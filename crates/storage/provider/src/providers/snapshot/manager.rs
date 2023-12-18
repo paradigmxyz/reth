@@ -1,4 +1,6 @@
-use super::{LoadedJar, SnapshotJarProvider, SnapshotProviderRW};
+use super::{
+    find_fixed_range, LoadedJar, SnapshotJarProvider, SnapshotProviderRW, BLOCKS_PER_SNAPSHOT,
+};
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
     ReceiptProvider, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
@@ -43,7 +45,7 @@ pub struct SnapshotProvider {
     /// segments and ranges.
     map: DashMap<(BlockNumber, SnapshotSegment), LoadedJar>,
     /// Available snapshot transaction ranges on disk indexed by max blocks.
-    snapshots_block_index: RwLock<SegmentRanges>,
+    snapshots_max_block: RwLock<HashMap<SnapshotSegment, u64>>,
     /// Available snapshot block ranges on disk indexed by max transactions.
     snapshots_tx_index: RwLock<SegmentRanges>,
     /// Tracks the highest snapshot of every segment.
@@ -63,7 +65,7 @@ impl SnapshotProvider {
         let provider = Self {
             map: Default::default(),
             writers: Default::default(),
-            snapshots_block_index: Default::default(),
+            snapshots_max_block: Default::default(),
             snapshots_tx_index: Default::default(),
             highest_tracker: None,
             path: path.as_ref().to_path_buf(),
@@ -123,29 +125,29 @@ impl SnapshotProvider {
     pub fn get_segment_provider(
         &self,
         segment: SnapshotSegment,
-        fn_ranges: impl Fn() -> Option<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)>,
+        fn_range: impl Fn() -> Option<RangeInclusive<BlockNumber>>,
         path: Option<&Path>,
     ) -> ProviderResult<Option<SnapshotJarProvider<'_>>> {
         // If we have a path, then get the block range and transaction range from its name.
         // Otherwise, check `self.available_snapshots`
-        let snapshot_ranges = match path {
+        let block_range = match path {
             Some(path) => {
                 SnapshotSegment::parse_filename(path.file_name().ok_or_else(|| {
                     ProviderError::MissingSnapshotPath(segment, path.to_path_buf())
                 })?)
-                .and_then(|(parsed_segment, block_range, tx_range)| {
+                .and_then(|(parsed_segment, block_range)| {
                     if parsed_segment == segment {
-                        return Some((block_range, tx_range))
+                        return Some(block_range)
                     }
                     None
                 })
             }
-            None => fn_ranges(),
+            None => fn_range(),
         };
 
         // Return cached `LoadedJar` or insert it for the first time, and then, return it.
-        if let Some((block_range, tx_range)) = snapshot_ranges {
-            return Ok(Some(self.get_or_create_jar_provider(segment, &block_range, &tx_range)?))
+        if let Some(block_range) = block_range {
+            return Ok(Some(self.get_or_create_jar_provider(segment, &block_range)?))
         }
 
         Ok(None)
@@ -157,19 +159,18 @@ impl SnapshotProvider {
         &self,
         segment: SnapshotSegment,
         block_range: &RangeInclusive<u64>,
-        tx_range: &RangeInclusive<u64>,
     ) -> ProviderResult<SnapshotJarProvider<'_>> {
         let key = (*block_range.end(), segment);
         if let Some(jar) = self.map.get(&key) {
             Ok(jar.into())
         } else {
-            let jar = NippyJar::load(&self.path.join(segment.filename(block_range, tx_range)))
-                .map(|jar| {
-                if self.load_filters {
-                    return jar.load_filters()
-                }
-                Ok(jar)
-            })??;
+            let jar =
+                NippyJar::load(&self.path.join(segment.filename(block_range))).map(|jar| {
+                    if self.load_filters {
+                        return jar.load_filters()
+                    }
+                    Ok(jar)
+                })??;
 
             self.map.insert(key, LoadedJar::new(jar)?);
             Ok(self.map.get(&key).expect("qed").into())
@@ -182,28 +183,18 @@ impl SnapshotProvider {
         &self,
         segment: SnapshotSegment,
         block: u64,
-    ) -> Option<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)> {
-        let snapshots = self.snapshots_block_index.read();
-        let segment_snapshots = snapshots.get(&segment)?;
-
-        // It's more probable that the request comes from a newer block height, so we iterate
-        // the snapshots in reverse.
-        let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
-
-        while let Some((block_end, tx_range)) = snapshots_rev_iter.next() {
-            if block > *block_end {
-                // request block is higher than highest snapshot block
-                return None
-            }
-            // `unwrap_or(0) is safe here as it sets block_start to 0 if the iterator is empty,
-            // indicating the lowest height snapshot has been reached.
-            let block_start =
-                snapshots_rev_iter.peek().map(|(block_end, _)| *block_end + 1).unwrap_or(0);
-            if block_start <= block {
-                return Some((block_start..=*block_end, tx_range.clone()))
-            }
-        }
-        None
+    ) -> Option<RangeInclusive<BlockNumber>> {
+        self.snapshots_max_block
+            .read()
+            .get(&segment)
+            .iter()
+            .filter_map(|max| {
+                if **max >= block {
+                    return Some(find_fixed_range(BLOCKS_PER_SNAPSHOT, block))
+                }
+                None
+            })
+            .next()
     }
 
     /// Gets a snapshot segment's block range and transaction range from the provider inner
@@ -212,7 +203,7 @@ impl SnapshotProvider {
         &self,
         segment: SnapshotSegment,
         tx: u64,
-    ) -> Option<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)> {
+    ) -> Option<RangeInclusive<BlockNumber>> {
         let snapshots = self.snapshots_tx_index.read();
         let segment_snapshots = snapshots.get(&segment)?;
 
@@ -227,7 +218,7 @@ impl SnapshotProvider {
             }
             let tx_start = snapshots_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
             if tx_start <= tx {
-                return Some((block_range.clone(), tx_start..=*tx_end))
+                return Some(block_range.clone())
             }
         }
         None
@@ -235,31 +226,29 @@ impl SnapshotProvider {
 
     /// Updates the inner transaction and block index
     pub fn update_index(&self) -> ProviderResult<()> {
-        let mut block_index = self.snapshots_block_index.write();
+        let mut max_block = self.snapshots_max_block.write();
         let mut tx_index = self.snapshots_tx_index.write();
 
         for (segment, ranges) in iter_snapshots(&self.path)? {
+            // Update last block for each segment
+            if let Some((block_range, _)) = ranges.last() {
+                max_block.insert(segment, *block_range.end());
+            }
+
+            // Update tx -> block_range index
             for (block_range, tx_range) in ranges {
-                let block_end = *block_range.end();
-                let tx_end = *tx_range.end();
+                if let Some(tx_range) = tx_range {
+                    let tx_end = *tx_range.end();
 
-                match tx_index.entry(segment) {
-                    Entry::Occupied(mut index) => {
-                        index.get_mut().insert(tx_end, block_range);
-                    }
-                    Entry::Vacant(index) => {
-                        index.insert(BTreeMap::from([(tx_end, block_range)]));
-                    }
-                };
-
-                match block_index.entry(segment) {
-                    Entry::Occupied(mut index) => {
-                        index.get_mut().insert(block_end, tx_range);
-                    }
-                    Entry::Vacant(index) => {
-                        index.insert(BTreeMap::from([(block_end, tx_range)]));
-                    }
-                };
+                    match tx_index.entry(segment) {
+                        Entry::Occupied(mut index) => {
+                            index.get_mut().insert(tx_end, block_range);
+                        }
+                        Entry::Vacant(index) => {
+                            index.insert(BTreeMap::from([(tx_end, block_range)]));
+                        }
+                    };
+                }
             }
         }
 
@@ -268,10 +257,7 @@ impl SnapshotProvider {
 
     /// Gets the highest snapshot block if it exists for a snapshot segment.
     pub fn get_highest_snapshot_block(&self, segment: SnapshotSegment) -> Option<BlockNumber> {
-        self.snapshots_block_index
-            .read()
-            .get(&segment)
-            .and_then(|index| index.last_key_value().map(|(last_block, _)| *last_block))
+        self.snapshots_max_block.read().get(&segment).map(|max_block| *max_block)
     }
 
     /// Gets the highest snapshotted transaction.
@@ -289,25 +275,14 @@ impl SnapshotProvider {
         segment: SnapshotSegment,
         func: impl Fn(SnapshotJarProvider<'_>) -> ProviderResult<Option<T>>,
     ) -> ProviderResult<Option<T>> {
-        let snapshots = self.snapshots_block_index.read();
-        if let Some(segment_snapshots) = snapshots.get(&segment) {
-            // It's more probable that the request comes from a newer block height, so we iterate
-            // the snapshots in reverse.
-            let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
-
-            while let Some((block_end, tx_range)) = snapshots_rev_iter.next() {
-                // `unwrap_or(0) is safe here as it sets block_start to 0 if the iterator
-                // is empty, indicating the lowest height snapshot has been reached.
-                let block_start =
-                    snapshots_rev_iter.peek().map(|(block_end, _)| *block_end + 1).unwrap_or(0);
-
-                if let Some(res) = func(self.get_or_create_jar_provider(
-                    segment,
-                    &(block_start..=*block_end),
-                    tx_range,
-                )?)? {
+        if let Some(highest_block) = self.get_highest_snapshot_block(segment) {
+            let mut range = find_fixed_range(BLOCKS_PER_SNAPSHOT, highest_block);
+            while *range.end() > 0 {
+                if let Some(res) = func(self.get_or_create_jar_provider(segment, &range)?)? {
                     return Ok(Some(res))
                 }
+                range = range.start().saturating_sub(BLOCKS_PER_SNAPSHOT)..=
+                    range.end().saturating_sub(BLOCKS_PER_SNAPSHOT);
             }
         }
 

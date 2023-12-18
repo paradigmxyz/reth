@@ -66,25 +66,14 @@ impl SnapshotSegment {
 
     /// Returns the default file name for the provided [`SegmentHeader`]
     pub fn filename_from_header(&self, header: SegmentHeader) -> String {
-        self.filename(&header.block_range, &header.tx_range)
+        self.filename(&header.block_range)
     }
 
     /// Returns the default file name for the provided segment and range.
-    pub fn filename(
-        &self,
-        block_range: &RangeInclusive<BlockNumber>,
-        tx_range: &RangeInclusive<TxNumber>,
-    ) -> String {
+    pub fn filename(&self, block_range: &RangeInclusive<BlockNumber>) -> String {
         // ATTENTION: if changing the name format, be sure to reflect those changes in
         // [`Self::parse_filename`].
-        format!(
-            "snapshot_{}_{}_{}_{}_{}",
-            self.as_ref(),
-            block_range.start(),
-            block_range.end(),
-            tx_range.start(),
-            tx_range.end(),
-        )
+        format!("snapshot_{}_{}_{}", self.as_ref(), block_range.start(), block_range.end())
     }
 
     /// Returns file name for the provided segment and range, alongisde filters, compression.
@@ -93,9 +82,8 @@ impl SnapshotSegment {
         filters: Filters,
         compression: Compression,
         block_range: &RangeInclusive<BlockNumber>,
-        tx_range: &RangeInclusive<TxNumber>,
     ) -> String {
-        let prefix = self.filename(block_range, tx_range);
+        let prefix = self.filename(block_range);
 
         let filters_name = match filters {
             Filters::WithFilters(inclusion_filter, phf) => {
@@ -127,9 +115,7 @@ impl SnapshotSegment {
     /// # Note
     /// This function is tightly coupled with the naming convention defined in [`Self::filename`].
     /// Any changes in the filename format in `filename` should be reflected here.
-    pub fn parse_filename(
-        name: &OsStr,
-    ) -> Option<(Self, RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)> {
+    pub fn parse_filename(name: &OsStr) -> Option<(Self, RangeInclusive<BlockNumber>)> {
         let mut parts = name.to_str()?.split('_');
         if parts.next() != Some("snapshot") {
             return None
@@ -137,13 +123,12 @@ impl SnapshotSegment {
 
         let segment = Self::from_str(parts.next()?).ok()?;
         let (block_start, block_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
-        let (tx_start, tx_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
 
-        if block_start >= block_end || tx_start > tx_end {
+        if block_start >= block_end {
             return None
         }
 
-        Some((segment, block_start..=block_end, tx_start..=tx_end))
+        Some((segment, block_start..=block_end))
     }
 }
 
@@ -153,7 +138,7 @@ pub struct SegmentHeader {
     /// Block range of the snapshot segment
     block_range: RangeInclusive<BlockNumber>,
     /// Transaction range of the snapshot segment
-    tx_range: RangeInclusive<TxNumber>,
+    tx_range: Option<RangeInclusive<TxNumber>>,
     /// Segment type
     segment: SnapshotSegment,
 }
@@ -162,7 +147,7 @@ impl SegmentHeader {
     /// Returns [`SegmentHeader`].
     pub fn new(
         block_range: RangeInclusive<BlockNumber>,
-        tx_range: RangeInclusive<TxNumber>,
+        tx_range: Option<RangeInclusive<TxNumber>>,
         segment: SnapshotSegment,
     ) -> Self {
         Self { block_range, tx_range, segment }
@@ -179,8 +164,8 @@ impl SegmentHeader {
     }
 
     /// Returns the transaction range.
-    pub fn tx_range(&self) -> &RangeInclusive<TxNumber> {
-        &self.tx_range
+    pub fn tx_range(&self) -> Option<RangeInclusive<TxNumber>> {
+        self.tx_range.as_ref().map(|range| range.clone())
     }
 
     /// Returns the first block number of the segment.
@@ -195,12 +180,13 @@ impl SegmentHeader {
 
     /// Returns the first transaction number of the segment.
     pub fn tx_start(&self) -> TxNumber {
-        *self.tx_range.start()
+        *self.tx_range.as_ref().expect("should exist").start()
     }
 
     /// Number of transactions.
     pub fn tx_len(&self) -> u64 {
-        self.tx_range.end() + 1 - self.tx_range.start()
+        self.tx_range.as_ref().expect("should exist").end() + 1 -
+            self.tx_range.as_ref().expect("should exist").start()
     }
 
     /// Number of blocks.
@@ -208,29 +194,47 @@ impl SegmentHeader {
         self.block_range.end() + 1 - self.block_range.start()
     }
 
-    /// Increments block or tx end range depending on segment
-    pub fn increment(&mut self) {
+    /// Increments block end range depending on segment
+    pub fn increment_block(&mut self) {
+        self.block_range = *self.block_range.start()..=*self.block_range.end() + 1;
+    }
+
+    /// Increments tx end range depending on segment
+    pub fn increment_tx(&mut self) {
         match self.segment {
-            SnapshotSegment::Headers => {
-                self.block_range = *self.block_range.start()..=*self.block_range.end() + 1;
-            }
-            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
-                self.tx_range = *self.tx_range.start()..=*self.tx_range.end() + 1;
-            }
+            SnapshotSegment::Headers => (),
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => match &mut self.tx_range {
+                Some(tx_range) => {
+                    *tx_range = *tx_range.start()..=*tx_range.end() + 1;
+                }
+                None => {
+                    panic!("Transaction based snapshots should have a transaction range.")
+                }
+            },
         }
     }
 
-    /// Removes `num` elements from end of block or tx range depending on segment.
+    /// Removes `num` elements from end of tx range.
     pub fn prune(&mut self, num: u64) {
         match self.segment {
             SnapshotSegment::Headers => {
                 self.block_range =
-                    *self.block_range.start()..=self.block_range.end().saturating_sub(num);
+                    *self.block_range.start()..=self.block_range.end().saturating_sub(num)
             }
-            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
-                self.tx_range = *self.tx_range.start()..=self.tx_range.end().saturating_sub(num);
-            }
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => match &mut self.tx_range {
+                Some(tx_range) => {
+                    *tx_range = *tx_range.start()..=tx_range.end().saturating_sub(num);
+                }
+                None => {
+                    panic!("Transaction based snapshots should have a transaction range.")
+                }
+            },
         };
+    }
+
+    /// Sets a new block_range.
+    pub fn set_block_range(&mut self, block_range: RangeInclusive<BlockNumber>) {
+        self.block_range = block_range;
     }
 
     /// Returns the row offset which depends on whether the segment is block or transaction based.
@@ -258,25 +262,17 @@ mod tests {
     #[test]
     fn test_filename() {
         let test_vectors = [
-            (SnapshotSegment::Headers, 2..=30, 0..=1, "snapshot_headers_2_30_0_1", None),
-            (
-                SnapshotSegment::Receipts,
-                30..=300,
-                110..=1000,
-                "snapshot_receipts_30_300_110_1000",
-                None,
-            ),
+            (SnapshotSegment::Headers, 2..=30, "snapshot_headers_2_30_0_1", None),
+            (SnapshotSegment::Receipts, 30..=300, "snapshot_receipts_30_300_110_1000", None),
             (
                 SnapshotSegment::Transactions,
                 1_123_233..=11_223_233,
-                1_123_233..=2_123_233,
                 "snapshot_transactions_1123233_11223233_1123233_2123233",
                 None,
             ),
             (
                 SnapshotSegment::Headers,
                 2..=30,
-                0..=1,
                 "snapshot_headers_2_30_0_1_cuckoo-fmph_lz4",
                 Some((
                     Compression::Lz4,
@@ -289,7 +285,6 @@ mod tests {
             (
                 SnapshotSegment::Headers,
                 2..=30,
-                0..=1,
                 "snapshot_headers_2_30_0_1_cuckoo-fmph_zstd",
                 Some((
                     Compression::Zstd,
@@ -302,7 +297,6 @@ mod tests {
             (
                 SnapshotSegment::Headers,
                 2..=30,
-                0..=1,
                 "snapshot_headers_2_30_0_1_cuckoo-fmph_zstd-dict",
                 Some((
                     Compression::ZstdWithDictionary,
@@ -314,24 +308,19 @@ mod tests {
             ),
         ];
 
-        for (segment, block_range, tx_range, filename, configuration) in test_vectors {
+        for (segment, block_range, filename, configuration) in test_vectors {
             if let Some((compression, filters)) = configuration {
                 assert_eq!(
-                    segment.filename_with_configuration(
-                        filters,
-                        compression,
-                        &block_range,
-                        &tx_range
-                    ),
+                    segment.filename_with_configuration(filters, compression, &block_range,),
                     filename
                 );
             } else {
-                assert_eq!(segment.filename(&block_range, &tx_range), filename);
+                assert_eq!(segment.filename(&block_range), filename);
             }
 
             assert_eq!(
                 SnapshotSegment::parse_filename(OsStr::new(filename)),
-                Some((segment, block_range, tx_range))
+                Some((segment, block_range))
             );
         }
 

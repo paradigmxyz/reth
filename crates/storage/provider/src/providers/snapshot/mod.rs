@@ -10,7 +10,12 @@ pub use writer::SnapshotProviderRW;
 use reth_interfaces::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{snapshot::SegmentHeader, SnapshotSegment};
-use std::{ops::Deref, sync::Arc};
+use std::{
+    ops::{Deref, RangeInclusive},
+    sync::Arc,
+};
+
+const BLOCKS_PER_SNAPSHOT: u64 = 500_000;
 
 /// Alias type for each specific `NippyJar`.
 type LoadedJarRef<'a> = dashmap::mapref::one::Ref<'a, (u64, SnapshotSegment), LoadedJar>;
@@ -41,6 +46,14 @@ impl Deref for LoadedJar {
     }
 }
 
+/// Each snapshot has a fixed number of blocks. This gives out the range where the requested block
+/// is positioned. Used for segment filename.
+pub(crate) fn find_fixed_range(interval: u64, block: u64) -> RangeInclusive<u64> {
+    let start = (block / interval) * interval;
+    let end = if block % interval == 0 { block } else { start + interval - 1 };
+    start..=end
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -62,12 +75,12 @@ mod test {
         let row_count = 100u64;
         let range = 0..=(row_count - 1);
         let segment_header =
-            SegmentHeader::new(range.clone(), range.clone(), SnapshotSegment::Headers);
+            SegmentHeader::new(range.clone(), Some(range.clone()), SnapshotSegment::Headers);
 
         // Data sources
         let factory = create_test_provider_factory();
         let snap_path = tempfile::tempdir().unwrap();
-        let snap_file = snap_path.path().join(SnapshotSegment::Headers.filename(&range, &range));
+        let snap_file = snap_path.path().join(SnapshotSegment::Headers.filename(&range));
 
         // Setup data
         let mut headers = random_header_range(

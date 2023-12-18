@@ -273,36 +273,6 @@ impl<H: NippyJarHeader> NippyJar<H> {
         self.path.with_extension(CONFIG_FILE_EXTENSION)
     }
 
-    /// Renames this [`NippyJar`] alongside every satellite file.
-    pub fn rename(mut self, new_path: impl AsRef<Path>) -> Result<(), NippyJarError> {
-        let previous_paths = [
-            self.data_path().to_path_buf(),
-            self.offsets_path(),
-            self.index_path(),
-            self.config_path(),
-        ];
-
-        // Update the common name prefix with updated ranges
-        self.path = new_path.as_ref().into();
-
-        let new_paths = [
-            self.data_path().to_path_buf(),
-            self.offsets_path(),
-            self.index_path(),
-            self.config_path(),
-        ];
-
-        // TODO(joshie): ensure consistency on unexpected shutdown
-
-        for (from, to) in previous_paths.into_iter().zip(new_paths) {
-            if from.exists() {
-                std::fs::rename(from, to)?;
-            }
-        }
-
-        Ok(())
-    }
-
     /// Deletes from disk this [`NippyJar`] alongside every satellite file.
     pub fn delete(self) -> Result<(), NippyJarError> {
         // TODO(joshie): ensure consistency on unexpected shutdown

@@ -4,7 +4,7 @@ use crate::{segments, segments::Segment, SnapshotterError};
 use reth_db::{database::Database, snapshot::iter_snapshots};
 use reth_interfaces::{RethError, RethResult};
 use reth_primitives::{snapshot::HighestSnapshots, BlockNumber, TxNumber};
-use reth_provider::{BlockReader, DatabaseProviderRO, ProviderFactory, TransactionsProviderExt};
+use reth_provider::{BlockReader, DatabaseProviderRO, ProviderFactory};
 use std::{
     collections::HashMap,
     ops::RangeInclusive,
@@ -210,9 +210,8 @@ impl<DB: Database> Snapshotter<DB> {
         if let Some(block_range) = block_range {
             let temp = self.snapshots_path.join(TEMPORARY_SUBDIRECTORY);
             let provider = self.provider_factory.provider()?;
-            let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
             let segment = S::default();
-            let filename = segment.segment().filename(&block_range, &tx_range);
+            let filename = segment.segment().filename(&block_range);
 
             segment.snapshot::<DB>(&provider, temp.clone(), block_range)?;
 

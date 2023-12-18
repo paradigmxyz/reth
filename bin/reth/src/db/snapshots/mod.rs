@@ -9,7 +9,7 @@ use reth_primitives::{
     snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentHeader},
     BlockNumber, ChainSpec, SnapshotSegment,
 };
-use reth_provider::{BlockNumReader, ProviderFactory, TransactionsProviderExt};
+use reth_provider::{BlockNumReader, ProviderFactory};
 use reth_snapshot::{segments as snap_segments, segments::Segment};
 use std::{
     ops::RangeInclusive,
@@ -189,10 +189,7 @@ impl Command {
                         segment.snapshot::<DB>(&provider, &dir, block_range.clone())?;
                     }
 
-                    let tx_range =
-                        provider.transaction_range_by_block_range(block_range.clone())?;
-
-                    Ok(segment.segment().filename(block_range, &tx_range))
+                    Ok(segment.segment().filename(block_range))
                 })
                 .collect::<Result<Vec<_>, eyre::Report>>()?;
 

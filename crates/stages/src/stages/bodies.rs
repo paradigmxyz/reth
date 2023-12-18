@@ -14,7 +14,10 @@ use reth_primitives::{
     SnapshotSegment,
 };
 use reth_provider::{providers::SnapshotWriter, DatabaseProviderRW};
-use std::{task::{ready, Context, Poll}, cmp::Ordering};
+use std::{
+    cmp::Ordering,
+    task::{ready, Context, Poll},
+};
 use tracing::*;
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
@@ -128,10 +131,10 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let db_tx_num = tx_block_cursor.last()?.unwrap_or_default().1;
 
         match snapshot_tx_num.cmp(&db_tx_num) {
-            Ordering::Less => snapshotter.prune_transactions(snapshot_tx_num - db_tx_num)?,
             Ordering::Greater => {
-                return Err(StageError::MissingSnapshotData)
+                snapshotter.prune_transactions(snapshot_tx_num - db_tx_num, from_block - 1)?
             }
+            Ordering::Less => return Err(StageError::MissingSnapshotData),
             Ordering::Equal => {}
         }
 
@@ -271,7 +274,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         }
 
         // Unwinds static file
-        snapshotter.prune_transactions(snapshot_tx_num.saturating_sub(db_tx_num))?;
+        snapshotter
+            .prune_transactions(snapshot_tx_num.saturating_sub(db_tx_num), input.unwind_to)?;
 
         // Committing static file.
         snapshotter.commit()?;
@@ -543,8 +547,10 @@ mod tests {
                 generators::{random_block_range, random_signed_tx},
             },
         };
-        use reth_primitives::{BlockBody, BlockNumber, SealedBlock, SealedHeader, TxNumber, B256};
-        use reth_provider::ProviderFactory;
+        use reth_primitives::{
+            BlockBody, BlockNumber, SealedBlock, SealedHeader, SnapshotSegment, TxNumber, B256,
+        };
+        use reth_provider::{providers::SnapshotWriter, ProviderFactory, TransactionsProvider};
         use std::{
             collections::{HashMap, VecDeque},
             ops::RangeInclusive,
