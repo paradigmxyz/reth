@@ -57,6 +57,8 @@ pub(crate) fn append_matching_block_logs(
     let mut log_index: u32 = 0;
 
     // Lazy loaded number of the first transaction in the block.
+    // This is useful for blocks with multiple matching logs because it prevents
+    // re-querying the block body indices.
     let mut loaded_first_tx_num = None;
 
     // Iterate over receipts and append matching logs.
@@ -76,6 +78,7 @@ pub(crate) fn append_matching_block_logs(
                     }
                 };
 
+                // This is safe because Transactions and Receipts have the same keys.
                 let transaction_id = first_tx_num + receipt_idx as u64;
                 let transaction = provider
                     .transaction_by_id(transaction_id)?
