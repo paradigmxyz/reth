@@ -37,40 +37,25 @@ use tracing::{debug, error, info, instrument, trace, warn};
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A Tree of chains.
 ///
-/// Mermaid flowchart represents all the states a block can have inside the blockchaintree.
-/// Green blocks belong to canonical chain and are saved inside then database, they are our main
-/// chain. Pending blocks and sidechains are found in memory inside [`BlockchainTree`].
-/// Both pending and sidechains have same mechanisms only difference is when they get committed to
-/// the database. For pending it is an append operation but for sidechains they need to move current
-/// canonical blocks to BlockchainTree and commit the sidechain to the database to become canonical
-/// chain (reorg). ```mermaid
-/// flowchart BT
-/// subgraph canonical chain
-/// CanonState:::state
-/// block0canon:::canon -->block1canon:::canon -->block2canon:::canon -->block3canon:::canon -->
-/// block4canon:::canon --> block5canon:::canon end
-/// block5canon --> block6pending1:::pending
-/// block5canon --> block6pending2:::pending
-/// subgraph sidechain2
-/// S2State:::state
-/// block3canon --> block4s2:::sidechain --> block5s2:::sidechain
-/// end
-/// subgraph sidechain1
-/// S1State:::state
-/// block2canon --> block3s1:::sidechain --> block4s1:::sidechain --> block5s1:::sidechain -->
-/// block6s1:::sidechain end
-/// classDef state fill:#1882C4
-/// classDef canon fill:#8AC926
-/// classDef pending fill:#FFCA3A
-/// classDef sidechain fill:#FF595E
-/// ```
-/// 
+/// The flowchart represents all the states a block can have inside the tree.
 ///
-/// main functions:
-/// * [BlockchainTree::insert_block]: Connect block to chain, execute it and if valid insert block
-///   into the tree.
-/// * [BlockchainTree::finalize_block]: Remove chains that are branch off the now finalized block.
-/// * [BlockchainTree::make_canonical]: Check if we have the hash of block that is the current
+/// - Green blocks belong to the canonical chain and are saved inside the database.
+/// - Pending blocks and sidechains are found in-memory inside [`BlockchainTree`].
+///
+/// Both pending chains and sidechains have the same mechanisms, the only difference is when they
+/// get committed to the database.
+///
+/// For pending, it is an append operation, but for sidechains they need to move the current
+/// canonical blocks to the tree (by removing them from the database), and commit the sidechain
+/// blocks to the database to become the canonical chain (reorg).
+///
+/// include_mmd!("docs/mermaid/tree.mmd")
+///
+/// # Main functions
+/// * [BlockchainTree::insert_block]: Connect a block to a chain, execute it, and if valid, insert
+///   the block into the tree.
+/// * [BlockchainTree::finalize_block]: Remove chains that branch off of the now finalized block.
+/// * [BlockchainTree::make_canonical]: Check if we have the hash of a block that is the current
 ///   canonical head and commit it to db.
 #[derive(Debug)]
 pub struct BlockchainTree<DB: Database, EF: ExecutorFactory> {
@@ -1244,7 +1229,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
         let tip = provider_rw.last_block_number()?;
         let revert_range = (revert_until + 1)..=tip;
-        info!(target: "blockchain_tree", "Unwinding canonical chain blocks: {:?}", revert_range);
+        info!(target: "blockchain_tree", "REORG: revert canonical from database by unwinding chain blocks {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = provider_rw
             .take_block_and_execution_range(
@@ -1824,7 +1809,7 @@ mod tests {
             .with_pending_blocks((block2.number + 1, HashSet::new()))
             .assert(&tree);
 
-        assert!(tree.make_canonical(&block1a_hash).is_ok());
+        assert_matches!(tree.make_canonical(&block1a_hash), Ok(_));
         // Trie state:
         //       b2a   b2 (side chain)
         //       |   /

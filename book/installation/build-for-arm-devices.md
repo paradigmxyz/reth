@@ -1,6 +1,6 @@
 # Building for ARM devices
 
-Reth can be built for and run on ARM devices, but there are a few things to take into considerations before.
+Reth can be built for and run on ARM devices, but there are a few things to take into consideration before.
 
 ## CPU Architecture
 
@@ -8,7 +8,7 @@ First, you must have a 64-bit CPU and Operating System, otherwise some of the pr
 
 ## Memory Layout on AArch64
 
-Then, you must setup the virtual memory layout in such a way that the user space is sufficiently large.
+Then, you must set up the virtual memory layout in such that the user space is sufficiently large.
 From [the Linux Kernel documentation](https://www.kernel.org/doc/html/v5.3/arm64/memory.html#:~:text=AArch64%20Linux%20uses%20either%203,for%20both%20user%20and%20kernel.), you can see that the memory layout with 4KB pages and a level-3 translation table limits the user space to 512GB, which is too low for Reth to sync on Ethereum mainnet.
 
 ## ARM Board Virtual Memory Limitation
