@@ -576,9 +576,16 @@ pub enum PayloadError {
 }
 
 impl PayloadError {
-    /// Returns `true` if the error is caused by invalid extra data.
+    /// Returns `true` if the error is caused by a block hash mismatch.
+    #[inline]
     pub fn is_block_hash_mismatch(&self) -> bool {
         matches!(self, PayloadError::BlockHash { .. })
+    }
+
+    /// Returns `true` if the error is caused by invalid block hashes (Cancun).
+    #[inline]
+    pub fn is_invalid_versioned_hashes(&self) -> bool {
+        matches!(self, PayloadError::InvalidVersionedHashes)
     }
 }
 
