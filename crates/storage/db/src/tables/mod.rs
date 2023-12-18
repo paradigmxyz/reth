@@ -93,7 +93,10 @@ pub trait TableViewer<R> {
 }
 
 macro_rules! tables {
-    ([$(($table:ident, $type:expr, $view_fn:ident)),*]) => {
+    ([
+        (TableType::Table, [$($table:ident),*]),
+        (TableType::DupSort, [$($dupsort:ident),*])
+    ]) => {
         #[derive(Debug, PartialEq, Copy, Clone)]
         /// Default tables that should be present inside database.
         pub enum Tables {
@@ -101,17 +104,24 @@ macro_rules! tables {
                 #[doc = concat!("Represents a ", stringify!($table), " table")]
                 $table,
             )*
+            $(
+                #[doc = concat!("Represents a ", stringify!($dupsort), " dupsort table")]
+                $dupsort,
+            )*
         }
 
         impl Tables {
             /// Array of all tables in database
-            pub const ALL: [Tables; NUM_TABLES] = [$(Tables::$table,)*];
+            pub const ALL: [Tables; NUM_TABLES] = [$(Tables::$table,)* $(Tables::$dupsort,)*];
 
             /// The name of the given table in database
             pub const fn name(&self) -> &str {
                 match self {
                     $(Tables::$table => {
                         $table::NAME
+                    },)*
+                    $(Tables::$dupsort => {
+                        $dupsort::NAME
                     },)*
                 }
             }
@@ -120,7 +130,10 @@ macro_rules! tables {
             pub const fn table_type(&self) -> TableType {
                 match self {
                     $(Tables::$table => {
-                        $type
+                        TableType::Table
+                    },)*
+                    $(Tables::$dupsort => {
+                        TableType::DupSort
                     },)*
                 }
             }
@@ -132,7 +145,10 @@ macro_rules! tables {
             {
                 match self {
                     $(Tables::$table => {
-                        visitor.$view_fn::<$table>()
+                        visitor.view::<$table>()
+                    },)*
+                    $(Tables::$dupsort => {
+                        visitor.view_dupsort::<$dupsort>()
                     },)*
                 }
             }
@@ -162,32 +178,36 @@ macro_rules! tables {
 }
 
 tables!([
-    (CanonicalHeaders, TableType::Table, view),
-    (HeaderTD, TableType::Table, view),
-    (HeaderNumbers, TableType::Table, view),
-    (Headers, TableType::Table, view),
-    (BlockBodyIndices, TableType::Table, view),
-    (BlockOmmers, TableType::Table, view),
-    (BlockWithdrawals, TableType::Table, view),
-    (TransactionBlock, TableType::Table, view),
-    (Transactions, TableType::Table, view),
-    (TxHashNumber, TableType::Table, view),
-    (Receipts, TableType::Table, view),
-    (PlainAccountState, TableType::Table, view),
-    (PlainStorageState, TableType::DupSort, view_dupsort),
-    (Bytecodes, TableType::Table, view),
-    (AccountHistory, TableType::Table, view),
-    (StorageHistory, TableType::Table, view),
-    (AccountChangeSet, TableType::DupSort, view_dupsort),
-    (StorageChangeSet, TableType::DupSort, view_dupsort),
-    (HashedAccount, TableType::Table, view),
-    (HashedStorage, TableType::DupSort, view_dupsort),
-    (AccountsTrie, TableType::Table, view),
-    (StoragesTrie, TableType::DupSort, view_dupsort),
-    (TxSenders, TableType::Table, view),
-    (SyncStage, TableType::Table, view),
-    (SyncStageProgress, TableType::Table, view),
-    (PruneCheckpoints, TableType::Table, view)
+    (
+        TableType::Table,
+        [
+            CanonicalHeaders,
+            HeaderTD,
+            HeaderNumbers,
+            Headers,
+            BlockBodyIndices,
+            BlockOmmers,
+            BlockWithdrawals,
+            TransactionBlock,
+            Transactions,
+            TxHashNumber,
+            Receipts,
+            PlainAccountState,
+            Bytecodes,
+            AccountHistory,
+            StorageHistory,
+            HashedAccount,
+            AccountsTrie,
+            TxSenders,
+            SyncStage,
+            SyncStageProgress,
+            PruneCheckpoints
+        ]
+    ),
+    (
+        TableType::DupSort,
+        [PlainStorageState, AccountChangeSet, StorageChangeSet, HashedStorage, StoragesTrie]
+    )
 ]);
 
 /// Macro to declare key value table.
