@@ -152,28 +152,29 @@ impl AppendableChain {
             )
         })?;
 
-        let mut state = self.state.clone();
+        let mut state = self.state().clone();
 
         // Revert state to the state after execution of the parent block
         state.revert_to(parent.number);
 
         // Revert changesets to get the state of the parent that we need to apply the change.
-        let post_state_data = BundleStateDataRef {
+        let bundle_state_data = BundleStateDataRef {
             state: &state,
             sidechain_block_hashes: &side_chain_block_hashes,
             canonical_block_hashes,
             canonical_fork,
         };
-        let block_state =
-            Self::validate_and_execute_sidechain(block.clone(), parent, post_state_data, externals)
-                .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
+        let block_state = Self::validate_and_execute_sidechain(
+            block.clone(),
+            parent,
+            bundle_state_data,
+            externals,
+        )
+        .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
         state.extend(block_state);
 
-        let chain =
-            Self { chain: Chain { state, blocks: BTreeMap::from([(block.number, block)]) } };
-
         // If all is okay, return new chain back. Present chain is not modified.
-        Ok(chain)
+        Ok(Self { chain: Chain::from_block(block, state) })
     }
 
     /// Validate and execute the given block that _extends the canonical chain_, validating its
@@ -188,7 +189,7 @@ impl AppendableChain {
     fn validate_and_execute<BSDP, DB, EF>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
-        post_state_data_provider: BSDP,
+        bundle_state_data_provider: BSDP,
         externals: &TreeExternals<DB, EF>,
         block_kind: BlockKind,
         block_validation_kind: BlockValidationKind,
@@ -201,18 +202,16 @@ impl AppendableChain {
         // some checks are done before blocks comes here.
         externals.consensus.validate_header_against_parent(&block, parent_block)?;
 
-        let (block, senders) = block.into_components();
-        let block = block.unseal();
-
         // get the state provider.
-        let db = externals.database();
-        let canonical_fork = post_state_data_provider.canonical_fork();
-        let state_provider = db.history_by_block_number(canonical_fork.number)?;
+        let canonical_fork = bundle_state_data_provider.canonical_fork();
+        let state_provider =
+            externals.provider_factory.history_by_block_number(canonical_fork.number)?;
 
-        let provider = BundleStateProvider::new(state_provider, post_state_data_provider);
+        let provider = BundleStateProvider::new(state_provider, bundle_state_data_provider);
 
         let mut executor = externals.executor_factory.with_state(&provider);
-        executor.execute_and_verify_receipt(&block, U256::MAX, Some(senders))?;
+        let block = block.unseal();
+        executor.execute_and_verify_receipt(&block, U256::MAX)?;
         let bundle_state = executor.take_output_state();
 
         // check state root if the block extends the canonical chain __and__ if state root
@@ -224,7 +223,7 @@ impl AppendableChain {
                 return Err(ConsensusError::BodyStateRootDiff(
                     GotExpected { got: state_root, expected: block.state_root }.into(),
                 )
-                .into())
+                .into());
             }
         }
 
@@ -235,7 +234,7 @@ impl AppendableChain {
     fn validate_and_execute_sidechain<BSDP, DB, EF>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
-        post_state_data_provider: BSDP,
+        bundle_state_data_provider: BSDP,
         externals: &TreeExternals<DB, EF>,
     ) -> RethResult<BundleStateWithReceipts>
     where
@@ -246,7 +245,7 @@ impl AppendableChain {
         Self::validate_and_execute(
             block,
             parent_block,
-            post_state_data_provider,
+            bundle_state_data_provider,
             externals,
             BlockKind::ForksHistoricalBlock,
             BlockValidationKind::SkipStateRootValidation,
@@ -280,10 +279,10 @@ impl AppendableChain {
         DB: Database,
         EF: ExecutorFactory,
     {
-        let (_, parent_block) = self.blocks.last_key_value().expect("Chain has at least one block");
+        let parent_block = self.chain.tip();
 
-        let post_state_data = BundleStateDataRef {
-            state: &self.state,
+        let bundle_state_data = BundleStateDataRef {
+            state: self.state(),
             sidechain_block_hashes: &side_chain_block_hashes,
             canonical_block_hashes,
             canonical_fork,
@@ -292,15 +291,14 @@ impl AppendableChain {
         let block_state = Self::validate_and_execute(
             block.clone(),
             parent_block,
-            post_state_data,
+            bundle_state_data,
             externals,
             block_kind,
             block_validation_kind,
         )
         .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
         // extend the state.
-        self.state.extend(block_state);
-        self.blocks.insert(block.number, block);
+        self.chain.append_block(block, block_state);
         Ok(())
     }
 }

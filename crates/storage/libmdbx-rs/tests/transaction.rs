@@ -7,8 +7,6 @@ use std::{
 };
 use tempfile::tempdir;
 
-type Environment = reth_libmdbx::Environment<NoWriteMap>;
-
 #[test]
 fn test_put_get_del() {
     let dir = tempdir().unwrap();
@@ -149,13 +147,13 @@ fn test_clear_db() {
     {
         let txn = env.begin_rw_txn().unwrap();
         txn.put(txn.open_db(None).unwrap().dbi(), b"key", b"val", WriteFlags::empty()).unwrap();
-        assert!(!txn.commit().unwrap());
+        assert!(!txn.commit().unwrap().0);
     }
 
     {
         let txn = env.begin_rw_txn().unwrap();
         txn.clear_db(txn.open_db(None).unwrap().dbi()).unwrap();
-        assert!(!txn.commit().unwrap());
+        assert!(!txn.commit().unwrap().0);
     }
 
     let txn = env.begin_ro_txn().unwrap();
@@ -179,7 +177,7 @@ fn test_drop_db() {
             .unwrap();
             // Workaround for MDBX dbi drop issue
             txn.create_db(Some("canary"), DatabaseFlags::empty()).unwrap();
-            assert!(!txn.commit().unwrap());
+            assert!(!txn.commit().unwrap().0);
         }
         {
             let txn = env.begin_rw_txn().unwrap();
@@ -188,7 +186,7 @@ fn test_drop_db() {
                 txn.drop_db(db).unwrap();
             }
             assert!(matches!(txn.open_db(Some("test")).unwrap_err(), Error::NotFound));
-            assert!(!txn.commit().unwrap());
+            assert!(!txn.commit().unwrap().0);
         }
     }
 

@@ -3,6 +3,7 @@
 use crate::node::cl_events::ConsensusLayerHealthEvent;
 use futures::Stream;
 use reth_beacon_consensus::BeaconConsensusEngineEvent;
+use reth_db::{database::Database, database_metrics::DatabaseMetadata};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
@@ -13,6 +14,7 @@ use reth_primitives::{
 use reth_prune::PrunerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
 use std::{
+    fmt::{Display, Formatter},
     future::Future,
     pin::Pin,
     task::{Context, Poll},
@@ -25,28 +27,22 @@ use tracing::{info, warn};
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 
 /// The current high-level state of the node.
-struct NodeState {
+struct NodeState<DB> {
+    /// Database environment.
+    /// Used for freelist calculation reported in the "Status" log message.
+    /// See [EventHandler::poll].
+    db: DB,
     /// Connection to the network.
     network: Option<NetworkHandle>,
     /// The stage currently being executed.
-    current_stage: Option<StageId>,
-    /// The ETA for the current stage.
-    eta: Eta,
-    /// The current checkpoint of the executing stage.
-    current_checkpoint: StageCheckpoint,
+    current_stage: Option<CurrentStage>,
     /// The latest block reached by either pipeline or consensus engine.
     latest_block: Option<BlockNumber>,
 }
 
-impl NodeState {
-    fn new(network: Option<NetworkHandle>, latest_block: Option<BlockNumber>) -> Self {
-        Self {
-            network,
-            current_stage: None,
-            eta: Eta::default(),
-            current_checkpoint: StageCheckpoint::new(0),
-            latest_block,
-        }
+impl<DB> NodeState<DB> {
+    fn new(db: DB, network: Option<NetworkHandle>, latest_block: Option<BlockNumber>) -> Self {
+        Self { db, network, current_stage: None, latest_block }
     }
 
     fn num_connected_peers(&self) -> usize {
@@ -56,70 +52,80 @@ impl NodeState {
     /// Processes an event emitted by the pipeline
     fn handle_pipeline_event(&mut self, event: PipelineEvent) {
         match event {
-            PipelineEvent::Running { pipeline_stages_progress, stage_id, checkpoint } => {
-                let notable = self.current_stage.is_none();
-                self.current_stage = Some(stage_id);
-                self.current_checkpoint = checkpoint.unwrap_or_default();
+            PipelineEvent::Run { pipeline_stages_progress, stage_id, checkpoint, target } => {
+                let checkpoint = checkpoint.unwrap_or_default();
+                let current_stage = CurrentStage {
+                    stage_id,
+                    eta: match &self.current_stage {
+                        Some(current_stage) if current_stage.stage_id == stage_id => {
+                            current_stage.eta
+                        }
+                        _ => Eta::default(),
+                    },
+                    checkpoint,
+                    target,
+                };
 
-                if notable {
-                    if let Some(progress) = self.current_checkpoint.entities() {
-                        info!(
-                            pipeline_stages = %pipeline_stages_progress,
-                            stage = %stage_id,
-                            from = self.current_checkpoint.block_number,
-                            checkpoint = %self.current_checkpoint.block_number,
-                            %progress,
-                            eta = %self.eta.fmt_for_stage(stage_id),
-                            "Executing stage",
-                        );
-                    } else {
-                        info!(
-                            pipeline_stages = %pipeline_stages_progress,
-                            stage = %stage_id,
-                            from = self.current_checkpoint.block_number,
-                            checkpoint = %self.current_checkpoint.block_number,
-                            eta = %self.eta.fmt_for_stage(stage_id),
-                            "Executing stage",
-                        );
-                    }
-                }
+                let progress = OptionalField(
+                    checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
+                );
+                let eta = current_stage.eta.fmt_for_stage(stage_id);
+
+                info!(
+                    pipeline_stages = %pipeline_stages_progress,
+                    stage = %stage_id,
+                    checkpoint = %checkpoint.block_number,
+                    target = %OptionalField(target),
+                    %progress,
+                    %eta,
+                    "Executing stage",
+                );
+
+                self.current_stage = Some(current_stage);
             }
             PipelineEvent::Ran {
                 pipeline_stages_progress,
                 stage_id,
                 result: ExecOutput { checkpoint, done },
             } => {
-                self.current_checkpoint = checkpoint;
                 if stage_id.is_finish() {
                     self.latest_block = Some(checkpoint.block_number);
                 }
-                self.eta.update(self.current_checkpoint);
 
-                let message =
-                    if done { "Stage finished executing" } else { "Stage committed progress" };
+                if let Some(current_stage) = self.current_stage.as_mut() {
+                    current_stage.checkpoint = checkpoint;
+                    current_stage.eta.update(checkpoint);
 
-                if let Some(progress) = checkpoint.entities() {
-                    info!(
-                        pipeline_stages = %pipeline_stages_progress,
-                        stage = %stage_id,
-                        checkpoint = %checkpoint.block_number,
-                        %progress,
-                        eta = %self.eta.fmt_for_stage(stage_id),
-                        "{message}",
+                    let target = OptionalField(current_stage.target);
+                    let progress = OptionalField(
+                        checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
                     );
-                } else {
-                    info!(
-                        pipeline_stages = %pipeline_stages_progress,
-                        stage = %stage_id,
-                        checkpoint = %checkpoint.block_number,
-                        eta = %self.eta.fmt_for_stage(stage_id),
-                        "{message}",
-                    );
+
+                    if done {
+                        info!(
+                            pipeline_stages = %pipeline_stages_progress,
+                            stage = %stage_id,
+                            checkpoint = %checkpoint.block_number,
+                            %target,
+                            %progress,
+                            "Stage finished executing",
+                        )
+                    } else {
+                        let eta = current_stage.eta.fmt_for_stage(stage_id);
+                        info!(
+                            pipeline_stages = %pipeline_stages_progress,
+                            stage = %stage_id,
+                            checkpoint = %checkpoint.block_number,
+                            %target,
+                            %progress,
+                            %eta,
+                            "Stage committed progress",
+                        )
+                    }
                 }
 
                 if done {
                     self.current_stage = None;
-                    self.eta = Eta::default();
                 }
             }
             _ => (),
@@ -189,6 +195,35 @@ impl NodeState {
     }
 }
 
+impl<DB: DatabaseMetadata> NodeState<DB> {
+    fn freelist(&self) -> Option<usize> {
+        self.db.metadata().freelist_size()
+    }
+}
+
+/// Helper type for formatting of optional fields:
+/// - If [Some(x)], then `x` is written
+/// - If [None], then `None` is written
+struct OptionalField<T: Display>(Option<T>);
+
+impl<T: Display> Display for OptionalField<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(field) = &self.0 {
+            write!(f, "{field}")
+        } else {
+            write!(f, "None")
+        }
+    }
+}
+
+/// The stage currently being executed.
+struct CurrentStage {
+    stage_id: StageId,
+    eta: Eta,
+    checkpoint: StageCheckpoint,
+    target: Option<BlockNumber>,
+}
+
 /// A node event.
 #[derive(Debug)]
 pub enum NodeEvent {
@@ -236,14 +271,16 @@ impl From<PrunerEvent> for NodeEvent {
 
 /// Displays relevant information to the user from components of the node, and periodically
 /// displays the high-level status of the node.
-pub async fn handle_events<E>(
+pub async fn handle_events<E, DB>(
     network: Option<NetworkHandle>,
     latest_block_number: Option<BlockNumber>,
     events: E,
+    db: DB,
 ) where
     E: Stream<Item = NodeEvent> + Unpin,
+    DB: DatabaseMetadata + Database + 'static,
 {
-    let state = NodeState::new(network, latest_block_number);
+    let state = NodeState::new(db, network, latest_block_number);
 
     let start = tokio::time::Instant::now() + Duration::from_secs(3);
     let mut info_interval = tokio::time::interval_at(start, INFO_MESSAGE_INTERVAL);
@@ -255,17 +292,18 @@ pub async fn handle_events<E>(
 
 /// Handles events emitted by the node and logs them accordingly.
 #[pin_project::pin_project]
-struct EventHandler<E> {
-    state: NodeState,
+struct EventHandler<E, DB> {
+    state: NodeState<DB>,
     #[pin]
     events: E,
     #[pin]
     info_interval: Interval,
 }
 
-impl<E> Future for EventHandler<E>
+impl<E, DB> Future for EventHandler<E, DB>
 where
     E: Stream<Item = NodeEvent> + Unpin,
+    DB: DatabaseMetadata + Database + 'static,
 {
     type Output = ();
 
@@ -273,32 +311,40 @@ where
         let mut this = self.project();
 
         while this.info_interval.poll_tick(cx).is_ready() {
-            if let Some(stage) = this.state.current_stage {
-                if let Some(progress) = this.state.current_checkpoint.entities() {
-                    info!(
-                        target: "reth::cli",
-                        connected_peers = this.state.num_connected_peers(),
-                        %stage,
-                        checkpoint = %this.state.current_checkpoint.block_number,
-                        %progress,
-                        eta = %this.state.eta.fmt_for_stage(stage),
-                        "Status"
-                    );
-                } else {
-                    info!(
-                        target: "reth::cli",
-                        connected_peers = this.state.num_connected_peers(),
-                        %stage,
-                        checkpoint = %this.state.current_checkpoint.block_number,
-                        eta = %this.state.eta.fmt_for_stage(stage),
-                        "Status"
-                    );
-                }
+            let freelist = OptionalField(this.state.freelist());
+
+            if let Some(CurrentStage { stage_id, eta, checkpoint, target }) =
+                &this.state.current_stage
+            {
+                let progress = OptionalField(
+                    checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
+                );
+                let eta = eta.fmt_for_stage(*stage_id);
+
+                info!(
+                    target: "reth::cli",
+                    connected_peers = this.state.num_connected_peers(),
+                    %freelist,
+                    stage = %stage_id,
+                    checkpoint = checkpoint.block_number,
+                    target = %OptionalField(*target),
+                    %progress,
+                    %eta,
+                    "Status"
+                );
+            } else if let Some(latest_block) = this.state.latest_block {
+                info!(
+                    target: "reth::cli",
+                    connected_peers = this.state.num_connected_peers(),
+                    %freelist,
+                    %latest_block,
+                    "Status"
+                );
             } else {
                 info!(
                     target: "reth::cli",
                     connected_peers = this.state.num_connected_peers(),
-                    latest_block = this.state.latest_block.unwrap_or(this.state.current_checkpoint.block_number),
+                    %freelist,
                     "Status"
                 );
             }
@@ -332,7 +378,7 @@ where
 /// checkpoints reported by the pipeline.
 ///
 /// One `Eta` is only valid for a single stage.
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 struct Eta {
     /// The last stage checkpoint
     last_checkpoint: EntitiesCheckpoint,
@@ -375,8 +421,8 @@ impl Eta {
     }
 }
 
-impl std::fmt::Display for Eta {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for Eta {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some((eta, last_checkpoint_time)) = self.eta.zip(self.last_checkpoint_time) {
             let remaining = eta.checked_sub(last_checkpoint_time.elapsed());
 

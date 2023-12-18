@@ -1,12 +1,11 @@
 use reth_db::open_db_read_only;
-use reth_primitives::{Address, ChainSpecBuilder, B256, U256};
+use reth_primitives::{Address, ChainSpecBuilder, B256};
 use reth_provider::{
     AccountReader, BlockReader, BlockSource, HeaderProvider, ProviderFactory, ReceiptProvider,
     StateProvider, TransactionsProvider,
 };
 use reth_rpc_types::{Filter, FilteredParams};
 use reth_rpc_types_compat::log::from_primitive_log;
-
 use std::path::Path;
 
 // Providers are zero cost abstractions on top of an opened MDBX Transaction
@@ -67,7 +66,7 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
     // The header's total difficulty is stored in a separate table, so we have a separate call for
     // it. This is not needed for post PoS transition chains.
     let td = provider.header_td_by_number(number)?.ok_or(eyre::eyre!("header td not found"))?;
-    assert_ne!(td, U256::ZERO);
+    assert!(!td.is_zero());
 
     // Can query headers by range as well, already sealed!
     let headers = provider.sealed_headers_range(100..200)?;

@@ -1,7 +1,7 @@
 use crate::{
     identifier::TransactionId,
     pool::{best::BestTransactions, size::SizeTracker},
-    Priority, TransactionOrdering, ValidPoolTransaction,
+    Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
 
 use crate::pool::best::BestTransactionsWithBasefee;
@@ -22,8 +22,9 @@ use tokio::sync::broadcast;
 ///
 /// Once an `independent` transaction was executed it *unlocks* the next nonce, if this transaction
 /// is also pending, then this will be moved to the `independent` queue.
+#[allow(missing_debug_implementations)]
 #[derive(Clone)]
-pub(crate) struct PendingPool<T: TransactionOrdering> {
+pub struct PendingPool<T: TransactionOrdering> {
     /// How to order transactions.
     ordering: T,
     /// Keeps track of transactions inserted in the pool.
@@ -34,6 +35,11 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
     by_id: BTreeMap<TransactionId, PendingTransaction<T>>,
     /// _All_ transactions sorted by priority
     all: BTreeSet<PendingTransaction<T>>,
+    /// The highest nonce transactions for each sender - like the `independent` set, but the
+    /// highest instead of lowest nonce.
+    ///
+    /// Sorted by their scoring value.
+    highest_nonces: BTreeSet<PendingTransaction<T>>,
     /// Independent transactions that can be included directly and don't require other
     /// transactions.
     ///
@@ -52,7 +58,7 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
 
 impl<T: TransactionOrdering> PendingPool<T> {
     /// Create a new pool instance.
-    pub(crate) fn new(ordering: T) -> Self {
+    pub fn new(ordering: T) -> Self {
         let (new_transaction_notifier, _) = broadcast::channel(200);
         Self {
             ordering,
@@ -60,6 +66,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             by_id: Default::default(),
             all: Default::default(),
             independent_transactions: Default::default(),
+            highest_nonces: Default::default(),
             size_of: Default::default(),
             new_transaction_notifier,
         }
@@ -73,6 +80,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Returns all transactions by id.
     fn clear_transactions(&mut self) -> BTreeMap<TransactionId, PendingTransaction<T>> {
         self.independent_transactions.clear();
+        self.highest_nonces.clear();
         self.all.clear();
         self.size_of.reset();
         std::mem::take(&mut self.by_id)
@@ -184,9 +192,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 }
             } else {
                 self.size_of += tx.transaction.size();
-                if self.ancestor(&id).is_none() {
-                    self.independent_transactions.insert(tx.clone());
-                }
+                self.update_independents_and_highest_nonces(&tx, &id);
                 self.all.insert(tx.clone());
                 self.by_id.insert(id, tx);
             }
@@ -232,9 +238,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 tx.priority = self.ordering.priority(&tx.transaction.transaction, base_fee);
 
                 self.size_of += tx.transaction.size();
-                if self.ancestor(&id).is_none() {
-                    self.independent_transactions.insert(tx.clone());
-                }
+                self.update_independents_and_highest_nonces(&tx, &id);
                 self.all.insert(tx.clone());
                 self.by_id.insert(id, tx);
             }
@@ -243,12 +247,33 @@ impl<T: TransactionOrdering> PendingPool<T> {
         removed
     }
 
+    /// Updates the independent transaction and highest nonces set, assuming the given transaction
+    /// is being _added_ to the pool.
+    fn update_independents_and_highest_nonces(
+        &mut self,
+        tx: &PendingTransaction<T>,
+        tx_id: &TransactionId,
+    ) {
+        let ancestor_id = tx_id.unchecked_ancestor();
+        if let Some(ancestor) = ancestor_id.and_then(|id| self.by_id.get(&id)) {
+            // the transaction already has an ancestor, so we only need to ensure that the
+            // highest nonces set actually contains the highest nonce for that sender
+            self.highest_nonces.remove(ancestor);
+            self.highest_nonces.insert(tx.clone());
+        } else {
+            // If there's __no__ ancestor in the pool, then this transaction is independent, this is
+            // guaranteed because this pool is gapless.
+            self.independent_transactions.insert(tx.clone());
+            self.highest_nonces.insert(tx.clone());
+        }
+    }
+
     /// Returns the ancestor the given transaction, the transaction with `nonce - 1`.
     ///
     /// Note: for a transaction with nonce higher than the current on chain nonce this will always
     /// return an ancestor since all transaction in this pool are gapless.
     fn ancestor(&self, id: &TransactionId) -> Option<&PendingTransaction<T>> {
-        self.by_id.get(&id.unchecked_ancestor()?)
+        self.get(&id.unchecked_ancestor()?)
     }
 
     /// Adds a new transactions to the pending queue.
@@ -256,15 +281,15 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// # Panics
     ///
     /// if the transaction is already included
-    pub(crate) fn add_transaction(
+    pub fn add_transaction(
         &mut self,
         tx: Arc<ValidPoolTransaction<T::Transaction>>,
         base_fee: u64,
     ) {
         assert!(
-            !self.by_id.contains_key(tx.id()),
+            !self.contains(tx.id()),
             "transaction already included {:?}",
-            self.by_id.contains_key(tx.id())
+            self.get(tx.id()).unwrap().transaction
         );
 
         // keep track of size
@@ -276,11 +301,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let priority = self.ordering.priority(&tx.transaction, base_fee);
         let tx = PendingTransaction { submission_id, transaction: tx, priority };
 
-        // If there's __no__ ancestor in the pool, then this transaction is independent, this is
-        // guaranteed because this pool is gapless.
-        if self.ancestor(&tx_id).is_none() {
-            self.independent_transactions.insert(tx.clone());
-        }
+        self.update_independents_and_highest_nonces(&tx, &tx_id);
         self.all.insert(tx.clone());
 
         // send the new transaction to any existing pendingpool snapshot iterators
@@ -299,7 +320,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         id: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         // mark the next as independent if it exists
-        if let Some(unlocked) = self.by_id.get(&id.descendant()) {
+        if let Some(unlocked) = self.get(&id.descendant()) {
             self.independent_transactions.insert(unlocked.clone());
         };
         self.remove_transaction(id)
@@ -316,6 +337,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.size_of -= tx.transaction.size();
         self.all.remove(&tx);
         self.independent_transactions.remove(&tx);
+
+        // switch out for the next ancestor if there is one
+        self.highest_nonces.remove(&tx);
+        if let Some(ancestor) = self.ancestor(id) {
+            self.highest_nonces.insert(ancestor.clone());
+        }
         Some(tx.transaction)
     }
 
@@ -325,10 +352,121 @@ impl<T: TransactionOrdering> PendingPool<T> {
         id
     }
 
-    /// Removes the worst transaction from this pool.
-    pub(crate) fn pop_worst(&mut self) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let worst = self.all.iter().next().map(|tx| *tx.transaction.id())?;
-        self.remove_transaction(&worst)
+    /// Traverses the pool, starting at the highest nonce set, removing the transactions which
+    /// would put the pool under the specified limits.
+    ///
+    /// This attempts to remove transactions by roughly the same amount for each sender. This is
+    /// done by removing the highest-nonce transactions for each sender.
+    ///
+    /// If the `remove_locals` flag is unset, transactions will be removed per-sender until a
+    /// local transaction is the highest nonce transaction for that sender. If all senders have a
+    /// local highest-nonce transaction, the pool will not be truncated further.
+    ///
+    /// Otherwise, if the `remove_locals` flag is set, transactions will be removed per-sender
+    /// until the pool is under the given limits.
+    ///
+    /// Any removed transactions will be added to the `end_removed` vector.
+    pub fn remove_to_limit(
+        &mut self,
+        limit: &SubPoolLimit,
+        remove_locals: bool,
+        end_removed: &mut Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
+    ) {
+        // This serves as a termination condition for the loop - it represents the number of
+        // _valid_ unique senders that might have descendants in the pool.
+        //
+        // If `remove_locals` is false, a value of zero means that there are no non-local txs in the
+        // pool that can be removed.
+        //
+        // If `remove_locals` is true, a value of zero means that there are no txs in the pool that
+        // can be removed.
+        let mut non_local_senders = self.highest_nonces.len();
+
+        // keep track of unique senders from previous iterations, to understand how many unique
+        // senders were removed in the last iteration
+        let mut unique_senders = self.highest_nonces.len();
+
+        // keep track of transactions to remove and how many have been removed so far
+        let original_length = self.len();
+        let mut removed = Vec::new();
+        let mut total_removed = 0;
+
+        // track total `size` of transactions to remove
+        let original_size = self.size();
+        let mut total_size = 0;
+
+        loop {
+            // check how many unique senders were removed last iteration
+            let unique_removed = unique_senders - self.highest_nonces.len();
+
+            // the new number of unique senders
+            unique_senders = self.highest_nonces.len();
+            non_local_senders -= unique_removed;
+
+            // we can re-use the temp array
+            removed.clear();
+
+            // loop through the highest nonces set, removing transactions until we reach the limit
+            for tx in self.highest_nonces.iter() {
+                // return early if the pool is under limits
+                if original_size - total_size <= limit.max_size &&
+                    original_length - total_removed <= limit.max_txs ||
+                    non_local_senders == 0
+                {
+                    // need to remove remaining transactions before exiting
+                    for id in &removed {
+                        if let Some(tx) = self.remove_transaction(id) {
+                            end_removed.push(tx);
+                        }
+                    }
+
+                    return
+                }
+
+                if !remove_locals && tx.transaction.is_local() {
+                    non_local_senders -= 1;
+                    continue
+                }
+
+                total_size += tx.transaction.size();
+                total_removed += 1;
+                removed.push(*tx.transaction.id());
+            }
+
+            // remove the transactions from this iteration
+            for id in &removed {
+                if let Some(tx) = self.remove_transaction(id) {
+                    end_removed.push(tx);
+                }
+            }
+        }
+    }
+
+    /// Truncates the pool to the given [SubPoolLimit], removing transactions until the subpool
+    /// limits are met.
+    ///
+    /// This attempts to remove transactions by rougly the same amount for each sender. For more
+    /// information on this exact process see docs for
+    /// [remove_to_limit](PendingPool::remove_to_limit).
+    ///
+    /// This first truncates all of the non-local transactions in the pool. If the subpool is still
+    /// not under the limit, this truncates the entire pool, including non-local transactions. The
+    /// removed transactions are returned.
+    pub fn truncate_pool(
+        &mut self,
+        limit: SubPoolLimit,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let mut removed = Vec::new();
+        self.remove_to_limit(&limit, false, &mut removed);
+
+        if self.size() <= limit.max_size && self.len() <= limit.max_txs {
+            return removed
+        }
+
+        // now repeat for local transactions
+        self.remove_to_limit(&limit, true, &mut removed);
+
+        removed
     }
 
     /// The reported size of all transactions in this pool.
@@ -348,9 +486,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
     }
 
     /// Returns `true` if the transaction with the given id is already included in this pool.
-    #[cfg(test)]
     pub(crate) fn contains(&self, id: &TransactionId) -> bool {
         self.by_id.contains_key(id)
+    }
+
+    /// Retrieves a transaction with the given ID from the pool, if it exists.
+    fn get(&self, id: &TransactionId) -> Option<&PendingTransaction<T>> {
+        self.by_id.get(id)
     }
 
     /// Asserts that the bijection between `by_id` and `all` is valid.
@@ -360,6 +502,15 @@ impl<T: TransactionOrdering> PendingPool<T> {
         assert!(
             self.independent_transactions.len() <= self.all.len(),
             "independent.len() > all.len()"
+        );
+        assert!(
+            self.highest_nonces.len() <= self.all.len(),
+            "independent_descendants.len() > all.len()"
+        );
+        assert_eq!(
+            self.highest_nonces.len(),
+            self.independent_transactions.len(),
+            "independent.len() = independent_descendants.len()"
         );
     }
 }
@@ -420,9 +571,11 @@ impl<T: TransactionOrdering> Ord for PendingTransaction<T> {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
+        test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         PoolTransaction,
     };
+    use reth_primitives::{address, TxType};
+    use std::collections::HashSet;
 
     #[test]
     fn test_enforce_basefee() {
@@ -431,7 +584,7 @@ mod tests {
         let tx = f.validated_arc(MockTransaction::eip1559().inc_price());
         pool.add_transaction(tx.clone(), 0);
 
-        assert!(pool.by_id.contains_key(tx.id()));
+        assert!(pool.contains(tx.id()));
         assert_eq!(pool.len(), 1);
 
         let removed = pool.update_base_fee(0);
@@ -453,11 +606,12 @@ mod tests {
         let descendant_tx = f.validated_arc(t.inc_nonce().decr_price());
         pool.add_transaction(descendant_tx.clone(), 0);
 
-        assert!(pool.by_id.contains_key(root_tx.id()));
-        assert!(pool.by_id.contains_key(descendant_tx.id()));
+        assert!(pool.contains(root_tx.id()));
+        assert!(pool.contains(descendant_tx.id()));
         assert_eq!(pool.len(), 2);
 
         assert_eq!(pool.independent_transactions.len(), 1);
+        assert_eq!(pool.highest_nonces.len(), 1);
 
         let removed = pool.update_base_fee(0);
         assert!(removed.is_empty());
@@ -470,14 +624,15 @@ mod tests {
             assert_eq!(removed.len(), 1);
             assert_eq!(pool2.len(), 1);
             // descendant got popped
-            assert!(pool2.by_id.contains_key(root_tx.id()));
-            assert!(!pool2.by_id.contains_key(descendant_tx.id()));
+            assert!(pool2.contains(root_tx.id()));
+            assert!(!pool2.contains(descendant_tx.id()));
         }
 
         // remove root transaction via fee
         let removed = pool.update_base_fee((root_tx.max_fee_per_gas() + 1) as u64);
         assert_eq!(removed.len(), 2);
         assert!(pool.is_empty());
+        pool.assert_invariants();
     }
 
     #[test]
@@ -492,6 +647,152 @@ mod tests {
         pool.add_transaction(f.validated_arc(t2), 0);
 
         // First transaction should be evicted.
-        assert_eq!(pool.pop_worst().map(|tx| *tx.hash()), Some(*t.hash()));
+        assert_eq!(
+            pool.highest_nonces.iter().next().map(|tx| *tx.transaction.hash()),
+            Some(*t.hash())
+        );
+
+        // truncate pool with max size = 1, ensure it's the same transaction
+        let removed = pool.truncate_pool(SubPoolLimit { max_txs: 1, max_size: usize::MAX });
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].hash(), t.hash());
+    }
+
+    #[test]
+    fn correct_independent_descendants() {
+        // this test ensures that we set the right highest nonces set for each sender
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        let a_sender = address!("000000000000000000000000000000000000000a");
+        let b_sender = address!("000000000000000000000000000000000000000b");
+        let c_sender = address!("000000000000000000000000000000000000000c");
+        let d_sender = address!("000000000000000000000000000000000000000d");
+
+        // create a chain of transactions by sender A, B, C
+        let mut tx_set =
+            MockTransactionSet::dependent(a_sender, 0, 4, reth_primitives::TxType::EIP1559);
+        let a = tx_set.clone().into_vec();
+
+        let b = MockTransactionSet::dependent(b_sender, 0, 3, reth_primitives::TxType::EIP1559)
+            .into_vec();
+        tx_set.extend(b.clone());
+
+        // C has the same number of txs as B
+        let c = MockTransactionSet::dependent(c_sender, 0, 3, reth_primitives::TxType::EIP1559)
+            .into_vec();
+        tx_set.extend(c.clone());
+
+        let d = MockTransactionSet::dependent(d_sender, 0, 1, reth_primitives::TxType::EIP1559)
+            .into_vec();
+        tx_set.extend(d.clone());
+
+        // add all the transactions to the pool
+        let all_txs = tx_set.into_vec();
+        for tx in all_txs {
+            pool.add_transaction(f.validated_arc(tx), 0);
+        }
+
+        pool.assert_invariants();
+
+        // the independent set is the roots of each of these tx chains, these are the highest
+        // nonces for each sender
+        let expected_highest_nonces = vec![d[0].clone(), c[2].clone(), b[2].clone(), a[3].clone()]
+            .iter()
+            .map(|tx| (tx.sender(), tx.nonce()))
+            .collect::<HashSet<_>>();
+        let actual_highest_nonces = pool
+            .highest_nonces
+            .iter()
+            .map(|tx| (tx.transaction.sender(), tx.transaction.nonce()))
+            .collect::<HashSet<_>>();
+        assert_eq!(expected_highest_nonces, actual_highest_nonces);
+        pool.assert_invariants();
+    }
+
+    #[test]
+    fn truncate_by_sender() {
+        // This test ensures that transactions are removed from the pending pool by sender.
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // Addresses for simulated senders A, B, C, and D.
+        let a = address!("000000000000000000000000000000000000000a");
+        let b = address!("000000000000000000000000000000000000000b");
+        let c = address!("000000000000000000000000000000000000000c");
+        let d = address!("000000000000000000000000000000000000000d");
+
+        // Create transaction chains for senders A, B, C, and D.
+        let a_txs = MockTransactionSet::sequential_transactions_by_sender(a, 4, TxType::EIP1559);
+        let b_txs = MockTransactionSet::sequential_transactions_by_sender(b, 3, TxType::EIP1559);
+        let c_txs = MockTransactionSet::sequential_transactions_by_sender(c, 3, TxType::EIP1559);
+        let d_txs = MockTransactionSet::sequential_transactions_by_sender(d, 1, TxType::EIP1559);
+
+        // Set up expected pending transactions.
+        let expected_pending = vec![
+            a_txs.transactions[0].clone(),
+            b_txs.transactions[0].clone(),
+            c_txs.transactions[0].clone(),
+            a_txs.transactions[1].clone(),
+        ]
+        .into_iter()
+        .map(|tx| (tx.sender(), tx.nonce()))
+        .collect::<HashSet<_>>();
+
+        // Set up expected removed transactions.
+        let expected_removed = vec![
+            d_txs.transactions[0].clone(),
+            c_txs.transactions[2].clone(),
+            b_txs.transactions[2].clone(),
+            a_txs.transactions[3].clone(),
+            c_txs.transactions[1].clone(),
+            b_txs.transactions[1].clone(),
+            a_txs.transactions[2].clone(),
+        ]
+        .into_iter()
+        .map(|tx| (tx.sender(), tx.nonce()))
+        .collect::<HashSet<_>>();
+
+        // Consolidate all transactions into a single vector.
+        let all_txs =
+            [a_txs.into_vec(), b_txs.into_vec(), c_txs.into_vec(), d_txs.into_vec()].concat();
+
+        // Add all the transactions to the pool.
+        for tx in all_txs {
+            pool.add_transaction(f.validated_arc(tx), 0);
+        }
+
+        // Sanity check, ensuring everything is consistent.
+        pool.assert_invariants();
+
+        // Define the maximum total transactions to be 4, removing transactions for each sender.
+        // Expected order of removal:
+        // * d1, c3, b3, a4
+        // * c2, b2, a3
+        //
+        // Remaining transactions:
+        // * a1, a2
+        // * b1
+        // * c1
+        let pool_limit = SubPoolLimit { max_txs: 4, max_size: usize::MAX };
+
+        // Truncate the pool based on the defined limit.
+        let removed = pool.truncate_pool(pool_limit);
+        pool.assert_invariants();
+        assert_eq!(removed.len(), expected_removed.len());
+
+        // Get the set of removed transactions and compare with the expected set.
+        let removed =
+            removed.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
+        assert_eq!(removed, expected_removed);
+
+        // Retrieve the current pending transactions after truncation.
+        let pending = pool.all().collect::<Vec<_>>();
+        assert_eq!(pending.len(), expected_pending.len());
+
+        // Get the set of pending transactions and compare with the expected set.
+        let pending =
+            pending.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
+        assert_eq!(pending, expected_pending);
     }
 }

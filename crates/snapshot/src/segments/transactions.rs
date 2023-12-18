@@ -1,6 +1,6 @@
 use crate::segments::{prepare_jar, Segment};
 use reth_db::{database::Database, snapshot::create_snapshot_T1, tables};
-use reth_interfaces::RethResult;
+use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     snapshot::{Compression, Filters, SegmentConfig, SegmentHeader},
     BlockNumber, SnapshotSegment, TxNumber,
@@ -28,23 +28,23 @@ impl Default for Transactions {
 }
 
 impl Segment for Transactions {
-    fn segment() -> SnapshotSegment {
+    fn segment(&self) -> SnapshotSegment {
         SnapshotSegment::Transactions
     }
 
     fn snapshot<DB: Database>(
         &self,
-        provider: &DatabaseProviderRO<'_, DB>,
+        provider: &DatabaseProviderRO<DB>,
         directory: impl AsRef<Path>,
         block_range: RangeInclusive<BlockNumber>,
-    ) -> RethResult<()> {
+    ) -> ProviderResult<()> {
         let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
         let tx_range_len = tx_range.clone().count();
 
         let mut jar = prepare_jar::<DB, 1>(
             provider,
             directory,
-            Self::segment(),
+            self.segment(),
             self.config,
             block_range,
             tx_range_len,

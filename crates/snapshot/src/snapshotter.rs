@@ -1,13 +1,15 @@
 //! Support for snapshotting.
 
 use crate::{segments, segments::Segment, SnapshotterError};
-use reth_db::database::Database;
+use reth_db::{database::Database, snapshot::iter_snapshots};
 use reth_interfaces::{RethError, RethResult};
-use reth_primitives::{
-    snapshot::HighestSnapshots, BlockNumber, ChainSpec, SnapshotSegment, TxNumber,
+use reth_primitives::{snapshot::HighestSnapshots, BlockNumber, TxNumber};
+use reth_provider::{BlockReader, DatabaseProviderRO, ProviderFactory, TransactionsProviderExt};
+use std::{
+    collections::HashMap,
+    ops::RangeInclusive,
+    path::{Path, PathBuf},
 };
-use reth_provider::{BlockReader, DatabaseProviderRO, ProviderFactory};
-use std::{collections::HashMap, ops::RangeInclusive, path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::warn;
 
@@ -88,17 +90,15 @@ impl SnapshotTargets {
 impl<DB: Database> Snapshotter<DB> {
     /// Creates a new [Snapshotter].
     pub fn new(
-        db: DB,
-        snapshots_path: PathBuf,
-        chain_spec: Arc<ChainSpec>,
+        provider_factory: ProviderFactory<DB>,
+        snapshots_path: impl AsRef<Path>,
         block_interval: u64,
     ) -> RethResult<Self> {
         let (highest_snapshots_notifier, highest_snapshots_tracker) = watch::channel(None);
 
         let mut snapshotter = Self {
-            provider_factory: ProviderFactory::new(db, chain_spec),
-            snapshots_path,
-            // TODO(alexey): fill from on-disk snapshot data
+            provider_factory,
+            snapshots_path: snapshots_path.as_ref().into(),
             highest_snapshots: HighestSnapshots::default(),
             highest_snapshots_notifier,
             highest_snapshots_tracker,
@@ -152,23 +152,14 @@ impl<DB: Database> Snapshotter<DB> {
         // It walks over the directory and parses the snapshot filenames extracting
         // `SnapshotSegment` and their inclusive range. It then takes the maximum block
         // number for each specific segment.
-        for (segment, range) in reth_primitives::fs::read_dir(&self.snapshots_path)?
-            .filter_map(Result::ok)
-            .filter_map(|entry| {
-                if let Ok(true) = entry.metadata().map(|metadata| metadata.is_file()) {
-                    return SnapshotSegment::parse_filename(&entry.file_name().to_string_lossy())
-                }
-                None
-            })
+        for (segment, ranges) in
+            iter_snapshots(&self.snapshots_path).map_err(|err| RethError::Provider(err.into()))?
         {
-            let max_segment_block = match segment {
-                SnapshotSegment::Headers => &mut self.highest_snapshots.headers,
-                SnapshotSegment::Transactions => &mut self.highest_snapshots.transactions,
-                SnapshotSegment::Receipts => &mut self.highest_snapshots.receipts,
-            };
-
-            if max_segment_block.map_or(true, |block| block < *range.end()) {
-                *max_segment_block = Some(*range.end());
+            for (block_range, _) in ranges {
+                let max_segment_block = self.highest_snapshots.as_mut(segment);
+                if max_segment_block.map_or(true, |block| block < *block_range.end()) {
+                    *max_segment_block = Some(*block_range.end());
+                }
             }
         }
 
@@ -218,13 +209,12 @@ impl<DB: Database> Snapshotter<DB> {
     ) -> RethResult<()> {
         if let Some(block_range) = block_range {
             let temp = self.snapshots_path.join(TEMPORARY_SUBDIRECTORY);
-            let filename = S::segment().filename(&block_range);
+            let provider = self.provider_factory.provider()?;
+            let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
+            let segment = S::default();
+            let filename = segment.segment().filename(&block_range, &tx_range);
 
-            S::default().snapshot::<DB>(
-                &self.provider_factory.provider()?,
-                temp.clone(),
-                block_range.clone(),
-            )?;
+            segment.snapshot::<DB>(&provider, temp.clone(), block_range)?;
 
             reth_primitives::fs::rename(temp.join(&filename), self.snapshots_path.join(filename))?;
         }
@@ -301,7 +291,7 @@ impl<DB: Database> Snapshotter<DB> {
 
     fn get_snapshot_target_tx_range(
         &self,
-        provider: &DatabaseProviderRO<'_, DB>,
+        provider: &DatabaseProviderRO<DB>,
         block_to_tx_number_cache: &mut HashMap<BlockNumber, TxNumber>,
         highest_snapshot: Option<BlockNumber>,
         block_range: &RangeInclusive<BlockNumber>,
@@ -339,16 +329,14 @@ mod tests {
         test_utils::{generators, generators::random_block_range},
         RethError,
     };
-    use reth_primitives::{snapshot::HighestSnapshots, B256, MAINNET};
-    use reth_stages::test_utils::TestTransaction;
+    use reth_primitives::{snapshot::HighestSnapshots, B256};
+    use reth_stages::test_utils::TestStageDB;
 
     #[test]
     fn new() {
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
         let snapshots_dir = tempfile::TempDir::new().unwrap();
-        let snapshotter =
-            Snapshotter::new(tx.inner_raw(), snapshots_dir.into_path(), MAINNET.clone(), 2)
-                .unwrap();
+        let snapshotter = Snapshotter::new(db.factory, snapshots_dir.into_path(), 2).unwrap();
 
         assert_eq!(
             *snapshotter.highest_snapshot_receiver().borrow(),
@@ -358,16 +346,14 @@ mod tests {
 
     #[test]
     fn get_snapshot_targets() {
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
         let snapshots_dir = tempfile::TempDir::new().unwrap();
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3);
-        tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
-        let mut snapshotter =
-            Snapshotter::new(tx.inner_raw(), snapshots_dir.into_path(), MAINNET.clone(), 2)
-                .unwrap();
+        let mut snapshotter = Snapshotter::new(db.factory, snapshots_dir.into_path(), 2).unwrap();
 
         // Snapshot targets has data per part up to the passed finalized block number,
         // respecting the block interval

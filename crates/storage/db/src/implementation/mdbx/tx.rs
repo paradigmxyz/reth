@@ -7,19 +7,32 @@ use crate::{
     },
     table::{Compress, DupSort, Encode, Table, TableImporter},
     tables::{utils::decode_one, Tables, NUM_TABLES},
-    transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
+    transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
 use parking_lot::RwLock;
 use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
-use reth_libmdbx::{ffi::DBI, EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
-use std::{marker::PhantomData, str::FromStr, sync::Arc, time::Instant};
+use reth_libmdbx::{ffi::DBI, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
+use reth_tracing::tracing::debug;
+use std::{
+    backtrace::Backtrace,
+    marker::PhantomData,
+    str::FromStr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
+
+/// Duration after which we emit the log about long-lived database transactions.
+const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
 
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]
-pub struct Tx<'a, K: TransactionKind, E: EnvironmentKind> {
+pub struct Tx<K: TransactionKind> {
     /// Libmdbx-sys transaction.
-    pub inner: Transaction<'a, K, E>,
+    pub inner: Transaction<K>,
     /// Database table handle cache.
     pub(crate) db_handles: Arc<RwLock<[Option<DBI>; NUM_TABLES]>>,
     /// Handler for metrics with its own [Drop] implementation for cases when the transaction isn't
@@ -29,27 +42,16 @@ pub struct Tx<'a, K: TransactionKind, E: EnvironmentKind> {
     metrics_handler: Option<MetricsHandler<K>>,
 }
 
-impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
+impl<K: TransactionKind> Tx<K> {
     /// Creates new `Tx` object with a `RO` or `RW` transaction.
-    pub fn new<'a>(inner: Transaction<'a, K, E>) -> Self
-    where
-        'a: 'env,
-    {
+    pub fn new(inner: Transaction<K>) -> Self {
         Self { inner, db_handles: Default::default(), metrics_handler: None }
     }
 
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
-    pub fn new_with_metrics<'a>(inner: Transaction<'a, K, E>, with_metrics: bool) -> Self
-    where
-        'a: 'env,
-    {
+    pub fn new_with_metrics(inner: Transaction<K>, with_metrics: bool) -> Self {
         let metrics_handler = with_metrics.then(|| {
-            let handler = MetricsHandler::<K> {
-                txn_id: inner.id(),
-                start: Instant::now(),
-                close_recorded: false,
-                _marker: PhantomData,
-            };
+            let handler = MetricsHandler::<K>::new(inner.id());
             TransactionMetrics::record_open(handler.transaction_mode());
             handler
         });
@@ -81,7 +83,7 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
     }
 
     /// Create db Cursor
-    pub fn new_cursor<T: Table>(&self) -> Result<Cursor<'env, K, T>, DatabaseError> {
+    pub fn new_cursor<T: Table>(&self) -> Result<Cursor<K, T>, DatabaseError> {
         let inner = self
             .inner
             .cursor_with_dbi(self.get_dbi::<T>()?)
@@ -97,26 +99,28 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
     fn execute_with_close_transaction_metric<R>(
         mut self,
         outcome: TransactionOutcome,
-        f: impl FnOnce(Self) -> R,
+        f: impl FnOnce(Self) -> (R, Option<CommitLatency>),
     ) -> R {
         if let Some(mut metrics_handler) = self.metrics_handler.take() {
             metrics_handler.close_recorded = true;
+            metrics_handler.log_backtrace_on_long_transaction();
 
             let start = Instant::now();
-            let result = f(self);
-            let close_duration = start.elapsed();
+            let (result, commit_latency) = f(self);
             let open_duration = metrics_handler.start.elapsed();
+            let close_duration = start.elapsed();
 
             TransactionMetrics::record_close(
                 metrics_handler.transaction_mode(),
                 outcome,
                 open_duration,
                 Some(close_duration),
+                commit_latency,
             );
 
             result
         } else {
-            f(self)
+            f(self).0
         }
     }
 
@@ -128,9 +132,10 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
         &self,
         operation: Operation,
         value_size: Option<usize>,
-        f: impl FnOnce(&Transaction<'_, K, E>) -> R,
+        f: impl FnOnce(&Transaction<K>) -> R,
     ) -> R {
-        if self.metrics_handler.is_some() {
+        if let Some(metrics_handler) = &self.metrics_handler {
+            metrics_handler.log_backtrace_on_long_transaction();
             OperationMetrics::record(T::NAME, operation, value_size, || f(&self.inner))
         } else {
             f(&self.inner)
@@ -144,13 +149,26 @@ struct MetricsHandler<K: TransactionKind> {
     txn_id: u64,
     /// The time when transaction has started.
     start: Instant,
-    /// If true, the metric about transaction closing has already been recorded and we don't need
+    /// If `true`, the metric about transaction closing has already been recorded and we don't need
     /// to do anything on [Drop::drop].
     close_recorded: bool,
+    /// If `true`, the backtrace of transaction has already been recorded and logged.
+    /// See [MetricsHandler::log_backtrace_on_long_transaction].
+    backtrace_recorded: AtomicBool,
     _marker: PhantomData<K>,
 }
 
 impl<K: TransactionKind> MetricsHandler<K> {
+    fn new(txn_id: u64) -> Self {
+        Self {
+            txn_id,
+            start: Instant::now(),
+            close_recorded: false,
+            backtrace_recorded: AtomicBool::new(false),
+            _marker: PhantomData,
+        }
+    }
+
     const fn transaction_mode(&self) -> TransactionMode {
         if K::IS_READ_ONLY {
             TransactionMode::ReadOnly
@@ -158,34 +176,55 @@ impl<K: TransactionKind> MetricsHandler<K> {
             TransactionMode::ReadWrite
         }
     }
+
+    /// Logs the backtrace of current call if the duration that the read transaction has been open
+    /// is more than [LONG_TRANSACTION_DURATION].
+    /// The backtrace is recorded and logged just once, guaranteed by `backtrace_recorded` atomic.
+    ///
+    /// NOTE: Backtrace is recorded using [Backtrace::force_capture], so `RUST_BACKTRACE` env var is
+    /// not needed.
+    fn log_backtrace_on_long_transaction(&self) {
+        if !self.backtrace_recorded.load(Ordering::Relaxed) &&
+            self.transaction_mode().is_read_only()
+        {
+            let open_duration = self.start.elapsed();
+            if open_duration > LONG_TRANSACTION_DURATION {
+                self.backtrace_recorded.store(true, Ordering::Relaxed);
+
+                let backtrace = Backtrace::force_capture();
+                debug!(
+                    target: "storage::db::mdbx",
+                    ?open_duration,
+                    ?backtrace,
+                    "The database read transaction has been open for too long"
+                );
+            }
+        }
+    }
 }
 
 impl<K: TransactionKind> Drop for MetricsHandler<K> {
     fn drop(&mut self) {
         if !self.close_recorded {
+            self.log_backtrace_on_long_transaction();
+
             TransactionMetrics::record_close(
                 self.transaction_mode(),
                 TransactionOutcome::Drop,
                 self.start.elapsed(),
+                None,
                 None,
             );
         }
     }
 }
 
-impl<'a, K: TransactionKind, E: EnvironmentKind> DbTxGAT<'a> for Tx<'_, K, E> {
-    type Cursor<T: Table> = Cursor<'a, K, T>;
-    type DupCursor<T: DupSort> = Cursor<'a, K, T>;
-}
+impl TableImporter for Tx<RW> {}
 
-impl<'a, K: TransactionKind, E: EnvironmentKind> DbTxMutGAT<'a> for Tx<'_, K, E> {
-    type CursorMut<T: Table> = Cursor<'a, RW, T>;
-    type DupCursorMut<T: DupSort> = Cursor<'a, RW, T>;
-}
+impl<K: TransactionKind> DbTx for Tx<K> {
+    type Cursor<T: Table> = Cursor<K, T>;
+    type DupCursor<T: DupSort> = Cursor<K, T>;
 
-impl<E: EnvironmentKind> TableImporter for Tx<'_, RW, E> {}
-
-impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, DatabaseError> {
         self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
             tx.get(self.get_dbi::<T>()?, key.encode().as_ref())
@@ -197,25 +236,26 @@ impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
 
     fn commit(self) -> Result<bool, DatabaseError> {
         self.execute_with_close_transaction_metric(TransactionOutcome::Commit, |this| {
-            this.inner.commit().map_err(|e| DatabaseError::Commit(e.into()))
+            match this.inner.commit().map_err(|e| DatabaseError::Commit(e.into())) {
+                Ok((v, latency)) => (Ok(v), Some(latency)),
+                Err(e) => (Err(e), None),
+            }
         })
     }
 
     fn abort(self) {
         self.execute_with_close_transaction_metric(TransactionOutcome::Abort, |this| {
-            drop(this.inner)
+            (drop(this.inner), None)
         })
     }
 
     // Iterate over read only values in database.
-    fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, DatabaseError> {
+    fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<T>, DatabaseError> {
         self.new_cursor()
     }
 
     /// Iterate over read only values in database.
-    fn cursor_dup_read<T: DupSort>(
-        &self,
-    ) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, DatabaseError> {
+    fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<T>, DatabaseError> {
         self.new_cursor()
     }
 
@@ -229,7 +269,10 @@ impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
     }
 }
 
-impl<E: EnvironmentKind> DbTxMut for Tx<'_, RW, E> {
+impl DbTxMut for Tx<RW> {
+    type CursorMut<T: Table> = Cursor<RW, T>;
+    type DupCursorMut<T: DupSort> = Cursor<RW, T>;
+
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = value.compress();
@@ -274,15 +317,11 @@ impl<E: EnvironmentKind> DbTxMut for Tx<'_, RW, E> {
         Ok(())
     }
 
-    fn cursor_write<T: Table>(
-        &self,
-    ) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, DatabaseError> {
+    fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError> {
         self.new_cursor()
     }
 
-    fn cursor_dup_write<T: DupSort>(
-        &self,
-    ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, DatabaseError> {
+    fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError> {
         self.new_cursor()
     }
 }

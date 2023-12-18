@@ -35,4 +35,13 @@ impl HighestSnapshots {
             SnapshotSegment::Receipts => self.receipts,
         }
     }
+
+    /// Returns a mutable reference to a snapshot segment
+    pub fn as_mut(&mut self, segment: SnapshotSegment) -> &mut Option<BlockNumber> {
+        match segment {
+            SnapshotSegment::Headers => &mut self.headers,
+            SnapshotSegment::Transactions => &mut self.transactions,
+            SnapshotSegment::Receipts => &mut self.receipts,
+        }
+    }
 }

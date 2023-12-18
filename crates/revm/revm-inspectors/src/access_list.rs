@@ -1,4 +1,5 @@
-use reth_primitives::{AccessList, AccessListItem, Address, B256};
+use alloy_primitives::{Address, B256};
+use reth_rpc_types::{AccessList, AccessListItem};
 use revm::{
     interpreter::{opcode, Interpreter},
     Database, EVMData, Inspector,

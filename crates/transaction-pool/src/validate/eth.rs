@@ -5,8 +5,8 @@ use crate::{
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     traits::TransactionOrigin,
     validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_SIZE, TX_MAX_SIZE},
-    EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
-    TransactionValidationTaskExecutor, TransactionValidator,
+    EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig, PoolTransaction,
+    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 use reth_primitives::{
     constants::{
@@ -124,6 +124,8 @@ where
     propagate_local_transactions: bool,
     /// Stores the setup and parameters needed for validating KZG proofs.
     kzg_settings: Arc<KzgSettings>,
+    /// How to handle [TransactionOrigin::Local](TransactionOrigin) transactions.
+    local_transactions_config: LocalTransactionConfig,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
 }
@@ -169,7 +171,7 @@ where
                 if !self.eip2718 {
                     return TransactionValidationOutcome::Invalid(
                         transaction,
-                        InvalidTransactionError::Eip1559Disabled.into(),
+                        InvalidTransactionError::Eip2930Disabled.into(),
                     )
                 }
             }
@@ -235,7 +237,7 @@ where
 
         // Drop non-local transactions with a fee lower than the configured fee for acceptance into
         // the pool.
-        if !origin.is_local() &&
+        if (!origin.is_local() || self.local_transactions_config.no_local_exemptions()) &&
             transaction.is_eip1559() &&
             transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
@@ -307,7 +309,11 @@ where
                     )
                 }
                 EthBlobTransactionSidecar::Missing => {
-                    if let Ok(Some(_)) = self.blob_store.get(*transaction.hash()) {
+                    // This can happen for re-injected blob transactions (on re-org), since the blob
+                    // is stripped from the transaction and not included in a block.
+                    // check if the blob is in the store, if it's included we previously validated
+                    // it and inserted it
+                    if let Ok(true) = self.blob_store.contains(*transaction.hash()) {
                         // validated transaction is already in the store
                     } else {
                         return TransactionValidationOutcome::Invalid(
@@ -480,6 +486,8 @@ pub struct EthTransactionValidatorBuilder {
 
     /// Stores the setup and parameters needed for validating KZG proofs.
     kzg_settings: Arc<KzgSettings>,
+    /// How to handle [TransactionOrigin::Local](TransactionOrigin) transactions.
+    local_transactions_config: LocalTransactionConfig,
 }
 
 impl EthTransactionValidatorBuilder {
@@ -496,6 +504,7 @@ impl EthTransactionValidatorBuilder {
             // default to true, can potentially take this as a param in the future
             propagate_local_transactions: true,
             kzg_settings: Arc::clone(&MAINNET_KZG_TRUSTED_SETUP),
+            local_transactions_config: Default::default(),
 
             // by default all transaction types are allowed
             eip2718: true,
@@ -513,6 +522,15 @@ impl EthTransactionValidatorBuilder {
     /// Disables the Cancun fork.
     pub fn no_cancun(self) -> Self {
         self.set_cancun(false)
+    }
+
+    /// Whether to allow exemptions for local transaction exemptions.
+    pub fn set_local_transactions_config(
+        mut self,
+        local_transactions_config: LocalTransactionConfig,
+    ) -> Self {
+        self.local_transactions_config = local_transactions_config;
+        self
     }
 
     /// Set the Cancun fork.
@@ -620,6 +638,7 @@ impl EthTransactionValidatorBuilder {
             minimum_priority_fee,
             propagate_local_transactions,
             kzg_settings,
+            local_transactions_config,
             ..
         } = self;
 
@@ -638,6 +657,7 @@ impl EthTransactionValidatorBuilder {
             propagate_local_transactions,
             blob_store: Box::new(blob_store),
             kzg_settings,
+            local_transactions_config,
             _marker: Default::default(),
         };
 
@@ -767,8 +787,9 @@ mod tests {
         let data = hex::decode(raw).unwrap();
         let tx = PooledTransactionsElement::decode_enveloped(data.into()).unwrap();
 
-        let transaction =
-            EthPooledTransaction::from_recovered_transaction(tx.try_into_ecrecovered().unwrap());
+        let transaction = EthPooledTransaction::from_recovered_pooled_transaction(
+            tx.try_into_ecrecovered().unwrap(),
+        );
         let res = ensure_intrinsic_gas(&transaction, false);
         assert!(res.is_ok());
         let res = ensure_intrinsic_gas(&transaction, true);

@@ -122,10 +122,10 @@ pub mod error;
 pub mod eth_requests;
 mod fetch;
 mod flattened_response;
-mod import;
+pub mod import;
 mod listener;
 mod manager;
-mod message;
+pub mod message;
 mod metrics;
 mod network;
 pub mod peers;
@@ -141,7 +141,7 @@ pub use discovery::{Discovery, DiscoveryEvent};
 pub use fetch::FetchClient;
 pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
-pub use network::{NetworkEvents, NetworkHandle};
+pub use network::{NetworkEvents, NetworkHandle, NetworkProtocols};
 pub use peers::PeersConfig;
 pub use session::{
     ActiveSessionHandle, ActiveSessionMessage, Direction, PeerInfo, PendingSessionEvent,

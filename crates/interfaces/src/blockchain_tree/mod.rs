@@ -237,6 +237,12 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// disconnected from the canonical chain.
     fn block_by_hash(&self, hash: BlockHash) -> Option<SealedBlock>;
 
+    /// Returns the block with matching hash from the tree, if it exists.
+    ///
+    /// Caution: This will not return blocks from the canonical chain or buffered blocks that are
+    /// disconnected from the canonical chain.
+    fn block_with_senders_by_hash(&self, hash: BlockHash) -> Option<SealedBlockWithSenders>;
+
     /// Returns the _buffered_ (disconnected) block with matching hash from the internal buffer if
     /// it exists.
     ///
@@ -293,6 +299,11 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// Returns the pending block if there is one.
     fn pending_block(&self) -> Option<SealedBlock> {
         self.block_by_hash(self.pending_block_num_hash()?.hash)
+    }
+
+    /// Returns the pending block if there is one.
+    fn pending_block_with_senders(&self) -> Option<SealedBlockWithSenders> {
+        self.block_with_senders_by_hash(self.pending_block_num_hash()?.hash)
     }
 
     /// Returns the pending block and its receipts in one call.

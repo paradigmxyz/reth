@@ -23,7 +23,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
     let transactions = payload
         .transactions
         .into_iter()
-        .map(TransactionSigned::decode_enveloped)
+        .map(|tx| TransactionSigned::decode_enveloped(&mut tx.as_ref()))
         .collect::<Result<Vec<_>, _>>()?;
     let transactions_root = proofs::calculate_transaction_root(&transactions);
 
@@ -304,6 +304,7 @@ pub fn try_into_sealed_block(
 ///
 /// If the provided block hash does not match the block hash computed from the provided block, this
 /// returns [PayloadError::BlockHash].
+#[inline]
 pub fn validate_block_hash(
     expected_block_hash: B256,
     block: Block,

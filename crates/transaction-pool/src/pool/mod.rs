@@ -107,9 +107,12 @@ use crate::{
 };
 use alloy_rlp::Encodable;
 pub use listener::{AllTransactionsEvents, TransactionEvents};
+pub use parked::{BasefeeOrd, ParkedOrd, ParkedPool};
+pub use pending::PendingPool;
 
 mod best;
 mod blob;
+pub use blob::{blob_tx_priority, fee_delta};
 mod parked;
 pub(crate) mod pending;
 pub(crate) mod size;
@@ -692,6 +695,14 @@ where
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let sender_id = self.get_sender_id(sender);
         self.pool.read().get_transactions_by_sender(sender_id)
+    }
+
+    /// Returns all transactions that where submitted with the given [TransactionOrigin]
+    pub(crate) fn get_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.pool.read().all().transactions_iter().filter(|tx| tx.origin == origin).collect()
     }
 
     /// Returns all the transactions belonging to the hashes.

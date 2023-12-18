@@ -2,8 +2,6 @@ use reth_libmdbx::*;
 use std::borrow::Cow;
 use tempfile::tempdir;
 
-type Environment = reth_libmdbx::Environment<NoWriteMap>;
-
 #[test]
 fn test_get() {
     let dir = tempdir().unwrap();
@@ -111,7 +109,7 @@ fn test_iter() {
         for (key, data) in &items {
             txn.put(db.dbi(), key, data, WriteFlags::empty()).unwrap();
         }
-        assert!(!txn.commit().unwrap());
+        assert!(!txn.commit().unwrap().0);
     }
 
     let txn = env.begin_ro_txn().unwrap();

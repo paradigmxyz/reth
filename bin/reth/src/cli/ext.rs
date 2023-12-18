@@ -1,16 +1,14 @@
 //! Support for integrating customizations into the CLI.
 
 use crate::cli::{
-    components::{RethNodeComponents, RethRpcComponents},
-    config::{PayloadBuilderConfig, RethRpcConfig},
+    components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
+    config::{PayloadBuilderConfig, RethNetworkConfig, RethRpcConfig},
 };
 use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
-
-use crate::cli::components::RethRpcServerHandles;
 
 /// A trait that allows for extending parts of the CLI with additional functionality.
 ///
@@ -35,12 +33,30 @@ impl RethCliExt for () {
 ///
 /// The functions are invoked during the initialization of the node command in the following order:
 ///
-/// 1. [on_components_initialized](RethNodeCommandConfig::on_components_initialized)
-/// 2. [spawn_payload_builder_service](RethNodeCommandConfig::spawn_payload_builder_service)
-/// 3. [extend_rpc_modules](RethNodeCommandConfig::extend_rpc_modules)
-/// 4. [on_rpc_server_started](RethNodeCommandConfig::on_rpc_server_started)
-/// 5. [on_node_started](RethNodeCommandConfig::on_node_started)
+/// 1. [configure_network](RethNodeCommandConfig::configure_network)
+/// 2. [on_components_initialized](RethNodeCommandConfig::on_components_initialized)
+/// 3. [spawn_payload_builder_service](RethNodeCommandConfig::spawn_payload_builder_service)
+/// 4. [extend_rpc_modules](RethNodeCommandConfig::extend_rpc_modules)
+/// 5. [on_rpc_server_started](RethNodeCommandConfig::on_rpc_server_started)
+/// 6. [on_node_started](RethNodeCommandConfig::on_node_started)
 pub trait RethNodeCommandConfig: fmt::Debug {
+    /// Invoked with the network configuration before the network is configured.
+    ///
+    /// This allows additional configuration of the network before it is launched.
+    fn configure_network<Conf, Reth>(
+        &mut self,
+        config: &mut Conf,
+        components: &Reth,
+    ) -> eyre::Result<()>
+    where
+        Conf: RethNetworkConfig,
+        Reth: RethNodeComponents,
+    {
+        let _ = config;
+        let _ = components;
+        Ok(())
+    }
+
     /// Event hook called once all components have been initialized.
     ///
     /// This is called as soon as the node components have been initialized.
@@ -224,6 +240,22 @@ impl<T> NoArgs<T> {
 }
 
 impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
+    fn configure_network<Conf, Reth>(
+        &mut self,
+        config: &mut Conf,
+        components: &Reth,
+    ) -> eyre::Result<()>
+    where
+        Conf: RethNetworkConfig,
+        Reth: RethNodeComponents,
+    {
+        if let Some(conf) = self.inner_mut() {
+            conf.configure_network(config, components)
+        } else {
+            Ok(())
+        }
+    }
+
     fn on_components_initialized<Reth: RethNodeComponents>(
         &mut self,
         components: &Reth,

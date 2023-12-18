@@ -1,21 +1,18 @@
 use super::LoadedJarRef;
 use crate::{
-    BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider, TransactionsProvider,
+    to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
+    TransactionsProvider,
 };
 use reth_db::{
     codecs::CompactU256,
     snapshot::{HeaderMask, ReceiptMask, SnapshotCursor, TransactionMask},
 };
-use reth_interfaces::{
-    executor::{BlockExecutionError, BlockValidationError},
-    provider::ProviderError,
-    RethResult,
-};
+use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, Receipt, SealedHeader,
     TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
-use std::ops::{Deref, Range, RangeBounds};
+use std::ops::{Deref, RangeBounds};
 
 /// Provider over a specific `NippyJar` and range.
 #[derive(Debug)]
@@ -41,7 +38,7 @@ impl<'a> From<LoadedJarRef<'a>> for SnapshotJarProvider<'a> {
 
 impl<'a> SnapshotJarProvider<'a> {
     /// Provides a cursor for more granular data access.
-    pub fn cursor<'b>(&'b self) -> RethResult<SnapshotCursor<'a>>
+    pub fn cursor<'b>(&'b self) -> ProviderResult<SnapshotCursor<'a>>
     where
         'b: 'a,
     {
@@ -56,7 +53,7 @@ impl<'a> SnapshotJarProvider<'a> {
 }
 
 impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
-    fn header(&self, block_hash: &BlockHash) -> RethResult<Option<Header>> {
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         Ok(self
             .cursor()?
             .get_two::<HeaderMask<Header, BlockHash>>(block_hash.into())?
@@ -64,11 +61,11 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
             .map(|(header, _)| header))
     }
 
-    fn header_by_number(&self, num: BlockNumber) -> RethResult<Option<Header>> {
+    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
         self.cursor()?.get_one::<HeaderMask<Header>>(num.into())
     }
 
-    fn header_td(&self, block_hash: &BlockHash) -> RethResult<Option<U256>> {
+    fn header_td(&self, block_hash: &BlockHash) -> ProviderResult<Option<U256>> {
         Ok(self
             .cursor()?
             .get_two::<HeaderMask<CompactU256, BlockHash>>(block_hash.into())?
@@ -76,11 +73,11 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
             .map(|(td, _)| td.into()))
     }
 
-    fn header_td_by_number(&self, num: BlockNumber) -> RethResult<Option<U256>> {
+    fn header_td_by_number(&self, num: BlockNumber) -> ProviderResult<Option<U256>> {
         Ok(self.cursor()?.get_one::<HeaderMask<CompactU256>>(num.into())?.map(Into::into))
     }
 
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
         let range = to_range(range);
 
         let mut cursor = self.cursor()?;
@@ -95,10 +92,18 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
         Ok(headers)
     }
 
-    fn sealed_headers_range(
+    fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
+        Ok(self
+            .cursor()?
+            .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
+            .map(|(header, hash)| header.seal(hash)))
+    }
+
+    fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> RethResult<Vec<SealedHeader>> {
+        mut predicate: impl FnMut(&SealedHeader) -> bool,
+    ) -> ProviderResult<Vec<SealedHeader>> {
         let range = to_range(range);
 
         let mut cursor = self.cursor()?;
@@ -108,22 +113,19 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
             if let Some((header, hash)) =
                 cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into())?
             {
-                headers.push(header.seal(hash))
+                let sealed = header.seal(hash);
+                if !predicate(&sealed) {
+                    break
+                }
+                headers.push(sealed);
             }
         }
         Ok(headers)
     }
-
-    fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>> {
-        Ok(self
-            .cursor()?
-            .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
-            .map(|(header, hash)| header.seal(hash)))
-    }
 }
 
 impl<'a> BlockHashReader for SnapshotJarProvider<'a> {
-    fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
+    fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.cursor()?.get_one::<HeaderMask<BlockHash>>(number.into())
     }
 
@@ -131,7 +133,7 @@ impl<'a> BlockHashReader for SnapshotJarProvider<'a> {
         &self,
         start: BlockNumber,
         end: BlockNumber,
-    ) -> RethResult<Vec<B256>> {
+    ) -> ProviderResult<Vec<B256>> {
         let mut cursor = self.cursor()?;
         let mut hashes = Vec::with_capacity((end - start) as usize);
 
@@ -145,22 +147,22 @@ impl<'a> BlockHashReader for SnapshotJarProvider<'a> {
 }
 
 impl<'a> BlockNumReader for SnapshotJarProvider<'a> {
-    fn chain_info(&self) -> RethResult<ChainInfo> {
+    fn chain_info(&self) -> ProviderResult<ChainInfo> {
         // Information on live database
-        Err(ProviderError::UnsupportedProvider.into())
+        Err(ProviderError::UnsupportedProvider)
     }
 
-    fn best_block_number(&self) -> RethResult<BlockNumber> {
+    fn best_block_number(&self) -> ProviderResult<BlockNumber> {
         // Information on live database
-        Err(ProviderError::UnsupportedProvider.into())
+        Err(ProviderError::UnsupportedProvider)
     }
 
-    fn last_block_number(&self) -> RethResult<BlockNumber> {
+    fn last_block_number(&self) -> ProviderResult<BlockNumber> {
         // Information on live database
-        Err(ProviderError::UnsupportedProvider.into())
+        Err(ProviderError::UnsupportedProvider)
     }
 
-    fn block_number(&self, hash: B256) -> RethResult<Option<BlockNumber>> {
+    fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
         let mut cursor = self.cursor()?;
 
         Ok(cursor
@@ -170,7 +172,7 @@ impl<'a> BlockNumReader for SnapshotJarProvider<'a> {
 }
 
 impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
-    fn transaction_id(&self, hash: TxHash) -> RethResult<Option<TxNumber>> {
+    fn transaction_id(&self, hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         let mut cursor = self.cursor()?;
 
         Ok(cursor
@@ -178,7 +180,7 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
             .and_then(|res| (res.hash() == hash).then(|| cursor.number())))
     }
 
-    fn transaction_by_id(&self, num: TxNumber) -> RethResult<Option<TransactionSigned>> {
+    fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
         Ok(self
             .cursor()?
             .get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())?
@@ -188,11 +190,11 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
     fn transaction_by_id_no_hash(
         &self,
         num: TxNumber,
-    ) -> RethResult<Option<TransactionSignedNoHash>> {
+    ) -> ProviderResult<Option<TransactionSignedNoHash>> {
         self.cursor()?.get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())
     }
 
-    fn transaction_by_hash(&self, hash: TxHash) -> RethResult<Option<TransactionSigned>> {
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
         Ok(self
             .cursor()?
             .get_one::<TransactionMask<TransactionSignedNoHash>>((&hash).into())?
@@ -202,44 +204,47 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
     fn transaction_by_hash_with_meta(
         &self,
         _hash: TxHash,
-    ) -> RethResult<Option<(TransactionSigned, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
         // Information required on indexing table [`tables::TransactionBlock`]
-        Err(ProviderError::UnsupportedProvider.into())
+        Err(ProviderError::UnsupportedProvider)
     }
 
-    fn transaction_block(&self, _id: TxNumber) -> RethResult<Option<BlockNumber>> {
+    fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
         // Information on indexing table [`tables::TransactionBlock`]
-        Err(ProviderError::UnsupportedProvider.into())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transactions_by_block(
         &self,
         _block_id: BlockHashOrNumber,
-    ) -> RethResult<Option<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
         // Related to indexing tables. Live database should get the tx_range and call snapshot
         // provider with `transactions_by_tx_range` instead.
-        Err(ProviderError::UnsupportedProvider.into())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transactions_by_block_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> RethResult<Vec<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
         // Related to indexing tables. Live database should get the tx_range and call snapshot
         // provider with `transactions_by_tx_range` instead.
-        Err(ProviderError::UnsupportedProvider.into())
+        Err(ProviderError::UnsupportedProvider)
     }
 
-    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
+    fn senders_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Address>> {
         let txs = self.transactions_by_tx_range(range)?;
-        Ok(TransactionSignedNoHash::recover_signers(&txs, txs.len())
-            .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?)
+        TransactionSignedNoHash::recover_signers(&txs, txs.len())
+            .ok_or(ProviderError::SenderRecoveryError)
     }
 
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> RethResult<Vec<reth_primitives::TransactionSignedNoHash>> {
+    ) -> ProviderResult<Vec<reth_primitives::TransactionSignedNoHash>> {
         let range = to_range(range);
         let mut cursor = self.cursor()?;
         let mut txes = Vec::with_capacity((range.end - range.start) as usize);
@@ -254,7 +259,7 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
         Ok(txes)
     }
 
-    fn transaction_sender(&self, num: TxNumber) -> RethResult<Option<Address>> {
+    fn transaction_sender(&self, num: TxNumber) -> ProviderResult<Option<Address>> {
         Ok(self
             .cursor()?
             .get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())?
@@ -263,11 +268,11 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
 }
 
 impl<'a> ReceiptProvider for SnapshotJarProvider<'a> {
-    fn receipt(&self, num: TxNumber) -> RethResult<Option<Receipt>> {
+    fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.cursor()?.get_one::<ReceiptMask<Receipt>>(num.into())
     }
 
-    fn receipt_by_hash(&self, hash: TxHash) -> RethResult<Option<Receipt>> {
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
         if let Some(tx_snapshot) = &self.auxiliar_jar {
             if let Some(num) = tx_snapshot.transaction_id(hash)? {
                 return self.receipt(num)
@@ -276,25 +281,25 @@ impl<'a> ReceiptProvider for SnapshotJarProvider<'a> {
         Ok(None)
     }
 
-    fn receipts_by_block(&self, _block: BlockHashOrNumber) -> RethResult<Option<Vec<Receipt>>> {
+    fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
         // Related to indexing tables. Snapshot should get the tx_range and call snapshot
         // provider with `receipt()` instead for each
-        Err(ProviderError::UnsupportedProvider.into())
+        Err(ProviderError::UnsupportedProvider)
     }
-}
 
-fn to_range<R: RangeBounds<u64>>(bounds: R) -> Range<u64> {
-    let start = match bounds.start_bound() {
-        std::ops::Bound::Included(&v) => v,
-        std::ops::Bound::Excluded(&v) => v + 1,
-        std::ops::Bound::Unbounded => 0,
-    };
+    fn receipts_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Receipt>> {
+        let range = to_range(range);
+        let mut cursor = self.cursor()?;
+        let mut receipts = Vec::with_capacity((range.end - range.start) as usize);
 
-    let end = match bounds.end_bound() {
-        std::ops::Bound::Included(&v) => v + 1,
-        std::ops::Bound::Excluded(&v) => v,
-        std::ops::Bound::Unbounded => u64::MAX,
-    };
-
-    start..end
+        for num in range {
+            if let Some(tx) = cursor.get_one::<ReceiptMask<Receipt>>(num.into())? {
+                receipts.push(tx)
+            }
+        }
+        Ok(receipts)
+    }
 }

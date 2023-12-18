@@ -42,7 +42,6 @@ impl TransactionLookupStage {
     }
 }
 
-#[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for TransactionLookupStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -50,9 +49,9 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     }
 
     /// Write transaction hash -> id entries
-    async fn execute(
+    fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<DB>,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if let Some((target_prunable_block, prune_mode)) = self
@@ -128,9 +127,9 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
@@ -165,7 +164,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 }
 
 fn stage_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<'_, &DB>,
+    provider: &DatabaseProviderRW<DB>,
 ) -> Result<EntitiesCheckpoint, StageError> {
     let pruned_entries = provider
         .get_prune_checkpoint(PruneSegment::TransactionLookup)?
@@ -187,7 +186,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner,
+        TestStageDB, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::{
@@ -196,11 +195,8 @@ mod tests {
     };
     use reth_primitives::{
         stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock, B256,
-        MAINNET,
     };
-    use reth_provider::{
-        BlockReader, ProviderError, ProviderFactory, PruneCheckpointWriter, TransactionsProvider,
-    };
+    use reth_provider::{BlockReader, ProviderError, PruneCheckpointWriter, TransactionsProvider};
     use std::ops::Sub;
 
     // Implement stage test suite.
@@ -231,7 +227,7 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        runner.tx.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
+        runner.db.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
 
         let rx = runner.execute(input);
 
@@ -247,7 +243,7 @@ mod tests {
                     total
                 }))
             }, done: true }) if block_number == previous_stage && processed == total &&
-                total == runner.tx.table::<tables::Transactions>().unwrap().len() as u64
+                total == runner.db.table::<tables::Transactions>().unwrap().len() as u64
         );
 
         // Validate the stage execution
@@ -270,9 +266,9 @@ mod tests {
         // Seed only once with full input range
         let seed =
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..4); // set tx count range high enough to hit the threshold
-        runner.tx.insert_blocks(seed.iter(), None).expect("failed to seed execution");
+        runner.db.insert_blocks(seed.iter(), None).expect("failed to seed execution");
 
-        let total_txs = runner.tx.table::<tables::Transactions>().unwrap().len() as u64;
+        let total_txs = runner.db.table::<tables::Transactions>().unwrap().len() as u64;
 
         // Execute first time
         let result = runner.execute(first_input).await.unwrap();
@@ -291,7 +287,7 @@ mod tests {
             ExecOutput {
                 checkpoint: StageCheckpoint::new(expected_progress).with_entities_stage_checkpoint(
                     EntitiesCheckpoint {
-                        processed: runner.tx.table::<tables::TxHashNumber>().unwrap().len() as u64,
+                        processed: runner.db.table::<tables::TxHashNumber>().unwrap().len() as u64,
                         total: total_txs
                     }
                 ),
@@ -335,7 +331,7 @@ mod tests {
         // Seed only once with full input range
         let seed =
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..2);
-        runner.tx.insert_blocks(seed.iter(), None).expect("failed to seed execution");
+        runner.db.insert_blocks(seed.iter(), None).expect("failed to seed execution");
 
         runner.set_prune_mode(PruneMode::Before(prune_target));
 
@@ -353,7 +349,7 @@ mod tests {
                     total
                 }))
             }, done: true }) if block_number == previous_stage && processed == total &&
-                total == runner.tx.table::<tables::Transactions>().unwrap().len() as u64
+                total == runner.db.table::<tables::Transactions>().unwrap().len() as u64
         );
 
         // Validate the stage execution
@@ -362,11 +358,11 @@ mod tests {
 
     #[test]
     fn stage_checkpoint_pruned() {
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
-        tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let max_pruned_block = 30;
         let max_processed_block = 70;
@@ -381,9 +377,9 @@ mod tests {
                 tx_hash_number += 1;
             }
         }
-        tx.insert_tx_hash_numbers(tx_hash_numbers).expect("insert tx hash numbers");
+        db.insert_tx_hash_numbers(tx_hash_numbers).expect("insert tx hash numbers");
 
-        let provider = tx.inner_rw();
+        let provider = db.factory.provider_rw().unwrap();
         provider
             .save_prune_checkpoint(
                 PruneSegment::TransactionLookup,
@@ -402,10 +398,7 @@ mod tests {
             .expect("save stage checkpoint");
         provider.commit().expect("commit");
 
-        let db = tx.inner_raw();
-        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
-        let provider = factory.provider_rw().expect("provider rw");
-
+        let provider = db.factory.provider_rw().unwrap();
         assert_eq!(
             stage_checkpoint(&provider).expect("stage checkpoint"),
             EntitiesCheckpoint {
@@ -419,14 +412,14 @@ mod tests {
     }
 
     struct TransactionLookupTestRunner {
-        tx: TestTransaction,
+        db: TestStageDB,
         commit_threshold: u64,
         prune_mode: Option<PruneMode>,
     }
 
     impl Default for TransactionLookupTestRunner {
         fn default() -> Self {
-            Self { tx: TestTransaction::default(), commit_threshold: 1000, prune_mode: None }
+            Self { db: TestStageDB::default(), commit_threshold: 1000, prune_mode: None }
         }
     }
 
@@ -448,17 +441,18 @@ mod tests {
         ///    not empty.
         fn ensure_no_hash_by_block(&self, number: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
-                .tx
-                .inner_rw()
+                .db
+                .factory
+                .provider_rw()?
                 .block_body_indices(number)?
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(number));
             match body_result {
-                Ok(body) => self.tx.ensure_no_entry_above_by_value::<tables::TxHashNumber, _>(
+                Ok(body) => self.db.ensure_no_entry_above_by_value::<tables::TxHashNumber, _>(
                     body.last_tx_num(),
                     |key| key,
                 )?,
                 Err(_) => {
-                    assert!(self.tx.table_is_empty::<tables::TxHashNumber>()?);
+                    assert!(self.db.table_is_empty::<tables::TxHashNumber>()?);
                 }
             };
 
@@ -469,8 +463,8 @@ mod tests {
     impl StageTestRunner for TransactionLookupTestRunner {
         type S = TransactionLookupStage;
 
-        fn tx(&self) -> &TestTransaction {
-            &self.tx
+        fn db(&self) -> &TestStageDB {
+            &self.db
         }
 
         fn stage(&self) -> Self::S {
@@ -490,7 +484,7 @@ mod tests {
             let mut rng = generators::rng();
 
             let blocks = random_block_range(&mut rng, stage_progress + 1..=end, B256::ZERO, 0..2);
-            self.tx.insert_blocks(blocks.iter(), None)?;
+            self.db.insert_blocks(blocks.iter(), None)?;
             Ok(blocks)
         }
 
@@ -501,7 +495,7 @@ mod tests {
         ) -> Result<(), TestRunnerError> {
             match output {
                 Some(output) => {
-                    let provider = self.tx.inner();
+                    let provider = self.db.factory.provider()?;
 
                     if let Some((target_prunable_block, _)) = self
                         .prune_mode

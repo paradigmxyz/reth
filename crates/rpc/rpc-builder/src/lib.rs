@@ -135,36 +135,7 @@
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-use crate::{
-    auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics,
-    RpcModuleSelection::Selection,
-};
-use constants::*;
-use error::{RpcError, ServerKind};
-use hyper::{header::AUTHORIZATION, HeaderMap};
-use jsonrpsee::{
-    server::{IdProvider, Server, ServerHandle},
-    Methods, RpcModule,
-};
-use reth_ipc::server::IpcServer;
-use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{
-    AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    ChangeSetReader, EvmEnvProvider, StateProviderFactory,
-};
-use reth_rpc::{
-    eth::{
-        cache::{cache_new_blocks_task, EthStateCache},
-        gas_oracle::GasPriceOracle,
-    },
-    AdminApi, AuthLayer, BlockingTaskGuard, BlockingTaskPool, Claims, DebugApi, EngineEthApi,
-    EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret, NetApi,
-    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
-};
-use reth_rpc_api::{servers::*, EngineApiServer};
-use reth_tasks::{TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::TransactionPool;
-use serde::{Deserialize, Serialize, Serializer};
+
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -172,10 +143,49 @@ use std::{
     str::FromStr,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
+
+use hyper::{header::AUTHORIZATION, HeaderMap};
+pub use jsonrpsee::server::ServerBuilder;
+use jsonrpsee::{
+    server::{IdProvider, Server, ServerHandle},
+    Methods, RpcModule,
+};
+use serde::{Deserialize, Serialize, Serializer};
+use strum::{AsRefStr, EnumVariantNames, ParseError, VariantNames};
 use tower::layer::util::{Identity, Stack};
 use tower_http::cors::CorsLayer;
 use tracing::{instrument, trace};
+
+use constants::*;
+use error::{RpcError, ServerKind};
+use reth_ipc::server::IpcServer;
+pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
+use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
+use reth_provider::{
+    AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+    ChangeSetReader, EvmEnvProvider, StateProviderFactory,
+};
+use reth_rpc::{
+    eth::{
+        cache::{cache_new_blocks_task, EthStateCache},
+        fee_history_cache_new_blocks_task,
+        gas_oracle::GasPriceOracle,
+        EthBundle, FeeHistoryCache,
+    },
+    AdminApi, AuthLayer, BlockingTaskGuard, BlockingTaskPool, Claims, DebugApi, EngineEthApi,
+    EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret, NetApi,
+    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
+};
+use reth_rpc_api::{servers::*, EngineApiServer};
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
+use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
+
+use crate::{
+    auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics,
+    RpcModuleSelection::Selection,
+};
+// re-export for convenience
+pub use crate::eth::{EthConfig, EthHandlers};
 
 /// Auth server utilities.
 pub mod auth;
@@ -194,14 +204,6 @@ pub mod constants;
 
 // Rpc server metrics
 mod metrics;
-
-// re-export for convenience
-pub use crate::eth::{EthConfig, EthHandlers};
-pub use jsonrpsee::server::ServerBuilder;
-pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
-use reth_network_api::noop::NoopNetwork;
-use reth_rpc::eth::EthBundle;
-use reth_transaction_pool::noop::NoopTransactionPool;
 
 /// Convenience function for starting a server in one step.
 pub async fn launch<Provider, Pool, Network, Tasks, Events>(
@@ -414,6 +416,37 @@ where
         let auth_module = registry.create_auth_module(engine);
 
         (modules, auth_module, registry)
+    }
+
+    /// Converts the builder into a [RethModuleRegistry] which can be used to create all components.
+    ///
+    /// This is useful for getting access to API handlers directly:
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use reth_network_api::noop::NoopNetwork;
+    /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
+    /// use reth_rpc_builder::RpcModuleBuilder;
+    /// use reth_tasks::TokioTaskExecutor;
+    /// use reth_transaction_pool::noop::NoopTransactionPool;
+    ///
+    /// let mut registry = RpcModuleBuilder::default()
+    ///     .with_provider(NoopProvider::default())
+    ///     .with_pool(NoopTransactionPool::default())
+    ///     .with_network(NoopNetwork::default())
+    ///     .with_executor(TokioTaskExecutor::default())
+    ///     .with_events(TestCanonStateSubscriptions::default())
+    ///     .into_registry(Default::default());
+    ///
+    /// let eth_api = registry.eth_api();
+    /// ```
+    pub fn into_registry(
+        self,
+        config: RpcModuleConfig,
+    ) -> RethModuleRegistry<Provider, Pool, Network, Tasks, Events> {
+        let Self { provider, pool, network, executor, events } = self;
+        RethModuleRegistry::new(provider, pool, network, executor, events, config)
     }
 
     /// Configures all [RpcModule]s specific to the given [TransportRpcModuleConfig] which can be
@@ -706,9 +739,7 @@ impl fmt::Display for RpcModuleSelection {
 }
 
 /// Represents RPC modules that are supported by reth
-#[derive(
-    Debug, Clone, Copy, Eq, PartialEq, Hash, AsRefStr, EnumVariantNames, EnumString, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, AsRefStr, EnumVariantNames, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "kebab-case")]
 pub enum RethRpcModule {
@@ -732,6 +763,11 @@ pub enum RethRpcModule {
     Reth,
     /// `ots_` module
     Ots,
+    /// For single non-standard `eth_` namespace call `eth_callBundle`
+    ///
+    /// This is separate from [RethRpcModule::Eth] because it is a non standardized call that
+    /// should be opt-in.
+    EthCallBundle,
 }
 
 // === impl RethRpcModule ===
@@ -740,6 +776,34 @@ impl RethRpcModule {
     /// Returns all variants of the enum
     pub const fn all_variants() -> &'static [&'static str] {
         Self::VARIANTS
+    }
+}
+
+impl FromStr for RethRpcModule {
+    type Err = ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "admin" => RethRpcModule::Admin,
+            "debug" => RethRpcModule::Debug,
+            "eth" => RethRpcModule::Eth,
+            "net" => RethRpcModule::Net,
+            "trace" => RethRpcModule::Trace,
+            "txpool" => RethRpcModule::Txpool,
+            "web3" => RethRpcModule::Web3,
+            "rpc" => RethRpcModule::Rpc,
+            "reth" => RethRpcModule::Reth,
+            "ots" => RethRpcModule::Ots,
+            "eth-call-bundle" | "eth_callBundle" => RethRpcModule::EthCallBundle,
+            _ => return Err(ParseError::VariantNotFound),
+        })
+    }
+}
+
+impl TryFrom<&str> for RethRpcModule {
+    type Error = ParseError;
+    fn try_from(s: &str) -> Result<RethRpcModule, <Self as TryFrom<&str>>::Error> {
+        FromStr::from_str(s)
     }
 }
 
@@ -886,6 +950,10 @@ where
     Events: CanonStateSubscriptions + Clone + 'static,
 {
     /// Register Eth Namespace
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn register_eth(&mut self) -> &mut Self {
         let eth_api = self.eth_api();
         self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
@@ -893,6 +961,10 @@ where
     }
 
     /// Register Otterscan Namespace
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn register_ots(&mut self) -> &mut Self {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
@@ -900,6 +972,10 @@ where
     }
 
     /// Register Debug Namespace
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn register_debug(&mut self) -> &mut Self {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -907,6 +983,10 @@ where
     }
 
     /// Register Trace Namespace
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn register_trace(&mut self) -> &mut Self {
         let trace_api = self.trace_api();
         self.modules.insert(RethRpcModule::Trace, trace_api.into_rpc().into());
@@ -935,6 +1015,12 @@ where
     }
 
     /// Register Net Namespace
+    ///
+    /// See also [Self::eth_api]
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime.
     pub fn register_net(&mut self) -> &mut Self {
         let netapi = self.net_api();
         self.modules.insert(RethRpcModule::Net, netapi.into_rpc().into());
@@ -942,6 +1028,12 @@ where
     }
 
     /// Register Reth namespace
+    ///
+    /// See also [Self::eth_api]
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime.
     pub fn register_reth(&mut self) -> &mut Self {
         let rethapi = self.reth_api();
         self.modules.insert(RethRpcModule::Reth, rethapi.into_rpc().into());
@@ -970,6 +1062,10 @@ where
     ///
     /// If this is the first time the namespace is requested, a new instance of API implementation
     /// will be created.
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn reth_methods(
         &mut self,
         namespaces: impl Iterator<Item = RethRpcModule>,
@@ -1038,6 +1134,11 @@ where
                                 .into_rpc()
                                 .into()
                         }
+                        RethRpcModule::EthCallBundle => {
+                            EthBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
+                                .into_rpc()
+                                .into()
+                        }
                     })
                     .clone()
             })
@@ -1053,6 +1154,10 @@ where
     }
 
     /// Creates the [EthHandlers] type the first time this is called.
+    ///
+    /// This will spawn the required service tasks for [EthApi] for:
+    ///   - [EthStateCache]
+    ///   - [FeeHistoryCache]
     fn with_eth<F, R>(&mut self, f: F) -> R
     where
         F: FnOnce(&EthHandlers<Provider, Pool, Network, Events>) -> R,
@@ -1070,10 +1175,24 @@ where
             );
             let new_canonical_blocks = self.events.canonical_state_stream();
             let c = cache.clone();
+
             self.executor.spawn_critical(
                 "cache canonical blocks task",
                 Box::pin(async move {
                     cache_new_blocks_task(c, new_canonical_blocks).await;
+                }),
+            );
+
+            let fee_history_cache =
+                FeeHistoryCache::new(cache.clone(), self.config.eth.fee_history_cache.clone());
+            let new_canonical_blocks = self.events.canonical_state_stream();
+            let fhc = fee_history_cache.clone();
+            let provider_clone = self.provider.clone();
+            self.executor.spawn_critical(
+                "cache canonical blocks for fee history task",
+                Box::pin(async move {
+                    fee_history_cache_new_blocks_task(fhc, new_canonical_blocks, provider_clone)
+                        .await;
                 }),
             );
 
@@ -1089,6 +1208,7 @@ where
                 self.config.eth.rpc_gas_cap,
                 executor.clone(),
                 blocking_task_pool.clone(),
+                fee_history_cache,
             );
             let filter = EthFilter::new(
                 self.provider.clone(),
@@ -1113,33 +1233,60 @@ where
     }
 
     /// Returns the configured [EthHandlers] or creates it if it does not exist yet
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn eth_handlers(&mut self) -> EthHandlers<Provider, Pool, Network, Events> {
         self.with_eth(|handlers| handlers.clone())
     }
 
     /// Returns the configured [EthApi] or creates it if it does not exist yet
+    ///
+    /// Caution: This will spawn the necessary tasks required by the [EthApi]: [EthStateCache].
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime.
     pub fn eth_api(&mut self) -> EthApi<Provider, Pool, Network> {
         self.with_eth(|handlers| handlers.api.clone())
     }
+
     /// Instantiates TraceApi
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn trace_api(&mut self) -> TraceApi<Provider, EthApi<Provider, Pool, Network>> {
         let eth = self.eth_handlers();
         TraceApi::new(self.provider.clone(), eth.api, self.blocking_pool_guard.clone())
     }
 
     /// Instantiates [EthBundle] Api
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn bundle_api(&mut self) -> EthBundle<EthApi<Provider, Pool, Network>> {
         let eth_api = self.eth_api();
         EthBundle::new(eth_api, self.blocking_pool_guard.clone())
     }
 
     /// Instantiates OtterscanApi
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn otterscan_api(&mut self) -> OtterscanApi<EthApi<Provider, Pool, Network>> {
         let eth_api = self.eth_api();
         OtterscanApi::new(eth_api)
     }
 
     /// Instantiates DebugApi
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn debug_api(&mut self) -> DebugApi<Provider, EthApi<Provider, Pool, Network>> {
         let eth_api = self.eth_api();
         DebugApi::new(
@@ -1151,6 +1298,10 @@ where
     }
 
     /// Instantiates NetApi
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn net_api(&mut self) -> NetApi<Network, EthApi<Provider, Pool, Network>> {
         let eth_api = self.eth_api();
         NetApi::new(self.network.clone(), eth_api)
@@ -2035,6 +2186,28 @@ impl fmt::Debug for RpcServerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_eth_call_bundle() {
+        let selection = "eth-call-bundle".parse::<RethRpcModule>().unwrap();
+        assert_eq!(selection, RethRpcModule::EthCallBundle);
+        let selection = "eth_callBundle".parse::<RethRpcModule>().unwrap();
+        assert_eq!(selection, RethRpcModule::EthCallBundle);
+    }
+
+    #[test]
+    fn parse_eth_call_bundle_selection() {
+        let selection = "eth,admin,debug,eth-call-bundle".parse::<RpcModuleSelection>().unwrap();
+        assert_eq!(
+            selection,
+            RpcModuleSelection::Selection(vec![
+                RethRpcModule::Eth,
+                RethRpcModule::Admin,
+                RethRpcModule::Debug,
+                RethRpcModule::EthCallBundle,
+            ])
+        );
+    }
 
     #[test]
     fn parse_rpc_module_selection() {

@@ -123,8 +123,8 @@ impl BranchNodeCompact {
     ) -> Self {
         let (state_mask, tree_mask, hash_mask) =
             (state_mask.into(), tree_mask.into(), hash_mask.into());
-        assert!(tree_mask.is_subset_of(&state_mask));
-        assert!(hash_mask.is_subset_of(&state_mask));
+        assert!(tree_mask.is_subset_of(state_mask));
+        assert!(hash_mask.is_subset_of(state_mask));
         assert_eq!(hash_mask.count_ones() as usize, hashes.len());
         Self { state_mask, tree_mask, hash_mask, hashes, root_hash }
     }
@@ -163,10 +163,7 @@ impl Compact for BranchNodeCompact {
         buf_size
     }
 
-    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let hash_len = B256::len_bytes();
 
         // Assert the buffer is long enough to contain the masks and the hashes.

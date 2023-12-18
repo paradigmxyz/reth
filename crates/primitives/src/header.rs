@@ -14,28 +14,6 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-/// Describes the current head block.
-///
-/// The head block is the highest fully synced block.
-///
-/// Note: This is a slimmed down version of [Header], primarily for communicating the highest block
-/// with the P2P network and the RPC.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
-)]
-pub struct Head {
-    /// The number of the head block.
-    pub number: BlockNumber,
-    /// The hash of the head block.
-    pub hash: B256,
-    /// The difficulty of the head block.
-    pub difficulty: U256,
-    /// The total difficulty at the head block.
-    pub total_difficulty: U256,
-    /// The timestamp of the head block.
-    pub timestamp: u64,
-}
-
 /// Block header
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -154,12 +132,9 @@ impl Header {
 
     /// Checks if the header is empty - has no transactions and no ommers
     pub fn is_empty(&self) -> bool {
-        let txs_and_ommers_empty = self.transaction_root_is_empty() && self.ommers_hash_is_empty();
-        if let Some(withdrawals_root) = self.withdrawals_root {
-            txs_and_ommers_empty && withdrawals_root == EMPTY_ROOT_HASH
-        } else {
-            txs_and_ommers_empty
-        }
+        self.transaction_root_is_empty() &&
+            self.ommers_hash_is_empty() &&
+            self.withdrawals_root.map_or(true, |root| root == EMPTY_ROOT_HASH)
     }
 
     /// Check if the ommers hash equals to empty hash list.
@@ -258,51 +233,59 @@ impl Header {
 
     fn header_payload_length(&self) -> usize {
         let mut length = 0;
-        length += self.parent_hash.length();
-        length += self.ommers_hash.length();
-        length += self.beneficiary.length();
-        length += self.state_root.length();
-        length += self.transactions_root.length();
-        length += self.receipts_root.length();
-        length += self.logs_bloom.length();
-        length += self.difficulty.length();
-        length += U256::from(self.number).length();
-        length += U256::from(self.gas_limit).length();
-        length += U256::from(self.gas_used).length();
-        length += self.timestamp.length();
-        length += self.extra_data.length();
-        length += self.mix_hash.length();
-        length += B64::new(self.nonce.to_be_bytes()).length();
+        length += self.parent_hash.length(); // Hash of the previous block.
+        length += self.ommers_hash.length(); // Hash of uncle blocks.
+        length += self.beneficiary.length(); // Address that receives rewards.
+        length += self.state_root.length(); // Root hash of the state object.
+        length += self.transactions_root.length(); // Root hash of transactions in the block.
+        length += self.receipts_root.length(); // Hash of transaction receipts.
+        length += self.logs_bloom.length(); // Data structure containing event logs.
+        length += self.difficulty.length(); // Difficulty value of the block.
+        length += U256::from(self.number).length(); // Block number.
+        length += U256::from(self.gas_limit).length(); // Maximum gas allowed.
+        length += U256::from(self.gas_used).length(); // Actual gas used.
+        length += self.timestamp.length(); // Block timestamp.
+        length += self.extra_data.length(); // Additional arbitrary data.
+        length += self.mix_hash.length(); // Hash used for mining.
+        length += B64::new(self.nonce.to_be_bytes()).length(); // Nonce for mining.
 
         if let Some(base_fee) = self.base_fee_per_gas {
+            // Adding base fee length if it exists.
             length += U256::from(base_fee).length();
         } else if self.withdrawals_root.is_some() ||
             self.blob_gas_used.is_some() ||
             self.excess_blob_gas.is_some() ||
             self.parent_beacon_block_root.is_some()
         {
-            length += 1; // EMPTY LIST CODE
+            // Placeholder code for empty lists.
+            length += 1;
         }
 
         if let Some(root) = self.withdrawals_root {
+            // Adding withdrawals_root length if it exists.
             length += root.length();
         } else if self.blob_gas_used.is_some() ||
             self.excess_blob_gas.is_some() ||
             self.parent_beacon_block_root.is_some()
         {
-            length += 1; // EMPTY STRING CODE
+            // Placeholder code for a missing string value.
+            length += 1;
         }
 
         if let Some(blob_gas_used) = self.blob_gas_used {
+            // Adding blob_gas_used length if it exists.
             length += U256::from(blob_gas_used).length();
         } else if self.excess_blob_gas.is_some() || self.parent_beacon_block_root.is_some() {
-            length += 1; // EMPTY LIST CODE
+            // Placeholder code for empty lists.
+            length += 1;
         }
 
         if let Some(excess_blob_gas) = self.excess_blob_gas {
+            // Adding excess_blob_gas length if it exists.
             length += U256::from(excess_blob_gas).length();
         } else if self.parent_beacon_block_root.is_some() {
-            length += 1; // EMPTY LIST CODE
+            // Placeholder code for empty lists.
+            length += 1;
         }
 
         // Encode parent beacon block root length. If new fields are added, the above pattern will
@@ -322,24 +305,28 @@ impl Header {
 
 impl Encodable for Header {
     fn encode(&self, out: &mut dyn BufMut) {
+        // Create a header indicating the encoded content is a list with the payload length computed
+        // from the header's payload calculation function.
         let list_header =
             alloy_rlp::Header { list: true, payload_length: self.header_payload_length() };
         list_header.encode(out);
-        self.parent_hash.encode(out);
-        self.ommers_hash.encode(out);
-        self.beneficiary.encode(out);
-        self.state_root.encode(out);
-        self.transactions_root.encode(out);
-        self.receipts_root.encode(out);
-        self.logs_bloom.encode(out);
-        self.difficulty.encode(out);
-        U256::from(self.number).encode(out);
-        U256::from(self.gas_limit).encode(out);
-        U256::from(self.gas_used).encode(out);
-        self.timestamp.encode(out);
-        self.extra_data.encode(out);
-        self.mix_hash.encode(out);
-        B64::new(self.nonce.to_be_bytes()).encode(out);
+
+        // Encode each header field sequentially
+        self.parent_hash.encode(out); // Encode parent hash.
+        self.ommers_hash.encode(out); // Encode ommer's hash.
+        self.beneficiary.encode(out); // Encode beneficiary.
+        self.state_root.encode(out); // Encode state root.
+        self.transactions_root.encode(out); // Encode transactions root.
+        self.receipts_root.encode(out); // Encode receipts root.
+        self.logs_bloom.encode(out); // Encode logs bloom.
+        self.difficulty.encode(out); // Encode difficulty.
+        U256::from(self.number).encode(out); // Encode block number.
+        U256::from(self.gas_limit).encode(out); // Encode gas limit.
+        U256::from(self.gas_used).encode(out); // Encode gas used.
+        self.timestamp.encode(out); // Encode timestamp.
+        self.extra_data.encode(out); // Encode extra data.
+        self.mix_hash.encode(out); // Encode mix hash.
+        B64::new(self.nonce.to_be_bytes()).encode(out); // Encode nonce.
 
         // Encode base fee. Put empty list if base fee is missing,
         // but withdrawals root is present.

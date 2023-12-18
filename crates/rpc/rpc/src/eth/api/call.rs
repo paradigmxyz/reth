@@ -4,8 +4,9 @@ use crate::{
     eth::{
         error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
         revm_utils::{
-            build_call_evm_env, caller_gas_allowance, cap_tx_gas_limit_with_caller_allowance,
-            get_precompiles, inspect, prepare_call_env, transact, EvmOverrides,
+            apply_state_overrides, build_call_evm_env, caller_gas_allowance,
+            cap_tx_gas_limit_with_caller_allowance, get_precompiles, inspect, prepare_call_env,
+            transact, EvmOverrides,
         },
         EthTransactions,
     },
@@ -18,10 +19,8 @@ use reth_provider::{
 };
 use reth_revm::{access_list::AccessListInspector, database::StateProviderDatabase};
 use reth_rpc_types::{
-    state::StateOverride, AccessListWithGasUsed, BlockError, Bundle, CallRequest, EthCallResponse,
-    StateContext,
+    state::StateOverride, AccessListWithGasUsed, Bundle, CallRequest, EthCallResponse, StateContext,
 };
-use reth_rpc_types_compat::log::{from_primitive_access_list, to_primitive_access_list};
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
@@ -42,12 +41,17 @@ where
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Estimate gas needed for execution of the `request` at the [BlockId].
-    pub async fn estimate_gas_at(&self, request: CallRequest, at: BlockId) -> EthResult<U256> {
+    pub async fn estimate_gas_at(
+        &self,
+        request: CallRequest,
+        at: BlockId,
+        state_override: Option<StateOverride>,
+    ) -> EthResult<U256> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
 
         self.on_blocking_task(|this| async move {
             let state = this.state_at(at)?;
-            this.estimate_gas_with(cfg, block_env, request, state)
+            this.estimate_gas_with(cfg, block_env, request, state, state_override)
         })
         .await
     }
@@ -88,10 +92,12 @@ where
 
         let target_block = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
 
-        let ((cfg, block_env, _), block) =
-            futures::try_join!(self.evm_env_at(target_block), self.block_by_id(target_block))?;
+        let ((cfg, block_env, _), block) = futures::try_join!(
+            self.evm_env_at(target_block),
+            self.block_with_senders(target_block)
+        )?;
 
-        let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let Some(block) = block else { return Err(EthApiError::UnknownBlockNumber) };
         let gas_limit = self.inner.gas_cap;
 
         // we're essentially replaying the transactions in the block here, hence we need the state
@@ -113,11 +119,8 @@ where
             if replay_block_txs {
                 // only need to replay the transactions in the block if not all transactions are
                 // to be replayed
-                let transactions = block.body.into_iter().take(num_txs);
-
-                // Execute all transactions until index
+                let transactions = block.into_transactions_ecrecovered().take(num_txs);
                 for tx in transactions {
-                    let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                     let tx = tx_env_with_recovered(&tx);
                     let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
                     let (res, _) = transact(&mut db, env)?;
@@ -172,6 +175,7 @@ where
         block: BlockEnv,
         request: CallRequest,
         state: S,
+        state_override: Option<StateOverride>,
     ) -> EthResult<U256>
     where
         S: StateProvider,
@@ -198,6 +202,10 @@ where
         let mut env = build_call_evm_env(cfg, block, request)?;
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
+        if let Some(state_override) = state_override {
+            // apply state overrides
+            apply_state_overrides(state_override, &mut db)?;
+        }
         // if the request is a simple transfer we can optimize
         if env.tx.data.is_empty() {
             if let TransactTo::Call(to) = env.tx.transact_to {
@@ -392,8 +400,7 @@ where
         let initial = request.access_list.take().unwrap_or_default();
 
         let precompiles = get_precompiles(env.cfg.spec_id);
-        let mut inspector =
-            AccessListInspector::new(to_primitive_access_list(initial), from, to, precompiles);
+        let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
         let (result, env) = inspect(&mut db, env, &mut inspector)?;
 
         match result.result {
@@ -410,10 +417,10 @@ where
         let access_list = inspector.into_access_list();
 
         // calculate the gas used using the access list
-        request.access_list = Some(from_primitive_access_list(access_list.clone()));
-        let gas_used = self.estimate_gas_with(env.cfg, env.block, request, db.db.state())?;
+        request.access_list = Some(access_list.clone());
+        let gas_used = self.estimate_gas_with(env.cfg, env.block, request, db.db.state(), None)?;
 
-        Ok(AccessListWithGasUsed { access_list: from_primitive_access_list(access_list), gas_used })
+        Ok(AccessListWithGasUsed { access_list, gas_used })
     }
 }
 

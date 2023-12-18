@@ -22,6 +22,8 @@ impl BlobStoreCanonTracker {
     }
 
     /// Adds all blocks to the tracked list of blocks.
+    ///
+    /// Replaces any previously tracked blocks with the set of transactions.
     pub fn add_blocks(
         &mut self,
         blocks: impl IntoIterator<Item = (BlockNumber, impl IntoIterator<Item = B256>)>,
@@ -32,6 +34,9 @@ impl BlobStoreCanonTracker {
     }
 
     /// Adds all blob transactions from the given chain to the tracker.
+    ///
+    /// Note: In case this is a chain that's part of a reorg, this replaces previously tracked
+    /// blocks.
     pub fn add_new_chain_blocks(&mut self, blocks: &ChainBlocks<'_>) {
         let blob_txs = blocks.iter().map(|(num, blocks)| {
             let iter =
@@ -42,10 +47,12 @@ impl BlobStoreCanonTracker {
     }
 
     /// Invoked when a block is finalized.
-    pub fn on_finalized_block(&mut self, number: BlockNumber) -> BlobStoreUpdates {
+    ///
+    /// This returns all blob transactions that were included in blocks that are now finalized.
+    pub fn on_finalized_block(&mut self, finalized_block: BlockNumber) -> BlobStoreUpdates {
         let mut finalized = Vec::new();
         while let Some(entry) = self.blob_txs_in_blocks.first_entry() {
-            if *entry.key() <= number {
+            if *entry.key() <= finalized_block {
                 finalized.extend(entry.remove_entry().1);
             } else {
                 break

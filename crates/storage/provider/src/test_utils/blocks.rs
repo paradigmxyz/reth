@@ -10,7 +10,7 @@ use reth_primitives::{
 use std::collections::HashMap;
 
 /// Assert genesis block
-pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<'_, DB>, g: SealedBlock) {
+pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<DB>, g: SealedBlock) {
     let n = g.number;
     let h = B256::ZERO;
     let tx = provider;
@@ -139,6 +139,8 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
             }],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: None,
         })]]),
         number,
     );
@@ -196,6 +198,8 @@ fn block2(
             }],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: None,
         })]]),
         number,
     );

@@ -5,7 +5,7 @@ use reth_primitives::{TxHash, B256};
 
 /// Parameters for debugging purposes
 #[derive(Debug, Args, PartialEq, Default)]
-#[command(next_help_heading = "Debug")]
+#[clap(next_help_heading = "Debug")]
 pub struct DebugArgs {
     /// Prompt the downloader to download blocks one at a time.
     ///
@@ -57,4 +57,24 @@ pub struct DebugArgs {
         conflicts_with = "hook_transaction"
     )]
     pub hook_all: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    /// A helper type to parse Args more easily
+    #[derive(Parser)]
+    struct CommandParser<T: Args> {
+        #[clap(flatten)]
+        args: T,
+    }
+
+    #[test]
+    fn test_parse_database_args() {
+        let default_args = DebugArgs::default();
+        let args = CommandParser::<DebugArgs>::parse_from(["reth"]).args;
+        assert_eq!(args, default_args);
+    }
 }

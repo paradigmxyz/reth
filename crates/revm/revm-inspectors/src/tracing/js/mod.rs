@@ -10,14 +10,14 @@ use crate::tracing::{
     types::CallKind,
     utils::get_create_address,
 };
+use alloy_primitives::{Address, Bytes, B256, U256};
 use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
-use reth_primitives::{Account, Address, Bytes, B256, U256};
 use revm::{
     interpreter::{
         return_revert, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter,
     },
     precompile::Precompiles,
-    primitives::{Env, ExecutionResult, Output, ResultAndState, TransactTo},
+    primitives::{AccountInfo, Env, ExecutionResult, Output, ResultAndState, TransactTo},
     Database, EVMData, Inspector,
 };
 use tokio::sync::mpsc;
@@ -40,8 +40,16 @@ pub struct JsInspector {
     result_fn: JsObject,
     fault_fn: JsObject,
 
-    /// EVM inspector hook functions
+    // EVM inspector hook functions
+    /// Invoked when the EVM enters a new call that is _NOT_ the top level call.
+    ///
+    /// Corresponds to [Inspector::call] and [Inspector::create_end] but is also invoked on
+    /// [Inspector::selfdestruct].
     enter_fn: Option<JsObject>,
+    /// Invoked when the EVM exits a call that is _NOT_ the top level call.
+    ///
+    /// Corresponds to [Inspector::call_end] and [Inspector::create_end] but also invoked after
+    /// selfdestruct.
     exit_fn: Option<JsObject>,
     /// Executed before each instruction is executed.
     step_fn: Option<JsObject>,
@@ -62,6 +70,7 @@ impl JsInspector {
     ///  - `fault`: a function that will be called when the transaction fails.
     ///
     /// Optional functions are invoked during inspection:
+    /// - `setup`: a function that will be called before the inspection starts.
     /// - `enter`: a function that will be called when the execution enters a new call.
     /// - `exit`: a function that will be called when the execution exits a call.
     /// - `step`: a function that will be called when the execution steps to the next instruction.
@@ -99,9 +108,9 @@ impl JsInspector {
             .get("fault", &mut ctx)?
             .as_object()
             .cloned()
-            .ok_or(JsInspectorError::ResultFunctionMissing)?;
+            .ok_or(JsInspectorError::FaultFunctionMissing)?;
         if !result_fn.is_callable() {
-            return Err(JsInspectorError::ResultFunctionMissing)
+            return Err(JsInspectorError::FaultFunctionMissing)
         }
 
         let enter_fn = obj.get("enter", &mut ctx)?.as_object().cloned().filter(|o| o.is_callable());
@@ -246,6 +255,29 @@ impl JsInspector {
         self.call_stack.last().expect("call stack is empty")
     }
 
+    #[inline]
+    fn pop_call(&mut self) {
+        self.call_stack.pop();
+    }
+
+    /// Returns true whether the active call is the root call.
+    #[inline]
+    fn is_root_call_active(&self) -> bool {
+        self.call_stack.len() == 1
+    }
+
+    /// Returns true if there's an enter function and the active call is not the root call.
+    #[inline]
+    fn can_call_enter(&self) -> bool {
+        self.enter_fn.is_some() && !self.is_root_call_active()
+    }
+
+    /// Returns true if there's an exit function and the active call is not the root call.
+    #[inline]
+    fn can_call_exit(&mut self) -> bool {
+        self.enter_fn.is_some() && !self.is_root_call_active()
+    }
+
     /// Pushes a new call to the stack
     fn push_call(
         &mut self,
@@ -263,10 +295,6 @@ impl JsInspector {
         };
         self.call_stack.push(call);
         self.active_call()
-    }
-
-    fn pop_call(&mut self) {
-        self.call_stack.pop();
     }
 
     /// Registers the precompiles in the JS context
@@ -376,7 +404,7 @@ where
             inputs.gas_limit,
         );
 
-        if self.enter_fn.is_some() {
+        if self.can_call_enter() {
             let call = self.active_call();
             let frame = CallFrame {
                 contract: call.contract.clone(),
@@ -399,7 +427,7 @@ where
         ret: InstructionResult,
         out: Bytes,
     ) -> (InstructionResult, Gas, Bytes) {
-        if self.exit_fn.is_some() {
+        if self.can_call_exit() {
             let frame_result =
                 FrameResult { gas_used: remaining_gas.spend(), output: out.clone(), error: None };
             if let Err(err) = self.try_exit(frame_result) {
@@ -431,7 +459,7 @@ where
             inputs.gas_limit,
         );
 
-        if self.enter_fn.is_some() {
+        if self.can_call_enter() {
             let call = self.active_call();
             let frame =
                 CallFrame { contract: call.contract.clone(), kind: call.kind, gas: call.gas_limit };
@@ -452,7 +480,7 @@ where
         remaining_gas: Gas,
         out: Bytes,
     ) -> (InstructionResult, Option<Address>, Gas, Bytes) {
-        if self.exit_fn.is_some() {
+        if self.can_call_exit() {
             let frame_result =
                 FrameResult { gas_used: remaining_gas.spend(), output: out.clone(), error: None };
             if let Err(err) = self.try_exit(frame_result) {
@@ -466,11 +494,19 @@ where
     }
 
     fn selfdestruct(&mut self, _contract: Address, _target: Address, _value: U256) {
+        // This is exempt from the root call constraint, because selfdestruct is treated as a
+        // new scope that is entered and immediately exited.
         if self.enter_fn.is_some() {
             let call = self.active_call();
             let frame =
                 CallFrame { contract: call.contract.clone(), kind: call.kind, gas: call.gas_limit };
             let _ = self.try_enter(frame);
+        }
+
+        // exit with empty frame result ref <https://github.com/ethereum/go-ethereum/blob/0004c6b229b787281760b14fb9460ffd9c2496f1/core/vm/instructions.go#L829-L829>
+        if self.exit_fn.is_some() {
+            let frame_result = FrameResult { gas_used: 0, output: Bytes::new(), error: None };
+            let _ = self.try_exit(frame_result);
         }
     }
 }
@@ -483,7 +519,7 @@ pub enum JsDbRequest {
         /// The address of the account to be loaded
         address: Address,
         /// The response channel
-        resp: std::sync::mpsc::Sender<Result<Option<Account>, String>>,
+        resp: std::sync::mpsc::Sender<Result<Option<AccountInfo>, String>>,
     },
     /// Bindings for [Database::code_by_hash]
     Code {

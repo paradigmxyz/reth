@@ -1,7 +1,7 @@
 #![allow(dead_code, unused)]
 use crate::{
     identifier::TransactionId, pool::size::SizeTracker, traits::BestTransactionsAttributes,
-    PoolTransaction, ValidPoolTransaction,
+    PoolTransaction, SubPoolLimit, ValidPoolTransaction,
 };
 use std::{
     cmp::Ordering,
@@ -47,11 +47,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     pub(crate) fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T>>) {
         assert!(tx.is_eip4844(), "transaction is not a blob tx");
         let id = *tx.id();
-        assert!(
-            !self.by_id.contains_key(&id),
-            "transaction already included {:?}",
-            self.by_id.contains_key(&id)
-        );
+        assert!(!self.contains(&id), "transaction already included {:?}", self.get(&id).unwrap());
         let submission_id = self.next_id();
 
         // keep track of size
@@ -182,11 +178,35 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         removed
     }
 
+    /// Removes transactions until the pool satisfies its [SubPoolLimit].
+    ///
+    /// This is done by removing transactions according to their ordering in the pool, defined by
+    /// the [BlobOrd] struct.
+    ///
+    /// Removed transactions are returned in the order they were removed.
+    pub(crate) fn truncate_pool(
+        &mut self,
+        limit: SubPoolLimit,
+    ) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        let mut removed = Vec::new();
+
+        while self.size() > limit.max_size && self.len() > limit.max_txs {
+            let tx = self.all.last().expect("pool is not empty");
+            let id = *tx.transaction.id();
+            removed.push(self.remove_transaction(&id).expect("transaction exists"));
+        }
+
+        removed
+    }
+
     /// Returns `true` if the transaction with the given id is already included in this pool.
-    #[cfg(test)]
-    #[allow(unused)]
     pub(crate) fn contains(&self, id: &TransactionId) -> bool {
         self.by_id.contains_key(id)
+    }
+
+    /// Retrieves a transaction with the given ID from the pool, if it exists.
+    fn get(&self, id: &TransactionId) -> Option<&BlobTransaction<T>> {
+        self.by_id.get(id)
     }
 
     /// Asserts that the bijection between `by_id` and `all` is valid.
@@ -272,6 +292,9 @@ impl<T: PoolTransaction> Ord for BlobTransaction<T> {
     }
 }
 
+/// This is the log base 2 of 1.125, which we'll use to calculate the priority
+const LOG_2_1_125: f64 = 0.16992500144231237;
+
 /// The blob step function, attempting to compute the delta given the `max_tx_fee`, and
 /// `current_fee`.
 ///
@@ -284,35 +307,81 @@ impl<T: PoolTransaction> Ord for BlobTransaction<T> {
 ///
 /// This is supposed to get the number of fee jumps required to get from the current fee to the fee
 /// cap, or where the transaction would not be executable any more.
-fn fee_delta(max_tx_fee: u128, current_fee: u128) -> f64 {
+///
+/// A positive value means that the transaction will remain executable unless the current fee
+/// increases.
+///
+/// A negative value means that the transaction is currently not executable, and requires the
+/// current fee to decrease by some number of jumps before the max fee is greater than the current
+/// fee.
+pub fn fee_delta(max_tx_fee: u128, current_fee: u128) -> i64 {
+    if max_tx_fee == current_fee {
+        // if these are equal, then there's no fee jump
+        return 0
+    }
+
+    let max_tx_fee_jumps = if max_tx_fee == 0 {
+        // we can't take log2 of 0, so we set this to zero here
+        0f64
+    } else {
+        (max_tx_fee.ilog2() as f64) / LOG_2_1_125
+    };
+
+    let current_fee_jumps = if current_fee == 0 {
+        // we can't take log2 of 0, so we set this to zero here
+        0f64
+    } else {
+        (current_fee.ilog2() as f64) / LOG_2_1_125
+    };
+
     // jumps = log1.125(txfee) - log1.125(basefee)
-    // TODO: should we do this without f64?
-    let jumps = (max_tx_fee as f64).log(1.125) - (current_fee as f64).log(1.125);
+    let jumps = max_tx_fee_jumps - current_fee_jumps;
+
     // delta = sign(jumps) * log(abs(jumps))
-    jumps.signum() * jumps.abs().log2()
+    match (jumps as i64).cmp(&0) {
+        Ordering::Equal => {
+            // can't take ilog2 of 0
+            0
+        }
+        Ordering::Greater => (jumps.ceil() as i64).ilog2() as i64,
+        Ordering::Less => -((-jumps.floor() as i64).ilog2() as i64),
+    }
 }
 
 /// Returns the priority for the transaction, based on the "delta" blob fee and priority fee.
-fn blob_tx_priority(
+pub fn blob_tx_priority(
     blob_fee_cap: u128,
     blob_fee: u128,
     max_priority_fee: u128,
     base_fee: u128,
-) -> f64 {
+) -> i64 {
     let delta_blob_fee = fee_delta(blob_fee_cap, blob_fee);
     let delta_priority_fee = fee_delta(max_priority_fee, base_fee);
 
+    // TODO: this could be u64:
+    // * if all are positive, zero is returned
+    // * if all are negative, the min negative value is returned
+    // * if some are positive and some are negative, the min negative value is returned
+    //
+    // the BlobOrd could then just be a u64, and higher values represent worse transactions (more
+    // jumps for one of the fees until the cap satisfies)
+    //
     // priority = min(delta-basefee, delta-blobfee, 0)
-    delta_blob_fee.min(delta_priority_fee).min(0.0)
+    delta_blob_fee.min(delta_priority_fee).min(0)
 }
 
+/// A struct used to determine the ordering for a specific blob transaction in the pool. This uses
+/// a `priority` value to determine the ordering, and uses the `submission_id` to break ties.
+///
+/// The `priority` value is calculated using the [blob_tx_priority] function, and should be
+/// re-calculated on each block.
 #[derive(Debug, Clone)]
 struct BlobOrd {
     /// Identifier that tags when transaction was submitted in the pool.
     pub(crate) submission_id: u64,
-    // The priority for this transaction, calculated using the [`blob_tx_priority`] function,
-    // taking into account both the blob and priority fee.
-    pub(crate) priority: f64,
+    /// The priority for this transaction, calculated using the [`blob_tx_priority`] function,
+    /// taking into account both the blob and priority fee.
+    pub(crate) priority: i64,
 }
 
 impl Eq for BlobOrd {}
@@ -331,7 +400,10 @@ impl PartialOrd<Self> for BlobOrd {
 
 impl Ord for BlobOrd {
     fn cmp(&self, other: &Self) -> Ordering {
-        let ord = other.priority.total_cmp(&self.priority);
+        // order in reverse, so transactions with a lower ordering return Greater - this is
+        // important because transactions with larger negative values will take more fee jumps and
+        // it will take longer to become executable, so those should be evicted first
+        let ord = other.priority.cmp(&self.priority);
 
         // use submission_id to break ties
         if ord == Ordering::Equal {
@@ -562,6 +634,29 @@ mod tests {
                 ordering.fees, actual_txs,
                 "ordering mismatch, expected: {:#?}, actual: {:#?}",
                 ordering.fees, actual_txs
+            );
+        }
+    }
+
+    #[test]
+    fn priority_tests() {
+        // Test vectors from:
+        // <https://github.com/ethereum/go-ethereum/blob/e91cdb49beb4b2a3872b5f2548bf2d6559e4f561/core/txpool/blobpool/priority_test.go#L27-L49>
+        let vectors = vec![
+            (7u128, 10u128, 2i64),
+            (17_200_000_000, 17_200_000_000, 0),
+            (9_853_941_692, 11_085_092_510, 0),
+            (11_544_106_391, 10_356_781_100, 0),
+            (17_200_000_000, 7, -7),
+            (7, 17_200_000_000, 7),
+        ];
+
+        for (base_fee, tx_fee, expected) in vectors {
+            let actual = fee_delta(tx_fee, base_fee);
+            assert_eq!(
+                actual, expected,
+                "fee_delta({}, {}) = {}, expected: {}",
+                tx_fee, base_fee, actual, expected
             );
         }
     }

@@ -1,6 +1,6 @@
 use auto_impl::auto_impl;
 use reth_db::models::BlockNumberAddress;
-use reth_interfaces::RethResult;
+use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{Account, Address, BlockNumber, StorageEntry, B256};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -18,7 +18,7 @@ pub trait HashingWriter: Send + Sync {
     fn unwind_account_hashing(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> RethResult<BTreeMap<B256, Option<Account>>>;
+    ) -> ProviderResult<BTreeMap<B256, Option<Account>>>;
 
     /// Inserts all accounts into [reth_db::tables::AccountHistory] table.
     ///
@@ -28,7 +28,7 @@ pub trait HashingWriter: Send + Sync {
     fn insert_account_for_hashing(
         &self,
         accounts: impl IntoIterator<Item = (Address, Option<Account>)>,
-    ) -> RethResult<BTreeMap<B256, Option<Account>>>;
+    ) -> ProviderResult<BTreeMap<B256, Option<Account>>>;
 
     /// Unwind and clear storage hashing
     ///
@@ -38,7 +38,7 @@ pub trait HashingWriter: Send + Sync {
     fn unwind_storage_hashing(
         &self,
         range: Range<BlockNumberAddress>,
-    ) -> RethResult<HashMap<B256, BTreeSet<B256>>>;
+    ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>>;
 
     /// Iterates over storages and inserts them to hashing table.
     ///
@@ -48,7 +48,7 @@ pub trait HashingWriter: Send + Sync {
     fn insert_storage_for_hashing(
         &self,
         storages: impl IntoIterator<Item = (Address, impl IntoIterator<Item = StorageEntry>)>,
-    ) -> RethResult<HashMap<B256, BTreeSet<B256>>>;
+    ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>>;
 
     /// Calculate the hashes of all changed accounts and storages, and finally calculate the state
     /// root.
@@ -61,5 +61,5 @@ pub trait HashingWriter: Send + Sync {
         range: RangeInclusive<BlockNumber>,
         end_block_hash: B256,
         expected_state_root: B256,
-    ) -> RethResult<()>;
+    ) -> ProviderResult<()>;
 }

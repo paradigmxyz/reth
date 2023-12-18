@@ -7,31 +7,30 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
-[features]
-default = ["compact"]
-compact = ["codecs-derive/compact"]
-scale = ["codecs-derive/scale"]
-postcard = ["codecs-derive/postcard"]
-no_codec = ["codecs-derive/no_codec"]
-arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
-optimism = ["codecs-derive/optimism"]
-
 [dependencies]
-bytes.workspace = true
 codecs-derive = { path = "./derive", default-features = false }
-revm-primitives = { workspace = true, features = ["serde"] }
 
-# arbitrary utils
-arbitrary = { workspace = true, features = ["derive"], optional = true }
-proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
+alloy-primitives.workspace = true
+bytes.workspace = true
 
 [dev-dependencies]
-revm-primitives = { workspace = true, features = ["serde", "arbitrary"] }
-serde = "1.0"
+alloy-primitives = { workspace = true, features = ["arbitrary", "serde"] }
+serde.workspace = true
 modular-bitfield = "0.11.2"
 test-fuzz = "4"
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-derive.workspace = true
+
+[features]
+default = ["compact", "std"]
+std = [
+    "alloy-primitives/std",
+    "bytes/std",
+]
+compact = ["codecs-derive/compact"]
+scale = ["codecs-derive/scale"]
+postcard = ["codecs-derive/postcard"]
+no_codec = ["codecs-derive/no_codec"]
+optimism = ["codecs-derive/optimism"]

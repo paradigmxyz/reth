@@ -5,7 +5,7 @@ use eyre::WrapErr;
 use reth_db::{
     database::Database,
     table::{DupSort, Table},
-    DatabaseEnvRO, RawValue, TableViewer, Tables,
+    DatabaseEnv, RawValue, TableViewer, Tables,
 };
 use reth_primitives::hex;
 use std::cell::RefCell;
@@ -54,7 +54,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db list` command
-    pub fn execute(self, tool: &DbTool<'_, DatabaseEnvRO>) -> eyre::Result<()> {
+    pub fn execute(self, tool: &DbTool<'_, DatabaseEnv>) -> eyre::Result<()> {
         self.table.view(&ListTableViewer { tool, args: &self })
     }
 
@@ -85,7 +85,7 @@ impl Command {
 }
 
 struct ListTableViewer<'a> {
-    tool: &'a DbTool<'a, DatabaseEnvRO>,
+    tool: &'a DbTool<'a, DatabaseEnv>,
     args: &'a Command,
 }
 

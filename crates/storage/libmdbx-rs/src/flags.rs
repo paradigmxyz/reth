@@ -28,11 +28,11 @@ pub enum SyncMode {
     /// are recycled the MVCC snapshots corresponding to previous "steady" transactions (see
     /// below).
     ///
-    /// With [crate::WriteMap] the [SyncMode::SafeNoSync] instructs MDBX to use asynchronous
-    /// mmap-flushes to disk. Asynchronous mmap-flushes means that actually all writes will
-    /// scheduled and performed by operation system on it own manner, i.e. unordered.
-    /// MDBX itself just notify operating system that it would be nice to write data to disk, but
-    /// no more.
+    /// With [crate::EnvironmentKind::WriteMap] the [SyncMode::SafeNoSync] instructs MDBX to use
+    /// asynchronous mmap-flushes to disk. Asynchronous mmap-flushes means that actually all
+    /// writes will scheduled and performed by operation system on it own manner, i.e.
+    /// unordered. MDBX itself just notify operating system that it would be nice to write data
+    /// to disk, but no more.
     ///
     /// Depending on the platform and hardware, with [SyncMode::SafeNoSync] you may get a multiple
     /// increase of write performance, even 10 times or more.
@@ -70,17 +70,18 @@ pub enum SyncMode {
     /// you may get a multiple increase of write performance, even 100 times or more.
     ///
     /// If the filesystem preserves write order (which is rare and never provided unless explicitly
-    /// noted) and the [WriteMap](crate::WriteMap) and [EnvironmentFlags::liforeclaim] flags are
-    /// not used, then a system crash can't corrupt the database, but you can lose the last
-    /// transactions, if at least one buffer is not yet flushed to disk. The risk is governed
-    /// by how often the system flushes dirty buffers to disk and how often
-    /// [Environment::sync()](crate::Environment::sync) is called. So, transactions exhibit ACI
-    /// (atomicity, consistency, isolation) properties and only lose D (durability).
-    /// I.e. database integrity is maintained, but a system crash may undo the final transactions.
+    /// noted) and the [WriteMap](crate::EnvironmentKind::WriteMap) and
+    /// [EnvironmentFlags::liforeclaim] flags are not used, then a system crash can't corrupt
+    /// the database, but you can lose the last transactions, if at least one buffer is not yet
+    /// flushed to disk. The risk is governed by how often the system flushes dirty buffers to
+    /// disk and how often [Environment::sync()](crate::Environment::sync) is called. So,
+    /// transactions exhibit ACI (atomicity, consistency, isolation) properties and only lose D
+    /// (durability). I.e. database integrity is maintained, but a system crash may undo the
+    /// final transactions.
     ///
     /// Otherwise, if the filesystem not preserves write order (which is typically) or
-    /// [WriteMap](crate::WriteMap) or [EnvironmentFlags::liforeclaim] flags are used, you should
-    /// expect the corrupted database after a system crash.
+    /// [WriteMap](crate::EnvironmentKind::WriteMap) or [EnvironmentFlags::liforeclaim] flags are
+    /// used, you should expect the corrupted database after a system crash.
     ///
     /// So, most important thing about [SyncMode::UtterlyNoSync]:
     /// - A system crash immediately after commit the write transaction high likely lead to
@@ -127,6 +128,10 @@ impl From<Mode> for EnvironmentFlags {
 pub struct EnvironmentFlags {
     pub no_sub_dir: bool,
     pub exclusive: bool,
+    /// Flag is intended to open an existing sub-database which was created with unknown flags
+    /// In such cases, instead of returning the `MDBX_INCOMPATIBLE` error, the sub-database will be
+    /// opened with flags which it was created, and then an application could determine the actual
+    /// flags.
     pub accede: bool,
     pub mode: Mode,
     pub no_rdahead: bool,
@@ -136,6 +141,7 @@ pub struct EnvironmentFlags {
 }
 
 impl EnvironmentFlags {
+    /// Configures the mdbx flags to use when opening the environment.
     pub(crate) fn make_flags(&self) -> ffi::MDBX_env_flags_t {
         let mut flags = 0;
 

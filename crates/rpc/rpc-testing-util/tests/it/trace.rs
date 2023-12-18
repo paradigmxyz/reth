@@ -1,7 +1,9 @@
 use futures::StreamExt;
 use jsonrpsee::http_client::HttpClientBuilder;
 use reth_rpc_api_testing_util::{trace::TraceApiExt, utils::parse_env_url};
-use reth_rpc_types::trace::{filter::TraceFilter, parity::TraceType};
+use reth_rpc_types::trace::{
+    filter::TraceFilter, parity::TraceType, tracerequest::TraceCallRequest,
+};
 use std::{collections::HashSet, time::Instant};
 /// This is intended to be run locally against a running node.
 ///
@@ -66,4 +68,27 @@ async fn trace_filters() {
         println!("Transaction Trace: {:?}", trace);
         println!("Duration since test start: {:?}", start_time.elapsed());
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn trace_call() {
+    let url = parse_env_url("RETH_RPC_TEST_NODE_URL").unwrap();
+    let client = HttpClientBuilder::default().build(url).unwrap();
+    let trace_call_request = TraceCallRequest::default();
+    let mut stream = client.trace_call_stream(trace_call_request);
+    let start_time = Instant::now();
+
+    while let Some(result) = stream.next().await {
+        match result {
+            Ok(trace_result) => {
+                println!("Trace Result: {:?}", trace_result);
+            }
+            Err((error, request)) => {
+                eprintln!("Error for request {:?}: {:?}", request, error);
+            }
+        }
+    }
+
+    println!("Completed in {:?}", start_time.elapsed());
 }

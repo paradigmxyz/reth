@@ -4,10 +4,10 @@ pub use manager::SnapshotProvider;
 mod jar;
 pub use jar::SnapshotJarProvider;
 
-use reth_interfaces::RethResult;
+use reth_interfaces::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{snapshot::SegmentHeader, SnapshotSegment};
-use std::ops::Deref;
+use std::{ops::Deref, sync::Arc};
 
 /// Alias type for each specific `NippyJar`.
 type LoadedJarRef<'a> = dashmap::mapref::one::Ref<'a, (u64, SnapshotSegment), LoadedJar>;
@@ -16,17 +16,17 @@ type LoadedJarRef<'a> = dashmap::mapref::one::Ref<'a, (u64, SnapshotSegment), Lo
 #[derive(Debug)]
 pub struct LoadedJar {
     jar: NippyJar<SegmentHeader>,
-    mmap_handle: reth_nippy_jar::MmapHandle,
+    mmap_handle: Arc<reth_nippy_jar::DataReader>,
 }
 
 impl LoadedJar {
-    fn new(jar: NippyJar<SegmentHeader>) -> RethResult<Self> {
-        let mmap_handle = jar.open_data()?;
+    fn new(jar: NippyJar<SegmentHeader>) -> ProviderResult<Self> {
+        let mmap_handle = Arc::new(jar.open_data_reader()?);
         Ok(Self { jar, mmap_handle })
     }
 
     /// Returns a clone of the mmap handle that can be used to instantiate a cursor.
-    fn mmap_handle(&self) -> reth_nippy_jar::MmapHandle {
+    fn mmap_handle(&self) -> Arc<reth_nippy_jar::DataReader> {
         self.mmap_handle.clone()
     }
 }
@@ -41,19 +41,17 @@ impl Deref for LoadedJar {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{HeaderProvider, ProviderFactory};
+    use crate::{test_utils::create_test_provider_factory, HeaderProvider};
     use rand::{self, seq::SliceRandom};
     use reth_db::{
         cursor::DbCursorRO,
-        database::Database,
         snapshot::create_snapshot_T1_T2_T3,
-        test_utils::create_test_rw_db,
         transaction::{DbTx, DbTxMut},
-        CanonicalHeaders, DatabaseError, HeaderNumbers, HeaderTD, Headers, RawTable,
+        CanonicalHeaders, HeaderNumbers, HeaderTD, Headers, RawTable,
     };
     use reth_interfaces::test_utils::generators::{self, random_header_range};
     use reth_nippy_jar::NippyJar;
-    use reth_primitives::{BlockNumber, B256, MAINNET, U256};
+    use reth_primitives::{BlockNumber, B256, U256};
 
     #[test]
     fn test_snap() {
@@ -64,9 +62,9 @@ mod test {
             SegmentHeader::new(range.clone(), range.clone(), SnapshotSegment::Headers);
 
         // Data sources
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(&db, MAINNET.clone());
-        let snap_file = tempfile::NamedTempFile::new().unwrap();
+        let factory = create_test_provider_factory();
+        let snap_path = tempfile::tempdir().unwrap();
+        let snap_file = snap_path.path().join(SnapshotSegment::Headers.filename(&range, &range));
 
         // Setup data
         let mut headers = random_header_range(
@@ -75,28 +73,26 @@ mod test {
             B256::random(),
         );
 
-        db.update(|tx| -> Result<(), DatabaseError> {
-            let mut td = U256::ZERO;
-            for header in headers.clone() {
-                td += header.header.difficulty;
-                let hash = header.hash();
+        let mut provider_rw = factory.provider_rw().unwrap();
+        let tx = provider_rw.tx_mut();
+        let mut td = U256::ZERO;
+        for header in headers.clone() {
+            td += header.header.difficulty;
+            let hash = header.hash();
 
-                tx.put::<CanonicalHeaders>(header.number, hash)?;
-                tx.put::<Headers>(header.number, header.clone().unseal())?;
-                tx.put::<HeaderTD>(header.number, td.into())?;
-                tx.put::<HeaderNumbers>(hash, header.number)?;
-            }
-            Ok(())
-        })
-        .unwrap()
-        .unwrap();
+            tx.put::<CanonicalHeaders>(header.number, hash).unwrap();
+            tx.put::<Headers>(header.number, header.clone().unseal()).unwrap();
+            tx.put::<HeaderTD>(header.number, td.into()).unwrap();
+            tx.put::<HeaderNumbers>(hash, header.number).unwrap();
+        }
+        provider_rw.commit().unwrap();
 
         // Create Snapshot
         {
             let with_compression = true;
             let with_filter = true;
 
-            let mut nippy_jar = NippyJar::new(3, snap_file.path(), segment_header);
+            let mut nippy_jar = NippyJar::new(3, snap_file.as_path(), segment_header);
 
             if with_compression {
                 nippy_jar = nippy_jar.with_zstd(false, 0);
@@ -106,7 +102,8 @@ mod test {
                 nippy_jar = nippy_jar.with_cuckoo_filter(row_count as usize + 10).with_fmph();
             }
 
-            let tx = db.tx().unwrap();
+            let provider = factory.provider().unwrap();
+            let tx = provider.tx_ref();
 
             // Hacky type inference. TODO fix
             let mut none_vec = Some(vec![vec![vec![0u8]].into_iter()]);
@@ -126,7 +123,7 @@ mod test {
                 BlockNumber,
                 SegmentHeader,
             >(
-                &tx, range, None, none_vec, Some(hashes), row_count as usize, &mut nippy_jar
+                tx, range, None, none_vec, Some(hashes), row_count as usize, &mut nippy_jar
             )
             .unwrap();
         }
@@ -134,9 +131,9 @@ mod test {
         // Use providers to query Header data and compare if it matches
         {
             let db_provider = factory.provider().unwrap();
-            let manager = SnapshotProvider::default();
+            let manager = SnapshotProvider::new(snap_path.path()).unwrap().with_filters();
             let jar_provider = manager
-                .get_segment_provider(SnapshotSegment::Headers, 0, Some(snap_file.path().into()))
+                .get_segment_provider_from_block(SnapshotSegment::Headers, 0, Some(&snap_file))
                 .unwrap();
 
             assert!(!headers.is_empty());

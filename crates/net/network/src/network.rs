@@ -1,6 +1,6 @@
 use crate::{
     config::NetworkMode, discovery::DiscoveryEvent, manager::NetworkEvent, message::PeerRequest,
-    peers::PeersHandle, FetchClient,
+    peers::PeersHandle, protocol::RlpxSubProtocol, FetchClient,
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -13,6 +13,7 @@ use reth_network_api::{
 };
 use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, B256};
 use reth_rpc_types::NetworkStatus;
+use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
     sync::{
@@ -41,6 +42,7 @@ impl NetworkHandle {
         num_active_peers: Arc<AtomicUsize>,
         listener_address: Arc<Mutex<SocketAddr>>,
         to_manager_tx: UnboundedSender<NetworkHandleMessage>,
+        secret_key: SecretKey,
         local_peer_id: PeerId,
         peers: PeersHandle,
         network_mode: NetworkMode,
@@ -53,6 +55,7 @@ impl NetworkHandle {
             num_active_peers,
             to_manager_tx,
             listener_address,
+            secret_key,
             local_peer_id,
             peers,
             network_mode,
@@ -153,7 +156,14 @@ impl NetworkHandle {
     pub fn tx_gossip_disabled(&self) -> bool {
         self.inner.tx_gossip_disabled
     }
+
+    /// Returns the secret key used for authenticating sessions.
+    pub fn secret_key(&self) -> &SecretKey {
+        &self.inner.secret_key
+    }
 }
+
+// === API Implementations ===
 
 impl NetworkEvents for NetworkHandle {
     fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent> {
@@ -169,7 +179,11 @@ impl NetworkEvents for NetworkHandle {
     }
 }
 
-// === API Implementations ===
+impl NetworkProtocols for NetworkHandle {
+    fn add_rlpx_sub_protocol(&self, protocol: RlpxSubProtocol) {
+        self.send_message(NetworkHandleMessage::AddRlpxSubProtocol(protocol))
+    }
+}
 
 impl PeersInfo for NetworkHandle {
     fn num_connected_peers(&self) -> usize {
@@ -322,6 +336,8 @@ struct NetworkInner {
     to_manager_tx: UnboundedSender<NetworkHandleMessage>,
     /// The local address that accepts incoming connections.
     listener_address: Arc<Mutex<SocketAddr>>,
+    /// The secret key used for authenticating sessions.
+    secret_key: SecretKey,
     /// The identifier used by this node.
     local_peer_id: PeerId,
     /// Access to the all the nodes.
@@ -351,6 +367,12 @@ pub trait NetworkEvents: Send + Sync {
     ///
     /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
     fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent>;
+}
+
+/// Provides access to modify the network's additional protocol handlers.
+pub trait NetworkProtocols: Send + Sync {
+    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    fn add_rlpx_sub_protocol(&self, protocol: RlpxSubProtocol);
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
@@ -400,4 +422,6 @@ pub(crate) enum NetworkHandleMessage {
     Shutdown(oneshot::Sender<()>),
     /// Add a new listener for `DiscoveryEvent`.
     DiscoveryListener(UnboundedSender<DiscoveryEvent>),
+    /// Add an additional [RlpxSubProtocol].
+    AddRlpxSubProtocol(RlpxSubProtocol),
 }

@@ -28,7 +28,7 @@ use reth_stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
         StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
     },
-    ExecInput, PipelineError, Stage,
+    ExecInput, Stage,
 };
 use reth_tasks::TaskExecutor;
 use std::{
@@ -121,7 +121,7 @@ impl Command {
         // initialize the database
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
         let factory = ProviderFactory::new(&db, self.chain.clone());
-        let provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+        let provider_rw = factory.provider_rw()?;
 
         // Configure and build network
         let network_secret_path =
@@ -177,10 +177,10 @@ impl Command {
                 Ok(senders) => senders,
                 Err(err) => {
                     warn!(target: "reth::cli", "Error sealing block with senders: {err:?}. Skipping...");
-                    continue
+                    continue;
                 }
             };
-            provider_rw.insert_block(sealed_block.block, Some(sealed_block.senders), None)?;
+            provider_rw.insert_block(sealed_block, None)?;
         }
 
         // Check if any of hashing or merkle stages aren't on the same block number as
@@ -197,7 +197,7 @@ impl Command {
                         checkpoint.stage_checkpoint.is_some()
                 });
 
-        let factory = reth_revm::Factory::new(self.chain.clone());
+        let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
         let mut execution_stage = ExecutionStage::new(
             factory,
             ExecutionStageThresholds {
@@ -222,53 +222,42 @@ impl Command {
                     None
                 };
 
-            execution_stage
-                .execute(
-                    &provider_rw,
-                    ExecInput {
-                        target: Some(block),
-                        checkpoint: block.checked_sub(1).map(StageCheckpoint::new),
-                    },
-                )
-                .await?;
+            execution_stage.execute(
+                &provider_rw,
+                ExecInput {
+                    target: Some(block),
+                    checkpoint: block.checked_sub(1).map(StageCheckpoint::new),
+                },
+            )?;
 
             let mut account_hashing_done = false;
             while !account_hashing_done {
-                let output = account_hashing_stage
-                    .execute(
-                        &provider_rw,
-                        ExecInput {
-                            target: Some(block),
-                            checkpoint: progress.map(StageCheckpoint::new),
-                        },
-                    )
-                    .await?;
-                account_hashing_done = output.done;
-            }
-
-            let mut storage_hashing_done = false;
-            while !storage_hashing_done {
-                let output = storage_hashing_stage
-                    .execute(
-                        &provider_rw,
-                        ExecInput {
-                            target: Some(block),
-                            checkpoint: progress.map(StageCheckpoint::new),
-                        },
-                    )
-                    .await?;
-                storage_hashing_done = output.done;
-            }
-
-            let incremental_result = merkle_stage
-                .execute(
+                let output = account_hashing_stage.execute(
                     &provider_rw,
                     ExecInput {
                         target: Some(block),
                         checkpoint: progress.map(StageCheckpoint::new),
                     },
-                )
-                .await;
+                )?;
+                account_hashing_done = output.done;
+            }
+
+            let mut storage_hashing_done = false;
+            while !storage_hashing_done {
+                let output = storage_hashing_stage.execute(
+                    &provider_rw,
+                    ExecInput {
+                        target: Some(block),
+                        checkpoint: progress.map(StageCheckpoint::new),
+                    },
+                )?;
+                storage_hashing_done = output.done;
+            }
+
+            let incremental_result = merkle_stage.execute(
+                &provider_rw,
+                ExecInput { target: Some(block), checkpoint: progress.map(StageCheckpoint::new) },
+            );
 
             if incremental_result.is_err() {
                 tracing::warn!(target: "reth::cli", block, "Incremental calculation failed, retrying from scratch");
@@ -285,10 +274,10 @@ impl Command {
 
                 let clean_input = ExecInput { target: Some(block), checkpoint: None };
                 loop {
-                    let clean_result = merkle_stage.execute(&provider_rw, clean_input).await;
+                    let clean_result = merkle_stage.execute(&provider_rw, clean_input);
                     assert!(clean_result.is_ok(), "Clean state root calculation failed");
                     if clean_result.unwrap().done {
-                        break
+                        break;
                     }
                 }
 
@@ -322,7 +311,7 @@ impl Command {
                                 "Nibbles don't match"
                             );
                             if incremental.1 != clean.1 &&
-                                clean.0.inner.len() > self.skip_node_depth.unwrap_or_default()
+                                clean.0 .0.len() > self.skip_node_depth.unwrap_or_default()
                             {
                                 incremental_account_mismatched.push(incremental);
                                 clean_account_mismatched.push(clean);
@@ -351,11 +340,10 @@ impl Command {
                     match (incremental_storage_trie_iter.next(), clean_storage_trie_iter.next()) {
                         (Some(incremental), Some(clean)) => {
                             if incremental != clean &&
-                                clean.1.nibbles.inner.len() >
-                                    self.skip_node_depth.unwrap_or_default()
+                                clean.1.nibbles.len() > self.skip_node_depth.unwrap_or_default()
                             {
                                 first_mismatched_storage = Some((incremental, clean));
-                                break
+                                break;
                             }
                         }
                         (Some(incremental), None) => {

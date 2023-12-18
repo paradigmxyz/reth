@@ -22,6 +22,9 @@ revm.workspace = true
 # common
 tracing.workspace = true
 
+[dev-dependencies]
+reth-trie.workspace = true
+
 [features]
 optimism = [
   "revm/optimism",

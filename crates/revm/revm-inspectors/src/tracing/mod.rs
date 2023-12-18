@@ -1,9 +1,9 @@
 use crate::tracing::{
-    types::{CallKind, LogCallOrder, RawLog},
+    types::{CallKind, LogCallOrder},
     utils::get_create_address,
 };
+use alloy_primitives::{Address, Bytes, Log, B256, U256};
 pub use arena::CallTraceArena;
-use reth_primitives::{Address, Bytes, B256, U256};
 use revm::{
     inspectors::GasInspector,
     interpreter::{
@@ -20,8 +20,9 @@ mod builder;
 mod config;
 mod fourbyte;
 mod opcount;
-mod types;
+pub mod types;
 mod utils;
+use self::parity::stack_push_count;
 use crate::tracing::{
     arena::PushTraceKind,
     types::{CallTraceNode, RecordedMemory, StorageChange, StorageChangeReason},
@@ -31,7 +32,7 @@ pub use builder::{
     geth::{self, GethTraceBuilder},
     parity::{self, ParityTraceBuilder},
 };
-pub use config::TracingInspectorConfig;
+pub use config::{StackSnapshotType, TracingInspectorConfig};
 pub use fourbyte::FourByteInspector;
 pub use opcount::OpcodeCountInspector;
 
@@ -80,6 +81,16 @@ impl TracingInspector {
             gas_inspector: Default::default(),
             spec_id: None,
         }
+    }
+
+    /// Gets a reference to the recorded call traces.
+    pub fn get_traces(&self) -> &CallTraceArena {
+        &self.traces
+    }
+
+    /// Gets a mutable reference to the recorded call traces.
+    pub fn get_traces_mut(&mut self) -> &mut CallTraceArena {
+        &mut self.traces
     }
 
     /// Manually the gas used of the root trace.
@@ -133,7 +144,7 @@ impl TracingInspector {
     ) -> bool {
         if data.precompiles.contains(to) {
             // only if this is _not_ the root call
-            return self.is_deep() && value == U256::ZERO
+            return self.is_deep() && value.is_zero()
         }
         false
     }
@@ -282,8 +293,11 @@ impl TracingInspector {
             .record_memory_snapshots
             .then(|| RecordedMemory::new(interp.shared_memory.context_memory().to_vec()))
             .unwrap_or_default();
-        let stack =
-            self.config.record_stack_snapshots.then(|| interp.stack.clone()).unwrap_or_default();
+        let stack = if self.config.record_stack_snapshots.is_full() {
+            Some(interp.stack.data().clone())
+        } else {
+            None
+        };
 
         let op = OpCode::new(interp.current_opcode())
             .or_else(|| {
@@ -326,9 +340,10 @@ impl TracingInspector {
             self.step_stack.pop().expect("can't fill step without starting a step first");
         let step = &mut self.traces.arena[trace_idx].trace.steps[step_idx];
 
-        if interp.stack.len() > step.stack.len() {
-            // if the stack grew, we need to record the new values
-            step.push_stack = Some(interp.stack.data()[step.stack.len()..].to_vec());
+        if self.config.record_stack_snapshots.is_pushes() {
+            let num_pushed = stack_push_count(step.op);
+            let start = interp.stack.len() - num_pushed;
+            step.push_stack = Some(interp.stack.data()[start..].to_vec());
         }
 
         if self.config.record_memory_snapshots {
@@ -406,7 +421,7 @@ where
 
         if self.config.record_logs {
             trace.ordering.push(LogCallOrder::Log(trace.logs.len()));
-            trace.logs.push(RawLog { topics: topics.to_vec(), data: data.clone() });
+            trace.logs.push(Log::new_unchecked(topics.to_vec(), data.clone()));
         }
     }
 

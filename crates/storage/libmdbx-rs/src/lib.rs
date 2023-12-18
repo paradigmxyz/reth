@@ -15,12 +15,11 @@ pub use crate::{
     cursor::{Cursor, Iter, IterDup},
     database::Database,
     environment::{
-        Environment, EnvironmentBuilder, EnvironmentKind, Geometry, Info, NoWriteMap, PageSize,
-        Stat, WriteMap,
+        Environment, EnvironmentBuilder, EnvironmentKind, Geometry, Info, PageSize, Stat,
     },
     error::{Error, Result},
     flags::*,
-    transaction::{Transaction, TransactionKind, RO, RW},
+    transaction::{CommitLatency, Transaction, TransactionKind, RO, RW},
 };
 pub mod ffi {
     pub use ffi::{MDBX_dbi as DBI, MDBX_log_level_t as LogLevel};
@@ -39,8 +38,6 @@ mod test_utils {
     use super::*;
     use byteorder::{ByteOrder, LittleEndian};
     use tempfile::tempdir;
-
-    type Environment = crate::Environment<NoWriteMap>;
 
     /// Regression test for https://github.com/danburkert/lmdb-rs/issues/21.
     /// This test reliably segfaults when run against lmbdb compiled with opt level -O3 and newer

@@ -24,14 +24,14 @@ where
         &mut self,
         key: Self::Key,
     ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.seek_exact(key)?.map(|value| (value.0.inner.to_vec(), value.1)))
+        Ok(self.0.seek_exact(key)?.map(|value| (value.0 .0.to_vec(), value.1)))
     }
 
     fn seek(
         &mut self,
         key: Self::Key,
     ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.seek(key)?.map(|value| (value.0.inner.to_vec(), value.1)))
+        Ok(self.0.seek(key)?.map(|value| (value.0 .0.to_vec(), value.1)))
     }
 
     fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
@@ -41,21 +41,18 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},
         tables,
-        test_utils::create_test_rw_db,
         transaction::DbTxMut,
     };
-    use reth_primitives::{hex_literal::hex, MAINNET};
-    use reth_provider::ProviderFactory;
+    use reth_primitives::hex_literal::hex;
+    use reth_provider::test_utils::create_test_provider_factory;
 
     #[test]
     fn test_account_trie_order() {
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+        let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
         let mut cursor = provider.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
 
@@ -82,13 +79,13 @@ mod tests {
         }
 
         let db_data = cursor.walk_range(..).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
-        assert_eq!(db_data[0].0.inner.to_vec(), data[0]);
-        assert_eq!(db_data[1].0.inner.to_vec(), data[1]);
-        assert_eq!(db_data[2].0.inner.to_vec(), data[2]);
-        assert_eq!(db_data[3].0.inner.to_vec(), data[3]);
+        assert_eq!(db_data[0].0 .0.to_vec(), data[0]);
+        assert_eq!(db_data[1].0 .0.to_vec(), data[1]);
+        assert_eq!(db_data[2].0 .0.to_vec(), data[2]);
+        assert_eq!(db_data[3].0 .0.to_vec(), data[3]);
 
         assert_eq!(
-            cursor.seek(hex!("0303040f").to_vec().into()).unwrap().map(|(k, _)| k.inner.to_vec()),
+            cursor.seek(hex!("0303040f").to_vec().into()).unwrap().map(|(k, _)| k.0.to_vec()),
             Some(data[1].clone())
         );
     }

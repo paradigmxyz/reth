@@ -15,18 +15,7 @@
 
 /// Various provider traits.
 mod traits;
-pub use traits::{
-    AccountExtReader, AccountReader, BlockExecutionWriter, BlockExecutor, BlockExecutorStats,
-    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
-    BlockWriter, BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonChainTracker,
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider, ExecutorFactory,
-    HashingWriter, HeaderProvider, HistoryWriter, PrunableBlockExecutor, PruneCheckpointReader,
-    PruneCheckpointWriter, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
-    StageCheckpointWriter, StateProvider, StateProviderBox, StateProviderFactory,
-    StateRootProvider, StorageReader, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, WithdrawalsProvider,
-};
+pub use traits::*;
 
 /// Provider trait implementations.
 pub mod providers;
@@ -47,3 +36,19 @@ pub use chain::{Chain, DisplayBlocksChain};
 
 pub mod bundle_state;
 pub use bundle_state::{BundleStateWithReceipts, OriginalValuesKnown, StateChanges, StateReverts};
+
+pub(crate) fn to_range<R: std::ops::RangeBounds<u64>>(bounds: R) -> std::ops::Range<u64> {
+    let start = match bounds.start_bound() {
+        std::ops::Bound::Included(&v) => v,
+        std::ops::Bound::Excluded(&v) => v + 1,
+        std::ops::Bound::Unbounded => 0,
+    };
+
+    let end = match bounds.end_bound() {
+        std::ops::Bound::Included(&v) => v + 1,
+        std::ops::Bound::Excluded(&v) => v,
+        std::ops::Bound::Unbounded => u64::MAX,
+    };
+
+    start..end
+}

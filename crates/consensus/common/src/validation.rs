@@ -263,7 +263,8 @@ fn check_gas_limit(
     // By consensus, gas_limit is multiplied by elasticity (*2) on
     // on exact block that hardfork happens.
     if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
-        parent_gas_limit = parent.gas_limit * chain_spec.base_fee_params.elasticity_multiplier;
+        parent_gas_limit =
+            parent.gas_limit * chain_spec.base_fee_params(child.timestamp).elasticity_multiplier;
     }
 
     if child.gas_limit > parent_gas_limit {
@@ -336,7 +337,7 @@ pub fn validate_header_regarding_parent(
             } else {
                 // This BaseFeeMissing will not happen as previous blocks are checked to have them.
                 parent
-                    .next_block_base_fee(chain_spec.base_fee_params)
+                    .next_block_base_fee(chain_spec.base_fee_params(child.timestamp))
                     .ok_or(ConsensusError::BaseFeeMissing)?
             };
         if expected_base_fee != base_fee {
@@ -484,13 +485,13 @@ mod tests {
     use super::*;
     use mockall::mock;
     use reth_interfaces::{
+        provider::ProviderResult,
         test_utils::generators::{self, Rng},
-        RethResult,
     };
     use reth_primitives::{
         constants::eip4844::DATA_GAS_PER_BLOB, hex_literal::hex, proofs, Account, Address,
-        BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, ForkCondition, Header,
-        Signature, TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
+        BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, Header, Signature,
+        TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
     };
     use std::ops::RangeBounds;
 
@@ -498,13 +499,13 @@ mod tests {
         WithdrawalsProvider {}
 
         impl WithdrawalsProvider for WithdrawalsProvider {
-            fn latest_withdrawal(&self) -> RethResult<Option<Withdrawal>> ;
+            fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> ;
 
             fn withdrawals_by_block(
                 &self,
                 _id: BlockHashOrNumber,
                 _timestamp: u64,
-            ) -> RethResult<Option<Vec<Withdrawal>>> ;
+            ) -> ProviderResult<Option<Vec<Withdrawal>>> ;
         }
     }
 
@@ -537,45 +538,52 @@ mod tests {
     }
 
     impl AccountReader for Provider {
-        fn basic_account(&self, _address: Address) -> RethResult<Option<Account>> {
+        fn basic_account(&self, _address: Address) -> ProviderResult<Option<Account>> {
             Ok(self.account)
         }
     }
 
     impl HeaderProvider for Provider {
-        fn is_known(&self, _block_hash: &BlockHash) -> RethResult<bool> {
+        fn is_known(&self, _block_hash: &BlockHash) -> ProviderResult<bool> {
             Ok(self.is_known)
         }
 
-        fn header(&self, _block_number: &BlockHash) -> RethResult<Option<Header>> {
+        fn header(&self, _block_number: &BlockHash) -> ProviderResult<Option<Header>> {
             Ok(self.parent.clone())
         }
 
-        fn header_by_number(&self, _num: u64) -> RethResult<Option<Header>> {
+        fn header_by_number(&self, _num: u64) -> ProviderResult<Option<Header>> {
             Ok(self.parent.clone())
         }
 
-        fn header_td(&self, _hash: &BlockHash) -> RethResult<Option<U256>> {
+        fn header_td(&self, _hash: &BlockHash) -> ProviderResult<Option<U256>> {
             Ok(None)
         }
 
-        fn header_td_by_number(&self, _number: BlockNumber) -> RethResult<Option<U256>> {
+        fn header_td_by_number(&self, _number: BlockNumber) -> ProviderResult<Option<U256>> {
             Ok(None)
         }
 
-        fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
-            Ok(vec![])
-        }
-
-        fn sealed_headers_range(
+        fn headers_range(
             &self,
             _range: impl RangeBounds<BlockNumber>,
-        ) -> RethResult<Vec<SealedHeader>> {
+        ) -> ProviderResult<Vec<Header>> {
             Ok(vec![])
         }
 
-        fn sealed_header(&self, _block_number: BlockNumber) -> RethResult<Option<SealedHeader>> {
+        fn sealed_header(
+            &self,
+            _block_number: BlockNumber,
+        ) -> ProviderResult<Option<SealedHeader>> {
             Ok(None)
+        }
+
+        fn sealed_headers_while(
+            &self,
+            _range: impl RangeBounds<BlockNumber>,
+            _predicate: impl FnMut(&SealedHeader) -> bool,
+        ) -> ProviderResult<Vec<SealedHeader>> {
+            Ok(vec![])
         }
     }
 
@@ -584,11 +592,11 @@ mod tests {
             &self,
             _id: BlockHashOrNumber,
             _timestamp: u64,
-        ) -> RethResult<Option<Vec<Withdrawal>>> {
+        ) -> ProviderResult<Option<Vec<Withdrawal>>> {
             self.withdrawals_provider.withdrawals_by_block(_id, _timestamp)
         }
 
-        fn latest_withdrawal(&self) -> RethResult<Option<Withdrawal>> {
+        fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
             self.withdrawals_provider.latest_withdrawal()
         }
     }

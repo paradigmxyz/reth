@@ -3,7 +3,7 @@ use reth_db::{
     cursor::DbCursorRO, database::Database, snapshot::create_snapshot_T1_T2_T3, tables,
     transaction::DbTx, RawKey, RawTable,
 };
-use reth_interfaces::RethResult;
+use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     snapshot::{Compression, Filters, SegmentConfig},
     BlockNumber, SnapshotSegment,
@@ -31,21 +31,21 @@ impl Default for Headers {
 }
 
 impl Segment for Headers {
-    fn segment() -> SnapshotSegment {
+    fn segment(&self) -> SnapshotSegment {
         SnapshotSegment::Headers
     }
 
     fn snapshot<DB: Database>(
         &self,
-        provider: &DatabaseProviderRO<'_, DB>,
+        provider: &DatabaseProviderRO<DB>,
         directory: impl AsRef<Path>,
         range: RangeInclusive<BlockNumber>,
-    ) -> RethResult<()> {
+    ) -> ProviderResult<()> {
         let range_len = range.clone().count();
         let mut jar = prepare_jar::<DB, 3>(
             provider,
             directory,
-            Self::segment(),
+            self.segment(),
             self.config,
             range.clone(),
             range_len,

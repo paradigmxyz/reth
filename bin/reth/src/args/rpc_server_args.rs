@@ -3,13 +3,14 @@
 use crate::{
     args::{
         types::{MaxU32, ZeroAsNoneU64},
-        GasPriceOracleArgs,
+        GasPriceOracleArgs, RpcStateCacheArgs,
     },
     cli::{
         components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
         config::RethRpcConfig,
         ext::RethNodeCommandConfig,
     },
+    utils::get_or_create_jwt_secret_from_path,
 };
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
@@ -22,13 +23,7 @@ use reth_provider::{
     EvmEnvProvider, HeaderProvider, StateProviderFactory,
 };
 use reth_rpc::{
-    eth::{
-        cache::{
-            DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_ENV_CACHE_MAX_LEN, DEFAULT_RECEIPT_CACHE_MAX_LEN,
-        },
-        gas_oracle::GasPriceOracleConfig,
-        RPC_DEFAULT_GAS_CAP,
-    },
+    eth::{cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP},
     JwtError, JwtSecret,
 };
 use reth_rpc_builder::{
@@ -60,8 +55,8 @@ pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 150;
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
 
 /// Parameters for configuring the rpc more granularity via CLI
-#[derive(Debug, Clone, Args)]
-#[command(next_help_heading = "RPC")]
+#[derive(Debug, Clone, Args, PartialEq, Eq)]
+#[clap(next_help_heading = "RPC")]
 pub struct RpcServerArgs {
     /// Enable the HTTP-RPC server
     #[arg(long, default_value_if("dev", "true", "true"))]
@@ -174,21 +169,13 @@ pub struct RpcServerArgs {
     )]
     pub rpc_gas_cap: u64,
 
+    /// State cache configuration.
+    #[clap(flatten)]
+    pub rpc_state_cache: RpcStateCacheArgs,
+
     /// Gas price oracle configuration.
     #[clap(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
-
-    /// Maximum number of block cache entries.
-    #[arg(long, default_value_t = DEFAULT_BLOCK_CACHE_MAX_LEN)]
-    pub block_cache_len: u32,
-
-    /// Maximum number of receipt cache entries.
-    #[arg(long, default_value_t = DEFAULT_RECEIPT_CACHE_MAX_LEN)]
-    pub receipt_cache_len: u32,
-
-    /// Maximum number of env cache entries.
-    #[arg(long, default_value_t = DEFAULT_ENV_CACHE_MAX_LEN)]
-    pub env_cache_len: u32,
 }
 
 impl RpcServerArgs {
@@ -349,7 +336,17 @@ impl RethRpcConfig for RpcServerArgs {
             .max_blocks_per_filter(self.rpc_max_blocks_per_filter.unwrap_or_max())
             .max_logs_per_response(self.rpc_max_logs_per_response.unwrap_or_max() as usize)
             .rpc_gas_cap(self.rpc_gas_cap)
+            .state_cache(self.state_cache_config())
             .gpo_config(self.gas_price_oracle_config())
+    }
+
+    fn state_cache_config(&self) -> EthStateCacheConfig {
+        EthStateCacheConfig {
+            max_blocks: self.rpc_state_cache.max_blocks,
+            max_receipts: self.rpc_state_cache.max_receipts,
+            max_envs: self.rpc_state_cache.max_envs,
+            max_concurrent_db_requests: self.rpc_state_cache.max_concurrent_db_requests,
+        }
     }
 
     fn rpc_max_request_size_bytes(&self) -> u32 {
@@ -361,12 +358,7 @@ impl RethRpcConfig for RpcServerArgs {
     }
 
     fn gas_price_oracle_config(&self) -> GasPriceOracleConfig {
-        GasPriceOracleConfig::new(
-            self.gas_price_oracle.blocks,
-            self.gas_price_oracle.ignore_price,
-            self.gas_price_oracle.max_price,
-            self.gas_price_oracle.percentile,
-        )
+        self.gas_price_oracle.gas_price_oracle_config()
     }
 
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig {
@@ -449,20 +441,45 @@ impl RethRpcConfig for RpcServerArgs {
                 debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
                 JwtSecret::from_file(fpath)
             }
-            None => {
-                if default_jwt_path.exists() {
-                    debug!(target: "reth::cli", ?default_jwt_path, "Reading JWT auth secret file");
-                    JwtSecret::from_file(&default_jwt_path)
-                } else {
-                    info!(target: "reth::cli", ?default_jwt_path, "Creating JWT auth secret file");
-                    JwtSecret::try_create(&default_jwt_path)
-                }
-            }
+            None => get_or_create_jwt_secret_from_path(&default_jwt_path),
         }
     }
 
     fn rpc_secret_key(&self) -> Option<JwtSecret> {
         self.rpc_jwtsecret.clone()
+    }
+}
+
+impl Default for RpcServerArgs {
+    fn default() -> Self {
+        Self {
+            http: false,
+            http_addr: Ipv4Addr::LOCALHOST.into(),
+            http_port: constants::DEFAULT_HTTP_RPC_PORT,
+            http_api: None,
+            http_corsdomain: None,
+            ws: false,
+            ws_addr: Ipv4Addr::LOCALHOST.into(),
+            ws_port: constants::DEFAULT_WS_RPC_PORT,
+            ws_allowed_origins: None,
+            ws_api: None,
+            ipcdisable: false,
+            ipcpath: constants::DEFAULT_IPC_ENDPOINT.to_string(),
+            auth_addr: Ipv4Addr::LOCALHOST.into(),
+            auth_port: constants::DEFAULT_AUTH_PORT,
+            auth_jwtsecret: None,
+            rpc_jwtsecret: None,
+            rpc_max_request_size: RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into(),
+            rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),
+            rpc_max_subscriptions_per_connection: RPC_DEFAULT_MAX_SUBS_PER_CONN.into(),
+            rpc_max_connections: RPC_DEFAULT_MAX_CONNECTIONS.into(),
+            rpc_max_tracing_requests: constants::DEFAULT_MAX_TRACING_REQUESTS,
+            rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
+            rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
+            rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
+            gas_price_oracle: GasPriceOracleArgs::default(),
+            rpc_state_cache: RpcStateCacheArgs::default(),
+        }
     }
 }
 
@@ -535,6 +552,23 @@ mod tests {
 
         let apis = args.http_api.unwrap();
         let expected = RpcModuleSelection::try_from_selection(["eth", "admin", "debug"]).unwrap();
+
+        assert_eq!(apis, expected);
+    }
+
+    #[test]
+    fn test_rpc_server_eth_call_bundle_args() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.api",
+            "eth,admin,debug,eth-call-bundle",
+        ])
+        .args;
+
+        let apis = args.http_api.unwrap();
+        let expected =
+            RpcModuleSelection::try_from_selection(["eth", "admin", "debug", "eth-call-bundle"])
+                .unwrap();
 
         assert_eq!(apis, expected);
     }
@@ -663,5 +697,13 @@ mod tests {
         let config = args.eth_config().filter_config();
         assert_eq!(config.max_blocks_per_filter, Some(100));
         assert_eq!(config.max_logs_per_response, Some(200));
+    }
+
+    #[test]
+    fn rpc_server_args_default_sanity_test() {
+        let default_args = RpcServerArgs::default();
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+
+        assert_eq!(args, default_args);
     }
 }

@@ -28,7 +28,30 @@ jobs:
         with:
           cache-on-failure: true
       - run:
-          cargo clippy --bin "${{ matrix.binary }}" --workspace --features "${{ matrix.network }}"
+          cargo clippy --bin "${{ matrix.binary }}" --workspace --features "${{ matrix.network }}" --lib --tests --benches --examples
+        env:
+          RUSTFLAGS: -D warnings
+
+  msrv:
+    name: MSRV / ${{ matrix.network }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - binary: reth
+            network: ethereum
+          - binary: op-reth
+            network: optimism
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.70" # MSRV
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: cargo build --bin "${{ matrix.binary }}" --workspace --features "${{ matrix.network }}"
         env:
           RUSTFLAGS: -D warnings
 

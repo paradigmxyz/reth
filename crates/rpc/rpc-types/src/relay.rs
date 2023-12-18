@@ -3,7 +3,7 @@
 
 use crate::{
     beacon::{BlsPublicKey, BlsSignature},
-    engine::BlobsBundleV1,
+    engine::{BlobsBundleV1, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3},
     ExecutionPayload,
 };
 use alloy_primitives::{Address, B256, U256};
@@ -44,6 +44,7 @@ pub struct ValidatorRegistrationMessage {
 /// (not necessarily a value confirmed by the relay).
 #[serde_as]
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ssz", derive(ssz_derive::Encode, ssz_derive::Decode))]
 pub struct BidTrace {
     #[serde_as(as = "DisplayFromStr")]
     pub slot: u64,
@@ -64,24 +65,75 @@ pub struct BidTrace {
 
 /// SignedBidTrace is a BidTrace with a signature
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ssz", derive(ssz_derive::Encode, ssz_derive::Decode))]
 pub struct SignedBidTrace {
     pub message: BidTrace,
     pub signature: BlsSignature,
 }
 
-/// Submission for the `/relay/v1/builder/blocks` endpoint.
+/// Submission for the `/relay/v1/builder/blocks` endpoint (Bellatrix).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SignedBidSubmission {
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "ssz", derive(ssz_derive::Decode, ssz_derive::Encode))]
+pub struct SignedBidSubmissionV1 {
     pub message: BidTrace,
+    #[serde(with = "crate::beacon::payload::beacon_payload_v1")]
+    pub execution_payload: ExecutionPayloadV1,
     pub signature: BlsSignature,
+}
+
+/// Submission for the `/relay/v1/builder/blocks` endpoint (Capella).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "ssz", derive(ssz_derive::Decode, ssz_derive::Encode))]
+pub struct SignedBidSubmissionV2 {
+    pub message: BidTrace,
+    #[serde(with = "crate::beacon::payload::beacon_payload_v2")]
+    pub execution_payload: ExecutionPayloadV2,
+    pub signature: BlsSignature,
+}
+
+/// Submission for the `/relay/v1/builder/blocks` endpoint (Deneb).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "ssz", derive(ssz_derive::Decode, ssz_derive::Encode))]
+pub struct SignedBidSubmissionV3 {
+    pub message: BidTrace,
+    #[serde(with = "crate::beacon::payload::beacon_payload_v3")]
+    pub execution_payload: ExecutionPayloadV3,
+    /// The Deneb block bundle for this bid.
+    pub blobs_bundle: BlobsBundleV1,
+    pub signature: BlsSignature,
+}
+
+/// SubmitBlockRequest is the request from the builder to submit a block.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubmitBlockRequest {
+    pub message: BidTrace,
     #[serde(with = "crate::beacon::payload::beacon_payload")]
     pub execution_payload: ExecutionPayload,
-    /// The Deneb block bundle for this bid.
-    ///
-    /// Only valid for [ExecutionPayloadV3](crate::eth::engine::ExecutionPayloadV3).
-    // TODO should this be combined with `execution_payload`?
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub blobs_bundle: Option<BlobsBundleV1>,
+    pub signature: BlsSignature,
+}
+
+/// A Request to validate a [SubmitBlockRequest] <https://github.com/flashbots/builder/blob/03ee71cf0a344397204f65ff6d3a917ee8e06724/eth/block-validation/api.go#L132-L136>
+#[serde_as]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuilderBlockValidationRequest {
+    #[serde(flatten)]
+    pub request: SubmitBlockRequest,
+    #[serde_as(as = "DisplayFromStr")]
+    pub registered_gas_limit: u64,
+}
+
+/// A Request to validate a [SubmitBlockRequest] <https://github.com/flashbots/builder/blob/03ee71cf0a344397204f65ff6d3a917ee8e06724/eth/block-validation/api.go#L204-L204>
+#[serde_as]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuilderBlockValidationRequestV2 {
+    #[serde(flatten)]
+    pub request: SubmitBlockRequest,
+    #[serde_as(as = "DisplayFromStr")]
+    pub registered_gas_limit: u64,
+    pub withdrawals_root: B256,
 }
 
 /// Query for the GET `/relay/v1/data/bidtraces/proposer_payload_delivered`
@@ -233,11 +285,48 @@ mod tests {
     }
 
     #[test]
-    fn deneb_bid_submission() {
-        let s = r#"{"message":{"slot":"1","parent_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","block_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","builder_pubkey":"0x93247f2209abcacf57b75a51dafae777f9dd38bc7053d1af526f220a7489a6d3a2753e5f3e8b1cfe39b56f43611df74a", "proposer_pubkey": "0x93247f2209abcacf57b75a51dafae777f9dd38bc7053d1af526f220a7489a6d3a2753e5f3e8b1cfe39b56f43611df74a","proposer_fee_recipient":"0xabcf8e0d4e9587369b2301d0790347320302cc09","gas_limit":"1","gas_used":"1","value":"1"},"execution_payload":{"parent_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","fee_recipient":"0xabcf8e0d4e9587369b2301d0790347320302cc09","state_root":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","receipts_root":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","logs_bloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prev_randao":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","block_number":"1","gas_limit":"1","gas_used":"1","timestamp":"1","extra_data":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","base_fee_per_gas":"1","block_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","transactions":["0x02f878831469668303f51d843b9ac9f9843b9aca0082520894c93269b73096998db66be0441e836d873535cb9c8894a19041886f000080c001a031cc29234036afbf9a1fb9476b463367cb1f957ac0b919b69bbc798436e604aaa018c4e9c3914eb27aadd0b91e10b18655739fcf8c1fc398763a9f1beecb8ddc86"],"withdrawals":[{"index":"1","validator_index":"1","address":"0xabcf8e0d4e9587369b2301d0790347320302cc09","amount":"32000000000"}]},"blobs_bundle":{"commitments":[],"proofs":[],"blobs":[]},"signature":"0x1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505cc411d61252fb6cb3fa0017b679f8bb2305b26a285fa2737f175668d0dff91cc1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505"}"#;
+    fn bellatrix_bid_submission() {
+        let s = r#"{"message":{"slot":"1","parent_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","block_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","builder_pubkey":"0x93247f2209abcacf57b75a51dafae777f9dd38bc7053d1af526f220a7489a6d3a2753e5f3e8b1cfe39b56f43611df74a", "proposer_pubkey": "0x93247f2209abcacf57b75a51dafae777f9dd38bc7053d1af526f220a7489a6d3a2753e5f3e8b1cfe39b56f43611df74a","proposer_fee_recipient":"0xabcf8e0d4e9587369b2301d0790347320302cc09","gas_limit":"1","gas_used":"1","value":"1"},"execution_payload":{"parent_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","fee_recipient":"0xabcf8e0d4e9587369b2301d0790347320302cc09","state_root":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","receipts_root":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","logs_bloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prev_randao":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","block_number":"1","gas_limit":"1","gas_used":"1","timestamp":"1","extra_data":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","base_fee_per_gas":"1","block_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","transactions":["0x02f878831469668303f51d843b9ac9f9843b9aca0082520894c93269b73096998db66be0441e836d873535cb9c8894a19041886f000080c001a031cc29234036afbf9a1fb9476b463367cb1f957ac0b919b69bbc798436e604aaa018c4e9c3914eb27aadd0b91e10b18655739fcf8c1fc398763a9f1beecb8ddc86"]},"signature":"0x1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505cc411d61252fb6cb3fa0017b679f8bb2305b26a285fa2737f175668d0dff91cc1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505"}"#;
 
-        let bid = serde_json::from_str::<SignedBidSubmission>(s).unwrap();
+        let bid = serde_json::from_str::<SignedBidSubmissionV1>(s).unwrap();
         let json: serde_json::Value = serde_json::from_str(s).unwrap();
         assert_eq!(json, serde_json::to_value(bid).unwrap());
+    }
+
+    #[test]
+    fn capella_bid_submission() {
+        let s = r#"{"message":{"slot":"1","parent_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","block_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","builder_pubkey":"0x93247f2209abcacf57b75a51dafae777f9dd38bc7053d1af526f220a7489a6d3a2753e5f3e8b1cfe39b56f43611df74a", "proposer_pubkey": "0x93247f2209abcacf57b75a51dafae777f9dd38bc7053d1af526f220a7489a6d3a2753e5f3e8b1cfe39b56f43611df74a","proposer_fee_recipient":"0xabcf8e0d4e9587369b2301d0790347320302cc09","gas_limit":"1","gas_used":"1","value":"1"},"execution_payload":{"parent_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","fee_recipient":"0xabcf8e0d4e9587369b2301d0790347320302cc09","state_root":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","receipts_root":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","logs_bloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prev_randao":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","block_number":"1","gas_limit":"1","gas_used":"1","timestamp":"1","extra_data":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","base_fee_per_gas":"1","block_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","transactions":["0x02f878831469668303f51d843b9ac9f9843b9aca0082520894c93269b73096998db66be0441e836d873535cb9c8894a19041886f000080c001a031cc29234036afbf9a1fb9476b463367cb1f957ac0b919b69bbc798436e604aaa018c4e9c3914eb27aadd0b91e10b18655739fcf8c1fc398763a9f1beecb8ddc86"],"withdrawals":[{"index":"1","validator_index":"1","address":"0xabcf8e0d4e9587369b2301d0790347320302cc09","amount":"32000000000"}]},"signature":"0x1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505cc411d61252fb6cb3fa0017b679f8bb2305b26a285fa2737f175668d0dff91cc1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505"}"#;
+
+        let bid = serde_json::from_str::<SignedBidSubmissionV2>(s).unwrap();
+        let json: serde_json::Value = serde_json::from_str(s).unwrap();
+        assert_eq!(json, serde_json::to_value(bid).unwrap());
+    }
+
+    #[test]
+    fn deneb_bid_submission() {
+        let s = r#"{"message":{"slot":"1","parent_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","block_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","builder_pubkey":"0x93247f2209abcacf57b75a51dafae777f9dd38bc7053d1af526f220a7489a6d3a2753e5f3e8b1cfe39b56f43611df74a", "proposer_pubkey": "0x93247f2209abcacf57b75a51dafae777f9dd38bc7053d1af526f220a7489a6d3a2753e5f3e8b1cfe39b56f43611df74a","proposer_fee_recipient":"0xabcf8e0d4e9587369b2301d0790347320302cc09","gas_limit":"1","gas_used":"1","value":"1"},"execution_payload":{"parent_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","fee_recipient":"0xabcf8e0d4e9587369b2301d0790347320302cc09","state_root":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","receipts_root":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","logs_bloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prev_randao":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","block_number":"1","gas_limit":"1","gas_used":"1","timestamp":"1","extra_data":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","base_fee_per_gas":"1","block_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","transactions":["0x02f878831469668303f51d843b9ac9f9843b9aca0082520894c93269b73096998db66be0441e836d873535cb9c8894a19041886f000080c001a031cc29234036afbf9a1fb9476b463367cb1f957ac0b919b69bbc798436e604aaa018c4e9c3914eb27aadd0b91e10b18655739fcf8c1fc398763a9f1beecb8ddc86"],"withdrawals":[{"index":"1","validator_index":"1","address":"0xabcf8e0d4e9587369b2301d0790347320302cc09","amount":"32000000000"}], "blob_gas_used":"1","excess_blob_gas":"1"},"blobs_bundle":{"commitments":[],"proofs":[],"blobs":[]},"signature":"0x1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505cc411d61252fb6cb3fa0017b679f8bb2305b26a285fa2737f175668d0dff91cc1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505"}"#;
+
+        let bid = serde_json::from_str::<SignedBidSubmissionV3>(s).unwrap();
+        let json: serde_json::Value = serde_json::from_str(s).unwrap();
+        assert_eq!(json, serde_json::to_value(bid).unwrap());
+    }
+
+    #[cfg(feature = "ssz")]
+    #[test]
+    fn capella_bid_submission_ssz() {
+        use ssz::{Decode, Encode};
+
+        let bytes = include_bytes!("../test_data/relay/signed_bid_submission_capella.ssz").to_vec();
+        let bid = SignedBidSubmissionV2::from_ssz_bytes(&bytes).unwrap();
+        assert_eq!(bytes, bid.as_ssz_bytes());
+    }
+
+    #[test]
+    fn test_can_parse_validation_request_body() {
+        const VALIDATION_REQUEST_BODY: &str =
+            include_str!("../test_data/relay/single_payload.json");
+
+        let _validation_request_body: BuilderBlockValidationRequest =
+            serde_json::from_str(VALIDATION_REQUEST_BODY).unwrap();
     }
 }

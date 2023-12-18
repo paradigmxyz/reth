@@ -33,9 +33,11 @@ impl CliRunner {
             task_manager,
             run_until_ctrl_c(command(context)),
         ))?;
-        // after the command has finished or exit signal was received we drop the task manager which
-        // fires the shutdown signal to all tasks spawned via the task executor
-        drop(task_manager);
+
+        // after the command has finished or exit signal was received we shutdown the task manager
+        // which fires the shutdown signal to all tasks spawned via the task executor and
+        // awaiting on tasks spawned with graceful shutdown
+        task_manager.graceful_shutdown_with_timeout(std::time::Duration::from_secs(10));
 
         // drop the tokio runtime on a separate thread because drop blocks until its pools
         // (including blocking pool) are shutdown. In other words `drop(tokio_runtime)` would block

@@ -9,7 +9,7 @@ use reth_primitives::{
         BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
     },
     Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    Receipts, SealedBlock, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Receipts, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -42,7 +42,7 @@ impl PendingBlockEnv {
         self,
         client: &Client,
         pool: &Pool,
-    ) -> EthResult<SealedBlock>
+    ) -> EthResult<SealedBlockWithSenders>
     where
         Client: StateProviderFactory + ChainSpecProvider,
         Pool: TransactionPool,
@@ -61,6 +61,7 @@ impl PendingBlockEnv {
         let block_number = block_env.number.to::<u64>();
 
         let mut executed_txs = Vec::new();
+        let mut senders = Vec::new();
         let mut best_txs = pool.best_transactions_with_base_fee(base_fee);
 
         let (withdrawals, withdrawals_root) = match origin {
@@ -173,10 +174,14 @@ impl PendingBlockEnv {
                 logs: result.logs().into_iter().map(into_reth_log).collect(),
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: None,
             }));
 
             // append transaction to the list of executed transactions
-            executed_txs.push(tx.into_signed());
+            let (tx, sender) = tx.to_components();
+            executed_txs.push(tx);
+            senders.push(sender);
         }
 
         // executes the withdrawals and commits them to the Database and BundleState.
@@ -198,7 +203,15 @@ impl PendingBlockEnv {
             block_number,
         );
 
-        let receipts_root = bundle.receipts_root_slow(block_number).expect("Block is present");
+        let receipts_root = bundle
+            .receipts_root_slow(
+                block_number,
+                #[cfg(feature = "optimism")]
+                chain_spec.as_ref(),
+                #[cfg(feature = "optimism")]
+                block_env.timestamp.to::<u64>(),
+            )
+            .expect("Block is present");
         let logs_bloom = bundle.block_logs_bloom(block_number).expect("Block is present");
 
         // calculate the state root
@@ -236,9 +249,7 @@ impl PendingBlockEnv {
 
         // seal the block
         let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
-        let sealed_block = block.seal_slow();
-
-        Ok(sealed_block)
+        Ok(SealedBlockWithSenders { block: block.seal_slow(), senders })
     }
 }
 
@@ -286,7 +297,7 @@ where
 #[derive(Clone, Debug)]
 pub(crate) enum PendingBlockEnvOrigin {
     /// The pending block as received from the CL.
-    ActualPending(SealedBlock),
+    ActualPending(SealedBlockWithSenders),
     /// The header of the latest block
     DerivedFromLatest(SealedHeader),
 }
@@ -298,7 +309,7 @@ impl PendingBlockEnvOrigin {
     }
 
     /// Consumes the type and returns the actual pending block.
-    pub(crate) fn into_actual_pending(self) -> Option<SealedBlock> {
+    pub(crate) fn into_actual_pending(self) -> Option<SealedBlockWithSenders> {
         match self {
             PendingBlockEnvOrigin::ActualPending(block) => Some(block),
             _ => None,
@@ -337,7 +348,7 @@ impl PendingBlockEnvOrigin {
 #[derive(Debug)]
 pub(crate) struct PendingBlock {
     /// The cached pending block
-    pub(crate) block: SealedBlock,
+    pub(crate) block: SealedBlockWithSenders,
     /// Timestamp when the pending block is considered outdated
     pub(crate) expires_at: Instant,
 }

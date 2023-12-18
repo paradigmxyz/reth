@@ -2,6 +2,7 @@ use crate::{
     listener::{ConnectionListener, ListenerEvent},
     message::{PeerMessage, PeerRequestSender},
     peers::InboundConnectionError,
+    protocol::IntoRlpxSubProtocol,
     session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},
     state::{NetworkState, StateAction},
 };
@@ -22,6 +23,7 @@ use std::{
 };
 use tracing::trace;
 
+#[cfg_attr(doc, aquamarine::aquamarine)]
 /// Contains the connectivity related state of the network.
 ///
 /// A swarm emits [`SwarmEvent`]s when polled.
@@ -43,24 +45,8 @@ use tracing::trace;
 /// request channel for the created session and sends requests it receives from the
 /// [`StateFetcher`], which receives request objects from the client interfaces responsible for
 /// downloading headers and bodies.
-#[cfg_attr(doc, aquamarine::aquamarine)]
-/// ```mermaid
-///  graph TB
-///     connections(TCP Listener)
-///     Discovery[(Discovery)]
-///     fetchRequest(Client Interfaces)
-///     Sessions[(SessionManager)]
-///     SessionTask[(Peer Session)]
-///     State[(State)]
-///     StateFetch[(State Fetcher)]
-///   connections --> |incoming| Sessions
-///   State --> |initiate outgoing| Sessions
-///   Discovery --> |update peers| State
-///   Sessions --> |spawns| SessionTask
-///   SessionTask <--> |handle state requests| State
-///   fetchRequest --> |request Headers, Bodies| StateFetch
-///   State --> |poll pending requests| StateFetch
-/// ```
+///
+/// include_mmd!("docs/mermaid/swarm.mmd")
 #[derive(Debug)]
 #[must_use = "Swarm does nothing unless polled"]
 pub(crate) struct Swarm<C> {
@@ -76,10 +62,7 @@ pub(crate) struct Swarm<C> {
 
 // === impl Swarm ===
 
-impl<C> Swarm<C>
-where
-    C: BlockNumReader,
-{
+impl<C> Swarm<C> {
     /// Configures a new swarm instance.
     pub(crate) fn new(
         incoming: ConnectionListener,
@@ -88,6 +71,11 @@ where
         net_connection_state: NetworkConnectionState,
     ) -> Self {
         Self { incoming, sessions, state, net_connection_state }
+    }
+
+    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    pub(crate) fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
+        self.sessions_mut().add_rlpx_sub_protocol(protocol);
     }
 
     /// Access to the state.
@@ -114,7 +102,12 @@ where
     pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager {
         &mut self.sessions
     }
+}
 
+impl<C> Swarm<C>
+where
+    C: BlockNumReader,
+{
     /// Triggers a new outgoing connection to the given node
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) {
         self.sessions.dial_outbound(remote_addr, remote_id)
@@ -199,7 +192,7 @@ where
             ListenerEvent::Incoming { stream, remote_addr } => {
                 // Reject incoming connection if node is shutting down.
                 if self.is_shutting_down() {
-                    return None
+                    return None;
                 }
                 // ensure we can handle an incoming connection from this address
                 if let Err(err) =
@@ -217,13 +210,13 @@ where
                             );
                         }
                     }
-                    return None
+                    return None;
                 }
 
                 match self.sessions.on_incoming(stream, remote_addr) {
                     Ok(session_id) => {
                         trace!(target: "net", ?remote_addr, "Incoming connection");
-                        return Some(SwarmEvent::IncomingTcpConnection { session_id, remote_addr })
+                        return Some(SwarmEvent::IncomingTcpConnection { session_id, remote_addr });
                     }
                     Err(err) => {
                         trace!(target: "net", ?err, "Incoming connection rejected, capacity already reached.");
@@ -242,7 +235,7 @@ where
         match event {
             StateAction::Connect { remote_addr, peer_id } => {
                 self.dial_outbound(remote_addr, peer_id);
-                return Some(SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id })
+                return Some(SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id });
             }
             StateAction::Disconnect { peer_id, reason } => {
                 self.sessions.disconnect(peer_id, reason);
@@ -260,7 +253,7 @@ where
             StateAction::DiscoveredNode { peer_id, socket_addr, fork_id } => {
                 // Don't try to connect to peer if node is shutting down
                 if self.is_shutting_down() {
-                    return None
+                    return None;
                 }
                 // Insert peer only if no fork id or a valid fork id
                 if fork_id.map_or_else(|| true, |f| self.sessions.is_valid_fork_id(f)) {
@@ -309,7 +302,7 @@ where
         loop {
             while let Poll::Ready(action) = this.state.poll(cx) {
                 if let Some(event) = this.on_state_action(action) {
-                    return Poll::Ready(Some(event))
+                    return Poll::Ready(Some(event));
                 }
             }
 
@@ -318,9 +311,9 @@ where
                 Poll::Pending => {}
                 Poll::Ready(event) => {
                     if let Some(event) = this.on_session_event(event) {
-                        return Poll::Ready(Some(event))
+                        return Poll::Ready(Some(event));
                     }
-                    continue
+                    continue;
                 }
             }
 
@@ -329,13 +322,13 @@ where
                 Poll::Pending => {}
                 Poll::Ready(event) => {
                     if let Some(event) = this.on_connection(event) {
-                        return Poll::Ready(Some(event))
+                        return Poll::Ready(Some(event));
                     }
-                    continue
+                    continue;
                 }
             }
 
-            return Poll::Pending
+            return Poll::Pending;
         }
     }
 }

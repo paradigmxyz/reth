@@ -128,7 +128,9 @@ pub struct PayloadBuilderAttributes {
     pub id: PayloadId,
     /// Parent block to build the payload on top
     pub parent: B256,
-    /// Timestamp for the generated payload
+    /// Unix timestamp for the generated payload
+    ///
+    /// Number of seconds since the Unix epoch.
     pub timestamp: u64,
     /// Address of the recipient for collecting transaction fee
     pub suggested_fee_recipient: Address,
@@ -167,13 +169,13 @@ impl PayloadBuilderAttributes {
 
         #[cfg(feature = "optimism")]
         let (id, transactions) = {
-            let transactions = attributes
+            let transactions: Vec<_> = attributes
                 .optimism_payload_attributes
                 .transactions
                 .as_deref()
                 .unwrap_or(&[])
                 .iter()
-                .map(|tx| TransactionSigned::decode_enveloped(tx.clone()))
+                .map(|tx| TransactionSigned::decode_enveloped(&mut tx.as_ref()))
                 .collect::<Result<_, _>>()?;
             (payload_id(&parent, &attributes, &transactions), transactions)
         };
@@ -251,7 +253,9 @@ impl PayloadBuilderAttributes {
             gas_limit: U256::from(parent.gas_limit),
             // calculate basefee based on parent block's gas usage
             basefee: U256::from(
-                parent.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default(),
+                parent
+                    .next_block_base_fee(chain_spec.base_fee_params(self.timestamp))
+                    .unwrap_or_default(),
             ),
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
@@ -272,7 +276,7 @@ impl PayloadBuilderAttributes {
 pub(crate) fn payload_id(
     parent: &B256,
     attributes: &PayloadAttributes,
-    #[cfg(feature = "optimism")] txs: &Vec<TransactionSigned>,
+    #[cfg(feature = "optimism")] txs: &[TransactionSigned],
 ) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();

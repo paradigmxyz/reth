@@ -32,27 +32,32 @@ pub struct TrieMask(u16);
 
 impl TrieMask {
     /// Creates a new `TrieMask` from the given inner value.
+    #[inline]
     pub fn new(inner: u16) -> Self {
         Self(inner)
     }
 
     /// Creates a new `TrieMask` from the given nibble.
+    #[inline]
     pub fn from_nibble(nibble: u8) -> Self {
         Self(1u16 << nibble)
     }
 
     /// Returns `true` if the current `TrieMask` is a subset of `other`.
-    pub fn is_subset_of(&self, other: &Self) -> bool {
-        *self & *other == *self
+    #[inline]
+    pub fn is_subset_of(self, other: Self) -> bool {
+        self & other == self
     }
 
     /// Returns `true` if a given bit is set in a mask.
-    pub fn is_bit_set(&self, index: u8) -> bool {
+    #[inline]
+    pub fn is_bit_set(self, index: u8) -> bool {
         self.0 & (1u16 << index) != 0
     }
 
     /// Returns `true` if the mask is empty.
-    pub fn is_empty(&self) -> bool {
+    #[inline]
+    pub fn is_empty(self) -> bool {
         self.0 == 0
     }
 }
@@ -72,10 +77,7 @@ impl Compact for TrieMask {
         2
     }
 
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let mask = buf.get_u16();
         (Self(mask), buf)
     }

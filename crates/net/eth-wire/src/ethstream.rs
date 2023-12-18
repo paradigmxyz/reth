@@ -166,6 +166,7 @@ where
 #[pin_project]
 #[derive(Debug)]
 pub struct EthStream<S> {
+    /// Negotiated eth version.
     version: EthVersion,
     #[pin]
     inner: S,
@@ -174,26 +175,31 @@ pub struct EthStream<S> {
 impl<S> EthStream<S> {
     /// Creates a new unauthed [`EthStream`] from a provided stream. You will need
     /// to manually handshake a peer.
+    #[inline]
     pub fn new(version: EthVersion, inner: S) -> Self {
         Self { version, inner }
     }
 
     /// Returns the eth version.
+    #[inline]
     pub fn version(&self) -> EthVersion {
         self.version
     }
 
     /// Returns the underlying stream.
+    #[inline]
     pub fn inner(&self) -> &S {
         &self.inner
     }
 
     /// Returns mutable access to the underlying stream.
+    #[inline]
     pub fn inner_mut(&mut self) -> &mut S {
         &mut self.inner
     }
 
     /// Consumes this type and returns the wrapped stream.
+    #[inline]
     pub fn into_inner(self) -> S {
         self.inner
     }
@@ -242,9 +248,14 @@ where
         let msg = match ProtocolMessage::decode_message(*this.version, &mut bytes.as_ref()) {
             Ok(m) => m,
             Err(err) => {
+                let msg = if bytes.len() > 50 {
+                    format!("{:02x?}...{:x?}", &bytes[..10], &bytes[bytes.len() - 10..])
+                } else {
+                    format!("{:02x?}", bytes)
+                };
                 debug!(
                     version=?this.version,
-                    msg=format!("{:02x?}...{:x?}", &bytes[..10], &bytes[bytes.len() - 10..]),
+                    %msg,
                     "failed to decode protocol message"
                 );
                 return Poll::Ready(Some(Err(err)))
@@ -278,7 +289,7 @@ where
             // start_disconnect, which would ideally be a part of the CanDisconnect trait, or at
             // least similar.
             //
-            // Other parts of reth do not need traits like CanDisconnect because they work
+            // Other parts of reth do not yet need traits like CanDisconnect because atm they work
             // exclusively with EthStream<P2PStream<S>>, where the inner P2PStream is accessible,
             // allowing for its start_disconnect method to be called.
             //

@@ -1,22 +1,25 @@
-//! Provides everything related to `eth_` namespace
-//!
 //! The entire implementation of the namespace is quite large, hence it is divided across several
 //! files.
 
 use crate::eth::{
-    api::pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin},
+    api::{
+        fee_history::FeeHistoryCache,
+        pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin},
+    },
     cache::EthStateCache,
     error::{EthApiError, EthResult},
     gas_oracle::GasPriceOracle,
     signer::EthSigner,
 };
+
 use async_trait::async_trait;
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnv},
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, B256, U256, U64,
+    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, B256, U256, U64,
 };
+
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
@@ -24,14 +27,17 @@ use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
 use std::{
+    fmt::Debug,
     future::Future,
     sync::Arc,
     time::{Duration, Instant},
 };
+
 use tokio::sync::{oneshot, Mutex};
 
 mod block;
 mod call;
+pub(crate) mod fee_history;
 mod fees;
 #[cfg(feature = "optimism")]
 mod optimism;
@@ -86,6 +92,7 @@ where
     Provider: BlockReaderIdExt + ChainSpecProvider,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: Provider,
         pool: Pool,
@@ -94,6 +101,7 @@ where
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
         blocking_task_pool: BlockingTaskPool,
+        fee_history_cache: FeeHistoryCache,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -104,6 +112,7 @@ where
             gas_cap.into().into(),
             Box::<TokioTaskExecutor>::default(),
             blocking_task_pool,
+            fee_history_cache,
         )
     }
 
@@ -118,6 +127,7 @@ where
         gas_cap: u64,
         task_spawner: Box<dyn TaskSpawner>,
         blocking_task_pool: BlockingTaskPool,
+        fee_history_cache: FeeHistoryCache,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -139,9 +149,11 @@ where
             task_spawner,
             pending_block: Default::default(),
             blocking_task_pool,
+            fee_history_cache,
             #[cfg(feature = "optimism")]
             http_client: reqwest::Client::new(),
         };
+
         Self { inner: Arc::new(inner) }
     }
 
@@ -194,6 +206,11 @@ where
     pub fn pool(&self) -> &Pool {
         &self.inner.pool
     }
+
+    /// Returns fee history cache
+    pub fn fee_history_cache(&self) -> &FeeHistoryCache {
+        &self.inner.fee_history_cache
+    }
 }
 
 // === State access helpers ===
@@ -206,7 +223,7 @@ where
     /// Returns the state at the given [BlockId] enum.
     ///
     /// Note: if not [BlockNumberOrTag::Pending] then this will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
-    pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
+    pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox> {
         Ok(self.provider().state_by_block_id(at)?)
     }
 
@@ -216,7 +233,7 @@ where
     pub fn state_at_block_id_or_latest(
         &self,
         block_id: Option<BlockId>,
-    ) -> EthResult<StateProviderBox<'_>> {
+    ) -> EthResult<StateProviderBox> {
         if let Some(block_id) = block_id {
             self.state_at_block_id(block_id)
         } else {
@@ -225,13 +242,13 @@ where
     }
 
     /// Returns the state at the given block number
-    pub fn state_at_hash(&self, block_hash: B256) -> RethResult<StateProviderBox<'_>> {
-        self.provider().history_by_block_hash(block_hash)
+    pub fn state_at_hash(&self, block_hash: B256) -> RethResult<StateProviderBox> {
+        Ok(self.provider().history_by_block_hash(block_hash)?)
     }
 
     /// Returns the _latest_ state
-    pub fn latest_state(&self) -> RethResult<StateProviderBox<'_>> {
-        self.provider().latest()
+    pub fn latest_state(&self) -> RethResult<StateProviderBox> {
+        Ok(self.provider().latest()?)
     }
 }
 
@@ -246,7 +263,7 @@ where
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     pub(crate) fn pending_block_env_and_cfg(&self) -> EthResult<PendingBlockEnv> {
-        let origin = if let Some(pending) = self.provider().pending_block()? {
+        let origin = if let Some(pending) = self.provider().pending_block_with_senders()? {
             PendingBlockEnvOrigin::ActualPending(pending)
         } else {
             // no pending block from the CL yet, so we use the latest block and modify the env
@@ -260,7 +277,8 @@ where
             latest.timestamp += 12;
             // base fee of the child block
             let chain_spec = self.provider().chain_spec();
-            latest.base_fee_per_gas = latest.next_block_base_fee(chain_spec.base_fee_params);
+            latest.base_fee_per_gas =
+                latest.next_block_base_fee(chain_spec.base_fee_params(latest.timestamp));
 
             PendingBlockEnvOrigin::DerivedFromLatest(latest)
         };
@@ -281,7 +299,7 @@ where
     }
 
     /// Returns the locally built pending block
-    pub(crate) async fn local_pending_block(&self) -> EthResult<Option<SealedBlock>> {
+    pub(crate) async fn local_pending_block(&self) -> EthResult<Option<SealedBlockWithSenders>> {
         let pending = self.pending_block_env_and_cfg()?;
         if pending.origin.is_actual_pending() {
             return Ok(pending.origin.into_actual_pending())
@@ -364,7 +382,7 @@ where
 
     /// Returns the current info for the chain
     fn chain_info(&self) -> RethResult<ChainInfo> {
-        self.provider().chain_info()
+        Ok(self.provider().chain_info()?)
     }
 
     fn accounts(&self) -> Vec<Address> {
@@ -448,6 +466,8 @@ struct EthApiInner<Provider, Pool, Network> {
     pending_block: Mutex<Option<PendingBlock>>,
     /// A pool dedicated to blocking tasks.
     blocking_task_pool: BlockingTaskPool,
+    /// Cache for block fees history
+    fee_history_cache: FeeHistoryCache,
     /// An http client for communicating with sequencers.
     #[cfg(feature = "optimism")]
     http_client: reqwest::Client,

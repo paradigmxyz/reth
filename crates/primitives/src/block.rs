@@ -53,14 +53,40 @@ impl Block {
         }
     }
 
+    /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
+    pub fn senders(&self) -> Option<Vec<Address>> {
+        TransactionSigned::recover_signers(&self.body, self.body.len())
+    }
+
     /// Transform into a [`BlockWithSenders`].
+    ///
+    /// # Panics
+    ///
+    /// If the number of senders does not match the number of transactions in the block
+    /// and the signer recovery for one of the transactions fails.
+    #[track_caller]
     pub fn with_senders(self, senders: Vec<Address>) -> BlockWithSenders {
-        assert_eq!(self.body.len(), senders.len(), "Unequal number of senders");
+        let senders = if self.body.len() == senders.len() {
+            senders
+        } else {
+            TransactionSigned::recover_signers(&self.body, self.body.len())
+                .expect("stored block is valid")
+        };
 
         BlockWithSenders { block: self, senders }
     }
 
+    /// **Expensive**. Transform into a [`BlockWithSenders`] by recovering senders in the contained
+    /// transactions.
+    ///
+    /// Returns `None` if a transaction is invalid.
+    pub fn with_recovered_senders(self) -> Option<BlockWithSenders> {
+        let senders = self.senders()?;
+        Some(BlockWithSenders { block: self, senders })
+    }
+
     /// Returns whether or not the block contains any blob transactions.
+    #[inline]
     pub fn has_blob_transactions(&self) -> bool {
         self.body.iter().any(|tx| tx.is_eip4844())
     }
@@ -98,9 +124,47 @@ impl BlockWithSenders {
         (!block.body.len() != senders.len()).then_some(Self { block, senders })
     }
 
+    /// Seal the block with a known hash.
+    ///
+    /// WARNING: This method does not perform validation whether the hash is correct.
+    #[inline]
+    pub fn seal(self, hash: B256) -> SealedBlockWithSenders {
+        let Self { block, senders } = self;
+        SealedBlockWithSenders { block: block.seal(hash), senders }
+    }
+
     /// Split Structure to its components
+    #[inline]
     pub fn into_components(self) -> (Block, Vec<Address>) {
         (self.block, self.senders)
+    }
+
+    /// Returns an iterator over all transactions in the block.
+    #[inline]
+    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+        self.block.body.iter()
+    }
+
+    /// Returns an iterator over all transactions and their sender.
+    #[inline]
+    pub fn transactions_with_sender(
+        &self,
+    ) -> impl Iterator<Item = (&Address, &TransactionSigned)> + '_ {
+        self.senders.iter().zip(self.block.body.iter())
+    }
+
+    /// Consumes the block and returns the transactions of the block.
+    #[inline]
+    pub fn into_transactions(self) -> Vec<TransactionSigned> {
+        self.block.body
+    }
+
+    /// Returns an iterator over all transactions in the chain.
+    #[inline]
+    pub fn into_transactions_ecrecovered(
+        self,
+    ) -> impl Iterator<Item = TransactionSignedEcRecovered> {
+        self.block.body.into_iter().zip(self.senders).map(|(tx, sender)| tx.with_signer(sender))
     }
 }
 
@@ -170,9 +234,30 @@ impl SealedBlock {
         )
     }
 
+    /// Returns an iterator over all blob transactions of the block
+    #[inline]
+    pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+        self.body.iter().filter(|tx| tx.is_eip4844())
+    }
+
     /// Returns only the blob transactions, if any, from the block body.
+    #[inline]
     pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
-        self.body.iter().filter(|tx| tx.is_eip4844()).collect()
+        self.blob_transactions_iter().collect()
+    }
+
+    /// Returns an iterator over all blob versioned hashes from the block body.
+    #[inline]
+    pub fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
+        self.blob_transactions_iter()
+            .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
+            .flatten()
+    }
+
+    /// Returns all blob versioned hashes from the block body.
+    #[inline]
+    pub fn blob_versioned_hashes(&self) -> Vec<&B256> {
+        self.blob_versioned_hashes_iter().collect()
     }
 
     /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
@@ -258,6 +343,13 @@ impl SealedBlockWithSenders {
     #[inline]
     pub fn into_components(self) -> (SealedBlock, Vec<Address>) {
         (self.block, self.senders)
+    }
+
+    /// Returns the unsealed [BlockWithSenders]
+    #[inline]
+    pub fn unseal(self) -> BlockWithSenders {
+        let Self { block, senders } = self;
+        BlockWithSenders { block: block.unseal(), senders }
     }
 
     /// Returns an iterator over all transactions in the block.
