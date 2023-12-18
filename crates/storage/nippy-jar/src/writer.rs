@@ -14,7 +14,7 @@ const OFFSET_SIZE_BYTES: u64 = 8;
 #[derive(Debug)]
 enum JarHolder<'a, H: NippyJarHeader = ()> {
     MutRef(&'a mut NippyJar<H>),
-    Owned(NippyJar<H>),
+    Owned(Box<NippyJar<H>>),
 }
 
 impl<'a, H: NippyJarHeader> Deref for JarHolder<'a, H> {
@@ -22,7 +22,7 @@ impl<'a, H: NippyJarHeader> Deref for JarHolder<'a, H> {
 
     fn deref(&self) -> &Self::Target {
         match self {
-            JarHolder::MutRef(jar) => *jar,
+            JarHolder::MutRef(jar) => jar,
             JarHolder::Owned(jar) => jar,
         }
     }
@@ -31,8 +31,8 @@ impl<'a, H: NippyJarHeader> Deref for JarHolder<'a, H> {
 impl<'a, H: NippyJarHeader> DerefMut for JarHolder<'a, H> {
     fn deref_mut(&mut self) -> &mut NippyJar<H> {
         match self {
-            JarHolder::MutRef(j) => *j,
-            JarHolder::Owned(j) => j,
+            JarHolder::MutRef(jar) => jar,
+            JarHolder::Owned(jar) => jar,
         }
     }
 }
