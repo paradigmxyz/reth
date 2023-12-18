@@ -17,7 +17,6 @@ use crate::{
     init::init_genesis,
     node::{cl_events::ConsensusLayerHealthEvents, events, run_network_until_shutdown},
     prometheus_exporter,
-    runner::tokio_runtime,
     utils::get_single_header,
     version::SHORT_VERSION,
 };
@@ -95,9 +94,12 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
-use tokio::sync::{
-    mpsc::{unbounded_channel, Receiver, UnboundedSender},
-    oneshot, watch,
+use tokio::{
+    runtime::Handle,
+    sync::{
+        mpsc::{unbounded_channel, Receiver, UnboundedSender},
+        oneshot, watch,
+    },
 };
 use tracing::*;
 
@@ -196,6 +198,139 @@ impl NodeConfig {
             pruning: PruningArgs::default(),
             #[cfg(feature = "optimism")]
             rollup: crate::args::RollupArgs::default(),
+        }
+    }
+
+    /// Set the datadir for the node
+    pub fn with_datadir(mut self, datadir: MaybePlatformPath<DataDirPath>) -> Self {
+        self.database = DatabaseType::Real(datadir);
+        self
+    }
+
+    /// Set the config file for the node
+    pub fn with_config(mut self, config: impl Into<PathBuf>) -> Self {
+        self.config = Some(config.into());
+        self
+    }
+
+    /// Set the chain for the node
+    pub fn with_chain(mut self, chain: Arc<ChainSpec>) -> Self {
+        self.chain = chain;
+        self
+    }
+
+    /// Set the metrics address for the node
+    pub fn with_metrics(mut self, metrics: SocketAddr) -> Self {
+        self.metrics = Some(metrics);
+        self
+    }
+
+    /// Set the instance for the node
+    pub fn with_instance(mut self, instance: u16) -> Self {
+        self.instance = instance;
+        self
+    }
+
+    /// Set the [Chain] for the node
+    pub fn with_chain_spec(mut self, chain: Arc<ChainSpec>) -> Self {
+        self.chain = chain;
+        self
+    }
+
+    /// Set the trusted setup file for the node
+    pub fn with_trusted_setup_file(mut self, trusted_setup_file: impl Into<PathBuf>) -> Self {
+        self.trusted_setup_file = Some(trusted_setup_file.into());
+        self
+    }
+
+    /// Set the network args for the node
+    pub fn with_network(mut self, network: NetworkArgs) -> Self {
+        self.network = network;
+        self
+    }
+
+    /// Set the rpc args for the node
+    pub fn with_rpc(mut self, rpc: RpcServerArgs) -> Self {
+        self.rpc = rpc;
+        self
+    }
+
+    /// Set the txpool args for the node
+    pub fn with_txpool(mut self, txpool: TxPoolArgs) -> Self {
+        self.txpool = txpool;
+        self
+    }
+
+    /// Set the builder args for the node
+    pub fn with_builder(mut self, builder: PayloadBuilderArgs) -> Self {
+        self.builder = builder;
+        self
+    }
+
+    /// Set the debug args for the node
+    pub fn with_debug(mut self, debug: DebugArgs) -> Self {
+        self.debug = debug;
+        self
+    }
+
+    /// Set the database args for the node
+    pub fn with_db(mut self, db: DatabaseArgs) -> Self {
+        self.db = db;
+        self
+    }
+
+    /// Set the dev args for the node
+    pub fn with_dev(mut self, dev: DevArgs) -> Self {
+        self.dev = dev;
+        self
+    }
+
+    /// Set the pruning args for the node
+    pub fn with_pruning(mut self, pruning: PruningArgs) -> Self {
+        self.pruning = pruning;
+        self
+    }
+
+    /// Set the rollup args for the node
+    #[cfg(feature = "optimism")]
+    pub fn with_rollup(mut self, rollup: crate::args::RollupArgs) -> Self {
+        self.rollup = rollup;
+        self
+    }
+
+    /// Launches the node, also adding any RPC extensions passed.
+    ///
+    /// # Example
+    /// ```rust
+    /// # use reth_tasks::TaskManager;
+    /// fn t() {
+    ///     use reth_tasks::TaskSpawner;
+    ///     let rt = tokio::runtime::Runtime::new().unwrap();
+    ///     let manager = TaskManager::new(rt.handle().clone());
+    ///     let executor = manager.executor();
+    ///     let config = NodeConfig::default();
+    ///     let ext = DefaultRethNodeCommandConfig;
+    ///     let handle = config.launch(ext, executor);
+    /// }
+    /// ```
+    pub async fn launch<E: RethCliExt>(
+        mut self,
+        ext: E::Node,
+        executor: TaskExecutor,
+    ) -> eyre::Result<NodeHandle> {
+        let database = std::mem::take(&mut self.database);
+        let db_instance =
+            DatabaseBuilder::new(database).build_db(self.db.log_level, self.chain.chain)?;
+
+        match db_instance {
+            DatabaseInstance::Real { db, data_dir } => {
+                let builder = NodeBuilderWithDatabase { config: self, db, data_dir };
+                builder.launch::<E>(ext, executor).await
+            }
+            DatabaseInstance::Test { db, data_dir } => {
+                let builder = NodeBuilderWithDatabase { config: self, db, data_dir };
+                builder.launch::<E>(ext, executor).await
+            }
         }
     }
 
@@ -370,141 +505,6 @@ impl NodeConfig {
         Ok(transaction_pool)
     }
 
-    /// Launches the node, also adding any RPC extensions passed.
-    ///
-    /// # Example
-    /// ```rust
-    /// # use reth_tasks::TaskManager;
-    /// fn t() {
-    ///     use reth_tasks::TaskSpawner;
-    ///     let rt = tokio::runtime::Runtime::new().unwrap();
-    ///     let manager = TaskManager::new(rt.handle().clone());
-    ///     let executor = manager.executor();
-    ///     let config = NodeConfig::default();
-    ///     let ext = DefaultRethNodeCommandConfig;
-    ///     let handle = config.launch(ext, executor);
-    /// }
-    /// ```
-    pub async fn launch<E: RethCliExt>(
-        mut self,
-        ext: E::Node,
-        executor: TaskExecutor,
-    ) -> eyre::Result<NodeHandle> {
-        let data_dir = self.data_dir().expect("see below");
-
-        let database = std::mem::take(&mut self.database);
-        let db_instance =
-            DatabaseBuilder::new(database).build_db(self.db.log_level, self.chain.chain)?;
-
-        match db_instance {
-            DatabaseInstance::Real(database) => {
-                let builder = NodeBuilderWithDatabase { config: self, database, data_dir };
-                builder.launch::<E>(ext, executor).await
-            }
-            DatabaseInstance::Test(database) => {
-                let builder = NodeBuilderWithDatabase { config: self, database, data_dir };
-                builder.launch::<E>(ext, executor).await
-            }
-        }
-    }
-
-    /// Set the datadir for the node
-    pub fn datadir(mut self, datadir: MaybePlatformPath<DataDirPath>) -> Self {
-        self.database = DatabaseType::Real(datadir);
-        self
-    }
-
-    /// Set the config file for the node
-    pub fn config(mut self, config: impl Into<PathBuf>) -> Self {
-        self.config = Some(config.into());
-        self
-    }
-
-    /// Set the chain for the node
-    pub fn chain(mut self, chain: Arc<ChainSpec>) -> Self {
-        self.chain = chain;
-        self
-    }
-
-    /// Set the metrics address for the node
-    pub fn metrics(mut self, metrics: SocketAddr) -> Self {
-        self.metrics = Some(metrics);
-        self
-    }
-
-    /// Set the instance for the node
-    pub fn instance(mut self, instance: u16) -> Self {
-        self.instance = instance;
-        self
-    }
-
-    /// Set the [Chain] for the node
-    pub fn chain_spec(mut self, chain: Arc<ChainSpec>) -> Self {
-        self.chain = chain;
-        self
-    }
-
-    /// Set the trusted setup file for the node
-    pub fn trusted_setup_file(mut self, trusted_setup_file: impl Into<PathBuf>) -> Self {
-        self.trusted_setup_file = Some(trusted_setup_file.into());
-        self
-    }
-
-    /// Set the network args for the node
-    pub fn network(mut self, network: NetworkArgs) -> Self {
-        self.network = network;
-        self
-    }
-
-    /// Set the rpc args for the node
-    pub fn rpc(mut self, rpc: RpcServerArgs) -> Self {
-        self.rpc = rpc;
-        self
-    }
-
-    /// Set the txpool args for the node
-    pub fn txpool(mut self, txpool: TxPoolArgs) -> Self {
-        self.txpool = txpool;
-        self
-    }
-
-    /// Set the builder args for the node
-    pub fn builder(mut self, builder: PayloadBuilderArgs) -> Self {
-        self.builder = builder;
-        self
-    }
-
-    /// Set the debug args for the node
-    pub fn debug(mut self, debug: DebugArgs) -> Self {
-        self.debug = debug;
-        self
-    }
-
-    /// Set the database args for the node
-    pub fn db(mut self, db: DatabaseArgs) -> Self {
-        self.db = db;
-        self
-    }
-
-    /// Set the dev args for the node
-    pub fn dev(mut self, dev: DevArgs) -> Self {
-        self.dev = dev;
-        self
-    }
-
-    /// Set the pruning args for the node
-    pub fn pruning(mut self, pruning: PruningArgs) -> Self {
-        self.pruning = pruning;
-        self
-    }
-
-    /// Set the rollup args for the node
-    #[cfg(feature = "optimism")]
-    pub fn rollup(mut self, rollup: crate::args::RollupArgs) -> Self {
-        self.rollup = rollup;
-        self
-    }
-
     /// Returns the [Consensus] instance to use.
     ///
     /// By default this will be a [BeaconConsensus] instance, but if the `--dev` flag is set, it
@@ -535,11 +535,11 @@ impl NodeConfig {
         Client: HeadersClient + BodiesClient + Clone + 'static,
     {
         // building network downloaders using the fetch client
-        let header_downloader = ReverseHeadersDownloaderBuilder::from(config.headers)
+        let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
             .build(client.clone(), Arc::clone(&consensus))
             .into_task_with(task_executor);
 
-        let body_downloader = BodiesDownloaderBuilder::from(config.bodies)
+        let body_downloader = BodiesDownloaderBuilder::new(config.bodies)
             .build(client, Arc::clone(&consensus), provider_factory.clone())
             .into_task_with(task_executor);
 
@@ -946,14 +946,10 @@ impl NodeConfig {
         )
     }
 
-    /// Change rpc port numbers based on the instance number.
+    /// Change rpc port numbers based on the instance number, using the inner
+    /// [RpcServerArgs::adjust_instance_ports] method.
     fn adjust_instance_ports(&mut self) {
-        // auth port is scaled by a factor of instance * 100
-        self.rpc.auth_port += self.instance * 100 - 100;
-        // http port is scaled by a factor of -instance
-        self.rpc.http_port -= self.instance - 1;
-        // ws port is scaled by a factor of instance * 2
-        self.rpc.ws_port += self.instance * 2 - 2;
+        self.rpc.adjust_instance_ports(self.instance);
     }
 }
 
@@ -988,7 +984,7 @@ pub struct NodeBuilderWithDatabase<DB> {
     /// The node config
     pub config: NodeConfig,
     /// The database
-    pub database: Arc<DB>,
+    pub db: Arc<DB>,
     /// The data dir
     pub data_dir: ChainPath<DataDirPath>,
 }
@@ -1013,7 +1009,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         info!(target: "reth::cli", "Database opened");
 
         let mut provider_factory =
-            ProviderFactory::new(Arc::clone(&self.database), Arc::clone(&self.config.chain));
+            ProviderFactory::new(Arc::clone(&self.db), Arc::clone(&self.config.chain));
 
         // configure snapshotter
         let snapshotter = reth_snapshot::Snapshotter::new(
@@ -1027,11 +1023,11 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             snapshotter.highest_snapshot_receiver(),
         );
 
-        self.config.start_metrics_endpoint(prometheus_handle, Arc::clone(&self.database)).await?;
+        self.config.start_metrics_endpoint(prometheus_handle, Arc::clone(&self.db)).await?;
 
         debug!(target: "reth::cli", chain=%self.config.chain.chain, genesis=?self.config.chain.genesis_hash(), "Initializing genesis");
 
-        let genesis_hash = init_genesis(Arc::clone(&self.database), self.config.chain.clone())?;
+        let genesis_hash = init_genesis(Arc::clone(&self.db), self.config.chain.clone())?;
 
         info!(target: "reth::cli", "{}", DisplayHardforks::new(self.config.chain.hardforks()));
 
@@ -1235,7 +1231,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
                 Some(network.clone()),
                 Some(head.number),
                 events,
-                self.database.clone(),
+                self.db.clone(),
             ),
         );
 
@@ -1277,7 +1273,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         // starts syncing from the current tip in the DB.
         #[cfg(feature = "optimism")]
         if self.chain.is_optimism() && !self.rollup.enable_genesis_walkback {
-            let client = _rpc_server_handles.auth.http_client();
+            let client = rpc_server_handles.auth.http_client();
             reth_rpc_api::EngineApiClient::fork_choice_updated_v2(
                 &client,
                 reth_rpc_types::engine::ForkchoiceState {
@@ -1291,28 +1287,17 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         }
 
         // construct node handle and return
-        let node_handle = NodeHandle { rpc_server_handles, consensus_engine_rx: rx };
+        let node_handle = NodeHandle {
+            rpc_server_handles,
+            consensus_engine_rx: rx,
+            terminate: self.config.debug.terminate,
+        };
         Ok(node_handle)
-
-        // rx.await??;
-
-        // info!(target: "reth::cli", "Consensus engine has exited.");
-
-        // if self.debug.terminate {
-        //     Ok(())
-        // } else {
-        //     // The pipeline has finished downloading blocks up to `--debug.tip` or
-        //     // `--debug.max-block`. Keep other node components alive for further usage.
-        //     futures::future::pending().await
-        // }
     }
 }
 
-/// The node handle
-// We need from each component on init:
-// * channels (for wiring into other components)
-// * handles (for wiring into other components)
-//   * also for giving to the NodeHandle, for example everything rpc
+/// The [NodeHandle] contains the [RethRpcServerHandles] returned by the reth initialization
+/// process, as well as a method for waiting for the node exit.
 #[derive(Debug)]
 pub struct NodeHandle {
     /// The handles to the RPC servers
@@ -1321,6 +1306,9 @@ pub struct NodeHandle {
     /// The receiver half of the channel for the consensus engine.
     /// This can be used to wait for the consensus engine to exit.
     consensus_engine_rx: oneshot::Receiver<Result<(), BeaconConsensusEngineError>>,
+
+    /// Flag indicating whether the node should be terminated after the pipeline sync.
+    terminate: bool,
 }
 
 impl NodeHandle {
@@ -1329,33 +1317,41 @@ impl NodeHandle {
         &self.rpc_server_handles
     }
 
-    /// Waits for the consensus engine to exit.
-    pub async fn wait_for_consensus_exit(self) -> eyre::Result<()> {
+    /// Waits for the node to exit, if it was configured to exit.
+    pub async fn wait_for_node_exit(self) -> eyre::Result<()> {
         self.consensus_engine_rx.await??;
-        Ok(())
+        info!(target: "reth::cli", "Consensus engine has exited.");
+
+        if self.terminate {
+            Ok(())
+        } else {
+            // The pipeline has finished downloading blocks up to `--debug.tip` or
+            // `--debug.max-block`. Keep other node components alive for further usage.
+            futures::future::pending().await
+        }
     }
 }
 
 /// A simple function to launch a node with the specified [NodeConfig], spawning tasks on the
-/// [TaskExecutor] constructed from [tokio_runtime].
+/// [TaskExecutor] constructed from [Handle::current].
 pub async fn spawn_node(config: NodeConfig) -> eyre::Result<NodeHandle> {
-    let runtime = tokio_runtime()?;
-    let task_manager = TaskManager::new(runtime.handle().clone());
+    let handle = Handle::current();
+    let task_manager = TaskManager::new(handle);
     let ext = DefaultRethNodeCommandConfig;
     config.launch::<()>(ext, task_manager.executor()).await
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use reth_primitives::U256;
     use reth_rpc_api::EthApiClient;
 
-    use super::*;
-
     #[tokio::test]
     async fn block_number_node_config_test() {
-        // this launches a test node
-        let handle = spawn_node(NodeConfig::test()).await.unwrap();
+        // this launches a test node with http
+        let rpc_args = RpcServerArgs::default().with_http();
+        let handle = spawn_node(NodeConfig::test().with_rpc(rpc_args)).await.unwrap();
 
         // call a function on the node
         let client = handle.rpc_server_handles().rpc.http_client().unwrap();
@@ -1363,5 +1359,15 @@ mod tests {
 
         // it should be zero, since this is an ephemeral test node
         assert_eq!(block_number, U256::ZERO);
+    }
+
+    #[tokio::test]
+    async fn rpc_handles_none_without_http() {
+        // this launches a test node _without_ http
+        let handle = spawn_node(NodeConfig::test()).await.unwrap();
+
+        // ensure that the `http_client` is none
+        let maybe_client = handle.rpc_server_handles().rpc.http_client();
+        assert!(maybe_client.is_none());
     }
 }
