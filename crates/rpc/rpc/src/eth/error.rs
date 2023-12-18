@@ -116,6 +116,17 @@ pub enum OptimismEthApiError {
     /// Wrapper around an [http::Error].
     #[error(transparent)]
     HttpError(#[from] http::Error),
+    #[error("unknown block number")]
+    UnknownBlockNumber,
+    /// Thrown when serializing transaction to forward to sequencer 
+    #[error("invalid sequencer transaction")]
+    InvalidSequencerTransaction,
+    /// Thrown when calculating L1 gas fee
+    #[error("failed to calculate l1 gas fee")]
+    L1BlockFeeError,
+    /// Thrown when calculating L1 gas used
+    #[error("failed to calculate l1 gas used")]
+    L1BlockGasError
 }
 
 impl From<EthApiError> for ErrorObject<'static> {
@@ -156,6 +167,12 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::Optimism(err) => match err {
                 OptimismEthApiError::HyperError(err) => internal_rpc_err(err.to_string()),
                 OptimismEthApiError::HttpError(err) => internal_rpc_err(err.to_string()),
+                OptimismEthApiError::UnknownBlockNumber => {
+                    rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
+                },
+                OptimismEthApiError::InvalidSequencerTransaction | 
+                OptimismEthApiError::L1BlockFeeError | 
+                OptimismEthApiError::L1BlockGasError => internal_rpc_err(err.to_string()),
             },
         }
     }
