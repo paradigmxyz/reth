@@ -76,6 +76,9 @@ pub enum StageError {
     /// rely on external downloaders
     #[error("invalid download response: {0}")]
     Download(#[from] DownloadError),
+    /// Database is ahead of snapshot data.
+    #[error("missing snapshot data")]
+    MissingSnapshotData,
     /// Internal error
     #[error(transparent)]
     Internal(#[from] RethError),
