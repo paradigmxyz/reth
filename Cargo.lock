@@ -6273,6 +6273,7 @@ dependencies = [
  "reth-primitives",
  "reth-trie",
  "revm",
+ "strum",
  "tempfile",
  "tokio",
  "tokio-stream",
