@@ -153,7 +153,10 @@ pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<Databas
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::*;
-    use crate::{database::Database, database_metrics::DatabaseMetrics};
+    use crate::{
+        database::Database,
+        database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    };
     use std::{path::PathBuf, sync::Arc};
 
     /// Error during database open
@@ -213,6 +216,12 @@ pub mod test_utils {
     impl<DB: DatabaseMetrics> DatabaseMetrics for TempDatabase<DB> {
         fn report_metrics(&self) {
             self.db().report_metrics()
+        }
+    }
+
+    impl<DB: DatabaseMetadata> DatabaseMetadata for TempDatabase<DB> {
+        fn metadata(&self) -> DatabaseMetadataValue {
+            self.db().metadata()
         }
     }
 
