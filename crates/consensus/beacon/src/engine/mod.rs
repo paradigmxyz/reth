@@ -22,18 +22,18 @@ use reth_interfaces::{
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
-    constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, ChainSpec, Head, Header,
-    SealedBlock, SealedHeader, B256, U256,
+    constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
+    SealedHeader, B256, U256,
 };
 use reth_provider::{
     BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
     StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, PayloadAttributes, PayloadError, PayloadStatus,
-    PayloadStatusEnum, PayloadValidationError,
+    CancunPayloadFields, ExecutionPayload, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
+    PayloadValidationError,
 };
-use reth_rpc_types_compat::engine::payload::{try_into_block, validate_block_hash};
+
 use reth_stages::{ControlFlow, Pipeline, PipelineError};
 use reth_tasks::TaskSpawner;
 use reth_tokio_util::EventListeners;
@@ -73,6 +73,7 @@ mod forkchoice;
 use crate::hooks::{EngineHookEvent, EngineHooks, PolledHook};
 pub use forkchoice::ForkchoiceStatus;
 use reth_interfaces::blockchain_tree::BlockValidationKind;
+use reth_payload_validator::ExecutionPayloadValidator;
 
 mod metrics;
 
@@ -187,6 +188,8 @@ where
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// The payload store.
     payload_builder: PayloadBuilderHandle,
+    /// Validator for execution payloads
+    payload_validator: ExecutionPayloadValidator,
     /// Listeners for engine events.
     listeners: EventListeners<BeaconConsensusEngineEvent>,
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
@@ -293,6 +296,7 @@ where
         );
         let mut this = Self {
             sync,
+            payload_validator: ExecutionPayloadValidator::new(blockchain.chain_spec()),
             blockchain,
             sync_state_updater,
             engine_message_rx: UnboundedReceiverStream::new(rx),
@@ -669,7 +673,7 @@ where
                         // On Optimism, the proposers are allowed to reorg their own chain at will.
                         cfg_if::cfg_if! {
                             if #[cfg(feature = "optimism")] {
-                                if self.chain_spec().is_optimism() {
+                                if self.blockchain.chain_spec().is_optimism() {
                                     debug!(
                                         target: "consensus::engine",
                                         fcu_head_num=?header.number,
@@ -1176,6 +1180,21 @@ where
     ///    - the versioned hashes passed with the payload do not exactly match transaction
     ///    versioned hashes
     ///    - the block does not contain blob transactions if it is pre-cancun
+    // This validates the following engine API rule:
+    //
+    // 3. Given the expected array of blob versioned hashes client software **MUST** run its
+    //    validation by taking the following steps:
+    //
+    //   1. Obtain the actual array by concatenating blob versioned hashes lists
+    //      (`tx.blob_versioned_hashes`) of each [blob
+    //      transaction](https://eips.ethereum.org/EIPS/eip-4844#new-transaction-type) included
+    //      in the payload, respecting the order of inclusion. If the payload has no blob
+    //      transactions the expected array **MUST** be `[]`.
+    //
+    //   2. Return `{status: INVALID, latestValidHash: null, validationError: errorMessage | null}`
+    //      if the expected and the actual arrays don't match.
+    //
+    // This validation **MUST** be instantly run in all cases even during active sync process.
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionPayload,
@@ -1183,117 +1202,26 @@ where
     ) -> Result<SealedBlock, PayloadStatus> {
         let parent_hash = payload.parent_hash();
 
-        let block_hash = payload.block_hash();
-        let block_res = match try_into_block(
-            payload,
-            cancun_fields.as_ref().map(|fields| fields.parent_beacon_block_root),
-        ) {
-            Ok(block) => {
-                // make sure there are no blob transactions in the payload if it is pre-cancun
-                if !self.chain_spec().is_cancun_active_at_timestamp(block.timestamp) &&
-                    block.has_blob_transactions()
-                {
-                    Err(PayloadError::PreCancunBlockWithBlobTransactions)
-                } else {
-                    validate_block_hash(block_hash, block)
-                }
-            }
-            Err(error) => Err(error),
-        };
-
-        let block = match block_res {
-            Ok(block) => block,
+        match self.payload_validator.ensure_well_formed_payload(payload, cancun_fields.into()) {
+            Ok(block) => Ok(block),
             Err(error) => {
                 error!(target: "consensus::engine", ?error, "Invalid payload");
+                // we need to convert the error to a payload status (response to the CL)
 
-                let mut latest_valid_hash = None;
-                if !error.is_block_hash_mismatch() {
-                    // Engine-API rule:
-                    // > `latestValidHash: null` if the blockHash validation has failed
-                    latest_valid_hash =
-                        self.latest_valid_hash_for_invalid_payload(parent_hash, None);
-                }
-                let status = PayloadStatusEnum::from(error);
-
-                return Err(PayloadStatus::new(status, latest_valid_hash));
-            }
-        };
-
-        let block_versioned_hashes = block
-            .blob_transactions()
-            .iter()
-            .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
-            .flatten()
-            .collect::<Vec<_>>();
-
-        self.validate_versioned_hashes(parent_hash, block_versioned_hashes, cancun_fields)?;
-
-        Ok(block)
-    }
-
-    /// Returns the currently configured [ChainSpec].
-    fn chain_spec(&self) -> Arc<ChainSpec> {
-        self.blockchain.chain_spec()
-    }
-
-    /// Validates that the versioned hashes in the block match the versioned hashes passed in the
-    /// [CancunPayloadFields], if the cancun payload fields are provided. If the payload fields are
-    /// not provided, but versioned hashes exist in the block, this returns a [PayloadStatus] with
-    /// the [PayloadError::InvalidVersionedHashes] error.
-    ///
-    /// This validates versioned hashes according to the Engine API Cancun spec:
-    /// <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification>
-    fn validate_versioned_hashes(
-        &self,
-        parent_hash: B256,
-        block_versioned_hashes: Vec<&B256>,
-        cancun_fields: Option<CancunPayloadFields>,
-    ) -> Result<(), PayloadStatus> {
-        // This validates the following engine API rule:
-        //
-        // 3. Given the expected array of blob versioned hashes client software **MUST** run its
-        //    validation by taking the following steps:
-        //
-        //   1. Obtain the actual array by concatenating blob versioned hashes lists
-        //      (`tx.blob_versioned_hashes`) of each [blob
-        //      transaction](https://eips.ethereum.org/EIPS/eip-4844#new-transaction-type) included
-        //      in the payload, respecting the order of inclusion. If the payload has no blob
-        //      transactions the expected array **MUST** be `[]`.
-        //
-        //   2. Return `{status: INVALID, latestValidHash: null, validationError: errorMessage |
-        //      null}` if the expected and the actual arrays don't match.
-        //
-        // This validation **MUST** be instantly run in all cases even during active sync process.
-        if let Some(fields) = cancun_fields {
-            if block_versioned_hashes.len() != fields.versioned_hashes.len() {
-                // if the lengths don't match then we know that the payload is invalid
                 let latest_valid_hash =
-                    self.latest_valid_hash_for_invalid_payload(parent_hash, None);
-                let status = PayloadStatusEnum::from(PayloadError::InvalidVersionedHashes);
-                return Err(PayloadStatus::new(status, latest_valid_hash));
-            }
+                    if error.is_block_hash_mismatch() || error.is_invalid_versioned_hashes() {
+                        // Engine-API rules:
+                        // > `latestValidHash: null` if the blockHash validation has failed (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/shanghai.md?plain=1#L113>)
+                        // > `latestValidHash: null` if the expected and the actual arrays don't match (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md?plain=1#L103>)
+                        None
+                    } else {
+                        self.latest_valid_hash_for_invalid_payload(parent_hash, None)
+                    };
 
-            // we can use `zip` safely here because we already compared their length
-            let zipped_versioned_hashes =
-                fields.versioned_hashes.iter().zip(block_versioned_hashes);
-            for (payload_versioned_hash, block_versioned_hash) in zipped_versioned_hashes {
-                if payload_versioned_hash != block_versioned_hash {
-                    // One of the hashes does not match - return invalid
-                    let latest_valid_hash =
-                        self.latest_valid_hash_for_invalid_payload(parent_hash, None);
-                    let status = PayloadStatusEnum::from(PayloadError::InvalidVersionedHashes);
-                    return Err(PayloadStatus::new(status, latest_valid_hash));
-                }
+                let status = PayloadStatusEnum::from(error);
+                Err(PayloadStatus::new(status, latest_valid_hash))
             }
-        } else if !block_versioned_hashes.is_empty() {
-            // there are versioned hashes in the block but no expected versioned hashes were
-            // provided in the new payload call, so the payload is invalid
-            let latest_valid_hash = self.latest_valid_hash_for_invalid_payload(parent_hash, None);
-            let status = PayloadStatusEnum::from(PayloadError::InvalidVersionedHashes);
-            return Err(PayloadStatus::new(status, latest_valid_hash));
         }
-
-        Ok(())
     }
 
     /// When the pipeline is active, the tree is unable to commit any additional blocks since the

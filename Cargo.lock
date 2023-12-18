@@ -5610,6 +5610,7 @@ dependencies = [
  "reth-network-api",
  "reth-nippy-jar",
  "reth-payload-builder",
+ "reth-payload-validator",
  "reth-primitives",
  "reth-provider",
  "reth-prune",
@@ -5699,6 +5700,7 @@ dependencies = [
  "reth-interfaces",
  "reth-metrics",
  "reth-payload-builder",
+ "reth-payload-validator",
  "reth-primitives",
  "reth-provider",
  "reth-prune",
@@ -6210,6 +6212,15 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+]
+
+[[package]]
+name = "reth-payload-validator"
+version = "0.1.0-alpha.13"
+dependencies = [
+ "reth-primitives",
+ "reth-rpc-types",
+ "reth-rpc-types-compat",
 ]
 
 [[package]]

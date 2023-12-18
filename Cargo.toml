@@ -21,6 +21,7 @@ members = [
     "crates/net/network-api/",
     "crates/payload/basic/",
     "crates/payload/builder/",
+    "crates/payload/validator/",
     "crates/primitives/",
     "crates/prune/",
     "crates/revm/",
@@ -116,6 +117,7 @@ reth-network = { path = "crates/net/network" }
 reth-network-api = { path = "crates/net/network-api" }
 reth-nippy-jar = { path = "crates/storage/nippy-jar" }
 reth-payload-builder = { path = "crates/payload/builder" }
+reth-payload-validator = { path = "crates/payload/validator" }
 reth-primitives = { path = "crates/primitives" }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune" }
