@@ -12,9 +12,9 @@ use futures_util::{
     pin_mut, FutureExt, Stream, StreamExt,
 };
 use reth_primitives::{
-    Address, BlockHash, BlockNumber, BlockNumberOrTag, FromRecoveredPooledTransaction,
-    FromRecoveredTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
-    TransactionSigned,
+    fs::FsPathError, Address, BlockHash, BlockNumber, BlockNumberOrTag,
+    FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction,
+    PooledTransactionsElementEcRecovered, TransactionSigned,
 };
 use reth_provider::{
     BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider,
@@ -28,7 +28,7 @@ use std::{
     path::PathBuf,
 };
 use tokio::sync::oneshot;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 /// Additional settings for maintaining the transaction pool
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,18 +55,11 @@ impl Default for MaintainPoolConfig {
 pub struct LocalTransactionBackupConfig {
     /// Path to transactions backup file
     pub transactions_path: Option<PathBuf>,
-
-    /// Store local transactions to local backup on graceful shutdown
-    /// And get them from backup on boot up
-    pub with_local_txs_backup: bool,
 }
 
 /// Receive path to transactions backup and return initialized config
 pub fn with_local_txs_backup(transactions_path: PathBuf) -> LocalTransactionBackupConfig {
-    LocalTransactionBackupConfig {
-        transactions_path: Some(transactions_path),
-        with_local_txs_backup: true,
-    }
+    LocalTransactionBackupConfig { transactions_path: Some(transactions_path) }
 }
 
 /// Returns a spawnable future for maintaining the state of the transaction pool.
@@ -576,7 +569,10 @@ fn changed_accounts_iter(
         .map(|(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance })
 }
 
-async fn apply_local_txs_backup<P>(pool: P, transactions_path: Option<PathBuf>)
+async fn apply_local_txs_backup<P>(
+    pool: P,
+    transactions_path: Option<PathBuf>,
+) -> Result<(), FsPathError>
 where
     P: TransactionPool + TransactionPoolExt + 'static,
 {
@@ -598,11 +594,17 @@ where
                     .collect::<Vec<_>>();
                 let _ =
                     pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
+                Ok(())
             }
-            Err(_err) => {
-                warn!(target: "reth::cli", txs_file = ?file_path, "Unable to read provided local transactions file")
+            Err(err) => {
+                error!(target: "reth::cli", 
+                    txs_file = ?file_path, 
+                    "Unable to read provided local transactions file. Encounetered error: {}", err);
+                Err(err)
             }
         }
+    } else {
+        Ok(())
     }
 }
 
@@ -643,7 +645,7 @@ pub async fn local_transactions_backup_task<P>(
 ) where
     P: TransactionPoolExt + Clone + 'static,
 {
-    apply_local_txs_backup(pool.clone(), transactions_path.clone()).await;
+    if (apply_local_txs_backup(pool.clone(), transactions_path.clone()).await).is_err() {};
 
     pin_mut!(pool_maintanance_future, shutdown);
 
@@ -714,19 +716,17 @@ mod tests {
 
         let _ = txpool.add_transaction(TransactionOrigin::Local, transaction.clone()).await;
 
-        let transactions_backup_config = with_local_txs_backup(transactions_path);
-
         let pool_maintanance_future: BoxFuture<'static, ()> = Box::pin(future::ready(()));
         let handle = tokio::runtime::Handle::current();
         let manager = TaskManager::new(handle);
         let executor_1 = manager.executor().clone();
-        let tx_path = transactions_backup_config.transactions_path.clone();
+        let tx_path = transactions_path.clone();
         let _ = executor_1
             .spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
                 local_transactions_backup_task(
                     shutdown,
                     txpool.clone(),
-                    tx_path,
+                    Some(tx_path),
                     pool_maintanance_future,
                 )
             })
@@ -734,7 +734,7 @@ mod tests {
 
         let pool_maintanance_future: BoxFuture<'static, ()> = Box::pin(future::ready(()));
         let validator_clone = validator.clone();
-        let tx_path = transactions_backup_config.transactions_path.clone();
+        let tx_path = Some(transactions_path.clone());
         let txpool = Pool::new(
             validator_clone.clone(),
             CoinbaseTipOrdering::default(),
