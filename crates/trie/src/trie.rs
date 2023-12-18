@@ -83,12 +83,25 @@ impl<T, H> StateRoot<T, H> {
     pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> StateRoot<T, HF> {
         StateRoot {
             trie_cursor_factory: self.trie_cursor_factory,
+            hashed_cursor_factory,
             changed_account_prefixes: self.changed_account_prefixes,
             changed_storage_prefixes: self.changed_storage_prefixes,
             destroyed_accounts: self.destroyed_accounts,
             threshold: self.threshold,
             previous_state: self.previous_state,
-            hashed_cursor_factory,
+        }
+    }
+
+    /// Set the trie cursor factory.
+    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> StateRoot<TF, H> {
+        StateRoot {
+            trie_cursor_factory,
+            hashed_cursor_factory: self.hashed_cursor_factory,
+            changed_account_prefixes: self.changed_account_prefixes,
+            changed_storage_prefixes: self.changed_storage_prefixes,
+            destroyed_accounts: self.destroyed_accounts,
+            threshold: self.threshold,
+            previous_state: self.previous_state,
         }
     }
 }
@@ -378,6 +391,16 @@ impl<T, H> StorageRoot<T, H> {
         StorageRoot {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
+            hashed_address: self.hashed_address,
+            changed_prefixes: self.changed_prefixes,
+        }
+    }
+
+    /// Set the trie cursor factory.
+    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> StorageRoot<TF, H> {
+        StorageRoot {
+            trie_cursor_factory,
+            hashed_cursor_factory: self.hashed_cursor_factory,
             hashed_address: self.hashed_address,
             changed_prefixes: self.changed_prefixes,
         }
