@@ -153,8 +153,8 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
                     match &*bmb {
                         Some(searcher) => {
-                            if searcher.find_first_in(&value).is_some()
-                                || searcher.find_first_in(&key).is_some()
+                            if searcher.find_first_in(&value).is_some() ||
+                                searcher.find_first_in(&key).is_some()
                             {
                                 hits += 1;
                                 return result()
@@ -197,8 +197,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     /// Grabs the content of the DupSort table for the given key and subkey
     pub fn get_dup<T: DupSort>(&self, key: T::Key, subkey: T::SubKey) -> Result<Option<T::Value>> {
         self.db
-            .view(|tx| tx.cursor_dup_read::<T>().unwrap().seek_by_key_subkey(key, subkey))
-            .unwrap()
+            .view(|tx| tx.cursor_dup_read::<T>()?.seek_by_key_subkey(key, subkey))?
             .map_err(|e| eyre::eyre!(e))
     }
 
