@@ -52,7 +52,7 @@ If both your CPU architecture and the memory layout are valid, the instructions 
 
 > This error is documented [here](https://github.com/paradigmxyz/reth/issues/2211).
 
-This error is raised whenever MBDX can not open a database due to the limitations imposed by the memory layout of your kernel. If the user space is limited to 512GB, the database will not be able to grow below this size.
+This error is raised whenever MDBX can not open a database due to the limitations imposed by the memory layout of your kernel. If the user space is limited to 512GB, the database will not be able to grow below this size.
 
 You will need to recompile the Linux Kernel to fix the issue.
 
