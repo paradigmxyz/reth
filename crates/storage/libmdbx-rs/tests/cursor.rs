@@ -109,7 +109,7 @@ fn test_iter() {
         for (key, data) in &items {
             txn.put(db.dbi(), key, data, WriteFlags::empty()).unwrap();
         }
-        assert!(!txn.commit().unwrap());
+        assert!(!txn.commit().unwrap().0);
     }
 
     let txn = env.begin_ro_txn().unwrap();

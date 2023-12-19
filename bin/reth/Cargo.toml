@@ -43,6 +43,7 @@ reth-tracing.workspace = true
 reth-tasks.workspace = true
 reth-net-nat.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-discv4.workspace = true
 reth-prune.workspace = true
@@ -58,7 +59,7 @@ secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recov
 tracing.workspace = true
 
 # io
-fdlimit = "0.2.1"
+fdlimit = "0.3.0"
 serde.workspace = true
 serde_json.workspace = true
 shellexpand = "3.0.0"
@@ -109,6 +110,9 @@ rayon.workspace = true
 jemallocator = { version = "0.5.0", optional = true }
 jemalloc-ctl = { version = "0.5.0", optional = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+procfs = { version = "0.16.0" }
+
 [features]
 default = ["jemalloc"]
 jemalloc = ["dep:jemallocator", "dep:jemalloc-ctl"]
@@ -131,6 +135,7 @@ optimism = [
     "reth-basic-payload-builder/optimism",
     "reth-network/optimism",
     "reth-network-api/optimism",
+    "reth-blockchain-tree/optimism",
 ]
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []

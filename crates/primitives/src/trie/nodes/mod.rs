@@ -28,5 +28,9 @@ fn rlp_node(rlp: &[u8]) -> Vec<u8> {
 // TODO: this could return [u8; 33] but Vec is needed everywhere this function is used
 #[inline]
 pub fn word_rlp(word: &B256) -> Vec<u8> {
-    [&[EMPTY_STRING_CODE + B256::len_bytes() as u8][..], &word[..]].concat()
+    // Gets optimized to alloc + write directly into it: https://godbolt.org/z/rfWGG6ebq
+    let mut arr = [0; 33];
+    arr[0] = EMPTY_STRING_CODE + 32;
+    arr[1..].copy_from_slice(word.as_slice());
+    arr.to_vec()
 }

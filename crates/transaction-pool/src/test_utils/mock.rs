@@ -637,12 +637,12 @@ impl PoolTransaction for MockTransaction {
         let base_fee = base_fee as u128;
         let max_fee_per_gas = self.max_fee_per_gas();
         if max_fee_per_gas < base_fee {
-            return None;
+            return None
         }
 
         let fee = max_fee_per_gas - base_fee;
         if let Some(priority_fee) = self.max_priority_fee_per_gas() {
-            return Some(fee.min(priority_fee));
+            return Some(fee.min(priority_fee))
         }
 
         Some(fee)
@@ -1145,8 +1145,12 @@ impl MockTransactionSet {
         Self { transactions }
     }
 
-    /// Create a list of dependent transactions with a common sender. The transactions start at the
-    /// given nonce, and the sender is incremented by the given tx_count.
+    /// Creates a series of dependent transactions for a given sender and nonce.
+    ///
+    /// This method generates a sequence of transactions starting from the provided nonce
+    /// for the given sender.
+    ///
+    /// The number of transactions created is determined by `tx_count`.
     pub fn dependent(sender: Address, from_nonce: u64, tx_count: usize, tx_type: TxType) -> Self {
         let mut txs = Vec::with_capacity(tx_count);
         let mut curr_tx = MockTransaction::new_from_type(tx_type).with_nonce(from_nonce);
@@ -1156,7 +1160,19 @@ impl MockTransactionSet {
             txs.push(curr_tx.clone());
         }
 
-        MockTransactionSet::new(txs)
+        Self::new(txs)
+    }
+
+    /// Creates a chain of transactions for a given sender with a specified count.
+    ///
+    /// This method generates a sequence of transactions starting from the specified sender
+    /// and creates a chain of transactions based on the `tx_count`.
+    pub fn sequential_transactions_by_sender(
+        sender: Address,
+        tx_count: usize,
+        tx_type: TxType,
+    ) -> Self {
+        Self::dependent(sender, 0, tx_count, tx_type)
     }
 
     /// Add transactions to the [MockTransactionSet]

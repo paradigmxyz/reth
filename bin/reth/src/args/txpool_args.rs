@@ -1,5 +1,6 @@
 //! Transaction pool arguments
 
+use crate::cli::config::RethTransactionPoolConfig;
 use clap::Args;
 use reth_transaction_pool::{
     LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
@@ -65,9 +66,9 @@ impl Default for TxPoolArgs {
     }
 }
 
-impl TxPoolArgs {
+impl RethTransactionPoolConfig for TxPoolArgs {
     /// Returns transaction pool configuration.
-    pub fn pool_config(&self) -> PoolConfig {
+    fn pool_config(&self) -> PoolConfig {
         PoolConfig {
             local_transactions_config: LocalTransactionConfig { no_exemptions: self.no_locals },
             pending_limit: SubPoolLimit {

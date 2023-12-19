@@ -897,25 +897,13 @@ impl Compact for TransactionSignedNoHash {
         let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
             TRANSACTION_DECOMPRESSOR.with(|decompressor| {
-                let mut decompressor = decompressor.borrow_mut();
-                let mut tmp: Vec<u8> = Vec::with_capacity(200);
-
-                // `decompress_to_buffer` will return an error if the output buffer doesn't have
-                // enough capacity. However we don't actually have information on the required
-                // length. So we hope for the best, and keep trying again with a fairly bigger size
-                // if it fails.
-                while let Err(err) = decompressor.decompress_to_buffer(buf, &mut tmp) {
-                    let err = err.to_string();
-                    if !err.contains("Destination buffer is too small") {
-                        panic!("Failed to decompress: {}", err);
-                    }
-                    tmp.reserve(tmp.capacity() + 24_000);
-                }
+                let decompressor = &mut decompressor.borrow_mut();
 
                 // TODO: enforce that zstd is only present at a "top" level type
 
                 let transaction_type = (bitflags & 0b110) >> 1;
-                let (transaction, _) = Transaction::from_compact(tmp.as_slice(), transaction_type);
+                let (transaction, _) =
+                    Transaction::from_compact(decompressor.decompress(buf), transaction_type);
 
                 (transaction, buf)
             })
@@ -992,6 +980,22 @@ impl TransactionSigned {
         self.signature.recover_signer(signature_hash)
     }
 
+    /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
+    /// value_.
+    ///
+    /// Returns `None` if the transaction's signature is invalid, see also
+    /// [Self::recover_signer_unchecked].
+    pub fn recover_signer_unchecked(&self) -> Option<Address> {
+        // Optimism's Deposit transaction does not have a signature. Directly return the
+        // `from` address.
+        #[cfg(feature = "optimism")]
+        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+            return Some(from)
+        }
+        let signature_hash = self.signature_hash();
+        self.signature.recover_signer_unchecked(signature_hash)
+    }
+
     /// Recovers a list of signers from a transaction list iterator
     ///
     /// Returns `None`, if some transaction's signature is invalid, see also
@@ -1021,6 +1025,16 @@ impl TransactionSigned {
         Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
     }
 
+    /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`] _without
+    /// ensuring that the signature has a low `s` value_ (EIP-2).
+    ///
+    /// Returns `None` if the transaction's signature is invalid, see also
+    /// [Self::recover_signer_unchecked].
+    pub fn into_ecrecovered_unchecked(self) -> Option<TransactionSignedEcRecovered> {
+        let signer = self.recover_signer_unchecked()?;
+        Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
+    }
+
     /// Tries to recover signer and return [`TransactionSignedEcRecovered`] by cloning the type.
     pub fn try_ecrecovered(&self) -> Option<TransactionSignedEcRecovered> {
         let signer = self.recover_signer()?;
@@ -1033,6 +1047,18 @@ impl TransactionSigned {
     /// [Self::recover_signer].
     pub fn try_into_ecrecovered(self) -> Result<TransactionSignedEcRecovered, Self> {
         match self.recover_signer() {
+            None => Err(self),
+            Some(signer) => Ok(TransactionSignedEcRecovered { signed_transaction: self, signer }),
+        }
+    }
+
+    /// Tries to recover signer and return [`TransactionSignedEcRecovered`]. _without ensuring that
+    /// the signature has a low `s` value_ (EIP-2).
+    ///
+    /// Returns `Err(Self)` if the transaction's signature is invalid, see also
+    /// [Self::recover_signer_unchecked].
+    pub fn try_into_ecrecovered_unchecked(self) -> Result<TransactionSignedEcRecovered, Self> {
+        match self.recover_signer_unchecked() {
             None => Err(self),
             Some(signer) => Ok(TransactionSignedEcRecovered { signed_transaction: self, signer }),
         }

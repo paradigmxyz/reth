@@ -24,7 +24,11 @@ proptest.workspace = true
 proptest-derive.workspace = true
 
 [features]
-default = ["compact"]
+default = ["compact", "std"]
+std = [
+    "alloy-primitives/std",
+    "bytes/std",
+]
 compact = ["codecs-derive/compact"]
 scale = ["codecs-derive/scale"]
 postcard = ["codecs-derive/postcard"]

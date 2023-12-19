@@ -3,6 +3,7 @@ use crate::{
 };
 use alloy_primitives::keccak256;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
+use revm_primitives::AccountInfo;
 
 /// An Ethereum account as represented in the trie.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
@@ -24,6 +25,17 @@ impl From<(Account, B256)> for TrieAccount {
             balance: account.balance,
             storage_root,
             code_hash: account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+        }
+    }
+}
+
+impl From<(AccountInfo, B256)> for TrieAccount {
+    fn from((account, storage_root): (AccountInfo, B256)) -> Self {
+        Self {
+            nonce: account.nonce,
+            balance: account.balance,
+            storage_root,
+            code_hash: account.code_hash,
         }
     }
 }

@@ -203,20 +203,24 @@ impl HashBuilder {
 
         trace!(target: "trie::hash_builder", ?current, ?succeeding, "updating merkle tree");
 
-        let mut i = 0;
+        let mut i = 0usize;
+        let span = tracing::trace_span!(
+            target: "trie::hash_builder",
+            "loop",
+            i = tracing::field::Empty,
+            current = tracing::field::Empty,
+            build_extensions = tracing::field::Empty,
+        )
+        .entered();
         loop {
-            let span = tracing::span!(
-                target: "trie::hash_builder",
-                tracing::Level::TRACE,
-                "loop",
-                i,
-                ?current,
-                ?build_extensions
-            );
-            let _enter = span.enter();
+            if !span.is_disabled() {
+                span.record("i", i);
+                span.record("current", &format!("{current:?}"));
+                span.record("build_extensions", build_extensions);
+            }
 
             let preceding_exists = !self.groups.is_empty();
-            let preceding_len: usize = self.groups.len().saturating_sub(1);
+            let preceding_len = self.groups.len().saturating_sub(1);
 
             let common_prefix_len = succeeding.common_prefix_length(current.as_slice());
             let len = std::cmp::max(preceding_len, common_prefix_len);
@@ -254,7 +258,7 @@ impl HashBuilder {
             if !succeeding.is_empty() || preceding_exists {
                 len_from += 1;
             }
-            trace!(target: "trie::hash_builder", "skipping {} nibbles", len_from);
+            trace!(target: "trie::hash_builder", "skipping {len_from} nibbles");
 
             // The key without the common prefix
             let short_node_key = current.slice(len_from..);

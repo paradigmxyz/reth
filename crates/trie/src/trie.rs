@@ -1139,7 +1139,7 @@ mod tests {
             .iter()
             .filter_map(|entry| match entry {
                 (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => {
-                    Some((nibbles.clone(), node.clone()))
+                    Some((nibbles.0.clone(), node.clone()))
                 }
                 _ => None,
             })
@@ -1163,12 +1163,13 @@ mod tests {
         // read the account updates from the db
         let mut accounts_trie = tx.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
         let walker = accounts_trie.walk(None).unwrap();
-        let mut account_updates = HashMap::new();
-        for item in walker {
-            let (key, node) = item.unwrap();
-            account_updates.insert(key, node);
-        }
-
+        let account_updates = walker
+            .into_iter()
+            .map(|item| {
+                let (key, node) = item.unwrap();
+                (key.0, node)
+            })
+            .collect();
         assert_trie_updates(&account_updates);
     }
 
@@ -1227,7 +1228,7 @@ mod tests {
             .iter()
             .filter_map(|entry| match entry {
                 (TrieKey::StorageNode(_, nibbles), TrieOp::Update(node)) => {
-                    Some((nibbles.clone().into(), node.clone()))
+                    Some((nibbles.0.clone(), node.clone()))
                 }
                 _ => None,
             })
