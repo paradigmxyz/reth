@@ -64,11 +64,10 @@ use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
     HeaderProvider, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
 };
-use reth_prune::{segments::SegmentSet, Pruner};
+use reth_prune::PrunerBuilder;
 use reth_revm::EvmProcessorFactory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
-use reth_snapshot::HighestSnapshotsTracker;
 use reth_stages::{
     prelude::*,
     stages::{
@@ -475,12 +474,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let mut hooks = EngineHooks::new();
 
         let pruner_events = if let Some(prune_config) = prune_config {
-            let mut pruner = self.build_pruner(
-                &prune_config,
-                provider_factory,
-                tree_config,
-                snapshotter.highest_snapshot_receiver(),
-            );
+            let mut pruner = PrunerBuilder::new(prune_config.clone())
+                .max_reorg_depth(tree_config.max_reorg_depth() as usize)
+                .prune_delete_limit(self.chain.prune_delete_limit)
+                .build(provider_factory, snapshotter.highest_snapshot_receiver());
 
             let events = pruner.events();
             hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
@@ -973,53 +970,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .build(provider_factory);
 
         Ok(pipeline)
-    }
-
-    /// Builds a [Pruner] with the given config.
-    fn build_pruner<DB: Database>(
-        &self,
-        config: &PruneConfig,
-        provider_factory: ProviderFactory<DB>,
-        tree_config: BlockchainTreeConfig,
-        highest_snapshots_rx: HighestSnapshotsTracker,
-    ) -> Pruner<DB> {
-        let segments = SegmentSet::default()
-            // Receipts
-            .segment_opt(config.segments.receipts.map(reth_prune::segments::Receipts::new))
-            // Receipts by logs
-            .segment_opt((!config.segments.receipts_log_filter.is_empty()).then(|| {
-                reth_prune::segments::ReceiptsByLogs::new(
-                    config.segments.receipts_log_filter.clone(),
-                )
-            }))
-            // Transaction lookup
-            .segment_opt(
-                config
-                    .segments
-                    .transaction_lookup
-                    .map(reth_prune::segments::TransactionLookup::new),
-            )
-            // Sender recovery
-            .segment_opt(
-                config.segments.sender_recovery.map(reth_prune::segments::SenderRecovery::new),
-            )
-            // Account history
-            .segment_opt(
-                config.segments.account_history.map(reth_prune::segments::AccountHistory::new),
-            )
-            // Storage history
-            .segment_opt(
-                config.segments.storage_history.map(reth_prune::segments::StorageHistory::new),
-            );
-
-        Pruner::new(
-            provider_factory,
-            segments.into_vec(),
-            config.block_interval,
-            self.chain.prune_delete_limit,
-            tree_config.max_reorg_depth() as usize,
-            highest_snapshots_rx,
-        )
     }
 
     /// Change rpc port numbers based on the instance number.

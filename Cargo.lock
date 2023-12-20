@@ -6308,6 +6308,7 @@ dependencies = [
  "itertools 0.11.0",
  "metrics",
  "rayon",
+ "reth-config",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
