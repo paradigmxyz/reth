@@ -1,4 +1,5 @@
 use crate::{segments::SegmentSet, Pruner};
+use reth_config::PruneConfig;
 use reth_db::database::Database;
 use reth_primitives::{PruneModes, MAINNET};
 use reth_provider::ProviderFactory;
@@ -20,9 +21,11 @@ pub struct PrunerBuilder {
 }
 
 impl PrunerBuilder {
-    /// Creates a new [PrunerBuilder] with default values.
-    pub fn new() -> Self {
-        Self::default()
+    /// Creates a new [PrunerBuilder] from the given [PruneConfig].
+    pub fn new(pruner_config: PruneConfig) -> Self {
+        PrunerBuilder::default()
+            .block_interval(pruner_config.block_interval)
+            .segments(pruner_config.segments)
     }
 
     /// Sets the minimum pruning interval measured in blocks.

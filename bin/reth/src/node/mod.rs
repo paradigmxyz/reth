@@ -474,7 +474,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let mut hooks = EngineHooks::new();
 
         let pruner_events = if let Some(prune_config) = prune_config {
-            let mut pruner = PrunerBuilder::from(prune_config.clone())
+            let mut pruner = PrunerBuilder::new(prune_config.clone())
                 .max_reorg_depth(tree_config.max_reorg_depth() as usize)
                 .prune_delete_limit(self.chain.prune_delete_limit)
                 .build(provider_factory, snapshotter.highest_snapshot_receiver());

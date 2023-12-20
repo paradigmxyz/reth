@@ -6,7 +6,6 @@ use reth_downloaders::{
 };
 use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
 use reth_primitives::PruneModes;
-use reth_prune::PrunerBuilder;
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -300,12 +299,6 @@ pub struct PruneConfig {
 impl Default for PruneConfig {
     fn default() -> Self {
         Self { block_interval: 5, segments: PruneModes::none() }
-    }
-}
-
-impl From<PruneConfig> for PrunerBuilder {
-    fn from(value: PruneConfig) -> Self {
-        PrunerBuilder::default().block_interval(value.block_interval).segments(value.segments)
     }
 }
 
