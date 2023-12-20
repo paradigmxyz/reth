@@ -127,16 +127,14 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     ///
     /// By default this spawns a [BasicPayloadJobGenerator] with the default configuration
     /// [BasicPayloadJobGeneratorConfig].
-    fn spawn_payload_builder_service<Conf, Reth, St>(
+    fn spawn_payload_builder_service<Conf, Reth>(
         &mut self,
         conf: &Conf,
         components: &Reth,
-        chain_events: St,
     ) -> eyre::Result<PayloadBuilderHandle>
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
-        St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     {
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
             .interval(conf.interval())
@@ -324,16 +322,14 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         }
     }
 
-    fn spawn_payload_builder_service<Conf, Reth, St>(
+    fn spawn_payload_builder_service<Conf, Reth>(
         &mut self,
         conf: &Conf,
         components: &Reth,
-        chain_events: St,
     ) -> eyre::Result<PayloadBuilderHandle>
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
-        St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     {
         self.inner_mut()
             .ok_or_else(|| eyre::eyre!("config value must be set"))?
