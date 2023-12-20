@@ -494,8 +494,8 @@ pub struct BodiesDownloaderBuilder {
 }
 
 impl BodiesDownloaderBuilder {
-    /// Creates a new `BodiesDownloaderBuilder` with configurations based on the provided
-    /// `BodiesConfig`.
+    /// Creates a new [BodiesDownloaderBuilder] with configurations based on the provided
+    /// [BodiesConfig].
     pub fn new(config: BodiesConfig) -> Self {
         BodiesDownloaderBuilder::default()
             .with_stream_batch_size(config.downloader_stream_batch_size)
