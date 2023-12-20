@@ -20,7 +20,7 @@ use reth_interfaces::consensus::Consensus;
 use reth_network::NetworkManager;
 use reth_primitives::ChainSpec;
 use reth_provider::{BlockReader, HeaderProvider};
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{fs, net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
 
 pub mod cl_events;
