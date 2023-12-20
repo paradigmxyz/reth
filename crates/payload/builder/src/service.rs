@@ -8,7 +8,7 @@ use crate::{
     BuiltPayload, KeepPayloadJobAlive, PayloadBuilderAttributes, PayloadJob,
 };
 use futures_util::{future::FutureExt, Stream, StreamExt};
-use reth_provider::CanonStateNotification;
+use reth_provider::CanonStateSubscriptions;
 use reth_rpc_types::engine::PayloadId;
 use std::{
     fmt,
@@ -164,7 +164,7 @@ impl PayloadBuilderHandle {
 pub struct PayloadBuilderService<Gen, St>
 where
     Gen: PayloadJobGenerator,
-    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+    St: CanonStateSubscriptions + Send + Unpin + 'static,
 {
     /// The type that knows how to create new payloads.
     generator: Gen,
@@ -185,11 +185,11 @@ where
 impl<Gen, St> PayloadBuilderService<Gen, St>
 where
     Gen: PayloadJobGenerator,
-    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+    St: CanonStateSubscriptions + Send + Unpin + 'static,
 {
     /// Creates a new payload builder service and returns the [PayloadBuilderHandle] to interact
     /// with it.
-    pub fn new(generator: Gen, mut chain_events: St) -> (Self, PayloadBuilderHandle) {
+    pub fn new(generator: Gen, chain_events: St) -> (Self, PayloadBuilderHandle) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
         let service = Self {
             generator,
@@ -282,13 +282,12 @@ impl<Gen, St> Future for PayloadBuilderService<Gen, St>
 where
     Gen: PayloadJobGenerator + Unpin + 'static,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
-    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+    St: CanonStateSubscriptions + Send + Unpin + 'static,
 {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-
 
         loop {
             // we poll all jobs first, so we always have the latest payload that we can report if

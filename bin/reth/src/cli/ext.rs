@@ -9,7 +9,6 @@ use clap::Args;
 use futures_util::Stream;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_provider::CanonStateNotification;
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
 
@@ -165,15 +164,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
             payload_builder,
         );
         let (payload_service, payload_builder) =
-            PayloadBuilderService::new(payload_generator, chain_events);
-
-        components.task_executor().spawn_critical(
-            "cache canonical blocks for payload builder service",
-            Box::pin(async move {
-                payload_builder.clone().chain_updates().await;
-            }),
-        );
-
+            PayloadBuilderService::new(payload_generator, components.events());
 
         components
             .task_executor()
@@ -333,7 +324,7 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
     {
         self.inner_mut()
             .ok_or_else(|| eyre::eyre!("config value must be set"))?
-            .spawn_payload_builder_service(conf, components, chain_events)
+            .spawn_payload_builder_service(conf, components)
     }
 }
 

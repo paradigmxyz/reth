@@ -384,9 +384,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         self.ext.on_components_initialized(&components)?;
 
         debug!(target: "reth::cli", "Spawning payload builder service");
-        let chain_events = blockchain_db.canonical_state_stream();
-        let payload_builder =
-            self.ext.spawn_payload_builder_service(&self.builder, &components, chain_events)?;
+        let payload_builder = self.ext.spawn_payload_builder_service(&self.builder, &components)?;
 
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
         let max_block = if let Some(block) = self.debug.max_block {
