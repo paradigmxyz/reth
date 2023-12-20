@@ -178,7 +178,7 @@ pub struct NodeBuilder {
 }
 
 impl NodeBuilder {
-    /// Creates a testing [NodeConfig], causing the database to be launched ephemerally.
+    /// Creates a testing [NodeBuilder], causing the database to be launched ephemerally.
     pub fn test() -> Self {
         Self {
             database: DatabaseType::test(),
@@ -230,7 +230,7 @@ impl NodeBuilder {
         self
     }
 
-    /// Set the [Chain] for the node
+    /// Set the [ChainSpec] for the node
     pub fn with_chain_spec(mut self, chain: Arc<ChainSpec>) -> Self {
         self.chain = chain;
         self
@@ -313,7 +313,7 @@ impl NodeBuilder {
     ///     let rt = tokio::runtime::Runtime::new().unwrap();
     ///     let manager = TaskManager::new(rt.handle().clone());
     ///     let executor = manager.executor();
-    ///     let config = NodeConfig::default();
+    ///     let config = NodeBuilder::default();
     ///     let ext = DefaultRethNodeCommandConfig;
     ///     let handle = config.launch(ext, executor);
     /// }
@@ -934,7 +934,7 @@ impl Default for NodeBuilder {
     }
 }
 
-/// A version of the [NodeConfig] that has an installed database. This is used to construct the
+/// A version of the [NodeBuilder] that has an installed database. This is used to construct the
 /// [NodeHandle].
 ///
 /// This also contains a path to a data dir that cannot be changed.
@@ -1228,7 +1228,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         // client from performing the derivation pipeline from genesis, and instead
         // starts syncing from the current tip in the DB.
         #[cfg(feature = "optimism")]
-        if self.chain.is_optimism() && !self.rollup.enable_genesis_walkback {
+        if self.config.chain.is_optimism() && !self.config.rollup.enable_genesis_walkback {
             let client = rpc_server_handles.auth.http_client();
             reth_rpc_api::EngineApiClient::fork_choice_updated_v2(
                 &client,
