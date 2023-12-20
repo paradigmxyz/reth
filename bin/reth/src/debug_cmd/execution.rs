@@ -97,11 +97,11 @@ impl Command {
         Client: HeadersClient + BodiesClient + Clone + 'static,
     {
         // building network downloaders using the fetch client
-        let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
+        let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
             .build(client.clone(), Arc::clone(&consensus))
             .into_task_with(task_executor);
 
-        let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
+        let body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
             .build(client, Arc::clone(&consensus), provider_factory.clone())
             .into_task_with(task_executor);
 
