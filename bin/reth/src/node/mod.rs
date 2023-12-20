@@ -23,7 +23,6 @@ use crate::{
 };
 use clap::{value_parser, Parser};
 use eyre::Context;
-use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
 use metrics_exporter_prometheus::PrometheusHandle;
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
@@ -56,6 +55,7 @@ use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle, 
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
+    fs,
     kzg::KzgSettings,
     stage::StageId,
     BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, B256,
@@ -242,7 +242,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         // Raise the fd limit of the process.
         // Does not do anything on windows.
-        raise_fd_limit();
+        let _ = fdlimit::raise_fd_limit();
 
         // get config
         let config = self.load_config()?;
@@ -266,7 +266,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         )?;
 
         provider_factory = provider_factory
-            .with_snapshots(data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver());
+            .with_snapshots(data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver())?;
 
         self.start_metrics_endpoint(prometheus_handle, Arc::clone(&db)).await?;
 
@@ -304,7 +304,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         debug!(target: "reth::cli", "configured blockchain tree");
 
         // fetch the head block from the database
-        let head = self.lookup_head(Arc::clone(&db)).wrap_err("the head block is missing")?;
+        let head =
+            self.lookup_head(provider_factory.clone()).wrap_err("the head block is missing")?;
 
         // setup the blockchain provider
         let blockchain_db =
@@ -346,7 +347,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let default_peers_path = data_dir.known_peers_path();
         let network_config = self.load_network_config(
             &config,
-            Arc::clone(&db),
+            provider_factory.clone(),
             ctx.task_executor.clone(),
             head,
             secret_key,
@@ -391,7 +392,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
         } else if let Some(tip) = self.debug.tip {
-            Some(self.lookup_or_fetch_tip(&db, &network_client, tip).await?)
+            Some(self.lookup_or_fetch_tip(provider_factory.clone(), &network_client, tip).await?)
         } else {
             None
         };
@@ -427,7 +428,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     &config.stages,
                     client.clone(),
                     Arc::clone(&consensus),
-                    provider_factory,
+                    provider_factory.clone(),
                     &ctx.task_executor,
                     sync_metrics_tx,
                     prune_config.clone(),
@@ -447,7 +448,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     &config.stages,
                     network_client.clone(),
                     Arc::clone(&consensus),
-                    provider_factory,
+                    provider_factory.clone(),
                     &ctx.task_executor,
                     sync_metrics_tx,
                     prune_config.clone(),
@@ -478,7 +479,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let pruner_events = if let Some(prune_config) = prune_config {
             let mut pruner = self.build_pruner(
                 &prune_config,
-                db.clone(),
+                provider_factory,
                 tree_config,
                 snapshotter.highest_snapshot_receiver(),
             );
@@ -749,8 +750,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// Fetches the head block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    fn lookup_head<DB: Database>(&self, db: DB) -> RethResult<Head> {
-        let factory = ProviderFactory::new(db, self.chain.clone());
+    fn lookup_head<DB: Database>(&self, factory: ProviderFactory<DB>) -> RethResult<Head> {
         let provider = factory.provider()?;
 
         let head = provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
@@ -782,7 +782,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// NOTE: The download is attempted with infinite retries.
     async fn lookup_or_fetch_tip<DB, Client>(
         &self,
-        db: DB,
+        provider_factory: ProviderFactory<DB>,
         client: Client,
         tip: B256,
     ) -> RethResult<u64>
@@ -790,7 +790,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         DB: Database,
         Client: HeadersClient,
     {
-        Ok(self.fetch_tip(db, client, BlockHashOrNumber::Hash(tip)).await?.number)
+        Ok(self.fetch_tip(provider_factory, client, BlockHashOrNumber::Hash(tip)).await?.number)
     }
 
     /// Attempt to look up the block with the given number and return the header.
@@ -798,7 +798,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// NOTE: The download is attempted with infinite retries.
     async fn fetch_tip<DB, Client>(
         &self,
-        db: DB,
+        factory: ProviderFactory<DB>,
         client: Client,
         tip: BlockHashOrNumber,
     ) -> RethResult<SealedHeader>
@@ -806,7 +806,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         DB: Database,
         Client: HeadersClient,
     {
-        let factory = ProviderFactory::new(db, self.chain.clone());
         let provider = factory.provider()?;
 
         let header = provider.header_by_hash_or_number(tip)?;
@@ -834,7 +833,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     fn load_network_config<DB: Database>(
         &self,
         config: &Config,
-        db: DB,
+        provider_factory: ProviderFactory<DB>,
         executor: TaskExecutor,
         head: Head,
         secret_key: SecretKey,
@@ -864,7 +863,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .sequencer_endpoint(self.rollup.sequencer_http.clone())
             .disable_tx_gossip(self.rollup.disable_txpool_gossip);
 
-        cfg_builder.build(ProviderFactory::new(db, self.chain.clone()))
+        cfg_builder.build(provider_factory)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -982,7 +981,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     fn build_pruner<DB: Database>(
         &self,
         config: &PruneConfig,
-        db: DB,
+        provider_factory: ProviderFactory<DB>,
         tree_config: BlockchainTreeConfig,
         highest_snapshots_rx: HighestSnapshotsTracker,
     ) -> Pruner<DB> {
@@ -1016,8 +1015,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             );
 
         Pruner::new(
-            db,
-            self.chain.clone(),
+            provider_factory,
             segments.into_vec(),
             config.block_interval,
             self.chain.prune_delete_limit,
@@ -1060,8 +1058,8 @@ async fn run_network_until_shutdown<C>(
         let known_peers = network.all_peers().collect::<Vec<_>>();
         if let Ok(known_peers) = serde_json::to_string_pretty(&known_peers) {
             trace!(target: "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
-            let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
-            match parent_dir.and_then(|_| std::fs::write(&file_path, known_peers)) {
+            let parent_dir = file_path.parent().map(fs::create_dir_all).transpose();
+            match parent_dir.and_then(|_| fs::write(&file_path, known_peers)) {
                 Ok(_) => {
                     info!(target: "reth::cli", peers_file=?file_path, "Wrote network peers to file");
                 }

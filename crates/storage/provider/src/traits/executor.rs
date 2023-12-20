@@ -2,7 +2,7 @@
 
 use crate::{bundle_state::BundleStateWithReceipts, StateProvider};
 use reth_interfaces::executor::BlockExecutionError;
-use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, Receipt, U256};
+use reth_primitives::{BlockNumber, BlockWithSenders, ChainSpec, PruneModes, Receipt, U256};
 use std::time::Duration;
 use tracing::debug;
 
@@ -23,26 +23,19 @@ pub trait ExecutorFactory: Send + Sync + 'static {
 /// An executor capable of executing a block.
 pub trait BlockExecutor {
     /// Execute a block.
-    ///
-    /// The number of `senders` should be equal to the number of transactions in the block.
-    ///
-    /// If no senders are specified, the `execute` function MUST recover the senders for the
-    /// provided block's transactions internally. We use this to allow for calculating senders in
-    /// parallel in e.g. staged sync, so that execution can happen without paying for sender
-    /// recovery costs.
     fn execute(
         &mut self,
-        block: &Block,
+        block: &BlockWithSenders,
         total_difficulty: U256,
-        senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError>;
 
     /// Executes the block and checks receipts.
+    ///
+    /// See [execute](BlockExecutor::execute) for more details.
     fn execute_and_verify_receipt(
         &mut self,
-        block: &Block,
+        block: &BlockWithSenders,
         total_difficulty: U256,
-        senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError>;
 
     /// Runs the provided transactions and commits their state to the run-time database.
@@ -55,11 +48,12 @@ pub trait BlockExecutor {
     /// 0, and so on).
     ///
     /// The second returned value represents the total gas used by this block of transactions.
+    ///
+    /// See [execute](BlockExecutor::execute) for more details.
     fn execute_transactions(
         &mut self,
-        block: &Block,
+        block: &BlockWithSenders,
         total_difficulty: U256,
-        senders: Option<Vec<Address>>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>;
 
     /// Return bundle state. This is output of executed blocks.
@@ -93,10 +87,8 @@ pub struct BlockExecutorStats {
     /// Time needed to merge transitions and create reverts.
     /// It this time transitions are applies to revm bundle state.
     pub merge_transitions_duration: Duration,
-    /// Time needed to caclulate receipt roots.
+    /// Time needed to calculate receipt roots.
     pub receipt_root_duration: Duration,
-    /// Time needed to recovere senders.
-    pub sender_recovery_duration: Duration,
 }
 
 impl BlockExecutorStats {
@@ -109,7 +101,6 @@ impl BlockExecutorStats {
             apply_post_state = ?self.apply_post_execution_state_changes_duration,
             merge_transitions = ?self.merge_transitions_duration,
             receipt_root = ?self.receipt_root_duration,
-            sender_recovery = ?self.sender_recovery_duration,
             "Execution time"
         );
     }

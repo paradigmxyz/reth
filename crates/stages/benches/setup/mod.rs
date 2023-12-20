@@ -13,7 +13,7 @@ use reth_interfaces::test_utils::{
         random_eoa_account_range,
     },
 };
-use reth_primitives::{Account, Address, SealedBlock, B256, U256};
+use reth_primitives::{fs, Account, Address, SealedBlock, B256, U256};
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
     test_utils::TestStageDB,
@@ -102,7 +102,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
 
     if !path.exists() {
         // create the dirs
-        std::fs::create_dir_all(&path).unwrap();
+        fs::create_dir_all(&path).unwrap();
         println!("Transactions testdata not found, generating to {:?}", path.display());
         let db = TestStageDB::new(&path);
 
