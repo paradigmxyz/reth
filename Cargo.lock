@@ -5766,6 +5766,7 @@ dependencies = [
  "reth-net-nat",
  "reth-network",
  "reth-primitives",
+ "reth-prune",
  "secp256k1 0.27.0",
  "serde",
  "serde_json",
