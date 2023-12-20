@@ -23,7 +23,6 @@ use crate::{
 };
 use clap::{value_parser, Parser};
 use eyre::Context;
-use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
 use metrics_exporter_prometheus::PrometheusHandle;
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
@@ -56,6 +55,7 @@ use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle, 
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
+    fs,
     kzg::KzgSettings,
     stage::StageId,
     BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, B256,
@@ -242,7 +242,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         // Raise the fd limit of the process.
         // Does not do anything on windows.
-        raise_fd_limit();
+        let _ = fdlimit::raise_fd_limit();
 
         // get config
         let config = self.load_config()?;
@@ -266,7 +266,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         )?;
 
         provider_factory = provider_factory
-            .with_snapshots(data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver());
+            .with_snapshots(data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver())?;
 
         self.start_metrics_endpoint(prometheus_handle, Arc::clone(&db)).await?;
 
@@ -1056,8 +1056,8 @@ async fn run_network_until_shutdown<C>(
         let known_peers = network.all_peers().collect::<Vec<_>>();
         if let Ok(known_peers) = serde_json::to_string_pretty(&known_peers) {
             trace!(target: "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
-            let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
-            match parent_dir.and_then(|_| std::fs::write(&file_path, known_peers)) {
+            let parent_dir = file_path.parent().map(fs::create_dir_all).transpose();
+            match parent_dir.and_then(|_| fs::write(&file_path, known_peers)) {
                 Ok(_) => {
                     info!(target: "reth::cli", peers_file=?file_path, "Wrote network peers to file");
                 }

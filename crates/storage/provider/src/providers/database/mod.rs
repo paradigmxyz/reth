@@ -83,12 +83,12 @@ impl<DB> ProviderFactory<DB> {
         mut self,
         snapshots_path: PathBuf,
         highest_snapshot_tracker: watch::Receiver<Option<HighestSnapshots>>,
-    ) -> Self {
+    ) -> ProviderResult<Self> {
         self.snapshot_provider = Some(Arc::new(
-            SnapshotProvider::new(snapshots_path)
+            SnapshotProvider::new(snapshots_path)?
                 .with_highest_tracker(Some(highest_snapshot_tracker)),
         ));
-        self
+        Ok(self)
     }
 
     /// Returns reference to the underlying database.
@@ -400,6 +400,13 @@ impl<DB: Database> ReceiptProvider for ProviderFactory<DB> {
 
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
         self.provider()?.receipts_by_block(block)
+    }
+
+    fn receipts_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Receipt>> {
+        self.provider()?.receipts_by_tx_range(range)
     }
 }
 
