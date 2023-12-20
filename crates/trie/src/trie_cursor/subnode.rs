@@ -154,7 +154,7 @@ fn update_full_key(key: &mut Nibbles, old_nibble: i8, new_nibble: i8) {
     if new_nibble >= 0 {
         if old_nibble >= 0 {
             let last_index = key.len() - 1;
-            key[last_index] = new_nibble as u8;
+            key.set_at(last_index, new_nibble as u8);
         } else {
             key.push(new_nibble as u8);
         }

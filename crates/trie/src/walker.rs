@@ -234,10 +234,8 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     fn update_skip_node(&mut self) {
-        self.can_skip_current_node = if let Some(key) = self.stack.last().map(|n| n.full_key()) {
-            let contains_prefix = self.changes.contains(key);
-            let hash_flag = self.stack.last().unwrap().hash_flag();
-            !contains_prefix && hash_flag
+        self.can_skip_current_node = if let Some(node) = self.stack.last() {
+            !self.changes.contains(node.full_key()) && node.hash_flag()
         } else {
             false
         };

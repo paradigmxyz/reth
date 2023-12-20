@@ -20,8 +20,7 @@ revm-primitives = { workspace = true, features = ["serde"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 ethers-core = { workspace = true, default-features = false, optional = true }
-# TODO: don't merge
-nybbles = { git = "https://github.com/dvush/nybbles", branch = "pop-idx-mut", features = ["serde", "rlp"] }
+nybbles = { version = "0.1.2", features = ["serde", "rlp"] }
 
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
