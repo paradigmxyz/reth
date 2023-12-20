@@ -926,7 +926,7 @@ where
             .cache()
             .get_block_and_receipts(meta.block_hash)
             .await?
-            .ok_or(EthApiError::Optimism(OptimismEthApiError::UnknownBlockNumber))?;
+            .ok_or(EthApiError::UnknownBlockNumber)?;
 
         let block = block.unseal();
         let l1_block_info = reth_revm::optimism::extract_l1_info(&block).ok();

@@ -116,9 +116,6 @@ pub enum OptimismEthApiError {
     /// Wrapper around an [reqwest::Error].
     #[error(transparent)]
     HttpError(#[from] reqwest::Error),
-    /// Thrown when using unknown block number
-    #[error("unknown block number")]
-    UnknownBlockNumber,
     /// Thrown when serializing transaction to forward to sequencer
     #[error("invalid sequencer transaction")]
     InvalidSequencerTransaction,
@@ -168,9 +165,6 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::Optimism(err) => match err {
                 OptimismEthApiError::HyperError(err) => internal_rpc_err(err.to_string()),
                 OptimismEthApiError::HttpError(err) => internal_rpc_err(err.to_string()),
-                OptimismEthApiError::UnknownBlockNumber => {
-                    rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), err.to_string())
-                }
                 OptimismEthApiError::InvalidSequencerTransaction |
                 OptimismEthApiError::L1BlockFeeError |
                 OptimismEthApiError::L1BlockGasError => internal_rpc_err(err.to_string()),
