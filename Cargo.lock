@@ -5762,7 +5762,6 @@ version = "0.1.0-alpha.13"
 dependencies = [
  "confy",
  "reth-discv4",
- "reth-downloaders",
  "reth-net-nat",
  "reth-network",
  "reth-primitives",
@@ -5889,6 +5888,7 @@ dependencies = [
  "metrics",
  "pin-project",
  "rayon",
+ "reth-config",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
