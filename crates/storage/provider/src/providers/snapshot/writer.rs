@@ -63,9 +63,9 @@ impl<'a> SnapshotProviderRW<'a> {
             Ok(writer) => Ok((writer, path)),
             Err(NippyJarError::FrozenJar) => {
                 // This snapshot has been frozen, so we should
-                return Err(ProviderError::FinalizedSnapshot(segment, block))
+                Err(ProviderError::FinalizedSnapshot(segment, block))
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => Err(e.into()),
         }
     }
 

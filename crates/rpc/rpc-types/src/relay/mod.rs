@@ -10,6 +10,8 @@ use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 
+pub mod error;
+
 /// Represents an entry of the `/relay/v1/builder/validators` endpoint
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -324,7 +326,7 @@ mod tests {
     #[test]
     fn test_can_parse_validation_request_body() {
         const VALIDATION_REQUEST_BODY: &str =
-            include_str!("../test_data/relay/single_payload.json");
+            include_str!("../../test_data/relay/single_payload.json");
 
         let _validation_request_body: BuilderBlockValidationRequest =
             serde_json::from_str(VALIDATION_REQUEST_BODY).unwrap();
