@@ -64,11 +64,10 @@ use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
     HeaderProvider, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
 };
-use reth_prune::{Pruner, PrunerBuilder};
+use reth_prune::PrunerBuilder;
 use reth_revm::EvmProcessorFactory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
-use reth_snapshot::HighestSnapshotsTracker;
 use reth_stages::{
     prelude::*,
     stages::{
@@ -475,12 +474,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let mut hooks = EngineHooks::new();
 
         let pruner_events = if let Some(prune_config) = prune_config {
-            let mut pruner = self.build_pruner(
-                prune_config.clone(),
-                provider_factory,
-                tree_config,
-                snapshotter.highest_snapshot_receiver(),
-            );
+            let mut pruner = PrunerBuilder::from(prune_config.clone())
+                .max_reorg_depth(tree_config.max_reorg_depth() as usize)
+                .prune_delete_limit(self.chain.prune_delete_limit)
+                .build(provider_factory, snapshotter.highest_snapshot_receiver());
 
             let events = pruner.events();
             hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
@@ -973,20 +970,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .build(provider_factory);
 
         Ok(pipeline)
-    }
-
-    /// Builds a [Pruner] with the given config.
-    fn build_pruner<DB: Database>(
-        &self,
-        config: PruneConfig,
-        provider_factory: ProviderFactory<DB>,
-        tree_config: BlockchainTreeConfig,
-        highest_snapshots_rx: HighestSnapshotsTracker,
-    ) -> Pruner<DB> {
-        PrunerBuilder::from(config)
-            .max_reorg_depth(tree_config.max_reorg_depth() as usize)
-            .prune_delete_limit(self.chain.prune_delete_limit)
-            .build(provider_factory, highest_snapshots_rx)
     }
 
     /// Change rpc port numbers based on the instance number.

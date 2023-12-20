@@ -1,4 +1,7 @@
-use crate::segments::{Segment, Receipts, ReceiptsByLogs, TransactionLookup, SenderRecovery, AccountHistory, StorageHistory};
+use crate::segments::{
+    AccountHistory, Receipts, ReceiptsByLogs, Segment, SenderRecovery, StorageHistory,
+    TransactionLookup,
+};
 use reth_db::database::Database;
 use reth_primitives::PruneModes;
 use std::sync::Arc;
