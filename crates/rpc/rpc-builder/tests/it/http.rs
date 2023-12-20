@@ -518,7 +518,7 @@ async fn test_eth_logs_args() {
     let client = handle.http_client().unwrap();
 
     let mut params = ArrayParams::default();
-    params.insert( serde_json::json!({"blockhash":"0x58dc57ab582b282c143424bd01e8d923cddfdcda9455bad02a29522f6274a948"})).unwrap();
+    params.insert( serde_json::json!({"blockHash":"0x58dc57ab582b282c143424bd01e8d923cddfdcda9455bad02a29522f6274a948"})).unwrap();
 
     let _resp = client.request::<Vec<Log>, _>("eth_getLogs", params).await.unwrap();
 }
