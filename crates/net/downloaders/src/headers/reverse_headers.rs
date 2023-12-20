@@ -1089,8 +1089,8 @@ pub struct ReverseHeadersDownloaderBuilder {
 }
 
 impl ReverseHeadersDownloaderBuilder {
-    /// Creates a new `ReverseHeadersDownloaderBuilder` with configurations based on the provided
-    /// `HeadersConfig`.
+    /// Creates a new [ReverseHeadersDownloaderBuilder] with configurations based on the provided
+    /// [HeadersConfig].
     pub fn new(config: HeadersConfig) -> Self {
         ReverseHeadersDownloaderBuilder::default()
             .request_limit(config.downloader_request_limit)
