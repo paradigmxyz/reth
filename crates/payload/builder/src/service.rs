@@ -7,7 +7,9 @@ use crate::{
     error::PayloadBuilderError, metrics::PayloadBuilderServiceMetrics, traits::PayloadJobGenerator,
     BuiltPayload, KeepPayloadJobAlive, PayloadBuilderAttributes, PayloadJob,
 };
-use futures_util::{future::FutureExt, Stream, StreamExt};
+use reth_tasks::TaskSpawner;
+
+use futures_util::{future::FutureExt, StreamExt};
 use reth_provider::CanonStateSubscriptions;
 use reth_rpc_types::engine::PayloadId;
 use std::{
@@ -16,8 +18,14 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
-use tokio::sync::{mpsc, oneshot};
+
+use tokio::{
+    sync::{mpsc, oneshot},
+    time::timeout,
+};
+
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, info, trace, warn};
 
@@ -161,10 +169,11 @@ impl PayloadBuilderHandle {
 /// does know nothing about how to build them, it just drives their jobs to completion.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct PayloadBuilderService<Gen, St>
+pub struct PayloadBuilderService<Gen, St, Tasks>
 where
-    Gen: PayloadJobGenerator,
+    Gen: PayloadJobGenerator<Tasks>,
     St: CanonStateSubscriptions + Send + Unpin + 'static,
+    Tasks: TaskSpawner + Unpin + 'static,
 {
     /// The type that knows how to create new payloads.
     generator: Gen,
@@ -182,10 +191,11 @@ where
 
 // === impl PayloadBuilderService ===
 
-impl<Gen, St> PayloadBuilderService<Gen, St>
+impl<Gen, St, Tasks> PayloadBuilderService<Gen, St, Tasks>
 where
-    Gen: PayloadJobGenerator,
+    Gen: PayloadJobGenerator<Tasks>,
     St: CanonStateSubscriptions + Send + Unpin + 'static,
+    Tasks: TaskSpawner + Unpin + 'static,
 {
     /// Creates a new payload builder service and returns the [PayloadBuilderHandle] to interact
     /// with it.
@@ -278,18 +288,33 @@ where
     }
 }
 
-impl<Gen, St> Future for PayloadBuilderService<Gen, St>
+impl<Gen, St, Tasks> Future for PayloadBuilderService<Gen, St, Tasks>
 where
-    Gen: PayloadJobGenerator + Unpin + 'static,
-    <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
+    Tasks: TaskSpawner +  Unpin + 'static,
+    Gen: PayloadJobGenerator<Tasks> + Unpin + Clone + 'static,
+    <Gen as PayloadJobGenerator<Tasks>>::Job: Unpin + 'static,
     St: CanonStateSubscriptions + Send + Unpin + 'static,
 {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-
         loop {
+            let mut canon_events = this.chain_events.subscribe_to_canonical_state();
+            this.generator.tasks().spawn_critical_blocking(
+                "rpc request",
+                Box::pin(async move {
+                    // more than enough time for the next block
+                    let duration = Duration::from_secs(15);
+
+                    // wait for canon event or timeout
+                    let update = timeout(duration, canon_events.recv())
+                        .await
+                        .expect("canon state should change before timeout")
+                        .expect("canon events stream is still open");
+                    let new_tip = update.tip();
+                }),
+            );
             // we poll all jobs first, so we always have the latest payload that we can report if
             // requests
             // we don't care about the order of the jobs, so we can just swap_remove them
