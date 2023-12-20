@@ -51,14 +51,14 @@ where
         &mut self,
         key: Self::Key,
     ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.seek_exact(key)?.map(|value| (value.0 .0.to_vec(), value.1)))
+        Ok(self.0.seek_exact(key)?.map(|value| (value.0 .0.to_vec(), value.1 .0)))
     }
 
     fn seek(
         &mut self,
         key: Self::Key,
     ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.seek(key)?.map(|value| (value.0 .0.to_vec(), value.1)))
+        Ok(self.0.seek(key)?.map(|value| (value.0 .0.to_vec(), value.1 .0)))
     }
 
     fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
@@ -123,7 +123,7 @@ mod tests {
     };
     use reth_primitives::{
         hex_literal::hex,
-        trie::{BranchNodeCompact, StorageTrieEntry},
+        trie::{BranchNodeCompact, StorageTrieEntry, StoredBranchNode},
     };
     use reth_provider::test_utils::create_test_provider_factory;
 
@@ -144,13 +144,13 @@ mod tests {
             cursor
                 .upsert(
                     key.into(),
-                    BranchNodeCompact::new(
+                    StoredBranchNode(BranchNodeCompact::new(
                         0b0000_0010_0000_0001,
                         0b0000_0010_0000_0001,
                         0,
                         Vec::default(),
                         None,
-                    ),
+                    )),
                 )
                 .unwrap();
         }
