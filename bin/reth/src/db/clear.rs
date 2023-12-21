@@ -1,7 +1,7 @@
 use clap::Parser;
 use reth_db::{
     database::Database,
-    table::{Table, DupSort},
+    table::{DupSort, Table},
     transaction::{DbTx, DbTxMut},
     TableViewer, Tables,
 };
