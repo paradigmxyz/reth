@@ -59,7 +59,10 @@ pub const NUM_TABLES: usize = 26;
 /// # Example
 ///
 /// ```
-/// use reth_db::{table::Table, TableViewer, Tables};
+/// use reth_db::{
+///     table::{DupSort, Table},
+///     TableViewer, Tables,
+/// };
 /// use std::str::FromStr;
 ///
 /// let headers = Tables::from_str("Headers").unwrap();
@@ -71,7 +74,12 @@ pub const NUM_TABLES: usize = 26;
 ///     type Error = &'static str;
 ///
 ///     fn view<T: Table>(&self) -> Result<(), Self::Error> {
-///         // operate on table in generic way
+///         // operate on table in a generic way
+///         Ok(())
+///     }
+///
+///     fn view_dupsort<T: DupSort>(&self) -> Result<(), Self::Error> {
+///         // operate on a dupsort table in a generic way
 ///         Ok(())
 ///     }
 /// }
@@ -465,20 +473,20 @@ mod tests {
         (TableType::Table, TxHashNumber::NAME),
         (TableType::Table, Receipts::NAME),
         (TableType::Table, PlainAccountState::NAME),
-        (TableType::DupSort, PlainStorageState::NAME),
         (TableType::Table, Bytecodes::NAME),
         (TableType::Table, AccountHistory::NAME),
         (TableType::Table, StorageHistory::NAME),
-        (TableType::DupSort, AccountChangeSet::NAME),
-        (TableType::DupSort, StorageChangeSet::NAME),
         (TableType::Table, HashedAccount::NAME),
-        (TableType::DupSort, HashedStorage::NAME),
         (TableType::Table, AccountsTrie::NAME),
-        (TableType::DupSort, StoragesTrie::NAME),
         (TableType::Table, TxSenders::NAME),
         (TableType::Table, SyncStage::NAME),
         (TableType::Table, SyncStageProgress::NAME),
         (TableType::Table, PruneCheckpoints::NAME),
+        (TableType::DupSort, PlainStorageState::NAME),
+        (TableType::DupSort, AccountChangeSet::NAME),
+        (TableType::DupSort, StorageChangeSet::NAME),
+        (TableType::DupSort, HashedStorage::NAME),
+        (TableType::DupSort, StoragesTrie::NAME),
     ];
 
     #[test]
