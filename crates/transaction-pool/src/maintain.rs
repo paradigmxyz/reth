@@ -637,7 +637,7 @@ where
 
 /// Task which manages saving local transactions to the persisten file in case of shutdown.
 /// Uploads transactions from the file on the boot up.
-pub async fn local_transactions_backup_task<P>(
+pub async fn backup_local_transactions_task<P>(
     shutdown: reth_tasks::shutdown::GracefulShutdown,
     pool: P,
     transactions_path: Option<PathBuf>,
