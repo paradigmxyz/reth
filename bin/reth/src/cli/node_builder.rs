@@ -307,15 +307,20 @@ impl NodeBuilder {
     ///
     /// # Example
     /// ```rust
-    /// # use reth_tasks::TaskManager;
-    /// fn t() {
-    ///     use reth_tasks::TaskSpawner;
-    ///     let rt = tokio::runtime::Runtime::new().unwrap();
-    ///     let manager = TaskManager::new(rt.handle().clone());
+    /// # use reth_tasks::{TaskManager, TaskSpawner};
+    /// # use reth::cli::{
+    /// #     node_builder::NodeBuilder,
+    /// #     ext::DefaultRethNodeCommandConfig,
+    /// # };
+    /// # use tokio::runtime::Handle;
+    ///
+    /// async fn t() {
+    ///     let handle = Handle::current();
+    ///     let manager = TaskManager::new(handle);
     ///     let executor = manager.executor();
-    ///     let config = NodeBuilder::default();
-    ///     let ext = DefaultRethNodeCommandConfig;
-    ///     let handle = config.launch(ext, executor);
+    ///     let builder = NodeBuilder::default();
+    ///     let ext = DefaultRethNodeCommandConfig::default();
+    ///     let handle = builder.launch::<()>(ext, executor).await.unwrap();
     /// }
     /// ```
     pub async fn launch<E: RethCliExt>(
