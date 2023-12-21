@@ -569,43 +569,29 @@ fn changed_accounts_iter(
         .map(|(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance })
 }
 
-async fn apply_local_txs_backup<P>(pool: P, file_path: PathBuf) -> Result<(), FsPathError>
+async fn apply_local_txs_backup<P>(
+    pool: P,
+    file_path: &PathBuf,
+) -> Result<(), ApplyLocalTxsBackupError>
 where
     P: TransactionPool + TransactionPoolExt + 'static,
 {
     info!(target: "reth::cli", txs_file =?file_path, "Check local persistent storage for saved transactions");
-    match reth_primitives::fs::read(&file_path) {
-        Ok(data) => {
-            warn!(target: "reth::cli", txs_file = ?file_path, "We read provided local transactions file and will try to decode transactions");
-            let mut data_slice = data.as_slice();
-            let txs_signed: Vec<TransactionSigned> =
-                alloy_rlp::Decodable::decode(&mut data_slice).unwrap();
+    let data = reth_primitives::fs::read(&file_path)?;
+    warn!(target: "reth::cli", txs_file = ?file_path, "We read provided local transactions file and will try to decode transactions");
+    let mut data_slice = data.as_slice();
+    let txs_signed: Vec<TransactionSigned> = alloy_rlp::Decodable::decode(&mut data_slice)?;
 
-            let pool_transactions = txs_signed
-                .into_iter()
-                .map(|tx| {
-                    let tx = tx.try_ecrecovered().unwrap();
-                    <P::Transaction>::from_recovered_transaction(tx)
-                })
-                .collect::<Vec<_>>();
-            let _ = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
-            match reth_primitives::fs::remove_file(file_path.clone()) {
-                Ok(_) => Ok(()),
-                Err(err) => {
-                    error!(target: "reth::cli", 
-                    txs_file = ?file_path, 
-                    "Unable to delete recovered local transactions file. Encounetered error: {}", err);
-                    Err(err)
-                }
-            }
-        }
-        Err(err) => {
-            error!(target: "reth::cli", 
-                    txs_file = ?file_path, 
-                    "Unable to read provided local transactions file. Encounetered error: {}", err);
-            Err(err)
-        }
-    }
+    let pool_transactions = txs_signed
+        .into_iter()
+        .map(|tx| {
+            let tx = tx.try_ecrecovered().unwrap();
+            <P::Transaction>::from_recovered_transaction(tx)
+        })
+        .collect::<Vec<_>>();
+    let _ = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
+    let _ = reth_primitives::fs::remove_file(file_path.clone())?;
+    Ok(())
 }
 
 fn save_local_txs_backup<P>(pool: P, file_path: PathBuf)
@@ -638,6 +624,23 @@ where
     }
 }
 
+enum ApplyLocalTxsBackupError {
+    DecodeError(alloy_rlp::Error),
+    FsPathError(FsPathError),
+}
+
+impl From<FsPathError> for ApplyLocalTxsBackupError {
+    fn from(err: FsPathError) -> Self {
+        ApplyLocalTxsBackupError::FsPathError(err)
+    }
+}
+
+impl From<alloy_rlp::Error> for ApplyLocalTxsBackupError {
+    fn from(err: alloy_rlp::Error) -> Self {
+        ApplyLocalTxsBackupError::DecodeError(err)
+    }
+}
+
 /// Task which manages saving local transactions to the persisten file in case of shutdown.
 /// Uploads transactions from the file on the boot up.
 pub async fn backup_local_transactions_task<P>(
@@ -649,7 +652,18 @@ pub async fn backup_local_transactions_task<P>(
     P: TransactionPoolExt + Clone + 'static,
 {
     if let Some(file_path) = transactions_path.clone() {
-        if (apply_local_txs_backup(pool.clone(), file_path).await).is_err() {};
+        match apply_local_txs_backup(pool.clone(), &file_path).await {
+            Ok(_) => (),
+            Err(err) => match err {
+                ApplyLocalTxsBackupError::DecodeError(err) => error!(
+                    "Failed to apply transacations backup. Encountered RLP decode error: {}",
+                    err
+                ),
+                ApplyLocalTxsBackupError::FsPathError(err) => {
+                    error!("Failed to apply transacation backup. Encountered file error: {}", err)
+                }
+            },
+        }
     }
 
     pin_mut!(pool_maintanance_future, shutdown);
