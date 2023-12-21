@@ -90,14 +90,17 @@ pub const NUM_TABLES: usize = 26;
 /// let _ = transactions.view(&viewer);
 /// ```
 pub trait TableViewer<R> {
-    /// type of error to return
+    /// The error type returned by the viewer.
     type Error;
 
-    /// operate on table in generic way
+    /// Operate on the table in a generic way.
     fn view<T: Table>(&self) -> Result<R, Self::Error>;
 
-    /// operate on dupsort table in generic way
-    fn view_dupsort<T: DupSort>(&self) -> Result<R, Self::Error>;
+    /// Operate on the dupsort table in a generic way.
+    /// By default, the `view` function is invoked unless overridden.
+    fn view_dupsort<T: DupSort>(&self) -> Result<R, Self::Error> {
+        self.view::<T>()
+    }
 }
 
 macro_rules! tables {

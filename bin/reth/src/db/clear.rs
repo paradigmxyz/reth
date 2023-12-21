@@ -1,7 +1,7 @@
 use clap::Parser;
 use reth_db::{
     database::Database,
-    table::{DupSort, Table},
+    table::Table,
     transaction::{DbTx, DbTxMut},
     TableViewer, Tables,
 };
@@ -33,15 +33,6 @@ impl<DB: Database> TableViewer<()> for ClearViewer<'_, DB> {
         let tx = self.db.tx_mut()?;
         tx.clear::<T>()?;
         tx.commit()?;
-
-        Ok(())
-    }
-
-    fn view_dupsort<T: DupSort>(&self) -> Result<(), Self::Error> {
-        let tx = self.db.tx_mut()?;
-        tx.clear::<T>()?;
-        tx.commit()?;
-
         Ok(())
     }
 }
