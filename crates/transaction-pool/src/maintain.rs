@@ -89,7 +89,7 @@ where
         task_spawner.spawn_critical_with_graceful_shutdown_signal(
             "maintanace pool task",
             |shutdown| {
-                local_transactions_backup_task(
+                backup_local_transactions_task(
                     shutdown,
                     pool,
                     transactions_backup_config.transactions_path,
@@ -605,6 +605,11 @@ where
     P: TransactionPool + TransactionPoolExt + 'static,
 {
     let local_transactions = pool.get_local_transactions();
+    if local_transactions.is_empty() {
+        info!("no local transactions to recover");
+        return
+    }
+
     let local_transactions = local_transactions
         .into_iter()
         .map(|tx| tx.to_recovered_transaction().into_signed())
@@ -716,7 +721,7 @@ mod tests {
         let tx_path = transactions_path.clone();
         let _ = executor_1
             .spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
-                local_transactions_backup_task(
+                backup_local_transactions_task(
                     shutdown,
                     txpool.clone(),
                     Some(tx_path),
@@ -738,7 +743,7 @@ mod tests {
         let executor_2 = manager.executor().clone();
         let _ = executor_2
             .spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
-                local_transactions_backup_task(
+                backup_local_transactions_task(
                     shutdown,
                     txpool.clone(),
                     tx_path,
