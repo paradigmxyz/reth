@@ -1,6 +1,5 @@
 use crate::utils::DbTool;
 use clap::Parser;
-
 use reth_db::{
     database::Database,
     table::{DupSort, Table},
@@ -43,6 +42,7 @@ impl Command {
 
         serde_json::from_str::<T::Key>(&self.key).map_err(|e| eyre::eyre!(e))
     }
+
     /// Get an instance of subkey for given dupsort table
     fn table_subkey<T: DupSort>(&self) -> Result<T::SubKey, eyre::Error> {
         assert_eq!(T::NAME, self.table.name());
@@ -100,6 +100,7 @@ impl<DB: Database> TableViewer<()> for GetValueViewer<'_, DB> {
         Ok(())
     }
 }
+
 /// Map the user input value to json
 fn maybe_json_value_parser(value: &str) -> Result<String, eyre::Error> {
     if serde_json::from_str::<serde::de::IgnoredAny>(value).is_ok() {
