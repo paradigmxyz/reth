@@ -1927,7 +1927,6 @@ Post-merge hard forks (timestamp based):
                     Hardfork::Shanghai,
                     ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 1705473120 },
                 ),
-                // Future Cancun block
                 (Hardfork::Cancun, ForkId { hash: ForkHash([0x70, 0xcc, 0x14, 0xe2]), next: 0 }),
             ],
         );
@@ -2098,12 +2097,17 @@ Post-merge hard forks (timestamp based):
                 ),
                 // Future Shanghai block
                 (
-                    Head { number: 6500000, timestamp: 1678832736, ..Default::default() },
+                    Head { number: 6500002, timestamp: 1678832736, ..Default::default() },
                     ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 1705473120 },
+                ),
+                // First Cancun block
+                (
+                    Head { number: 6500003, timestamp: 1705473120, ..Default::default() },
+                    ForkId { hash: ForkHash([0x70, 0xcc, 0x14, 0xe2]), next: 0 },
                 ),
                 // Future Cancun block
                 (
-                    Head { number: 6500001, timestamp: 1705473120, ..Default::default() },
+                    Head { number: 6500003, timestamp: 2705473120, ..Default::default() },
                     ForkId { hash: ForkHash([0x70, 0xcc, 0x14, 0xe2]), next: 0 },
                 ),
             ],
