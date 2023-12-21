@@ -1,5 +1,5 @@
 use crate::{ruint::UintTryFrom, U256};
-use alloy_rlp::{RlpEncodableWrapper, RlpDecodableWrapper};
+use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs::{add_arbitrary_tests, Compact};
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +8,19 @@ use serde::{Deserialize, Serialize};
 /// While the field is 256 bits, for many chains it's not possible for the field to use
 /// this full precision, hence we use a wrapper type to allow for overriding of encoding.
 #[add_arbitrary_tests(compact, rlp)]
-#[derive(Default, Debug, Copy, Clone, Hash, PartialEq, Eq, Serialize, Deserialize, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(
+    Default,
+    Debug,
+    Copy,
+    Clone,
+    Hash,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+)]
 pub struct TxValue(U256);
 
 impl From<TxValue> for U256 {
