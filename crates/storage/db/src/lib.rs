@@ -226,9 +226,15 @@ pub mod test_utils {
         }
     }
 
+    /// Get a temporary directory path to use for the database
+    pub fn tempdir_path() -> PathBuf {
+        let builder = tempfile::Builder::new().prefix("reth-test-").rand_bytes(8).tempdir();
+        builder.expect(ERROR_TEMPDIR).into_path()
+    }
+
     /// Create read/write database for testing
     pub fn create_test_rw_db() -> Arc<TempDatabase<DatabaseEnv>> {
-        let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
+        let path = tempdir_path();
         let emsg = format!("{}: {:?}", ERROR_DB_CREATION, path);
 
         let db = init_db(&path, None).expect(&emsg);
@@ -245,7 +251,7 @@ pub mod test_utils {
 
     /// Create read only database for testing
     pub fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnv>> {
-        let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
+        let path = tempdir_path();
         {
             init_db(path.as_path(), None).expect(ERROR_DB_CREATION);
         }

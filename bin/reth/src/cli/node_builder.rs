@@ -24,6 +24,7 @@ use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use metrics_exporter_prometheus::PrometheusHandle;
+use once_cell::sync::Lazy;
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook},
@@ -84,8 +85,8 @@ use reth_stages::{
 };
 use reth_tasks::{TaskExecutor, TaskManager};
 use reth_transaction_pool::{
-    blobstore::InMemoryBlobStore, CoinbaseTipOrdering, EthPooledTransaction,
-    EthTransactionValidator, TransactionPool, TransactionValidationTaskExecutor,
+    blobstore::InMemoryBlobStore, EthTransactionPool, TransactionPool,
+    TransactionValidationTaskExecutor,
 };
 use secp256k1::SecretKey;
 use std::{
@@ -102,14 +103,10 @@ use tokio::{
 };
 use tracing::*;
 
-/// The default reth transaction pool type
-type RethTransactionPool<DB, Tree> = reth_transaction_pool::Pool<
-    TransactionValidationTaskExecutor<
-        EthTransactionValidator<BlockchainProvider<DB, Tree>, EthPooledTransaction>,
-    >,
-    CoinbaseTipOrdering<EthPooledTransaction>,
-    InMemoryBlobStore,
->;
+/// The default prometheus recorder handle. We use a global static to ensure that it is only
+/// installed once.
+pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
+    Lazy::new(|| prometheus_exporter::install_recorder().unwrap());
 
 /// Start the node
 #[derive(Debug)]
@@ -474,7 +471,7 @@ impl NodeBuilder {
         blockchain_db: &BlockchainProvider<DB, Tree>,
         head: Head,
         executor: &TaskExecutor,
-    ) -> eyre::Result<RethTransactionPool<DB, Tree>>
+    ) -> eyre::Result<EthTransactionPool<BlockchainProvider<DB, Tree>, InMemoryBlobStore>>
     where
         DB: Database + Unpin + Clone + 'static,
         Tree: BlockchainTreeEngine
@@ -624,7 +621,7 @@ impl NodeBuilder {
     }
 
     fn install_prometheus_recorder(&self) -> eyre::Result<PrometheusHandle> {
-        prometheus_exporter::install_recorder()
+        Ok(PROMETHEUS_RECORDER_HANDLE.clone())
     }
 
     async fn start_metrics_endpoint<Metrics>(
@@ -1307,12 +1304,31 @@ mod tests {
     use super::*;
     use reth_primitives::U256;
     use reth_rpc_api::EthApiClient;
+    use std::sync::atomic::{AtomicU16, Ordering};
+
+    /// A simple static atomic used to assign instance numbers to test nodes.
+    static TEST_NODE_INSTANCE: AtomicU16 = AtomicU16::new(1);
+
+    /// A method that ensures the node is spawned with a unique instance number. This calls
+    /// [spawn_node] under the hood, and just modifies the [NodeBuilder] to have a unique instance
+    /// number.
+    ///
+    /// IPC is also disabled by default. It is up to the test / caller to enable it and ensure that
+    /// the IPC path is unique.
+    async fn spawn_test_node(config: NodeBuilder) -> eyre::Result<NodeHandle> {
+        let instance = TEST_NODE_INSTANCE.fetch_add(1, Ordering::SeqCst);
+        let mut config = config.with_instance(instance);
+
+        // disable ipc by default
+        config.rpc.ipcdisable = true;
+        spawn_node(config).await
+    }
 
     #[tokio::test]
     async fn block_number_node_config_test() {
         // this launches a test node with http
         let rpc_args = RpcServerArgs::default().with_http();
-        let handle = spawn_node(NodeBuilder::test().with_rpc(rpc_args)).await.unwrap();
+        let handle = spawn_test_node(NodeBuilder::test().with_rpc(rpc_args)).await.unwrap();
 
         // call a function on the node
         let client = handle.rpc_server_handles().rpc.http_client().unwrap();
@@ -1325,7 +1341,7 @@ mod tests {
     #[tokio::test]
     async fn rpc_handles_none_without_http() {
         // this launches a test node _without_ http
-        let handle = spawn_node(NodeBuilder::test()).await.unwrap();
+        let handle = spawn_test_node(NodeBuilder::test()).await.unwrap();
 
         // ensure that the `http_client` is none
         let maybe_client = handle.rpc_server_handles().rpc.http_client();
@@ -1334,9 +1350,13 @@ mod tests {
 
     #[tokio::test]
     async fn launch_multiple_nodes() {
-        // need to fix subscriber thing
-        todo!();
-        // let _first_handle = spawn_node(NodeBuilder::test()).await.unwrap();
-        // let _second_handle = spawn_node(NodeBuilder::test().with_instance(1)).await.unwrap();
+        // spawn_test_node takes roughly 1 second per node, so this test takes ~4 seconds
+        let num_nodes = 4;
+
+        let mut handles = Vec::new();
+        for _ in 0..num_nodes {
+            let handle = spawn_test_node(NodeBuilder::test()).await.unwrap();
+            handles.push(handle);
+        }
     }
 }

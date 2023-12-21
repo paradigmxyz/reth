@@ -73,6 +73,7 @@ metrics-util = "0.15.0"
 metrics-process = "1.0.9"
 reth-metrics.workspace = true
 metrics.workspace = true
+once_cell.workspace = true
 
 # test vectors generation
 proptest.workspace = true
