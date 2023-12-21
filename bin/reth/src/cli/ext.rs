@@ -11,6 +11,113 @@ use reth_payload_builder::{BuiltPayload, PayloadBuilderHandle, PayloadBuilderSer
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
 
+/// What we need:
+///
+/// 0. A way to define various network specific types, e.g. PayloadAttributes
+/// 1. A way to define and create certain components, e.g. txpool
+
+
+/// A trait that defines primitives that are specific to a network and ultimately define the node fundamental types.
+///
+/// See also `EthereumPrimitives` and `OptimismPrimitives` for examples.
+pub trait NetworkPrimitives {
+
+    // here we add network specific types, such as Transaction, Block, PayloadAttributes, etc.
+
+}
+
+pub trait NodePrimitives {
+
+    // here we want
+
+}
+
+
+trait RethBuiltins {
+
+    // here we add things like DB
+
+}
+
+/// A trait that defines the components of a node.
+///
+/// TODO do we want this generic or as associated types?
+/// with generic is should be easier to reuse things.
+///
+/// TODO this also needs the DB as generic input
+///
+
+pub trait NodeConfig<R: RethBuiltins> {
+
+    type Primitives: NodePrimitives;
+
+    /// The transaction pool type.
+    type TxPool;
+
+
+    type Network;
+
+}
+
+/// This is a container type for all components
+trait NodeComponents<R: RethBuiltins, C: NodeConfig<R>> {
+
+
+    fn txpool(&self) -> C::TxPool;
+
+}
+
+/// A trait to hook into the node setup routine and apply additional configuration.
+trait NodeExtension<R: RethBuiltins, C: NodeConfig<R>> {
+
+
+}
+
+
+/// A simplified version of the NodeConfig trait that only extends the node with additional functionality.
+trait EthereumNodeExtension<R: RethBuiltins> {}
+
+// TODO impl NodeConfig for EthereumNodeExtension
+
+/// Node extension must define the NodeConfig type, this way, if necessary everything can be modified
+
+// TODO should all of those be implemented on the same type?
+// we could default impl a trait that provides built in components as types, but we also want these to be generic, for example we want to be able to use a custom database for testing, so this must come from external somehow.
+
+/// Node Builder workflow:
+/// 1. Database is configured
+/// 2. TxPool is configured
+/// 3. Network is configured
+///
+///
+/// How much flexibility do we want?
+/// We want easy NodeExtensions,
+/// but we also want to be able to replace components entirely
+/// And we want to configure network (rollup) specific types, such as PayloadAttributes
+///
+/// ## Node Extensions // TODO rename to simply NodeConfig?
+///
+/// For node extensions we want want simple hooks that allow to extend the node with __additional__ functionality.
+/// These allow custom config (e.g. additional CLI arguments)
+///
+/// ## Node Components // TODO this could be merged with NodeConfig?
+///
+/// Node components is responsible for __defining__ the components of a node.
+///
+/// ## Node Primitives
+///
+/// Define the fundamental __standalone__ types of a node, such as Transaction, Block, PayloadAttributes, etc.
+///
+///
+/// ### Flow
+///
+/// 1. Node Primitives are defined
+/// 2. Node Components are defined, these may depend on Node Primitives
+/// 3. Node is configured / modified
+///
+/// The setup can be simplified with helpers that provide default implementations for the Node Primitives and Node Components, for example for ethereum.
+
+
 /// A trait that allows for extending parts of the CLI with additional functionality.
 ///
 /// This is intended as a way to allow to _extend_ the node command. For example, to register

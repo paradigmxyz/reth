@@ -105,6 +105,7 @@ const-str = "0.5.6"
 boyer-moore-magiclen = "0.2.16"
 itertools.workspace = true
 rayon.workspace = true
+async-trait.workspace = true
 
 [target.'cfg(not(windows))'.dependencies]
 jemallocator = { version = "0.5.0", optional = true }
