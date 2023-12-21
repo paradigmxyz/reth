@@ -43,12 +43,12 @@ pub trait ConnectionHandler: Send + Sync + 'static {
     /// The connection that yields messages to send to the remote.
     ///
     /// The connection will be closed when this stream resolves.
-    type Connection: Connection + ?Sized;
+    type Connection: Connection;
 
     /// The connection that transfers messages to and from the remote.
     ///
     /// The connection will be closed when this stream resolves.
-    type P2PConnection: P2PConnection + ?Sized;
+    type P2PConnection: P2PConnection;
 
     /// Returns the protocol to announce when the p2p connection will be established.
     ///
@@ -86,20 +86,22 @@ pub enum OnNotSupported {
 }
 
 /// An established rlpx sub protocol connection as returned by [`ConnectionHandler`].
-pub trait Connection<FromConn = dyn fmt::Debug, ToConn = dyn fmt::Debug, E = dyn error::Error>:
-    Stream<Item = FromConn> + Sink<Box<ToConn>, Error = E> + Send + 'static
-where
-    FromConn: fmt::Debug + ?Sized,
-    ToConn: fmt::Debug + ?Sized,
+pub trait Connection<
+    StreamedType = dyn fmt::Debug,
+    SunkType = Box<dyn fmt::Debug>,
+    E = dyn error::Error,
+>: Stream<Item = StreamedType> + Sink<SunkType, Error = E> + Send + 'static where
+    StreamedType: fmt::Debug + ?Sized,
+    SunkType: fmt::Debug + Sized,
     E: error::Error + ?Sized,
 {
 }
 
-impl<T, FromConn, ToConn, E> Connection<FromConn, ToConn, E> for T
+impl<T, StreamedType, SunkType, E> Connection<StreamedType, SunkType, E> for T
 where
-    T: Stream<Item = FromConn> + Sink<Box<ToConn>, Error = E> + Send + ?Sized + 'static,
-    FromConn: fmt::Debug + ?Sized,
-    ToConn: fmt::Debug + ?Sized,
+    T: Stream<Item = StreamedType> + Sink<SunkType, Error = E> + Send + 'static,
+    StreamedType: fmt::Debug + ?Sized,
+    SunkType: fmt::Debug + Sized,
     E: error::Error + ?Sized,
 {
 }
@@ -107,26 +109,23 @@ where
 /// An established connection to the p2p connection. Passed to [`ConnectionHandler`] to
 /// establish a rlpx subprotocol [`Connection`].
 pub trait P2PConnection<E = io::Error>:
-    Stream<Item = BytesMut>
-    + Sink<Bytes, Error = E>
-    + CanDisconnect<Bytes>
-    + ProxyProtocol
-    + Send
-    + 'static
+    Connection<BytesMut, Bytes, E> + CanDisconnect<Bytes> + ProxyProtocol + Send + 'static
+where
+    E: error::Error,
 {
 }
 
-impl<T, E> P2PConnection<E> for T where
-    T: Stream<Item = BytesMut>
-        + Sink<Bytes, Error = E>
+impl<T, E> P2PConnection<E> for T
+where
+    T: Connection<BytesMut, Bytes, E>
         + CanDisconnect<Bytes>
         + ProxyProtocol
         + Send
         + ?Sized
-        + 'static
+        + 'static,
+    E: error::Error,
 {
 }
-
 /// Act as intermediary between p2p connection and protocol connection.
 pub trait ProxyProtocol {
     /// Shared capability assigned to proxy.
