@@ -327,7 +327,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             let chain_events = blockchain_db.canonical_state_stream();
             let client = blockchain_db.clone();
             let transactions_backup_config =
-                reth_transaction_pool::maintain::with_local_txs_backup(transactions_path);
+                reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
 
             let fut = reth_transaction_pool::maintain::maintain_transaction_pool_future(
                 client,

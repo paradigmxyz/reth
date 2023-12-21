@@ -57,9 +57,11 @@ pub struct LocalTransactionBackupConfig {
     pub transactions_path: Option<PathBuf>,
 }
 
-/// Receive path to transactions backup and return initialized config
-pub fn with_local_txs_backup(transactions_path: PathBuf) -> LocalTransactionBackupConfig {
-    LocalTransactionBackupConfig { transactions_path: Some(transactions_path) }
+impl LocalTransactionBackupConfig {
+    /// Receive path to transactions backup and return initialized config
+    pub fn with_local_txs_backup(transactions_path: PathBuf) -> Self {
+        Self { transactions_path: Some(transactions_path) }
+    }
 }
 
 /// Returns a spawnable future for maintaining the state of the transaction pool.
@@ -577,7 +579,7 @@ where
     P: TransactionPool + TransactionPoolExt + 'static,
 {
     info!(target: "reth::cli", txs_file =?file_path, "Check local persistent storage for saved transactions");
-    let data = reth_primitives::fs::read(&file_path)?;
+    let data = reth_primitives::fs::read(file_path)?;
     warn!(target: "reth::cli", txs_file = ?file_path, "We read provided local transactions file and will try to decode transactions");
     let mut data_slice = data.as_slice();
     let txs_signed: Vec<TransactionSigned> = alloy_rlp::Decodable::decode(&mut data_slice)?;
@@ -590,7 +592,7 @@ where
         })
         .collect::<Vec<_>>();
     let _ = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
-    let _ = reth_primitives::fs::remove_file(file_path.clone())?;
+    reth_primitives::fs::remove_file(file_path.clone())?;
     Ok(())
 }
 
