@@ -44,14 +44,7 @@ impl Encodable for TxValue {
 impl Decodable for TxValue {
     #[inline]
     fn decode(buf: &mut &[u8]) -> Result<Self, Error> {
-        #[cfg(feature = "optimism")]
-        {
-            U256::decode(buf).map(Self)
-        }
-        #[cfg(not(feature = "optimism"))]
-        {
-            u128::decode(buf).map(Self::from)
-        }
+        U256::decode(buf).map(Self)
     }
 }
 
