@@ -97,6 +97,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(10_790_000) },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1678832736)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(1705473120)),
         ]),
         // https://goerli.etherscan.io/tx/0xa3c07dc59bfdb1bfc2d50920fed2ef2c1c4e0a09fe2325dbc14e07702f965a78
         deposit_contract: Some(DepositContract::new(
@@ -1922,7 +1923,12 @@ Post-merge hard forks (timestamp based):
                     Hardfork::London,
                     ForkId { hash: ForkHash([0xb8, 0xc6, 0x29, 0x9d]), next: 1678832736 },
                 ),
-                (Hardfork::Shanghai, ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 0 }),
+                (
+                    Hardfork::Shanghai,
+                    ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 1705473120 },
+                ),
+                // Future Cancun block
+                (Hardfork::Cancun, ForkId { hash: ForkHash([0x70, 0xcc, 0x14, 0xe2]), next: 0 }),
             ],
         );
     }
@@ -2088,12 +2094,17 @@ Post-merge hard forks (timestamp based):
                 // First Shanghai block
                 (
                     Head { number: 6000001, timestamp: 1678832736, ..Default::default() },
-                    ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 0 },
+                    ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 1705473120 },
                 ),
                 // Future Shanghai block
                 (
                     Head { number: 6500000, timestamp: 1678832736, ..Default::default() },
-                    ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 0 },
+                    ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 1705473120 },
+                ),
+                // Future Cancun block
+                (
+                    Head { number: 6500001, timestamp: 1705473120, ..Default::default() },
+                    ForkId { hash: ForkHash([0x70, 0xcc, 0x14, 0xe2]), next: 0 },
                 ),
             ],
         );
