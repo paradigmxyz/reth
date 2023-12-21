@@ -569,68 +569,58 @@ fn changed_accounts_iter(
         .map(|(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance })
 }
 
-async fn apply_local_txs_backup<P>(
-    pool: P,
-    transactions_path: Option<PathBuf>,
-) -> Result<(), FsPathError>
+async fn apply_local_txs_backup<P>(pool: P, file_path: PathBuf) -> Result<(), FsPathError>
 where
     P: TransactionPool + TransactionPoolExt + 'static,
 {
-    if let Some(file_path) = transactions_path.clone() {
-        trace!(target: "reth::cli", txs_file =?file_path, "Check local persistent storage for saved transactions");
-        match reth_primitives::fs::read(&file_path) {
-            Ok(data) => {
-                warn!(target: "reth::cli", txs_file = ?file_path, "We read provided local transactions file and will try to decode transactions");
-                let mut data_slice = data.as_slice();
-                let txs_signed: Vec<TransactionSigned> =
-                    alloy_rlp::Decodable::decode(&mut data_slice).unwrap();
+    info!(target: "reth::cli", txs_file =?file_path, "Check local persistent storage for saved transactions");
+    match reth_primitives::fs::read(&file_path) {
+        Ok(data) => {
+            warn!(target: "reth::cli", txs_file = ?file_path, "We read provided local transactions file and will try to decode transactions");
+            let mut data_slice = data.as_slice();
+            let txs_signed: Vec<TransactionSigned> =
+                alloy_rlp::Decodable::decode(&mut data_slice).unwrap();
 
-                let pool_transactions = txs_signed
-                    .into_iter()
-                    .map(|tx| {
-                        let tx = tx.try_ecrecovered().unwrap();
-                        <P::Transaction>::from_recovered_transaction(tx)
-                    })
-                    .collect::<Vec<_>>();
-                let _ =
-                    pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
-                Ok(())
-            }
-            Err(err) => {
-                error!(target: "reth::cli", 
+            let pool_transactions = txs_signed
+                .into_iter()
+                .map(|tx| {
+                    let tx = tx.try_ecrecovered().unwrap();
+                    <P::Transaction>::from_recovered_transaction(tx)
+                })
+                .collect::<Vec<_>>();
+            let _ = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
+            Ok(())
+        }
+        Err(err) => {
+            error!(target: "reth::cli", 
                     txs_file = ?file_path, 
                     "Unable to read provided local transactions file. Encounetered error: {}", err);
-                Err(err)
-            }
+            Err(err)
         }
-    } else {
-        Ok(())
     }
 }
 
-fn save_local_txs_backup<P>(pool: P, transactions_path: Option<PathBuf>)
+fn save_local_txs_backup<P>(pool: P, file_path: PathBuf)
 where
     P: TransactionPool + TransactionPoolExt + 'static,
 {
-    if let Some(file_path) = transactions_path {
-        let local_transactions = pool.get_local_transactions();
-        let local_transactions = local_transactions
-            .into_iter()
-            .map(|tx| tx.to_recovered_transaction().into_signed())
-            .collect::<Vec<_>>();
+    let local_transactions = pool.get_local_transactions();
+    let local_transactions = local_transactions
+        .into_iter()
+        .map(|tx| tx.to_recovered_transaction().into_signed())
+        .collect::<Vec<_>>();
 
-        let num_txs = local_transactions.len();
-        let mut buf = alloy_rlp::BytesMut::new();
-        alloy_rlp::encode_list(&local_transactions, &mut buf);
-        trace!(target: "reth::cli", txs_file =?file_path, num_txs=%num_txs, "Saving current local transactions");
-        let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
-        match parent_dir.map(|_| reth_primitives::fs::write(&file_path, buf)) {
-            Ok(_) => {
-                info!(target: "reth::cli", txs_file=?file_path, "Wrote local transactions to file");
-            }
-            Err(err) => {
-                warn!(target: "reth::cli", ?err, txs_file=?file_path, "Failed to write local transactions to file");
-            }
+    let num_txs = local_transactions.len();
+    let mut buf = alloy_rlp::BytesMut::new();
+    alloy_rlp::encode_list(&local_transactions, &mut buf);
+    info!(target: "reth::cli", txs_file =?file_path, num_txs=%num_txs, "Saving current local transactions");
+    let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
+    match parent_dir.map(|_| reth_primitives::fs::write(&file_path, buf)) {
+        Ok(_) => {
+            info!(target: "reth::cli", txs_file=?file_path, "Wrote local transactions to file");
+        }
+        Err(err) => {
+            warn!(target: "reth::cli", ?err, txs_file=?file_path, "Failed to write local transactions to file");
         }
     }
 }
@@ -645,7 +635,9 @@ pub async fn local_transactions_backup_task<P>(
 ) where
     P: TransactionPoolExt + Clone + 'static,
 {
-    if (apply_local_txs_backup(pool.clone(), transactions_path.clone()).await).is_err() {};
+    if let Some(file_path) = transactions_path.clone() {
+        if (apply_local_txs_backup(pool.clone(), file_path).await).is_err() {};
+    }
 
     pin_mut!(pool_maintanance_future, shutdown);
 
@@ -656,8 +648,9 @@ pub async fn local_transactions_backup_task<P>(
             graceful_guard = Some(guard);
         },
     }
-
-    save_local_txs_backup(pool, transactions_path);
+    if let Some(file_path) = transactions_path {
+        save_local_txs_backup(pool, file_path);
+    }
     drop(graceful_guard)
 }
 

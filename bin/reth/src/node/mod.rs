@@ -320,7 +320,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
         info!(target: "reth::cli", "Transaction pool initialized");
 
-        let transactions_path = data_dir.txpool_path();
+        let transactions_path = data_dir.txpool_transactions_path();
 
         // spawn txpool maintenance task
         {

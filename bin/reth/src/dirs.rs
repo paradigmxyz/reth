@@ -296,7 +296,7 @@ impl<D> ChainPath<D> {
     /// Returns the path to the local transactions backup file
     ///
     /// `<DIR>/<CHAIN_ID>/txpool-transactions-backup.rlp`
-    pub fn txpool_path(&self) -> PathBuf {
+    pub fn txpool_transactions_path(&self) -> PathBuf {
         self.0.join("txpool-transactions-backup.rlp").into()
     }
 
