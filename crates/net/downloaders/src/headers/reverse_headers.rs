@@ -5,6 +5,7 @@ use crate::metrics::HeaderDownloaderMetrics;
 use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use rayon::prelude::*;
+use reth_config::config::HeadersConfig;
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
@@ -1085,6 +1086,19 @@ pub struct ReverseHeadersDownloaderBuilder {
     max_concurrent_requests: usize,
     /// How many responses to buffer
     max_buffered_responses: usize,
+}
+
+impl ReverseHeadersDownloaderBuilder {
+    /// Creates a new [ReverseHeadersDownloaderBuilder] with configurations based on the provided
+    /// [HeadersConfig].
+    pub fn new(config: HeadersConfig) -> Self {
+        ReverseHeadersDownloaderBuilder::default()
+            .request_limit(config.downloader_request_limit)
+            .min_concurrent_requests(config.downloader_min_concurrent_requests)
+            .max_concurrent_requests(config.downloader_max_concurrent_requests)
+            .max_buffered_responses(config.downloader_max_buffered_responses)
+            .stream_batch_size(config.commit_threshold as usize)
+    }
 }
 
 impl Default for ReverseHeadersDownloaderBuilder {

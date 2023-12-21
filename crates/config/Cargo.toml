@@ -12,7 +12,6 @@ repository.workspace = true
 reth-network.workspace = true
 reth-net-nat.workspace = true
 reth-discv4.workspace = true
-reth-downloaders.workspace = true
 reth-primitives.workspace = true
 
 # io

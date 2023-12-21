@@ -4,9 +4,9 @@ use boyer_moore_magiclen::BMByte;
 use eyre::Result;
 use reth_consensus_common::validation::validate_block_standalone;
 use reth_db::{
-    cursor::DbCursorRO,
+    cursor::{DbCursorRO, DbDupCursorRO},
     database::Database,
-    table::{Decode, Decompress, Table, TableRow},
+    table::{Decode, Decompress, DupSort, Table, TableRow},
     transaction::{DbTx, DbTxMut},
     DatabaseError, RawTable, TableRawRow,
 };
@@ -192,6 +192,13 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     /// Grabs the content of the table for the given key
     pub fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>> {
         self.db.view(|tx| tx.get::<T>(key))?.map_err(|e| eyre::eyre!(e))
+    }
+
+    /// Grabs the content of the DupSort table for the given key and subkey
+    pub fn get_dup<T: DupSort>(&self, key: T::Key, subkey: T::SubKey) -> Result<Option<T::Value>> {
+        self.db
+            .view(|tx| tx.cursor_dup_read::<T>()?.seek_by_key_subkey(key, subkey))?
+            .map_err(|e| eyre::eyre!(e))
     }
 
     /// Drops the database at the given path.
