@@ -612,6 +612,7 @@ impl ProtocolStream {
     ///
     /// If the message is empty.
     #[inline]
+    #[track_caller]
     pub fn mask_msg_id(&self, mut msg: BytesMut) -> Bytes {
         msg[0] += self.shared_cap.relative_message_id_offset();
         msg.freeze()
