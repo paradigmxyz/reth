@@ -66,6 +66,11 @@ impl Status {
         Default::default()
     }
 
+    /// Sets the [EthVersion] for the status.
+    pub fn set_eth_version(&mut self, version: EthVersion) {
+        self.version = version as u8;
+    }
+
     /// Create a [`StatusBuilder`] from the given [`ChainSpec`] and head block.
     ///
     /// Sets the `chain` and `genesis`, `blockhash`, and `forkid` fields based on the [`ChainSpec`]

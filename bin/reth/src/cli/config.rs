@@ -11,9 +11,10 @@ use reth_rpc_builder::{
     auth::AuthServerConfig, error::RpcError, EthConfig, IpcServerBuilder, RpcServerConfig,
     ServerBuilder, TransportRpcModuleConfig,
 };
+use reth_transaction_pool::PoolConfig;
 use std::{borrow::Cow, path::PathBuf, time::Duration};
 
-/// A trait that provides configured RPC server.
+/// A trait that provides a configured RPC server.
 ///
 /// This provides all basic config values for the RPC server and is implemented by the
 /// [RpcServerArgs](crate::args::RpcServerArgs) type.
@@ -110,7 +111,8 @@ pub trait PayloadBuilderConfig {
     fn compute_pending_block(&self) -> bool;
 }
 
-/// A trait that can be used to apply additional configuration to the network.
+/// A trait that represents the configured network and can be used to apply additional configuration
+/// to the network.
 pub trait RethNetworkConfig {
     /// Adds a new additional protocol to the RLPx sub-protocol list.
     ///
@@ -120,10 +122,26 @@ pub trait RethNetworkConfig {
     ///
     /// See also [ProtocolHandler](reth_network::protocol::ProtocolHandler)
     fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol);
+
+    /// Returns the secret key used for authenticating sessions.
+    fn secret_key(&self) -> secp256k1::SecretKey;
+
+    // TODO add more network config methods here
 }
 
 impl<C> RethNetworkConfig for reth_network::NetworkManager<C> {
     fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         reth_network::NetworkManager::add_rlpx_sub_protocol(self, protocol);
     }
+
+    fn secret_key(&self) -> secp256k1::SecretKey {
+        self.secret_key()
+    }
+}
+
+/// A trait that provides all basic config values for the transaction pool and is implemented by the
+/// [TxPoolArgs](crate::args::TxPoolArgs) type.
+pub trait RethTransactionPoolConfig {
+    /// Returns transaction pool configuration.
+    fn pool_config(&self) -> PoolConfig;
 }

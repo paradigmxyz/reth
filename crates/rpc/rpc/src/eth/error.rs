@@ -113,9 +113,18 @@ pub enum OptimismEthApiError {
     /// Wrapper around a [hyper::Error].
     #[error(transparent)]
     HyperError(#[from] hyper::Error),
-    /// Wrapper around an [http::Error].
+    /// Wrapper around an [reqwest::Error].
     #[error(transparent)]
-    HttpError(#[from] http::Error),
+    HttpError(#[from] reqwest::Error),
+    /// Thrown when serializing transaction to forward to sequencer
+    #[error("invalid sequencer transaction")]
+    InvalidSequencerTransaction,
+    /// Thrown when calculating L1 gas fee
+    #[error("failed to calculate l1 gas fee")]
+    L1BlockFeeError,
+    /// Thrown when calculating L1 gas used
+    #[error("failed to calculate l1 gas used")]
+    L1BlockGasError,
 }
 
 impl From<EthApiError> for ErrorObject<'static> {
@@ -156,6 +165,9 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::Optimism(err) => match err {
                 OptimismEthApiError::HyperError(err) => internal_rpc_err(err.to_string()),
                 OptimismEthApiError::HttpError(err) => internal_rpc_err(err.to_string()),
+                OptimismEthApiError::InvalidSequencerTransaction |
+                OptimismEthApiError::L1BlockFeeError |
+                OptimismEthApiError::L1BlockGasError => internal_rpc_err(err.to_string()),
             },
         }
     }

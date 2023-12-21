@@ -2,14 +2,18 @@
 
 use crate::{
     database::Database,
+    database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
     tables::{TableType, Tables},
     utils::default_page_size,
     DatabaseError,
 };
+use eyre::Context;
+use metrics::{gauge, Label};
 use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, PageSize, SyncMode, RO, RW,
 };
+use reth_tracing::tracing::error;
 use std::{ops::Deref, path::Path};
 use tx::Tx;
 
@@ -56,6 +60,81 @@ impl Database for DatabaseEnv {
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.with_metrics,
         ))
+    }
+}
+
+impl DatabaseMetrics for DatabaseEnv {
+    fn report_metrics(&self) {
+        for (name, value, labels) in self.gauge_metrics() {
+            gauge!(name, value, labels);
+        }
+    }
+
+    fn gauge_metrics(&self) -> Vec<(&'static str, f64, Vec<Label>)> {
+        let mut metrics = Vec::new();
+
+        let _ = self
+            .view(|tx| {
+                for table in Tables::ALL.iter().map(|table| table.name()) {
+                    let table_db = tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
+
+                    let stats = tx
+                        .inner
+                        .db_stat(&table_db)
+                        .wrap_err(format!("Could not find table: {table}"))?;
+
+                    let page_size = stats.page_size() as usize;
+                    let leaf_pages = stats.leaf_pages();
+                    let branch_pages = stats.branch_pages();
+                    let overflow_pages = stats.overflow_pages();
+                    let num_pages = leaf_pages + branch_pages + overflow_pages;
+                    let table_size = page_size * num_pages;
+                    let entries = stats.entries();
+
+                    metrics.push((
+                        "db.table_size",
+                        table_size as f64,
+                        vec![Label::new("table", table)],
+                    ));
+                    metrics.push((
+                        "db.table_pages",
+                        leaf_pages as f64,
+                        vec![Label::new("table", table), Label::new("type", "leaf")],
+                    ));
+                    metrics.push((
+                        "db.table_pages",
+                        branch_pages as f64,
+                        vec![Label::new("table", table), Label::new("type", "branch")],
+                    ));
+                    metrics.push((
+                        "db.table_pages",
+                        overflow_pages as f64,
+                        vec![Label::new("table", table), Label::new("type", "overflow")],
+                    ));
+                    metrics.push((
+                        "db.table_entries",
+                        entries as f64,
+                        vec![Label::new("table", table)],
+                    ));
+                }
+
+                Ok::<(), eyre::Report>(())
+            })
+            .map_err(|error| error!(?error, "Failed to read db table stats"));
+
+        if let Ok(freelist) =
+            self.freelist().map_err(|error| error!(?error, "Failed to read db.freelist"))
+        {
+            metrics.push(("db.freelist", freelist as f64, vec![]));
+        }
+
+        metrics
+    }
+}
+
+impl DatabaseMetadata for DatabaseEnv {
+    fn metadata(&self) -> DatabaseMetadataValue {
+        DatabaseMetadataValue::new(self.freelist().ok())
     }
 }
 
@@ -148,7 +227,7 @@ impl DatabaseEnv {
                     LogLevel::Extra => 7,
                 });
             } else {
-                return Err(DatabaseError::LogLevelUnavailable(log_level))
+                return Err(DatabaseError::LogLevelUnavailable(log_level));
             }
         }
 

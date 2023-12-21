@@ -4,7 +4,7 @@ use itertools::Itertools;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_db::{database::Database, open_db_read_only, DatabaseEnv};
 use reth_interfaces::db::LogLevel;
-use reth_nippy_jar::NippyJar;
+use reth_nippy_jar::{NippyJar, NippyJarCursor};
 use reth_primitives::{
     snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentHeader},
     BlockNumber, ChainSpec, SnapshotSegment,
@@ -59,7 +59,7 @@ pub struct Command {
     only_bench: bool,
 
     /// Compression algorithms to use.
-    #[arg(long, short, value_delimiter = ',', default_value = "lz4")]
+    #[arg(long, short, value_delimiter = ',', default_value = "uncompressed")]
     compression: Vec<Compression>,
 
     /// Flag to enable inclusion list filters and PHFs.
@@ -79,11 +79,14 @@ impl Command {
         log_level: Option<LogLevel>,
         chain: Arc<ChainSpec>,
     ) -> eyre::Result<()> {
-        let all_combinations = self
-            .segments
-            .iter()
-            .cartesian_product(self.compression.iter())
-            .cartesian_product(self.phf.iter());
+        let all_combinations =
+            self.segments.iter().cartesian_product(self.compression.iter()).cartesian_product(
+                if self.phf.is_empty() {
+                    vec![None]
+                } else {
+                    self.phf.iter().copied().map(Some).collect::<Vec<_>>()
+                },
+            );
 
         {
             let db = open_db_read_only(db_path, None)?;
@@ -91,8 +94,8 @@ impl Command {
 
             if !self.only_bench {
                 for ((mode, compression), phf) in all_combinations.clone() {
-                    let filters = if self.with_filters {
-                        Filters::WithFilters(InclusionFilter::Cuckoo, *phf)
+                    let filters = if let Some(phf) = self.with_filters.then_some(phf).flatten() {
+                        Filters::WithFilters(InclusionFilter::Cuckoo, phf)
                     } else {
                         Filters::WithoutFilters
                     };
@@ -124,7 +127,7 @@ impl Command {
                         chain.clone(),
                         *compression,
                         InclusionFilter::Cuckoo,
-                        *phf,
+                        phf,
                     )?,
                     SnapshotSegment::Transactions => self.bench_transactions_snapshot(
                         db_path,
@@ -132,7 +135,7 @@ impl Command {
                         chain.clone(),
                         *compression,
                         InclusionFilter::Cuckoo,
-                        *phf,
+                        phf,
                     )?,
                     SnapshotSegment::Receipts => self.bench_receipts_snapshot(
                         db_path,
@@ -140,7 +143,7 @@ impl Command {
                         chain.clone(),
                         *compression,
                         InclusionFilter::Cuckoo,
-                        *phf,
+                        phf,
                     )?,
                 }
             }
@@ -207,19 +210,18 @@ impl Command {
     fn stats(&self, snapshots: Vec<impl AsRef<Path>>) -> eyre::Result<()> {
         let mut total_filters_size = 0;
         let mut total_index_size = 0;
-        let mut total_offsets_size = 0;
         let mut total_duration = Duration::new(0, 0);
         let mut total_file_size = 0;
 
         for snap in &snapshots {
             let start_time = Instant::now();
             let jar = NippyJar::<SegmentHeader>::load(snap.as_ref())?;
+            let _cursor = NippyJarCursor::new(&jar)?;
             let duration = start_time.elapsed();
             let file_size = snap.as_ref().metadata()?.len();
 
             total_filters_size += jar.filter_size();
             total_index_size += jar.offsets_index_size();
-            total_offsets_size += jar.offsets_size();
             total_duration += duration;
             total_file_size += file_size;
 
@@ -227,7 +229,6 @@ impl Command {
             println!("  File Size:           {:>7}", human_bytes(file_size as f64));
             println!("  Filters Size:        {:>7}", human_bytes(jar.filter_size() as f64));
             println!("  Offset Index Size:   {:>7}", human_bytes(jar.offsets_index_size() as f64));
-            println!("  Offset List Size:    {:>7}", human_bytes(jar.offsets_size() as f64));
             println!(
                 "  Loading Time:        {:>7.2} ms | {:>7.2} µs",
                 duration.as_millis() as f64,
@@ -239,7 +240,6 @@ impl Command {
 
         println!("Total Filters Size:     {:>7}", human_bytes(total_filters_size as f64));
         println!("Total Offset Index Size: {:>7}", human_bytes(total_index_size as f64));
-        println!("Total Offset List Size:  {:>7}", human_bytes(total_offsets_size as f64));
         println!("Total File Size:         {:>7}", human_bytes(total_file_size as f64));
         println!(
             "Average Loading Time:    {:>7.2} ms | {:>7.2} µs",

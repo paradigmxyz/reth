@@ -46,6 +46,12 @@ pub mod test_vectors;
 pub mod utils;
 pub mod version;
 
+/// Re-exported payload related types
+pub mod payload {
+    pub use reth_payload_builder::*;
+    pub use reth_payload_validator::ExecutionPayloadValidator;
+}
+
 /// Re-exported from `reth_provider`.
 pub mod providers {
     pub use reth_provider::*;

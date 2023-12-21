@@ -1,3 +1,9 @@
+/// GPO reexports
+pub use reth_rpc::eth::gas_oracle::{
+    DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
+    DEFAULT_MAX_GAS_PRICE,
+};
+
 /// The default port for the http server
 pub const DEFAULT_HTTP_RPC_PORT: u16 = 8545;
 

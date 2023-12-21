@@ -1,6 +1,7 @@
 use super::LoadedJarRef;
 use crate::{
-    BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider, TransactionsProvider,
+    to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
+    TransactionsProvider,
 };
 use reth_db::{
     codecs::CompactU256,
@@ -11,7 +12,7 @@ use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, Receipt, SealedHeader,
     TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
-use std::ops::{Deref, Range, RangeBounds};
+use std::ops::{Deref, RangeBounds};
 
 /// Provider over a specific `NippyJar` and range.
 #[derive(Debug)]
@@ -285,20 +286,20 @@ impl<'a> ReceiptProvider for SnapshotJarProvider<'a> {
         // provider with `receipt()` instead for each
         Err(ProviderError::UnsupportedProvider)
     }
-}
 
-fn to_range<R: RangeBounds<u64>>(bounds: R) -> Range<u64> {
-    let start = match bounds.start_bound() {
-        std::ops::Bound::Included(&v) => v,
-        std::ops::Bound::Excluded(&v) => v + 1,
-        std::ops::Bound::Unbounded => 0,
-    };
+    fn receipts_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Receipt>> {
+        let range = to_range(range);
+        let mut cursor = self.cursor()?;
+        let mut receipts = Vec::with_capacity((range.end - range.start) as usize);
 
-    let end = match bounds.end_bound() {
-        std::ops::Bound::Included(&v) => v + 1,
-        std::ops::Bound::Excluded(&v) => v,
-        std::ops::Bound::Unbounded => u64::MAX,
-    };
-
-    start..end
+        for num in range {
+            if let Some(tx) = cursor.get_one::<ReceiptMask<Receipt>>(num.into())? {
+                receipts.push(tx)
+            }
+        }
+        Ok(receipts)
+    }
 }

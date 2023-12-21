@@ -23,10 +23,10 @@ pub mod components;
 pub mod config;
 pub mod ext;
 
-/// Default [Directive] for [EnvFilter] which disables high-frequency debug logs from `hyper` and
-/// `trust-dns`
-const DEFAULT_ENV_FILTER_DIRECTIVE: &str =
-    "hyper::proto::h1=off,trust_dns_proto=off,trust_dns_resolver=off";
+/// Default [directives](Directive) for [EnvFilter] which disables high-frequency debug logs from
+/// `hyper` and `trust-dns`
+const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 3] =
+    ["hyper::proto::h1=off", "trust_dns_proto=off", "atrust_dns_resolver=off"];
 
 /// The main reth cli interface.
 ///
@@ -232,20 +232,32 @@ impl Logs {
     {
         let mut layers = Vec::new();
 
+        // Function to create a new EnvFilter with environment (from `RUST_LOG` env var), default
+        // (from `DEFAULT_DIRECTIVES`) and additional directives.
+        let create_env_filter = |additional_directives: &str| -> eyre::Result<EnvFilter> {
+            let env_filter = EnvFilter::builder().from_env_lossy();
+
+            DEFAULT_ENV_FILTER_DIRECTIVES
+                .into_iter()
+                .chain(additional_directives.split(','))
+                .try_fold(env_filter, |env_filter, directive| {
+                    Ok(env_filter.add_directive(directive.parse()?))
+                })
+        };
+
+        // Create and add the journald layer if enabled
         if self.journald {
+            let journald_filter = create_env_filter(&self.journald_filter)?;
             layers.push(
-                reth_tracing::journald(
-                    EnvFilter::try_new(DEFAULT_ENV_FILTER_DIRECTIVE)?
-                        .add_directive(self.journald_filter.parse()?),
-                )
-                .expect("Could not connect to journald"),
+                reth_tracing::journald(journald_filter).expect("Could not connect to journald"),
             );
         }
 
+        // Create and add the file logging layer if enabled
         let file_guard = if self.log_file_max_files > 0 {
+            let file_filter = create_env_filter(&self.log_file_filter)?;
             let (layer, guard) = reth_tracing::file(
-                EnvFilter::try_new(DEFAULT_ENV_FILTER_DIRECTIVE)?
-                    .add_directive(self.log_file_filter.parse()?),
+                file_filter,
                 &self.log_file_directory,
                 "reth.log",
                 self.log_file_max_size * MB_TO_BYTES,
@@ -382,5 +394,22 @@ mod tests {
         let reth = Cli::<()>::try_parse_from(["reth", "node", "--trusted-setup-file", "README.md"])
             .unwrap();
         assert!(reth.run().is_err());
+    }
+
+    #[test]
+    fn parse_env_filter_directives() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        std::env::set_var("RUST_LOG", "info,evm=debug");
+        let reth = Cli::<()>::try_parse_from([
+            "reth",
+            "init",
+            "--datadir",
+            temp_dir.path().to_str().unwrap(),
+            "--log.file.filter",
+            "debug,net=trace",
+        ])
+        .unwrap();
+        assert!(reth.run().is_ok());
     }
 }
