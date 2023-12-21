@@ -66,7 +66,7 @@ impl<DB> NodeState<DB> {
                     target,
                 };
 
-                let progress = OptionalField(
+                let stage_progress = OptionalField(
                     checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
                 );
 
@@ -76,7 +76,7 @@ impl<DB> NodeState<DB> {
                         stage = %stage_id,
                         checkpoint = %checkpoint.block_number,
                         target = %OptionalField(target),
-                        %progress,
+                        %stage_progress,
                         %stage_eta,
                         "Executing stage",
                     );
@@ -86,7 +86,7 @@ impl<DB> NodeState<DB> {
                         stage = %stage_id,
                         checkpoint = %checkpoint.block_number,
                         target = %OptionalField(target),
-                        %progress,
+                        %stage_progress,
                         "Executing stage",
                     );
                 }
@@ -107,7 +107,7 @@ impl<DB> NodeState<DB> {
                     current_stage.eta.update(checkpoint);
 
                     let target = OptionalField(current_stage.target);
-                    let progress = OptionalField(
+                    let stage_progress = OptionalField(
                         checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
                     );
 
@@ -120,7 +120,7 @@ impl<DB> NodeState<DB> {
                             stage = %stage_id,
                             checkpoint = %checkpoint.block_number,
                             %target,
-                            %progress,
+                            %stage_progress,
                             %stage_eta,
                             message,
                         )
@@ -130,7 +130,7 @@ impl<DB> NodeState<DB> {
                             stage = %stage_id,
                             checkpoint = %checkpoint.block_number,
                             %target,
-                            %progress,
+                            %stage_progress,
                             message,
                         )
                     }
@@ -328,7 +328,7 @@ where
             if let Some(CurrentStage { stage_id, eta, checkpoint, target }) =
                 &this.state.current_stage
             {
-                let progress = OptionalField(
+                let stage_progress = OptionalField(
                     checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
                 );
 
@@ -340,7 +340,7 @@ where
                         stage = %stage_id,
                         checkpoint = checkpoint.block_number,
                         target = %OptionalField(*target),
-                        %progress,
+                        %stage_progress,
                         %stage_eta,
                         "Status"
                     );
@@ -352,7 +352,7 @@ where
                         stage = %stage_id,
                         checkpoint = checkpoint.block_number,
                         target = %OptionalField(*target),
-                        %progress,
+                        %stage_progress,
                         "Status"
                     );
                 }
