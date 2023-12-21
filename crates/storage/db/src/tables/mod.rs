@@ -166,10 +166,13 @@ macro_rules! tables {
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 match s {
                     $($table::NAME => {
-                        return Ok(Tables::$table)
+                        Ok(Tables::$table)
+                    },)*
+                    $($dupsort::NAME => {
+                        Ok(Tables::$dupsort)
                     },)*
                     _ => {
-                        return Err("Unknown table".to_string())
+                        Err("Unknown table".to_string())
                     }
                 }
             }
