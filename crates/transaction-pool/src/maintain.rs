@@ -589,7 +589,15 @@ where
                 })
                 .collect::<Vec<_>>();
             let _ = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
-            Ok(())
+            match reth_primitives::fs::remove_file(file_path.clone()) {
+                Ok(_) => Ok(()),
+                Err(err) => {
+                    error!(target: "reth::cli", 
+                    txs_file = ?file_path, 
+                    "Unable to delete recovered local transactions file. Encounetered error: {}", err);
+                    Err(err)
+                }
+            }
         }
         Err(err) => {
             error!(target: "reth::cli", 
