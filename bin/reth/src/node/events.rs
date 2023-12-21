@@ -438,8 +438,11 @@ impl Eta {
     /// It's not the case for network-dependent ([StageId::Headers] and [StageId::Bodies]) and
     /// [StageId::Execution] stages.
     fn fmt_for_stage(&self, stage: StageId) -> Option<String> {
-        (!matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution))
-            .then_some(self.to_string())
+        if matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution) {
+            None
+        } else {
+            Some(self.to_string())
+        }
     }
 }
 
