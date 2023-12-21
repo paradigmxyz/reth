@@ -18,7 +18,6 @@ use reth_tracing::{
     BoxedLayer, FileWorkerGuard,
 };
 use std::{fmt, fmt::Display, sync::Arc};
-use tracing::subscriber::DefaultGuard;
 
 pub mod components;
 pub mod config;
@@ -84,7 +83,7 @@ impl<Ext: RethCliExt> Cli<Ext> {
         self.logs.log_file_directory =
             self.logs.log_file_directory.join(self.chain.chain.to_string());
 
-        let _guards = self.init_tracing()?;
+        let _guard = self.init_tracing()?;
 
         let runner = CliRunner;
         match self.command {
@@ -105,18 +104,15 @@ impl<Ext: RethCliExt> Cli<Ext> {
     ///
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
-    ///
-    /// This also returns a guard for the default tracing subscriber, which must be kept alive for
-    /// the subscriber to remain set.
-    pub fn init_tracing(&self) -> eyre::Result<(Option<FileWorkerGuard>, DefaultGuard)> {
+    pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
         let mut layers =
             vec![reth_tracing::stdout(self.verbosity.directive(), &self.logs.color.to_string())];
 
         let (additional_layers, guard) = self.logs.layers()?;
         layers.extend(additional_layers);
 
-        let default_guard = reth_tracing::init(layers);
-        Ok((guard, default_guard))
+        reth_tracing::init(layers);
+        Ok(guard)
     }
 
     /// Configures the given node extension.

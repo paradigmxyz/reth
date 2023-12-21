@@ -19,7 +19,7 @@
 
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use std::path::Path;
-use tracing::{subscriber::DefaultGuard, Subscriber};
+use tracing::Subscriber;
 use tracing_subscriber::{
     filter::Directive, prelude::*, registry::LookupSpan, EnvFilter, Layer, Registry,
 };
@@ -32,10 +32,9 @@ pub use tracing_subscriber;
 pub type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
 
 /// Initializes a new [Subscriber] based on the given layers.
-pub fn init(layers: Vec<BoxedLayer<Registry>>) -> DefaultGuard {
-    // Just set the default subscriber, relying on the caller to keep the default guard alive for
-    // the lifetime of the program.
-    tracing_subscriber::registry().with(layers).set_default()
+pub fn init(layers: Vec<BoxedLayer<Registry>>) {
+    // To avoid panicking in tests, we silently fail if we cannot initialize the subscriber.
+    let _ = tracing_subscriber::registry().with(layers).try_init();
 }
 
 /// Builds a new tracing layer that writes to stdout.
