@@ -6,7 +6,6 @@ use crate::cli::{
 };
 use clap::Args;
 
-use futures_util::Stream;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateNotificationStream;

@@ -296,7 +296,7 @@ where
             //              new_chain.committed().map(|chain| chain.state())
             //        });
 
-            let e = this.chain_events.poll_next_unpin(cx);
+            let _e = this.chain_events.poll_next_unpin(cx);
 
             // we poll all jobs first, so we always have the latest payload that we can report if
             // requests
