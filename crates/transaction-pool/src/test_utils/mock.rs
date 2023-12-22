@@ -246,6 +246,55 @@ impl MockTransaction {
         }
     }
 
+    /// Returns a new EIP2930 transaction with random address and hash and empty values
+    pub fn eip2930() -> Self {
+        MockTransaction::Eip2930 {
+            hash: B256::random(),
+            sender: Address::random(),
+            nonce: 0,
+            to: TransactionKind::Call(Address::random()),
+            gas_limit: 0,
+            input: Bytes::new(),
+            value: Default::default(),
+            gas_price: 0,
+            accesslist: Default::default(),
+        }
+    }
+
+    /// Returns a new deposit transaction with random address and hash and empty values
+    #[cfg(feature = "optimism")]
+    pub fn deposit() -> Self {
+        MockTransaction::Deposit(TxDeposit {
+            source_hash: B256::random(),
+            from: Address::random(),
+            to: TransactionKind::Call(Address::random()),
+            mint: Some(0),
+            value: Default::default(),
+            gas_limit: 0,
+            is_system_transaction: false,
+            input: Bytes::new(),
+        })
+    }
+
+    /// Creates a new transaction with the given [TxType].
+    ///
+    /// See the default constructors for each of the transaction types:
+    ///
+    /// * [MockTransaction::legacy]
+    /// * [MockTransaction::eip2930]
+    /// * [MockTransaction::eip1559]
+    /// * [MockTransaction::eip4844]
+    pub fn new_from_type(tx_type: TxType) -> Self {
+        match tx_type {
+            TxType::Legacy => Self::legacy(),
+            TxType::EIP2930 => Self::eip2930(),
+            TxType::EIP1559 => Self::eip1559(),
+            TxType::EIP4844 => Self::eip4844(),
+            #[cfg(feature = "optimism")]
+            TxType::DEPOSIT => Self::deposit(),
+        }
+    }
+
     /// Sets the max fee per blob gas for EIP-4844 transactions,
     pub fn with_blob_fee(mut self, val: u128) -> Self {
         self.set_blob_fee(val);
@@ -898,8 +947,8 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::{any, Strategy};
 
-        any::<(Transaction, Address, B256, BlobTransactionSidecar)>()
-            .prop_map(|(tx, sender, tx_hash, sidecar)| match &tx {
+        any::<(Transaction, Address, B256)>()
+            .prop_map(|(tx, sender, tx_hash)| match &tx {
                 Transaction::Legacy(TxLegacy {
                     nonce,
                     gas_price,
@@ -972,7 +1021,9 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     value: (*value).into(),
                     input: (*input).clone(),
                     accesslist: (*access_list).clone(),
-                    sidecar,
+                    // only generate a sidecar if it is a 4844 tx - also for the sake of
+                    // performance just use a default sidecar
+                    sidecar: BlobTransactionSidecar::default(),
                 },
                 _ => unimplemented!(),
             })
@@ -998,6 +1049,7 @@ impl MockTransactionFactory {
     pub fn validated(&mut self, transaction: MockTransaction) -> MockValidTx {
         self.validated_with_origin(TransactionOrigin::External, transaction)
     }
+
     pub fn validated_arc(&mut self, transaction: MockTransaction) -> Arc<MockValidTx> {
         Arc::new(self.validated(transaction))
     }
@@ -1078,6 +1130,59 @@ impl MockTransactionDistribution {
             MockTransaction::legacy()
         };
         tx.with_nonce(nonce).with_gas_limit(self.gas_limit_range.sample(rng))
+    }
+}
+
+/// A set of [MockTransaction]s that can be modified at once
+#[derive(Debug, Clone)]
+pub struct MockTransactionSet {
+    pub(crate) transactions: Vec<MockTransaction>,
+}
+
+impl MockTransactionSet {
+    /// Create a new [MockTransactionSet] from a list of transactions
+    fn new(transactions: Vec<MockTransaction>) -> Self {
+        Self { transactions }
+    }
+
+    /// Creates a series of dependent transactions for a given sender and nonce.
+    ///
+    /// This method generates a sequence of transactions starting from the provided nonce
+    /// for the given sender.
+    ///
+    /// The number of transactions created is determined by `tx_count`.
+    pub fn dependent(sender: Address, from_nonce: u64, tx_count: usize, tx_type: TxType) -> Self {
+        let mut txs = Vec::with_capacity(tx_count);
+        let mut curr_tx = MockTransaction::new_from_type(tx_type).with_nonce(from_nonce);
+        for i in 0..tx_count {
+            let nonce = from_nonce + i as u64;
+            curr_tx = curr_tx.next().with_sender(sender);
+            txs.push(curr_tx.clone());
+        }
+
+        Self::new(txs)
+    }
+
+    /// Creates a chain of transactions for a given sender with a specified count.
+    ///
+    /// This method generates a sequence of transactions starting from the specified sender
+    /// and creates a chain of transactions based on the `tx_count`.
+    pub fn sequential_transactions_by_sender(
+        sender: Address,
+        tx_count: usize,
+        tx_type: TxType,
+    ) -> Self {
+        Self::dependent(sender, 0, tx_count, tx_type)
+    }
+
+    /// Add transactions to the [MockTransactionSet]
+    pub fn extend<T: IntoIterator<Item = MockTransaction>>(&mut self, txs: T) {
+        self.transactions.extend(txs);
+    }
+
+    /// Extract the inner [Vec] of [MockTransaction]s
+    pub fn into_vec(self) -> Vec<MockTransaction> {
+        self.transactions
     }
 }
 

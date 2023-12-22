@@ -3,55 +3,23 @@ use super::{
     Command, Compression, PerfectHashingFunction,
 };
 use rand::{seq::SliceRandom, Rng};
-use reth_db::{database::Database, open_db_read_only, snapshot::ReceiptMask};
+use reth_db::{open_db_read_only, snapshot::ReceiptMask};
 use reth_interfaces::db::LogLevel;
 use reth_primitives::{
     snapshot::{Filters, InclusionFilter},
     ChainSpec, Receipt, SnapshotSegment,
 };
 use reth_provider::{
-    providers::SnapshotProvider, DatabaseProviderRO, ProviderError, ProviderFactory,
-    ReceiptProvider, TransactionsProvider, TransactionsProviderExt,
+    providers::SnapshotProvider, BlockNumReader, ProviderError, ProviderFactory, ReceiptProvider,
+    TransactionsProvider, TransactionsProviderExt,
 };
-use reth_snapshot::{segments, segments::Segment};
+
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 impl Command {
-    pub(crate) fn generate_receipts_snapshot<DB: Database>(
-        &self,
-        provider: &DatabaseProviderRO<DB>,
-        compression: Compression,
-        inclusion_filter: InclusionFilter,
-        phf: PerfectHashingFunction,
-    ) -> eyre::Result<()> {
-        let block_range = self.block_range();
-        let filters = if self.with_filters {
-            Filters::WithFilters(inclusion_filter, phf)
-        } else {
-            Filters::WithoutFilters
-        };
-
-        let segment: segments::Receipts = segments::Receipts::new(compression, filters);
-        segment.snapshot::<DB>(provider, PathBuf::default(), block_range.clone())?;
-
-        // Default name doesn't have any configuration
-        let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
-        reth_primitives::fs::rename(
-            SnapshotSegment::Receipts.filename(&block_range, &tx_range),
-            SnapshotSegment::Receipts.filename_with_configuration(
-                filters,
-                compression,
-                &block_range,
-                &tx_range,
-            ),
-        )?;
-
-        Ok(())
-    }
-
     pub(crate) fn bench_receipts_snapshot(
         &self,
         db_path: &Path,
@@ -59,15 +27,19 @@ impl Command {
         chain: Arc<ChainSpec>,
         compression: Compression,
         inclusion_filter: InclusionFilter,
-        phf: PerfectHashingFunction,
+        phf: Option<PerfectHashingFunction>,
     ) -> eyre::Result<()> {
-        let filters = if self.with_filters {
+        let factory = ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone());
+        let provider = factory.provider()?;
+        let tip = provider.last_block_number()?;
+        let block_range =
+            self.block_ranges(tip).first().expect("has been generated before").clone();
+
+        let filters = if let Some(phf) = self.with_filters.then_some(phf).flatten() {
             Filters::WithFilters(inclusion_filter, phf)
         } else {
             Filters::WithoutFilters
         };
-
-        let block_range = self.block_range();
 
         let mut rng = rand::thread_rng();
 
@@ -81,7 +53,7 @@ impl Command {
             .filename_with_configuration(filters, compression, &block_range, &tx_range)
             .into();
 
-        let provider = SnapshotProvider::default();
+        let provider = SnapshotProvider::new(PathBuf::default())?;
         let jar_provider = provider.get_segment_provider_from_block(
             SnapshotSegment::Receipts,
             self.from,

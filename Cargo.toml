@@ -6,6 +6,7 @@ members = [
     "crates/consensus/auto-seal/",
     "crates/consensus/beacon/",
     "crates/consensus/common/",
+    "crates/ethereum-forks/",
     "crates/interfaces/",
     "crates/metrics/",
     "crates/metrics/metrics-derive/",
@@ -20,6 +21,7 @@ members = [
     "crates/net/network-api/",
     "crates/payload/basic/",
     "crates/payload/builder/",
+    "crates/payload/validator/",
     "crates/primitives/",
     "crates/prune/",
     "crates/revm/",
@@ -62,7 +64,7 @@ default-members = ["bin/reth"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.11"
+version = "0.1.0-alpha.13"
 edition = "2021"
 rust-version = "1.70"
 license = "MIT OR Apache-2.0"
@@ -103,6 +105,7 @@ reth-dns-discovery = { path = "crates/net/dns" }
 reth-downloaders = { path = "crates/net/downloaders" }
 reth-ecies = { path = "crates/net/ecies" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
+reth-ethereum-forks = { path = "crates/ethereum-forks" }
 reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
@@ -115,6 +118,7 @@ reth-network = { path = "crates/net/network" }
 reth-network-api = { path = "crates/net/network-api" }
 reth-nippy-jar = { path = "crates/storage/nippy-jar" }
 reth-payload-builder = { path = "crates/payload/builder" }
+reth-payload-validator = { path = "crates/payload/validator" }
 reth-primitives = { path = "crates/primitives" }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune" }
@@ -140,9 +144,9 @@ revm = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze",  fea
 revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", features = ["std"], default-features = false }
 
 # eth
-alloy-primitives = "0.4"
-alloy-dyn-abi = "0.4"
-alloy-sol-types = "0.4"
+alloy-primitives = "0.5"
+alloy-dyn-abi = "0.5"
+alloy-sol-types = "0.5"
 alloy-rlp = "0.3"
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
@@ -156,7 +160,7 @@ boa_engine = "0.17"
 boa_gc = "0.17"
 
 # misc
-aquamarine = "0.3"
+aquamarine = "0.4"
 bytes = "1.5"
 bitflags = "2.4"
 clap = "4"
@@ -212,11 +216,11 @@ confy = "0.5"
 toml = "0.8"
 
 # misc-testing
-arbitrary = "1.1"
+arbitrary = "1.3"
 assert_matches = "1.5.0"
 tempfile = "3.8"
 criterion = "0.5"
 pprof = "0.13"
-proptest = "1.0"
+proptest = "1.4"
 proptest-derive = "0.4"
 serial_test = "2"

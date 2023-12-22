@@ -35,7 +35,7 @@ use std::{
 };
 use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
-use tracing::trace;
+use tracing::{debug, trace};
 
 /// Cache limit of transactions to keep track of for a single peer.
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
@@ -589,6 +589,7 @@ where
                 self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
 
                 if has_blob_txs {
+                    debug!(target: "net::tx", ?peer_id, "received bad full blob transaction broadcast");
                     self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
                 }
             }
@@ -856,7 +857,7 @@ where
                     // known that this transaction is bad. (e.g. consensus
                     // rules)
                     if err.is_bad_transaction() && !this.network.is_syncing() {
-                        trace!(target: "net::tx", ?err, "bad pool transaction import");
+                        debug!(target: "net::tx", ?err, "bad pool transaction import");
                         this.on_bad_import(err.hash);
                         continue
                     }

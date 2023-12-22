@@ -728,7 +728,7 @@ impl FilteredParams {
     }
 
     /// Returns `true` if the bloom matches the topics
-    pub fn matches_topics(bloom: Bloom, topic_filters: &Vec<BloomFilter>) -> bool {
+    pub fn matches_topics(bloom: Bloom, topic_filters: &[BloomFilter]) -> bool {
         if topic_filters.is_empty() {
             return true
         }
@@ -988,6 +988,21 @@ mod tests {
                     .into(),
                 Default::default(),
             ]
+        );
+    }
+
+    #[test]
+    fn test_block_hash() {
+        let s =
+            r#"{"blockHash":"0x58dc57ab582b282c143424bd01e8d923cddfdcda9455bad02a29522f6274a948"}"#;
+        let filter = serde_json::from_str::<Filter>(s).unwrap();
+        similar_asserts::assert_eq!(
+            filter.block_option,
+            FilterBlockOption::AtBlockHash(
+                "0x58dc57ab582b282c143424bd01e8d923cddfdcda9455bad02a29522f6274a948"
+                    .parse()
+                    .unwrap()
+            )
         );
     }
 

@@ -228,9 +228,10 @@ where
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/rlpx.md#message-id-based-multiplexing>
 ///
-/// This stream emits Bytes that start with the normalized message id, so that the first byte of
-/// each message starts from 0. If this stream only supports a single capability, for example `eth`
-/// then the first byte of each message will match [EthMessageID](crate::types::EthMessageID).
+/// This stream emits _non-empty_ Bytes that start with the normalized message id, so that the first
+/// byte of each message starts from 0. If this stream only supports a single capability, for
+/// example `eth` then the first byte of each message will match
+/// [EthMessageID](crate::types::EthMessageID).
 #[pin_project]
 #[derive(Debug)]
 pub struct P2PStream<S> {
@@ -300,11 +301,6 @@ impl<S> P2PStream<S> {
         &self.shared_capabilities
     }
 
-    /// Returns `true` if the connection is about to disconnect.
-    pub fn is_disconnecting(&self) -> bool {
-        self.disconnecting
-    }
-
     /// Returns `true` if the stream has outgoing capacity.
     fn has_outgoing_capacity(&self) -> bool {
         self.outgoing_messages.len() < self.outgoing_message_buffer_capacity
@@ -325,7 +321,16 @@ impl<S> P2PStream<S> {
         ping.encode(&mut ping_bytes);
         self.outgoing_messages.push_back(ping_bytes.freeze());
     }
+}
 
+pub trait DisconnectP2P {
+    /// Starts to gracefully disconnect.
+    fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), P2PStreamError>;
+    /// Returns `true` if the connection is about to disconnect.
+    fn is_disconnecting(&self) -> bool;
+}
+
+impl<S> DisconnectP2P for P2PStream<S> {
     /// Starts to gracefully disconnect the connection by sending a Disconnect message and stop
     /// reading new messages.
     ///
@@ -334,7 +339,7 @@ impl<S> P2PStream<S> {
     /// # Errors
     ///
     /// Returns an error only if the message fails to compress.
-    pub fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), snap::Error> {
+    fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), P2PStreamError> {
         // clear any buffered messages and queue in
         self.outgoing_messages.clear();
         let disconnect = P2PMessage::Disconnect(reason);
@@ -363,6 +368,10 @@ impl<S> P2PStream<S> {
         self.outgoing_messages.push_back(compressed.freeze());
         self.disconnecting = true;
         Ok(())
+    }
+
+    fn is_disconnecting(&self) -> bool {
+        self.disconnecting
     }
 }
 
@@ -405,6 +414,11 @@ where
                 None => return Poll::Ready(None),
             };
 
+            if bytes.is_empty() {
+                // empty messages are not allowed
+                return Poll::Ready(Some(Err(P2PStreamError::EmptyProtocolMessage)))
+            }
+
             // first check that the compressed message length does not exceed the max
             // payload size
             let decompressed_len = snap::raw::decompress_len(&bytes[1..])?;
@@ -430,7 +444,7 @@ where
                 err
             })?;
 
-            let id = *bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
+            let id = bytes[0];
             match id {
                 _ if id == P2PMessageID::Ping as u8 => {
                     trace!("Received Ping, Sending Pong");
@@ -572,8 +586,7 @@ where
         Ok(())
     }
 
-    /// Returns Poll::Ready(Ok(())) when no buffered items remain and the sink has been successfully
-    /// closed.
+    /// Returns `Poll::Ready(Ok(()))` when no buffered items remain.
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let mut this = self.project();
         loop {
@@ -593,6 +606,7 @@ where
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         ready!(self.as_mut().poll_flush(cx))?;
+        ready!(self.project().inner.poll_close(cx))?;
 
         Poll::Ready(Ok(()))
     }

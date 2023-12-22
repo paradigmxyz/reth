@@ -113,7 +113,7 @@ HashedStorage {
     U256 StorageValue
 }
 AccountsTrie {
-    StoredNibbles Nibbles "PK"
+    Nibbles "PK"
     BranchNodeCompact Node
 }
 StoragesTrie {

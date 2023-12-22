@@ -1,7 +1,8 @@
 //! Types for representing call trace items.
 
 use crate::tracing::{config::TraceStyle, utils::convert_memory};
-use alloy_primitives::{Address, Bytes, B256, U256, U64};
+pub use alloy_primitives::Log;
+use alloy_primitives::{Address, Bytes, U256, U64};
 use alloy_sol_types::decode_revert_reason;
 use reth_rpc_types::trace::{
     geth::{CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
@@ -60,7 +61,7 @@ impl CallTrace {
     /// Returns true if the status code is an error or revert, See [InstructionResult::Revert]
     #[inline]
     pub fn is_error(&self) -> bool {
-        self.status.is_error()
+        !self.status.is_ok()
     }
 
     /// Returns true if the status code is a revert
@@ -128,8 +129,8 @@ pub struct CallTraceNode {
     pub idx: usize,
     /// The call trace
     pub trace: CallTrace,
-    /// Logs
-    pub logs: Vec<RawLog>,
+    /// Recorded logs, if enabled
+    pub logs: Vec<Log>,
     /// Ordering of child calls and logs
     pub ordering: Vec<LogCallOrder>,
 }
@@ -346,7 +347,10 @@ impl CallTraceNode {
 
         // we need to populate error and revert reason
         if !self.trace.success {
-            call_frame.revert_reason = decode_revert_reason(self.trace.output.as_ref());
+            // decode the revert reason, but don't include it if it's empty
+            call_frame.revert_reason = decode_revert_reason(self.trace.output.as_ref())
+                .filter(|reason| !reason.is_empty());
+
             // Note: the call tracer mimics parity's trace transaction and geth maps errors to parity style error messages, <https://github.com/ethereum/go-ethereum/blob/34d507215951fb3f4a5983b65e127577989a6db8/eth/tracers/native/call_flat.go#L39-L55>
             call_frame.error = self.trace.as_error_msg(TraceStyle::Parity);
         }
@@ -357,7 +361,7 @@ impl CallTraceNode {
                 .iter()
                 .map(|log| CallLogFrame {
                     address: Some(self.execution_address()),
-                    topics: Some(log.topics.clone()),
+                    topics: Some(log.topics().to_vec()),
                     data: Some(log.data.clone()),
                 })
                 .collect();
@@ -487,15 +491,6 @@ pub enum LogCallOrder {
     Log(usize),
     /// Contains the index of the corresponding trace node
     Call(usize),
-}
-
-/// Ethereum log.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RawLog {
-    /// Indexed event params are represented as log topics.
-    pub topics: Vec<B256>,
-    /// Others are just plain data.
-    pub data: Bytes,
 }
 
 /// Represents a tracked call step during execution
@@ -682,5 +677,16 @@ impl RecordedMemory {
 impl AsRef<[u8]> for RecordedMemory {
     fn as_ref(&self) -> &[u8] {
         self.as_bytes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_empty_revert() {
+        let reason = decode_revert_reason("".as_bytes());
+        assert_eq!(reason, Some("".to_string()));
     }
 }

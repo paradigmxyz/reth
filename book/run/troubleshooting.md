@@ -61,7 +61,7 @@ is less than 1 second.
 It will take the same time as initial sync.
 
 1. Stop Reth
-2. Drop the database using [`reth db drop`](../cli/db.md#reth-db-drop)
+2. Drop the database using [`reth db drop`](../cli/reth/db/drop.md)
 3. Start reth
 
 ### Database write error
@@ -94,3 +94,20 @@ Caused by:
     ./db-tools/mdbx_chk $(reth db path)/mdbx.dat | tee mdbx_chk.log
     ```
     If `mdbx_chk` has detected any errors, please [open an issue](https://github.com/paradigmxyz/reth/issues) and post the output from the `mdbx_chk.log` file.
+
+### Concurrent database access error (using containers/Docker)
+
+If you encounter an error while accessing the database from multiple processes and you are using multiple containers or a mix of host and container(s), it is possible the error is related to `PID` namespaces. You might see one of the following error messages.
+
+```console
+mdbx:0: panic: Assertion `osal_rdt_unlock() failed: err 1' failed.
+```
+or
+
+```console
+pthread_mutex_lock.c:438: __pthread_mutex_lock_full: Assertion `e != ESRCH || !robust' failed
+```
+
+If you are using Docker, a possible solution is to run all database-accessing containers with `--pid=host` flag.
+
+For more information, check out the `Containers` section in the [libmdbx README](https://github.com/erthink/libmdbx#containers).

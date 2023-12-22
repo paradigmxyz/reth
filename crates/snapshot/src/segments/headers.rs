@@ -31,7 +31,7 @@ impl Default for Headers {
 }
 
 impl Segment for Headers {
-    fn segment() -> SnapshotSegment {
+    fn segment(&self) -> SnapshotSegment {
         SnapshotSegment::Headers
     }
 
@@ -45,7 +45,7 @@ impl Segment for Headers {
         let mut jar = prepare_jar::<DB, 3>(
             provider,
             directory,
-            Self::segment(),
+            self.segment(),
             self.config,
             range.clone(),
             range_len,

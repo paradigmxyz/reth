@@ -3,56 +3,22 @@ use super::{
     Command,
 };
 use rand::{seq::SliceRandom, Rng};
-use reth_db::{database::Database, open_db_read_only, snapshot::HeaderMask};
+use reth_db::{open_db_read_only, snapshot::HeaderMask};
 use reth_interfaces::db::LogLevel;
 use reth_primitives::{
     snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction},
     BlockHash, ChainSpec, Header, SnapshotSegment,
 };
 use reth_provider::{
-    providers::SnapshotProvider, DatabaseProviderRO, HeaderProvider, ProviderError,
-    ProviderFactory, TransactionsProviderExt,
+    providers::SnapshotProvider, BlockNumReader, HeaderProvider, ProviderError, ProviderFactory,
+    TransactionsProviderExt,
 };
-use reth_snapshot::{segments, segments::Segment};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 impl Command {
-    pub(crate) fn generate_headers_snapshot<DB: Database>(
-        &self,
-        provider: &DatabaseProviderRO<DB>,
-        compression: Compression,
-        inclusion_filter: InclusionFilter,
-        phf: PerfectHashingFunction,
-    ) -> eyre::Result<()> {
-        let range = self.block_range();
-        let filters = if self.with_filters {
-            Filters::WithFilters(inclusion_filter, phf)
-        } else {
-            Filters::WithoutFilters
-        };
-
-        let segment = segments::Headers::new(compression, filters);
-
-        segment.snapshot::<DB>(provider, PathBuf::default(), range.clone())?;
-
-        // Default name doesn't have any configuration
-        let tx_range = provider.transaction_range_by_block_range(range.clone())?;
-        reth_primitives::fs::rename(
-            SnapshotSegment::Headers.filename(&range, &tx_range),
-            SnapshotSegment::Headers.filename_with_configuration(
-                filters,
-                compression,
-                &range,
-                &tx_range,
-            ),
-        )?;
-
-        Ok(())
-    }
-
     pub(crate) fn bench_headers_snapshot(
         &self,
         db_path: &Path,
@@ -60,15 +26,19 @@ impl Command {
         chain: Arc<ChainSpec>,
         compression: Compression,
         inclusion_filter: InclusionFilter,
-        phf: PerfectHashingFunction,
+        phf: Option<PerfectHashingFunction>,
     ) -> eyre::Result<()> {
-        let filters = if self.with_filters {
+        let factory = ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone());
+        let provider = factory.provider()?;
+        let tip = provider.last_block_number()?;
+        let block_range =
+            self.block_ranges(tip).first().expect("has been generated before").clone();
+
+        let filters = if let Some(phf) = self.with_filters.then_some(phf).flatten() {
             Filters::WithFilters(inclusion_filter, phf)
         } else {
             Filters::WithoutFilters
         };
-
-        let block_range = self.block_range();
 
         let mut row_indexes = block_range.clone().collect::<Vec<_>>();
         let mut rng = rand::thread_rng();
@@ -80,7 +50,7 @@ impl Command {
         let path: PathBuf = SnapshotSegment::Headers
             .filename_with_configuration(filters, compression, &block_range, &tx_range)
             .into();
-        let provider = SnapshotProvider::default();
+        let provider = SnapshotProvider::new(PathBuf::default())?;
         let jar_provider = provider.get_segment_provider_from_block(
             SnapshotSegment::Headers,
             self.from,

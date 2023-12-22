@@ -26,10 +26,15 @@ pub struct PoolConfig {
     pub basefee_limit: SubPoolLimit,
     /// Max number of transaction in the queued sub-pool
     pub queued_limit: SubPoolLimit,
+    /// Max number of transactions in the blob sub-pool
+    pub blob_limit: SubPoolLimit,
     /// Max number of executable transaction slots guaranteed per account
     pub max_account_slots: usize,
     /// Price bump (in %) for the transaction pool underpriced check.
     pub price_bumps: PriceBumpConfig,
+    /// How to handle locally received transactions:
+    /// [TransactionOrigin::Local](crate::TransactionOrigin).
+    pub local_transactions_config: LocalTransactionConfig,
 }
 
 impl Default for PoolConfig {
@@ -38,8 +43,10 @@ impl Default for PoolConfig {
             pending_limit: Default::default(),
             basefee_limit: Default::default(),
             queued_limit: Default::default(),
+            blob_limit: Default::default(),
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
+            local_transactions_config: Default::default(),
         }
     }
 }
@@ -97,5 +104,26 @@ impl Default for PriceBumpConfig {
             default_price_bump: DEFAULT_PRICE_BUMP,
             replace_blob_tx_price_bump: REPLACE_BLOB_PRICE_BUMP,
         }
+    }
+}
+
+/// Configuration options for the locally received transactions:
+/// [TransactionOrigin::Local](crate::TransactionOrigin)
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub struct LocalTransactionConfig {
+    /// Apply no exemptions to the locally received transactions.
+    ///
+    /// This includes:
+    ///   - available slots are limited to the configured `max_account_slots` of [PoolConfig]
+    ///   - no price exemptions
+    ///   - no eviction exemptions
+    pub no_exemptions: bool,
+}
+
+impl LocalTransactionConfig {
+    /// Returns whether local transactions are not exempt from the configured limits.
+    #[inline]
+    pub fn no_local_exemptions(&self) -> bool {
+        self.no_exemptions
     }
 }

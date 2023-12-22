@@ -59,8 +59,12 @@ pub struct MaintainPoolMetrics {
     /// Number of currently dirty addresses that need to be updated in the pool by fetching account
     /// info
     pub(crate) dirty_accounts: Gauge,
+    /// How often the pool drifted from the canonical state.
+    pub(crate) drift_count: Counter,
     /// Number of transaction reinserted into the pool after reorg.
     pub(crate) reinserted_transactions: Counter,
+    /// Number of transactions finalized blob transactions we were tracking.
+    pub(crate) deleted_tracked_finalized_blobs: Counter,
 }
 
 impl MaintainPoolMetrics {
@@ -72,5 +76,15 @@ impl MaintainPoolMetrics {
     #[inline]
     pub(crate) fn inc_reinserted_transactions(&self, count: usize) {
         self.reinserted_transactions.increment(count as u64);
+    }
+
+    #[inline]
+    pub(crate) fn inc_deleted_tracked_blobs(&self, count: usize) {
+        self.deleted_tracked_finalized_blobs.increment(count as u64);
+    }
+
+    #[inline]
+    pub(crate) fn inc_drift(&self) {
+        self.drift_count.increment(1);
     }
 }

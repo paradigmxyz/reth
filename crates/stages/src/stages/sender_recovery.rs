@@ -198,9 +198,14 @@ fn recover_sender(
     let tx = transaction.value().expect("value to be formated");
     tx.transaction.encode_without_signature(rlp_buf);
 
+    // We call [Signature::recover_signer_unchecked] because transactions run in the pipeline are
+    // known to be valid - this means that we do not need to check whether or not the `s` value is
+    // greater than `secp256k1n / 2` if past EIP-2. There are transactions pre-homestead which have
+    // large `s` values, so using [Signature::recover_signer] here would not be
+    // backwards-compatible.
     let sender = tx
         .signature
-        .recover_signer(keccak256(rlp_buf))
+        .recover_signer_unchecked(keccak256(rlp_buf))
         .ok_or(SenderRecoveryStageError::FailedRecovery(FailedSenderRecoveryError { tx: tx_id }))?;
 
     Ok((tx_id, sender))

@@ -75,22 +75,27 @@ impl PooledTransactionsElement {
     /// Converts from an EIP-4844 [TransactionSignedEcRecovered] to a
     /// [PooledTransactionsElementEcRecovered] with the given sidecar.
     ///
-    /// Returns the transaction is not an EIP-4844 transaction.
+    /// Returns an `Err` containing the original `TransactionSigned` if the transaction is not
+    /// EIP-4844.
     pub fn try_from_blob_transaction(
         tx: TransactionSigned,
         sidecar: BlobTransactionSidecar,
     ) -> Result<Self, TransactionSigned> {
-        let TransactionSigned { transaction, signature, hash } = tx;
-        if let Transaction::Eip4844(tx) = transaction {
-            Ok(PooledTransactionsElement::BlobTransaction(BlobTransaction {
-                transaction: tx,
-                signature,
-                hash,
-                sidecar,
-            }))
-        } else {
-            Err(TransactionSigned { transaction, signature, hash })
-        }
+        Ok(match tx {
+            // If the transaction is an EIP-4844 transaction...
+            TransactionSigned { transaction: Transaction::Eip4844(tx), signature, hash } => {
+                // Construct a `PooledTransactionsElement::BlobTransaction` with provided sidecar.
+                PooledTransactionsElement::BlobTransaction(BlobTransaction {
+                    transaction: tx,
+                    signature,
+                    hash,
+                    sidecar,
+                })
+            }
+            // If the transaction is not EIP-4844, return an error with the original
+            // transaction.
+            _ => return Err(tx),
+        })
     }
 
     /// Heavy operation that return signature hash over rlp encoded transaction.
@@ -109,8 +114,8 @@ impl PooledTransactionsElement {
     /// Reference to transaction hash. Used to identify transaction.
     pub fn hash(&self) -> &TxHash {
         match self {
-            PooledTransactionsElement::Legacy { hash, .. } => hash,
-            PooledTransactionsElement::Eip2930 { hash, .. } => hash,
+            PooledTransactionsElement::Legacy { hash, .. } |
+            PooledTransactionsElement::Eip2930 { hash, .. } |
             PooledTransactionsElement::Eip1559 { hash, .. } => hash,
             PooledTransactionsElement::BlobTransaction(tx) => &tx.hash,
             #[cfg(feature = "optimism")]
@@ -121,8 +126,8 @@ impl PooledTransactionsElement {
     /// Returns the signature of the transaction.
     pub fn signature(&self) -> &Signature {
         match self {
-            Self::Legacy { signature, .. } => signature,
-            Self::Eip2930 { signature, .. } => signature,
+            Self::Legacy { signature, .. } |
+            Self::Eip2930 { signature, .. } |
             Self::Eip1559 { signature, .. } => signature,
             Self::BlobTransaction(blob_tx) => &blob_tx.signature,
             #[cfg(feature = "optimism")]
@@ -148,8 +153,7 @@ impl PooledTransactionsElement {
     ///
     /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
     pub fn recover_signer(&self) -> Option<Address> {
-        let signature_hash = self.signature_hash();
-        self.signature().recover_signer(signature_hash)
+        self.signature().recover_signer(self.signature_hash())
     }
 
     /// Tries to recover signer and return [`PooledTransactionsElementEcRecovered`].
@@ -513,19 +517,26 @@ impl From<TransactionSigned> for PooledTransactionsElement {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
+    /// Generates an arbitrary `PooledTransactionsElement`.
+    ///
+    /// This function generates an arbitrary `PooledTransactionsElement` by creating a transaction
+    /// and, if applicable, generating a sidecar for blob transactions.
+    ///
+    /// It handles the generation of sidecars and constructs the resulting
+    /// `PooledTransactionsElement`.
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let transaction = TransactionSigned::arbitrary(u)?;
-
-        // this will have an empty sidecar
-        let pooled_txs_element = PooledTransactionsElement::from(transaction);
-
-        // generate a sidecar for blob txs
-        if let PooledTransactionsElement::BlobTransaction(mut tx) = pooled_txs_element {
-            tx.sidecar = crate::BlobTransactionSidecar::arbitrary(u)?;
-            Ok(PooledTransactionsElement::BlobTransaction(tx))
-        } else {
-            Ok(pooled_txs_element)
-        }
+        // Attempt to create a `TransactionSigned` with arbitrary data.
+        Ok(match PooledTransactionsElement::from(TransactionSigned::arbitrary(u)?) {
+            // If the generated `PooledTransactionsElement` is a blob transaction...
+            PooledTransactionsElement::BlobTransaction(mut tx) => {
+                // Generate a sidecar for the blob transaction using arbitrary data.
+                tx.sidecar = crate::BlobTransactionSidecar::arbitrary(u)?;
+                // Return the blob transaction with the generated sidecar.
+                PooledTransactionsElement::BlobTransaction(tx)
+            }
+            // If the generated `PooledTransactionsElement` is not a blob transaction...
+            tx => tx,
+        })
     }
 }
 
@@ -614,11 +625,10 @@ impl PooledTransactionsElementEcRecovered {
     }
 }
 
+/// Converts a `TransactionSignedEcRecovered` into a `PooledTransactionsElementEcRecovered`.
 impl From<TransactionSignedEcRecovered> for PooledTransactionsElementEcRecovered {
     fn from(tx: TransactionSignedEcRecovered) -> Self {
-        let signer = tx.signer;
-        let transaction = tx.signed_transaction.into();
-        Self { transaction, signer }
+        Self { transaction: tx.signed_transaction.into(), signer: tx.signer }
     }
 }
 

@@ -16,11 +16,21 @@ use tracing::warn;
 /// The number of transactions sampled in a block
 pub const SAMPLE_NUMBER: usize = 3_usize;
 
-/// The default maximum gas price to use for the estimate
-pub const DEFAULT_MAX_PRICE: U256 = U256::from_limbs([500_000_000_000u64, 0, 0, 0]);
+/// The default maximum number of blocks to use for the gas price oracle.
+pub const MAX_HEADER_HISTORY: u64 = 1024;
+
+/// Number of recent blocks to check for gas price
+pub const DEFAULT_GAS_PRICE_BLOCKS: u32 = 20;
+
+/// The percentile of gas prices to use for the estimate
+pub const DEFAULT_GAS_PRICE_PERCENTILE: u32 = 60;
+
+/// Maximum transaction priority fee (or gas price before London Fork) to be recommended by the gas
+/// price oracle
+pub const DEFAULT_MAX_GAS_PRICE: U256 = U256::from_limbs([500_000_000_000u64, 0, 0, 0]);
 
 /// The default minimum gas price, under which the sample will be ignored
-pub const DEFAULT_IGNORE_PRICE: U256 = U256::from_limbs([2u64, 0, 0, 0]);
+pub const DEFAULT_IGNORE_GAS_PRICE: U256 = U256::from_limbs([2u64, 0, 0, 0]);
 
 /// Settings for the [GasPriceOracle]
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -51,33 +61,13 @@ pub struct GasPriceOracleConfig {
 impl Default for GasPriceOracleConfig {
     fn default() -> Self {
         GasPriceOracleConfig {
-            blocks: 20,
-            percentile: 60,
-            max_header_history: 1024,
-            max_block_history: 1024,
+            blocks: DEFAULT_GAS_PRICE_BLOCKS,
+            percentile: DEFAULT_GAS_PRICE_PERCENTILE,
+            max_header_history: MAX_HEADER_HISTORY,
+            max_block_history: MAX_HEADER_HISTORY,
             default: None,
-            max_price: Some(DEFAULT_MAX_PRICE),
-            ignore_price: Some(DEFAULT_IGNORE_PRICE),
-        }
-    }
-}
-
-impl GasPriceOracleConfig {
-    /// Creating a new gpo config with blocks, ignoreprice, maxprice and percentile
-    pub fn new(
-        blocks: Option<u32>,
-        ignore_price: Option<u64>,
-        max_price: Option<u64>,
-        percentile: Option<u32>,
-    ) -> Self {
-        Self {
-            blocks: blocks.unwrap_or(20),
-            percentile: percentile.unwrap_or(60),
-            max_header_history: 1024,
-            max_block_history: 1024,
-            default: None,
-            max_price: max_price.map(U256::from).or(Some(DEFAULT_MAX_PRICE)),
-            ignore_price: ignore_price.map(U256::from).or(Some(DEFAULT_IGNORE_PRICE)),
+            max_price: Some(DEFAULT_MAX_GAS_PRICE),
+            ignore_price: Some(DEFAULT_IGNORE_GAS_PRICE),
         }
     }
 }
@@ -320,12 +310,12 @@ mod tests {
 
     #[test]
     fn max_price_sanity() {
-        assert_eq!(DEFAULT_MAX_PRICE, U256::from(500_000_000_000u64));
-        assert_eq!(DEFAULT_MAX_PRICE, U256::from(500 * GWEI_TO_WEI))
+        assert_eq!(DEFAULT_MAX_GAS_PRICE, U256::from(500_000_000_000u64));
+        assert_eq!(DEFAULT_MAX_GAS_PRICE, U256::from(500 * GWEI_TO_WEI))
     }
 
     #[test]
     fn ignore_price_sanity() {
-        assert_eq!(DEFAULT_IGNORE_PRICE, U256::from(2u64));
+        assert_eq!(DEFAULT_IGNORE_GAS_PRICE, U256::from(2u64));
     }
 }

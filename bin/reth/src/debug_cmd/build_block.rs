@@ -179,7 +179,7 @@ impl Command {
         let mut blobs_bundle = self
             .blobs_bundle_path
             .map(|path| -> eyre::Result<BlobsBundleV1> {
-                let contents = std::fs::read_to_string(&path)
+                let contents = fs::read_to_string(&path)
                     .wrap_err(format!("could not read {}", path.display()))?;
                 serde_json::from_str(&contents).wrap_err("failed to deserialize blobs bundle")
             })
@@ -269,19 +269,31 @@ impl Command {
 
                 let executor_factory = EvmProcessorFactory::new(self.chain.clone());
                 let mut executor = executor_factory.with_state(blockchain_db.latest()?);
-                executor.execute_and_verify_receipt(
-                    &block_with_senders.block.clone().unseal(),
-                    U256::MAX,
-                    None,
-                )?;
+                executor
+                    .execute_and_verify_receipt(&block_with_senders.clone().unseal(), U256::MAX)?;
                 let state = executor.take_output_state();
                 debug!(target: "reth::cli", ?state, "Executed block");
 
+                let hashed_state = state.hash_state_slow();
+                let (state_root, trie_updates) = state
+                    .state_root_calculator(provider_factory.provider()?.tx_ref(), &hashed_state)
+                    .root_with_updates()?;
+
+                if state_root != block_with_senders.state_root {
+                    eyre::bail!(
+                        "state root mismatch. expected: {}. got: {}",
+                        block_with_senders.state_root,
+                        state_root
+                    );
+                }
+
                 // Attempt to insert new block without committing
                 let provider_rw = provider_factory.provider_rw()?;
-                provider_rw.append_blocks_with_bundle_state(
+                provider_rw.append_blocks_with_state(
                     Vec::from([block_with_senders]),
                     state,
+                    hashed_state,
+                    trie_updates,
                     None,
                 )?;
                 info!(target: "reth::cli", "Successfully appended built block");

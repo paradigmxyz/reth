@@ -107,7 +107,7 @@ impl Encode for StoredNibbles {
 
     // Delegate to the Compact implementation
     fn encode(self) -> Self::Encoded {
-        let mut buf = Vec::with_capacity(self.inner.len());
+        let mut buf = Vec::with_capacity(self.0.len());
         self.to_compact(&mut buf);
         buf
     }

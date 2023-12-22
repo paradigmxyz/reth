@@ -29,10 +29,10 @@ pub struct DevArgs {
     /// Interval between blocks.
     ///
     /// Parses strings using [humantime::parse_duration]
-    /// --dev.block_time 12s
+    /// --dev.block-time 12s
     #[arg(
         long = "dev.block-time",
-        help_heading = "Dev testnet", 
+        help_heading = "Dev testnet",
         conflicts_with = "block_max_transactions",
         value_parser = parse_duration,
         verbatim_doc_comment
@@ -95,5 +95,12 @@ mod tests {
             "1s",
         ]);
         assert!(args.is_err());
+    }
+
+    #[test]
+    fn dev_args_default_sanity_check() {
+        let default_args = DevArgs::default();
+        let args = CommandParser::<DevArgs>::parse_from(["reth"]).args;
+        assert_eq!(args, default_args);
     }
 }

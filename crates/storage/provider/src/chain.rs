@@ -6,6 +6,7 @@ use reth_primitives::{
     Address, BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, TxHash,
 };
+use revm::db::BundleState;
 use std::{borrow::Cow, collections::BTreeMap, fmt};
 
 /// A chain of blocks and their final state.
@@ -59,6 +60,11 @@ impl Chain {
         &self.state
     }
 
+    /// Prepends the given state to the current state.
+    pub fn prepend_state(&mut self, state: BundleState) {
+        self.state.prepend_state(state);
+    }
+
     /// Return true if chain is empty and has no blocks.
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
@@ -103,6 +109,23 @@ impl Chain {
     /// chain.
     pub fn inner(&self) -> (ChainBlocks<'_>, &BundleStateWithReceipts) {
         (ChainBlocks { blocks: Cow::Borrowed(&self.blocks) }, &self.state)
+    }
+
+    /// Returns an iterator over all the receipts of the blocks in the chain.
+    pub fn block_receipts_iter(&self) -> impl Iterator<Item = &Vec<Option<Receipt>>> + '_ {
+        self.state.receipts().iter()
+    }
+
+    /// Returns an iterator over all blocks in the chain with increasing block number.
+    pub fn blocks_iter(&self) -> impl Iterator<Item = &SealedBlockWithSenders> + '_ {
+        self.blocks().iter().map(|block| block.1)
+    }
+
+    /// Returns an iterator over all blocks and their receipts in the chain.
+    pub fn blocks_and_receipts(
+        &self,
+    ) -> impl Iterator<Item = (&SealedBlockWithSenders, &Vec<Option<Receipt>>)> + '_ {
+        self.blocks_iter().zip(self.block_receipts_iter())
     }
 
     /// Get the block at which this chain forked.
@@ -409,7 +432,7 @@ mod tests {
 
     #[test]
     fn chain_append() {
-        let block = SealedBlockWithSenders::default();
+        let block: SealedBlockWithSenders = SealedBlockWithSenders::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
         let block3_hash = B256::new([0x03; 32]);

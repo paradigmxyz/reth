@@ -177,10 +177,10 @@ impl Command {
                 Ok(senders) => senders,
                 Err(err) => {
                     warn!(target: "reth::cli", "Error sealing block with senders: {err:?}. Skipping...");
-                    continue
+                    continue;
                 }
             };
-            provider_rw.insert_block(sealed_block.block, Some(sealed_block.senders), None)?;
+            provider_rw.insert_block(sealed_block, None)?;
         }
 
         // Check if any of hashing or merkle stages aren't on the same block number as
@@ -277,7 +277,7 @@ impl Command {
                     let clean_result = merkle_stage.execute(&provider_rw, clean_input);
                     assert!(clean_result.is_ok(), "Clean state root calculation failed");
                     if clean_result.unwrap().done {
-                        break
+                        break;
                     }
                 }
 
@@ -311,7 +311,7 @@ impl Command {
                                 "Nibbles don't match"
                             );
                             if incremental.1 != clean.1 &&
-                                clean.0.inner.len() > self.skip_node_depth.unwrap_or_default()
+                                clean.0 .0.len() > self.skip_node_depth.unwrap_or_default()
                             {
                                 incremental_account_mismatched.push(incremental);
                                 clean_account_mismatched.push(clean);
@@ -340,11 +340,10 @@ impl Command {
                     match (incremental_storage_trie_iter.next(), clean_storage_trie_iter.next()) {
                         (Some(incremental), Some(clean)) => {
                             if incremental != clean &&
-                                clean.1.nibbles.inner.len() >
-                                    self.skip_node_depth.unwrap_or_default()
+                                clean.1.nibbles.len() > self.skip_node_depth.unwrap_or_default()
                             {
                                 first_mismatched_storage = Some((incremental, clean));
-                                break
+                                break;
                             }
                         }
                         (Some(incremental), None) => {

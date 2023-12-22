@@ -91,6 +91,10 @@ enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
 serial_test.workspace = true
 tempfile.workspace = true
 
+## Benchmarks
+pprof = { workspace = true, features = ["criterion", "flamegraph"] }
+criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
+
 [features]
 default = ["serde"]
 serde = ["dep:serde", "dep:humantime-serde", "secp256k1/serde", "enr?/serde", "dep:serde_json"]
@@ -103,3 +107,8 @@ optimism = [
     "reth-network-api/optimism",
     "reth-rpc-types/optimism",
 ]
+
+[[bench]]
+name = "bench"
+required-features = ["test-utils"]
+harness = false

@@ -394,10 +394,7 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use futures::poll;
-    use reth_db::{
-        mdbx::DatabaseEnv,
-        test_utils::{create_test_rw_db, TempDatabase},
-    };
+    use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
     use reth_interfaces::{p2p::either::EitherDownloader, test_utils::TestFullBlockClient};
     use reth_primitives::{
         constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpec,
@@ -405,7 +402,7 @@ mod tests {
     };
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
-        BundleStateWithReceipts, ProviderFactory,
+        BundleStateWithReceipts,
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
     use reth_tasks::TokioTaskExecutor;
