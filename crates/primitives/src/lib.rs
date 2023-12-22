@@ -48,8 +48,8 @@ mod withdrawal;
 
 pub use account::{Account, Bytecode};
 pub use block::{
-    Block, BlockBody, BlockBodyRoots, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
-    BlockWithSenders, ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
+    Block, BlockBody, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, BlockWithSenders,
+    ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
 };
 pub use bytes::{self, Buf, BufMut, BytesMut};
 pub use chain::{
