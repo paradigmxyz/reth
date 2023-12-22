@@ -50,7 +50,7 @@ pub trait RethNodeComponents: Clone + Send + Sync + 'static {
     /// The network type used to communicate with p2p.
     type Network: NetworkInfo + Peers + NetworkProtocols + NetworkEvents + Clone + 'static;
     /// The events type used to create subscriptions.
-    type Events: CanonStateSubscriptions + Clone + Unpin + 'static;
+    type Events: CanonStateSubscriptions + Clone + 'static;
     /// The type that is used to spawn tasks.
     type Tasks: TaskSpawner + Clone + Unpin + 'static;
 
@@ -118,7 +118,7 @@ where
     Tasks: TaskSpawner + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + Unpin + 'static,
     Network: NetworkInfo + Peers + NetworkProtocols + NetworkEvents + Clone + 'static,
-    Events: CanonStateSubscriptions + Clone + Unpin + 'static,
+    Events: CanonStateSubscriptions + Clone + 'static,
 {
     type Provider = Provider;
     type Pool = Pool;
