@@ -1,5 +1,7 @@
 //! Trait abstractions used by the payload crate.
 
+use reth_provider::CanonStateNotification;
+
 use crate::{error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes};
 use std::{future::Future, sync::Arc};
 
@@ -82,5 +84,5 @@ pub trait PayloadJobGenerator: Send + Sync {
     ) -> Result<Self::Job, PayloadBuilderError>;
 
     /// Handles new chain state events
-    fn on_new_state(&self);
+    fn on_new_state(&self, new_state: CanonStateNotification);
 }

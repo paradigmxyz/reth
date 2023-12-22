@@ -31,7 +31,8 @@ use reth_primitives::{
     SealedBlock, Withdrawal, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{
-    BlockReaderIdExt, BlockSource, BundleStateWithReceipts, ProviderError, StateProviderFactory,
+    BlockReaderIdExt, BlockSource, BundleStateWithReceipts, CanonStateNotification, ProviderError,
+    StateProviderFactory,
 };
 use reth_revm::{
     database::StateProviderDatabase,
@@ -45,9 +46,10 @@ use revm::{
     Database, DatabaseCommit, State,
 };
 use std::{
+    cell::RefCell,
     future::Future,
     pin::Pin,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{atomic::AtomicBool, Arc, RwLock},
     task::{Context, Poll},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -88,6 +90,8 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = EthereumPaylo
     ///
     /// See [PayloadBuilder]
     builder: Builder,
+    /// Stored cached_reads for new payload jobs
+    cached_reads: Arc<RwLock<CachedReads>>,
 }
 
 // === impl BasicPayloadJobGenerator ===
@@ -135,6 +139,7 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
             config,
             chain_spec,
             builder,
+            cached_reads: Arc::new(RwLock::new(CachedReads::default())),
         }
     }
 
@@ -206,6 +211,9 @@ where
 
         let until = self.job_deadline(config.attributes.timestamp);
         let deadline = Box::pin(tokio::time::sleep_until(until));
+        let read_cached_reads = self.cached_reads.read().unwrap();
+
+        let cached_reads = Some(read_cached_reads.clone());
 
         Ok(BasicPayloadJob {
             config,
@@ -216,14 +224,24 @@ where
             interval: tokio::time::interval(self.config.interval),
             best_payload: None,
             pending_block: None,
-            cached_reads: None,
+            cached_reads,
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
             builder: self.builder.clone(),
         })
     }
 
-    fn on_new_state(&self) {}
+    fn on_new_state(&self, new_state: CanonStateNotification) {
+        //pub struct CachedReads {
+        //    accounts: HashMap<Address, CachedAccount>,
+        //    contracts: HashMap<B256, Bytecode>,
+        //    block_hashes: HashMap<U256, B256>,
+        let mut cached_reads = CachedReads::default();
+        cached_reads.as_db(new_state.committed().unwrap().state().state().state.clone());
+        let mut write_guard = self.cached_reads.write().unwrap();
+        *write_guard = cached_reads;
+        ()
+    }
 }
 
 /// Restricts how many generator tasks can be executed at once.

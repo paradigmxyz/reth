@@ -292,11 +292,10 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         loop {
-            //            let e = self.chain_events.flat_map(|new_chain| {
-            //              new_chain.committed().map(|chain| chain.state())
-            //        });
-
-            let _e = this.chain_events.poll_next_unpin(cx);
+            let _ = this
+                .chain_events
+                .poll_next_unpin(cx)
+                .map(|new_state| this.generator.on_new_state(new_state.unwrap()));
 
             // we poll all jobs first, so we always have the latest payload that we can report if
             // requests
