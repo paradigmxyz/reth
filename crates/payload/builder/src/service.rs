@@ -284,7 +284,7 @@ where
 
 impl<Gen> Future for PayloadBuilderService<Gen>
 where
-    Gen: PayloadJobGenerator + Unpin + Clone + 'static,
+    Gen: PayloadJobGenerator + Unpin + 'static,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
 {
     type Output = ();
