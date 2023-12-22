@@ -110,7 +110,7 @@ impl Layers {
     pub(crate) fn file(
         &mut self,
         format: LogFormat,
-        filter: String,
+        filter: &str,
         file_info: FileInfo,
     ) -> eyre::Result<FileWorkerGuard> {
         let log_dir = file_info.create_log_dir();
