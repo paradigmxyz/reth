@@ -110,7 +110,7 @@ impl Layers {
     pub(crate) fn file(
         &mut self,
         format: LogFormat,
-        filter: String,
+        filter: &str,
         file_info: FileInfo,
     ) -> eyre::Result<FileWorkerGuard> {
         let log_dir = file_info.create_log_dir();
@@ -126,7 +126,6 @@ impl Layers {
 /// Holds configuration information for file logging.
 ///
 /// Contains details about the log file's path, name, size, and rotation strategy.
-
 #[derive(Debug)]
 pub struct FileInfo {
     dir: PathBuf,
@@ -161,7 +160,7 @@ impl FileInfo {
     ) -> (tracing_appender::non_blocking::NonBlocking, WorkerGuard) {
         let (writer, guard) = tracing_appender::non_blocking(
             RollingFileAppender::new(
-                log_dir.join(AsRef::<Path>::as_ref(&self.file_name)),
+                log_dir.join(&self.file_name),
                 RollingConditionBasic::new().max_size(self.max_size_bytes),
                 self.max_files,
             )
