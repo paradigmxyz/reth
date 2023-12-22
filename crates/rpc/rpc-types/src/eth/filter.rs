@@ -10,7 +10,9 @@ use std::{
     collections::HashSet,
     hash::Hash,
     ops::{Range, RangeFrom, RangeTo},
+    sync::Arc,
 };
+use tokio::sync::Mutex;
 
 /// Helper type to represent a bloom filter used for matching logs.
 #[derive(Default, Debug)]
@@ -245,7 +247,7 @@ impl FilterBlockOption {
 }
 
 /// Filter for
-#[derive(Default, Debug, PartialEq, Eq, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct Filter {
     /// Filter block options, specifying on which blocks the filter should
     /// match.
@@ -253,9 +255,20 @@ pub struct Filter {
     pub block_option: FilterBlockOption,
     /// Address
     pub address: FilterSet<Address>,
-    /// Topics (maxmimum of 4)
+    /// Topics (maximum of 4)
     pub topics: [Topic; 4],
+    /// Reorged logs
+    pub reorged_logs: Arc<Mutex<Option<Vec<Log>>>>,
 }
+
+impl PartialEq for Filter {
+    fn eq(&self, other: &Self) -> bool {
+        (&self.block_option, &self.address, &self.topics) ==
+            (&other.block_option, &other.address, &other.topics)
+    }
+}
+
+impl Eq for Filter {}
 
 impl Filter {
     /// Creates a new, empty filter
@@ -619,7 +632,10 @@ impl<'de> Deserialize<'de> for Filter {
                     FilterBlockOption::Range { from_block, to_block }
                 };
 
-                Ok(Filter { block_option, address, topics })
+                let reorged_logs: Arc<Mutex<Option<Vec<Log>>>> =
+                    Arc::new(Mutex::new(Some(Vec::new())));
+
+                Ok(Filter { block_option, address, topics, reorged_logs })
             }
         }
 
@@ -1108,6 +1124,7 @@ mod tests {
                 Default::default(),
                 Default::default(),
             ],
+            reorged_logs: Arc::new(Mutex::new(Some(Vec::new()))),
         }
     }
 
@@ -1147,6 +1164,7 @@ mod tests {
             block_option: Default::default(),
             address: Default::default(),
             topics: Default::default(),
+            reorged_logs: Arc::new(Mutex::new(Some(Vec::new()))),
         };
         let topics = filter.topics;
 
@@ -1173,6 +1191,7 @@ mod tests {
                 Default::default(),
                 Default::default(),
             ],
+            reorged_logs: Arc::new(Mutex::new(Some(Vec::new()))),
         };
         let topics = filter.topics;
 
@@ -1204,6 +1223,7 @@ mod tests {
                 Default::default(),
                 Default::default(),
             ],
+            reorged_logs: Arc::new(Mutex::new(Some(Vec::new()))),
         };
         let topics = filter.topics;
 
@@ -1225,6 +1245,7 @@ mod tests {
                 Default::default(),
                 Default::default(),
             ],
+            reorged_logs: Arc::new(Mutex::new(Some(Vec::new()))),
         };
         let topics_input = filter.topics;
 
@@ -1242,6 +1263,7 @@ mod tests {
             block_option: Default::default(),
             address: rng_address.into(),
             topics: Default::default(),
+            reorged_logs: Arc::new(Mutex::new(Some(Vec::new()))),
         };
         let address_bloom = FilteredParams::address_filter(&filter.address);
         assert!(FilteredParams::matches_address(
@@ -1258,6 +1280,7 @@ mod tests {
             block_option: Default::default(),
             address: rng_address.into(),
             topics: Default::default(),
+            reorged_logs: Arc::new(Mutex::new(Some(Vec::new()))),
         };
         let address_bloom = FilteredParams::address_filter(&filter.address);
         assert!(!FilteredParams::matches_address(
@@ -1308,6 +1331,7 @@ mod tests {
                         .into(),
                     Default::default(),
                 ],
+                reorged_logs: Arc::new(Mutex::new(Some(Vec::new())))
             }
         );
     }
@@ -1333,6 +1357,7 @@ mod tests {
                 },
                 address: Default::default(),
                 topics: Default::default(),
+                reorged_logs: Arc::new(Mutex::new(Some(Vec::new())))
             }
         );
     }

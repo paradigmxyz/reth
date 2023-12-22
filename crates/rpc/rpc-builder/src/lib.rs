@@ -1210,20 +1210,20 @@ where
                 blocking_task_pool.clone(),
                 fee_history_cache,
             );
+            let pubsub = EthPubSub::with_spawner(
+                self.provider.clone(),
+                self.pool.clone(),
+                self.events.clone(),
+                self.network.clone(),
+                executor.clone(),
+            );
             let filter = EthFilter::new(
                 self.provider.clone(),
                 self.pool.clone(),
                 cache.clone(),
                 self.config.eth.filter_config(),
                 executor.clone(),
-            );
-
-            let pubsub = EthPubSub::with_spawner(
-                self.provider.clone(),
-                self.pool.clone(),
-                self.events.clone(),
-                self.network.clone(),
-                executor,
+                pubsub.clone(),
             );
 
             let eth = EthHandlers { api, cache, filter, pubsub, blocking_task_pool };
