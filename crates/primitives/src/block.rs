@@ -457,15 +457,6 @@ impl BlockBody {
         self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
     }
 
-    /// Calculate all roots (transaction, ommers, withdrawals) for the block body.
-    pub fn calculate_roots(&self) -> BlockBodyRoots {
-        BlockBodyRoots {
-            tx_root: self.calculate_tx_root(),
-            ommers_hash: self.calculate_ommers_root(),
-            withdrawals_root: self.calculate_withdrawals_root(),
-        }
-    }
-
     /// Calculates a heuristic for the in-memory size of the [BlockBody].
     #[inline]
     pub fn size(&self) -> usize {
@@ -481,18 +472,6 @@ impl BlockBody {
                 })
                 .unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
     }
-}
-
-/// A struct that represents roots associated with a block body. This can be used to correlate
-/// block body responses with headers.
-#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Hash)]
-pub struct BlockBodyRoots {
-    /// The transaction root for the block body.
-    pub tx_root: B256,
-    /// The ommers hash for the block body.
-    pub ommers_hash: B256,
-    /// The withdrawals root for the block body, if withdrawals exist.
-    pub withdrawals_root: Option<B256>,
 }
 
 #[cfg(test)]
