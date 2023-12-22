@@ -92,7 +92,7 @@ pub fn validate_transaction_regarding_header(
             ..
         }) => {
             // EIP-1559: Fee market change for ETH 1.0 chain https://eips.ethereum.org/EIPS/eip-1559
-            if !chain_spec.fork(Hardfork::Berlin).active_at_block(at_block_number) {
+            if !chain_spec.fork(Hardfork::London).active_at_block(at_block_number) {
                 return Err(InvalidTransactionError::Eip1559Disabled.into())
             }
 
