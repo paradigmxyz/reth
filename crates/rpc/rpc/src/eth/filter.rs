@@ -1,10 +1,6 @@
 use super::cache::EthStateCache;
 use crate::{
-    eth::{
-        error::{EthApiError, EthResult},
-        logs_utils,
-        pubsub::EthPubSub,
-    },
+    eth::{error::EthApiError, logs_utils, pubsub::EthPubSub},
     result::{rpc_error_with_code, ToRpcResult},
     EthSubscriptionIdProvider,
 };
@@ -16,7 +12,7 @@ use tokio_stream::{wrappers::BroadcastStream, Stream};
 use alloy_primitives::B256;
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{BlockHashOrNumber, IntoRecoveredTransaction, Receipt, SealedBlock, TxHash};
+use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{
     BlockIdReader, BlockReader, CanonStateSubscriptions, EvmEnvProvider, ProviderError,
 };
@@ -184,12 +180,17 @@ where
                             let filtered_params = FilteredParams::new(Some(*filter.clone()));
 
                             for reorged_block in &mut temp_reorged_blocks {
-                                let mut matching_logs = logs_utils::matching_block_logs(
-                                    &filtered_params,
-                                    reorged_block.block,
-                                    reorged_block.tx_receipts.clone(),
-                                    true,
-                                );
+                                let mut matching_logs =
+                                    logs_utils::matching_block_logs_with_tx_hashes(
+                                        &filtered_params,
+                                        reorged_block.block,
+                                        reorged_block
+                                            .tx_receipts
+                                            .clone()
+                                            .iter()
+                                            .map(|(tx, receipt)| (*tx, receipt)),
+                                        true,
+                                    );
 
                                 reverted_logs.append(&mut matching_logs);
                                 if Some(reorged_block.block.hash) == active_filter.block_hash {
@@ -547,7 +548,7 @@ where
                     };
 
                     if let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? {
-                        append_matching_block_logs(
+                        logs_utils::append_matching_block_logs(
                             &mut all_logs,
                             &self.provider,
                             &filter_params,
