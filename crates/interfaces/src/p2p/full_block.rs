@@ -313,7 +313,7 @@ fn ensure_valid_body_response(
         ))
     }
 
-    let tx_root: revm_primitives::FixedBytes<32> = block.calculate_tx_root();
+    let tx_root = block.calculate_tx_root();
     if header.transactions_root != tx_root {
         return Err(ConsensusError::BodyTransactionRootDiff(
             GotExpected { got: tx_root, expected: header.transactions_root }.into(),
