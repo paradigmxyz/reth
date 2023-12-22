@@ -126,7 +126,6 @@ impl Layers {
 /// Holds configuration information for file logging.
 ///
 /// Contains details about the log file's path, name, size, and rotation strategy.
-
 #[derive(Debug)]
 pub struct FileInfo {
     dir: PathBuf,
