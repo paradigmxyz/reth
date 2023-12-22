@@ -66,6 +66,7 @@ pub fn validate_transaction_regarding_header(
     transaction: &Transaction,
     chain_spec: &ChainSpec,
     at_block_number: BlockNumber,
+    at_timestamp: u64,
     base_fee: Option<u64>,
 ) -> Result<(), ConsensusError> {
     let chain_id = match transaction {
@@ -110,6 +111,11 @@ pub fn validate_transaction_regarding_header(
             max_priority_fee_per_gas,
             ..
         }) => {
+            // EIP-4844: Shard Blob Transactions https://eips.ethereum.org/EIPS/eip-4844
+            if !chain_spec.fork(Hardfork::Cancun).active_at_timestamp(at_timestamp) {
+                return Err(InvalidTransactionError::Eip4844Disabled.into())
+            }
+
             // EIP-1559: add more constraints to the tx validation
             // https://github.com/ethereum/EIPs/pull/3594
             if max_priority_fee_per_gas > max_fee_per_gas {
@@ -155,6 +161,7 @@ pub fn validate_all_transaction_regarding_block_and_nonces<
             transaction,
             chain_spec,
             header.number,
+            header.timestamp,
             header.base_fee_per_gas,
         )?;
 
