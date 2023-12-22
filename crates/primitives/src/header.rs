@@ -2,8 +2,8 @@ use crate::{
     basefee::calculate_next_block_base_fee,
     constants::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH},
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
-    keccak256, Address, BaseFeeParams, BlockBodyRoots, BlockHash, BlockNumHash, BlockNumber, Bloom,
-    Bytes, B256, B64, U256,
+    keccak256, Address, BaseFeeParams, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, B256,
+    B64, U256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use bytes::{Buf, BufMut, BytesMut};
@@ -145,15 +145,6 @@ impl Header {
     /// Check if the transaction root equals to empty root.
     pub fn transaction_root_is_empty(&self) -> bool {
         self.transactions_root == EMPTY_ROOT_HASH
-    }
-
-    /// Converts all roots in the header to a [BlockBodyRoots] struct.
-    pub fn body_roots(&self) -> BlockBodyRoots {
-        BlockBodyRoots {
-            tx_root: self.transactions_root,
-            ommers_hash: self.ommers_hash,
-            withdrawals_root: self.withdrawals_root,
-        }
     }
 
     /// Returns the blob fee for _this_ block according to the EIP-4844 spec.

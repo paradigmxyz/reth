@@ -250,7 +250,7 @@ mod tests {
     use super::*;
     use crate::{
         prefix_set::PrefixSetMut,
-        trie_cursor::{AccountTrieCursor, StorageTrieCursor},
+        trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
     };
     use reth_db::{cursor::DbCursorRW, tables, transaction::DbTxMut};
     use reth_primitives::trie::StorageTrieEntry;
@@ -286,7 +286,7 @@ mod tests {
         for (k, v) in &inputs {
             account_cursor.upsert(k.clone().into(), v.clone()).unwrap();
         }
-        let account_trie = AccountTrieCursor::new(account_cursor);
+        let account_trie = DatabaseAccountTrieCursor::new(account_cursor);
         test_cursor(account_trie, &expected);
 
         let hashed_address = B256::random();
@@ -299,7 +299,7 @@ mod tests {
                 )
                 .unwrap();
         }
-        let storage_trie = StorageTrieCursor::new(storage_cursor, hashed_address);
+        let storage_trie = DatabaseStorageTrieCursor::new(storage_cursor, hashed_address);
         test_cursor(storage_trie, &expected);
     }
 
@@ -357,7 +357,7 @@ mod tests {
             cursor.upsert(hashed_address, StorageTrieEntry { nibbles: k.into(), node: v }).unwrap();
         }
 
-        let mut trie = StorageTrieCursor::new(cursor, hashed_address);
+        let mut trie = DatabaseStorageTrieCursor::new(cursor, hashed_address);
 
         // No changes
         let mut cursor = TrieWalker::new(&mut trie, Default::default());

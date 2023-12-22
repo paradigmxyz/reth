@@ -2077,7 +2077,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
         {
             // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
             // are pre-loaded.
-            let (state_root, trie_updates) = StateRoot::new(&self.tx)
+            let (state_root, trie_updates) = StateRoot::from_tx(&self.tx)
                 .with_changed_account_prefixes(account_prefix_set.freeze())
                 .with_changed_storage_prefixes(
                     storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
@@ -2261,7 +2261,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
             // Calculate the reverted merkle root.
             // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
             // are pre-loaded.
-            let (new_state_root, trie_updates) = StateRoot::new(&self.tx)
+            let (new_state_root, trie_updates) = StateRoot::from_tx(&self.tx)
                 .with_changed_account_prefixes(account_prefix_set.freeze())
                 .with_changed_storage_prefixes(
                     storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),

@@ -5990,26 +5990,19 @@ dependencies = [
 name = "reth-interfaces"
 version = "0.1.0-alpha.13"
 dependencies = [
- "arbitrary",
- "async-trait",
  "auto_impl",
  "clap",
  "futures",
- "modular-bitfield",
  "parking_lot 0.12.1",
  "rand 0.8.5",
- "reth-codecs",
- "reth-db",
  "reth-eth-wire",
  "reth-network-api",
  "reth-nippy-jar",
  "reth-primitives",
  "reth-rpc-types",
- "revm-primitives",
  "secp256k1 0.27.0",
  "thiserror",
  "tokio",
- "tokio-stream",
  "tracing",
 ]
 
