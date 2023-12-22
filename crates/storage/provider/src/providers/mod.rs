@@ -374,6 +374,13 @@ where
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
         self.database.provider()?.receipts_by_block(block)
     }
+
+    fn receipts_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Receipt>> {
+        self.database.provider()?.receipts_by_tx_range(range)
+    }
 }
 impl<DB, Tree> ReceiptProviderIdExt for BlockchainProvider<DB, Tree>
 where

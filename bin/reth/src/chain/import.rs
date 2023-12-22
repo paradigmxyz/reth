@@ -143,11 +143,11 @@ impl ImportCommand {
             eyre::bail!("unable to import non canonical blocks");
         }
 
-        let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
+        let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
             .build(file_client.clone(), consensus.clone())
             .into_task();
 
-        let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
+        let body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
             .build(file_client.clone(), consensus.clone(), provider_factory.clone())
             .into_task();
 

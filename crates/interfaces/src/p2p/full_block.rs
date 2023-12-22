@@ -36,7 +36,7 @@ impl<Client> FullBlockClient<Client> {
     }
 
     /// Returns a client with Test consensus
-    #[cfg(feature = "test-utils")]
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn test_client(client: Client) -> Self {
         Self::new(client, Arc::new(crate::test_utils::TestConsensus::default()))
     }
@@ -306,17 +306,17 @@ fn ensure_valid_body_response(
     header: &SealedHeader,
     block: &BlockBody,
 ) -> Result<(), ConsensusError> {
-    let body_roots = block.calculate_roots();
-
-    if header.ommers_hash != body_roots.ommers_hash {
+    let ommers_hash = block.calculate_ommers_root();
+    if header.ommers_hash != ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff(
-            GotExpected { got: body_roots.ommers_hash, expected: header.ommers_hash }.into(),
+            GotExpected { got: ommers_hash, expected: header.ommers_hash }.into(),
         ))
     }
 
-    if header.transactions_root != body_roots.tx_root {
+    let tx_root = block.calculate_tx_root();
+    if header.transactions_root != tx_root {
         return Err(ConsensusError::BodyTransactionRootDiff(
-            GotExpected { got: body_roots.tx_root, expected: header.transactions_root }.into(),
+            GotExpected { got: tx_root, expected: header.transactions_root }.into(),
         ))
     }
 

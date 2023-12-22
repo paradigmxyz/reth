@@ -171,6 +171,11 @@ impl SessionManager {
         self.status
     }
 
+    /// Returns the secret key used for authenticating sessions.
+    pub fn secret_key(&self) -> SecretKey {
+        self.secret_key
+    }
+
     /// Returns the session hello message.
     pub fn hello_message(&self) -> HelloMessageWithProtocols {
         self.hello_message.clone()

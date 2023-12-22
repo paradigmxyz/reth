@@ -33,7 +33,6 @@ impl<DB: Database> TableViewer<()> for ClearViewer<'_, DB> {
         let tx = self.db.tx_mut()?;
         tx.clear::<T>()?;
         tx.commit()?;
-
         Ok(())
     }
 }

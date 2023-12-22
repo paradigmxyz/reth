@@ -159,10 +159,10 @@ impl BundleStateWithReceipts {
         &self,
         tx: &'a TX,
         hashed_post_state: &'b HashedPostState,
-    ) -> StateRoot<'a, TX, HashedPostStateCursorFactory<'a, 'b, TX>> {
+    ) -> StateRoot<&'a TX, HashedPostStateCursorFactory<'a, 'b, TX>> {
         let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, hashed_post_state);
-        StateRoot::new(tx)
+        StateRoot::from_tx(tx)
             .with_hashed_cursor_factory(hashed_cursor_factory)
             .with_changed_account_prefixes(account_prefix_set)
             .with_changed_storage_prefixes(storage_prefix_set)
@@ -1236,7 +1236,7 @@ mod tests {
                 }
             }
 
-            let (_, updates) = StateRoot::new(tx).root_with_updates().unwrap();
+            let (_, updates) = StateRoot::from_tx(tx).root_with_updates().unwrap();
             updates.flush(tx).unwrap();
         })
         .unwrap();

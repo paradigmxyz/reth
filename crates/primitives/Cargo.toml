@@ -20,6 +20,7 @@ revm-primitives = { workspace = true, features = ["serde"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 ethers-core = { workspace = true, default-features = false, optional = true }
+nybbles = { version = "0.1", features = ["serde", "rlp"] }
 
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
@@ -86,6 +87,7 @@ arbitrary = [
     "revm-primitives/arbitrary",
     "reth-rpc-types/arbitrary",
     "reth-ethereum-forks/arbitrary",
+    "nybbles/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-derive",

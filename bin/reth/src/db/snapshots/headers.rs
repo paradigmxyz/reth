@@ -26,7 +26,7 @@ impl Command {
         chain: Arc<ChainSpec>,
         compression: Compression,
         inclusion_filter: InclusionFilter,
-        phf: PerfectHashingFunction,
+        phf: Option<PerfectHashingFunction>,
     ) -> eyre::Result<()> {
         let factory = ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone());
         let provider = factory.provider()?;
@@ -34,7 +34,7 @@ impl Command {
         let block_range =
             self.block_ranges(tip).first().expect("has been generated before").clone();
 
-        let filters = if self.with_filters {
+        let filters = if let Some(phf) = self.with_filters.then_some(phf).flatten() {
             Filters::WithFilters(inclusion_filter, phf)
         } else {
             Filters::WithoutFilters
@@ -50,7 +50,7 @@ impl Command {
         let path: PathBuf = SnapshotSegment::Headers
             .filename_with_configuration(filters, compression, &block_range, &tx_range)
             .into();
-        let provider = SnapshotProvider::default();
+        let provider = SnapshotProvider::new(PathBuf::default())?;
         let jar_provider = provider.get_segment_provider_from_block(
             SnapshotSegment::Headers,
             self.from,

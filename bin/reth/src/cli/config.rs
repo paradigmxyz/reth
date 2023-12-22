@@ -111,7 +111,8 @@ pub trait PayloadBuilderConfig {
     fn compute_pending_block(&self) -> bool;
 }
 
-/// A trait that can be used to apply additional configuration to the network.
+/// A trait that represents the configured network and can be used to apply additional configuration
+/// to the network.
 pub trait RethNetworkConfig {
     /// Adds a new additional protocol to the RLPx sub-protocol list.
     ///
@@ -121,11 +122,20 @@ pub trait RethNetworkConfig {
     ///
     /// See also [ProtocolHandler](reth_network::protocol::ProtocolHandler)
     fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol);
+
+    /// Returns the secret key used for authenticating sessions.
+    fn secret_key(&self) -> secp256k1::SecretKey;
+
+    // TODO add more network config methods here
 }
 
 impl<C> RethNetworkConfig for reth_network::NetworkManager<C> {
     fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         reth_network::NetworkManager::add_rlpx_sub_protocol(self, protocol);
+    }
+
+    fn secret_key(&self) -> secp256k1::SecretKey {
+        self.secret_key()
     }
 }
 

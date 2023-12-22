@@ -1,12 +1,9 @@
 //! Support for snapshotting.
 
 use crate::{segments, segments::Segment, SnapshotterError};
-use reth_db::database::Database;
+use reth_db::{database::Database, snapshot::iter_snapshots};
 use reth_interfaces::{RethError, RethResult};
-use reth_primitives::{
-    snapshot::{iter_snapshots, HighestSnapshots},
-    BlockNumber, TxNumber,
-};
+use reth_primitives::{snapshot::HighestSnapshots, BlockNumber, TxNumber};
 use reth_provider::{BlockReader, DatabaseProviderRO, ProviderFactory, TransactionsProviderExt};
 use std::{
     collections::HashMap,
@@ -155,10 +152,14 @@ impl<DB: Database> Snapshotter<DB> {
         // It walks over the directory and parses the snapshot filenames extracting
         // `SnapshotSegment` and their inclusive range. It then takes the maximum block
         // number for each specific segment.
-        for (segment, block_range, _) in iter_snapshots(&self.snapshots_path)? {
-            let max_segment_block = self.highest_snapshots.as_mut(segment);
-            if max_segment_block.map_or(true, |block| block < *block_range.end()) {
-                *max_segment_block = Some(*block_range.end());
+        for (segment, ranges) in
+            iter_snapshots(&self.snapshots_path).map_err(|err| RethError::Provider(err.into()))?
+        {
+            for (block_range, _) in ranges {
+                let max_segment_block = self.highest_snapshots.as_mut(segment);
+                if max_segment_block.map_or(true, |block| block < *block_range.end()) {
+                    *max_segment_block = Some(*block_range.end());
+                }
             }
         }
 
