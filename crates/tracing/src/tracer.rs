@@ -81,7 +81,7 @@ impl Tracer {
         }
 
         let file_guard = if let Some((config, file_info)) = self.file {
-            Some(layers.file(config.format, config.filters, file_info)?)
+            Some(layers.file(config.format, &config.filters, file_info)?)
         } else {
             None
         };
@@ -138,7 +138,7 @@ impl Default for LayerInfo {
         Self {
             format: LogFormat::Terminal,
             directive: LevelFilter::INFO.into(),
-            filters: "".to_string(),
+            filters: "debug".to_string(),
             color: None,
         }
     }
