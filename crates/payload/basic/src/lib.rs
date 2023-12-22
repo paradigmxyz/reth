@@ -111,7 +111,6 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
         )
     }
 
-
     /// Returns a reference to the tasks type
     pub fn tasks(&self) -> &Tasks {
         &self.executor
@@ -166,16 +165,16 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
 
 // === impl BasicPayloadJobGenerator ===
 
-impl<Client, Pool, Tasks, Builder> PayloadJobGenerator<Tasks>
+impl<Client, Pool, Tasks, Builder> PayloadJobGenerator
     for BasicPayloadJobGenerator<Client, Pool, Tasks, Builder>
 where
     Client: StateProviderFactory + BlockReaderIdExt + Clone + Unpin + 'static,
-    Pool: TransactionPool + Clone + Unpin + 'static,
+    Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
-    Builder: PayloadBuilder<Pool, Client> + Unpin + Clone +  'static,
+    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
 {
     type Job = BasicPayloadJob<Client, Pool, Tasks, Builder>;
-    
+
     fn new_payload_job(
         &self,
         attributes: PayloadBuilderAttributes,
@@ -225,10 +224,6 @@ where
     }
 
     fn on_new_state(&self) {}
-
-    fn tasks(&self) -> &Tasks {
-        &self.executor
-    }
 }
 
 /// Restricts how many generator tasks can be executed at once.

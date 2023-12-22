@@ -1,7 +1,6 @@
 //! Trait abstractions used by the payload crate.
 
 use crate::{error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes};
-use reth_tasks::TaskSpawner;
 use std::{future::Future, sync::Arc};
 
 /// A type that can build a payload.
@@ -63,10 +62,7 @@ pub enum KeepPayloadJobAlive {
 }
 
 /// A type that knows how to create new jobs for creating payloads.
-pub trait PayloadJobGenerator<Tasks>: Send + Sync
-where
-    Tasks: TaskSpawner + Unpin + 'static,
-{
+pub trait PayloadJobGenerator: Send + Sync {
     /// The type that manages the lifecycle of a payload.
     ///
     /// This type is a future that yields better payloads.
@@ -87,7 +83,4 @@ where
 
     /// Handles new chain state events
     fn on_new_state(&self);
-
-    /// Get executor
-    fn tasks(&self) -> &Tasks;
 }

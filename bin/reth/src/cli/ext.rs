@@ -9,6 +9,7 @@ use clap::Args;
 use futures_util::Stream;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_provider::CanonStateNotificationStream;
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
 
@@ -130,6 +131,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
         &mut self,
         conf: &Conf,
         components: &Reth,
+        chain_events: CanonStateNotificationStream,
     ) -> eyre::Result<PayloadBuilderHandle>
     where
         Conf: PayloadBuilderConfig,
@@ -164,7 +166,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
             payload_builder,
         );
         let (payload_service, payload_builder) =
-            PayloadBuilderService::new(payload_generator, components.events());
+            PayloadBuilderService::new(payload_generator, chain_events);
 
         components
             .task_executor()
@@ -317,6 +319,7 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         &mut self,
         conf: &Conf,
         components: &Reth,
+        chain_events: CanonStateNotificationStream,
     ) -> eyre::Result<PayloadBuilderHandle>
     where
         Conf: PayloadBuilderConfig,
@@ -324,7 +327,7 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
     {
         self.inner_mut()
             .ok_or_else(|| eyre::eyre!("config value must be set"))?
-            .spawn_payload_builder_service(conf, components)
+            .spawn_payload_builder_service(conf, components, chain_events)
     }
 }
 
