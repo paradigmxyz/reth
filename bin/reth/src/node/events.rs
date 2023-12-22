@@ -3,7 +3,7 @@
 use crate::node::cl_events::ConsensusLayerHealthEvent;
 use futures::Stream;
 use reth_beacon_consensus::BeaconConsensusEngineEvent;
-use reth_db::DatabaseEnv;
+use reth_db::{database::Database, database_metrics::DatabaseMetadata};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
@@ -17,7 +17,6 @@ use std::{
     fmt::{Display, Formatter},
     future::Future,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -28,11 +27,11 @@ use tracing::{info, warn};
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 
 /// The current high-level state of the node.
-struct NodeState {
+struct NodeState<DB> {
     /// Database environment.
     /// Used for freelist calculation reported in the "Status" log message.
     /// See [EventHandler::poll].
-    db: Arc<DatabaseEnv>,
+    db: DB,
     /// Connection to the network.
     network: Option<NetworkHandle>,
     /// The stage currently being executed.
@@ -41,12 +40,8 @@ struct NodeState {
     latest_block: Option<BlockNumber>,
 }
 
-impl NodeState {
-    fn new(
-        db: Arc<DatabaseEnv>,
-        network: Option<NetworkHandle>,
-        latest_block: Option<BlockNumber>,
-    ) -> Self {
+impl<DB> NodeState<DB> {
+    fn new(db: DB, network: Option<NetworkHandle>, latest_block: Option<BlockNumber>) -> Self {
         Self { db, network, current_stage: None, latest_block }
     }
 
@@ -71,20 +66,30 @@ impl NodeState {
                     target,
                 };
 
-                let progress = OptionalField(
+                let stage_progress = OptionalField(
                     checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
                 );
-                let eta = current_stage.eta.fmt_for_stage(stage_id);
 
-                info!(
-                    pipeline_stages = %pipeline_stages_progress,
-                    stage = %stage_id,
-                    checkpoint = %checkpoint.block_number,
-                    target = %OptionalField(target),
-                    %progress,
-                    %eta,
-                    "Executing stage",
-                );
+                if let Some(stage_eta) = current_stage.eta.fmt_for_stage(stage_id) {
+                    info!(
+                        pipeline_stages = %pipeline_stages_progress,
+                        stage = %stage_id,
+                        checkpoint = %checkpoint.block_number,
+                        target = %OptionalField(target),
+                        %stage_progress,
+                        %stage_eta,
+                        "Executing stage",
+                    );
+                } else {
+                    info!(
+                        pipeline_stages = %pipeline_stages_progress,
+                        stage = %stage_id,
+                        checkpoint = %checkpoint.block_number,
+                        target = %OptionalField(target),
+                        %stage_progress,
+                        "Executing stage",
+                    );
+                }
 
                 self.current_stage = Some(current_stage);
             }
@@ -102,29 +107,31 @@ impl NodeState {
                     current_stage.eta.update(checkpoint);
 
                     let target = OptionalField(current_stage.target);
-                    let progress = OptionalField(
+                    let stage_progress = OptionalField(
                         checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
                     );
 
-                    if done {
+                    let message =
+                        if done { "Stage finished executing" } else { "Stage committed progress" };
+
+                    if let Some(stage_eta) = current_stage.eta.fmt_for_stage(stage_id) {
                         info!(
                             pipeline_stages = %pipeline_stages_progress,
                             stage = %stage_id,
                             checkpoint = %checkpoint.block_number,
                             %target,
-                            %progress,
-                            "Stage finished executing",
+                            %stage_progress,
+                            %stage_eta,
+                            message,
                         )
                     } else {
-                        let eta = current_stage.eta.fmt_for_stage(stage_id);
                         info!(
                             pipeline_stages = %pipeline_stages_progress,
                             stage = %stage_id,
                             checkpoint = %checkpoint.block_number,
                             %target,
-                            %progress,
-                            %eta,
-                            "Stage committed progress",
+                            %stage_progress,
+                            message,
                         )
                     }
                 }
@@ -200,6 +207,12 @@ impl NodeState {
     }
 }
 
+impl<DB: DatabaseMetadata> NodeState<DB> {
+    fn freelist(&self) -> Option<usize> {
+        self.db.metadata().freelist_size()
+    }
+}
+
 /// Helper type for formatting of optional fields:
 /// - If [Some(x)], then `x` is written
 /// - If [None], then `None` is written
@@ -270,13 +283,14 @@ impl From<PrunerEvent> for NodeEvent {
 
 /// Displays relevant information to the user from components of the node, and periodically
 /// displays the high-level status of the node.
-pub async fn handle_events<E>(
+pub async fn handle_events<E, DB>(
     network: Option<NetworkHandle>,
     latest_block_number: Option<BlockNumber>,
     events: E,
-    db: Arc<DatabaseEnv>,
+    db: DB,
 ) where
     E: Stream<Item = NodeEvent> + Unpin,
+    DB: DatabaseMetadata + Database + 'static,
 {
     let state = NodeState::new(db, network, latest_block_number);
 
@@ -290,17 +304,18 @@ pub async fn handle_events<E>(
 
 /// Handles events emitted by the node and logs them accordingly.
 #[pin_project::pin_project]
-struct EventHandler<E> {
-    state: NodeState,
+struct EventHandler<E, DB> {
+    state: NodeState<DB>,
     #[pin]
     events: E,
     #[pin]
     info_interval: Interval,
 }
 
-impl<E> Future for EventHandler<E>
+impl<E, DB> Future for EventHandler<E, DB>
 where
     E: Stream<Item = NodeEvent> + Unpin,
+    DB: DatabaseMetadata + Database + 'static,
 {
     type Output = ();
 
@@ -308,27 +323,39 @@ where
         let mut this = self.project();
 
         while this.info_interval.poll_tick(cx).is_ready() {
-            let freelist = OptionalField(this.state.db.freelist().ok());
+            let freelist = OptionalField(this.state.freelist());
 
             if let Some(CurrentStage { stage_id, eta, checkpoint, target }) =
                 &this.state.current_stage
             {
-                let progress = OptionalField(
+                let stage_progress = OptionalField(
                     checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
                 );
-                let eta = eta.fmt_for_stage(*stage_id);
 
-                info!(
-                    target: "reth::cli",
-                    connected_peers = this.state.num_connected_peers(),
-                    %freelist,
-                    stage = %stage_id,
-                    checkpoint = checkpoint.block_number,
-                    target = %OptionalField(*target),
-                    %progress,
-                    %eta,
-                    "Status"
-                );
+                if let Some(stage_eta) = eta.fmt_for_stage(*stage_id) {
+                    info!(
+                        target: "reth::cli",
+                        connected_peers = this.state.num_connected_peers(),
+                        %freelist,
+                        stage = %stage_id,
+                        checkpoint = checkpoint.block_number,
+                        target = %OptionalField(*target),
+                        %stage_progress,
+                        %stage_eta,
+                        "Status"
+                    );
+                } else {
+                    info!(
+                        target: "reth::cli",
+                        connected_peers = this.state.num_connected_peers(),
+                        %freelist,
+                        stage = %stage_id,
+                        checkpoint = checkpoint.block_number,
+                        target = %OptionalField(*target),
+                        %stage_progress,
+                        "Status"
+                    );
+                }
             } else if let Some(latest_block) = this.state.latest_block {
                 info!(
                     target: "reth::cli",
@@ -407,13 +434,14 @@ impl Eta {
 
     /// Format ETA for a given stage.
     ///
-    /// NOTE: Currently ETA is disabled for Headers and Bodies stages until we find better
-    /// heuristics for calculation.
-    fn fmt_for_stage(&self, stage: StageId) -> String {
-        if matches!(stage, StageId::Headers | StageId::Bodies) {
-            String::from("unknown")
+    /// NOTE: Currently ETA is enabled only for the stages that have predictable progress.
+    /// It's not the case for network-dependent ([StageId::Headers] and [StageId::Bodies]) and
+    /// [StageId::Execution] stages.
+    fn fmt_for_stage(&self, stage: StageId) -> Option<String> {
+        if matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution) {
+            None
         } else {
-            format!("{}", self)
+            Some(self.to_string())
         }
     }
 }

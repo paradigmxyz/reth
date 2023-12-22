@@ -1008,6 +1008,21 @@ mod tests {
     }
 
     #[test]
+    fn test_block_hash() {
+        let s =
+            r#"{"blockHash":"0x58dc57ab582b282c143424bd01e8d923cddfdcda9455bad02a29522f6274a948"}"#;
+        let filter = serde_json::from_str::<Filter>(s).unwrap();
+        similar_asserts::assert_eq!(
+            filter.block_option,
+            FilterBlockOption::AtBlockHash(
+                "0x58dc57ab582b282c143424bd01e8d923cddfdcda9455bad02a29522f6274a948"
+                    .parse()
+                    .unwrap()
+            )
+        );
+    }
+
+    #[test]
     fn test_filter_topics_middle_wildcard() {
         let s = r#"{"fromBlock": "0xfc359e", "toBlock": "0xfc359e", "topics": [["0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"], [], [null, "0x0000000000000000000000000c17e776cd218252adfca8d4e761d3fe757e9778"]]}"#;
         let filter = serde_json::from_str::<Filter>(s).unwrap();

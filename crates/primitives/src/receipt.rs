@@ -120,21 +120,18 @@ impl Receipts {
 
     /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
     pub fn gas_spent_by_tx(&self) -> Result<Vec<(u64, u64)>, PruneSegmentError> {
-        self.last()
-            .map(|block_r| {
-                block_r
-                    .iter()
-                    .enumerate()
-                    .map(|(id, tx_r)| {
-                        if let Some(receipt) = tx_r.as_ref() {
-                            Ok((id as u64, receipt.cumulative_gas_used))
-                        } else {
-                            Err(PruneSegmentError::ReceiptsPruned)
-                        }
-                    })
-                    .collect::<Result<Vec<_>, PruneSegmentError>>()
-            })
-            .unwrap_or(Ok(vec![]))
+        let Some(block_r) = self.last() else {
+            return Ok(vec![]);
+        };
+        let mut out = Vec::with_capacity(block_r.len());
+        for (id, tx_r) in block_r.iter().enumerate() {
+            if let Some(receipt) = tx_r.as_ref() {
+                out.push((id as u64, receipt.cumulative_gas_used));
+            } else {
+                return Err(PruneSegmentError::ReceiptsPruned);
+            }
+        }
+        Ok(out)
     }
 }
 
