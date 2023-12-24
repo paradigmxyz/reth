@@ -11,13 +11,13 @@
 //!
 //!  ```
 //!  use reth_tracing::{
-//!      tracer::{LayerInfo, Tracer},
+//!      LayerInfo, RethTracer,
 //!      tracing::level_filters::LevelFilter,
 //!      LogFormat,
 //!  };
 //!
 //!  fn main() -> eyre::Result<()> {
-//!      let tracer = Tracer::new().with_stdout(LayerInfo::new(
+//!      let tracer = RethTracer::new().with_stdout(LayerInfo::new(
 //!          LogFormat::Json,
 //!          "debug".to_string(),
 //!          LevelFilter::INFO.into(),
