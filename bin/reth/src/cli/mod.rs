@@ -13,20 +13,15 @@ use crate::{
 use clap::{value_parser, ArgAction, Args, Parser, Subcommand, ValueEnum};
 use reth_primitives::ChainSpec;
 use reth_tracing::{
-    tracing::{metadata::LevelFilter, Level, Subscriber},
-    tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
-    BoxedLayer, FileWorkerGuard, LogFormat,
+    tracing::{metadata::LevelFilter, Level},
+    tracing_subscriber::filter::Directive,
+    FileInfo, FileWorkerGuard, LayerInfo, LogFormat, RethTracer, Tracer,
 };
 use std::{fmt, fmt::Display, sync::Arc};
 
 pub mod components;
 pub mod config;
 pub mod ext;
-
-/// Default [directives](Directive) for [EnvFilter] which disables high-frequency debug logs from
-/// `hyper` and `trust-dns`
-const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 3] =
-    ["hyper::proto::h1=off", "trust_dns_proto=off", "atrust_dns_resolver=off"];
 
 /// The main reth cli interface.
 ///
@@ -69,9 +64,6 @@ pub struct Cli<Ext: RethCliExt = ()> {
 
     #[clap(flatten)]
     logs: Logs,
-
-    #[clap(flatten)]
-    verbosity: Verbosity,
 }
 
 impl<Ext: RethCliExt> Cli<Ext> {
@@ -103,13 +95,7 @@ impl<Ext: RethCliExt> Cli<Ext> {
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        let mut layers =
-            vec![reth_tracing::stdout(self.verbosity.directive(), &self.logs.color.to_string())];
-
-        let (additional_layers, guard) = self.logs.layers()?;
-        layers.extend(additional_layers);
-
-        reth_tracing::init(layers);
+        let guard = self.logs.init_tracing()?;
         Ok(guard)
     }
 
@@ -226,58 +212,52 @@ pub struct Logs {
         default_value_t = ColorMode::Always
     )]
     color: ColorMode,
+    #[clap(flatten)]
+    verbosity: Verbosity,
 }
 
 /// Constant to convert megabytes to bytes
 const MB_TO_BYTES: u64 = 1024 * 1024;
 
 impl Logs {
-    /// Builds tracing layers from the current log options.
-    pub fn layers<S>(&self) -> eyre::Result<(Vec<BoxedLayer<S>>, Option<FileWorkerGuard>)>
-    where
-        S: Subscriber,
-        for<'a> S: LookupSpan<'a>,
-    {
-        let mut layers = Vec::new();
+    /// Creates a LayerInfo instance.
+    fn layer(&self, format: LogFormat, use_color: bool) -> LayerInfo {
+        LayerInfo::new(
+            format,
+            self.log_file_filter.clone(),
+            self.verbosity.directive(),
+            if use_color { Some(self.color.to_string()) } else { None },
+        )
+    }
 
-        // Function to create a new EnvFilter with environment (from `RUST_LOG` env var), default
-        // (from `DEFAULT_DIRECTIVES`) and additional directives.
-        let create_env_filter = |additional_directives: &str| -> eyre::Result<EnvFilter> {
-            let env_filter = EnvFilter::builder().from_env_lossy();
+    /// File info from the current log options.
+    fn file_info(&self) -> FileInfo {
+        FileInfo::new(
+            self.log_file_directory.clone().into(),
+            self.log_file_max_size * MB_TO_BYTES,
+            self.log_file_max_files,
+        )
+    }
 
-            DEFAULT_ENV_FILTER_DIRECTIVES
-                .into_iter()
-                .chain(additional_directives.split(','))
-                .try_fold(env_filter, |env_filter, directive| {
-                    Ok(env_filter.add_directive(directive.parse()?))
-                })
-        };
+    /// Initializes tracing with the configured options from cli args.
+    pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
+        let mut tracer = RethTracer::new();
 
-        // Create and add the journald layer if enabled
+        let stdout = self.layer(self.log_std_format.clone(), true);
+        tracer = tracer.with_stdout(stdout);
+
         if self.journald {
-            let journald_filter = create_env_filter(&self.journald_filter)?;
-            layers.push(
-                reth_tracing::journald(journald_filter).expect("Could not connect to journald"),
-            );
+            tracer = tracer.with_journald(self.journald_filter.clone());
         }
 
-        // Create and add the file logging layer if enabled
-        let file_guard = if self.log_file_max_files > 0 {
-            let file_filter = create_env_filter(&self.log_file_filter)?;
-            let (layer, guard) = reth_tracing::file(
-                file_filter,
-                &self.log_file_directory,
-                "reth.log",
-                self.log_file_max_size * MB_TO_BYTES,
-                self.log_file_max_files,
-            );
-            layers.push(layer);
-            Some(guard)
-        } else {
-            None
-        };
+        if self.log_file_max_files > 0 {
+            let info = self.file_info();
+            let file = self.layer(self.log_file_format.clone(), false);
+            tracer = tracer.with_file(file, info);
+        }
 
-        Ok((layers, file_guard))
+        let guard = tracer.init()?;
+        Ok(guard)
     }
 }
 
