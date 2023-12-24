@@ -243,7 +243,7 @@ impl Logs {
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
         let mut tracer = RethTracer::new();
 
-        let stdout = self.layer(self.log_std_format.clone(), true);
+        let stdout = self.layer(self.log_std_format, true);
         tracer = tracer.with_stdout(stdout);
 
         if self.journald {
@@ -252,7 +252,7 @@ impl Logs {
 
         if self.log_file_max_files > 0 {
             let info = self.file_info();
-            let file = self.layer(self.log_file_format.clone(), false);
+            let file = self.layer(self.log_file_format, false);
             tracer = tracer.with_file(file, info);
         }
 

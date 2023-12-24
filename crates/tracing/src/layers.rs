@@ -148,7 +148,7 @@ impl FileInfo {
     }
 }
 
-/// A worker guard returned by [`file()`].
+/// A worker guard returned by the file layer.
 ///
 ///  When a guard is dropped, all events currently in-memory are flushed to the log file this guard
 ///  belongs to.
