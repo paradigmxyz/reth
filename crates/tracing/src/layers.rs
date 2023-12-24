@@ -4,40 +4,12 @@ use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
 
-use crate::{formatter::LogFormat, BoxedLayer, FileWorkerGuard};
+use crate::formatter::LogFormat;
 
 /// Default [directives](Directive) for [EnvFilter] which disables high-frequency debug logs from
 /// `hyper` and `trust-dns`
 const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 3] =
     ["hyper::proto::h1=off", "trust_dns_proto=off", "atrust_dns_resolver=off"];
-
-/// Builds an environment filter for logging.
-///
-/// The events are filtered by `default_directive`, unless overridden by `RUST_LOG`.
-///
-/// # Arguments
-/// * `default_directive` - An optional `Directive` that sets the default directive.
-/// * `directives` - Additional directives as a comma-separated string.
-///
-/// # Returns
-/// An `eyre::Result<EnvFilter>` that can be used to configure a tracing subscriber.
-fn build_env_filter(
-    default_directive: Option<Directive>,
-    directives: &str,
-) -> eyre::Result<EnvFilter> {
-    let env_filter = if let Some(default_directive) = default_directive {
-        EnvFilter::builder().with_default_directive(default_directive).from_env_lossy()
-    } else {
-        EnvFilter::builder().from_env_lossy()
-    };
-
-    DEFAULT_ENV_FILTER_DIRECTIVES
-        .into_iter()
-        .chain(directives.split(','))
-        .try_fold(env_filter, |env_filter, directive| {
-            Ok(env_filter.add_directive(directive.parse()?))
-        })
-}
 
 /// Manages the collection of layers for a tracing subscriber.
 ///
@@ -116,7 +88,7 @@ impl Layers {
         let log_dir = file_info.create_log_dir();
         let (writer, guard) = file_info.create_log_writer(log_dir);
 
-        let file_filter = build_env_filter(None, &filter)?;
+        let file_filter = build_env_filter(None, filter)?;
         let layer = format.apply(file_filter, None, Some(writer));
         self.inner.push(layer);
         Ok(guard)
@@ -126,7 +98,7 @@ impl Layers {
 /// Holds configuration information for file logging.
 ///
 /// Contains details about the log file's path, name, size, and rotation strategy.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileInfo {
     dir: PathBuf,
     file_name: String,
@@ -134,7 +106,13 @@ pub struct FileInfo {
     max_files: usize,
 }
 
+const RETH_LOG_FILE_NAME: &str = "reth.log";
+
 impl FileInfo {
+    /// Creates a new `FileInfo` instance.
+    pub fn new(dir: PathBuf, max_size_bytes: u64, max_files: usize) -> Self {
+        Self { dir, file_name: RETH_LOG_FILE_NAME.to_string(), max_size_bytes, max_files }
+    }
     /// Creates the log directory if it doesn't exist.
     ///
     /// # Returns
@@ -168,4 +146,41 @@ impl FileInfo {
         );
         (writer, guard)
     }
+}
+
+/// A worker guard returned by [`file()`].
+///
+///  When a guard is dropped, all events currently in-memory are flushed to the log file this guard
+///  belongs to.
+pub type FileWorkerGuard = tracing_appender::non_blocking::WorkerGuard;
+
+///  A boxed tracing [Layer].
+pub(crate) type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
+
+/// Builds an environment filter for logging.
+///
+/// The events are filtered by `default_directive`, unless overridden by `RUST_LOG`.
+///
+/// # Arguments
+/// * `default_directive` - An optional `Directive` that sets the default directive.
+/// * `directives` - Additional directives as a comma-separated string.
+///
+/// # Returns
+/// An `eyre::Result<EnvFilter>` that can be used to configure a tracing subscriber.
+fn build_env_filter(
+    default_directive: Option<Directive>,
+    directives: &str,
+) -> eyre::Result<EnvFilter> {
+    let env_filter = if let Some(default_directive) = default_directive {
+        EnvFilter::builder().with_default_directive(default_directive).from_env_lossy()
+    } else {
+        EnvFilter::builder().from_env_lossy()
+    };
+
+    DEFAULT_ENV_FILTER_DIRECTIVES
+        .into_iter()
+        .chain(directives.split(','))
+        .try_fold(env_filter, |env_filter, directive| {
+            Ok(env_filter.add_directive(directive.parse()?))
+        })
 }

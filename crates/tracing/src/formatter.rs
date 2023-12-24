@@ -1,4 +1,4 @@
-use crate::BoxedLayer;
+use crate::layers::BoxedLayer;
 use clap::ValueEnum;
 use std::{fmt, fmt::Display};
 use tracing_appender::non_blocking::NonBlocking;
