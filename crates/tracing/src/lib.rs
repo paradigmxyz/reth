@@ -11,7 +11,7 @@
 //!
 //!  ```
 //!  use reth_tracing::{
-//!      LayerInfo, RethTracer,
+//!      LayerInfo, RethTracer, Tracer,
 //!      tracing::level_filters::LevelFilter,
 //!      LogFormat,
 //!  };
