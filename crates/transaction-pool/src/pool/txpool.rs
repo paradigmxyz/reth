@@ -132,9 +132,9 @@ impl<T: TransactionOrdering> TxPool<T> {
             (Ordering::Equal, Ordering::Equal) => {
                 // fee unchanged, nothing to update
             }
-            (Ordering::Greater, Ordering::Equal)
-            | (Ordering::Equal, Ordering::Greater)
-            | (Ordering::Greater, Ordering::Greater) => {
+            (Ordering::Greater, Ordering::Equal) |
+            (Ordering::Equal, Ordering::Greater) |
+            (Ordering::Greater, Ordering::Greater) => {
                 // increased blob fee: recheck pending pool and remove all that are no longer valid
                 let removed =
                     self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
@@ -1309,9 +1309,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                         cumulative_cost += tx.transaction.cost();
                         if tx.transaction.is_eip4844() && cumulative_cost > on_chain_balance {
                             // the transaction would shift
-                            return Err(InsertErr::Overdraft {
-                                transaction: Arc::new(new_blob_tx),
-                            });
+                            return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) });
                         }
                     }
                 }
@@ -1335,8 +1333,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let price_bump = price_bumps.price_bump(existing_transaction.tx_type());
         let price_bump_multiplier = (100 + price_bump) / 100;
 
-        if maybe_replacement.max_fee_per_gas()
-            <= existing_transaction.max_fee_per_gas() * price_bump_multiplier
+        if maybe_replacement.max_fee_per_gas() <=
+            existing_transaction.max_fee_per_gas() * price_bump_multiplier
         {
             return true;
         }
@@ -1346,10 +1344,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let replacement_max_priority_fee_per_gas =
             maybe_replacement.transaction.max_priority_fee_per_gas().unwrap_or(0);
 
-        if replacement_max_priority_fee_per_gas
-            <= existing_max_priority_fee_per_gas * price_bump_multiplier
-            && existing_max_priority_fee_per_gas != 0
-            && replacement_max_priority_fee_per_gas != 0
+        if replacement_max_priority_fee_per_gas <=
+            existing_max_priority_fee_per_gas * price_bump_multiplier &&
+            existing_max_priority_fee_per_gas != 0 &&
+            replacement_max_priority_fee_per_gas != 0
         {
             return true;
         }
@@ -1361,8 +1359,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
             // this enforces that blob txs can only be replaced by blob txs
             let replacement_max_blob_fee_per_gas =
                 maybe_replacement.transaction.max_fee_per_blob_gas().unwrap_or(0);
-            if replacement_max_blob_fee_per_gas
-                <= existing_max_blob_fee_per_gas * price_bump_multiplier
+            if replacement_max_blob_fee_per_gas <=
+                existing_max_blob_fee_per_gas * price_bump_multiplier
             {
                 return true;
             }
