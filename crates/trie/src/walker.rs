@@ -253,7 +253,7 @@ mod tests {
         trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
     };
     use reth_db::{cursor::DbCursorRW, tables, transaction::DbTxMut};
-    use reth_primitives::trie::StorageTrieEntry;
+    use reth_primitives::trie::{StorageTrieEntry, StoredBranchNode};
     use reth_provider::test_utils::create_test_provider_factory;
 
     #[test]
@@ -284,7 +284,7 @@ mod tests {
 
         let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
         for (k, v) in &inputs {
-            account_cursor.upsert(k.clone().into(), v.clone()).unwrap();
+            account_cursor.upsert(k.clone().into(), StoredBranchNode(v.clone())).unwrap();
         }
         let account_trie = DatabaseAccountTrieCursor::new(account_cursor);
         test_cursor(account_trie, &expected);
