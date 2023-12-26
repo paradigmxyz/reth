@@ -4607,9 +4607,9 @@ dependencies = [
 
 [[package]]
 name = "nybbles"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47dddada2357f8e7786f4f4d837db7bdddec02c7c3e5da7840d92c70390f6dc0"
+checksum = "836816c354fb2c09622b54545a6f98416147346b13cc7eba5f92fab6b3042c93"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -6240,6 +6240,7 @@ dependencies = [
 name = "reth-primitives"
 version = "0.1.0-alpha.13"
 dependencies = [
+ "ahash",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
@@ -6289,6 +6290,7 @@ dependencies = [
 name = "reth-provider"
 version = "0.1.0-alpha.13"
 dependencies = [
+ "ahash",
  "alloy-rlp",
  "assert_matches",
  "auto_impl",
@@ -6665,6 +6667,7 @@ dependencies = [
 name = "reth-trie"
 version = "0.1.0-alpha.13"
 dependencies = [
+ "ahash",
  "alloy-rlp",
  "auto_impl",
  "criterion",

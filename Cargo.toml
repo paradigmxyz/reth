@@ -179,6 +179,7 @@ metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::me
 hex-literal = "0.4"
 once_cell = "1.17"
 syn = "2.0"
+ahash = "0.8.6"
 
 # proc-macros
 proc-macro2 = "1.0"
