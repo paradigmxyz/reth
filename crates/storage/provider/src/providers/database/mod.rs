@@ -146,7 +146,7 @@ impl<DB: Database> ProviderFactory<DB> {
         if block_number == provider.best_block_number().unwrap_or_default() &&
             block_number == provider.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProvider::new(provider.into_tx())))
+            return Ok(Box::new(LatestStateProvider::new(provider.into_tx())));
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -578,7 +578,10 @@ mod tests {
 
         {
             let provider = factory.provider_rw().unwrap();
-            assert_matches!(provider.insert_block(block.clone(), None, None), Ok(_));
+            assert_matches!(
+                provider.insert_block(block.clone().try_seal_with_senders().unwrap(), None),
+                Ok(_)
+            );
             assert_matches!(
                 provider.transaction_sender(0), Ok(Some(sender))
                 if sender == block.body[0].recover_signer().unwrap()
@@ -590,8 +593,7 @@ mod tests {
             let provider = factory.provider_rw().unwrap();
             assert_matches!(
                 provider.insert_block(
-                    block.clone(),
-                    None,
+                    block.clone().try_seal_with_senders().unwrap(),
                     Some(&PruneModes {
                         sender_recovery: Some(PruneMode::Full),
                         transaction_lookup: Some(PruneMode::Full),
@@ -616,7 +618,10 @@ mod tests {
         for range in tx_ranges {
             let provider = factory.provider_rw().unwrap();
 
-            assert_matches!(provider.insert_block(block.clone(), None, None), Ok(_));
+            assert_matches!(
+                provider.insert_block(block.clone().try_seal_with_senders().unwrap(), None),
+                Ok(_)
+            );
 
             let senders = provider.get_or_take::<tables::TxSenders, true>(range.clone());
             assert_eq!(

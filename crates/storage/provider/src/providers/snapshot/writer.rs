@@ -1,9 +1,11 @@
 use super::{find_fixed_range, SnapshotProvider, BLOCKS_PER_SNAPSHOT};
 use reth_codecs::Compact;
+use reth_db::table::Table;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
-    snapshot::SegmentHeader, BlockNumber, SnapshotSegment, TransactionSignedNoHash, TxNumber,
+    snapshot::SegmentHeader, BlockNumber, Header, Receipt, SnapshotSegment,
+    TransactionSignedNoHash, TxNumber,
 };
 use std::{ops::Deref, path::PathBuf, sync::Arc};
 
@@ -56,9 +58,9 @@ impl<'a> SnapshotProviderRW<'a> {
             Ok(writer) => Ok((writer, path)),
             Err(NippyJarError::FrozenJar) => {
                 // This snapshot has been frozen, so we should
-                return Err(ProviderError::FinalizedSnapshot(segment, block))
+                Err(ProviderError::FinalizedSnapshot(segment, block))
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -179,14 +181,14 @@ impl<'a> SnapshotProviderRW<'a> {
         Ok(())
     }
 
-    /// Appends transaction to snapshot file.
-    pub fn append_transaction(
+    /// Appends to tx number-based snapshot file.
+    fn append_with_tx_number<V: Compact>(
         &mut self,
+        segment: SnapshotSegment,
         block: BlockNumber,
         tx_num: TxNumber,
-        tx: TransactionSignedNoHash,
+        value: V,
     ) -> ProviderResult<()> {
-        let segment = SnapshotSegment::Transactions;
         debug_assert!(self.writer.user_header().segment() == segment);
 
         if self.writer.user_header().tx_range().is_some_and(|range| range.contains(&tx_num)) {
@@ -196,7 +198,7 @@ impl<'a> SnapshotProviderRW<'a> {
         self.append(
             block,
             segment,
-            tx,
+            value,
             |segment_header| {
                 let block_start = *find_fixed_range(BLOCKS_PER_SNAPSHOT, block).start();
                 *segment_header =
@@ -209,6 +211,26 @@ impl<'a> SnapshotProviderRW<'a> {
                 segment_header.increment_tx()
             },
         )
+    }
+
+    /// Appends transaction to snapshot file.
+    pub fn append_transaction(
+        &mut self,
+        block: BlockNumber,
+        tx_num: TxNumber,
+        tx: TransactionSignedNoHash,
+    ) -> ProviderResult<()> {
+        self.append_with_tx_number(SnapshotSegment::Transactions, block, tx_num, tx)
+    }
+
+    /// Appends receipt to snapshot file.
+    pub fn append_receipt(
+        &mut self,
+        block: BlockNumber,
+        tx_num: TxNumber,
+        receipt: Receipt,
+    ) -> ProviderResult<()> {
+        self.append_with_tx_number(SnapshotSegment::Receipts, block, tx_num, receipt)
     }
 
     /// Prunes `to_delete` number of transactions from snapshots.

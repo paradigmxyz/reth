@@ -158,11 +158,17 @@ impl PeerRequest {
 
 /// Corresponding variant for [`PeerRequest`].
 #[derive(Debug)]
+#[allow(missing_docs)]
 pub enum PeerResponse {
+    /// Response to a [`GetBlockHeaders`] request.
     BlockHeaders { response: oneshot::Receiver<RequestResult<BlockHeaders>> },
+    /// Response to a [`GetBlockBodies`] request.
     BlockBodies { response: oneshot::Receiver<RequestResult<BlockBodies>> },
+    /// Response to a [`GetPooledTransactions`] request.
     PooledTransactions { response: oneshot::Receiver<RequestResult<PooledTransactions>> },
+    /// Response to a [`GetNodeData`] request.
     NodeData { response: oneshot::Receiver<RequestResult<NodeData>> },
+    /// Response to a [`GetReceipts`] request.
     Receipts { response: oneshot::Receiver<RequestResult<Receipts>> },
 }
 

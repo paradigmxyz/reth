@@ -11,7 +11,7 @@ use reth_db::{
 use reth_interfaces::p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    SnapshotSegment,
+    SnapshotSegment, TransactionSignedNoHash,
 };
 use reth_provider::{providers::SnapshotWriter, DatabaseProviderRW};
 use std::{

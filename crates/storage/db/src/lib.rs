@@ -153,7 +153,11 @@ pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<Databas
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::*;
-    use crate::{database::Database, database_metrics::DatabaseMetrics};
+    use crate::{
+        database::Database,
+        database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    };
+    use reth_primitives::fs;
     use std::{path::PathBuf, sync::Arc};
 
     /// Error during database open
@@ -178,7 +182,7 @@ pub mod test_utils {
         fn drop(&mut self) {
             if let Some(db) = self.db.take() {
                 drop(db);
-                let _ = std::fs::remove_dir_all(&self.path);
+                let _ = fs::remove_dir_all(&self.path);
             }
         }
     }
@@ -215,6 +219,12 @@ pub mod test_utils {
     impl<DB: DatabaseMetrics> DatabaseMetrics for TempDatabase<DB> {
         fn report_metrics(&self) {
             self.db().report_metrics()
+        }
+    }
+
+    impl<DB: DatabaseMetadata> DatabaseMetadata for TempDatabase<DB> {
+        fn metadata(&self) -> DatabaseMetadataValue {
+            self.db().metadata()
         }
     }
 
@@ -261,6 +271,7 @@ mod tests {
         version::{db_version_file_path, DatabaseVersionError},
     };
     use assert_matches::assert_matches;
+    use reth_primitives::fs;
     use tempfile::tempdir;
 
     #[test]
@@ -281,8 +292,7 @@ mod tests {
 
         // Database is not empty, version file is malformed
         {
-            std::fs::write(path.path().join(db_version_file_path(&path)), "invalid-version")
-                .unwrap();
+            fs::write(path.path().join(db_version_file_path(&path)), "invalid-version").unwrap();
             let db = init_db(&path, None);
             assert!(db.is_err());
             assert_matches!(
@@ -293,7 +303,7 @@ mod tests {
 
         // Database is not empty, version file contains not matching version
         {
-            std::fs::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
+            fs::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
             let db = init_db(&path, None);
             assert!(db.is_err());
             assert_matches!(

@@ -158,7 +158,7 @@ impl SegmentHeader {
         self.segment
     }
 
-    /// Returns block range.
+    /// Returns the block range.
     pub fn block_range(&self) -> &RangeInclusive<BlockNumber> {
         &self.block_range
     }
