@@ -25,7 +25,6 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::sync::watch;
 
 /// Alias type for a map that can be queried for transaction/block ranges from a block/transaction
 /// segment respectively. It uses `BlockNumber` to represent the block end of a snapshot range or

@@ -12,7 +12,6 @@ use crate::{
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::{db::LogLevel, provider::ProviderResult, RethError, RethResult};
 use reth_primitives::{
-    snapshot::HighestSnapshots,
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
     ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders,
@@ -25,7 +24,6 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::sync::watch;
 use tracing::trace;
 
 mod metrics;
