@@ -23,7 +23,7 @@ use std::{fmt, marker::PhantomData};
 pub trait NetworkPrimitives {
 
     // here we add network specific types, such as Transaction, Block, PayloadAttributes, etc.
-
+    // and vm
 }
 
 pub trait NodePrimitives {
@@ -32,12 +32,40 @@ pub trait NodePrimitives {
 
 }
 
+trait Blockchain<N: NetworkPrimitives> {
 
+}
+
+/// This type provides the entry point for the node: hooks etc.
+struct NodeRunner<Ext> {
+
+}
+
+fn launch<T: NodePrimitives>() {}
+
+fn launch_test<T: NodePrimitives>() {}
+
+// TODO rename to blockchain
 trait RethBuiltins {
 
     // here we add things like DB
 
 }
+
+pub trait NodeConfig2 {
+
+}
+
+pub trait NodeConfigExt<R: RethBuiltins> {}
+
+pub trait NodeComponents2 {
+
+
+}
+
+// TODO we need a hooke that returns a Node using the builtins
+
+
 
 /// A trait that defines the components of a node.
 ///
