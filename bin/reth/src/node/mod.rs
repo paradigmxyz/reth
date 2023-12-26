@@ -13,14 +13,11 @@ use crate::{
     version::SHORT_VERSION,
 };
 use clap::{value_parser, Parser};
-use futures::pin_mut;
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_interfaces::consensus::Consensus;
-use reth_network::NetworkManager;
 use reth_primitives::ChainSpec;
-use reth_provider::{BlockReader, HeaderProvider};
-use std::{fs, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
 
 pub mod cl_events;
@@ -236,44 +233,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
         }
     }
-}
-
-/// Drives the [NetworkManager] future until a [Shutdown](reth_tasks::shutdown::Shutdown) signal is
-/// received. If configured, this writes known peers to `persistent_peers_file` afterwards.
-pub(crate) async fn run_network_until_shutdown<C>(
-    shutdown: reth_tasks::shutdown::GracefulShutdown,
-    network: NetworkManager<C>,
-    persistent_peers_file: Option<PathBuf>,
-) where
-    C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
-{
-    pin_mut!(network, shutdown);
-
-    let mut graceful_guard = None;
-    tokio::select! {
-        _ = &mut network => {},
-        guard = shutdown => {
-            graceful_guard = Some(guard);
-        },
-    }
-
-    if let Some(file_path) = persistent_peers_file {
-        let known_peers = network.all_peers().collect::<Vec<_>>();
-        if let Ok(known_peers) = serde_json::to_string_pretty(&known_peers) {
-            trace!(target: "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
-            let parent_dir = file_path.parent().map(fs::create_dir_all).transpose();
-            match parent_dir.and_then(|_| fs::write(&file_path, known_peers)) {
-                Ok(_) => {
-                    info!(target: "reth::cli", peers_file=?file_path, "Wrote network peers to file");
-                }
-                Err(err) => {
-                    warn!(target: "reth::cli", ?err, peers_file=?file_path, "Failed to write network peers to file");
-                }
-            }
-        }
-    }
-
-    drop(graceful_guard)
 }
 
 #[cfg(test)]

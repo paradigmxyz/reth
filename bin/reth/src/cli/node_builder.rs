@@ -15,9 +15,9 @@ use crate::{
     },
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     init::init_genesis,
-    node::{cl_events::ConsensusLayerHealthEvents, events, run_network_until_shutdown},
+    node::{cl_events::ConsensusLayerHealthEvents, events},
     prometheus_exporter,
-    utils::get_single_header,
+    utils::{get_single_header, write_peers_to_file},
     version::SHORT_VERSION,
 };
 use eyre::Context;
@@ -668,10 +668,14 @@ impl NodeBuilder {
 
         let default_peers_path = data_dir.known_peers_path();
         let known_peers_file = self.network.persistent_peers_file(default_peers_path);
-        task_executor
-            .spawn_critical_with_graceful_shutdown_signal("p2p network task", |shutdown| {
-                run_network_until_shutdown(shutdown, network, known_peers_file)
-            });
+        task_executor.spawn_critical_with_graceful_shutdown_signal(
+            "p2p network task",
+            |shutdown| {
+                network.run_until_graceful_shutdown(shutdown, |network| {
+                    write_peers_to_file(network, known_peers_file)
+                })
+            },
+        );
 
         handle
     }

@@ -33,7 +33,7 @@ use crate::{
     transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
-use futures::{Future, StreamExt};
+use futures::{pin_mut, Future, StreamExt};
 use parking_lot::Mutex;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
@@ -45,6 +45,7 @@ use reth_network_api::ReputationChangeKind;
 use reth_primitives::{ForkId, NodeRecord, PeerId, B256};
 use reth_provider::{BlockNumReader, BlockReader};
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
+use reth_tasks::shutdown::GracefulShutdown;
 use reth_tokio_util::EventListeners;
 use secp256k1::SecretKey;
 use std::{
@@ -593,6 +594,35 @@ where
             }
             NetworkHandleMessage::AddRlpxSubProtocol(proto) => self.add_rlpx_sub_protocol(proto),
         }
+    }
+}
+
+impl<C> NetworkManager<C>
+where
+    C: BlockReader + Unpin,
+{
+    /// Drives the [NetworkManager] future until a [GracefulShutdown](GracefulShutdown) signal is
+    /// received.
+    ///
+    /// This also run the given function `shutdown_hook` afterwards.
+    pub async fn run_until_graceful_shutdown(
+        self,
+        shutdown: GracefulShutdown,
+        shutdown_hook: impl FnOnce(&mut Self),
+    ) {
+        let network = self;
+        pin_mut!(network, shutdown);
+
+        let mut graceful_guard = None;
+        tokio::select! {
+            _ = &mut network => {},
+            guard = shutdown => {
+                graceful_guard = Some(guard);
+            },
+        }
+
+        shutdown_hook(&mut network);
+        drop(graceful_guard);
     }
 }
 
