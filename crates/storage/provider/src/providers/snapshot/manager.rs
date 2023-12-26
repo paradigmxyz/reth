@@ -29,13 +29,8 @@ use std::{
 };
 use tokio::sync::watch;
 
-/// Alias type for a map that can be queried for transaction/block ranges from a block/transaction
-/// segment respectively. It uses `BlockNumber` to represent the block end of a snapshot range or
-/// `TxNumber` to represent the transaction end of a snapshot range.
-///
-/// Can be in one of the two formats:
-/// - `HashMap<SnapshotSegment, BTreeMap<BlockNumber, RangeInclusive<TxNumber>>>`
-/// - `HashMap<SnapshotSegment, BTreeMap<TxNumber, RangeInclusive<BlockNumber>>>`
+/// Alias type for a map that can be queried for block ranges from a transaction
+/// segment respectively. It uses `TxNumber` to represent the transaction end of a snapshot range.
 type SegmentRanges = HashMap<SnapshotSegment, BTreeMap<u64, RangeInclusive<u64>>>;
 
 /// [`SnapshotProvider`] manages all existing [`SnapshotJarProvider`].
@@ -44,7 +39,7 @@ pub struct SnapshotProvider {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
     map: DashMap<(BlockNumber, SnapshotSegment), LoadedJar>,
-    /// Available snapshot transaction ranges on disk indexed by max blocks.
+    /// Max snapshotted block for each snapshot segment
     snapshots_max_block: RwLock<HashMap<SnapshotSegment, u64>>,
     /// Available snapshot block ranges on disk indexed by max transactions.
     snapshots_tx_index: RwLock<SegmentRanges>,
@@ -187,14 +182,9 @@ impl SnapshotProvider {
         self.snapshots_max_block
             .read()
             .get(&segment)
-            .iter()
-            .filter_map(|max| {
-                if **max >= block {
-                    return Some(find_fixed_range(BLOCKS_PER_SNAPSHOT, block))
-                }
-                None
-            })
-            .next()
+            .into_iter()
+            .find(|max| **max >= block)
+            .map(|block| find_fixed_range(BLOCKS_PER_SNAPSHOT, *block))
     }
 
     /// Gets a snapshot segment's block range and transaction range from the provider inner
@@ -228,6 +218,9 @@ impl SnapshotProvider {
     pub fn update_index(&self) -> ProviderResult<()> {
         let mut max_block = self.snapshots_max_block.write();
         let mut tx_index = self.snapshots_tx_index.write();
+
+        // Makes sure unwinds are properly taken care of
+        tx_index.clear();
 
         for (segment, ranges) in iter_snapshots(&self.path)? {
             // Update last block for each segment

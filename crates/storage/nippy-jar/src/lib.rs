@@ -277,10 +277,13 @@ impl<H: NippyJarHeader> NippyJar<H> {
     pub fn delete(self) -> Result<(), NippyJarError> {
         // TODO(joshie): ensure consistency on unexpected shutdown
 
-        std::fs::remove_file(self.data_path())?;
-        std::fs::remove_file(self.index_path())?;
-        std::fs::remove_file(self.offsets_path())?;
-        std::fs::remove_file(self.config_path())?;
+        for path in
+            [self.data_path().into(), self.index_path(), self.offsets_path(), self.config_path()]
+        {
+            if path.exists() {
+                std::fs::remove_file(path)?;
+            }
+        }
 
         Ok(())
     }

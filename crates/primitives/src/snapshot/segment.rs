@@ -165,7 +165,7 @@ impl SegmentHeader {
 
     /// Returns the transaction range.
     pub fn tx_range(&self) -> Option<RangeInclusive<TxNumber>> {
-        self.tx_range.as_ref().map(|range| range.clone())
+        self.tx_range.clone()
     }
 
     /// Returns the first block number of the segment.
@@ -203,14 +203,14 @@ impl SegmentHeader {
     pub fn increment_tx(&mut self) {
         match self.segment {
             SnapshotSegment::Headers => (),
-            SnapshotSegment::Transactions | SnapshotSegment::Receipts => match &mut self.tx_range {
-                Some(tx_range) => {
-                    *tx_range = *tx_range.start()..=*tx_range.end() + 1;
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                if let Some(tx_range) = &mut self.tx_range {
+                    let start = if *tx_range.start() == 0 { 1 } else { *tx_range.start() };
+                    *tx_range = start..=*tx_range.end() + 1;
+                } else {
+                    self.tx_range = Some(1..=1);
                 }
-                None => {
-                    panic!("Transaction based snapshots should have a transaction range.")
-                }
-            },
+            }
         }
     }
 
@@ -225,9 +225,7 @@ impl SegmentHeader {
                 Some(tx_range) => {
                     *tx_range = *tx_range.start()..=tx_range.end().saturating_sub(num);
                 }
-                None => {
-                    panic!("Transaction based snapshots should have a transaction range.")
-                }
+                None => (),
             },
         };
     }

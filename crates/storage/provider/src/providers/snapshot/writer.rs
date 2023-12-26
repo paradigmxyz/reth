@@ -149,11 +149,11 @@ impl<'a> SnapshotProviderRW<'a> {
                 }
 
                 NippyJar::<SegmentHeader>::load(&previous_snap)?.delete()?;
-            } else {
-                let to_delete = len - num_rows;
 
+                num_rows -= len;
+            } else {
                 // Update `SegmentHeader`
-                self.writer.user_header_mut().prune(to_delete);
+                self.writer.user_header_mut().prune(num_rows);
 
                 // Only Transactions and Receipts
                 if let Some(last_block) = last_block {
@@ -162,9 +162,9 @@ impl<'a> SnapshotProviderRW<'a> {
                 }
 
                 // Truncate data
-                self.writer.prune_rows(to_delete as usize)?;
+                self.writer.prune_rows(num_rows as usize)?;
+                num_rows = 0;
             }
-            num_rows -= len;
         }
 
         Ok(())

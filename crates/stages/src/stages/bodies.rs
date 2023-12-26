@@ -128,7 +128,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let snapshot_tx_num = snapshot_provider
             .get_highest_snapshot_tx(SnapshotSegment::Transactions)
             .unwrap_or_default();
-        let db_tx_num = tx_block_cursor.last()?.unwrap_or_default().1;
+        let db_tx_num = tx_block_cursor.last()?.unwrap_or_default().0;
 
         match snapshot_tx_num.cmp(&db_tx_num) {
             Ordering::Greater => {
@@ -428,6 +428,7 @@ mod tests {
 
         // Check that we synced more blocks
         let output = rx.await.unwrap();
+
         assert_matches!(
             output,
             Ok(ExecOutput { checkpoint: StageCheckpoint {
@@ -485,16 +486,13 @@ mod tests {
             .expect("Written block data invalid");
 
         // Delete a transaction
-        runner
-            .db()
-            .commit(|tx| {
-                let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
-                tx_cursor.last()?.expect("Could not read last transaction");
-                tx_cursor.delete_current()?;
-                Ok(())
-            })
-            .expect("Could not delete a transaction");
-
+        let snapshot_provider = runner.db().factory.snapshot_provider().expect("should exist");
+        {
+            let mut snapshotter =
+                snapshot_provider.latest_writer(SnapshotSegment::Transactions).unwrap();
+            snapshotter.prune_transactions(1, checkpoint.block_number).unwrap();
+            snapshotter.update_index().unwrap();
+        }
         // Unwind all of it
         let unwind_to = 1;
         let input = UnwindInput { bad_block: None, checkpoint, unwind_to };
@@ -620,24 +618,39 @@ mod tests {
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.checkpoint().block_number;
                 let end = input.target();
+
+                let snapshot_provider = self.db.factory.snapshot_provider().expect("should exist");
+
                 let mut rng = generators::rng();
                 let blocks = random_block_range(&mut rng, start..=end, GENESIS_HASH, 0..2);
+
                 self.db.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
+                // let mut snapshotter = snapshot_provider.writer(start,
+                // SnapshotSegment::Transactions)?;
+                // let mut snapshotter = snapshot_provider
+                //                 .writer(start, SnapshotSegment::Transactions)?;
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
                     self.db.commit(|tx| {
                         let body = StoredBlockBodyIndices {
-                            first_tx_num: 0,
+                            first_tx_num: 1,
                             tx_count: progress.body.len() as u64,
                         };
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx(&mut rng);
-                            tx.put::<tables::Transactions>(tx_num, transaction.into())
+                            let mut snapshotter =
+                                snapshot_provider.writer(start, SnapshotSegment::Transactions)?;
+                            snapshotter.append_transaction(
+                                progress.number,
+                                tx_num,
+                                transaction.into(),
+                            )?;
+                            snapshotter.commit()
                         })?;
 
                         if body.tx_count != 0 {
                             tx.put::<tables::TransactionBlock>(
-                                body.first_tx_num(),
+                                body.last_tx_num(),
                                 progress.number,
                             )?;
                         }
@@ -712,12 +725,18 @@ mod tests {
                 prev_progress: BlockNumber,
                 highest_block: BlockNumber,
             ) -> Result<(), TestRunnerError> {
+                let snapshot_provider = self
+                    .db
+                    .factory
+                    .snapshot_provider()
+                    .expect("snapshot provider should be initalized.");
+
                 self.db.query(|tx| {
                     // Acquire cursors on body related tables
                     let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
                     let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
-                    let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
+                    // let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
                     let mut tx_block_cursor = tx.cursor_read::<tables::TransactionBlock>()?;
 
                     let first_body_key = match bodies_cursor.first()? {
@@ -726,6 +745,7 @@ mod tests {
                     };
 
                     let mut prev_number: Option<BlockNumber> = None;
+
 
                     for entry in bodies_cursor.walk(Some(first_body_key))? {
                         let (number, body) = entry?;
@@ -755,16 +775,14 @@ mod tests {
 
                         let tx_block_id = tx_block_cursor.seek_exact(body.last_tx_num())?.map(|(_,b)| b);
                         if body.tx_count == 0 {
-                            assert_ne!(tx_block_id,Some(number));
+                            assert_ne!(tx_block_id,Some(number), "AAA");
                         } else {
-                            assert_eq!(tx_block_id, Some(number));
+                            assert_eq!(tx_block_id, Some(number),"BBB");
                         }
 
                         for tx_id in body.tx_num_range() {
-                            let tx_entry = transaction_cursor.seek_exact(tx_id)?;
-                            assert!(tx_entry.is_some(), "Transaction is missing.");
+                            assert!(snapshot_provider.transaction_by_id(tx_id)?.is_some(), "Transaction is missing.");
                         }
-
 
                         prev_number = Some(number);
                     }
