@@ -11,7 +11,7 @@ use reth_db::{
 use reth_interfaces::p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    SnapshotSegment, TransactionSignedNoHash,
+    SnapshotSegment,
 };
 use reth_provider::{providers::SnapshotWriter, DatabaseProviderRW};
 use std::{
@@ -491,7 +491,7 @@ mod tests {
             let mut snapshotter =
                 snapshot_provider.latest_writer(SnapshotSegment::Transactions).unwrap();
             snapshotter.prune_transactions(1, checkpoint.block_number).unwrap();
-            snapshotter.update_index().unwrap();
+            snapshotter.commit().unwrap();
         }
         // Unwind all of it
         let unwind_to = 1;
@@ -625,27 +625,25 @@ mod tests {
                 let blocks = random_block_range(&mut rng, start..=end, GENESIS_HASH, 0..2);
 
                 self.db.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
-                // let mut snapshotter = snapshot_provider.writer(start,
-                // SnapshotSegment::Transactions)?;
-                // let mut snapshotter = snapshot_provider
-                //                 .writer(start, SnapshotSegment::Transactions)?;
+
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
-                    self.db.commit(|tx| {
+                    {
+                        let tx = self.db.factory.provider_rw()?.into_tx();
+                        let mut snapshotter =
+                            snapshot_provider.writer(start, SnapshotSegment::Transactions)?;
+
                         let body = StoredBlockBodyIndices {
                             first_tx_num: 1,
                             tx_count: progress.body.len() as u64,
                         };
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx(&mut rng);
-                            let mut snapshotter =
-                                snapshot_provider.writer(start, SnapshotSegment::Transactions)?;
                             snapshotter.append_transaction(
                                 progress.number,
                                 tx_num,
                                 transaction.into(),
-                            )?;
-                            snapshotter.commit()
+                            )
                         })?;
 
                         if body.tx_count != 0 {
@@ -663,8 +661,10 @@ mod tests {
                                 StoredBlockOmmers { ommers: progress.ommers.clone() },
                             )?;
                         }
-                        Ok(())
-                    })?;
+
+                        snapshotter.commit()?;
+                        tx.commit()?;
+                    }
                 }
                 self.set_responses(blocks.iter().map(body_by_hash).collect());
                 Ok(blocks)

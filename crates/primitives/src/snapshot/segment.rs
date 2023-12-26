@@ -124,7 +124,7 @@ impl SnapshotSegment {
         let segment = Self::from_str(parts.next()?).ok()?;
         let (block_start, block_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
 
-        if block_start >= block_end {
+        if block_start > block_end {
             return None
         }
 
