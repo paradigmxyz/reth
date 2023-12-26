@@ -1179,7 +1179,7 @@ mod tests {
             .into_iter()
             .map(|item| {
                 let (key, node) = item.unwrap();
-                (key.0, node)
+                (key.0, node.0)
             })
             .collect();
         assert_trie_updates(&account_updates);
