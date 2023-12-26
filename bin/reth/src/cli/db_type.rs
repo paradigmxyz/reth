@@ -47,8 +47,11 @@ impl DatabaseBuilder {
         Self { db_type }
     }
 
-    /// Initializes and returns the test database. If the [DatabaseType] is test, the [LogLevel]
-    /// and chain are not used.
+    /// Initializes and returns the [DatabaseInstance] depending on the current database type. If
+    /// the [DatabaseType] is test, the [LogLevel] is not used.
+    ///
+    /// If the [DatabaseType] is test, then the [ChainPath] constructed will be derived from the db
+    /// path of the [TempDatabase] and the given chain.
     pub fn build_db(
         self,
         log_level: Option<LogLevel>,
@@ -75,7 +78,7 @@ impl DatabaseBuilder {
     }
 }
 
-/// A constructed database type, without path information.
+/// A constructed database type, with a [ChainPath].
 #[derive(Debug, Clone)]
 pub enum DatabaseInstance {
     /// The test database
@@ -85,7 +88,7 @@ pub enum DatabaseInstance {
         /// The data dir
         data_dir: ChainPath<DataDirPath>,
     },
-    /// The right database
+    /// The real database
     Real {
         /// The database
         db: Arc<DatabaseEnv>,
