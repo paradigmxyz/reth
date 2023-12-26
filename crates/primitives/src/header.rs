@@ -14,6 +14,15 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+/// Errors that can occur during header sanity checks.
+#[derive(Debug, PartialEq)]
+pub enum HeaderError {
+    /// Represents an error when the block difficulty is too large.
+    LargeDifficulty,
+    /// Represents an error when the block extradata is too large.
+    LargeExtraData,
+}
+
 /// Block header
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -117,6 +126,44 @@ impl Default for Header {
 }
 
 impl Header {
+    /// Performs a sanity check on the extradata field of the header.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the extradata size is larger than 100 KB.
+    pub fn check_extradata(&self) -> Result<(), HeaderError> {
+        if self.extra_data.len() > 100 * 1024 {
+            return Err(HeaderError::LargeExtraData);
+        }
+        Ok(())
+    }
+
+    /// Performs a sanity check on the block difficulty field of the header.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the block difficulty exceeds 80 bits.
+    pub fn check_difficulty(&self) -> Result<(), HeaderError> {
+        if self.difficulty.bit_len() > 80 {
+            return Err(HeaderError::LargeDifficulty);
+        }
+        Ok(())
+    }
+
+    /// Performs combined sanity checks on multiple header fields.
+    ///
+    /// This method combines checks for block difficulty and extradata sizes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if either the block difficulty exceeds 80 bits
+    /// or if the extradata size is larger than 100 KB.
+    pub fn sanity_check(&self) -> Result<(), HeaderError> {
+        self.check_difficulty()?;
+        self.check_extradata()?;
+        Ok(())
+    }
+
     /// Returns the parent block's number and hash
     pub fn parent_num_hash(&self) -> BlockNumHash {
         BlockNumHash { number: self.number.saturating_sub(1), hash: self.parent_hash }
