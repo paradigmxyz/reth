@@ -601,8 +601,7 @@ impl<C> NetworkManager<C>
 where
     C: BlockReader + Unpin,
 {
-    /// Drives the [NetworkManager] future until a [GracefulShutdown](GracefulShutdown) signal is
-    /// received.
+    /// Drives the [NetworkManager] future until a [GracefulShutdown] signal is received.
     ///
     /// This also run the given function `shutdown_hook` afterwards.
     pub async fn run_until_graceful_shutdown(
