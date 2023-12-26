@@ -23,7 +23,6 @@ use crate::{
 };
 use clap::{value_parser, Parser};
 use eyre::Context;
-use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
 use metrics_exporter_prometheus::PrometheusHandle;
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
@@ -242,7 +241,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         // Raise the fd limit of the process.
         // Does not do anything on windows.
-        raise_fd_limit();
+        let _ = fdlimit::raise_fd_limit();
 
         // get config
         let config = self.load_config()?;
