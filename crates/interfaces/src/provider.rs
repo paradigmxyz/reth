@@ -122,9 +122,9 @@ pub enum ProviderError {
     /// Snapshot file is not found for requested transaction.
     #[error("not able to find {0} snapshot file for transaction id {1}")]
     MissingSnapshotTx(SnapshotSegment, TxNumber),
-    /// Error during conversion from U256 to u64.
-    #[error("failed to convert U256 to u64")]
-    ConversionError(U256),
+    /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
+    #[error("Failed to convert block number U256 to u64: {0}")]
+    BlockNumberOverflow(U256),
 }
 
 impl From<reth_nippy_jar::NippyJarError> for ProviderError {
