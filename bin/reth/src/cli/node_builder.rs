@@ -564,47 +564,6 @@ impl NodeBuilder {
         Ok(pipeline)
     }
 
-    /// Returns the chain specific path to the data dir. This returns `None` if the database is
-    /// configured for testing.
-    fn data_dir(&self) -> Option<ChainPath<DataDirPath>> {
-        match &self.database {
-            DatabaseBuilder::Real(data_dir) => {
-                Some(data_dir.unwrap_or_chain_default(self.chain.chain))
-            }
-            DatabaseBuilder::Test => None,
-        }
-    }
-
-    /// Returns the path to the config file.
-    fn config_path(&self) -> Option<PathBuf> {
-        let chain_dir = self.data_dir()?;
-
-        let config = self.config.clone().unwrap_or_else(|| chain_dir.config_path());
-        Some(config)
-    }
-
-    /// Loads the reth config with the given datadir root
-    fn load_config(&self) -> eyre::Result<Config> {
-        let Some(config_path) = self.config_path() else { todo!() };
-
-        let mut config = confy::load_path::<Config>(&config_path)
-            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))?;
-
-        info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
-
-        // Update the config with the command line arguments
-        config.peers.connect_trusted_nodes_only = self.network.trusted_only;
-
-        if !self.network.trusted_peers.is_empty() {
-            info!(target: "reth::cli", "Adding trusted nodes");
-            self.network.trusted_peers.iter().for_each(|peer| {
-                config.peers.trusted_nodes.insert(*peer);
-            });
-        }
-
-        Ok(config)
-    }
-
     /// Loads the trusted setup params from a given file path or falls back to
     /// `MAINNET_KZG_TRUSTED_SETUP`.
     fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
@@ -964,7 +923,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         raise_fd_limit()?;
 
         // get config
-        let config = self.config.load_config()?;
+        let config = self.load_config()?;
 
         let prometheus_handle = self.config.install_prometheus_recorder()?;
         info!(target: "reth::cli", "Database opened");
@@ -1033,7 +992,6 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             self.config.build_and_spawn_txpool(&blockchain_db, head, &executor)?;
 
         // build network
-        info!(target: "reth::cli", "Connecting to P2P network");
         let (network_client, mut network_builder) = self
             .config
             .build_network(
@@ -1252,6 +1210,33 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             terminate: self.config.debug.terminate,
         };
         Ok(node_handle)
+    }
+
+    /// Returns the path to the config file.
+    fn config_path(&self) -> PathBuf {
+        self.config.config.clone().unwrap_or_else(|| self.data_dir.config_path())
+    }
+
+    /// Loads the reth config with the given datadir root
+    fn load_config(&self) -> eyre::Result<Config> {
+        let config_path = self.config_path();
+
+        let mut config = confy::load_path::<Config>(&config_path)
+            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))?;
+
+        info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
+
+        // Update the config with the command line arguments
+        config.peers.connect_trusted_nodes_only = self.config.network.trusted_only;
+
+        if !self.config.network.trusted_peers.is_empty() {
+            info!(target: "reth::cli", "Adding trusted nodes");
+            self.config.network.trusted_peers.iter().for_each(|peer| {
+                config.peers.trusted_nodes.insert(*peer);
+            });
+        }
+
+        Ok(config)
     }
 }
 

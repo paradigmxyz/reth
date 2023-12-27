@@ -10,7 +10,6 @@ use crate::{
     cli::{db_type::DatabaseBuilder, ext::RethCliExt, node_builder::NodeBuilder},
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
-    version::SHORT_VERSION,
 };
 use clap::{value_parser, Parser};
 use reth_auto_seal_consensus::AutoSealConsensus;
@@ -18,7 +17,6 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_interfaces::consensus::Consensus;
 use reth_primitives::ChainSpec;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
-use tracing::*;
 
 pub mod cl_events;
 pub mod events;
@@ -168,8 +166,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
     /// Execute `node` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
-
         let Self {
             datadir,
             config,
