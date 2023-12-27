@@ -220,19 +220,11 @@ impl BodiesClient for TestFullBlockClient {
         // Create a future that immediately returns the result of the block body retrieval
         // operation.
         futures::future::ready(Ok(WithPeerId::new(
-            // Generate a random PeerId as part of the returned result.
             PeerId::random(),
-            // Process the provided hashes to collect block bodies.
             hashes
-                // Iterate through the hashes and filter/map to obtain the corresponding block
-                // bodies.
                 .iter()
-                // Filter the hashes to retrieve the associated block bodies,
-                // cloning the values to ensure ownership and handling potential None values.
                 .filter_map(|hash| bodies.get(hash).cloned())
-                // Take a limited number of block bodies based on the soft limit.
                 .take(self.soft_limit)
-                // Collect the filtered block bodies into a vector.
                 .collect::<Vec<_>>(),
         )))
     }
