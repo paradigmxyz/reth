@@ -179,31 +179,6 @@ pub struct RpcServerArgs {
 }
 
 impl RpcServerArgs {
-    /// Enables the HTTP-RPC server.
-    pub fn with_http(mut self) -> Self {
-        self.http = true;
-        self
-    }
-
-    /// Enables the WS-RPC server.
-    pub fn with_ws(mut self) -> Self {
-        self.ws = true;
-        self
-    }
-
-    /// Change rpc port numbers based on the instance number.
-    ///
-    /// Warning: if `instance` is zero, this will panic.
-    pub fn adjust_instance_ports(&mut self, instance: u16) {
-        debug_assert_ne!(instance, 0, "instance must be non-zero");
-        // auth port is scaled by a factor of instance * 100
-        self.auth_port += instance * 100 - 100;
-        // http port is scaled by a factor of -instance
-        self.http_port -= instance - 1;
-        // ws port is scaled by a factor of instance * 2
-        self.ws_port += instance * 2 - 2;
-    }
-
     /// Configures and launches _all_ servers.
     ///
     /// Returns the handles for the launched regular RPC server(s) (if any) and the server handle

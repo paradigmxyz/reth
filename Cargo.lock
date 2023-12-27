@@ -5608,7 +5608,6 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-process",
  "metrics-util",
- "once_cell",
  "pin-project",
  "pretty_assertions",
  "procfs",
