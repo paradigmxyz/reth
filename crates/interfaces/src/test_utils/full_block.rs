@@ -64,8 +64,23 @@ impl BodiesClient for NoopFullBlockClient {
 }
 
 impl HeadersClient for NoopFullBlockClient {
+    /// The output type representing a future containing a peer request result with a vector of
+    /// headers.
     type Output = futures::future::Ready<PeerRequestResult<Vec<Header>>>;
 
+    /// Retrieves headers with a specified priority level.
+    ///
+    /// This implementation does nothing and returns an empty vector of headers.
+    ///
+    /// # Arguments
+    ///
+    /// * `_request` - A request for headers (unused in this implementation).
+    /// * `_priority` - The priority level for the headers request (unused in this implementation).
+    ///
+    /// # Returns
+    ///
+    /// Always returns a ready future with an empty vector of headers wrapped in a
+    /// `PeerRequestResult`.
     fn get_headers_with_priority(
         &self,
         _request: HeadersRequest,
@@ -155,7 +170,6 @@ impl HeadersClient for TestFullBlockClient {
         request: HeadersRequest,
         _priority: Priority,
     ) -> Self::Output {
-        // Locks the headers for concurrent access.
         let headers = self.headers.lock();
 
         // Initializes the block hash or number.
