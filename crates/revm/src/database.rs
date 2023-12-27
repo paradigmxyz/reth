@@ -113,6 +113,16 @@ impl<DB: StateProvider> DatabaseRef for StateProviderDatabase<DB> {
     ///
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
     fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
-        Ok(self.0.block_hash(number.to())?.unwrap_or_default())
+        // Attempt to convert U256 to u64
+        let block_number = match number.try_into() {
+            Ok(value) => value,
+            Err(_) => return Err(Self::Error::ConversionError(number)),
+        };
+
+        // Get the block hash or default hash
+        match self.0.block_hash(block_number)? {
+            Some(hash) => Ok(hash),
+            None => Ok(B256::default()),
+        }
     }
 }
