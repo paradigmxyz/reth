@@ -190,6 +190,11 @@ impl<D: XdgPath> MaybePlatformPath<D> {
         )
     }
 
+    /// Returns the default platform path for the specified [Chain].
+    pub fn chain_default(chain: Chain) -> ChainPath<D> {
+        PlatformPath::default().with_chain(chain)
+    }
+
     /// Returns true if a custom path is set
     pub fn is_some(&self) -> bool {
         self.0.is_some()
