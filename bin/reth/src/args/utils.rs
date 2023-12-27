@@ -10,7 +10,7 @@ use std::{
 };
 
 #[cfg(feature = "optimism")]
-use reth_primitives::{BASE_GOERLI, BASE_SEPOLIA, BASE_MAINNET};
+use reth_primitives::{BASE_GOERLI, BASE_MAINNET, BASE_SEPOLIA};
 
 #[cfg(not(feature = "optimism"))]
 use reth_primitives::{DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA};

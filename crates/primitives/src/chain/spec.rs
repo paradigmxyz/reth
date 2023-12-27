@@ -2880,4 +2880,20 @@ Post-merge hard forks (timestamp based):
 
         assert_eq!(spec.hardfork_fork_filter(Hardfork::Shanghai), None);
     }
+
+    #[test]
+    #[cfg(feature = "optimism")]
+    fn base_sepolia_genesis() {
+        let genesis = BASE_SEPOLIA.genesis_header();
+        assert_eq!(
+            genesis.hash_slow(),
+            "0x0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4"
+                .parse::<B256>()
+                .unwrap()
+        );
+        let base_fee =
+            genesis.next_block_base_fee(BASE_SEPOLIA.base_fee_params(genesis.timestamp)).unwrap();
+        // <https://base-sepolia.blockscout.com/block/1>
+        assert_eq!(base_fee, 980000000);
+    }
 }
