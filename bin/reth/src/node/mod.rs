@@ -7,7 +7,7 @@ use crate::{
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
         RpcServerArgs, TxPoolArgs,
     },
-    cli::{db_type::DatabaseBuilder, ext::RethCliExt, node_builder::NodeBuilder},
+    cli::{db_type::DatabaseBuilder, ext::RethCliExt, node_builder::NodeConfig},
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
 };
@@ -190,7 +190,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let database = DatabaseBuilder::Real(datadir);
 
         // set up node config
-        let node_config = NodeBuilder {
+        let node_config = NodeConfig {
             database,
             config,
             chain,
