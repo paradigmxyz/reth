@@ -132,7 +132,7 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 ///
 ///     // configure the rpc apis
 ///     let mut rpc = RpcServerArgs::default().with_http().with_ws();
-///     rpc.modules = Some(RpcModuleSelection::All);
+///     rpc.http_api = Some(RpcModuleSelection::All);
 ///     let builder = builder.with_rpc(rpc);
 ///
 ///     let ext = DefaultRethNodeCommandConfig::default();
@@ -166,7 +166,7 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 ///
 ///     // configure the rpc apis
 ///     let mut rpc = RpcServerArgs::default().with_http().with_ws();
-///     rpc.modules = Some(RpcModuleSelection::All);
+///     rpc.http_api = Some(RpcModuleSelection::All);
 ///     let builder = builder.with_rpc(rpc);
 ///
 ///     let ext = DefaultRethNodeCommandConfig::default();
@@ -1347,8 +1347,11 @@ impl NodeHandle {
 ///
 /// # Example
 /// ```
-/// # use reth::{args::rpc_server_args::RpcServerArgs, NodeBuilder, spawn_node};
-/// async fn main() {
+/// # use reth::{
+/// #     cli::node_builder::{NodeBuilder, spawn_node},
+/// #     args::RpcServerArgs,
+/// # };
+/// async fn t() {
 ///     // Create a node builder with an http rpc server enabled
 ///     let rpc_args = RpcServerArgs::default().with_http();
 ///

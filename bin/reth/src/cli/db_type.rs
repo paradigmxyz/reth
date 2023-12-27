@@ -26,11 +26,14 @@ impl DatabaseBuilder {
         Self::Test
     }
 
-    /// Initializes and returns the [DatabaseInstance] depending on the current database type. If
-    /// the [DatabaseBuilder] is test, the [LogLevel] is not used.
+    /// Initializes and returns the [DatabaseInstance] depending on the current database type.
     ///
     /// If the [DatabaseBuilder] is test, then the [ChainPath] constructed will be derived from the
-    /// db path of the [TempDatabase] and the given chain.
+    /// db path of the [TempDatabase] and the given chain. The [LogLevel] will not be used.
+    ///
+    /// If the [DatabaseBuilder] is real, then the db will be initialized using the given log level
+    /// and the [ChainPath] will be derived from the given path and chain. This database path is
+    /// then passed into [init_db].
     pub fn init_db(
         self,
         log_level: Option<LogLevel>,
