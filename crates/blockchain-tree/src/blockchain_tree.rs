@@ -1164,14 +1164,16 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         let hashed_state = state.hash_state_slow();
 
         // Compute state root or retrieve cached trie updates before opening write transaction.
+        let block_hash_numbers =
+            blocks.iter().map(|(number, b)| (number, b.hash)).collect::<Vec<_>>();
         let trie_updates = match chain_trie_updates {
             Some(updates) => {
-                debug!(target: "blockchain_tree", ?blocks, "Using cached trie updates");
+                debug!(target: "blockchain_tree", blocks = ?block_hash_numbers, "Using cached trie updates");
                 self.metrics.trie_updates_insert_cached.increment(1);
                 updates
             }
             None => {
-                debug!(target: "blockchain_tree", ?blocks, "Recomputing state root for insert");
+                debug!(target: "blockchain_tree", blocks = ?block_hash_numbers, "Recomputing state root for insert");
                 let (state_root, trie_updates) = state
                     .state_root_calculator(
                         self.externals.provider_factory.provider()?.tx_ref(),
