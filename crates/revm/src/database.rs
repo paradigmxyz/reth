@@ -112,9 +112,7 @@ impl<DB: StateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Retrieves the block hash for a given block number.
     ///
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
-    /// Note: This operation may potentially be unsafe due to the unwrap operation.
     fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
-        // Note: this unwrap is potentially unsafe
-        Ok(self.0.block_hash(number.try_into().unwrap())?.unwrap_or_default())
+        Ok(self.0.block_hash(number.to())?.unwrap_or_default())
     }
 }
