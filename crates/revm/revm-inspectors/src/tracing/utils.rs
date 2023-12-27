@@ -1,6 +1,7 @@
 //! Util functions for revm related ops
 
 use alloy_primitives::{hex, Address, Bytes, B256};
+use alloy_sol_types::{ContractError, GenericRevertReason};
 use revm::{
     interpreter::CreateInputs,
     primitives::{CreateScheme, SpecId, KECCAK_EMPTY},
@@ -57,4 +58,46 @@ pub(crate) fn load_account_code<DB: DatabaseRef>(
             }
         })
         .map(Into::into)
+}
+
+/// Returns a non empty revert reason if the output is a revert/error.
+#[inline]
+pub(crate) fn maybe_revert_reason(output: &[u8]) -> Option<String> {
+    let reason = match GenericRevertReason::decode(output)? {
+        GenericRevertReason::ContractError(err) => {
+            match err {
+                ContractError::Revert(revert) => {
+                    // return the raw revert reason and don't use the revert's display message
+                    revert.reason
+                }
+                err => err.to_string(),
+            }
+        }
+        GenericRevertReason::RawString(err) => err,
+    };
+    if reason.is_empty() {
+        None
+    } else {
+        Some(reason)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_sol_types::{GenericContractError, SolInterface};
+
+    #[test]
+    fn decode_empty_revert() {
+        let reason = GenericRevertReason::decode("".as_bytes()).map(|x| x.to_string());
+        assert_eq!(reason, Some("".to_string()));
+    }
+
+    #[test]
+    fn decode_revert_reason() {
+        let err = GenericContractError::Revert("my revert".into());
+        let encoded = err.abi_encode();
+        let reason = maybe_revert_reason(&encoded).unwrap();
+        assert_eq!(reason, "my revert");
+    }
 }
