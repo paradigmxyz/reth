@@ -143,7 +143,7 @@ revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_fr
 # eth
 alloy-primitives = "0.5"
 alloy-dyn-abi = "0.5"
-alloy-sol-types = "0.5.3"
+alloy-sol-types = "0.5"
 alloy-rlp = "0.3"
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
