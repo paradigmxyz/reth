@@ -33,8 +33,7 @@ pub type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
 
 /// Initializes a new [Subscriber] based on the given layers.
 pub fn init(layers: Vec<BoxedLayer<Registry>>) {
-    // To avoid panicking in tests, we silently fail if we cannot initialize the subscriber.
-    let _ = tracing_subscriber::registry().with(layers).try_init();
+    tracing_subscriber::registry().with(layers).init();
 }
 
 /// Builds a new tracing layer that writes to stdout.
