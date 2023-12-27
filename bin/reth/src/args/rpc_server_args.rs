@@ -192,8 +192,18 @@ impl RpcServerArgs {
     }
 
     /// Change rpc port numbers based on the instance number.
+    /// * The `auth_port` is scaled by a factor of `instance * 100`
+    /// * The `http_port` is scaled by a factor of `-instance`
+    /// * The `ws_port` is scaled by a factor of `instance * 2`
     ///
-    /// Warning: if `instance` is zero, this will panic.
+    /// # Panics
+    /// Warning: if `instance` is zero in debug mode, this will panic.
+    ///
+    /// This will also panic in debug mode if either:
+    /// * `instance` is greater than `655` (scaling would overflow `u16`)
+    /// * `self.auth_port / 100 + (instance - 1)` would overflow `u16`
+    ///
+    /// In release mode, this will silently wrap around.
     pub fn adjust_instance_ports(&mut self, instance: u16) {
         debug_assert_ne!(instance, 0, "instance must be non-zero");
         // auth port is scaled by a factor of instance * 100
