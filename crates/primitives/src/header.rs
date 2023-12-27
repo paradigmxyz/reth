@@ -131,7 +131,7 @@ impl Header {
     /// # Errors
     ///
     /// Returns an error if the extradata size is larger than 100 KB.
-    pub fn check_extradata(&self) -> Result<(), HeaderError> {
+    pub fn ensure_extradata_valid(&self) -> Result<(), HeaderError> {
         if self.extra_data.len() > 100 * 1024 {
             return Err(HeaderError::LargeExtraData);
         }
@@ -143,7 +143,7 @@ impl Header {
     /// # Errors
     ///
     /// Returns an error if the block difficulty exceeds 80 bits.
-    pub fn check_difficulty(&self) -> Result<(), HeaderError> {
+    pub fn ensure_difficulty_valid(&self) -> Result<(), HeaderError> {
         if self.difficulty.bit_len() > 80 {
             return Err(HeaderError::LargeDifficulty);
         }
@@ -158,9 +158,9 @@ impl Header {
     ///
     /// Returns an error if either the block difficulty exceeds 80 bits
     /// or if the extradata size is larger than 100 KB.
-    pub fn sanity_check(&self) -> Result<(), HeaderError> {
-        self.check_difficulty()?;
-        self.check_extradata()?;
+    pub fn ensure_well_formed(&self) -> Result<(), HeaderError> {
+        self.ensure_difficulty_valid()?;
+        self.ensure_extradata_valid()?;
         Ok(())
     }
 
