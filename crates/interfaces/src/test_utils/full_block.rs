@@ -185,12 +185,7 @@ impl HeadersClient for TestFullBlockClient {
             .filter_map(|_| {
                 headers.iter().find_map(|(hash, header)| {
                     // Checks if the header matches the specified block or number.
-                    if BlockNumHash::new(
-                        header.number,
-                        reth_primitives::alloy_primitives::FixedBytes(**hash),
-                    )
-                    .matches_block_or_num(&block)
-                    {
+                    if BlockNumHash::new(header.number, *hash).matches_block_or_num(&block) {
                         match request.direction {
                             HeadersDirection::Falling => block = header.parent_hash.into(),
                             HeadersDirection::Rising => block = (header.number + 1).into(),
