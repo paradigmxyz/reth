@@ -17,22 +17,48 @@ use std::{collections::HashMap, sync::Arc};
 #[non_exhaustive]
 pub struct NoopFullBlockClient;
 
+/// Implements the `DownloadClient` trait for the `NoopFullBlockClient` struct.
 impl DownloadClient for NoopFullBlockClient {
+    /// Reports a bad message received from a peer.
+    ///
+    /// # Arguments
+    ///
+    /// * `_peer_id` - Identifier for the peer sending the bad message (unused in this
+    ///   implementation).
     fn report_bad_message(&self, _peer_id: PeerId) {}
 
+    /// Retrieves the number of connected peers.
+    ///
+    /// # Returns
+    ///
+    /// The number of connected peers, which is always zero in this implementation.
     fn num_connected_peers(&self) -> usize {
         0
     }
 }
 
+/// Implements the `BodiesClient` trait for the `NoopFullBlockClient` struct.
 impl BodiesClient for NoopFullBlockClient {
+    /// Defines the output type of the function.
     type Output = futures::future::Ready<PeerRequestResult<Vec<BlockBody>>>;
 
+    /// Retrieves block bodies based on provided hashes and priority.
+    ///
+    /// # Arguments
+    ///
+    /// * `_hashes` - A vector of block hashes (unused in this implementation).
+    /// * `_priority` - Priority level for block body retrieval (unused in this implementation).
+    ///
+    /// # Returns
+    ///
+    /// A future containing an empty vector of block bodies and a randomly generated `PeerId`.
     fn get_block_bodies_with_priority(
         &self,
         _hashes: Vec<B256>,
         _priority: Priority,
     ) -> Self::Output {
+        // Create a future that immediately returns an empty vector of block bodies and a random
+        // PeerId.
         futures::future::ready(Ok(WithPeerId::new(PeerId::random(), vec![])))
     }
 }
@@ -75,8 +101,7 @@ impl TestFullBlockClient {
     /// Insert a header and body into the client maps.
     pub fn insert(&self, header: SealedHeader, body: BlockBody) {
         let hash = header.hash();
-        let header = header.unseal();
-        self.headers.lock().insert(hash, header);
+        self.headers.lock().insert(hash, header.unseal());
         self.bodies.lock().insert(hash, body);
     }
 
@@ -87,31 +112,53 @@ impl TestFullBlockClient {
 
     /// Get the block with the highest block number.
     pub fn highest_block(&self) -> Option<SealedBlock> {
-        let headers = self.headers.lock();
-        let (hash, header) = headers.iter().max_by_key(|(hash, header)| header.number)?;
-        let bodies = self.bodies.lock();
-        let body = bodies.get(hash)?;
-        Some(SealedBlock::new(header.clone().seal(*hash), body.clone()))
+        self.headers.lock().iter().max_by_key(|(_, header)| header.number).and_then(
+            |(hash, header)| {
+                self.bodies
+                    .lock()
+                    .get(hash)
+                    .map(|body| SealedBlock::new(header.clone().seal(*hash), body.clone()))
+            },
+        )
     }
 }
 
 impl DownloadClient for TestFullBlockClient {
+    /// Reports a bad message from a specific peer.
     fn report_bad_message(&self, _peer_id: PeerId) {}
 
+    /// Retrieves the number of connected peers.
+    ///
+    /// Returns the number of connected peers in the test scenario (1).
     fn num_connected_peers(&self) -> usize {
         1
     }
 }
 
+/// Implements the `HeadersClient` trait for the `TestFullBlockClient` struct.
 impl HeadersClient for TestFullBlockClient {
+    /// Specifies the associated output type.
     type Output = futures::future::Ready<PeerRequestResult<Vec<Header>>>;
 
+    /// Retrieves headers with a given priority level.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - A `HeadersRequest` indicating the headers to retrieve.
+    /// * `_priority` - A `Priority` level for the request.
+    ///
+    /// # Returns
+    ///
+    /// A `Ready` future containing a `PeerRequestResult` with a vector of retrieved headers.
     fn get_headers_with_priority(
         &self,
         request: HeadersRequest,
         _priority: Priority,
     ) -> Self::Output {
+        // Locks the headers for concurrent access.
         let headers = self.headers.lock();
+
+        // Initializes the block hash or number.
         let mut block: BlockHashOrNumber = match request.start {
             BlockHashOrNumber::Hash(hash) => headers.get(&hash).cloned(),
             BlockHashOrNumber::Number(num) => headers.values().find(|h| h.number == num).cloned(),
@@ -119,48 +166,74 @@ impl HeadersClient for TestFullBlockClient {
         .map(|h| h.number.into())
         .unwrap();
 
-        let mut resp = Vec::new();
-
-        for _ in 0..request.limit {
-            // fetch from storage
-            if let Some((_, header)) = headers.iter().find(|(hash, header)| {
-                BlockNumHash::new(header.number, **hash).matches_block_or_num(&block)
-            }) {
-                match request.direction {
-                    HeadersDirection::Falling => block = header.parent_hash.into(),
-                    HeadersDirection::Rising => {
-                        let next = header.number + 1;
-                        block = next.into()
+        // Retrieves headers based on the provided limit and request direction.
+        let resp = (0..request.limit)
+            .filter_map(|_| {
+                headers.iter().find_map(|(hash, header)| {
+                    // Checks if the header matches the specified block or number.
+                    if BlockNumHash::new(
+                        header.number,
+                        reth_primitives::alloy_primitives::FixedBytes(**hash),
+                    )
+                    .matches_block_or_num(&block)
+                    {
+                        match request.direction {
+                            HeadersDirection::Falling => block = header.parent_hash.into(),
+                            HeadersDirection::Rising => block = (header.number + 1).into(),
+                        }
+                        Some(header.clone())
+                    } else {
+                        None
                     }
-                }
-                resp.push(header.clone());
-            } else {
-                break
-            }
-        }
+                })
+            })
+            .collect::<Vec<_>>();
+
+        // Returns a future containing the retrieved headers with a random peer ID.
         futures::future::ready(Ok(WithPeerId::new(PeerId::random(), resp)))
     }
 }
 
+/// Implements the `BodiesClient` trait for the `TestFullBlockClient` struct.
 impl BodiesClient for TestFullBlockClient {
+    /// Defines the output type of the function.
     type Output = futures::future::Ready<PeerRequestResult<Vec<BlockBody>>>;
 
+    /// Retrieves block bodies corresponding to provided hashes with a given priority.
+    ///
+    /// # Arguments
+    ///
+    /// * `hashes` - A vector of block hashes to retrieve bodies for.
+    /// * `_priority` - Priority level for block body retrieval (unused in this implementation).
+    ///
+    /// # Returns
+    ///
+    /// A future containing the result of the block body retrieval operation.
     fn get_block_bodies_with_priority(
         &self,
         hashes: Vec<B256>,
         _priority: Priority,
     ) -> Self::Output {
+        // Acquire a lock on the bodies.
         let bodies = self.bodies.lock();
-        let mut all_bodies = Vec::new();
-        for hash in hashes {
-            if let Some(body) = bodies.get(&hash) {
-                all_bodies.push(body.clone());
-            }
 
-            if all_bodies.len() == self.soft_limit {
-                break
-            }
-        }
-        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), all_bodies)))
+        // Create a future that immediately returns the result of the block body retrieval
+        // operation.
+        futures::future::ready(Ok(WithPeerId::new(
+            // Generate a random PeerId as part of the returned result.
+            PeerId::random(),
+            // Process the provided hashes to collect block bodies.
+            hashes
+                // Iterate through the hashes and filter/map to obtain the corresponding block
+                // bodies.
+                .iter()
+                // Filter the hashes to retrieve the associated block bodies,
+                // cloning the values to ensure ownership and handling potential None values.
+                .filter_map(|hash| bodies.get(hash).cloned())
+                // Take a limited number of block bodies based on the soft limit.
+                .take(self.soft_limit)
+                // Collect the filtered block bodies into a vector.
+                .collect::<Vec<_>>(),
+        )))
     }
 }

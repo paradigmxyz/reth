@@ -37,13 +37,13 @@ pub trait Consensus: Debug + Send + Sync {
     ///
     /// Note: this expects that the headers are in natural order (ascending block number)
     fn validate_header_range(&self, headers: &[SealedHeader]) -> Result<(), ConsensusError> {
-        let mut headers = headers.iter();
-        let Some(mut parent) = headers.next() else { return Ok(()) };
-        self.validate_header(parent)?;
-        for child in headers {
-            self.validate_header(child)?;
-            self.validate_header_against_parent(child, parent)?;
-            parent = child;
+        if let Some(mut parent) = headers.first() {
+            self.validate_header(parent)?;
+            for child in headers {
+                self.validate_header(child)?;
+                self.validate_header_against_parent(child, parent)?;
+                parent = child;
+            }
         }
         Ok(())
     }
