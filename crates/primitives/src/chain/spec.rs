@@ -369,7 +369,7 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
             ),
             (Hardfork::Bedrock, ForkCondition::Block(0)),
-            (Hardfork::Regolith, ForkCondition::Block(0)),
+            (Hardfork::Regolith, ForkCondition::Timestamp(0)),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
             (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
         ]),
