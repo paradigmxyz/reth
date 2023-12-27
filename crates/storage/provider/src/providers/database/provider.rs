@@ -11,6 +11,7 @@ use crate::{
     PruneCheckpointWriter, StageCheckpointReader, StorageReader, TransactionVariant,
     TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
+use ahash::{AHashMap, AHashSet};
 use itertools::{izip, Itertools};
 use reth_db::{
     common::KeyValue,
@@ -49,7 +50,7 @@ use reth_trie::{
 };
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
 use std::{
-    collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{hash_map, BTreeMap, BTreeSet, HashMap},
     fmt::Debug,
     ops::{Bound, Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
@@ -2037,8 +2038,8 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
     ) -> ProviderResult<()> {
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSetMut::default();
-        let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
-        let mut destroyed_accounts = HashSet::default();
+        let mut storage_prefix_set: AHashMap<B256, PrefixSetMut> = AHashMap::default();
+        let mut destroyed_accounts = AHashSet::default();
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 
@@ -2077,7 +2078,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
         {
             // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
             // are pre-loaded.
-            let (state_root, trie_updates) = StateRoot::new(&self.tx)
+            let (state_root, trie_updates) = StateRoot::from_tx(&self.tx)
                 .with_changed_account_prefixes(account_prefix_set.freeze())
                 .with_changed_storage_prefixes(
                     storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
@@ -2227,8 +2228,8 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
 
             // Initialize prefix sets.
             let mut account_prefix_set = PrefixSetMut::default();
-            let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
-            let mut destroyed_accounts = HashSet::default();
+            let mut storage_prefix_set: AHashMap<B256, PrefixSetMut> = AHashMap::default();
+            let mut destroyed_accounts = AHashSet::default();
 
             // Unwind account hashes. Add changed accounts to account prefix set.
             let hashed_addresses = self.unwind_account_hashing(range.clone())?;
@@ -2261,7 +2262,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
             // Calculate the reverted merkle root.
             // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
             // are pre-loaded.
-            let (new_state_root, trie_updates) = StateRoot::new(&self.tx)
+            let (new_state_root, trie_updates) = StateRoot::from_tx(&self.tx)
                 .with_changed_account_prefixes(account_prefix_set.freeze())
                 .with_changed_storage_prefixes(
                     storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),

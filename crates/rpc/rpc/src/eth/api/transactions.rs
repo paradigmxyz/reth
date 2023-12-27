@@ -44,6 +44,8 @@ use revm::{
 #[cfg(feature = "optimism")]
 use crate::eth::api::optimism::OptimismTxMeta;
 #[cfg(feature = "optimism")]
+use crate::eth::error::OptimismEthApiError;
+#[cfg(feature = "optimism")]
 use reth_revm::optimism::RethL1BlockInfo;
 #[cfg(feature = "optimism")]
 use revm::L1BlockInfo;
@@ -966,10 +968,10 @@ where
                     &envelope_buf,
                     tx.is_deposit(),
                 )
-                .map_err(|_| EthApiError::InternalEthError)?;
+                .map_err(|_| EthApiError::Optimism(OptimismEthApiError::L1BlockFeeError))?;
             let inner_l1_data_gas = l1_block_info
                 .l1_data_gas(&self.inner.provider.chain_spec(), block_timestamp, &envelope_buf)
-                .map_err(|_| EthApiError::InternalEthError)?;
+                .map_err(|_| EthApiError::Optimism(OptimismEthApiError::L1BlockGasError))?;
             (Some(inner_l1_fee), Some(inner_l1_data_gas))
         } else {
             (None, None)
@@ -996,7 +998,7 @@ where
                     target = "rpc::eth",
                     "Failed to serialize transaction for forwarding to sequencer"
                 );
-                EthApiError::InternalEthError
+                EthApiError::Optimism(OptimismEthApiError::InvalidSequencerTransaction)
             })?;
 
             self.inner
@@ -1006,7 +1008,7 @@ where
                 .body(body)
                 .send()
                 .await
-                .map_err(|_| EthApiError::InternalEthError)?;
+                .map_err(|err| EthApiError::Optimism(OptimismEthApiError::HttpError(err)))?;
         }
         Ok(())
     }

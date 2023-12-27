@@ -1415,6 +1415,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let mut cumulative_cost = U256::ZERO;
         let mut updates = Vec::new();
 
+        // Current tx does not exceed block gas limit after ensure_valid check
+        state.insert(TxState::NOT_TOO_MUCH_GAS);
+
         // identifier of the ancestor transaction, will be None if the transaction is the next tx of
         // the sender
         let ancestor = TransactionId::ancestor(
@@ -1455,11 +1458,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         }
         if fee_cap >= self.pending_fees.base_fee as u128 {
             state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
-        }
-
-        // Ensure tx does not exceed block gas limit
-        if transaction.gas_limit() < self.block_gas_limit {
-            state.insert(TxState::NOT_TOO_MUCH_GAS);
         }
 
         // placeholder for the replaced transaction, if any
@@ -2489,6 +2487,20 @@ mod tests {
             pool.insert_tx(f.validated(tx), on_chain_balance, on_chain_nonce),
             Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas { .. })
         ));
+    }
+
+    #[test]
+    fn test_tx_equal_gas_limit() {
+        let on_chain_balance = U256::from(1_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+
+        let tx = MockTransaction::eip1559().with_gas_limit(30_000_000);
+
+        let InsertOk { state, .. } =
+            pool.insert_tx(f.validated(tx), on_chain_balance, on_chain_nonce).unwrap();
+        assert!(state.contains(TxState::NOT_TOO_MUCH_GAS));
     }
 
     #[test]

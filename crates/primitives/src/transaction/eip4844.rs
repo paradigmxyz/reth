@@ -24,7 +24,7 @@ use std::ops::Deref;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxEip4844 {
     /// Added as EIP-pub 155: Simple replay attack protection
-    pub chain_id: u64,
+    pub chain_id: ChainId,
     /// A scalar value equal to the number of transactions sent by the sender; formally Tn.
     pub nonce: u64,
     /// A scalar value equal to the maximum

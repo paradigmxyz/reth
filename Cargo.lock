@@ -256,6 +256,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-trie"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7b13840ded510d1cecf2722a84b8265424d172d4fa5552944ce339a307dc9d6"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "arbitrary",
+ "derive_arbitrary",
+ "derive_more",
+ "nybbles",
+ "proptest",
+ "proptest-derive",
+ "serde",
+ "smallvec",
+ "tracing",
+]
+
+[[package]]
 name = "android-tzdata"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4588,9 +4607,9 @@ dependencies = [
 
 [[package]]
 name = "nybbles"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47dddada2357f8e7786f4f4d837db7bdddec02c7c3e5da7840d92c70390f6dc0"
+checksum = "836816c354fb2c09622b54545a6f98416147346b13cc7eba5f92fab6b3042c93"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -5582,7 +5601,7 @@ dependencies = [
  "human_bytes",
  "humantime",
  "hyper",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "jemalloc-ctl",
  "jemallocator",
  "metrics",
@@ -5762,7 +5781,6 @@ version = "0.1.0-alpha.13"
 dependencies = [
  "confy",
  "reth-discv4",
- "reth-downloaders",
  "reth-net-nat",
  "reth-network",
  "reth-primitives",
@@ -5799,7 +5817,7 @@ dependencies = [
  "futures",
  "heapless",
  "iai",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "metrics",
  "modular-bitfield",
  "page_size",
@@ -5885,10 +5903,11 @@ dependencies = [
  "assert_matches",
  "futures",
  "futures-util",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "metrics",
  "pin-project",
  "rayon",
+ "reth-config",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
@@ -5989,26 +6008,19 @@ dependencies = [
 name = "reth-interfaces"
 version = "0.1.0-alpha.13"
 dependencies = [
- "arbitrary",
- "async-trait",
  "auto_impl",
  "clap",
  "futures",
- "modular-bitfield",
  "parking_lot 0.12.1",
  "rand 0.8.5",
- "reth-codecs",
- "reth-db",
  "reth-eth-wire",
  "reth-network-api",
  "reth-nippy-jar",
  "reth-primitives",
  "reth-rpc-types",
- "revm-primitives",
  "secp256k1 0.27.0",
  "thiserror",
  "tokio",
- "tokio-stream",
  "tracing",
 ]
 
@@ -6228,8 +6240,10 @@ dependencies = [
 name = "reth-primitives"
 version = "0.1.0-alpha.13"
 dependencies = [
+ "ahash",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-trie",
  "arbitrary",
  "assert_matches",
  "byteorder",
@@ -6276,11 +6290,12 @@ dependencies = [
 name = "reth-provider"
 version = "0.1.0-alpha.13"
 dependencies = [
+ "ahash",
  "alloy-rlp",
  "assert_matches",
  "auto_impl",
  "dashmap",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "metrics",
  "parking_lot 0.12.1",
  "pin-project",
@@ -6305,9 +6320,10 @@ name = "reth-prune"
 version = "0.1.0-alpha.13"
 dependencies = [
  "assert_matches",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "metrics",
  "rayon",
+ "reth-config",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
@@ -6499,7 +6515,7 @@ dependencies = [
  "bytes",
  "ethereum_ssz",
  "ethereum_ssz_derive",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "jsonrpsee-types",
  "proptest",
  "proptest-derive",
@@ -6551,7 +6567,7 @@ dependencies = [
  "auto_impl",
  "criterion",
  "futures-util",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "metrics",
  "num-traits",
  "paste",
@@ -6651,6 +6667,7 @@ dependencies = [
 name = "reth-trie"
 version = "0.1.0-alpha.13"
 dependencies = [
+ "ahash",
  "alloy-rlp",
  "auto_impl",
  "criterion",

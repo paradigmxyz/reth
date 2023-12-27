@@ -191,7 +191,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             });
 
             let tx = provider.tx_ref();
-            let progress = StateRoot::new(tx)
+            let progress = StateRoot::from_tx(tx)
                 .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
                 .root_with_progress()
                 .map_err(|e| StageError::Fatal(Box::new(e)))?;
