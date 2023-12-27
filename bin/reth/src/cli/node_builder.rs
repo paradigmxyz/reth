@@ -106,7 +106,73 @@ use tracing::*;
 pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
     Lazy::new(|| prometheus_exporter::install_recorder().unwrap());
 
-/// Start the node
+/// This includes all necessary configuration to launch the node.
+/// The individual configuration options can be overwritten before launching the node.
+///
+/// # Example
+/// ```rust
+/// # use reth_tasks::{TaskManager, TaskSpawner};
+/// # use reth::{
+/// #     cli::{
+/// #         node_builder::NodeBuilder,
+/// #         ext::DefaultRethNodeCommandConfig,
+/// #     },
+/// #     args::RpcServerArgs,
+/// # };
+/// # use reth_rpc_builder::RpcModuleSelection;
+/// # use tokio::runtime::Handle;
+///
+/// async fn t() {
+///     let handle = Handle::current();
+///     let manager = TaskManager::new(handle);
+///     let executor = manager.executor();
+///
+///     // create the builder
+///     let builder = NodeBuilder::default();
+///
+///     // configure the rpc apis
+///     let mut rpc = RpcServerArgs::default().with_http().with_ws();
+///     rpc.modules = Some(RpcModuleSelection::All);
+///     let builder = builder.with_rpc(rpc);
+///
+///     let ext = DefaultRethNodeCommandConfig::default();
+///     let handle = builder.launch::<()>(ext, executor).await.unwrap();
+/// }
+/// ```
+///
+/// This can also be used to launch a node with a temporary test database. This can be done with
+/// the [NodeBuilder::test] method.
+///
+/// # Example
+/// ```rust
+/// # use reth_tasks::{TaskManager, TaskSpawner};
+/// # use reth::{
+/// #     cli::{
+/// #         node_builder::NodeBuilder,
+/// #         ext::DefaultRethNodeCommandConfig,
+/// #     },
+/// #     args::RpcServerArgs,
+/// # };
+/// # use reth_rpc_builder::RpcModuleSelection;
+/// # use tokio::runtime::Handle;
+///
+/// async fn t() {
+///     let handle = Handle::current();
+///     let manager = TaskManager::new(handle);
+///     let executor = manager.executor();
+///
+///     // create the builder with a test database, using the `test` method
+///     let builder = NodeBuilder::test();
+///
+///     // configure the rpc apis
+///     let mut rpc = RpcServerArgs::default().with_http().with_ws();
+///     rpc.modules = Some(RpcModuleSelection::All);
+///     let builder = builder.with_rpc(rpc);
+///
+///     let ext = DefaultRethNodeCommandConfig::default();
+///     let handle = builder.launch::<()>(ext, executor).await.unwrap();
+/// }
+/// ```
 #[derive(Debug)]
 pub struct NodeBuilder {
     /// The test database
@@ -256,7 +322,7 @@ impl NodeBuilder {
     }
 
     /// Set the builder args for the node
-    pub fn with_builder(mut self, builder: PayloadBuilderArgs) -> Self {
+    pub fn with_payload_builder(mut self, builder: PayloadBuilderArgs) -> Self {
         self.builder = builder;
         self
     }
@@ -326,7 +392,7 @@ impl NodeBuilder {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         let database = std::mem::take(&mut self.database);
-        let db_instance = database.build_db(self.db.log_level, self.chain.chain)?;
+        let db_instance = database.init_db(self.db.log_level, self.chain.chain)?;
 
         match db_instance {
             DatabaseInstance::Real { db, data_dir } => {
@@ -1278,6 +1344,21 @@ impl NodeHandle {
 
 /// A simple function to launch a node with the specified [NodeBuilder], spawning tasks on the
 /// [TaskExecutor] constructed from [Handle::current].
+///
+/// # Example
+/// ```
+/// # use reth::{args::rpc_server_args::RpcServerArgs, NodeBuilder, spawn_node};
+/// async fn main() {
+///     // Create a node builder with an http rpc server enabled
+///     let rpc_args = RpcServerArgs::default().with_http();
+///
+///     /// Set the node instance number to 2
+///     let builder = NodeBuilder::test().with_rpc(rpc_args).with_instance(2);
+///
+///     // Spawn the builder, returning a handle to the node
+///     let _handle = spawn_node(builder).await.unwrap();
+/// }
+/// ```
 pub async fn spawn_node(config: NodeBuilder) -> eyre::Result<NodeHandle> {
     let handle = Handle::current();
     let task_manager = TaskManager::new(handle);

@@ -31,7 +31,7 @@ impl DatabaseBuilder {
     ///
     /// If the [DatabaseBuilder] is test, then the [ChainPath] constructed will be derived from the
     /// db path of the [TempDatabase] and the given chain.
-    pub fn build_db(
+    pub fn init_db(
         self,
         log_level: Option<LogLevel>,
         chain: Chain,
@@ -108,7 +108,7 @@ mod tests {
         let expected_db_path = tempdir.path().join("db");
         let datadir_path = MaybePlatformPath::<DataDirPath>::from(tempdir.path().to_path_buf());
         let db = DatabaseBuilder::Real(datadir_path);
-        let db = db.build_db(None, Chain::mainnet()).unwrap();
+        let db = db.init_db(None, Chain::mainnet()).unwrap();
 
         // ensure that the datadir path is correct
         assert_eq!(db.data_dir().data_dir_path(), expected_datadir_path);
