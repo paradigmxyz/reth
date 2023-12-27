@@ -35,12 +35,14 @@ impl std::fmt::Debug for CursorSubNode {
     }
 }
 
+/// Implements conversion from `StoredSubNode` to `CursorSubNode`.
 impl From<StoredSubNode> for CursorSubNode {
+    /// Converts a `StoredSubNode` into a `CursorSubNode`.
+    ///
+    /// Extracts necessary values from the `StoredSubNode` and constructs
+    /// a corresponding `CursorSubNode`.
     fn from(value: StoredSubNode) -> Self {
-        let nibble = match value.nibble {
-            Some(n) => n as i8,
-            None => -1,
-        };
+        let nibble = value.nibble.map_or(-1, |n| n as i8);
         let key = Nibbles::from_nibbles_unchecked(value.key);
         let full_key = full_key(key.clone(), nibble);
         Self { key, nibble, node: value.node, full_key }
@@ -57,13 +59,11 @@ impl From<CursorSubNode> for StoredSubNode {
 impl CursorSubNode {
     /// Creates a new `CursorSubNode` from a key and an optional node.
     pub fn new(key: Nibbles, node: Option<BranchNodeCompact>) -> Self {
-        // Find the first nibble that is set in the state mask of the node.
-        let nibble = match &node {
-            Some(n) if n.root_hash.is_none() => {
-                CHILD_INDEX_RANGE.clone().find(|i| n.state_mask.is_bit_set(*i)).unwrap() as i8
-            }
-            _ => -1,
-        };
+        let nibble = node
+            .as_ref()
+            .filter(|n| n.root_hash.is_none())
+            .and_then(|n| CHILD_INDEX_RANGE.clone().find(|i| n.state_mask.is_bit_set(*i)))
+            .map_or(-1, |nibble| nibble as i8);
         let full_key = full_key(key.clone(), nibble);
         CursorSubNode { key, node, nibble, full_key }
     }
@@ -75,48 +75,32 @@ impl CursorSubNode {
 
     /// Returns `true` if the state flag is set for the current nibble.
     pub fn state_flag(&self) -> bool {
-        if let Some(node) = &self.node {
-            if self.nibble >= 0 {
-                return node.state_mask.is_bit_set(self.nibble as u8)
-            }
-        }
-        true
+        self.node
+            .as_ref()
+            .map_or(true, |node| self.nibble >= 0 && node.state_mask.is_bit_set(self.nibble as u8))
     }
 
     /// Returns `true` if the tree flag is set for the current nibble.
     pub fn tree_flag(&self) -> bool {
-        if let Some(node) = &self.node {
-            if self.nibble >= 0 {
-                return node.tree_mask.is_bit_set(self.nibble as u8)
-            }
-        }
-        true
+        self.node
+            .as_ref()
+            .map_or(true, |node| self.nibble >= 0 && node.tree_mask.is_bit_set(self.nibble as u8))
     }
 
     /// Returns `true` if the current nibble has a root hash.
     pub fn hash_flag(&self) -> bool {
-        match &self.node {
-            Some(node) => match self.nibble {
-                // This guy has it
-                -1 => node.root_hash.is_some(),
-                // Or get it from the children
-                _ => node.hash_mask.is_bit_set(self.nibble as u8),
-            },
-            None => false,
-        }
+        self.node.as_ref().map_or(false, |node| {
+            (self.nibble == -1 && node.root_hash.is_some()) ||
+                node.hash_mask.is_bit_set(self.nibble as u8)
+        })
     }
 
     /// Returns the root hash of the current node, if it has one.
     pub fn hash(&self) -> Option<B256> {
-        if self.hash_flag() {
-            let node = self.node.as_ref().unwrap();
-            match self.nibble {
-                -1 => node.root_hash,
-                _ => Some(node.hash_for_nibble(self.nibble as u8)),
-            }
-        } else {
-            None
-        }
+        self.node.as_ref().filter(|_| self.hash_flag()).and_then(|node| match self.nibble {
+            -1 => node.root_hash,
+            _ => Some(node.hash_for_nibble(self.nibble as u8)),
+        })
     }
 
     /// Returns the next child index to visit.
@@ -141,6 +125,7 @@ impl CursorSubNode {
     }
 }
 
+/// Constructs a full key from the given `Nibbles` and `nibble`.
 #[inline]
 fn full_key(mut key: Nibbles, nibble: i8) -> Nibbles {
     if nibble >= 0 {
@@ -149,6 +134,7 @@ fn full_key(mut key: Nibbles, nibble: i8) -> Nibbles {
     key
 }
 
+/// Updates the key by replacing or appending a nibble based on the old and new nibble values.
 #[inline]
 fn update_full_key(key: &mut Nibbles, old_nibble: i8, new_nibble: i8) {
     if new_nibble >= 0 {
