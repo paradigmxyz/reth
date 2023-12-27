@@ -323,6 +323,8 @@ impl NodeBuilder {
         ext: E::Node,
         executor: TaskExecutor,
     ) -> eyre::Result<NodeHandle> {
+        info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
+
         let database = std::mem::take(&mut self.database);
         let db_instance = database.build_db(self.db.log_level, self.chain.chain)?;
 
@@ -916,8 +918,6 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         mut ext: E::Node,
         executor: TaskExecutor,
     ) -> eyre::Result<NodeHandle> {
-        info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
-
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         raise_fd_limit()?;
