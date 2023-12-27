@@ -225,7 +225,7 @@ impl BodiesClient for TestFullBlockClient {
                 .iter()
                 .filter_map(|hash| bodies.get(hash).cloned())
                 .take(self.soft_limit)
-                .collect::<Vec<_>>(),
+                .collect(),
         )))
     }
 }
