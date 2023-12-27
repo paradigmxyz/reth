@@ -13,52 +13,31 @@ use std::{str::FromStr, sync::Arc};
 /// A type that represents either a _real_ (represented by a path), or _test_ database, which will
 /// use a [TempDatabase].
 #[derive(Debug)]
-pub enum DatabaseType {
-    /// The real database type
+pub enum DatabaseBuilder {
+    /// The real database type, with a specified data dir
     Real(MaybePlatformPath<DataDirPath>),
     /// The test database type
     Test,
 }
 
-/// The [Default] implementation for [DatabaseType] uses the _real_ variant, using the default
-/// value for the inner [MaybePlatformPath].
-impl Default for DatabaseType {
-    fn default() -> Self {
-        Self::Real(MaybePlatformPath::<DataDirPath>::default())
-    }
-}
-
-impl DatabaseType {
+impl DatabaseBuilder {
     /// Creates a _test_ database
     pub fn test() -> Self {
         Self::Test
     }
-}
-
-/// Type that represents a [DatabaseType] and [LogLevel], used to build a database type
-pub struct DatabaseBuilder {
-    /// The database type
-    db_type: DatabaseType,
-}
-
-impl DatabaseBuilder {
-    /// Creates the [DatabaseBuilder] with the given [DatabaseType]
-    pub fn new(db_type: DatabaseType) -> Self {
-        Self { db_type }
-    }
 
     /// Initializes and returns the [DatabaseInstance] depending on the current database type. If
-    /// the [DatabaseType] is test, the [LogLevel] is not used.
+    /// the [DatabaseBuilder] is test, the [LogLevel] is not used.
     ///
-    /// If the [DatabaseType] is test, then the [ChainPath] constructed will be derived from the db
-    /// path of the [TempDatabase] and the given chain.
+    /// If the [DatabaseBuilder] is test, then the [ChainPath] constructed will be derived from the
+    /// db path of the [TempDatabase] and the given chain.
     pub fn build_db(
         self,
         log_level: Option<LogLevel>,
         chain: Chain,
     ) -> eyre::Result<DatabaseInstance> {
-        match self.db_type {
-            DatabaseType::Test => {
+        match self {
+            DatabaseBuilder::Test => {
                 let db = create_test_rw_db();
                 let db_path_str = db.path().to_str().expect("Path is not valid unicode");
                 let path = MaybePlatformPath::<DataDirPath>::from_str(db_path_str)
@@ -67,14 +46,23 @@ impl DatabaseBuilder {
 
                 Ok(DatabaseInstance::Test { db, data_dir })
             }
-            DatabaseType::Real(path) => {
+            DatabaseBuilder::Real(path) => {
                 let data_dir = path.unwrap_or_chain_default(chain);
+                let db_path = data_dir.db_path();
 
-                tracing::info!(target: "reth::cli", path = ?data_dir, "Opening database");
-                let db = Arc::new(init_db(data_dir.clone(), log_level)?);
+                tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
+                let db = Arc::new(init_db(db_path.clone(), log_level)?);
                 Ok(DatabaseInstance::Real { db, data_dir })
             }
         }
+    }
+}
+
+/// The [Default] implementation for [DatabaseBuilder] uses the _real_ variant, using the default
+/// value for the inner [MaybePlatformPath].
+impl Default for DatabaseBuilder {
+    fn default() -> Self {
+        Self::Real(MaybePlatformPath::<DataDirPath>::default())
     }
 }
 
@@ -104,5 +92,28 @@ impl DatabaseInstance {
             Self::Test { data_dir, .. } => data_dir,
             Self::Real { data_dir, .. } => data_dir,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_primitives::Chain;
+
+    #[test]
+    fn test_database_db_dir() {
+        // create temp dir to test that the db path is correct
+        let tempdir = tempfile::tempdir().unwrap();
+        let expected_datadir_path = tempdir.path().to_path_buf();
+        let expected_db_path = tempdir.path().join("db");
+        let datadir_path = MaybePlatformPath::<DataDirPath>::from(tempdir.path().to_path_buf());
+        let db = DatabaseBuilder::Real(datadir_path);
+        let db = db.build_db(None, Chain::mainnet()).unwrap();
+
+        // ensure that the datadir path is correct
+        assert_eq!(db.data_dir().data_dir_path(), expected_datadir_path);
+
+        // ensure that the db path is correct
+        assert_eq!(db.data_dir().db_path(), expected_db_path);
     }
 }

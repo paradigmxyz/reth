@@ -246,6 +246,12 @@ impl<D> FromStr for MaybePlatformPath<D> {
     }
 }
 
+impl<D> From<PathBuf> for MaybePlatformPath<D> {
+    fn from(path: PathBuf) -> Self {
+        Self(Some(PlatformPath(path, std::marker::PhantomData)))
+    }
+}
+
 /// Wrapper type around PlatformPath that includes a `Chain`, used for separating reth data for
 /// different networks.
 ///
@@ -262,6 +268,13 @@ impl<D> ChainPath<D> {
     /// Returns a new `ChainPath` given a `PlatformPath` and a `Chain`.
     pub fn new(path: PlatformPath<D>, chain: Chain) -> Self {
         Self(path, chain)
+    }
+
+    /// Returns the path to the reth data directory for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>`
+    pub fn data_dir_path(&self) -> PathBuf {
+        self.0.as_ref().into()
     }
 
     /// Returns the path to the db directory for this chain.

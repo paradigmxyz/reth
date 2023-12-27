@@ -1,7 +1,5 @@
 //! Support for customizing the node
-use super::{
-    components::RethRpcServerHandles, db_type::DatabaseType, ext::DefaultRethNodeCommandConfig,
-};
+use super::{components::RethRpcServerHandles, ext::DefaultRethNodeCommandConfig};
 use crate::{
     args::{
         get_secret_key, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
@@ -112,7 +110,7 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 #[derive(Debug)]
 pub struct NodeBuilder {
     /// The test database
-    pub database: DatabaseType,
+    pub database: DatabaseBuilder,
 
     /// The path to the configuration file to use.
     pub config: Option<PathBuf>,
@@ -178,7 +176,7 @@ impl NodeBuilder {
     /// Creates a testing [NodeBuilder], causing the database to be launched ephemerally.
     pub fn test() -> Self {
         Self {
-            database: DatabaseType::test(),
+            database: DatabaseBuilder::test(),
             config: None,
             chain: MAINNET.clone(),
             metrics: None,
@@ -199,7 +197,7 @@ impl NodeBuilder {
 
     /// Set the datadir for the node
     pub fn with_datadir(mut self, datadir: MaybePlatformPath<DataDirPath>) -> Self {
-        self.database = DatabaseType::Real(datadir);
+        self.database = DatabaseBuilder::Real(datadir);
         self
     }
 
@@ -326,8 +324,7 @@ impl NodeBuilder {
         executor: TaskExecutor,
     ) -> eyre::Result<NodeHandle> {
         let database = std::mem::take(&mut self.database);
-        let db_instance =
-            DatabaseBuilder::new(database).build_db(self.db.log_level, self.chain.chain)?;
+        let db_instance = database.build_db(self.db.log_level, self.chain.chain)?;
 
         match db_instance {
             DatabaseInstance::Real { db, data_dir } => {
@@ -571,10 +568,10 @@ impl NodeBuilder {
     /// configured for testing.
     fn data_dir(&self) -> Option<ChainPath<DataDirPath>> {
         match &self.database {
-            DatabaseType::Real(data_dir) => {
+            DatabaseBuilder::Real(data_dir) => {
                 Some(data_dir.unwrap_or_chain_default(self.chain.chain))
             }
-            DatabaseType::Test => None,
+            DatabaseBuilder::Test => None,
         }
     }
 
@@ -920,7 +917,7 @@ impl NodeBuilder {
 impl Default for NodeBuilder {
     fn default() -> Self {
         Self {
-            database: DatabaseType::default(),
+            database: DatabaseBuilder::default(),
             config: None,
             chain: MAINNET.clone(),
             metrics: None,
