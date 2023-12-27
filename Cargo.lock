@@ -5812,6 +5812,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-stages",
+ "reth-trie",
  "tokio",
  "tracing",
 ]

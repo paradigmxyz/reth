@@ -2317,7 +2317,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
             }
         }
 
-        Ok(Chain::new(blocks, execution_state))
+        Ok(Chain::new(blocks, execution_state, None))
     }
 }
 

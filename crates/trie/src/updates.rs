@@ -41,7 +41,7 @@ impl TrieOp {
 }
 
 /// The aggregation of trie updates.
-#[derive(Debug, Default, Clone, Deref)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deref)]
 pub struct TrieUpdates {
     trie_operations: HashMap<TrieKey, TrieOp>,
 }
