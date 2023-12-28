@@ -5624,6 +5624,7 @@ dependencies = [
  "reth-db",
  "reth-discv4",
  "reth-downloaders",
+ "reth-ethereum-payload-builder",
  "reth-interfaces",
  "reth-metrics",
  "reth-net-nat",
@@ -6011,7 +6012,6 @@ name = "reth-ethereum-payload-builder"
 version = "0.1.0-alpha.13"
 dependencies = [
  "reth-basic-payload-builder",
- "reth-interfaces",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",

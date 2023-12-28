@@ -44,6 +44,7 @@ reth-tracing.workspace = true
 reth-tasks.workspace = true
 reth-net-nat.workspace = true
 reth-optimism-payload-builder = { workspace = true, optional = true }
+reth-ethereum-payload-builder.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
@@ -139,6 +140,7 @@ optimism = [
     "reth-network/optimism",
     "reth-network-api/optimism",
     "reth-blockchain-tree/optimism",
+    "reth-ethereum-payload-builder/optimism",
 ]
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
