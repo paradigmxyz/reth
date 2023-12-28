@@ -1,4 +1,5 @@
 //! Command for debugging merkle trie calculation.
+
 use crate::{
     args::{
         get_secret_key,

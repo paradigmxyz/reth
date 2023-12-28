@@ -1,4 +1,3 @@
-#![allow(missing_docs)]
 //! Payload support for the beacon API.
 //!
 //! Internal helper module to deserialize/serialize the payload attributes for the beacon API, which
@@ -8,6 +7,8 @@
 //! aliases are not an option.
 //!
 //! See also <https://github.com/ethereum/consensus-specs/blob/master/specs/deneb/beacon-chain.md#executionpayload>
+
+#![allow(missing_docs)]
 
 use crate::{
     beacon::{withdrawals::BeaconWithdrawal, BlsPublicKey},

@@ -69,6 +69,8 @@ proptest.workspace = true
 proptest-derive.workspace = true
 rand.workspace = true
 revm-primitives = { workspace = true, features = ["arbitrary"] }
+nybbles = { version = "0.1", features = ["arbitrary"] }
+alloy-trie = { version = "0.1", features = ["arbitrary"] }
 serde_json.workspace = true
 test-fuzz = "4"
 toml.workspace = true

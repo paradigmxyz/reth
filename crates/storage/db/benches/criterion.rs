@@ -1,14 +1,13 @@
-#![allow(dead_code, unused_imports, non_snake_case)]
-
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use pprof::criterion::{Output, PProfProfiler};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    table::{Decode, Decompress, DupSort},
     tables::*,
+    transaction::DbTx,
 };
-use std::time::Instant;
 
 criterion_group! {
     name = benches;

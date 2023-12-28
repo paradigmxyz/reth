@@ -5,24 +5,30 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, unused_crate_dependencies, unreachable_pub, rustdoc::all)]
+#![warn(
+    missing_debug_implementations,
+    missing_docs,
+    unused_crate_dependencies,
+    unreachable_pub,
+    rustdoc::all
+)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use std::{
-    future::Future,
-    pin::Pin,
-    sync::{Arc, atomic::AtomicBool},
-    task::{Context, Poll},
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
 use alloy_rlp::Encodable;
 use futures_core::ready;
 use futures_util::FutureExt;
 use revm::{
-    Database,
-    DatabaseCommit,
-    db::states::bundle_state::BundleRetention, primitives::{BlockEnv, CfgEnv, Env}, State,
+    db::states::bundle_state::BundleRetention,
+    primitives::{BlockEnv, CfgEnv, Env},
+    Database, DatabaseCommit, State,
+};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::{atomic::AtomicBool, Arc},
+    task::{Context, Poll},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     sync::{oneshot, Semaphore},
@@ -32,20 +38,17 @@ use tracing::{debug, trace, warn};
 
 use reth_interfaces::RethResult;
 use reth_payload_builder::{
-    BuiltPayload, database::CachedReads, error::PayloadBuilderError, KeepPayloadJobAlive,
+    database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
     PayloadBuilderAttributes, PayloadId, PayloadJob, PayloadJobGenerator,
 };
 use reth_primitives::{
-    B256,
-    Block
-    ,
-    BlockNumberOrTag
-    ,
-    Bytes, bytes::BytesMut, ChainSpec, constants::{
-        BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
-        EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
-    }, EMPTY_OMMER_ROOT_HASH, Header,
-    proofs, Receipts, SealedBlock, U256, Withdrawal,
+    bytes::BytesMut,
+    constants::{
+        BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
+        ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
+    },
+    proofs, Block, BlockNumberOrTag, Bytes, ChainSpec, Header, Receipts, SealedBlock, Withdrawal,
+    B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, BlockSource, BundleStateWithReceipts, ProviderError, StateProviderFactory,
@@ -259,7 +262,6 @@ impl BasicPayloadJobGeneratorConfig {
         self.max_gas_limit = max_gas_limit;
         self
     }
-
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
@@ -446,11 +448,7 @@ where
 
             if let Some(payload) = self.builder.on_missing_payload(args) {
                 return (
-                    ResolveBestPayload {
-                        best_payload: Some(payload),
-                        maybe_better,
-                        empty_payload,
-                    },
+                    ResolveBestPayload { best_payload: Some(payload), maybe_better, empty_payload },
                     KeepPayloadJobAlive::Yes,
                 )
             }
@@ -584,11 +582,11 @@ pub struct PayloadConfig {
     /// The parent block.
     pub parent_block: Arc<SealedBlock>,
     /// Block extra data.
-    pub  extra_data: Bytes,
+    pub extra_data: Bytes,
     /// Requested attributes for the payload.
     pub attributes: PayloadBuilderAttributes,
     /// The chain spec.
-    pub  chain_spec: Arc<ChainSpec>,
+    pub chain_spec: Arc<ChainSpec>,
 }
 
 impl PayloadConfig {
@@ -707,7 +705,6 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
         &self,
         args: BuildArguments<Pool, Client>,
     ) -> Result<BuildOutcome, PayloadBuilderError>;
-
 
     /// Invoked when the payload job is being resolved and there is no payload yet.
     ///

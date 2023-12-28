@@ -118,7 +118,7 @@ impl BlobStoreSize {
 mod tests {
     use super::*;
 
-    #[allow(unused)]
+    #[allow(dead_code)]
     struct DynStore {
         store: Box<dyn BlobStore>,
     }

@@ -1,4 +1,5 @@
 //! Prometheus exporter
+
 use eyre::WrapErr;
 use hyper::{
     service::{make_service_fn, service_fn},

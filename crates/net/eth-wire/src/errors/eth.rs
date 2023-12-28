@@ -1,4 +1,5 @@
 //! Error handling for (`EthStream`)[crate::EthStream]
+
 use crate::{
     errors::{MuxDemuxError, P2PStreamError},
     version::ParseVersionError,

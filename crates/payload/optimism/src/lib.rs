@@ -45,7 +45,7 @@ use tracing::{debug, trace, warn};
 #[non_exhaustive]
 pub struct OptimismPayloadBuilder {
     /// The rollup's compute pending block configuration option.
-    /// TODO(clabby): Implement this feature.
+    // TODO(clabby): Implement this feature.
     compute_pending_block: bool,
 }
 

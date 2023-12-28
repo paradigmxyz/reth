@@ -209,28 +209,28 @@ where
         header: &SealedHeader,
         request: HeadersRequest,
         peer_id: PeerId,
-    ) -> Result<(), HeadersResponseError> {
+    ) -> Result<(), Box<HeadersResponseError>> {
         match self.existing_sync_target() {
             SyncTargetBlock::Hash(hash) | SyncTargetBlock::HashAndNumber { hash, .. }
                 if header.hash() != hash =>
             {
-                Err(HeadersResponseError {
+                Err(Box::new(HeadersResponseError {
                     request,
                     peer_id: Some(peer_id),
                     error: DownloadError::InvalidTip(
                         GotExpected { got: header.hash(), expected: hash }.into(),
                     ),
-                })
+                }))
             }
             SyncTargetBlock::Number(number) if header.number != number => {
-                Err(HeadersResponseError {
+                Err(Box::new(HeadersResponseError {
                     request,
                     peer_id: Some(peer_id),
                     error: DownloadError::InvalidTipNumber(GotExpected {
                         got: header.number,
                         expected: number,
                     }),
-                })
+                }))
             }
             _ => Ok(()),
         }
@@ -243,7 +243,6 @@ where
     /// Returns an error if the given headers are invalid.
     ///
     /// Caution: this expects the `headers` to be sorted with _falling_ block numbers
-    #[allow(clippy::result_large_err)]
     fn process_next_headers(
         &mut self,
         request: HeadersRequest,
@@ -352,7 +351,6 @@ where
     }
 
     /// Handles the response for the request for the sync target
-    #[allow(clippy::result_large_err)]
     fn on_sync_target_outcome(
         &mut self,
         response: HeadersRequestOutcome,
@@ -442,7 +440,6 @@ where
     }
 
     /// Invoked when we received a response
-    #[allow(clippy::result_large_err)]
     fn on_headers_outcome(
         &mut self,
         response: HeadersRequestOutcome,

@@ -1,5 +1,6 @@
 //! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message
 //! types.
+
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, B256};

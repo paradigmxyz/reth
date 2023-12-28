@@ -15,7 +15,10 @@
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use reth_basic_payload_builder::{is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome, commit_withdrawals, pre_block_beacon_root_contract_call};
+use reth_basic_payload_builder::{
+    commit_withdrawals, is_better_payload, pre_block_beacon_root_contract_call, BuildArguments,
+    BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
+};
 use reth_interfaces::RethResult;
 use reth_payload_builder::{error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{

@@ -1,4 +1,5 @@
 //! auto-mine consensus integration test
+
 use clap::Parser;
 use jsonrpsee::{core::client::ClientT, http_client::HttpClientBuilder, rpc_params};
 use reth::{
