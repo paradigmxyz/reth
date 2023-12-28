@@ -1,4 +1,5 @@
 //! Command for debugging block building.
+
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
@@ -179,7 +180,7 @@ impl Command {
         let mut blobs_bundle = self
             .blobs_bundle_path
             .map(|path| -> eyre::Result<BlobsBundleV1> {
-                let contents = std::fs::read_to_string(&path)
+                let contents = fs::read_to_string(&path)
                     .wrap_err(format!("could not read {}", path.display()))?;
                 serde_json::from_str(&contents).wrap_err("failed to deserialize blobs bundle")
             })
@@ -269,11 +270,8 @@ impl Command {
 
                 let executor_factory = EvmProcessorFactory::new(self.chain.clone());
                 let mut executor = executor_factory.with_state(blockchain_db.latest()?);
-                executor.execute_and_verify_receipt(
-                    &block_with_senders.block.clone().unseal(),
-                    U256::MAX,
-                    None,
-                )?;
+                executor
+                    .execute_and_verify_receipt(&block_with_senders.clone().unseal(), U256::MAX)?;
                 let state = executor.take_output_state();
                 debug!(target: "reth::cli", ?state, "Executed block");
 

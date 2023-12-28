@@ -174,7 +174,7 @@ impl fmt::Display for Error {
 }
 
 #[inline]
-pub fn mdbx_result(err_code: c_int) -> Result<bool> {
+pub(crate) fn mdbx_result(err_code: c_int) -> Result<bool> {
     match err_code {
         ffi::MDBX_SUCCESS => Ok(false),
         ffi::MDBX_RESULT_TRUE => Ok(true),

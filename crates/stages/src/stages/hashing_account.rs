@@ -95,7 +95,7 @@ impl AccountHashingStage {
         let blocks = random_block_range(&mut rng, opts.blocks.clone(), B256::ZERO, opts.txs);
 
         for block in blocks {
-            provider.insert_block(block, None, None).unwrap();
+            provider.insert_block(block.try_seal_with_senders().unwrap(), None).unwrap();
         }
         let mut accounts = random_eoa_account_range(&mut rng, opts.accounts);
         {
@@ -138,7 +138,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let (from_block, to_block) = input.next_block_range().into_inner();
@@ -238,7 +238,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                     },
                 );
 
-                return Ok(ExecOutput { checkpoint, done: false })
+                return Ok(ExecOutput { checkpoint, done: false });
             }
         } else {
             // Aggregate all transition changesets and make a list of accounts that have been
@@ -549,7 +549,7 @@ mod tests {
                     let start_block = input.next_block();
                     let end_block = output.checkpoint.block_number;
                     if start_block > end_block {
-                        return Ok(())
+                        return Ok(());
                     }
                 }
                 self.check_hashed_accounts()

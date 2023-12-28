@@ -1,4 +1,5 @@
 //! `eth_` PubSub RPC handler implementation
+
 use crate::{eth::logs_utils, result::invalid_params_rpc_err};
 use futures::StreamExt;
 use jsonrpsee::{server::SubscriptionMessage, PendingSubscriptionSink, SubscriptionSink};
@@ -308,10 +309,10 @@ where
             })
             .flat_map(futures::stream::iter)
             .flat_map(move |(block_receipts, removed)| {
-                let all_logs = logs_utils::matching_block_logs(
+                let all_logs = logs_utils::matching_block_logs_with_tx_hashes(
                     &filter,
                     block_receipts.block,
-                    block_receipts.tx_receipts,
+                    block_receipts.tx_receipts.iter().map(|(tx, receipt)| (*tx, receipt)),
                     removed,
                 );
                 futures::stream::iter(all_logs)

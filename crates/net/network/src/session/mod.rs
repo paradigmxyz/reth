@@ -1,4 +1,5 @@
 //! Support for handling peer sessions.
+
 use crate::{
     message::PeerMessage,
     metrics::SessionManagerMetrics,
@@ -169,6 +170,11 @@ impl SessionManager {
     /// Returns the current status of the session.
     pub fn status(&self) -> Status {
         self.status
+    }
+
+    /// Returns the secret key used for authenticating sessions.
+    pub fn secret_key(&self) -> SecretKey {
+        self.secret_key
     }
 
     /// Returns the session hello message.

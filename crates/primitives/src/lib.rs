@@ -15,7 +15,6 @@
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-#![allow(clippy::non_canonical_clone_impl)]
 
 mod account;
 pub mod basefee;
@@ -48,8 +47,8 @@ mod withdrawal;
 
 pub use account::{Account, Bytecode};
 pub use block::{
-    Block, BlockBody, BlockBodyRoots, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
-    BlockWithSenders, ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
+    Block, BlockBody, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, BlockWithSenders,
+    ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
 };
 pub use bytes::{self, Buf, BufMut, BytesMut};
 pub use chain::{
@@ -134,7 +133,7 @@ pub use c_kzg as kzg;
 #[cfg(feature = "optimism")]
 mod optimism {
     pub use crate::{
-        chain::{BASE_GOERLI, BASE_MAINNET, OP_GOERLI},
+        chain::{BASE_GOERLI, BASE_MAINNET, BASE_SEPOLIA, OP_GOERLI},
         transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID},
     };
 }

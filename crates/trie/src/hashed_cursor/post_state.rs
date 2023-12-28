@@ -1,12 +1,12 @@
 use super::{HashedAccountCursor, HashedCursorFactory, HashedStorageCursor};
 use crate::prefix_set::{PrefixSet, PrefixSetMut};
+use ahash::{AHashMap, AHashSet};
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     tables,
     transaction::DbTx,
 };
 use reth_primitives::{trie::Nibbles, Account, StorageEntry, B256, U256};
-use std::collections::{HashMap, HashSet};
 
 /// The post state account storage with hashed slots.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -14,7 +14,7 @@ pub struct HashedStorage {
     /// Hashed storage slots with non-zero.
     non_zero_valued_storage: Vec<(B256, U256)>,
     /// Slots that have been zero valued.
-    zero_valued_slots: HashSet<B256>,
+    zero_valued_slots: AHashSet<B256>,
     /// Whether the storage was wiped or not.
     wiped: bool,
     /// Whether the storage entries were sorted or not.
@@ -26,7 +26,7 @@ impl HashedStorage {
     pub fn new(wiped: bool) -> Self {
         Self {
             non_zero_valued_storage: Vec::new(),
-            zero_valued_slots: HashSet::new(),
+            zero_valued_slots: AHashSet::new(),
             wiped,
             sorted: true, // empty is sorted
         }
@@ -72,9 +72,9 @@ pub struct HashedPostState {
     /// Map of hashed addresses to account info.
     accounts: Vec<(B256, Account)>,
     /// Set of destroyed accounts.
-    destroyed_accounts: HashSet<B256>,
+    destroyed_accounts: AHashSet<B256>,
     /// Map of hashed addresses to hashed storage.
-    storages: HashMap<B256, HashedStorage>,
+    storages: AHashMap<B256, HashedStorage>,
     /// Whether the account and storage entries were sorted or not.
     sorted: bool,
 }
@@ -83,8 +83,8 @@ impl Default for HashedPostState {
     fn default() -> Self {
         Self {
             accounts: Vec::new(),
-            destroyed_accounts: HashSet::new(),
-            storages: HashMap::new(),
+            destroyed_accounts: AHashSet::new(),
+            storages: AHashMap::new(),
             sorted: true, // empty is sorted
         }
     }
@@ -139,17 +139,17 @@ impl HashedPostState {
     }
 
     /// Returns all destroyed accounts.
-    pub fn destroyed_accounts(&self) -> HashSet<B256> {
+    pub fn destroyed_accounts(&self) -> AHashSet<B256> {
         self.destroyed_accounts.clone()
     }
 
     /// Construct (PrefixSet)[PrefixSet] from hashed post state.
     /// The prefix sets contain the hashed account and storage keys that have been changed in the
     /// post state.
-    pub fn construct_prefix_sets(&self) -> (PrefixSet, HashMap<B256, PrefixSet>) {
+    pub fn construct_prefix_sets(&self) -> (PrefixSet, AHashMap<B256, PrefixSet>) {
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSetMut::default();
-        let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
+        let mut storage_prefix_set: AHashMap<B256, PrefixSetMut> = AHashMap::default();
 
         // Populate account prefix set.
         for (hashed_address, _) in &self.accounts {

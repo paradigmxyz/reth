@@ -88,7 +88,7 @@ where
                     self.current_walker_key_checked = true;
                     if self.walker.can_skip_current_node {
                         return Ok(Some(AccountNode::Branch(TrieBranchNode::new(
-                            key,
+                            key.clone(),
                             self.walker.hash().unwrap(),
                             self.walker.children_are_in_trie(),
                         ))))
@@ -97,7 +97,7 @@ where
             }
 
             if let Some((hashed_address, account)) = self.current_hashed_entry.take() {
-                if self.walker.key().map_or(false, |key| key < Nibbles::unpack(hashed_address)) {
+                if self.walker.key().map_or(false, |key| key < &Nibbles::unpack(hashed_address)) {
                     self.current_walker_key_checked = false;
                     continue
                 }
@@ -178,7 +178,7 @@ where
                     self.current_walker_key_checked = true;
                     if self.walker.can_skip_current_node {
                         return Ok(Some(StorageNode::Branch(TrieBranchNode::new(
-                            key,
+                            key.clone(),
                             self.walker.hash().unwrap(),
                             self.walker.children_are_in_trie(),
                         ))))
@@ -188,7 +188,7 @@ where
 
             if let Some(StorageEntry { key: hashed_key, value }) = self.current_hashed_entry.take()
             {
-                if self.walker.key().map_or(false, |key| key < Nibbles::unpack(hashed_key)) {
+                if self.walker.key().map_or(false, |key| key < &Nibbles::unpack(hashed_key)) {
                     self.current_walker_key_checked = false;
                     continue
                 }

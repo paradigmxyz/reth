@@ -1,3 +1,5 @@
+//! Merkle trie proofs.
+
 use super::Nibbles;
 use crate::{keccak256, Account, Address, Bytes, B256, U256};
 

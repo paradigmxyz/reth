@@ -1,6 +1,7 @@
 //! Main `stage` command
 //!
 //! Stage debugging tool
+
 use crate::{
     args::{
         get_secret_key,
@@ -108,7 +109,7 @@ impl Command {
     pub async fn execute(self) -> eyre::Result<()> {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
-        fdlimit::raise_fd_limit();
+        let _ = fdlimit::raise_fd_limit();
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);

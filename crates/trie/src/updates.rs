@@ -5,7 +5,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
-    trie::{BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibblesSubKey},
+    trie::{
+        BranchNodeCompact, Nibbles, StorageTrieEntry, StoredBranchNode, StoredNibbles,
+        StoredNibblesSubKey,
+    },
     B256,
 };
 use std::collections::{hash_map::IntoIter, HashMap};
@@ -14,7 +17,7 @@ use std::collections::{hash_map::IntoIter, HashMap};
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TrieKey {
     /// A node in the account trie.
-    AccountNode(Nibbles),
+    AccountNode(StoredNibbles),
     /// A node in the storage trie.
     StorageNode(B256, StoredNibblesSubKey),
     /// Storage trie of an account.
@@ -79,9 +82,9 @@ impl TrieUpdates {
     /// Extend the updates with account trie updates.
     pub fn extend_with_account_updates(&mut self, updates: HashMap<Nibbles, BranchNodeCompact>) {
         self.extend(
-            updates
-                .into_iter()
-                .map(|(nibbles, node)| (TrieKey::AccountNode(nibbles), TrieOp::Update(node))),
+            updates.into_iter().map(|(nibbles, node)| {
+                (TrieKey::AccountNode(nibbles.into()), TrieOp::Update(node))
+            }),
         );
     }
 
@@ -121,8 +124,8 @@ impl TrieUpdates {
                         }
                     }
                     TrieOp::Update(node) => {
-                        if !nibbles.is_empty() {
-                            account_trie_cursor.upsert(nibbles, node)?;
+                        if !nibbles.0.is_empty() {
+                            account_trie_cursor.upsert(nibbles, StoredBranchNode(node))?;
                         }
                     }
                 },

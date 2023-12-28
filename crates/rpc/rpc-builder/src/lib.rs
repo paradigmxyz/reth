@@ -151,7 +151,7 @@ use jsonrpsee::{
     Methods, RpcModule,
 };
 use serde::{Deserialize, Serialize, Serializer};
-use strum::{AsRefStr, EnumVariantNames, ParseError, VariantNames};
+use strum::{AsRefStr, EnumIter, EnumVariantNames, IntoStaticStr, ParseError, VariantNames};
 use tower::layer::util::{Identity, Stack};
 use tower_http::cors::CorsLayer;
 use tracing::{instrument, trace};
@@ -739,7 +739,19 @@ impl fmt::Display for RpcModuleSelection {
 }
 
 /// Represents RPC modules that are supported by reth
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, AsRefStr, EnumVariantNames, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Eq,
+    PartialEq,
+    Hash,
+    AsRefStr,
+    IntoStaticStr,
+    EnumVariantNames,
+    EnumIter,
+    Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "kebab-case")]
 pub enum RethRpcModule {
@@ -776,6 +788,18 @@ impl RethRpcModule {
     /// Returns all variants of the enum
     pub const fn all_variants() -> &'static [&'static str] {
         Self::VARIANTS
+    }
+
+    /// Returns all variants of the enum
+    pub fn modules() -> impl IntoIterator<Item = RethRpcModule> {
+        use strum::IntoEnumIterator;
+        Self::iter()
+    }
+
+    /// Returns the string representation of the module.
+    #[inline]
+    pub fn as_str(&self) -> &'static str {
+        self.into()
     }
 }
 

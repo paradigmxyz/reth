@@ -1,4 +1,5 @@
 //! Database debugging tool
+
 use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
     utils::DbTool,

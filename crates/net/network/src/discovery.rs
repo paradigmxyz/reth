@@ -117,7 +117,6 @@ impl Discovery {
     }
 
     /// Updates the `eth:ForkId` field in discv4.
-    #[allow(unused)]
     pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
         if let Some(discv4) = &self.discv4 {
             // use forward-compatible forkid entry

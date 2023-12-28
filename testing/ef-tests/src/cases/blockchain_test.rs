@@ -52,14 +52,19 @@ impl Case for BlockchainTestCase {
         })
     }
 
-    // TODO: Clean up
+    /// Runs the test cases for the Ethereum Forks test suite.
+    ///
+    /// # Errors
+    /// Returns an error if the test is flagged for skipping or encounters issues during execution.
     fn run(&self) -> Result<(), Error> {
+        // If the test is marked for skipping, return a Skipped error immediately.
         if self.skip {
-            return Err(Error::Skipped)
+            return Err(Error::Skipped);
         }
 
-        for case in self.tests.values() {
-            if matches!(
+        // Iterate through test cases, filtering by the network type to exclude specific forks.
+        for case in self.tests.values().filter(|case| {
+            !matches!(
                 case.network,
                 ForkSpec::ByzantiumToConstantinopleAt5 |
                     ForkSpec::Constantinople |
@@ -68,65 +73,69 @@ impl Case for BlockchainTestCase {
                     ForkSpec::MergeMeterInitCode |
                     ForkSpec::MergePush0 |
                     ForkSpec::Unknown
-            ) {
-                continue
-            }
-
-            // Create the database
+            )
+        }) {
+            // Create a new test database and initialize a provider for the test case.
             let db = create_test_rw_db();
-            let factory = ProviderFactory::new(db.as_ref(), Arc::new(case.network.clone().into()));
-            let provider = factory.provider_rw().unwrap();
+            let provider = ProviderFactory::new(db.as_ref(), Arc::new(case.network.clone().into()))
+                .provider_rw()
+                .unwrap();
 
-            // Insert test state
+            // Insert initial test state into the provider.
             provider
                 .insert_block(
                     SealedBlock::new(
                         case.genesis_block_header.clone().into(),
                         BlockBody::default(),
-                    ),
-                    None,
+                    )
+                    .try_seal_with_senders()
+                    .unwrap(),
                     None,
                 )
                 .map_err(|err| Error::RethError(err.into()))?;
             case.pre.write_to_db(provider.tx_ref())?;
 
-            let mut last_block = None;
-            for block in case.blocks.iter() {
+            // Decode and insert blocks, creating a chain of blocks for the test case.
+            let last_block = case.blocks.iter().try_fold(None, |_, block| {
                 let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
                 provider
-                    .insert_block(decoded.clone(), None, None)
+                    .insert_block(decoded.clone().try_seal_with_senders().unwrap(), None)
                     .map_err(|err| Error::RethError(err.into()))?;
-                last_block = Some(decoded);
-            }
+                Ok::<Option<SealedBlock>, Error>(Some(decoded))
+            })?;
 
-            // Call execution stage
-            {
-                let mut stage = ExecutionStage::new_with_factory(
-                    reth_revm::EvmProcessorFactory::new(Arc::new(case.network.clone().into())),
-                );
-                let target = last_block.as_ref().map(|b| b.number);
-                let _ = stage.execute(&provider, ExecInput { target, checkpoint: None });
-            }
+            // Execute the execution stage using the EVM processor factory for the test case
+            // network.
+            let _ = ExecutionStage::new_with_factory(reth_revm::EvmProcessorFactory::new(
+                Arc::new(case.network.clone().into()),
+            ))
+            .execute(
+                &provider,
+                ExecInput { target: last_block.as_ref().map(|b| b.number), checkpoint: None },
+            );
 
-            // Validate post state
-            if let Some(state) = &case.post_state {
-                for (&address, account) in state.iter() {
-                    account.assert_db(address, provider.tx_ref())?;
+            // Validate the post-state for the test case.
+            match (&case.post_state, &case.post_state_hash) {
+                (Some(state), None) => {
+                    // Validate accounts in the state against the provider's database.
+                    for (&address, account) in state.iter() {
+                        account.assert_db(address, provider.tx_ref())?;
+                    }
                 }
-            } else if let Some(expected_state_root) = case.post_state_hash {
-                // `insert_hashes` will insert hashed data, compute the state root and match it to
-                // expected internally
-                let last_block = last_block.unwrap_or_default();
-                provider
-                    .insert_hashes(0..=last_block.number, last_block.hash, expected_state_root)
-                    .map_err(|err| Error::RethError(err.into()))?;
-            } else {
-                return Err(Error::MissingPostState)
+                (None, Some(expected_state_root)) => {
+                    // Insert state hashes into the provider based on the expected state root.
+                    let last_block = last_block.unwrap_or_default();
+                    provider
+                        .insert_hashes(0..=last_block.number, last_block.hash, *expected_state_root)
+                        .map_err(|err| Error::RethError(err.into()))?;
+                }
+                _ => return Err(Error::MissingPostState),
             }
 
-            // Drop provider without committing to the database.
+            // Drop the provider without committing to the database.
             drop(provider);
         }
+
         Ok(())
     }
 }

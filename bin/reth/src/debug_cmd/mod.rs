@@ -1,4 +1,5 @@
 //! `reth debug` command. Collection of various debugging routines.
+
 use clap::{Parser, Subcommand};
 
 use crate::runner::CliContext;

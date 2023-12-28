@@ -2,7 +2,7 @@ use crate::{
     database::Database,
     error::{mdbx_result, Error, Result},
     flags::EnvironmentFlags,
-    transaction::{RO, RW},
+    transaction::{CommitLatency, RO, RW},
     Mode, Transaction, TransactionKind,
 };
 use byteorder::{ByteOrder, NativeEndian};
@@ -291,24 +291,25 @@ impl EnvironmentKind {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct TxnPtr(pub *mut ffi::MDBX_txn);
+pub(crate) struct TxnPtr(pub(crate) *mut ffi::MDBX_txn);
 unsafe impl Send for TxnPtr {}
 unsafe impl Sync for TxnPtr {}
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct EnvPtr(pub *mut ffi::MDBX_env);
+pub(crate) struct EnvPtr(pub(crate) *mut ffi::MDBX_env);
 unsafe impl Send for EnvPtr {}
 unsafe impl Sync for EnvPtr {}
 
 pub(crate) enum TxnManagerMessage {
     Begin { parent: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<TxnPtr>> },
     Abort { tx: TxnPtr, sender: SyncSender<Result<bool>> },
-    Commit { tx: TxnPtr, sender: SyncSender<Result<bool>> },
+    Commit { tx: TxnPtr, sender: SyncSender<Result<(bool, CommitLatency)>> },
 }
 
 /// Environment statistics.
 ///
 /// Contains information about the size and layout of an MDBX environment or database.
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct Stat(ffi::MDBX_stat);
 
@@ -362,6 +363,7 @@ impl Stat {
     }
 }
 
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct GeometryInfo(ffi::MDBX_envinfo__bindgen_ty_1);
 
@@ -374,6 +376,7 @@ impl GeometryInfo {
 /// Environment information.
 ///
 /// Contains environment information about the map size, readers, last txn id etc.
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct Info(ffi::MDBX_envinfo);
 
@@ -411,6 +414,25 @@ impl Info {
     pub fn num_readers(&self) -> usize {
         self.0.mi_numreaders as usize
     }
+
+    /// Return the internal page ops metrics
+    #[inline]
+    pub fn page_ops(&self) -> PageOps {
+        PageOps {
+            newly: self.0.mi_pgop_stat.newly,
+            cow: self.0.mi_pgop_stat.cow,
+            clone: self.0.mi_pgop_stat.clone,
+            split: self.0.mi_pgop_stat.split,
+            merge: self.0.mi_pgop_stat.merge,
+            spill: self.0.mi_pgop_stat.spill,
+            unspill: self.0.mi_pgop_stat.unspill,
+            wops: self.0.mi_pgop_stat.wops,
+            prefault: self.0.mi_pgop_stat.prefault,
+            mincore: self.0.mi_pgop_stat.mincore,
+            msync: self.0.mi_pgop_stat.msync,
+            fsync: self.0.mi_pgop_stat.fsync,
+        }
+    }
 }
 
 impl fmt::Debug for Environment {
@@ -427,6 +449,35 @@ impl fmt::Debug for Environment {
 pub enum PageSize {
     MinimalAcceptable,
     Set(usize),
+}
+
+/// Statistics of page operations overall of all (running, completed and aborted) transactions
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PageOps {
+    /// Quantity of a new pages added
+    pub newly: u64,
+    /// Quantity of pages copied for update
+    pub cow: u64,
+    /// Quantity of parent's dirty pages clones for nested transactions
+    pub clone: u64,
+    /// Page splits
+    pub split: u64,
+    /// Page merges
+    pub merge: u64,
+    /// Quantity of spilled dirty pages
+    pub spill: u64,
+    /// Quantity of unspilled/reloaded pages
+    pub unspill: u64,
+    /// Number of explicit write operations (not a pages) to a disk
+    pub wops: u64,
+    /// Number of explicit msync/flush-to-disk operations
+    pub msync: u64,
+    /// Number of explicit fsync/flush-to-disk operations
+    pub fsync: u64,
+    /// Number of prefault write operations
+    pub prefault: u64,
+    /// Number of mincore() calls
+    pub mincore: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -603,9 +654,13 @@ impl EnvironmentBuilder {
                         }
                         TxnManagerMessage::Commit { tx, sender } => {
                             sender
-                                .send(mdbx_result(unsafe {
-                                    ffi::mdbx_txn_commit_ex(tx.0, ptr::null_mut())
-                                }))
+                                .send({
+                                    let mut latency = CommitLatency::new();
+                                    mdbx_result(unsafe {
+                                        ffi::mdbx_txn_commit_ex(tx.0, latency.mdb_commit_latency())
+                                    })
+                                    .map(|v| (v, latency))
+                                })
                                 .unwrap();
                         }
                     },

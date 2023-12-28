@@ -101,7 +101,7 @@ impl TableViewer<()> for ListTableViewer<'_> {
                     final_entry_idx = total_entries - 1,
                     table = self.args.table.name()
                 );
-                return Ok(());
+                return Ok(())
             }
 
 

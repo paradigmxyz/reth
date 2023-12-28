@@ -9,6 +9,7 @@
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+mod builder;
 mod error;
 mod event;
 mod metrics;
@@ -16,6 +17,7 @@ mod pruner;
 pub mod segments;
 
 use crate::metrics::Metrics;
+pub use builder::PrunerBuilder;
 pub use error::PrunerError;
 pub use event::PrunerEvent;
 pub use pruner::{Pruner, PrunerResult, PrunerWithResult};

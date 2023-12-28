@@ -1,4 +1,5 @@
 //! `reth recover` command.
+
 use clap::{Parser, Subcommand};
 
 use crate::runner::CliContext;

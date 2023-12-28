@@ -1,5 +1,6 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
+
 use reth_primitives::{
     constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     proofs::{self},
@@ -304,6 +305,7 @@ pub fn try_into_sealed_block(
 ///
 /// If the provided block hash does not match the block hash computed from the provided block, this
 /// returns [PayloadError::BlockHash].
+#[inline]
 pub fn validate_block_hash(
     expected_block_hash: B256,
     block: Block,

@@ -76,7 +76,7 @@ impl Command {
             entry = storage_trie_cursor.next()?;
         }
 
-        let state_root = StateRoot::new(tx_mut).root()?;
+        let state_root = StateRoot::from_tx(tx_mut).root()?;
         if state_root != best_header.state_root {
             eyre::bail!(
                 "Recovery failed. Incorrect state root. Expected: {:?}. Received: {:?}",

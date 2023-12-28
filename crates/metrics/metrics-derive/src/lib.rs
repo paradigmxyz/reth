@@ -12,9 +12,6 @@
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, DeriveInput};
 
-#[allow(unused_extern_crates)]
-extern crate proc_macro;
-
 mod expand;
 mod metric;
 mod with_attrs;

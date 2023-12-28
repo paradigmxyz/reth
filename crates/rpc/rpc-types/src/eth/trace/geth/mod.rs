@@ -1,5 +1,6 @@
+//! Geth tracing types.
+
 #![allow(missing_docs)]
-//! Geth tracing types
 
 use crate::{state::StateOverride, BlockOverrides};
 use alloy_primitives::{Bytes, B256, U256};
@@ -558,5 +559,21 @@ mod tests {
         let val = serde_json::to_value(&log).unwrap();
         let input = serde_json::from_str::<serde_json::Value>(s).unwrap();
         similar_asserts::assert_eq!(input, val);
+    }
+
+    #[test]
+    fn test_trace_result_serde() {
+        let s = r#"        {
+            "result": {
+                "from": "0xccc5499e15fedaaeaba68aeb79b95b20f725bc56",
+                "gas": "0x186a0",
+                "gasUsed": "0xdb91",
+                "to": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+                "input": "0xa9059cbb000000000000000000000000e3f85a274c1edbea2f2498cf5978f41961cf8b5b0000000000000000000000000000000000000000000000000000000068c8f380",
+                "value": "0x0",
+                "type": "CALL"
+            }
+        }"#;
+        let _result: TraceResult = serde_json::from_str(s).unwrap();
     }
 }
