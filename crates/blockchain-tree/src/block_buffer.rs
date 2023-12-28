@@ -92,7 +92,10 @@ impl BlockBuffer {
     ///
     /// Note: that order of returned blocks is important and the blocks with lower block number
     /// in the chain will come first so that they can be executed in the correct order.
-    pub fn remove_with_children(&mut self, parent_hash: &BlockHash) -> Vec<SealedBlockWithSenders> {
+    pub fn remove_block_with_children(
+        &mut self,
+        parent_hash: &BlockHash,
+    ) -> Vec<SealedBlockWithSenders> {
         // remove parent block if present
         let mut removed = Vec::new();
         if let Some(block) = self.remove_block(parent_hash) {
@@ -269,7 +272,10 @@ mod tests {
         assert_eq!(buffer.lowest_ancestor(&block4.hash), Some(&block4));
         assert_eq!(buffer.lowest_ancestor(&block3.hash), Some(&block1));
         assert_eq!(buffer.lowest_ancestor(&block1.hash), Some(&block1));
-        assert_eq!(buffer.remove_with_children(&main_parent_hash), vec![block1, block2, block3]);
+        assert_eq!(
+            buffer.remove_block_with_children(&main_parent_hash),
+            vec![block1, block2, block3]
+        );
         assert_buffer_lengths(&buffer, 1);
     }
 
@@ -293,7 +299,7 @@ mod tests {
         assert_buffer_lengths(&buffer, 4);
         assert_eq!(
             buffer
-                .remove_with_children(&main_parent_hash)
+                .remove_block_with_children(&main_parent_hash)
                 .into_iter()
                 .map(|b| (b.hash, b))
                 .collect::<HashMap<_, _>>(),
@@ -327,7 +333,7 @@ mod tests {
         assert_buffer_lengths(&buffer, 4);
         assert_eq!(
             buffer
-                .remove_with_children(&block1.hash)
+                .remove_block_with_children(&block1.hash)
                 .into_iter()
                 .map(|b| (b.hash, b))
                 .collect::<HashMap<_, _>>(),
