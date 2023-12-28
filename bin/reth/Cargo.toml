@@ -30,6 +30,7 @@ reth-transaction-pool.workspace = true
 reth-beacon-consensus.workspace = true
 reth-auto-seal-consensus.workspace = true
 reth-consensus-common.workspace = true
+reth-clayer.workspace = true
 reth-blockchain-tree.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-rpc-builder.workspace = true

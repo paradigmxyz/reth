@@ -1402,8 +1402,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c64043d6c7b7a4c58e39e7efccfdea7b93d885a795d0c054a69dbbf4dd52686"
 dependencies = [
  "crossterm 0.27.0",
- "strum",
- "strum_macros",
+ "strum 0.25.0",
+ "strum_macros 0.25.3",
  "unicode-width",
 ]
 
@@ -2439,6 +2439,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "ethereum_hashing"
+version = "1.0.0-beta.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "233dc6f434ce680dbabf4451ee3380cec46cb3c45d66660445a435619710dd35"
+dependencies = [
+ "cpufeatures",
+ "lazy_static",
+ "ring 0.16.20",
+ "sha2",
+]
+
+[[package]]
+name = "ethereum_serde_utils"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f8cb04ea380a33e9c269fa5f8df6f2d63dee19728235f3e639e7674e038686a"
+dependencies = [
+ "ethereum-types",
+ "hex",
+ "serde",
+ "serde_derive",
+ "serde_json",
+]
+
+[[package]]
 name = "ethereum_ssz"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2540,7 +2565,7 @@ dependencies = [
  "rlp",
  "serde",
  "serde_json",
- "strum",
+ "strum 0.25.0",
  "syn 2.0.41",
  "tempfile",
  "thiserror",
@@ -5548,6 +5573,7 @@ dependencies = [
  "http",
  "http-body",
  "hyper",
+ "hyper-rustls",
  "ipnet",
  "js-sys",
  "log",
@@ -5556,11 +5582,13 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "rustls",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "system-configuration",
  "tokio",
+ "tokio-rustls",
  "tokio-util",
  "tower-service",
  "url",
@@ -5568,6 +5596,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
+ "webpki-roots",
  "winreg",
 ]
 
@@ -5618,6 +5647,7 @@ dependencies = [
  "reth-basic-payload-builder",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
+ "reth-clayer",
  "reth-config",
  "reth-consensus-common",
  "reth-db",
@@ -5758,6 +5788,49 @@ dependencies = [
  "reth-stages",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "reth-clayer"
+version = "0.1.0-alpha.13"
+dependencies = [
+ "alloy-primitives",
+ "arbitrary",
+ "chrono",
+ "clap",
+ "derivative",
+ "ethereum_serde_utils",
+ "eyre",
+ "futures-util",
+ "hex",
+ "jsonrpsee",
+ "jsonwebtoken",
+ "rand 0.8.5",
+ "reqwest",
+ "reth",
+ "reth-beacon-consensus",
+ "reth-interfaces",
+ "reth-network",
+ "reth-primitives",
+ "reth-provider",
+ "reth-revm",
+ "reth-rpc-types",
+ "reth-stages",
+ "reth-transaction-pool",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "serde_millis",
+ "strum 0.24.1",
+ "superstruct",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "tree_hash",
+ "tree_hash_derive",
+ "url",
+ "zeroize",
 ]
 
 [[package]]
@@ -6275,7 +6348,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "smallvec",
- "strum",
+ "strum 0.25.0",
  "sucds 0.6.0",
  "tempfile",
  "test-fuzz",
@@ -6308,7 +6381,7 @@ dependencies = [
  "reth-primitives",
  "reth-trie",
  "revm",
- "strum",
+ "strum 0.25.0",
  "tempfile",
  "tokio",
  "tokio-stream",
@@ -6471,7 +6544,7 @@ dependencies = [
  "reth-transaction-pool",
  "serde",
  "serde_json",
- "strum",
+ "strum 0.25.0",
  "thiserror",
  "tokio",
  "tower",
@@ -7253,6 +7326,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_millis"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6e2dc780ca5ee2c369d1d01d100270203c4ff923d2a4264812d723766434d00"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_qs"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7635,11 +7717,33 @@ checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
 name = "strum"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
+dependencies = [
+ "strum_macros 0.24.3",
+]
+
+[[package]]
+name = "strum"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
 dependencies = [
- "strum_macros",
+ "strum_macros 0.25.3",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.24.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e385be0d24f186b4ce2f9982191e7101bb737312ad61c1f2f984f34bcf85d59"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -7691,6 +7795,20 @@ checksum = "d53d46182afe6ed822a94c54a532dc0d59691a8f49226bdc4596529ca864cdd6"
 dependencies = [
  "anyhow",
  "num-traits",
+]
+
+[[package]]
+name = "superstruct"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75b9e5728aa1a87141cefd4e7509903fc01fa0dcb108022b1e841a67c5159fc5"
+dependencies = [
+ "darling 0.13.4",
+ "itertools 0.10.5",
+ "proc-macro2",
+ "quote",
+ "smallvec",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -8294,6 +8412,28 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "tree_hash"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c998ac5fe2b07c025444bdd522e6258110b63861c6698eedc610c071980238d"
+dependencies = [
+ "ethereum-types",
+ "ethereum_hashing",
+ "smallvec",
+]
+
+[[package]]
+name = "tree_hash_derive"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84303a9c7cda5f085a3ed9cd241d1e95e04d88aab1d679b02f212e653537ba86"
+dependencies = [
+ "darling 0.13.4",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]

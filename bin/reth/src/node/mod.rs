@@ -33,6 +33,7 @@ use reth_beacon_consensus::{
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
+use reth_clayer::ConsensusBuilder;
 use reth_config::{
     config::{PruneConfig, StageConfig},
     Config,
@@ -440,7 +441,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
             (pipeline, EitherDownloader::Left(client))
         } else {
-            let pipeline = self
+            let mut pipeline = self
                 .build_networked_pipeline(
                     &config.stages,
                     network_client.clone(),
@@ -452,6 +453,23 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     max_block,
                 )
                 .await?;
+
+            // ===============================================================================
+            // extract the jwt secret from the args if possible
+            let default_jwt_path = data_dir.jwt_path();
+            let jwt_secret = self.rpc.auth_jwt_secret(default_jwt_path)?;
+            let mut task = ConsensusBuilder::new(
+                jwt_secret.as_bytes(),
+                Arc::clone(&self.chain),
+                blockchain_db.clone(),
+                transaction_pool.clone(),
+                network.clone(),
+            )
+            .build();
+            let pipeline_events = pipeline.events();
+            task.set_pipeline_events(pipeline_events);
+            ctx.task_executor.spawn(Box::pin(task));
+            // ===============================================================================
 
             (pipeline, EitherDownloader::Right(network_client))
         };

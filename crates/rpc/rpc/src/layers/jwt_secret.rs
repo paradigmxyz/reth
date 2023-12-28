@@ -157,6 +157,11 @@ impl JwtSecret {
         let algo = jsonwebtoken::Header::new(Algorithm::HS256);
         jsonwebtoken::encode(&algo, claims, &key)
     }
+
+    /// Returns the underlying bytes of the secret
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
 }
 
 impl std::fmt::Debug for JwtSecret {
