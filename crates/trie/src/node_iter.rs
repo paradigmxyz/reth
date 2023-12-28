@@ -85,6 +85,7 @@ where
     H: HashedAccountCursor,
 {
     /// Return the next account trie node to be added to the hash builder.
+    ///
     /// Returns the nodes using this algorithm:
     /// 1. Return the current intermediate branch node if it hasn't been updated.
     /// 2. Advance the trie walker to the next intermediate branch node and retrieve next
@@ -92,6 +93,7 @@ where
     /// 3. Reposition the hashed account cursor on the next unprocessed key.
     /// 4. Return every hashed account entry up to the key of the current intermediate branch node.
     /// 5. Repeat.
+    ///
     /// NOTE: The iteration will start from the key of the previous hashed entry if it was supplied.
     pub(crate) fn try_next(&mut self) -> Result<Option<AccountNode>, StateRootError> {
         loop {
@@ -220,7 +222,7 @@ where
                 // Compare keys and proceed accordingly.
                 if self.walker.key().map_or(false, |key| key < &Nibbles::unpack(hashed_key)) {
                     self.current_walker_key_checked = false;
-                    continue; // Continue the loop.
+                    continue;
                 }
 
                 // Move to the next hashed storage entry and return the corresponding leaf node.
