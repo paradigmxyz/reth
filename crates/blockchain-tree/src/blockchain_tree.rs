@@ -1070,8 +1070,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             chain_notification =
                 CanonStateNotification::Commit { new: Arc::new(new_canon_chain.clone()) };
             // append to database
-            self.commit_canonical_to_database(new_canon_chain)?;
-            durations_recorder.record_relative(MakeCanonicalAction::CommitCanonicalChainToDatabase);
+            self.commit_canonical_to_database(new_canon_chain, &mut durations_recorder)?;
         } else {
             // it forks to canonical block that is not the tip.
 
@@ -1106,8 +1105,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 Ok(val) => val,
             };
             // commit new canonical chain.
-            self.commit_canonical_to_database(new_canon_chain.clone())?;
-            durations_recorder.record_relative(MakeCanonicalAction::CommitCanonicalChainToDatabase);
+            self.commit_canonical_to_database(new_canon_chain.clone(), &mut durations_recorder)?;
 
             if let Some(old_canon_chain) = old_canon_chain {
                 // state action
@@ -1158,7 +1156,11 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     }
 
     /// Write the given chain to the database as canonical.
-    fn commit_canonical_to_database(&self, chain: Chain) -> RethResult<()> {
+    fn commit_canonical_to_database(
+        &self,
+        chain: Chain,
+        recorder: &mut MakeCanonicalDurationsRecorder,
+    ) -> RethResult<()> {
         // Compute state root before opening write transaction.
         let hashed_state = chain.state().hash_state_slow();
         let (state_root, trie_updates) = chain
@@ -1179,6 +1181,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 },
             ))));
         }
+        recorder.record_relative(MakeCanonicalAction::RetrieveStateTrieUpdates);
 
         let (blocks, state) = chain.into_inner();
         let provider_rw = self.externals.provider_factory.provider_rw()?;
@@ -1193,6 +1196,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             .map_err(|e| BlockExecutionError::CanonicalCommit { inner: e.to_string() })?;
 
         provider_rw.commit()?;
+        recorder.record_relative(MakeCanonicalAction::CommitCanonicalChainToDatabase);
 
         Ok(())
     }
