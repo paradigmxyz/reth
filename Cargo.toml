@@ -64,11 +64,8 @@ default-members = ["bin/reth"]
 resolver = "2"
 
 [workspace.lints.rust]
-missing_debug_implementations = "warn"
-missing_docs = "warn"
-unreachable_pub = "warn"
-unused_must_use = "deny"
-rust_2018_idioms = "deny"
+warn = ["missing_debug_implementations", "missing_docs", "unreachable_pub", "rustdoc::all"]
+deny = ["unused_must_use", "rust_2018_idioms"]
 
 [workspace.package]
 version = "0.1.0-alpha.13"
