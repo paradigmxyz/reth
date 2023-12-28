@@ -21,6 +21,8 @@ members = [
     "crates/net/network-api/",
     "crates/payload/basic/",
     "crates/payload/builder/",
+    "crates/payload/ethereum/",
+    "crates/payload/optimism/",
     "crates/payload/validator/",
     "crates/primitives/",
     "crates/prune/",
@@ -113,6 +115,7 @@ reth-downloaders = { path = "crates/net/downloaders" }
 reth-ecies = { path = "crates/net/ecies" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-ethereum-forks = { path = "crates/ethereum-forks" }
+reth-ethereum-payload-builder = { path = "crates/payload/ethereum" }
 reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
