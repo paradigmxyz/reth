@@ -72,7 +72,7 @@ impl<C, H> AccountNodeIter<C, H> {
     }
 
     /// Sets the last iterated account key and returns the modified `AccountNodeIter`.
-    /// This is used to resume iteration from the last checkpoint. 
+    /// This is used to resume iteration from the last checkpoint.
     pub(crate) fn with_last_account_key(mut self, previous_account_key: B256) -> Self {
         self.previous_account_key = Some(previous_account_key);
         self
