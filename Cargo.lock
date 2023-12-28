@@ -170,9 +170,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-primitives"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c0e5e60ff0e0c34c553822dabcfe0f5fece5a8c52f08a915be8c737de4b03fa"
+checksum = "9c234f92024707f224510ff82419b2be0e1d8e1fd911defcac5a085cd7f83898"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -185,6 +185,7 @@ dependencies = [
  "getrandom 0.2.11",
  "hex-literal",
  "itoa",
+ "keccak-asm",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
@@ -4006,6 +4007,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "keccak-asm"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb8515fff80ed850aea4a1595f2e519c003e2a00a82fe168ebf5269196caf444"
+dependencies = [
+ "digest 0.10.7",
+ "sha3-asm",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7393,6 +7404,16 @@ checksum = "75872d278a8f37ef87fa0ddbda7802605cb18344497949862c0d4dcb291eba60"
 dependencies = [
  "digest 0.10.7",
  "keccak",
+]
+
+[[package]]
+name = "sha3-asm"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bac61da6b35ad76b195eb4771210f947734321a8d81d7738e1580d953bc7a15e"
+dependencies = [
+ "cc",
+ "cfg-if",
 ]
 
 [[package]]
