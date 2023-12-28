@@ -2,6 +2,7 @@
 //!
 //! A [`Chain`] contains the state of accounts for the chain after execution of its constituent
 //! blocks, as well as a list of the blocks the chain is composed of.
+
 use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
 use reth_db::database::Database;

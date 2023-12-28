@@ -1,4 +1,5 @@
 //! various serde test
+
 use crate::utils::launch_http;
 use jsonrpsee::{
     core::{client::ClientT, traits::ToRpcParams, Error},

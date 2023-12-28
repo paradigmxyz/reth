@@ -11,6 +11,7 @@
 //! ```sh
 //! cast rpc txpoolExt_transactionCount
 //! ```
+
 use clap::Parser;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth::cli::{

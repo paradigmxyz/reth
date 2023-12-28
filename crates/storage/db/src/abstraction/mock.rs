@@ -1,4 +1,5 @@
 //! Mock database
+
 use crate::{
     common::{IterPairResult, PairResult, ValueOnlyResult},
     cursor::{
