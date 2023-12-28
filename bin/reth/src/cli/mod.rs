@@ -2,13 +2,12 @@
 
 use crate::{
     args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-    chain,
     cli::ext::RethCliExt,
-    db, debug_cmd,
+    commands::{
+        config_cmd, db, debug_cmd, import, init_cmd, node, p2p, recover, stage, test_vectors,
+    },
     dirs::{LogsDir, PlatformPath},
-    node, p2p, recover,
     runner::CliRunner,
-    stage, test_vectors,
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, ArgAction, Args, Parser, Subcommand, ValueEnum};
@@ -140,10 +139,10 @@ pub enum Commands<Ext: RethCliExt = ()> {
     Node(node::NodeCommand<Ext>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
-    Init(chain::InitCommand),
+    Init(init_cmd::InitCommand),
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
-    Import(chain::ImportCommand),
+    Import(import::ImportCommand),
     /// Database debugging utilities
     #[command(name = "db")]
     Db(db::Command),
@@ -158,7 +157,7 @@ pub enum Commands<Ext: RethCliExt = ()> {
     TestVectors(test_vectors::Command),
     /// Write config to stdout
     #[command(name = "config")]
-    Config(crate::config::Command),
+    Config(config_cmd::Command),
     /// Various debug routines
     #[command(name = "debug")]
     Debug(debug_cmd::Command),
