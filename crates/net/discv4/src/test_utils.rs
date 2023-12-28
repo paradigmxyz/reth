@@ -293,7 +293,7 @@ mod tests {
 
         let mut rng = thread_rng();
         let (_, mut service) = create_discv4().await;
-        let (mut mockv4, _) = MockDiscovery::new().await.unwrap();
+        let (mut mockv4, _cmd) = MockDiscovery::new().await.unwrap();
 
         let mock_enr = mockv4.local_enr();
 
