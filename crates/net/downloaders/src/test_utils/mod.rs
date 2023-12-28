@@ -52,8 +52,8 @@ pub(crate) fn generate_bodies(
 pub(crate) async fn generate_bodies_file(
     range: RangeInclusive<u64>,
 ) -> (tokio::fs::File, Vec<SealedHeader>, HashMap<B256, BlockBody>) {
-    let (headers, mut bodies) = generate_bodies(range);
-    let raw_block_bodies = create_raw_bodies(headers.clone().iter(), &mut bodies);
+    let (headers, bodies) = generate_bodies(range);
+    let raw_block_bodies = create_raw_bodies(headers.clone().iter(), &mut bodies.clone());
 
     let file: File = tempfile::tempfile().unwrap().into();
     let mut writer = FramedWrite::new(file, BlockFileCodec);
