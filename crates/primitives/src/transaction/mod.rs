@@ -1076,9 +1076,10 @@ impl TransactionSigned {
     /// Encodes the transaction into the "raw" format (e.g. `eth_sendRawTransaction`).
     /// This format is also referred to as "binary" encoding.
     ///
-    /// For legacy transactions, it encodes the RLP of the transaction into the buffer: `rlp(tx)`
+    /// For legacy transactions, it encodes the RLP of the transaction into the buffer:
+    /// `rlp(tx-data)`
     /// For EIP-2718 typed it encodes the type of the transaction followed by the rlp of the
-    /// transaction: `type || rlp(tx)`
+    /// transaction: `tx-type || rlp(tx-data)`
     pub fn encode_enveloped(&self, out: &mut dyn bytes::BufMut) {
         self.encode_inner(out, false)
     }
@@ -1195,12 +1196,12 @@ impl TransactionSigned {
     ///
     /// This should be used _only_ be used internally in general transaction decoding methods,
     /// which have already ensured that the input is a typed transaction with the following format:
-    /// `tx_type || rlp(tx)`
+    /// `tx-type || rlp(tx-data)`
     ///
     /// Note that this format does not start with any RLP header, and instead starts with a single
     /// byte indicating the transaction type.
     ///
-    /// CAUTION: this expects that `data` is `tx_type || rlp(tx)`
+    /// CAUTION: this expects that `data` is `tx-type || rlp(tx-data)`
     pub fn decode_enveloped_typed_transaction(
         data: &mut &[u8],
     ) -> alloy_rlp::Result<TransactionSigned> {
@@ -1260,13 +1261,13 @@ impl TransactionSigned {
     ///
     /// A raw transaction is either a legacy transaction or EIP-2718 typed transaction.
     ///
-    /// For legacy transactions, the format is encoded as: `rlp(tx)`. This format will start with a
-    /// RLP list header.
+    /// For legacy transactions, the format is encoded as: `rlp(tx-data)`. This format will start
+    /// with a RLP list header.
     ///
     /// For EIP-2718 typed transactions, the format is encoded as the type of the transaction
-    /// followed by the rlp of the transaction: `type || rlp(tx)`.
+    /// followed by the rlp of the transaction: `type || rlp(tx-data)`.
     ///
-    /// To decode EIP-4844 transactions in `eth_sendRawTransaction`, use
+    /// To decode EIP-4844 transactions from `eth_sendRawTransaction`, use
     /// [PooledTransactionsElement::decode_enveloped].
     pub fn decode_enveloped(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if data.is_empty() {
@@ -1309,6 +1310,14 @@ impl From<TransactionSignedEcRecovered> for TransactionSigned {
 }
 
 impl Encodable for TransactionSigned {
+    /// This encodes the transaction _with_ the signature, and an rlp header.
+    ///
+    /// For legacy transactions, it encodes the transaction data:
+    /// `rlp(tx-data)`
+    ///
+    /// For EIP-2718 typed transactions, it encodes the transaction type followed by the rlp of the
+    /// transaction:
+    /// `rlp(tx-type || rlp(tx-data))`
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         self.encode_inner(out, true);
     }
@@ -1318,29 +1327,37 @@ impl Encodable for TransactionSigned {
     }
 }
 
-/// This `Decodable` implementation only supports decoding rlp encoded transactions as it's used by
-/// p2p.
-///
-/// The p2p encoding format always includes an RLP header, although the type RLP header depends on
-/// whether or not the transaction is a legacy transaction.
-///
-/// If the transaction is a legacy transaction, it is just encoded as a RLP list: `rlp(tx)`.
-///
-/// If the transaction is a typed transaction, it is encoded as a RLP string:
-/// `rlp(type || rlp(tx))`
-///
-/// This cannot be used for decoding EIP-4844 transactions in p2p, since the EIP-4844 variant of
-/// [TransactionSigned] does not include the blob sidecar. For a general purpose decoding method
-/// suitable for decoding transactions from p2p, see [PooledTransactionsElement].
-///
-/// CAUTION: Due to a quirk in [Header::decode], this method will succeed even if a typed
-/// transaction is encoded in the RPC format, and does not start with a RLP header. This is because
-/// [Header::decode] does not advance the buffer, and returns a length-1 string header if the first
-/// byte is less than `0xf7`. This causes this decode implementation to pass unaltered buffer to
-/// [TransactionSigned::decode_enveloped_typed_transaction], which expects the RPC format. Despite
-/// this quirk, this should **not** be used for RPC methods that accept raw transactions.
 impl Decodable for TransactionSigned {
+    /// This `Decodable` implementation only supports decoding rlp encoded transactions as it's used
+    /// by p2p.
+    ///
+    /// The p2p encoding format always includes an RLP header, although the type RLP header depends
+    /// on whether or not the transaction is a legacy transaction.
+    ///
+    /// If the transaction is a legacy transaction, it is just encoded as a RLP list:
+    /// `rlp(tx-data)`.
+    ///
+    /// If the transaction is a typed transaction, it is encoded as a RLP string:
+    /// `rlp(tx-type || rlp(tx-data))`
+    ///
+    /// This can be used for decoding all signed transactions in p2p `BlockBodies` responses.
+    ///
+    /// This cannot be used for decoding EIP-4844 transactions in p2p `PooledTransactions`, since
+    /// the EIP-4844 variant of [TransactionSigned] does not include the blob sidecar.
+    ///
+    /// For a method suitable for decoding pooled transactions, see [PooledTransactionsElement].
+    ///
+    /// CAUTION: Due to a quirk in [Header::decode], this method will succeed even if a typed
+    /// transaction is encoded in this format, and does not start with a RLP header:
+    /// `tx-type || rlp(tx-data)`.
+    ///
+    /// This is because [Header::decode] does not advance the buffer, and returns a length-1 string
+    /// header if the first byte is less than `0xf7`.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        if buf.is_empty() {
+            return Err(RlpError::InputTooShort)
+        }
+
         // decode header
         let mut original_encoding = *buf;
         let header = Header::decode(buf)?;

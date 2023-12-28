@@ -321,17 +321,21 @@ impl PooledTransactionsElement {
 
 impl Encodable for PooledTransactionsElement {
     /// Encodes an enveloped post EIP-4844 [PooledTransactionsElement].
+    ///
+    /// For legacy transactions, this encodes the transaction as `rlp(tx-data)`.
+    ///
+    /// For EIP-2718 transactions, this encodes the transaction as `rlp(tx_type || rlp(tx-data)))`.
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             Self::Legacy { transaction, signature, .. } => {
                 transaction.encode_with_signature(signature, out)
             }
             Self::Eip2930 { transaction, signature, .. } => {
-                // encodes with header
+                // encodes with string header
                 transaction.encode_with_signature(signature, out, true)
             }
             Self::Eip1559 { transaction, signature, .. } => {
-                // encodes with header
+                // encodes with string header
                 transaction.encode_with_signature(signature, out, true)
             }
             Self::BlobTransaction(blob_tx) => {
@@ -377,7 +381,7 @@ impl Encodable for PooledTransactionsElement {
 impl Decodable for PooledTransactionsElement {
     /// Decodes an enveloped post EIP-4844 [PooledTransactionsElement].
     ///
-    /// CAUTION: this expects that `buf` is `[id, rlp(tx)]`
+    /// CAUTION: this expects that `buf` is `rlp(tx_type || rlp(tx-data))`
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         // From the EIP-4844 spec:
         // Blob transactions have two network representations. During transaction gossip responses

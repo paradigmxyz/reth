@@ -81,6 +81,11 @@ impl TxLegacy {
 
     /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
     /// hash.
+    ///
+    /// This encodes the transaction as:
+    /// `rlp(nonce, gas_price, gas_limit, to, value, input, v, r, s)`
+    ///
+    /// The `v` value is encoded according to EIP-155 if the `chain_id` is not `None`.
     pub(crate) fn encode_with_signature(&self, signature: &Signature, out: &mut dyn bytes::BufMut) {
         let payload_length =
             self.fields_len() + signature.payload_len_with_eip155_chain_id(self.chain_id);

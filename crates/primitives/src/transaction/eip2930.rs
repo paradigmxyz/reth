@@ -117,6 +117,9 @@ impl TxEip2930 {
 
     /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
     /// hash that for eip2718 does not require rlp header
+    ///
+    /// This encodes the transaction as:
+    /// `rlp(nonce, gas_price, gas_limit, to, value, input, access_list, y_parity, r, s)`
     pub(crate) fn encode_with_signature(
         &self,
         signature: &Signature,
