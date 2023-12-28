@@ -208,7 +208,7 @@ impl std::fmt::Debug for IpcServer {
 
 /// Data required by the server to handle requests received via an IPC connection
 #[derive(Debug, Clone)]
-#[allow(unused)]
+#[allow(dead_code)]
 pub(crate) struct ServiceData<L: Logger> {
     /// Registered server methods.
     pub(crate) methods: Methods,

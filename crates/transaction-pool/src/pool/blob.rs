@@ -1,4 +1,3 @@
-#![allow(dead_code, unused)]
 use crate::{
     identifier::TransactionId, pool::size::SizeTracker, traits::BestTransactionsAttributes,
     PoolTransaction, SubPoolLimit, ValidPoolTransaction,
@@ -85,7 +84,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     /// Returns all transactions that satisfy the given basefee and blob_fee.
     pub(crate) fn satisfy_attributes(
         &self,
-        best_transactions_attributes: BestTransactionsAttributes,
+        _best_transactions_attributes: BestTransactionsAttributes,
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
         Vec::new()
     }
@@ -102,7 +101,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
 
     /// Returns whether the pool is empty
     #[cfg(test)]
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub(crate) fn is_empty(&self) -> bool {
         self.by_id.is_empty()
     }

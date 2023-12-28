@@ -832,7 +832,7 @@ impl<T: TransactionOrdering> Drop for TxPool<T> {
 
 // Additional test impls
 #[cfg(any(test, feature = "test-utils"))]
-#[allow(missing_docs)]
+#[allow(dead_code)]
 impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) fn pending(&self) -> &PendingPool<T> {
         &self.pending_pool
@@ -896,7 +896,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Returns an iterator over all _unique_ hashes in the pool
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub(crate) fn hashes_iter(&self) -> impl Iterator<Item = TxHash> + '_ {
         self.by_hash.keys().copied()
     }
@@ -1141,7 +1141,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Returns a mutable iterator over all transactions for the given sender, starting with the
     /// lowest nonce
     #[cfg(test)]
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub(crate) fn txs_iter_mut(
         &mut self,
         sender: SenderId,
@@ -1655,7 +1655,7 @@ pub(crate) type InsertResult<T> = Result<InsertOk<T>, InsertErr<T>>;
 pub(crate) enum InsertErr<T: PoolTransaction> {
     /// Attempted to replace existing transaction, but was underpriced
     Underpriced {
-        #[allow(unused)]
+        #[allow(dead_code)]
         transaction: Arc<ValidPoolTransaction<T>>,
         existing: TxHash,
     },
@@ -1690,7 +1690,7 @@ pub(crate) struct InsertOk<T: PoolTransaction> {
     /// Where to move the transaction to.
     move_to: SubPool,
     /// Current state of the inserted tx.
-    #[allow(unused)]
+    #[allow(dead_code)]
     state: TxState,
     /// The transaction that was replaced by this.
     replaced_tx: Option<(Arc<ValidPoolTransaction<T>>, SubPool)>,

@@ -1,9 +1,8 @@
-#[allow(unused_imports)]
 use reth_db::{
     database::Database,
-    table::*,
+    table::{Compress, Encode, Table, TableRow},
     test_utils::create_test_rw_db_with_path,
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTxMut,
     DatabaseEnv,
 };
 use reth_primitives::{fs, Bytes};
@@ -19,7 +18,7 @@ const RANDOM_INDEXES: [usize; 10] = [23, 2, 42, 5, 3, 99, 54, 0, 33, 64];
 
 /// Returns bench vectors in the format: `Vec<(Key, EncodedKey, Value, CompressedValue)>`.
 #[allow(dead_code)]
-fn load_vectors<T: reth_db::table::Table>() -> Vec<(T::Key, Bytes, T::Value, Bytes)>
+pub(crate) fn load_vectors<T: Table>() -> Vec<(T::Key, Bytes, T::Value, Bytes)>
 where
     T: Default,
     T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
@@ -50,7 +49,7 @@ where
 /// Sets up a clear database at `bench_db_path`.
 #[allow(clippy::ptr_arg)]
 #[allow(dead_code)]
-fn set_up_db<T>(
+pub(crate) fn set_up_db<T>(
     bench_db_path: &Path,
     pair: &Vec<(<T as Table>::Key, Bytes, <T as Table>::Value, Bytes)>,
 ) -> DatabaseEnv

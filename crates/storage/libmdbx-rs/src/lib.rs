@@ -4,9 +4,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![allow(clippy::type_complexity)]
-// TODO(danipopes): add these warnings
-// #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+#![warn(missing_debug_implementations, unreachable_pub, rustdoc::all)] // TODO(danipopes): missing_docs
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 

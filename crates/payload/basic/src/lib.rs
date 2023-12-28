@@ -648,7 +648,7 @@ pub struct PayloadConfig {
     /// The chain spec.
     chain_spec: Arc<ChainSpec>,
     /// The rollup's compute pending block configuration option.
-    /// TODO(clabby): Implement this feature.
+    // TODO(clabby): Implement this feature.
     #[cfg(feature = "optimism")]
     #[allow(dead_code)]
     compute_pending_block: bool,

@@ -184,7 +184,6 @@ impl RpcServerArgs {
     /// Returns the handles for the launched regular RPC server(s) (if any) and the server handle
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
-    #[allow(clippy::too_many_arguments)]
     pub async fn start_servers<Reth, Engine, Conf>(
         &self,
         components: &Reth,

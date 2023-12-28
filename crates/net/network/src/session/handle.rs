@@ -253,7 +253,6 @@ pub enum ActiveSessionMessage {
         message: PeerMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
-    #[allow(unused)]
     InvalidMessage {
         /// Identifier of the remote peer.
         peer_id: PeerId,

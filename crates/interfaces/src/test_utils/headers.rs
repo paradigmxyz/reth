@@ -1,4 +1,5 @@
 //! Testing support for headers related interfaces.
+
 use crate::{
     consensus::{self, Consensus, ConsensusError},
     p2p::{
@@ -6,19 +7,16 @@ use crate::{
         error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
         headers::{
             client::{HeadersClient, HeadersRequest},
-            downloader::{validate_header_download, HeaderDownloader, SyncTarget},
+            downloader::{HeaderDownloader, SyncTarget},
             error::HeadersDownloaderResult,
         },
         priority::Priority,
     },
 };
-use futures::{future, Future, FutureExt, Stream, StreamExt};
-use reth_eth_wire::BlockHeaders;
+use futures::{Future, FutureExt, Stream, StreamExt};
 use reth_primitives::{
-    BlockHash, BlockNumber, Head, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader,
-    WithPeerId, B256, U256,
+    Header, HeadersDirection, PeerId, SealedBlock, SealedHeader, WithPeerId, U256,
 };
-use reth_rpc_types::engine::ForkchoiceState;
 use std::{
     fmt,
     pin::Pin,
@@ -28,12 +26,7 @@ use std::{
     },
     task::{ready, Context, Poll},
 };
-use tokio::sync::{
-    oneshot::{error::RecvError, Receiver},
-    watch,
-    watch::error::SendError,
-    Mutex,
-};
+use tokio::sync::Mutex;
 
 /// A test downloader which just returns the values that have been pushed to it.
 #[derive(Debug)]
@@ -67,11 +60,6 @@ impl TestHeaderDownloader {
             done: false,
         }
     }
-
-    /// Validate whether the header is valid in relation to it's parent
-    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
-        validate_header_download(&self.consensus, header, parent)
-    }
 }
 
 impl HeaderDownloader for TestHeaderDownloader {
@@ -94,7 +82,7 @@ impl Stream for TestHeaderDownloader {
                 return Poll::Ready(Some(Ok(std::mem::take(&mut this.queued_headers))))
             }
             if this.download.is_none() {
-                this.download.insert(this.create_download());
+                this.download = Some(this.create_download());
             }
 
             match ready!(this.download.as_mut().unwrap().poll_next_unpin(cx)) {
@@ -293,8 +281,8 @@ impl Consensus for TestConsensus {
 
     fn validate_header_against_parent(
         &self,
-        header: &SealedHeader,
-        parent: &SealedHeader,
+        _header: &SealedHeader,
+        _parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
             Err(consensus::ConsensusError::BaseFeeMissing)
@@ -305,8 +293,8 @@ impl Consensus for TestConsensus {
 
     fn validate_header_with_total_difficulty(
         &self,
-        header: &Header,
-        total_difficulty: U256,
+        _header: &Header,
+        _total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
             Err(consensus::ConsensusError::BaseFeeMissing)

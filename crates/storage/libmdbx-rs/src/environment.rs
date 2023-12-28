@@ -291,12 +291,12 @@ impl EnvironmentKind {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct TxnPtr(pub *mut ffi::MDBX_txn);
+pub(crate) struct TxnPtr(pub(crate) *mut ffi::MDBX_txn);
 unsafe impl Send for TxnPtr {}
 unsafe impl Sync for TxnPtr {}
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct EnvPtr(pub *mut ffi::MDBX_env);
+pub(crate) struct EnvPtr(pub(crate) *mut ffi::MDBX_env);
 unsafe impl Send for EnvPtr {}
 unsafe impl Sync for EnvPtr {}
 
@@ -309,6 +309,7 @@ pub(crate) enum TxnManagerMessage {
 /// Environment statistics.
 ///
 /// Contains information about the size and layout of an MDBX environment or database.
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct Stat(ffi::MDBX_stat);
 
@@ -362,6 +363,7 @@ impl Stat {
     }
 }
 
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct GeometryInfo(ffi::MDBX_envinfo__bindgen_ty_1);
 
@@ -374,6 +376,7 @@ impl GeometryInfo {
 /// Environment information.
 ///
 /// Contains environment information about the map size, readers, last txn id etc.
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct Info(ffi::MDBX_envinfo);
 
