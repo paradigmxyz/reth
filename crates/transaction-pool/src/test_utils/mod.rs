@@ -1,17 +1,16 @@
 //! Internal helpers for testing.
-#![allow(missing_docs, unused, missing_debug_implementations, unreachable_pub)]
+
+#![allow(missing_docs, missing_debug_implementations)]
+
+use crate::{blobstore::InMemoryBlobStore, noop::MockTransactionValidator, Pool};
 
 mod gen;
-mod mock;
-mod pool;
-
-use crate::{
-    blobstore::InMemoryBlobStore, noop::MockTransactionValidator, Pool, PoolTransaction,
-    TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
-};
 pub use gen::*;
+
+mod mock;
 pub use mock::*;
-use std::{marker::PhantomData, sync::Arc};
+
+mod pool;
 
 /// A [Pool] used for testing
 pub type TestPool =
@@ -21,6 +20,7 @@ pub type TestPool =
 pub fn testing_pool() -> TestPool {
     testing_pool_with_validator(MockTransactionValidator::default())
 }
+
 /// Returns a new [Pool] used for testing purposes
 pub fn testing_pool_with_validator(
     validator: MockTransactionValidator<MockTransaction>,

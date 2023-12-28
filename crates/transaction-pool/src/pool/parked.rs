@@ -207,7 +207,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
 
     /// Returns whether the pool is empty
     #[cfg(test)]
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub(crate) fn is_empty(&self) -> bool {
         self.by_id.is_empty()
     }

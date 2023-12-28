@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+
 use crate::{
     error::ECIESErrorImpl,
     mac::{HeaderBytes, MAC},

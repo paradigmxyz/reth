@@ -1,28 +1,3 @@
-#![allow(dead_code, unreachable_pub, missing_docs, unused_variables)]
-
-use std::{
-    collections::VecDeque,
-    fmt, io,
-    pin::Pin,
-    task::{ready, Context, Poll},
-    time::Duration,
-};
-
-use alloy_rlp::{Decodable, Encodable, Error as RlpError, EMPTY_LIST_CODE};
-use futures::{Sink, SinkExt, StreamExt};
-use pin_project::pin_project;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-use tokio_stream::Stream;
-use tracing::{debug, trace};
-
-use reth_codecs::derive_arbitrary;
-use reth_metrics::metrics::counter;
-use reth_primitives::{
-    bytes::{Buf, BufMut, Bytes, BytesMut},
-    hex, GotExpected,
-};
-
 use crate::{
     capability::SharedCapabilities,
     disconnect::CanDisconnect,
@@ -30,6 +5,27 @@ use crate::{
     pinger::{Pinger, PingerEvent},
     DisconnectReason, HelloMessage, HelloMessageWithProtocols,
 };
+use alloy_rlp::{Decodable, Encodable, Error as RlpError, EMPTY_LIST_CODE};
+use futures::{Sink, SinkExt, StreamExt};
+use pin_project::pin_project;
+use reth_codecs::derive_arbitrary;
+use reth_metrics::metrics::counter;
+use reth_primitives::{
+    bytes::{Buf, BufMut, Bytes, BytesMut},
+    hex, GotExpected,
+};
+use std::{
+    collections::VecDeque,
+    fmt, io,
+    pin::Pin,
+    task::{ready, Context, Poll},
+    time::Duration,
+};
+use tokio_stream::Stream;
+use tracing::{debug, trace};
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// [`MAX_PAYLOAD_SIZE`] is the maximum size of an uncompressed message payload.
 /// This is defined in [EIP-706](https://eips.ethereum.org/EIPS/eip-706).
@@ -56,6 +52,7 @@ const PING_INTERVAL: Duration = Duration::from_secs(60);
 
 /// [`GRACE_PERIOD`] determines the amount of time to wait for a peer to disconnect after sending a
 /// [`P2PMessage::Disconnect`] message.
+#[allow(dead_code)]
 const GRACE_PERIOD: Duration = Duration::from_secs(2);
 
 /// [`MAX_P2P_CAPACITY`] is the maximum number of messages that can be buffered to be sent in the
@@ -323,9 +320,12 @@ impl<S> P2PStream<S> {
     }
 }
 
+/// Gracefully disconnects the connection by sending a disconnect message and stop reading new
+/// messages.
 pub trait DisconnectP2P {
     /// Starts to gracefully disconnect.
     fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), P2PStreamError>;
+
     /// Returns `true` if the connection is about to disconnect.
     fn is_disconnecting(&self) -> bool;
 }
@@ -842,6 +842,8 @@ mod tests {
             P2PStreamError::Disconnected(reason) => assert_eq!(reason, expected_disconnect),
             e => panic!("unexpected err: {e}"),
         }
+
+        handle.await.unwrap();
     }
 
     #[tokio::test]

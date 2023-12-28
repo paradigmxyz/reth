@@ -177,7 +177,7 @@ pub(crate) struct ServerHandle(Arc<watch::Sender<()>>);
 
 impl ServerHandle {
     /// Wait for the server to stop.
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub(crate) async fn stopped(self) {
         self.0.closed().await
     }
@@ -201,7 +201,7 @@ impl ConnectionGuard {
         }
     }
 
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub(crate) fn available_connections(&self) -> usize {
         self.0.available_permits()
     }

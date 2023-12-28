@@ -545,6 +545,7 @@ impl TransactionPtr {
 ///
 /// Contains information about latency of commit stages.
 /// Inner struct stores this info in 1/65536 of seconds units.
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct CommitLatency(ffi::MDBX_commit_latency);
 

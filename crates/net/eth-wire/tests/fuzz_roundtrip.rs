@@ -38,7 +38,6 @@ macro_rules! fuzz_type_and_name {
     ( $x:ty, $fuzzname:ident ) => {
         /// Fuzzes the round-trip encoding of the type.
         #[test_fuzz]
-        #[allow(non_snake_case)]
         fn $fuzzname(thing: $x) {
             crate::roundtrip_fuzz::<$x>(thing)
         }

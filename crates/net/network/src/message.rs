@@ -56,14 +56,12 @@ pub enum PeerMessage {
     /// All `eth` request variants.
     EthRequest(PeerRequest),
     /// Other than eth namespace message
-    #[allow(unused)]
     Other(RawCapabilityMessage),
 }
 
 /// Request Variants that only target block related data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(missing_docs)]
-#[allow(clippy::enum_variant_names)]
 pub enum BlockRequest {
     GetBlockHeaders(GetBlockHeaders),
     GetBlockBodies(GetBlockBodies),
@@ -71,7 +69,7 @@ pub enum BlockRequest {
 
 /// Protocol related request messages that expect a response
 #[derive(Debug)]
-#[allow(clippy::enum_variant_names, missing_docs)]
+#[allow(missing_docs)]
 pub enum PeerRequest {
     /// Request Block headers from the peer.
     ///
@@ -265,15 +263,8 @@ impl PeerResponseResult {
     }
 
     /// Returns whether this result is an error.
-    #[allow(unused)]
     pub fn is_err(&self) -> bool {
-        match self {
-            PeerResponseResult::BlockHeaders(res) => res.is_err(),
-            PeerResponseResult::BlockBodies(res) => res.is_err(),
-            PeerResponseResult::PooledTransactions(res) => res.is_err(),
-            PeerResponseResult::NodeData(res) => res.is_err(),
-            PeerResponseResult::Receipts(res) => res.is_err(),
-        }
+        self.err().is_some()
     }
 }
 
