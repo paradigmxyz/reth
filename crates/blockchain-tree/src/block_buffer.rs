@@ -73,7 +73,7 @@ impl BlockBuffer {
         let hash = block.hash;
 
         self.parent_to_child.entry(block.parent_hash).or_default().insert(hash);
-        self.earliest_blocks.entry(block.number).or_default().insert(hash); // TODO: fix removal.
+        self.earliest_blocks.entry(block.number).or_default().insert(hash);
         self.blocks.insert(hash, block);
 
         if let Some((evicted_hash, _)) = self.lru.push(hash, ()).filter(|(b, _)| *b != hash) {
