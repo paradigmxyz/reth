@@ -24,21 +24,21 @@ impl TrieBranchNode {
     }
 }
 
-/// Represents a node within an account.
+/// Represents a variant of an account node.
 #[derive(Debug)]
 pub(crate) enum AccountNode {
-    /// Branch node within the account.
+    /// Branch node.
     Branch(TrieBranchNode),
-    /// Leaf node within the account.
+    /// Leaf node.
     Leaf(B256, Account),
 }
 
-/// Represents a node within storage.
+/// Represents a variant of a storage node.
 #[derive(Debug)]
 pub(crate) enum StorageNode {
-    /// Branch node within storage.
+    /// Branch node.
     Branch(TrieBranchNode),
-    /// Leaf node within storage.
+    /// Leaf node.
     Leaf(B256, U256),
 }
 
