@@ -1,0 +1,24 @@
+[package]
+name = "reth-optimism-payload-builder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "A payload builder for op-reth that builds optimistic payloads."
+
+[dependencies]
+# reth
+reth-primitives = { workspace = true, features = ["optimism"] }
+reth-revm = { workspace = true, features = ["optimism"] }
+reth-transaction-pool = { workspace = true, features = ["optimism"] }
+reth-provider = { workspace = true, features = ["optimism"] }
+reth-payload-builder = { workspace = true, features = ["optimism"] }
+reth-basic-payload-builder.workspace = true
+
+# ethereum
+revm.workspace = true
+
+# misc
+tracing.workspace = true

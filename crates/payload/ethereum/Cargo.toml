@@ -1,12 +1,12 @@
 [package]
-name = "reth-basic-payload-builder"
+name = "reth-ethereum-payload-builder"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "A basic payload builder for reth that uses the txpool API to build payloads."
+description = "A basic ethereum payload builder for reth that uses the txpool API to build payloads."
 
 [dependencies]
 # reth
@@ -15,21 +15,11 @@ reth-revm.workspace = true
 reth-transaction-pool.workspace = true
 reth-provider.workspace = true
 reth-payload-builder.workspace = true
-reth-tasks.workspace = true
+reth-basic-payload-builder.workspace = true
 reth-interfaces.workspace = true
 
 # ethereum
-alloy-rlp.workspace = true
 revm.workspace = true
-
-# async
-tokio = { workspace = true, features = ["sync", "time"] }
-futures-core = "0.3"
-futures-util.workspace = true
-
-# metrics
-reth-metrics.workspace = true
-metrics.workspace = true
 
 # misc
 tracing.workspace = true

@@ -1,8 +1,101 @@
+//! A basic payload generator for reth.
+
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![warn(
+    missing_debug_implementations,
+    missing_docs,
+    unused_crate_dependencies,
+    unreachable_pub,
+    rustdoc::all
+)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 //! Optimism's [PayloadBuilder] implementation.
 
-use super::*;
-use reth_payload_builder::error::OptimismPayloadBuilderError;
-use reth_primitives::Hardfork;
+use reth_basic_payload_builder::*;
+use reth_payload_builder::{
+    error::{OptimismPayloadBuilderError, PayloadBuilderError},
+    BuiltPayload,
+};
+use reth_primitives::{
+    constants::BEACON_NONCE,
+    proofs,
+    revm::{compat::into_reth_log, env::tx_env_with_recovered},
+    Block, Hardfork, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH,
+    U256,
+};
+use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
+use reth_revm::database::StateProviderDatabase;
+use reth_transaction_pool::TransactionPool;
+use revm::{
+    db::states::bundle_state::BundleRetention,
+    primitives::{EVMError, Env, InvalidTransaction, ResultAndState},
+    DatabaseCommit, State,
+};
+use std::sync::Arc;
+use tracing::{debug, trace, warn};
+
+/// Optimism's payload builder
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct OptimismPayloadBuilder {
+    /// The rollup's compute pending block configuration option.
+    /// TODO(clabby): Implement this feature.
+    compute_pending_block: bool,
+}
+
+impl OptimismPayloadBuilder {
+    /// Sets the rollup's compute pending block configuration option.
+    pub fn set_compute_pending_block(mut self, compute_pending_block: bool) -> Self {
+        self.compute_pending_block = compute_pending_block;
+        self
+    }
+
+    /// Enables the rollup's compute pending block configuration option.
+    pub fn compute_pending_block(self) -> Self {
+        self.set_compute_pending_block(true)
+    }
+
+    /// Returns the rollup's compute pending block configuration option.
+    pub fn is_compute_pending_block(&self) -> bool {
+        self.compute_pending_block
+    }
+}
+
+/// Implementation of the [PayloadBuilder] trait for [OptimismPayloadBuilder].
+impl<Pool, Client> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder
+where
+    Client: StateProviderFactory,
+    Pool: TransactionPool,
+{
+    fn try_build(
+        &self,
+        args: BuildArguments<Pool, Client>,
+    ) -> Result<BuildOutcome, PayloadBuilderError> {
+        optimism_payload_builder(args, self.compute_pending_block)
+    }
+
+    fn on_missing_payload(&self, args: BuildArguments<Pool, Client>) -> Option<Arc<BuiltPayload>> {
+        // In Optimism, the PayloadAttributes can specify a `no_tx_pool` option that implies we
+        // should not pull transactions from the tx pool. In this case, we build the payload
+        // upfront with the list of transactions sent in the attributes without caring about
+        // the results of the polling job, if a best payload has not already been built.
+        if args.config.attributes.optimism_payload_attributes.no_tx_pool {
+            if let Ok(BuildOutcome::Better { payload, .. }) = self.try_build(args) {
+                trace!(target: "payload_builder", "[OPTIMISM] Forced best payload");
+                let payload = Arc::new(payload);
+                return Some(payload)
+            }
+        }
+
+        None
+    }
+}
 
 /// Constructs an Ethereum transaction payload from the transactions sent through the
 /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -15,6 +108,7 @@ use reth_primitives::Hardfork;
 #[inline]
 pub(crate) fn optimism_payload_builder<Pool, Client>(
     args: BuildArguments<Pool, Client>,
+    _compute_pending_block: bool,
 ) -> Result<BuildOutcome, PayloadBuilderError>
 where
     Client: StateProviderFactory,
@@ -135,12 +229,10 @@ where
             success: result.is_success(),
             cumulative_gas_used,
             logs: result.logs().into_iter().map(into_reth_log).collect(),
-            #[cfg(feature = "optimism")]
             deposit_nonce: depositor.map(|account| account.nonce),
             // The deposit receipt version was introduced in Canyon to indicate an update to how
             // receipt hashes should be computed when set. The state transition process
             // ensures this is only set for post-Canyon deposit transactions.
-            #[cfg(feature = "optimism")]
             deposit_receipt_version: chain_spec
                 .is_fork_active_at_timestamp(Hardfork::Canyon, attributes.timestamp)
                 .then_some(1),
@@ -218,9 +310,7 @@ where
                 success: result.is_success(),
                 cumulative_gas_used,
                 logs: result.logs().into_iter().map(into_reth_log).collect(),
-                #[cfg(feature = "optimism")]
                 deposit_nonce: None,
-                #[cfg(feature = "optimism")]
                 deposit_receipt_version: None,
             }));
 
@@ -304,23 +394,4 @@ where
     payload.extend_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
-}
-
-/// Optimism's payload builder
-#[derive(Debug, Clone, Copy, Default)]
-#[non_exhaustive]
-pub struct OptimismPayloadBuilder;
-
-/// Implementation of the [PayloadBuilder] trait for [OptimismPayloadBuilder].
-impl<Pool, Client> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder
-where
-    Client: StateProviderFactory,
-    Pool: TransactionPool,
-{
-    fn try_build(
-        &self,
-        args: BuildArguments<Pool, Client>,
-    ) -> Result<BuildOutcome, PayloadBuilderError> {
-        optimism_payload_builder(args)
-    }
 }
