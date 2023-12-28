@@ -1,5 +1,6 @@
+//! Relay API bindings: <https://flashbots.github.io/relay-specs/>
+
 #![allow(missing_docs)]
-//! Relay API bindings <https://flashbots.github.io/relay-specs/>
 
 use crate::{
     beacon::{BlsPublicKey, BlsSignature},

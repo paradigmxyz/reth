@@ -1,7 +1,8 @@
-#![allow(missing_docs)]
 //! The [`TransactionRequest`][crate::TransactionRequest] is a universal representation for a
 //! transaction deserialized from the json input of an RPC call. Depending on what fields are set,
 //! it can be converted into the container type [`TypedTransactionRequest`].
+
+#![allow(missing_docs)]
 
 use crate::{
     eth::transaction::AccessList,
