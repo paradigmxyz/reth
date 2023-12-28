@@ -95,7 +95,7 @@ impl BlockBuffer {
     pub fn remove_with_children(&mut self, parent_hash: &BlockHash) -> Vec<SealedBlockWithSenders> {
         // remove parent block if present
         let mut removed = Vec::new();
-        if let Some(block) = self.remove_block(&parent_hash) {
+        if let Some(block) = self.remove_block(parent_hash) {
             removed.push(block);
         }
 
