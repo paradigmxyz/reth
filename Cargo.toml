@@ -63,6 +63,10 @@ default-members = ["bin/reth"]
 # https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html
 resolver = "2"
 
+[workspace.lints]
+warn = ["missing_debug_implementations", "missing_docs", "unreachable_pub", "rustdoc::all"]
+deny = ["unused_must_use", "rust_2018_idioms"]
+
 [workspace.package]
 version = "0.1.0-alpha.13"
 edition = "2021"
