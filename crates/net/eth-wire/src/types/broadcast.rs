@@ -1,4 +1,5 @@
 //! Types for broadcasting new data.
+
 use crate::{EthMessage, EthVersion};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,

@@ -1,4 +1,5 @@
 //! Implementation of [`BlockchainTree`]
+
 use crate::{
     canonical_chain::CanonicalChain,
     chain::BlockKind,
