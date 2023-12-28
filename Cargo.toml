@@ -119,7 +119,6 @@ reth-net-nat = { path = "crates/net/nat" }
 reth-network = { path = "crates/net/network" }
 reth-network-api = { path = "crates/net/network-api" }
 reth-nippy-jar = { path = "crates/storage/nippy-jar" }
-reth-optimism-payload-builder = { path = "crates/payload/optimism" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-validator = { path = "crates/payload/validator" }
 reth-primitives = { path = "crates/primitives" }
