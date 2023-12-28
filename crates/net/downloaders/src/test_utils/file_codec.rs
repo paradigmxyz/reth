@@ -1,4 +1,5 @@
 //! Codec for reading raw block bodies from a file.
+
 use super::FileClientError;
 use alloy_rlp::{Decodable, Encodable};
 use reth_primitives::{

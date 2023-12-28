@@ -1,4 +1,5 @@
-//! CLI command to show configs
+//! CLI command to show configs.
+
 use std::path::PathBuf;
 
 use clap::Parser;

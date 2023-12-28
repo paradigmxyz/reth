@@ -1,6 +1,7 @@
 //! Main node command
 //!
 //! Starts the client
+
 use crate::{
     args::{
         get_secret_key,

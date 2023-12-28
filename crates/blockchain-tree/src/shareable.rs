@@ -1,4 +1,5 @@
 //! Wrapper around BlockchainTree that allows for it to be shared.
+
 use super::BlockchainTree;
 use parking_lot::RwLock;
 use reth_db::database::Database;

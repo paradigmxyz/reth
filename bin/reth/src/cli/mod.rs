@@ -1,4 +1,5 @@
 //! CLI definition and entrypoint to executable
+
 use crate::{
     args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
     chain,

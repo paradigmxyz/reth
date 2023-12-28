@@ -1,4 +1,5 @@
 //! P2P Debugging tool
+
 use crate::{
     args::{
         get_secret_key,

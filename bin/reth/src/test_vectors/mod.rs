@@ -1,4 +1,5 @@
 //! Command for generating test vectors.
+
 use clap::{Parser, Subcommand};
 
 mod tables;

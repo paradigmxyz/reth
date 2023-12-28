@@ -1,4 +1,5 @@
 //! Implements data structures specific to the database
+
 use crate::{
     table::{Decode, Encode},
     DatabaseError,

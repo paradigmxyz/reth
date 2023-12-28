@@ -1,4 +1,5 @@
 //! reth data directories.
+
 use crate::utils::parse_path;
 use reth_primitives::Chain;
 use std::{
