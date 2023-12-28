@@ -1,5 +1,6 @@
+//! Geth tracing types.
+
 #![allow(missing_docs)]
-//! Geth tracing types
 
 use crate::{state::StateOverride, BlockOverrides};
 use alloy_primitives::{Bytes, B256, U256};

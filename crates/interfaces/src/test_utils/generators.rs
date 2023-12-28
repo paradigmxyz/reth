@@ -4,15 +4,15 @@ use rand::{
 };
 use reth_primitives::{
     proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, Log, Receipt, SealedBlock,
-    SealedHeader, Signature, StorageEntry, Transaction, TransactionKind, TransactionSigned,
-    TxLegacy, B256, U256,
+    SealedHeader, StorageEntry, Transaction, TransactionKind, TransactionSigned, TxLegacy, B256,
+    U256,
 };
-use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey, SECP256K1};
+use secp256k1::{KeyPair, Secp256k1};
 use std::{
     cmp::{max, min},
     collections::{hash_map::DefaultHasher, BTreeMap},
     hash::Hasher,
-    ops::{Range, RangeInclusive, Sub},
+    ops::{Range, RangeInclusive},
 };
 
 // TODO(onbjerg): Maybe we should split this off to its own crate, or move the helpers to the
@@ -220,7 +220,7 @@ where
 
     let mut changesets = Vec::new();
 
-    blocks.into_iter().for_each(|block| {
+    for _block in blocks {
         let mut changeset = Vec::new();
         let (from, to, mut transfer, new_entries) = random_account_change(
             rng,
@@ -263,7 +263,7 @@ where
         prev_to.balance = prev_to.balance.wrapping_add(transfer);
 
         changesets.push(changeset);
-    });
+    }
 
     let final_state = state
         .into_iter()
@@ -388,7 +388,7 @@ pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: O
 mod test {
     use super::*;
     use reth_primitives::{
-        hex, keccak256, public_key_to_address, AccessList, Address, TransactionKind, TxEip1559,
+        hex, public_key_to_address, AccessList, Signature, TransactionKind, TxEip1559,
     };
     use secp256k1::KeyPair;
     use std::str::FromStr;

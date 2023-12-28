@@ -1,9 +1,6 @@
 #![allow(missing_docs)]
 
-use crate::{
-    test_utils::{MockTransactionFactory, MockValidTx},
-    EthPooledTransaction,
-};
+use crate::EthPooledTransaction;
 use rand::Rng;
 use reth_primitives::{
     constants::MIN_PROTOCOL_BASE_FEE, sign_message, AccessList, Address, Bytes,
@@ -26,7 +23,7 @@ impl<R: Rng> TransactionGenerator<R> {
     }
 
     /// Generates random random signers
-    pub fn with_num_signers(mut rng: R, num_signers: usize) -> Self {
+    pub fn with_num_signers(rng: R, num_signers: usize) -> Self {
         let mut signer_keys = Vec::with_capacity(num_signers);
         for _ in 0..num_signers {
             signer_keys.push(B256::random());
@@ -118,10 +115,10 @@ impl TransactionBuilder {
             nonce,
             gas_limit,
             max_fee_per_gas,
-            max_priority_fee_per_gas,
+            max_priority_fee_per_gas: _,
             to,
             value,
-            access_list,
+            access_list: _,
             input,
         } = self;
         let tx: Transaction = TxLegacy {

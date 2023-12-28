@@ -3,25 +3,19 @@ use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
-    table::{Table, TableRow},
+    table::Table,
     tables,
     test_utils::{create_test_rw_db, create_test_rw_db_with_path, TempDatabase},
     transaction::{DbTx, DbTxMut},
     DatabaseEnv, DatabaseError as DbError,
 };
-use reth_interfaces::{provider::ProviderResult, test_utils::generators::ChangeSet, RethResult};
+use reth_interfaces::{provider::ProviderResult, test_utils::generators::ChangeSet};
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader, StorageEntry,
     TxHash, TxNumber, B256, MAINNET, U256,
 };
-use reth_provider::{DatabaseProviderRO, DatabaseProviderRW, HistoryWriter, ProviderFactory};
-use std::{
-    borrow::Borrow,
-    collections::BTreeMap,
-    ops::{Deref, RangeInclusive},
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use reth_provider::{HistoryWriter, ProviderFactory};
+use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 /// Test database that is used for testing stage implementations.
 #[derive(Debug)]
@@ -46,7 +40,7 @@ impl TestStageDB {
     where
         F: FnOnce(&<DatabaseEnv as Database>::TXMut) -> ProviderResult<()>,
     {
-        let mut tx = self.factory.provider_rw()?;
+        let tx = self.factory.provider_rw()?;
         f(tx.tx_ref())?;
         tx.commit().expect("failed to commit");
         Ok(())
@@ -245,18 +239,20 @@ impl TestStageDB {
                     let hashed_entry = StorageEntry { key: keccak256(entry.key), ..entry };
 
                     let mut cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-                    if let Some(e) = cursor
+                    if cursor
                         .seek_by_key_subkey(address, entry.key)?
                         .filter(|e| e.key == entry.key)
+                        .is_some()
                     {
                         cursor.delete_current()?;
                     }
                     cursor.upsert(address, entry)?;
 
                     let mut cursor = tx.cursor_dup_write::<tables::HashedStorage>()?;
-                    if let Some(e) = cursor
+                    if cursor
                         .seek_by_key_subkey(hashed_address, hashed_entry.key)?
                         .filter(|e| e.key == hashed_entry.key)
+                        .is_some()
                     {
                         cursor.delete_current()?;
                     }
@@ -299,7 +295,7 @@ impl TestStageDB {
         })
     }
 
-    pub fn insert_history<I>(&self, changesets: I, block_offset: Option<u64>) -> ProviderResult<()>
+    pub fn insert_history<I>(&self, changesets: I, _block_offset: Option<u64>) -> ProviderResult<()>
     where
         I: IntoIterator<Item = ChangeSet>,
     {
