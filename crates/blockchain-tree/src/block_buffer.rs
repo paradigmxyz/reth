@@ -11,8 +11,8 @@ use std::{
 ///
 /// The buffer has three main functionalities:
 /// * [BlockBuffer::insert_block] for inserting blocks inside the buffer.
-/// * [BlockBuffer::remove_with_children] for connecting blocks if the parent gets received and
-///   inserted.
+/// * [BlockBuffer::remove_block_with_children] for connecting blocks if the parent gets received
+///   and inserted.
 /// * [BlockBuffer::remove_old_blocks] to remove old blocks that precede the finalized number.
 ///
 /// Note: Buffer is limited by number of blocks that it can contain and eviction of the block
