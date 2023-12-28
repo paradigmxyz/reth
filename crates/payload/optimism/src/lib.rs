@@ -1,4 +1,4 @@
-//! A basic payload generator for reth.
+//! Optimism's payload builder implementation.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -8,8 +8,6 @@
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-
-//! Optimism's [PayloadBuilder] implementation.
 
 #[cfg(feature = "optimism")]
 pub use builder::*;

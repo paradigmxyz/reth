@@ -1,4 +1,4 @@
-//! A basic payload generator for reth.
+//! A basic Ethereum payload builder implementation.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
