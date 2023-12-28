@@ -184,6 +184,7 @@ where
 impl<Gen, St> PayloadBuilderService<Gen, St>
 where
     Gen: PayloadJobGenerator,
+    <Gen as PayloadJobGenerator>::Job: PayloadJob<BuiltPayload = BuiltPayload>,
 {
     /// Creates a new payload builder service and returns the [PayloadBuilderHandle] to interact
     /// with it.
@@ -283,6 +284,7 @@ impl<Gen, St> Future for PayloadBuilderService<Gen, St>
 where
     Gen: PayloadJobGenerator + Unpin + 'static,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
+    <Gen as PayloadJobGenerator>::Job: PayloadJob<BuiltPayload = BuiltPayload>,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 {
     type Output = ();

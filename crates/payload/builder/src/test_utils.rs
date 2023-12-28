@@ -63,6 +63,7 @@ impl Future for TestPayloadJob {
 }
 
 impl PayloadJob for TestPayloadJob {
+    type BuiltPayload = BuiltPayload;
     type ResolvePayloadFuture =
         futures_util::future::Ready<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
 
