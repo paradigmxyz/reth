@@ -140,17 +140,18 @@ pub trait RethNodeCommandConfig: fmt::Debug {
             .extradata(conf.extradata_rlp_bytes())
             .max_gas_limit(conf.max_gas_limit());
 
+        // no extradata for optimism
         #[cfg(feature = "optimism")]
-        let payload_job_config =
-            payload_job_config.compute_pending_block(conf.compute_pending_block());
+        let payload_job_config = payload_job_config.extradata(Default::default());
 
         // The default payload builder is implemented on the unit type.
         #[cfg(not(feature = "optimism"))]
-        let payload_builder = reth_basic_payload_builder::EthereumPayloadBuilder::default();
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
 
         // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
         #[cfg(feature = "optimism")]
-        let payload_builder = reth_basic_payload_builder::OptimismPayloadBuilder::default();
+        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
+            .set_compute_pending_block(conf.compute_pending_block());
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             components.provider(),

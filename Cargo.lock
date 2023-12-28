@@ -5624,12 +5624,14 @@ dependencies = [
  "reth-db",
  "reth-discv4",
  "reth-downloaders",
+ "reth-ethereum-payload-builder",
  "reth-interfaces",
  "reth-metrics",
  "reth-net-nat",
  "reth-network",
  "reth-network-api",
  "reth-nippy-jar",
+ "reth-optimism-payload-builder",
  "reth-payload-builder",
  "reth-payload-validator",
  "reth-primitives",
@@ -6006,6 +6008,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-ethereum-payload-builder"
+version = "0.1.0-alpha.13"
+dependencies = [
+ "reth-basic-payload-builder",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-provider",
+ "reth-revm",
+ "reth-transaction-pool",
+ "revm",
+ "tracing",
+]
+
+[[package]]
 name = "reth-interfaces"
 version = "0.1.0-alpha.13"
 dependencies = [
@@ -6204,6 +6220,20 @@ dependencies = [
  "thiserror",
  "tracing",
  "zstd 0.12.4",
+]
+
+[[package]]
+name = "reth-optimism-payload-builder"
+version = "0.1.0-alpha.13"
+dependencies = [
+ "reth-basic-payload-builder",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-provider",
+ "reth-revm",
+ "reth-transaction-pool",
+ "revm",
+ "tracing",
 ]
 
 [[package]]
