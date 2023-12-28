@@ -74,8 +74,13 @@ impl<DB: StateProvider> Database for StateProviderDatabase<DB> {
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
     /// Note: It safely casts the `number` to `u64`.
     fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
-        // The `number` represents the block number, so it is safe to cast it to u64.
-        Ok(self.0.block_hash(number.try_into().unwrap())?.unwrap_or_default())
+        // Attempt to convert U256 to u64
+        let block_number = match number.try_into() {
+            Ok(value) => value,
+            Err(_) => return Err(Self::Error::BlockNumberOverflow(number)),
+        };
+
+        Ok(self.0.block_hash(block_number)?.unwrap_or_default())
     }
 }
 
@@ -112,9 +117,14 @@ impl<DB: StateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Retrieves the block hash for a given block number.
     ///
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
-    /// Note: This operation may potentially be unsafe due to the unwrap operation.
     fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
-        // Note: this unwrap is potentially unsafe
-        Ok(self.0.block_hash(number.try_into().unwrap())?.unwrap_or_default())
+        // Attempt to convert U256 to u64
+        let block_number = match number.try_into() {
+            Ok(value) => value,
+            Err(_) => return Err(Self::Error::BlockNumberOverflow(number)),
+        };
+
+        // Get the block hash or default hash
+        Ok(self.0.block_hash(block_number)?.unwrap_or_default())
     }
 }
