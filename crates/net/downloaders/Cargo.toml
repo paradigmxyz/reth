@@ -53,3 +53,6 @@ tempfile.workspace = true
 
 [features]
 test-utils = ["dep:alloy-rlp", "dep:tempfile", "dep:itertools", "reth-db/test-utils", "reth-interfaces/test-utils"]
+
+[lints]
+workspace = true
