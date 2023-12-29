@@ -172,7 +172,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         }
 
         // check if block is disconnected
-        if let Some(block) = self.state.buffered_blocks.block(block) {
+        if let Some(block) = self.state.buffered_blocks.block(&block.hash) {
             return Ok(Some(BlockStatus::Disconnected {
                 missing_ancestor: block.parent_num_hash(),
             }));
@@ -328,7 +328,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         }
 
         // if there is a parent inside the buffer, validate against it.
-        if let Some(buffered_parent) = self.state.buffered_blocks.block(parent) {
+        if let Some(buffered_parent) = self.state.buffered_blocks.block(&parent.hash) {
             self.externals
                 .consensus
                 .validate_header_against_parent(&block, buffered_parent)
@@ -804,7 +804,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             }
         }
         // clean block buffer.
-        self.state.buffered_blocks.clean_old_blocks(finalized_block);
+        self.state.buffered_blocks.remove_old_blocks(finalized_block);
     }
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
@@ -890,7 +890,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         trace!(target: "blockchain_tree", ?new_block, "try_connect_buffered_blocks");
 
         // first remove all the children of the new block from the buffer
-        let include_blocks = self.state.buffered_blocks.remove_with_children(new_block);
+        let include_blocks = self.state.buffered_blocks.remove_block_with_children(&new_block.hash);
         // then try to reinsert them into the tree
         for block in include_blocks.into_iter() {
             // dont fail on error, just ignore the block.
@@ -1282,7 +1282,6 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block_buffer::BufferedBlocks;
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
     use reth_db::{tables, test_utils::TempDatabase, transaction::DbTxMut, DatabaseEnv};
@@ -1368,7 +1367,7 @@ mod tests {
         /// Pending blocks
         pending_blocks: Option<(BlockNumber, HashSet<BlockHash>)>,
         /// Buffered blocks
-        buffered_blocks: Option<BufferedBlocks>,
+        buffered_blocks: Option<HashMap<BlockHash, SealedBlockWithSenders>>,
     }
 
     impl TreeTester {
@@ -1376,10 +1375,12 @@ mod tests {
             self.chain_num = Some(chain_num);
             self
         }
+
         fn with_block_to_chain(mut self, block_to_chain: HashMap<BlockHash, BlockChainId>) -> Self {
             self.block_to_chain = Some(block_to_chain);
             self
         }
+
         fn with_fork_to_child(
             mut self,
             fork_to_child: HashMap<BlockHash, HashSet<BlockHash>>,
@@ -1388,7 +1389,10 @@ mod tests {
             self
         }
 
-        fn with_buffered_blocks(mut self, buffered_blocks: BufferedBlocks) -> Self {
+        fn with_buffered_blocks(
+            mut self,
+            buffered_blocks: HashMap<BlockHash, SealedBlockWithSenders>,
+        ) -> Self {
             self.buffered_blocks = Some(buffered_blocks);
             self
         }
@@ -1659,10 +1663,7 @@ mod tests {
         // |
 
         TreeTester::default()
-            .with_buffered_blocks(BTreeMap::from([(
-                block2.number,
-                HashMap::from([(block2.hash(), block2.clone())]),
-            )]))
+            .with_buffered_blocks(HashMap::from([(block2.hash(), block2.clone())]))
             .assert(&tree);
 
         assert_eq!(
@@ -1959,10 +1960,7 @@ mod tests {
         );
 
         TreeTester::default()
-            .with_buffered_blocks(BTreeMap::from([(
-                block2b.number,
-                HashMap::from([(block2b.hash(), block2b.clone())]),
-            )]))
+            .with_buffered_blocks(HashMap::from([(block2b.hash(), block2b.clone())]))
             .assert(&tree);
 
         // update canonical block to b2, this would make b2a be removed
@@ -1979,10 +1977,10 @@ mod tests {
         // |
         TreeTester::default()
             .with_chain_num(0)
-            .with_block_to_chain(HashMap::from([]))
-            .with_fork_to_child(HashMap::from([]))
-            .with_pending_blocks((block2.number + 1, HashSet::from([])))
-            .with_buffered_blocks(BTreeMap::from([]))
+            .with_block_to_chain(HashMap::default())
+            .with_fork_to_child(HashMap::default())
+            .with_pending_blocks((block2.number + 1, HashSet::default()))
+            .with_buffered_blocks(HashMap::default())
             .assert(&tree);
     }
 }
