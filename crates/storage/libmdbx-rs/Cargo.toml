@@ -40,3 +40,6 @@ harness = false
 [[bench]]
 name = "transaction"
 harness = false
+
+[lints]
+workspace = true
