@@ -14,3 +14,6 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["e
 tracing-appender.workspace = true
 tracing-journald = "0.3"
 rolling-file = "0.2.0"
+
+[lints]
+workspace = true
