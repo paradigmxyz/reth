@@ -35,3 +35,6 @@ assert_matches.workspace = true
 
 [features]
 clap = ["dep:clap"]
+
+[lints]
+workspace = true
