@@ -29,3 +29,6 @@ tokio = { workspace = true, features = ["macros"] }
 [features]
 default = ["serde"]
 serde = ["dep:serde_with"]
+
+[lints]
+workspace = true
