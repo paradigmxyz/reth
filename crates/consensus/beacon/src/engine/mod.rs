@@ -20,7 +20,7 @@ use reth_interfaces::{
     sync::{NetworkSyncUpdater, SyncState},
     RethError, RethResult,
 };
-use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
+use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderTrait};
 use reth_primitives::{
     constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
     SealedHeader, B256,

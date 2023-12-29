@@ -95,69 +95,6 @@ where
     pub fn new(to_service: mpsc::UnboundedSender<PayloadServiceCommand<T>>) -> Self {
         Self { to_service }
     }
-
-    /// Resolves the payload job and returns the best payload that has been built so far.
-    ///
-    /// Note: depending on the installed [PayloadJobGenerator], this may or may not terminate the
-    /// job, See [PayloadJob::resolve].
-    pub async fn resolve(
-        &self,
-        id: PayloadId,
-    ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
-        let (tx, rx) = oneshot::channel();
-        self.to_service.send(PayloadServiceCommand::Resolve(id, tx)).ok()?;
-        match rx.await.transpose()? {
-            Ok(fut) => Some(fut.await),
-            Err(e) => Some(Err(e.into())),
-        }
-    }
-
-    /// Returns the best payload for the given identifier.
-    pub async fn best_payload(
-        &self,
-        id: PayloadId,
-    ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
-        let (tx, rx) = oneshot::channel();
-        self.to_service.send(PayloadServiceCommand::BestPayload(id, tx)).ok()?;
-        rx.await.ok()?
-    }
-
-    /// Returns the payload attributes associated with the given identifier.
-    ///
-    /// Note: this returns the attributes of the payload and does not resolve the job.
-    pub async fn payload_attributes(
-        &self,
-        id: PayloadId,
-    ) -> Option<Result<T, PayloadBuilderError>> {
-        let (tx, rx) = oneshot::channel();
-        self.to_service.send(PayloadServiceCommand::PayloadAttributes(id, tx)).ok()?;
-        rx.await.ok()?
-    }
-
-    /// Sends a message to the service to start building a new payload for the given payload.
-    ///
-    /// This is the same as [PayloadBuilderHandle::new_payload] but does not wait for the result and
-    /// returns the receiver instead
-    pub fn send_new_payload(
-        &self,
-        attr: PayloadBuilderAttributes,
-    ) -> oneshot::Receiver<Result<PayloadId, PayloadBuilderError>> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(PayloadServiceCommand::BuildNewPayload(attr, tx));
-        rx
-    }
-
-    /// Starts building a new payload for the given payload attributes.
-    ///
-    /// Returns the identifier of the payload.
-    ///
-    /// Note: if there's already payload in progress with same identifier, it will be returned.
-    pub async fn new_payload(
-        &self,
-        attr: PayloadBuilderAttributes,
-    ) -> Result<PayloadId, PayloadBuilderError> {
-        self.send_new_payload(attr).await?
-    }
 }
 
 #[async_trait::async_trait]
