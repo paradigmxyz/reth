@@ -84,3 +84,6 @@ test-utils = ["reth-interfaces/test-utils", "reth-db/test-utils"]
 name = "criterion"
 harness = false
 required-features = ["test-utils"]
+
+[lints]
+workspace = true
