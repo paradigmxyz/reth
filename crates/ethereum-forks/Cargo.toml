@@ -39,3 +39,6 @@ proptest-derive.workspace = true
 [features]
 arbitrary = ["dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 optimism = ["reth-codecs/optimism"]
+
+[lints]
+workspace = true
