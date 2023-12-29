@@ -29,20 +29,12 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod args;
-pub mod chain;
 pub mod cli;
-pub mod config;
-pub mod db;
-pub mod debug_cmd;
+pub mod commands;
 pub mod dirs;
 pub mod init;
-pub mod node;
-pub mod p2p;
 pub mod prometheus_exporter;
-pub mod recover;
 pub mod runner;
-pub mod stage;
-pub mod test_vectors;
 pub mod utils;
 pub mod version;
 

@@ -1,11 +1,13 @@
+//! Command that initializes the node by importing a chain from a file.
+
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs,
     },
+    commands::node::events::{handle_events, NodeEvent},
     dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
-    node::events::{handle_events, NodeEvent},
     version::SHORT_VERSION,
 };
 use clap::Parser;
