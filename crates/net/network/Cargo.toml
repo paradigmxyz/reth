@@ -110,3 +110,6 @@ optimism = [
 name = "bench"
 required-features = ["test-utils"]
 harness = false
+
+[lints]
+workspace = true
