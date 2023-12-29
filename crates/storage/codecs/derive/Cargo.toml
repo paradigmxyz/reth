@@ -39,3 +39,6 @@ scale = []
 postcard = []
 no_codec = []
 optimism = []
+
+[lints]
+workspace = true
