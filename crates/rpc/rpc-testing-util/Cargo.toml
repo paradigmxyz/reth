@@ -29,3 +29,6 @@ similar-asserts = "1.5.0"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "rt"] }
+
+[lints]
+workspace = true
