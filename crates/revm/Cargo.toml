@@ -32,3 +32,6 @@ optimism = [
   "reth-consensus-common/optimism",
   "reth-interfaces/optimism",
 ]
+
+[lints]
+workspace = true
