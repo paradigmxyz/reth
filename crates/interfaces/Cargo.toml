@@ -42,3 +42,6 @@ secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 test-utils = ["secp256k1", "rand", "parking_lot"]
 cli = ["clap"]
 optimism = ["reth-eth-wire/optimism"]
+
+[lints]
+workspace = true
