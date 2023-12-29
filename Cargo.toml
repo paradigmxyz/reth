@@ -227,3 +227,13 @@ pprof = "0.13"
 proptest = "1.4"
 proptest-derive = "0.4"
 serial_test = "2"
+
+# Linting rules across all crates in the workspace.
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+missing_docs = "warn"
+unreachable_pub = "warn"
+"rustdoc.all" = "warn"
+
+unused_must_use = "deny"
+"rust_2018_idioms" = "deny"
