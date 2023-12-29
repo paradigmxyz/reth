@@ -119,3 +119,6 @@ harness = false
 [[bench]]
 name = "nibbles"
 harness = false
+
+[lints]
+workspace = true
