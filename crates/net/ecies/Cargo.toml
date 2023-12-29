@@ -38,3 +38,6 @@ aes = "0.8.1"
 hmac = "0.12.1"
 block-padding = "0.3.2"
 cipher = { version = "0.4.3", features = ["block-padding"] }
+
+[lints]
+workspace = true
