@@ -35,7 +35,12 @@ impl std::fmt::Debug for CursorSubNode {
     }
 }
 
+/// Implements conversion from `StoredSubNode` to `CursorSubNode`.
 impl From<StoredSubNode> for CursorSubNode {
+    /// Converts a `StoredSubNode` into a `CursorSubNode`.
+    ///
+    /// Extracts necessary values from the `StoredSubNode` and constructs
+    /// a corresponding `CursorSubNode`.
     fn from(value: StoredSubNode) -> Self {
         let nibble = match value.nibble {
             Some(n) => n as i8,
@@ -141,6 +146,7 @@ impl CursorSubNode {
     }
 }
 
+/// Constructs a full key from the given `Nibbles` and `nibble`.
 #[inline]
 fn full_key(mut key: Nibbles, nibble: i8) -> Nibbles {
     if nibble >= 0 {
@@ -149,6 +155,7 @@ fn full_key(mut key: Nibbles, nibble: i8) -> Nibbles {
     key
 }
 
+/// Updates the key by replacing or appending a nibble based on the old and new nibble values.
 #[inline]
 fn update_full_key(key: &mut Nibbles, old_nibble: i8, new_nibble: i8) {
     if new_nibble >= 0 {
