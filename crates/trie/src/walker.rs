@@ -234,11 +234,10 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     fn update_skip_node(&mut self) {
-        self.can_skip_current_node = if let Some(node) = self.stack.last() {
-            !self.changes.contains(node.full_key()) && node.hash_flag()
-        } else {
-            false
-        };
+        self.can_skip_current_node = self
+            .stack
+            .last()
+            .map_or(false, |node| !self.changes.contains(node.full_key()) && node.hash_flag());
     }
 }
 
