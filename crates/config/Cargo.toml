@@ -27,3 +27,6 @@ tempfile.workspace = true
 [dev-dependencies]
 confy.workspace = true
 toml.workspace = true
+
+[lints]
+workspace = true
