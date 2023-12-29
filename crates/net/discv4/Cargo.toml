@@ -42,3 +42,6 @@ reth-tracing.workspace = true
 default = ["serde"]
 test-utils = ["dep:rand"]
 serde = ["dep:serde"]
+
+[lints]
+workspace = true
