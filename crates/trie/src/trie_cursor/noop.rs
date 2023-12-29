@@ -63,7 +63,7 @@ pub struct NoopStorageTrieCursor;
 impl TrieCursor for NoopStorageTrieCursor {
     type Key = StoredNibblesSubKey;
 
-    /// Seeks within the storage trie.
+    /// Seeks a key in storage tries.
     fn seek(
         &mut self,
         _key: Self::Key,
@@ -71,7 +71,7 @@ impl TrieCursor for NoopStorageTrieCursor {
         Ok(None)
     }
 
-    /// Seeks an exact match within the storage trie.
+    /// Seeks an exact match in storage tries.
     fn seek_exact(
         &mut self,
         _key: Self::Key,
@@ -79,7 +79,7 @@ impl TrieCursor for NoopStorageTrieCursor {
         Ok(None)
     }
 
-    /// Retrieves the current cursor position within the storage trie.
+    /// Retrieves the current cursor position within storage tries.
     fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
         Ok(None)
     }

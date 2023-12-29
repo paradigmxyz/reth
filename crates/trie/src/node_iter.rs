@@ -222,7 +222,7 @@ where
                 // Compare keys and proceed accordingly.
                 if self.walker.key().map_or(false, |key| key < &Nibbles::unpack(hashed_key)) {
                     self.current_walker_key_checked = false;
-                    continue;
+                    continue
                 }
 
                 // Move to the next hashed storage entry and return the corresponding leaf node.
@@ -238,7 +238,7 @@ where
                 self.walker.advance()?;
             } else {
                 // No more keys to process, break the loop.
-                break;
+                break
             }
         }
 
