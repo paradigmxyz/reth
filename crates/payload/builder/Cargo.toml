@@ -46,3 +46,6 @@ optimism = [
   "reth-interfaces/optimism",
   "reth-transaction-pool/optimism"
 ]
+
+[lints]
+workspace = true
