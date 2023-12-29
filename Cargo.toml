@@ -142,7 +142,7 @@ reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 
 # revm
-revm = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze",  features = ["std", "secp256k1"], default-features = false }
+revm = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", features = ["std", "secp256k1"], default-features = false }
 revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", features = ["std"], default-features = false }
 
 # eth
@@ -227,3 +227,8 @@ pprof = "0.13"
 proptest = "1.4"
 proptest-derive = "0.4"
 serial_test = "2"
+
+
+[workspace.metadata.cargo-udeps.ignore]
+# ignored because this is mutually exclusive with the optimism payload builder via feature flags
+normal = ["reth-ethereum-payload-builder"]
