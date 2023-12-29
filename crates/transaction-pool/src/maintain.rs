@@ -573,7 +573,7 @@ fn changed_accounts_iter(
 
 async fn apply_local_txs_backup<P>(
     pool: P,
-    file_path: &PathBuf,
+    file_path: &Path,
 ) -> Result<(), ApplyLocalTxsBackupError>
 where
     P: TransactionPool + TransactionPoolExt + 'static,
