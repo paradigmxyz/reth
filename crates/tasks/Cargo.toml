@@ -26,3 +26,6 @@ dyn-clone = "1.0"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
+
+[lints]
+workspace = true
