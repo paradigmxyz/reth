@@ -86,3 +86,6 @@ optimism = [
     "reth-provider/optimism",
     "reth-transaction-pool/optimism",
 ]
+
+[lints]
+workspace = true
