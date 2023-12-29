@@ -27,3 +27,5 @@ tracing.workspace = true
 # This is a workaround for reth-cli crate to allow this as mandatory dependency without breaking the build even if unused.
 # This makes managing features and testing workspace easier because clippy always builds all members if --workspace is provided
 optimism = []
+[lints]
+workspace = true
