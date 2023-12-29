@@ -40,3 +40,6 @@ reth-stages = { workspace = true, features = ["test-utils"] }
 # misc
 
 assert_matches.workspace = true
+
+[lints]
+workspace = true
