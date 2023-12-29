@@ -200,9 +200,9 @@ pin-project = "1.0.12"
 futures-util = "0.3.25"
 
 # rpc
-jsonrpsee = { version = "0.20" }
-jsonrpsee-core = { version = "0.20" }
-jsonrpsee-types = { version = "0.20" }
+jsonrpsee = { version = "0.21" }
+jsonrpsee-core = { version = "0.21" }
+jsonrpsee-types = { version = "0.21" }
 
 # crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = [

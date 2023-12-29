@@ -239,13 +239,12 @@ fn execute_notification(notif: Notif<'_>, max_log_length: u32) -> MethodResponse
 }
 
 #[allow(dead_code)]
-pub(crate) struct HandleRequest<L: Logger> {
+pub(crate) struct HandleRequest {
     pub(crate) methods: Methods,
     pub(crate) max_request_body_size: u32,
     pub(crate) max_response_body_size: u32,
     pub(crate) max_log_length: u32,
     pub(crate) batch_requests_supported: bool,
-    pub(crate) logger: L,
     pub(crate) conn: Arc<OwnedSemaphorePermit>,
     pub(crate) bounded_subscriptions: BoundedSubscriptions,
     pub(crate) method_sink: MethodSink,
