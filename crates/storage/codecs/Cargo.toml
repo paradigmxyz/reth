@@ -34,3 +34,5 @@ scale = ["codecs-derive/scale"]
 postcard = ["codecs-derive/postcard"]
 no_codec = ["codecs-derive/no_codec"]
 optimism = ["codecs-derive/optimism"]
+[lints]
+workspace = true
