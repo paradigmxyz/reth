@@ -88,3 +88,6 @@ harness = false
 name = "priority"
 required-features = ["arbitrary"]
 harness = false
+
+[lints]
+workspace = true
