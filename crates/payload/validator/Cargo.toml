@@ -13,3 +13,5 @@ description = "Payload validation support"
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
+[lints]
+workspace = true
