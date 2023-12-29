@@ -43,3 +43,6 @@ assert_matches.workspace = true
 
 [features]
 optimism = ["reth-primitives/optimism", "reth-rpc-types/optimism"]
+
+[lints]
+workspace = true
