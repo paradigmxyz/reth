@@ -33,3 +33,5 @@ metrics.workspace = true
 
 # misc
 tracing.workspace = true
+[lints]
+workspace = true
