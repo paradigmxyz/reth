@@ -13,3 +13,6 @@ description = "Additional utilities for working with Tokio in reth."
 # async
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream = { workspace = true, features = ["sync"] }
+
+[lints]
+workspace = true
