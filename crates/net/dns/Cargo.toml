@@ -43,3 +43,6 @@ reth-tracing.workspace = true
 [features]
 default = ["serde"]
 serde = ["dep:serde", "dep:serde_with"]
+
+[lints]
+workspace = true
