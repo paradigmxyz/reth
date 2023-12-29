@@ -453,7 +453,7 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
 {
-    type BuiltPayload = BuiltPayload;
+    type PayloadAttributes = PayloadBuilderAttributes;
     type ResolvePayloadFuture = ResolveBestPayload;
 
     fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {

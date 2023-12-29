@@ -29,6 +29,7 @@ revm-primitives.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 futures-util.workspace = true
+async-trait.workspace = true
 
 # metrics
 reth-metrics.workspace = true

@@ -187,7 +187,7 @@ where
     /// Tracks the received forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// The payload store.
-    payload_builder: PayloadBuilderHandle,
+    payload_builder: PayloadBuilderHandle<PayloadBuilderAttributes>,
     /// Validator for execution payloads
     payload_validator: ExecutionPayloadValidator,
     /// Listeners for engine events.
@@ -234,7 +234,7 @@ where
         sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
-        payload_builder: PayloadBuilderHandle,
+        payload_builder: PayloadBuilderHandle<PayloadBuilderAttributes>,
         target: Option<B256>,
         pipeline_run_threshold: u64,
         hooks: EngineHooks,
@@ -278,7 +278,7 @@ where
         sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
-        payload_builder: PayloadBuilderHandle,
+        payload_builder: PayloadBuilderHandle<PayloadBuilderAttributes>,
         target: Option<B256>,
         pipeline_run_threshold: u64,
         to_engine: UnboundedSender<BeaconEngineMessage>,

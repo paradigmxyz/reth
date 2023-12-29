@@ -1,8 +1,10 @@
 //! Trait abstractions used by the payload crate.
 
 use reth_provider::CanonStateNotification;
-use crate::{error::PayloadBuilderError, PayloadBuilderAttributes};
+use crate::{error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes};
+use reth_rpc_types::engine::PayloadId;
 use std::{future::Future, sync::Arc};
+use tokio::sync::oneshot;
 
 /// A type that can build a payload.
 ///
@@ -16,10 +18,10 @@ use std::{future::Future, sync::Arc};
 ///
 /// Note: A `PayloadJob` need to be cancel safe because it might be dropped after the CL has requested the payload via `engine_getPayloadV1` (see also [engine API docs](https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1))
 pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + Sync {
-    /// Represents the payload type that is returned by this payload job.
-    type BuiltPayload;
+    /// Represents the payload attributes type that is used to spawn this payload job.
+    type PayloadAttributes: PayloadAttributesTrait + std::fmt::Debug;
     /// Represents the future that resolves the block that's returned to the CL.
-    type ResolvePayloadFuture: Future<Output = Result<Arc<Self::BuiltPayload>, PayloadBuilderError>>
+    type ResolvePayloadFuture: Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>>
         + Send
         + Sync
         + 'static;
@@ -27,10 +29,10 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     /// Returns the best payload that has been built so far.
     ///
     /// Note: This is never called by the CL.
-    fn best_payload(&self) -> Result<Arc<Self::BuiltPayload>, PayloadBuilderError>;
+    fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError>;
 
     /// Returns the payload attributes for the payload being built.
-    fn payload_attributes(&self) -> Result<PayloadBuilderAttributes, PayloadBuilderError>;
+    fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError>;
 
     /// Called when the payload is requested by the CL.
     ///
@@ -52,6 +54,59 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     /// once more. If this returns [`KeepPayloadJobAlive::No`] then the [`PayloadJob`] will be
     /// dropped after this call.
     fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive);
+}
+
+/// This is a trait that can be implemented by different built payload attributes types.
+pub trait PayloadAttributesTrait {}
+
+/// This is a trait that a payload builder or handle can implement to retrieve information relevant
+/// to each payload job.
+#[async_trait::async_trait]
+pub trait PayloadBuilderTrait {
+    /// The [PayloadAttributesTrait] type that is used to spawn this payload job.
+    type PayloadAttributes: PayloadAttributesTrait + std::fmt::Debug;
+
+    /// Resolves the payload job and returns the best payload that has been built so far.
+    ///
+    /// Note: depending on the installed [PayloadJobGenerator], this may or may not terminate the
+    /// job, See [PayloadJob::resolve].
+    async fn resolve(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
+
+    /// Returns the best payload for the given identifier that has been built so far.
+    async fn best_payload(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
+
+    /// Returns the payload attributes associated with the given identifier.
+    ///
+    /// Note: this returns the attributes of the payload and does not resolve the job.
+    async fn payload_attributes(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<Self::PayloadAttributes, PayloadBuilderError>>;
+
+    /// Sends a message to the service to start building a new payload for the given payload.
+    ///
+    /// This is the same as [PayloadBuilderTrait::new_payload] but does not wait for the result and
+    /// returns the receiver instead
+    fn send_new_payload(
+        &self,
+        attr: Self::PayloadAttributes,
+    ) -> oneshot::Receiver<Result<PayloadId, PayloadBuilderError>>;
+
+    /// Starts building a new payload for the given payload attributes.
+    ///
+    /// Returns the identifier of the payload.
+    ///
+    /// Note: if there's already payload in progress with same identifier, it will be returned.
+    async fn new_payload(
+        &self,
+        attr: Self::PayloadAttributes,
+    ) -> Result<PayloadId, PayloadBuilderError>;
 }
 
 /// Whether the payload job should be kept alive or terminated after the payload was requested by

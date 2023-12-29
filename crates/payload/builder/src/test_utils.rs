@@ -15,18 +15,14 @@ use std::{
 };
 
 /// Creates a new [PayloadBuilderService] for testing purposes.
-pub fn test_payload_service() -> (
-    PayloadBuilderService<
-        TestPayloadJobGenerator,
-        futures_util::stream::Empty<CanonStateNotification>,
-    >,
-    PayloadBuilderHandle,
-) {
+pub fn test_payload_service(
+) -> (PayloadBuilderService<TestPayloadJobGenerator, futures_util::stream::Empty<CanonStateNotification>>, PayloadBuilderHandle<PayloadBuilderAttributes>)
+{
     PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
 }
 
 /// Creates a new [PayloadBuilderService] for testing purposes and spawns it in the background.
-pub fn spawn_test_payload_service() -> PayloadBuilderHandle {
+pub fn spawn_test_payload_service() -> PayloadBuilderHandle<PayloadBuilderAttributes> {
     let (service, handle) = test_payload_service();
     tokio::spawn(service);
     handle
@@ -63,7 +59,7 @@ impl Future for TestPayloadJob {
 }
 
 impl PayloadJob for TestPayloadJob {
-    type BuiltPayload = BuiltPayload;
+    type PayloadAttributes = PayloadBuilderAttributes;
     type ResolvePayloadFuture =
         futures_util::future::Ready<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
 
