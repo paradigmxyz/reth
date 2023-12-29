@@ -64,3 +64,6 @@ optimism = [
   "reth-payload-builder/optimism",
   "reth-blockchain-tree/optimism",
 ]
+
+[lints]
+workspace = true
