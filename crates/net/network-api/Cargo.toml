@@ -27,3 +27,6 @@ tokio = { workspace = true, features = ["sync"] }
 default = ["serde"]
 serde = ["dep:serde"]
 optimism = []
+
+[lints]
+workspace = true
