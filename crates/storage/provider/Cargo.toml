@@ -62,3 +62,6 @@ optimism = [
   "reth-primitives/optimism",
   "reth-interfaces/optimism"
 ]
+
+[lints]
+workspace = true
