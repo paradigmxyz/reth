@@ -602,7 +602,7 @@ where
 {
     let local_transactions = pool.get_local_transactions();
     if local_transactions.is_empty() {
-        info!("no local transactions to recover");
+        trace!("no local transactions to recover");
         return
     }
 
