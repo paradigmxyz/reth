@@ -33,3 +33,5 @@ optimism = [
     "reth-provider/optimism",
     "reth-payload-builder/optimism",
 ]
+[lints]
+workspace = true
