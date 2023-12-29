@@ -15,3 +15,6 @@ alloy-rlp.workspace = true
 
 [features]
 optimism = ["reth-primitives/optimism", "reth-rpc-types/optimism"]
+
+[lints]
+workspace = true
