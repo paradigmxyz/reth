@@ -29,3 +29,6 @@ thiserror.workspace = true
 
 [dev-dependencies]
 tokio-stream = { workspace = true, features = ["sync"] }
+
+[lints]
+workspace = true
