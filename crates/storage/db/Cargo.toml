@@ -112,3 +112,6 @@ harness = false
 name = "iai"
 required-features = ["test-utils"]
 harness = false
+
+[lints]
+workspace = true
