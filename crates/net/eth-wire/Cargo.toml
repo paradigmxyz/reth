@@ -65,3 +65,6 @@ optimism = ["reth-primitives/optimism"]
 name = "fuzz_roundtrip"
 path = "tests/fuzz_roundtrip.rs"
 required-features = ["arbitrary", "serde"]
+
+[lints]
+workspace = true
