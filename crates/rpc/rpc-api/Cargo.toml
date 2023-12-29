@@ -19,3 +19,6 @@ serde_json.workspace = true
 
 [features]
 client = ["jsonrpsee/client", "jsonrpsee/async-client"]
+
+[lints]
+workspace = true
