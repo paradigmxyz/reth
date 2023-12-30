@@ -84,5 +84,5 @@ pub trait PayloadJobGenerator: Send + Sync {
     ) -> Result<Self::Job, PayloadBuilderError>;
 
     /// Handles new chain state events
-    fn on_new_state(&self, new_state: CanonStateNotification);
+    fn on_new_state(&mut self, new_state: CanonStateNotification);
 }

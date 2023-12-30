@@ -112,7 +112,7 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     /// See [PayloadBuilder]
     builder: Builder,
     /// Stored cached_reads for new payload jobs
-    cached_reads: Arc<RwLock<CachedReads>>,
+    cached_reads: Arc<CachedReads>,
 }
 
 // === impl BasicPayloadJobGenerator ===
@@ -135,7 +135,7 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
             config,
             chain_spec,
             builder,
-            cached_reads: Arc::new(RwLock::new(CachedReads::default())),
+            cached_reads: Arc::new(CachedReads::default()),
         }
     }
 
@@ -230,15 +230,10 @@ where
         })
     }
 
-    fn on_new_state(&self, new_state: CanonStateNotification) {
-        //pub struct CachedReads {
-        //    accounts: HashMap<Address, CachedAccount>,
-        //    contracts: HashMap<B256, Bytecode>,
-        //    block_hashes: HashMap<U256, B256>,
+    fn on_new_state(&mut self, new_state: CanonStateNotification) {
         let mut cached_reads = CachedReads::default();
         cached_reads.as_db(new_state.committed().unwrap().state().state().state.clone());
-        let mut write_guard = self.cached_reads.write().unwrap();
-        *write_guard = cached_reads;
+        self.cached_reads = cached_reads;
         ()
     }
 }
