@@ -2,8 +2,9 @@
 
 use crate::{
     blobstore::{BlobStoreCanonTracker, BlobStoreUpdates},
+    error::PoolError,
     metrics::MaintainPoolMetrics,
-    traits::{CanonicalStateUpdate, ChangedAccount,TransactionPool, TransactionPoolExt},
+    traits::{CanonicalStateUpdate, ChangedAccount, TransactionPool, TransactionPoolExt},
     BlockInfo,
 };
 
@@ -25,8 +26,7 @@ use std::{
     borrow::Borrow,
     collections::HashSet,
     hash::{Hash, Hasher},
-    path::PathBuf,
-    path::Path,
+    path::{Path, PathBuf},
 };
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace, warn};
@@ -572,7 +572,10 @@ fn changed_accounts_iter(
         .map(|(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance })
 }
 
-async fn apply_local_txs_backup<P>(
+/// Loads Ethereum transactions from a file, decodes them from the RLP format, and inserts them
+/// into the transaction pool on node boot up.
+/// The file is removed after the transactions have been successfully processed.
+async fn load_and_reinsert_transactions<P>(
     pool: P,
     file_path: &Path,
 ) -> Result<(), ApplyLocalTxsBackupError>
@@ -587,12 +590,11 @@ where
 
     let pool_transactions = txs_signed
         .into_iter()
-        .map(|tx| {
-            let tx = tx.try_ecrecovered().unwrap();
-            <P::Transaction>::from_recovered_transaction(tx)
-        })
+        .filter_map(|tx| tx.try_ecrecovered().map(<P::Transaction>::from_recovered_transaction))
         .collect::<Vec<_>>();
-    let _ = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
+    let outcome = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await?;
+    info!(target: "reth:cli", txs_file = ?file_path, "Successfuly reinserted next number of transactions: {}", outcome.len());
+
     reth_primitives::fs::remove_file(file_path)?;
     Ok(())
 }
@@ -627,21 +629,20 @@ where
     }
 }
 
-enum ApplyLocalTxsBackupError {
-    DecodeError(alloy_rlp::Error),
-    FsPathError(FsPathError),
-}
+#[derive(thiserror::Error, Debug)]
+/// Errors possible during txs backup load and decode
+pub enum ApplyLocalTxsBackupError {
+    #[error("Failed to apply transacations backup. Encountered RLP decode error: {0}")]
+    /// Error during RLP decoding of transactions
+    Decode(#[from] alloy_rlp::Error),
 
-impl From<FsPathError> for ApplyLocalTxsBackupError {
-    fn from(err: FsPathError) -> Self {
-        ApplyLocalTxsBackupError::FsPathError(err)
-    }
-}
+    #[error("Failed to apply transacation backup. Encountered file error: {0}")]
+    /// Error during file upload
+    FsPath(#[from] FsPathError),
 
-impl From<alloy_rlp::Error> for ApplyLocalTxsBackupError {
-    fn from(err: alloy_rlp::Error) -> Self {
-        ApplyLocalTxsBackupError::DecodeError(err)
-    }
+    #[error("Failed to insert transactions to the transactions pool. Encountered pool error: {0}")]
+    /// Error adding transactions to the transaction pool
+    Pool(#[from] PoolError),
 }
 
 /// Task which manages saving local transactions to the persisten file in case of shutdown.
@@ -655,17 +656,11 @@ pub async fn backup_local_transactions_task<P>(
     P: TransactionPoolExt + Clone + 'static,
 {
     if let Some(file_path) = transactions_path.clone() {
-        match apply_local_txs_backup(pool.clone(), &file_path).await {
+        match load_and_reinsert_transactions(pool.clone(), &file_path).await {
             Ok(_) => (),
-            Err(err) => match err {
-                ApplyLocalTxsBackupError::DecodeError(err) => error!(
-                    "Failed to apply transacations backup. Encountered RLP decode error: {}",
-                    err
-                ),
-                ApplyLocalTxsBackupError::FsPathError(err) => {
-                    error!("Failed to apply transacation backup. Encountered file error: {}", err)
-                }
-            },
+            Err(err) => {
+                error!("{}", err)
+            }
         }
     }
 
