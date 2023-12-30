@@ -7,6 +7,7 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 description = "Reth node implementation"
+default-run = "reth"
 
 [package.metadata.cargo-udeps.ignore]
 normal = [
@@ -42,6 +43,8 @@ reth-downloaders = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 reth-tasks.workspace = true
 reth-net-nat.workspace = true
+reth-optimism-payload-builder = { path = "../../crates/payload/optimism", optional = true }
+reth-ethereum-payload-builder.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
@@ -73,6 +76,7 @@ metrics-util = "0.15.0"
 metrics-process = "1.0.9"
 reth-metrics.workspace = true
 metrics.workspace = true
+once_cell.workspace = true
 
 # test vectors generation
 proptest.workspace = true
@@ -133,10 +137,12 @@ optimism = [
     "reth-provider/optimism",
     "reth-beacon-consensus/optimism",
     "reth-auto-seal-consensus/optimism",
-    "reth-basic-payload-builder/optimism",
     "reth-network/optimism",
     "reth-network-api/optimism",
     "reth-blockchain-tree/optimism",
+    "reth-payload-builder/optimism",
+    "reth-optimism-payload-builder/optimism",
+    "reth-ethereum-payload-builder/optimism",
 ]
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []

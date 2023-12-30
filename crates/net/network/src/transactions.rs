@@ -1067,7 +1067,6 @@ struct Peer {
     /// negotiated version of the session.
     version: EthVersion,
     /// The peer's client version.
-    #[allow(unused)]
     client_version: Arc<str>,
 }
 

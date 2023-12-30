@@ -1,24 +1,22 @@
 //! Test helpers for mocking an entire pool.
 
+#![allow(dead_code)]
+
 use crate::{
-    error::PoolResult,
     pool::{txpool::TxPool, AddedTransaction},
-    test_utils::{
-        MockOrdering, MockTransaction, MockTransactionDistribution, MockTransactionFactory,
-    },
+    test_utils::{MockOrdering, MockTransactionDistribution, MockTransactionFactory},
     TransactionOrdering,
 };
 use rand::Rng;
-use reth_primitives::{Address, U128, U256};
+use reth_primitives::{Address, U256};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     ops::{Deref, DerefMut},
-    sync::Arc,
 };
 
 /// A wrapped `TxPool` with additional helpers for testing
-pub struct MockPool<T: TransactionOrdering = MockOrdering> {
+pub(crate) struct MockPool<T: TransactionOrdering = MockOrdering> {
     // The wrapped pool.
     pool: TxPool<T>,
 }
@@ -60,7 +58,7 @@ impl<T: TransactionOrdering> DerefMut for MockPool<T> {
 }
 
 /// Simulates transaction execution.
-pub struct MockTransactionSimulator<R: Rng> {
+pub(crate) struct MockTransactionSimulator<R: Rng> {
     /// The pending base fee
     base_fee: u128,
     /// Generator for transactions
@@ -83,7 +81,7 @@ pub struct MockTransactionSimulator<R: Rng> {
 
 impl<R: Rng> MockTransactionSimulator<R> {
     /// Returns a new mock instance
-    pub fn new(mut rng: R, config: MockSimulatorConfig) -> Self {
+    pub(crate) fn new(mut rng: R, config: MockSimulatorConfig) -> Self {
         let senders = config.addresses(&mut rng);
         let nonces = senders.iter().copied().map(|a| (a, 0)).collect();
         let balances = senders.iter().copied().map(|a| (a, config.balance)).collect();
@@ -113,7 +111,7 @@ impl<R: Rng> MockTransactionSimulator<R> {
     }
 
     /// Executes the next scenario and applies it to the pool
-    pub fn next(&mut self, pool: &mut MockPool) {
+    pub(crate) fn next(&mut self, pool: &mut MockPool) {
         let sender = self.rng_address();
         let scenario = self.rng_scenario();
         let on_chain_nonce = self.nonces[&sender];
@@ -152,30 +150,29 @@ impl<R: Rng> MockTransactionSimulator<R> {
 }
 
 /// How to configure a new mock transaction stream
-pub struct MockSimulatorConfig {
+pub(crate) struct MockSimulatorConfig {
     /// How many senders to generate.
-    pub num_senders: usize,
+    pub(crate) num_senders: usize,
     // TODO(mattsse): add a way to generate different balances
-    pub balance: U256,
+    pub(crate) balance: U256,
     /// Scenarios to test
-    pub scenarios: Vec<ScenarioType>,
+    pub(crate) scenarios: Vec<ScenarioType>,
     /// The start base fee
-    pub base_fee: u128,
+    pub(crate) base_fee: u128,
     /// generator for transactions
-    pub tx_generator: MockTransactionDistribution,
+    pub(crate) tx_generator: MockTransactionDistribution,
 }
 
 impl MockSimulatorConfig {
     /// Generates a set of random addresses
-    pub fn addresses(&self, rng: &mut impl rand::Rng) -> Vec<Address> {
-        let _ = rng.gen::<bool>(); // TODO(dani): ::random_with
-        std::iter::repeat_with(Address::random).take(self.num_senders).collect()
+    pub(crate) fn addresses(&self, rng: &mut impl rand::Rng) -> Vec<Address> {
+        std::iter::repeat_with(|| Address::random_with(rng)).take(self.num_senders).collect()
     }
 }
 
 /// Represents
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ScenarioType {
+pub(crate) enum ScenarioType {
     OnchainNonce,
     HigherNonce { skip: u64 },
 }
@@ -186,7 +183,7 @@ pub enum ScenarioType {
 ///
 /// An executed scenario can affect previous executed transactions
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Scenario {
+pub(crate) enum Scenario {
     /// Send a tx with the same nonce as on chain.
     OnchainNonce { nonce: u64 },
     /// Send a tx with a higher nonce that what the sender has on chain
@@ -199,7 +196,7 @@ pub enum Scenario {
 
 /// Represents an executed scenario
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecutedScenario {
+pub(crate) struct ExecutedScenario {
     /// balance at the time of execution
     balance: U256,
     /// nonce at the time of execution
@@ -210,7 +207,7 @@ pub struct ExecutedScenario {
 
 /// All executed scenarios by a sender
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecutedScenarios {
+pub(crate) struct ExecutedScenarios {
     sender: Address,
     scenarios: Vec<ExecutedScenario>,
 }

@@ -15,7 +15,6 @@
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-#![allow(clippy::non_canonical_clone_impl)]
 
 mod account;
 pub mod basefee;
@@ -51,7 +50,6 @@ pub use block::{
     Block, BlockBody, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, BlockWithSenders,
     ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
 };
-pub use bytes::{self, Buf, BufMut, BytesMut};
 pub use chain::{
     AllGenesisFormats, BaseFeeParams, BaseFeeParamsKind, Chain, ChainInfo, ChainSpec,
     ChainSpecBuilder, DisplayHardforks, ForkBaseFeeParams, ForkCondition, ForkTimestamps,
@@ -101,9 +99,11 @@ pub use withdrawal::Withdrawal;
 // Re-exports
 pub use self::ruint::UintTryTo;
 pub use alloy_primitives::{
-    self, address, b256, bloom, bytes, eip191_hash_message, hex, hex_literal, keccak256, ruint,
-    Address, BlockHash, BlockNumber, Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey,
-    StorageValue, TxHash, TxIndex, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
+    self, address, b256, bloom, bytes,
+    bytes::{Buf, BufMut, BytesMut},
+    eip191_hash_message, hex, hex_literal, keccak256, ruint, Address, BlockHash, BlockNumber,
+    Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey, StorageValue, TxHash, TxIndex,
+    TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
 };
 pub use reth_ethereum_forks::*;
 pub use revm_primitives::{self, JumpMap};
@@ -134,7 +134,7 @@ pub use c_kzg as kzg;
 #[cfg(feature = "optimism")]
 mod optimism {
     pub use crate::{
-        chain::{BASE_GOERLI, BASE_MAINNET, OP_GOERLI},
+        chain::{BASE_GOERLI, BASE_MAINNET, BASE_SEPOLIA, OP_GOERLI},
         transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID},
     };
 }

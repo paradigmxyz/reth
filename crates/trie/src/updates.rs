@@ -5,7 +5,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
-    trie::{BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
+    trie::{
+        BranchNodeCompact, Nibbles, StorageTrieEntry, StoredBranchNode, StoredNibbles,
+        StoredNibblesSubKey,
+    },
     B256,
 };
 use std::collections::{hash_map::IntoIter, HashMap};
@@ -122,7 +125,7 @@ impl TrieUpdates {
                     }
                     TrieOp::Update(node) => {
                         if !nibbles.0.is_empty() {
-                            account_trie_cursor.upsert(nibbles, node)?;
+                            account_trie_cursor.upsert(nibbles, StoredBranchNode(node))?;
                         }
                     }
                 },
