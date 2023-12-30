@@ -1,5 +1,5 @@
 //! Support for customizing the node
-use super::{components::RethRpcServerHandles, ext::DefaultRethNodeCommandConfig};
+use super::cli::{components::RethRpcServerHandles, ext::DefaultRethNodeCommandConfig};
 use crate::{
     args::{
         get_secret_key, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
@@ -11,9 +11,9 @@ use crate::{
         db_type::{DatabaseBuilder, DatabaseInstance},
         ext::{RethCliExt, RethNodeCommandConfig},
     },
+    commands::node::{cl_events::ConsensusLayerHealthEvents, events},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     init::init_genesis,
-    node::{cl_events::ConsensusLayerHealthEvents, events},
     prometheus_exporter,
     utils::{get_single_header, write_peers_to_file},
     version::SHORT_VERSION,
@@ -113,8 +113,8 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// ```rust
 /// # use reth_tasks::{TaskManager, TaskSpawner};
 /// # use reth::{
+/// #     builder::NodeConfig,
 /// #     cli::{
-/// #         node_builder::NodeConfig,
 /// #         ext::DefaultRethNodeCommandConfig,
 /// #     },
 /// #     args::RpcServerArgs,
@@ -147,8 +147,8 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// ```rust
 /// # use reth_tasks::{TaskManager, TaskSpawner};
 /// # use reth::{
+/// #     builder::NodeConfig,
 /// #     cli::{
-/// #         node_builder::NodeConfig,
 /// #         ext::DefaultRethNodeCommandConfig,
 /// #     },
 /// #     args::RpcServerArgs,
@@ -369,8 +369,8 @@ impl NodeConfig {
     /// # Example
     /// ```rust
     /// # use reth_tasks::{TaskManager, TaskSpawner};
+    /// # use reth::builder::NodeConfig;
     /// # use reth::cli::{
-    /// #     node_builder::NodeConfig,
     /// #     ext::DefaultRethNodeCommandConfig,
     /// # };
     /// # use tokio::runtime::Handle;
@@ -1354,7 +1354,7 @@ impl NodeHandle {
 /// # Example
 /// ```
 /// # use reth::{
-/// #     cli::node_builder::{NodeConfig, spawn_node},
+/// #     builder::{NodeConfig, spawn_node},
 /// #     args::RpcServerArgs,
 /// # };
 /// async fn t() {

@@ -12,7 +12,7 @@ use alloy_rlp::Decodable;
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{
-    default_payload_builder, BuildArguments, BuildOutcome, Cancelled, PayloadConfig,
+    BuildArguments, BuildOutcome, Cancelled, PayloadBuilder, PayloadConfig,
 };
 use reth_beacon_consensus::BeaconConsensus;
 use reth_blockchain_tree::{
@@ -244,8 +244,6 @@ impl Command {
             Bytes::default(),
             PayloadBuilderAttributes::try_new(best_block.hash, payload_attrs)?,
             self.chain.clone(),
-            #[cfg(feature = "optimism")]
-            true,
         );
         let args = BuildArguments::new(
             blockchain_db.clone(),
@@ -255,7 +253,15 @@ impl Command {
             Cancelled::default(),
             None,
         );
-        match default_payload_builder(args)? {
+
+        #[cfg(feature = "optimism")]
+        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
+            .compute_pending_block();
+
+        #[cfg(not(feature = "optimism"))]
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
+
+        match payload_builder.try_build(args)? {
             BuildOutcome::Better { payload, .. } => {
                 let block = payload.block();
                 debug!(target: "reth::cli", ?block, "Built new payload");

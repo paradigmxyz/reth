@@ -1,3 +1,5 @@
+//! Command that initializes the node from a genesis file.
+
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
