@@ -572,7 +572,7 @@ fn changed_accounts_iter(
         .map(|(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance })
 }
 
-/// Loads Ethereum transactions from a file, decodes them from the RLP format, and inserts them
+/// Loads transactions from a file, decodes them from the RLP format, and inserts them
 /// into the transaction pool on node boot up.
 /// The file is removed after the transactions have been successfully processed.
 async fn load_and_reinsert_transactions<P>(
@@ -636,7 +636,7 @@ pub enum ApplyLocalTxsBackupError {
     /// Error during RLP decoding of transactions
     Decode(#[from] alloy_rlp::Error),
 
-    #[error("Failed to apply transacation backup. Encountered file error: {0}")]
+    #[error("Failed to apply transacations backup. Encountered file error: {0}")]
     /// Error during file upload
     FsPath(#[from] FsPathError),
 
