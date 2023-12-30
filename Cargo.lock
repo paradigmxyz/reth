@@ -5598,6 +5598,7 @@ version = "0.1.0-alpha.13"
 dependencies = [
  "alloy-rlp",
  "aquamarine",
+ "async-trait",
  "backon",
  "boyer-moore-magiclen",
  "clap",

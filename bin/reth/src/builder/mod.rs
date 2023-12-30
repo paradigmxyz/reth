@@ -101,6 +101,9 @@ use tokio::{
 };
 use tracing::*;
 
+pub mod service;
+pub mod traits;
+
 /// The default prometheus recorder handle. We use a global static to ensure that it is only
 /// installed once.
 pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =

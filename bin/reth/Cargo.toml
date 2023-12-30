@@ -92,6 +92,7 @@ human_bytes = "0.4.1"
 tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
 futures.workspace = true
 pin-project.workspace = true
+async-trait.workspace = true
 
 # http/rpc
 hyper = "0.14.25"
