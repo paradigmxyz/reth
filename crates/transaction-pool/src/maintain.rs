@@ -3,8 +3,8 @@
 use crate::{
     blobstore::{BlobStoreCanonTracker, BlobStoreUpdates},
     metrics::MaintainPoolMetrics,
-    traits::{CanonicalStateUpdate, ChangedAccount, TransactionPoolExt},
-    BlockInfo, TransactionPool,
+    traits::{CanonicalStateUpdate, ChangedAccount,TransactionPool, TransactionPoolExt},
+    BlockInfo,
 };
 
 use futures_util::{
@@ -26,6 +26,7 @@ use std::{
     collections::HashSet,
     hash::{Hash, Hasher},
     path::PathBuf,
+    path::Path,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace, warn};
@@ -576,7 +577,7 @@ async fn apply_local_txs_backup<P>(
     file_path: &Path,
 ) -> Result<(), ApplyLocalTxsBackupError>
 where
-    P: TransactionPool + TransactionPoolExt + 'static,
+    P: TransactionPoolExt + 'static,
 {
     info!(target: "reth::cli", txs_file =?file_path, "Check local persistent storage for saved transactions");
     let data = reth_primitives::fs::read(file_path)?;
@@ -592,13 +593,13 @@ where
         })
         .collect::<Vec<_>>();
     let _ = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
-    reth_primitives::fs::remove_file(file_path.clone())?;
+    reth_primitives::fs::remove_file(file_path)?;
     Ok(())
 }
 
-fn save_local_txs_backup<P>(pool: P, file_path: PathBuf)
+fn save_local_txs_backup<P>(pool: P, file_path: &Path)
 where
-    P: TransactionPool + TransactionPoolExt + 'static,
+    P: TransactionPoolExt + 'static,
 {
     let local_transactions = pool.get_local_transactions();
     if local_transactions.is_empty() {
@@ -616,7 +617,7 @@ where
     alloy_rlp::encode_list(&local_transactions, &mut buf);
     info!(target: "reth::cli", txs_file =?file_path, num_txs=%num_txs, "Saving current local transactions");
     let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
-    match parent_dir.map(|_| reth_primitives::fs::write(&file_path, buf)) {
+    match parent_dir.map(|_| reth_primitives::fs::write(file_path, buf)) {
         Ok(_) => {
             info!(target: "reth::cli", txs_file=?file_path, "Wrote local transactions to file");
         }
@@ -678,7 +679,7 @@ pub async fn backup_local_transactions_task<P>(
         },
     }
     if let Some(file_path) = transactions_path {
-        save_local_txs_backup(pool, file_path);
+        save_local_txs_backup(pool, &file_path);
     }
     drop(graceful_guard)
 }
@@ -699,7 +700,6 @@ mod tests {
     use crate::{
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
-        TransactionPool,
     };
     use futures_util::{future, future::BoxFuture};
     use reth_primitives::{
