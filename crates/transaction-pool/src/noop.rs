@@ -196,8 +196,8 @@ impl TransactionPool for NoopTransactionPool {
         &self,
         _sender: Address,
         _nonce: u64,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        vec![]
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        None
     }
 
     fn unique_senders(&self) -> HashSet<Address> {

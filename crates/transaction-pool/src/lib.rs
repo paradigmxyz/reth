@@ -477,12 +477,8 @@ where
         &self,
         sender: Address,
         nonce: u64,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.pool
-            .get_transactions_by_sender(sender)
-            .into_iter()
-            .filter(|tx| tx.nonce() == nonce)
-            .collect()
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_transactions_by_sender(sender).into_iter().find(|tx| tx.nonce() == nonce)
     }
 
     fn get_transactions_by_origin(
