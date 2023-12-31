@@ -96,13 +96,20 @@ where
         Box::new(executor.clone()),
         eth_pubsub.clone(),
     );
-    launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
+    launch_with_eth_api::<Provider, Pool, Network, EngineApi, Events>(
+        eth_api,
+        eth_filter,
+        engine_api,
+        socket_addr,
+        secret,
+    )
+    .await
 }
 
 /// Configure and launch a _standalone_ auth server with existing EthApi implementation.
 pub async fn launch_with_eth_api<Provider, Pool, Network, EngineApi, Events>(
     eth_api: EthApi<Provider, Pool, Network>,
-    eth_filter: EthFilter<Provider, Pool, Events, Network>,
+    eth_filter: EthFilter<Provider, Pool>,
     engine_api: EngineApi,
     socket_addr: SocketAddr,
     secret: JwtSecret,

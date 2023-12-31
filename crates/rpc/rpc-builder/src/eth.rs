@@ -19,7 +19,7 @@ pub struct EthHandlers<Provider, Pool, Network, Events> {
     /// The async caching layer used by the eth handlers
     pub cache: EthStateCache,
     /// Polling based filter handler available on all transports
-    pub filter: EthFilter<Provider, Pool, Events, Network>,
+    pub filter: EthFilter<Provider, Pool>,
     /// Handler for subscriptions only available for transports that support it (ws, ipc)
     pub pubsub: EthPubSub<Provider, Pool, Events, Network>,
     /// The configured tracing call pool

@@ -26,7 +26,6 @@ use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, Transa
 use std::{
     collections::HashMap,
     iter::StepBy,
-    marker::PhantomData,
     ops::RangeInclusive,
     sync::Arc,
     time::{Duration, Instant},
@@ -41,19 +40,15 @@ use tracing::trace;
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
 /// `Eth` filter RPC implementation.
-pub struct EthFilter<Provider, Pool, Events, Network> {
+pub struct EthFilter<Provider, Pool> {
     /// All nested fields bundled together
     inner: Arc<EthFilterInner<Provider, Pool>>,
-    phantom_events: PhantomData<Events>,
-    phantom_network: PhantomData<Network>,
 }
 
-impl<Provider, Pool, Events, Network> EthFilter<Provider, Pool, Events, Network>
+impl<Provider, Pool> EthFilter<Provider, Pool>
 where
     Provider: BlockReader + EvmEnvProvider + Send + Sync + 'static,
     Pool: Send + Sync + 'static,
-    Events: CanonStateSubscriptions + 'static,
-    Network: NetworkInfo + 'static,
 {
     /// Creates a new, shareable instance.
     ///
@@ -63,14 +58,18 @@ where
     /// See also [EthFilterConfig].
     ///
     /// This also spawns a task that periodically clears stale filters.
-    pub fn new(
+    pub fn new<Events, Network>(
         provider: Provider,
         pool: Pool,
         eth_cache: EthStateCache,
         config: EthFilterConfig,
         task_spawner: Box<dyn TaskSpawner>,
         pubsub: EthPubSub<Provider, Pool, Events, Network>,
-    ) -> Self {
+    ) -> Self
+    where
+        Events: CanonStateSubscriptions + 'static,
+        Network: NetworkInfo + 'static,
+    {
         let EthFilterConfig { max_blocks_per_filter, max_logs_per_response, stale_filter_ttl } =
             config;
         let inner = EthFilterInner {
@@ -87,11 +86,7 @@ where
             max_logs_per_response: max_logs_per_response.unwrap_or(usize::MAX),
         };
 
-        let eth_filter = Self {
-            inner: Arc::new(inner),
-            phantom_events: PhantomData::<Events>,
-            phantom_network: PhantomData::<Network>,
-        };
+        let eth_filter = Self { inner: Arc::new(inner) };
 
         let this = eth_filter.clone();
         eth_filter.inner.task_spawner.clone().spawn_critical(
@@ -142,23 +137,32 @@ where
         })
     }
 
-    async fn update_reorged_logs(&self, pubsub: EthPubSub<Provider, Pool, Events, Network>) {
+    /// Endless future that updates the reorged logs for impacted filters
+    async fn update_reorged_logs<Events, Network>(
+        &self,
+        pubsub: EthPubSub<Provider, Pool, Events, Network>,
+    ) where
+        Events: CanonStateSubscriptions + 'static,
+        Network: NetworkInfo + 'static,
+    {
         let mut stream = self.reorged_logs_stream(pubsub).await;
         while let Some((id, logs)) = stream.next().await {
             let mut filters = executor::block_on(self.active_filters().inner.lock());
             let active_filter =
                 filters.get_mut(&id).ok_or(FilterError::FilterNotFound(id)).unwrap();
-            if let FilterKind::Log(ref mut filter) = active_filter.kind {
-                filter.reorged_logs = Arc::new(Mutex::new(Some(logs)));
-            }
+            active_filter.reorged_logs = Arc::new(Mutex::new(Some(logs)));
         }
     }
 
     /// Reacts to reorged blocks, checks impacted log filters, stores reorged logs in the log filter
-    pub async fn reorged_logs_stream(
+    pub async fn reorged_logs_stream<Events, Network>(
         &self,
         pubsub: EthPubSub<Provider, Pool, Events, Network>,
-    ) -> impl Stream<Item = (FilterId, Vec<Log>)> + '_ {
+    ) -> impl Stream<Item = (FilterId, Vec<Log>)> + '_
+    where
+        Events: CanonStateSubscriptions + 'static,
+        Network: NetworkInfo + 'static,
+    {
         let mut temp_reorged_blocks = Vec::new();
 
         BroadcastStream::new(pubsub.get_chain_events().subscribe_to_canonical_state())
@@ -208,7 +212,7 @@ where
     }
 }
 
-impl<Provider, Pool, Events, Network> EthFilter<Provider, Pool, Events, Network>
+impl<Provider, Pool> EthFilter<Provider, Pool>
 where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
@@ -307,13 +311,10 @@ where
 }
 
 #[async_trait]
-impl<Provider, Pool, Events, Network> EthFilterApiServer
-    for EthFilter<Provider, Pool, Events, Network>
+impl<Provider, Pool> EthFilterApiServer for EthFilter<Provider, Pool>
 where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
-    Events: CanonStateSubscriptions + 'static,
-    Network: NetworkInfo + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -392,21 +393,15 @@ where
     }
 }
 
-impl<Provider, Pool, Events, Network> std::fmt::Debug
-    for EthFilter<Provider, Pool, Events, Network>
-{
+impl<Provider, Pool> std::fmt::Debug for EthFilter<Provider, Pool> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthFilter").finish_non_exhaustive()
     }
 }
 
-impl<Provider, Pool, Events, Network> Clone for EthFilter<Provider, Pool, Events, Network> {
+impl<Provider, Pool> Clone for EthFilter<Provider, Pool> {
     fn clone(&self) -> Self {
-        Self {
-            inner: Arc::clone(&self.inner),
-            phantom_events: PhantomData::<Events>,
-            phantom_network: PhantomData::<Network>,
-        }
+        Self { inner: Arc::clone(&self.inner) }
     }
 }
 
@@ -489,6 +484,7 @@ where
             self.provider.block_hash(last_poll_block_number).to_rpc_result()?;
         let id = FilterId::from(self.id_provider.next_id());
         let mut filters = self.active_filters.inner.lock().await;
+        let reorged_logs: Arc<Mutex<Option<Vec<Log>>>> = Arc::new(Mutex::new(Some(Vec::new())));
         filters.insert(
             id.clone(),
             ActiveFilter {
@@ -496,6 +492,7 @@ where
                 block_hash: last_poll_block_hash,
                 last_poll_timestamp: Instant::now(),
                 kind,
+                reorged_logs,
             },
         );
         Ok(id)
@@ -641,6 +638,8 @@ struct ActiveFilter {
     last_poll_timestamp: Instant,
     /// What kind of filter it is.
     kind: FilterKind,
+    /// Reorged logs
+    reorged_logs: Arc<Mutex<Option<Vec<Log>>>>,
 }
 
 /// A receiver for pending transactions that returns all new transactions since the last poll.

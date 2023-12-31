@@ -6503,8 +6503,6 @@ dependencies = [
  "serde_with",
  "similar-asserts",
  "thiserror",
- "tokio",
- "tokio-util",
  "url",
 ]
 
