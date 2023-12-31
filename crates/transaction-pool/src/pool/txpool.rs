@@ -90,6 +90,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
+    /// Retrieves the nonce of the last transaction for a given sender after processing all
+    /// transactions.
+    pub fn nonce_after_all_transactions(&self, sender: SenderId) -> Option<u64> {
+        self.all_transactions.txs_iter(sender).last().map(|(_, tx)| tx.transaction.nonce())
+    }
+
     /// Returns access to the [`AllTransactions`] container.
     pub(crate) fn all(&self) -> &AllTransactions<T::Transaction> {
         &self.all_transactions
@@ -2545,6 +2551,27 @@ mod tests {
         assert_eq!(pool.basefee_pool.len(), 1);
 
         assert_eq!(pool.all_transactions.txs.get(&id).unwrap().subpool, SubPool::BaseFee)
+    }
+
+    #[test]
+    fn nonce_after_all_transactions_for_sender() {
+        // Set up a mock transaction factory and a new transaction pool.
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        // Create a mock transaction and add it to the pool.
+        let tx = MockTransaction::eip1559();
+        pool.add_transaction(f.validated(tx.clone()), U256::from(1_000), 0).unwrap();
+
+        // Create another mock transaction with an incremented price and add it to the pool.
+        pool.add_transaction(f.validated(tx.inc_price().next().clone()), U256::from(1_000), 0)
+            .unwrap();
+
+        // Ensure that the calculated next nonce for the sender matches the expected value.
+        assert_eq!(
+            pool.nonce_after_all_transactions(f.ids.sender_id(&tx.sender()).unwrap()),
+            Some(1)
+        );
     }
 
     #[test]
