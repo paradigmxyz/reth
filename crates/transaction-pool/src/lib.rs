@@ -484,7 +484,7 @@ where
             .iter()
             .chain(queued.iter())
             .find(|tx| tx.sender() == sender && tx.nonce() == nonce)
-            .map(|tx| Arc::clone(tx))
+            .cloned()
     }
 
     fn get_transactions_by_origin(
