@@ -90,10 +90,18 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    /// Retrieves the nonce of the last transaction for a given sender after processing all
-    /// transactions.
-    pub fn nonce_after_all_transactions(&self, sender: SenderId) -> Option<u64> {
-        self.all_transactions.txs_iter(sender).last().map(|(_, tx)| tx.transaction.nonce())
+    /// Retrieves the highest nonce for a specific sender from the transaction pool.
+    pub fn get_highest_nonce_by_sender(&self, sender: SenderId) -> Option<u64> {
+        self.all().txs_iter(sender).last().map(|(_, tx)| tx.transaction.nonce())
+    }
+
+    /// Retrieves the highest transaction (wrapped in an `Arc`) for a specific sender from the
+    /// transaction pool.
+    pub fn get_highest_transaction_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.all().txs_iter(sender).last().map(|(_, tx)| Arc::clone(&tx.transaction))
     }
 
     /// Returns access to the [`AllTransactions`] container.
@@ -2554,7 +2562,7 @@ mod tests {
     }
 
     #[test]
-    fn nonce_after_all_transactions_for_sender() {
+    fn get_highest_transaction_by_sender_and_nonce() {
         // Set up a mock transaction factory and a new transaction pool.
         let mut f = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
@@ -2563,15 +2571,26 @@ mod tests {
         let tx = MockTransaction::eip1559();
         pool.add_transaction(f.validated(tx.clone()), U256::from(1_000), 0).unwrap();
 
-        // Create another mock transaction with an incremented price and add it to the pool.
-        pool.add_transaction(f.validated(tx.inc_price().next().clone()), U256::from(1_000), 0)
-            .unwrap();
+        // Create another mock transaction with an incremented price.
+        let tx1 = tx.inc_price().next().clone();
+
+        // Validate the second mock transaction and add it to the pool.
+        let tx1_validated = f.validated(tx1.clone());
+        pool.add_transaction(tx1_validated, U256::from(1_000), 0).unwrap();
 
         // Ensure that the calculated next nonce for the sender matches the expected value.
         assert_eq!(
-            pool.nonce_after_all_transactions(f.ids.sender_id(&tx.sender()).unwrap()),
+            pool.get_highest_nonce_by_sender(f.ids.sender_id(&tx.sender()).unwrap()),
             Some(1)
         );
+
+        // Retrieve the highest transaction by sender.
+        let highest_tx = pool
+            .get_highest_transaction_by_sender(f.ids.sender_id(&tx.sender()).unwrap())
+            .expect("Failed to retrieve highest transaction");
+
+        // Validate that the retrieved highest transaction matches the expected transaction.
+        assert_eq!(highest_tx.as_ref().transaction, tx1);
     }
 
     #[test]
