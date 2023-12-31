@@ -1630,7 +1630,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             by_hash: Default::default(),
             txs: Default::default(),
             tx_counter: Default::default(),
-            last_seen_block_number: 0,
+            last_seen_block_number: Default::default(),
             last_seen_block_hash: Default::default(),
             pending_fees: Default::default(),
             price_bumps: Default::default(),
