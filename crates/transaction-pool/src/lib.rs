@@ -478,7 +478,13 @@ where
         sender: Address,
         nonce: u64,
     ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.pool.get_transactions_by_sender(sender).into_iter().find(|tx| tx.nonce() == nonce)
+        let AllPoolTransactions { pending, queued } = self.all_transactions();
+
+        pending
+            .iter()
+            .chain(queued.iter())
+            .find(|tx| tx.sender() == sender && tx.nonce() == nonce)
+            .map(|tx| Arc::clone(tx))
     }
 
     fn get_transactions_by_origin(
