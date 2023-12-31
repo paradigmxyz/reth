@@ -1,14 +1,14 @@
 //! Customizable node builder service
 
-use crate::{
-    builder::{NodeConfig, NodeHandle},
-    cli::ext::{RethCliExt, RethNodeCommandExt},
-};
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
 use reth_tasks::TaskExecutor;
+use crate::{
+    builder::{NodeConfig, NodeHandle},
+    cli::ext::RethNodeCommandExt,
+};
 use crate::builder::traits::PoolBuilder;
 
 /// Declaratively construct a node.
@@ -45,12 +45,12 @@ impl NodeBuilder<(), (), (), InitState> {
 impl<DB, Pool, Ext> NodeBuilder<DB, Pool, Ext, InitState> {
     /// Configures the additional external context, e.g. additional context captured via CLI args.
     pub fn with_ext<E>(self, ext: E) -> NodeBuilder<DB, Pool, E, InitState> {
-        NodeBuilder { config: self.config, state: self.state, ctx: NodeBuilderContext { database: self.ctx.database,pool: self.ctx.pool, ext } }
+        NodeBuilder { config: self.config, state: self.state, ctx: NodeBuilderContext { database: self.ctx.database, pool_builder: self.ctx.pool_builder, ext } }
     }
 
     /// Configures the additional external context, e.g. additional context captured via CLI args.
     pub fn with_database<D>(self, database: D) -> NodeBuilder<D, Pool, Ext, InitState> {
-        NodeBuilder { config: self.config, state: self.state,  ctx: NodeBuilderContext { database, pool: self.ctx.pool, ext: self.ctx.ext } }
+        NodeBuilder { config: self.config, state: self.state,  ctx: NodeBuilderContext { database, pool_builder: self.ctx.pool_builder, ext: self.ctx.ext } }
     }
 }
 
@@ -81,11 +81,23 @@ struct NodeBuilderContext<DB, Pool, Ext> {
     /// Holds additional external context, e.g. additional context captured via CLI args.
     ext: Ext,
     /// The transaction pool
-    pool: Pool
+    pool_builder: Pool,
+
+    // TODO add hooks here: transform the hooks from RethNodeCommandExt into fields here
 }
 
 impl Default for NodeBuilderContext<(), (), ()> {
     fn default() -> Self {
-        Self { database: (), ext: (), pool: () }
+        Self { database: (), ext: (), pool_builder: () }
     }
+}
+
+
+/// Customizable components for the node.
+struct NodeComponentsBuilder<Pool: PoolBuilder> {
+    pool_builder: Pool,
+    // TODO this needs to depend on the pool type
+    // TODO merge this in one trait + helper types for ethereum? this!
+    // Then make NodeCommand hooks generic over this components trait + additional generic arguments for builtins like provider etc.
+    payload_service: ()
 }
