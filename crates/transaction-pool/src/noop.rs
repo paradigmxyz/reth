@@ -192,6 +192,14 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
+    fn get_transactions_by_sender_and_nonce(
+        &self,
+        _sender: Address,
+        _nonce: u64,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
     fn unique_senders(&self) -> HashSet<Address> {
         Default::default()
     }

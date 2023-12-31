@@ -473,6 +473,18 @@ where
         self.pool.get_transactions_by_sender(sender)
     }
 
+    fn get_transactions_by_sender_and_nonce(
+        &self,
+        sender: Address,
+        nonce: u64,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool
+            .get_transactions_by_sender(sender)
+            .into_iter()
+            .filter(|tx| tx.nonce() == nonce)
+            .collect()
+    }
+
     fn get_transactions_by_origin(
         &self,
         origin: TransactionOrigin,
