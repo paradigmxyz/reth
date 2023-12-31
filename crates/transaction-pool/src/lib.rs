@@ -144,7 +144,7 @@
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use crate::pool::PoolInner;
+use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
@@ -478,13 +478,11 @@ where
         sender: Address,
         nonce: u64,
     ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        let transaction_id = TransactionId::new(self.pool.get_sender_id(sender), nonce);
+
         let AllPoolTransactions { pending, queued } = self.all_transactions();
 
-        pending
-            .iter()
-            .chain(queued.iter())
-            .find(|tx| tx.sender() == sender && tx.nonce() == nonce)
-            .cloned()
+        pending.iter().chain(queued.iter()).find(|tx| tx.transaction_id == transaction_id).cloned()
     }
 
     fn get_transactions_by_origin(
