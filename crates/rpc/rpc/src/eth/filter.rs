@@ -1,18 +1,21 @@
 use super::cache::EthStateCache;
 use crate::{
-    eth::{
-        error::EthApiError,
-        logs_utils::{self, append_matching_block_logs},
-    },
+    eth::{error::EthApiError, logs_utils, pubsub::EthPubSub},
     result::{rpc_error_with_code, ToRpcResult},
     EthSubscriptionIdProvider,
 };
 use core::fmt;
+use futures::{executor, StreamExt};
+use reth_network_api::NetworkInfo;
+use tokio_stream::{wrappers::BroadcastStream, Stream};
 
+use alloy_primitives::B256;
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_primitives::{IntoRecoveredTransaction, TxHash};
-use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
+use reth_provider::{
+    BlockIdReader, BlockReader, CanonStateSubscriptions, EvmEnvProvider, ProviderError,
+};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
@@ -44,7 +47,7 @@ pub struct EthFilter<Provider, Pool> {
 
 impl<Provider, Pool> EthFilter<Provider, Pool>
 where
-    Provider: Send + Sync + 'static,
+    Provider: BlockReader + EvmEnvProvider + Send + Sync + 'static,
     Pool: Send + Sync + 'static,
 {
     /// Creates a new, shareable instance.
@@ -55,13 +58,18 @@ where
     /// See also [EthFilterConfig].
     ///
     /// This also spawns a task that periodically clears stale filters.
-    pub fn new(
+    pub fn new<Events, Network>(
         provider: Provider,
         pool: Pool,
         eth_cache: EthStateCache,
         config: EthFilterConfig,
         task_spawner: Box<dyn TaskSpawner>,
-    ) -> Self {
+        pubsub: EthPubSub<Provider, Pool, Events, Network>,
+    ) -> Self
+    where
+        Events: CanonStateSubscriptions + 'static,
+        Network: NetworkInfo + 'static,
+    {
         let EthFilterConfig { max_blocks_per_filter, max_logs_per_response, stale_filter_ttl } =
             config;
         let inner = EthFilterInner {
@@ -85,6 +93,14 @@ where
             "eth-filters_stale-filters-clean",
             Box::pin(async move {
                 this.watch_and_clear_stale_filters().await;
+            }),
+        );
+
+        let also_this = eth_filter.clone();
+        eth_filter.inner.task_spawner.clone().spawn_critical(
+            "eth-filters_update_reorged_logs",
+            Box::pin(async move {
+                also_this.update_reorged_logs(pubsub).await;
             }),
         );
 
@@ -119,6 +135,82 @@ where
 
             is_valid
         })
+    }
+
+    /// Endless future that updates the reorged logs for impacted filters
+    async fn update_reorged_logs<Events, Network>(
+        &self,
+        pubsub: EthPubSub<Provider, Pool, Events, Network>,
+    ) where
+        Events: CanonStateSubscriptions + 'static,
+        Network: NetworkInfo + 'static,
+    {
+        let mut stream = self.reorged_logs_stream(pubsub).await;
+        while let Some((id, logs)) = stream.next().await {
+            let mut filters = executor::block_on(self.active_filters().inner.lock());
+            let active_filter =
+                filters.get_mut(&id).ok_or(FilterError::FilterNotFound(id)).unwrap();
+            if let Ok(reorged_logs) = active_filter.reorged_logs.lock().await {
+                reorged_logs = Some(logs);
+            }
+        }
+    }
+
+    /// Reacts to reorged blocks, checks impacted log filters, stores reorged logs in the log filter
+    pub async fn reorged_logs_stream<Events, Network>(
+        &self,
+        pubsub: EthPubSub<Provider, Pool, Events, Network>,
+    ) -> impl Stream<Item = (FilterId, Vec<Log>)> + '_
+    where
+        Events: CanonStateSubscriptions + 'static,
+        Network: NetworkInfo + 'static,
+    {
+        let mut temp_reorged_blocks = Vec::new();
+
+        BroadcastStream::new(pubsub.get_chain_events().subscribe_to_canonical_state())
+            .map(move |canon_state| {
+                canon_state.expect("new block subscription never ends; qed").block_receipts()
+            })
+            .flat_map(futures::stream::iter)
+            .flat_map(move |(block_receipts, removed)| {
+                let mut reorged_logs: Vec<(FilterId, Vec<Log>)> = Vec::new();
+
+                if removed {
+                    temp_reorged_blocks.push(block_receipts);
+
+                    let filters = executor::block_on(self.active_filters().inner.lock());
+
+                    filters.iter().for_each(|(id, active_filter)| {
+                        if let FilterKind::Log(ref filter) = active_filter.kind {
+                            let mut reverted_logs: Vec<Log> = Vec::new();
+                            let filtered_params = FilteredParams::new(Some(*filter.clone()));
+
+                            for reorged_block in &mut temp_reorged_blocks {
+                                let mut matching_logs =
+                                    logs_utils::matching_block_logs_with_tx_hashes(
+                                        &filtered_params,
+                                        reorged_block.block,
+                                        reorged_block
+                                            .tx_receipts
+                                            .clone()
+                                            .iter()
+                                            .map(|(tx, receipt)| (*tx, receipt)),
+                                        true,
+                                    );
+
+                                reverted_logs.append(&mut matching_logs);
+                                if Some(reorged_block.block.hash) == active_filter.block_hash {
+                                    reorged_logs.push((id.clone(), reverted_logs.clone()));
+                                }
+                            }
+                        }
+                    });
+                } else {
+                    temp_reorged_blocks.clear();
+                }
+
+                futures::stream::iter(reorged_logs)
+            })
     }
 }
 
@@ -390,14 +482,19 @@ where
     /// Installs a new filter and returns the new identifier.
     async fn install_filter(&self, kind: FilterKind) -> RpcResult<FilterId> {
         let last_poll_block_number = self.provider.best_block_number().to_rpc_result()?;
+        let last_poll_block_hash =
+            self.provider.block_hash(last_poll_block_number).to_rpc_result()?;
         let id = FilterId::from(self.id_provider.next_id());
         let mut filters = self.active_filters.inner.lock().await;
+        let reorged_logs: Arc<Mutex<Option<Vec<Log>>>> = Arc::new(Mutex::new(Some(Vec::new())));
         filters.insert(
             id.clone(),
             ActiveFilter {
                 block: last_poll_block_number,
+                block_hash: last_poll_block_hash,
                 last_poll_timestamp: Instant::now(),
                 kind,
+                reorged_logs,
             },
         );
         Ok(id)
@@ -450,7 +547,7 @@ where
                     };
 
                     if let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? {
-                        append_matching_block_logs(
+                        logs_utils::append_matching_block_logs(
                             &mut all_logs,
                             &self.provider,
                             &filter_params,
@@ -537,10 +634,14 @@ pub struct ActiveFilters {
 struct ActiveFilter {
     /// At which block the filter was polled last.
     block: u64,
+    /// Hash of the block at which the filter was polled last.
+    block_hash: Option<B256>,
     /// Last time this filter was polled.
     last_poll_timestamp: Instant,
     /// What kind of filter it is.
     kind: FilterKind,
+    /// Reorged logs
+    reorged_logs: Arc<Mutex<Option<Vec<Log>>>>,
 }
 
 /// A receiver for pending transactions that returns all new transactions since the last poll.

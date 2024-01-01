@@ -253,7 +253,7 @@ pub struct Filter {
     pub block_option: FilterBlockOption,
     /// Address
     pub address: FilterSet<Address>,
-    /// Topics (maxmimum of 4)
+    /// Topics (maximum of 4)
     pub topics: [Topic; 4],
 }
 

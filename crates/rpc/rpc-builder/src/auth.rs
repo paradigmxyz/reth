@@ -12,15 +12,15 @@ use jsonrpsee::{
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
-    StateProviderFactory,
+    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
+    ReceiptProviderIdExt, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
         cache::EthStateCache, gas_oracle::GasPriceOracle, EthFilterConfig, FeeHistoryCache,
         FeeHistoryCacheConfig,
     },
-    AuthLayer, BlockingTaskPool, Claims, EngineEthApi, EthApi, EthFilter,
+    AuthLayer, BlockingTaskPool, Claims, EngineEthApi, EthApi, EthFilter, EthPubSub,
     EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
@@ -33,7 +33,7 @@ use std::{
 
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
-pub async fn launch<Provider, Pool, Network, Tasks, EngineApi>(
+pub async fn launch<Provider, Pool, Network, Tasks, EngineApi, Events>(
     provider: Provider,
     pool: Pool,
     network: Network,
@@ -41,6 +41,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, EngineApi>(
     engine_api: EngineApi,
     socket_addr: SocketAddr,
     secret: JwtSecret,
+    events: Events,
 ) -> Result<AuthServerHandle, RpcError>
 where
     Provider: BlockReaderIdExt
@@ -56,6 +57,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EngineApi: EngineApiServer,
+    Events: CanonStateSubscriptions + Clone + 'static,
 {
     // spawn a new cache task
     let eth_cache =
@@ -68,7 +70,7 @@ where
     let eth_api = EthApi::with_spawner(
         provider.clone(),
         pool.clone(),
-        network,
+        network.clone(),
         eth_cache.clone(),
         gas_oracle,
         EthConfig::default().rpc_gas_cap,
@@ -79,13 +81,33 @@ where
     let config = EthFilterConfig::default()
         .max_logs_per_response(DEFAULT_MAX_LOGS_PER_RESPONSE)
         .max_blocks_per_filter(DEFAULT_MAX_BLOCKS_PER_FILTER);
-    let eth_filter =
-        EthFilter::new(provider, pool, eth_cache.clone(), config, Box::new(executor.clone()));
-    launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
+    let eth_pubsub = EthPubSub::with_spawner(
+        provider.clone(),
+        pool.clone(),
+        events.clone(),
+        network.clone(),
+        Box::new(executor.clone()),
+    );
+    let eth_filter = EthFilter::new(
+        provider.clone(),
+        pool.clone(),
+        eth_cache.clone(),
+        config,
+        Box::new(executor.clone()),
+        eth_pubsub.clone(),
+    );
+    launch_with_eth_api::<Provider, Pool, Network, EngineApi, Events>(
+        eth_api,
+        eth_filter,
+        engine_api,
+        socket_addr,
+        secret,
+    )
+    .await
 }
 
 /// Configure and launch a _standalone_ auth server with existing EthApi implementation.
-pub async fn launch_with_eth_api<Provider, Pool, Network, EngineApi>(
+pub async fn launch_with_eth_api<Provider, Pool, Network, EngineApi, Events>(
     eth_api: EthApi<Provider, Pool, Network>,
     eth_filter: EthFilter<Provider, Pool>,
     engine_api: EngineApi,
@@ -104,6 +126,7 @@ where
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     EngineApi: EngineApiServer,
+    Events: CanonStateSubscriptions + Clone + 'static,
 {
     // Configure the module and start the server.
     let mut module = RpcModule::new(());
