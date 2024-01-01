@@ -150,7 +150,9 @@ where
             let mut filters = executor::block_on(self.active_filters().inner.lock());
             let active_filter =
                 filters.get_mut(&id).ok_or(FilterError::FilterNotFound(id)).unwrap();
-            active_filter.reorged_logs = Arc::new(Mutex::new(Some(logs)));
+            if let Ok(reorged_logs) = active_filter.reorged_logs.lock().await {
+                reorged_logs = Some(logs);
+            }
         }
     }
 
