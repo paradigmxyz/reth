@@ -1,34 +1,18 @@
 use super::file_codec::BlockFileCodec;
-use alloy_rlp::{Decodable, Header as RlpHeader};
 use itertools::Either;
-use reth_interfaces::{
-    p2p::{
-        bodies::client::{BodiesClient, BodiesFut},
-        download::DownloadClient,
-        error::RequestError,
-        headers::client::{HeadersClient, HeadersFut, HeadersRequest},
-        priority::Priority,
-    },
-    sync::{NetworkSyncUpdater, SyncState, SyncStateProvider},
+use reth_interfaces::p2p::{
+    bodies::client::{BodiesClient, BodiesFut},
+    download::DownloadClient,
+    error::RequestError,
+    headers::client::{HeadersClient, HeadersFut, HeadersRequest},
+    priority::Priority,
 };
 use reth_primitives::{
-    Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId,
-    B256,
+    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, B256,
 };
-use std::{
-    collections::HashMap,
-    iter::zip,
-    path::Path,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
+use std::{self, collections::HashMap, path::Path};
 use thiserror::Error;
-use tokio::{
-    fs::File,
-    io::{AsyncReadExt, BufReader},
-};
+use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 use tracing::{trace, warn};
@@ -250,14 +234,12 @@ mod tests {
     use crate::{
         bodies::{
             bodies::BodiesDownloaderBuilder,
-            test_utils::{create_raw_bodies, insert_headers, zip_blocks},
+            test_utils::{insert_headers, zip_blocks},
         },
         headers::{reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::child_header},
         test_utils::{generate_bodies, generate_bodies_file},
     };
-    use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
-    use futures::SinkExt;
     use futures_util::stream::StreamExt;
     use reth_db::test_utils::create_test_rw_db;
     use reth_interfaces::{
@@ -269,12 +251,7 @@ mod tests {
     };
     use reth_primitives::{SealedHeader, MAINNET};
     use reth_provider::ProviderFactory;
-    use std::{
-        io::{Read, Seek, SeekFrom, Write},
-        sync::Arc,
-    };
-    use tokio::io::{AsyncSeekExt, AsyncWriteExt, BufWriter};
-    use tokio_util::codec::FramedWrite;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn streams_bodies_from_buffer() {
@@ -337,8 +314,7 @@ mod tests {
     #[tokio::test]
     async fn test_download_headers_from_file() {
         // Generate some random blocks
-        let db = create_test_rw_db();
-        let (file, headers, mut bodies) = generate_bodies_file(0..=19).await;
+        let (file, headers, _) = generate_bodies_file(0..=19).await;
 
         // now try to read them back
         let client = Arc::new(FileClient::from_file(file).await.unwrap());

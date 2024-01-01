@@ -162,6 +162,16 @@ pub struct TaskManager {
 // === impl TaskManager ===
 
 impl TaskManager {
+    /// Returns a a [TaskManager] over the currently running Runtime.
+    ///
+    /// # Panics
+    ///
+    /// This will panic if called outside the context of a Tokio runtime.
+    pub fn current() -> Self {
+        let handle = Handle::current();
+        Self::new(handle)
+    }
+
     /// Create a new instance connected to the given handle's tokio runtime.
     pub fn new(handle: Handle) -> Self {
         let (panicked_tasks_tx, panicked_tasks_rx) = unbounded_channel();

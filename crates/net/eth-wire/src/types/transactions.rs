@@ -1,4 +1,5 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
+
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{PooledTransactionsElement, TransactionSigned, B256};

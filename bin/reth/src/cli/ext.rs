@@ -29,7 +29,7 @@ impl RethCliExt for () {
 }
 
 /// A trait that allows for extending and customizing parts of the node command
-/// [NodeCommand](crate::node::NodeCommand).
+/// [NodeCommand](crate::commands::node::NodeCommand).
 ///
 /// The functions are invoked during the initialization of the node command in the following order:
 ///
@@ -140,18 +140,18 @@ pub trait RethNodeCommandConfig: fmt::Debug {
             .extradata(conf.extradata_rlp_bytes())
             .max_gas_limit(conf.max_gas_limit());
 
+        // no extradata for optimism
         #[cfg(feature = "optimism")]
-        let payload_job_config =
-            payload_job_config.compute_pending_block(conf.compute_pending_block());
+        let payload_job_config = payload_job_config.extradata(Default::default());
 
         // The default payload builder is implemented on the unit type.
         #[cfg(not(feature = "optimism"))]
-        #[allow(clippy::let_unit_value)]
-        let payload_builder = reth_basic_payload_builder::EthereumPayloadBuilder::default();
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
 
         // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
         #[cfg(feature = "optimism")]
-        let payload_builder = reth_basic_payload_builder::OptimismPayloadBuilder::default();
+        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
+            .set_compute_pending_block(conf.compute_pending_block());
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             components.provider(),
@@ -177,7 +177,8 @@ pub trait RethNodeCommandExt: RethNodeCommandConfig + fmt::Debug + clap::Args {}
 // blanket impl for all types that implement the required traits.
 impl<T> RethNodeCommandExt for T where T: RethNodeCommandConfig + fmt::Debug + clap::Args {}
 
-/// The default configuration for the reth node command [Command](crate::node::NodeCommand).
+/// The default configuration for the reth node command
+/// [Command](crate::commands::node::NodeCommand).
 ///
 /// This is a convenience type for [NoArgs<()>].
 #[derive(Debug, Clone, Copy, Default, Args)]
@@ -200,7 +201,7 @@ impl<Conf: RethNodeCommandConfig> RethCliExt for NoArgsCliExt<Conf> {
 /// additional CLI arguments.
 ///
 /// Note: This type must be manually filled with a [RethNodeCommandConfig] manually before executing
-/// the [NodeCommand](crate::node::NodeCommand).
+/// the [NodeCommand](crate::commands::node::NodeCommand).
 #[derive(Debug, Clone, Copy, Default, Args)]
 pub struct NoArgs<T = ()> {
     #[clap(skip)]

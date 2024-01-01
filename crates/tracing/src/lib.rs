@@ -53,13 +53,9 @@ pub use tracing_subscriber;
 // Re-export LogFormat
 pub use formatter::LogFormat;
 pub use layers::{FileInfo, FileWorkerGuard};
-#[cfg(test)]
-pub use test_tracer::TestTracer;
 
 mod formatter;
 mod layers;
-#[cfg(test)]
-mod test_tracer;
 
 use crate::layers::Layers;
 use tracing::level_filters::LevelFilter;
