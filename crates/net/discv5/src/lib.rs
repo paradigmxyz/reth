@@ -3,7 +3,7 @@ pub use discv5::{
     ConfigBuilder as Discv5ConfigBuilder, Discv5, Enr, Event,
 };
 
-use futures_util::{StreamExt,TryFutureExt};
+use futures_util::{StreamExt};
 use k256::ecdsa::SigningKey;
 use parking_lot::Mutex;
 use secp256k1::SecretKey;
@@ -56,24 +56,28 @@ impl Discv5Handle {
     
         tokio::task::spawn_blocking(move || {
             let mut discv5_guard = discv5.lock();
-            discv5_guard.start()
+            // Perform operations with discv5_guard here and return the result.
+            // For example, if start() returns a result, handle it inside and return an owned type.
+            let _ = discv5_guard.start();
         })
-        .await  // Await the JoinHandle
-        .map_err(|_| Discv5Error::Discv5Construct)?  // Handle JoinError
-        .map_err(|_| Discv5Error::Discv5Construct); // Handle error from start()
-    
-        Ok(())
+        .await
+        .map_err(|_| Discv5Error::Discv5Construct.into())
     }
+    
 
-    // Create the event stream
     pub async fn create_event_stream(
         &self,
     ) -> Result<tokio::sync::mpsc::Receiver<Event>, Discv5Error> {
-            let discv5 = self.inner.lock();
-            discv5.event_stream().await.map_err(|e| Discv5Error::Discv5EventStreamStart.into())
+        let discv5 = Arc::clone(&self.inner);
+        let discv5_guard = discv5.lock();
+    
+        // Directly await the async operation
+        discv5_guard.event_stream().await
+            .map_err(|_| Discv5Error::Discv5EventStreamStart.into())
     }
-}
+    
 
+}
 impl fmt::Debug for Discv5Handle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Discv5Handle(<Discv5>)")
