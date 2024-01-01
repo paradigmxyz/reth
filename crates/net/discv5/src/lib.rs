@@ -56,8 +56,7 @@ impl Discv5Handle {
     
         tokio::task::spawn_blocking(move || {
             let mut discv5_guard = discv5.lock();
-            // Perform operations with discv5_guard here and return the result.
-            // For example, if start() returns a result, handle it inside and return an owned type.
+           
             let _ = discv5_guard.start();
         })
         .await
