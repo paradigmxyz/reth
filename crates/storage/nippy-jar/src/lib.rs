@@ -5,8 +5,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-// TODO(danipopes): add these warnings
-// #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+#![warn(missing_debug_implementations, unreachable_pub, rustdoc::all)] // TODO(danipopes): missing_docs
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
@@ -438,12 +437,12 @@ impl<H: NippyJarHeader> PerfectHashingFunction for NippyJar<H> {
 #[derive(Debug)]
 pub struct DataReader {
     /// Data file descriptor. Needs to be kept alive as long as `data_mmap` handle.
-    #[allow(unused)]
+    #[allow(dead_code)]
     data_file: File,
     /// Mmap handle for data.
     data_mmap: Mmap,
     /// Offset file descriptor. Needs to be kept alive as long as `offset_mmap` handle.
-    #[allow(unused)]
+    #[allow(dead_code)]
     offset_file: File,
     /// Mmap handle for offsets.
     offset_mmap: Mmap,
@@ -805,7 +804,7 @@ mod tests {
         let block_start = 500;
 
         #[derive(Serialize, Deserialize, Debug)]
-        pub struct BlockJarHeader {
+        struct BlockJarHeader {
             block_start: usize,
         }
 

@@ -12,27 +12,37 @@ use reth_primitives::fs::FsPathError;
 pub type RethResult<T> = Result<T, RethError>;
 
 /// Core error variants possible when interacting with the blockchain.
+///
+/// This enum encapsulates various error types that can occur during blockchain interactions.
+///
+/// It allows for structured error handling based on the nature of the encountered issue.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
-#[allow(missing_docs)]
 pub enum RethError {
+    /// Error encountered during block execution.
     #[error(transparent)]
     Execution(#[from] BlockExecutionError),
 
+    /// Consensus-related errors.
     #[error(transparent)]
     Consensus(#[from] ConsensusError),
 
+    /// Database-related errors.
     #[error(transparent)]
     Database(#[from] DatabaseError),
 
+    /// Errors originating from providers.
     #[error(transparent)]
     Provider(#[from] ProviderError),
 
+    /// Errors related to networking.
     #[error(transparent)]
     Network(#[from] NetworkError),
 
+    /// Canonical errors encountered.
     #[error(transparent)]
     Canonical(#[from] CanonicalError),
 
+    /// Custom error message.
     #[error("{0}")]
     Custom(String),
 }

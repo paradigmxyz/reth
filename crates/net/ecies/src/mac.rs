@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+
 use aes::Aes256Enc;
 use block_padding::NoPadding;
 use cipher::BlockEncrypt;

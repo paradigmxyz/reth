@@ -34,8 +34,7 @@ pub const EPOCH_DURATION: Duration = Duration::from_secs(12 * EPOCH_SLOTS);
 pub const BEACON_NONCE: u64 = 0u64;
 
 /// The default Ethereum block gas limit.
-///
-/// TODO: This should be a chain spec parameter.
+// TODO: This should be a chain spec parameter.
 /// See <https://github.com/paradigmxyz/reth/issues/3233>.
 pub const ETHEREUM_BLOCK_GAS_LIMIT: u64 = 30_000_000;
 
@@ -91,6 +90,21 @@ pub const OP_GOERLI_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON: u64 = 250;
 /// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
 #[cfg(feature = "optimism")]
 pub const OP_GOERLI_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u64 = 10;
+
+/// Base fee max change denominator for Optimism Sepolia as defined in the Optimism
+/// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
+#[cfg(feature = "optimism")]
+pub const OP_SEPOLIA_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 50;
+
+/// Base fee max change denominator for Optimism Sepolia as defined in the Optimism Canyon
+/// hardfork.
+#[cfg(feature = "optimism")]
+pub const OP_SEPOLIA_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON: u64 = 250;
+
+/// Base fee max change denominator for Optimism Sepolia as defined in the Optimism
+/// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
+#[cfg(feature = "optimism")]
+pub const OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u64 = 10;
 
 /// Multiplier for converting gwei to wei.
 pub const GWEI_TO_WEI: u64 = 1_000_000_000;

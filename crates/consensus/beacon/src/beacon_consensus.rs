@@ -1,4 +1,5 @@
 //! Consensus for ethereum network
+
 use reth_consensus_common::validation;
 use reth_interfaces::consensus::{Consensus, ConsensusError};
 use reth_primitives::{

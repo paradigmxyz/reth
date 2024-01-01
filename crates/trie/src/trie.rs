@@ -8,6 +8,7 @@ use crate::{
     walker::TrieWalker,
     StateRootError, StorageRootError,
 };
+use ahash::{AHashMap, AHashSet};
 use alloy_rlp::{BufMut, Encodable};
 use reth_db::transaction::DbTx;
 use reth_primitives::{
@@ -16,10 +17,7 @@ use reth_primitives::{
     trie::{HashBuilder, Nibbles, TrieAccount},
     Address, BlockNumber, B256,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    ops::RangeInclusive,
-};
+use std::ops::RangeInclusive;
 use tracing::{debug, trace};
 
 /// StateRoot is used to compute the root node of a state trie.
@@ -33,9 +31,9 @@ pub struct StateRoot<T, H> {
     pub changed_account_prefixes: PrefixSet,
     /// A map containing storage changes with the hashed address as key and a set of storage key
     /// prefixes as the value.
-    pub changed_storage_prefixes: HashMap<B256, PrefixSet>,
+    pub changed_storage_prefixes: AHashMap<B256, PrefixSet>,
     /// A map containing keys of accounts that were destroyed.
-    pub destroyed_accounts: HashSet<B256>,
+    pub destroyed_accounts: AHashSet<B256>,
     /// Previous intermediate state.
     previous_state: Option<IntermediateStateRootState>,
     /// The number of updates after which the intermediate progress should be returned.
@@ -50,13 +48,13 @@ impl<T, H> StateRoot<T, H> {
     }
 
     /// Set the changed storage prefixes.
-    pub fn with_changed_storage_prefixes(mut self, prefixes: HashMap<B256, PrefixSet>) -> Self {
+    pub fn with_changed_storage_prefixes(mut self, prefixes: AHashMap<B256, PrefixSet>) -> Self {
         self.changed_storage_prefixes = prefixes;
         self
     }
 
     /// Set the destroyed accounts.
-    pub fn with_destroyed_accounts(mut self, accounts: HashSet<B256>) -> Self {
+    pub fn with_destroyed_accounts(mut self, accounts: AHashSet<B256>) -> Self {
         self.destroyed_accounts = accounts;
         self
     }
@@ -113,8 +111,8 @@ impl<'a, TX: DbTx> StateRoot<&'a TX, &'a TX> {
             trie_cursor_factory: tx,
             hashed_cursor_factory: tx,
             changed_account_prefixes: PrefixSetMut::default().freeze(),
-            changed_storage_prefixes: HashMap::default(),
-            destroyed_accounts: HashSet::default(),
+            changed_storage_prefixes: AHashMap::default(),
+            destroyed_accounts: AHashSet::default(),
             previous_state: None,
             threshold: 100_000,
         }
@@ -519,7 +517,12 @@ mod tests {
         Account, Address, StorageEntry, B256, U256,
     };
     use reth_provider::{test_utils::create_test_provider_factory, DatabaseProviderRW};
-    use std::{collections::BTreeMap, ops::Mul, str::FromStr, sync::Arc};
+    use std::{
+        collections::{BTreeMap, HashMap},
+        ops::Mul,
+        str::FromStr,
+        sync::Arc,
+    };
 
     fn insert_account(
         tx: &impl DbTxMut,
@@ -1179,7 +1182,7 @@ mod tests {
             .into_iter()
             .map(|item| {
                 let (key, node) = item.unwrap();
-                (key.0, node)
+                (key.0, node.0)
             })
             .collect();
         assert_trie_updates(&account_updates);

@@ -9,7 +9,6 @@ use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
 
 /// Various error cases that can occur when a block violates tree assumptions.
 #[derive(Debug, Clone, Copy, thiserror::Error, Eq, PartialEq)]
-#[allow(missing_docs)]
 pub enum BlockchainTreeError {
     /// Thrown if the block number is lower than the last finalized block number.
     #[error("block number is lower than the last finalized block number #{last_finalized}")]
@@ -41,7 +40,7 @@ pub enum BlockchainTreeError {
         /// The block hash that could not be found.
         block_hash: BlockHash,
     },
-    // Thrown if the block failed to buffer
+    /// Thrown if the block failed to buffer
     #[error("block with hash {block_hash} failed to buffer")]
     BlockBufferingFailed {
         /// The block hash of the block that failed to buffer.
@@ -53,7 +52,6 @@ pub enum BlockchainTreeError {
 pub type CanonicalResult<T> = Result<T, CanonicalError>;
 
 /// Canonical Errors
-#[allow(missing_docs)]
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 pub enum CanonicalError {
     /// Error originating from validation operations.
@@ -63,17 +61,17 @@ pub enum CanonicalError {
     #[error(transparent)]
     BlockchainTree(#[from] BlockchainTreeError),
     /// Error indicating a transaction reverted during execution.
-    #[error("transaction error on revert: {inner}")]
-    CanonicalRevert { inner: String },
+    #[error("transaction error on revert: {0}")]
+    CanonicalRevert(String),
     /// Error indicating a transaction failed to commit during execution.
-    #[error("transaction error on commit: {inner}")]
-    CanonicalCommit { inner: String },
+    #[error("transaction error on commit: {0}")]
+    CanonicalCommit(String),
 }
 
 impl CanonicalError {
     /// Returns `true` if the error is fatal.
     pub fn is_fatal(&self) -> bool {
-        matches!(self, Self::CanonicalCommit { .. } | Self::CanonicalRevert { .. })
+        matches!(self, Self::CanonicalCommit(_) | Self::CanonicalRevert(_))
     }
 }
 
@@ -270,8 +268,8 @@ impl InsertBlockErrorKind {
             }
             InsertBlockErrorKind::Canonical(err) => match err {
                 CanonicalError::BlockchainTree(_) |
-                CanonicalError::CanonicalCommit { .. } |
-                CanonicalError::CanonicalRevert { .. } => false,
+                CanonicalError::CanonicalCommit(_) |
+                CanonicalError::CanonicalRevert(_) => false,
                 CanonicalError::Validation(_) => true,
             },
             InsertBlockErrorKind::BlockchainTree(_) => false,

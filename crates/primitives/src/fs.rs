@@ -1,4 +1,5 @@
 //! Wrapper for `std::fs` methods
+
 use std::{
     fs::{self, ReadDir},
     io,

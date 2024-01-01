@@ -19,7 +19,7 @@ pub use spec::{
 };
 
 #[cfg(feature = "optimism")]
-pub use spec::{BASE_GOERLI, BASE_MAINNET, OP_GOERLI};
+pub use spec::{BASE_GOERLI, BASE_MAINNET, BASE_SEPOLIA, OP_GOERLI};
 
 // The chain info module.
 mod info;
@@ -64,6 +64,7 @@ pub enum NamedChain {
 
     Base = 8453,
     BaseGoerli = 84531,
+    BaseSepolia = 84532,
 
     Arbitrum = 42161,
     ArbitrumTestnet = 421611,
@@ -138,6 +139,11 @@ impl Chain {
         Chain::Named(NamedChain::BaseGoerli)
     }
 
+    /// Returns the base sepolia chain.
+    pub const fn base_sepolia() -> Self {
+        Chain::Named(NamedChain::BaseSepolia)
+    }
+
     /// Returns the base mainnet chain.
     pub const fn base_mainnet() -> Self {
         Chain::Named(NamedChain::Base)
@@ -157,7 +163,8 @@ impl Chain {
                     NamedChain::OptimismGoerli |
                     NamedChain::OptimismKovan |
                     NamedChain::Base |
-                    NamedChain::BaseGoerli
+                    NamedChain::BaseGoerli |
+                    NamedChain::BaseSepolia
             )
         })
     }
@@ -187,7 +194,7 @@ impl Chain {
 
         let named: NamedChain = self.try_into().ok()?;
 
-        if matches!(named, C::Mainnet | C::Goerli | C::Sepolia | C::Ropsten | C::Rinkeby) {
+        if matches!(named, C::Mainnet | C::Goerli | C::Sepolia | C::Holesky) {
             return Some(format!("{DNS_PREFIX}all.{}.ethdisco.net", named.as_ref().to_lowercase()))
         }
         None
@@ -446,9 +453,16 @@ mod tests {
     }
 
     #[test]
-    fn test_dns_network() {
+    fn test_dns_main_network() {
         let s = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.mainnet.ethdisco.net";
         let chain: Chain = NamedChain::Mainnet.into();
+        assert_eq!(s, chain.public_dns_network_protocol().unwrap().as_str());
+    }
+
+    #[test]
+    fn test_dns_holesky_network() {
+        let s = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.holesky.ethdisco.net";
+        let chain: Chain = NamedChain::Holesky.into();
         assert_eq!(s, chain.public_dns_network_protocol().unwrap().as_str());
     }
 }

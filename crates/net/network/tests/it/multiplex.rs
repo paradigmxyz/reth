@@ -166,9 +166,9 @@ struct ProtocolState {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 enum ProtocolEvent {
     Established {
+        #[allow(dead_code)]
         direction: Direction,
         peer_id: PeerId,
         to_connection: mpsc::UnboundedSender<Command>,

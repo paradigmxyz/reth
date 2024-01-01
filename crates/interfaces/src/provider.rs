@@ -1,6 +1,6 @@
 use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, SnapshotSegment,
-    TxHashOrNumber, TxNumber, B256,
+    TxHashOrNumber, TxNumber, B256, U256,
 };
 use std::path::PathBuf;
 use thiserror::Error;
@@ -122,6 +122,9 @@ pub enum ProviderError {
     /// Snapshot file is not found for requested transaction.
     #[error("not able to find {0} snapshot file for transaction id {1}")]
     MissingSnapshotTx(SnapshotSegment, TxNumber),
+    /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
+    #[error("failed to convert block number U256 to u64: {0}")]
+    BlockNumberOverflow(U256),
 }
 
 impl From<reth_nippy_jar::NippyJarError> for ProviderError {
