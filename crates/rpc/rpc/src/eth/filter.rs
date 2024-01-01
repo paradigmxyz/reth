@@ -146,12 +146,13 @@ where
         Network: NetworkInfo + 'static,
     {
         let mut stream = self.reorged_logs_stream(pubsub).await;
-        while let Some((id, logs)) = stream.next().await {
+        while let Some((id, mut logs)) = stream.next().await {
             let mut filters = executor::block_on(self.active_filters().inner.lock());
             let active_filter =
                 filters.get_mut(&id).ok_or(FilterError::FilterNotFound(id)).unwrap();
-            if let Ok(reorged_logs) = active_filter.reorged_logs.lock().await {
-                reorged_logs = Some(logs);
+            let mut guard = active_filter.reorged_logs.lock().await;
+            if let Some(reorged_logs_vec) = guard.as_mut() {
+                reorged_logs_vec.append(&mut logs);
             }
         }
     }
