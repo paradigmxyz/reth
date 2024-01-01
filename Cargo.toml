@@ -231,14 +231,13 @@ serial_test = "2"
 [workspace.metadata.cargo-udeps.ignore]
 # ignored because this is mutually exclusive with the optimism payload builder via feature flags
 normal = ["reth-ethereum-payload-builder"]
-=======
 
 # Linting rules across all crates in the workspace.
-[workspace.lints]
-rust.missing_debug_implementations = "warn"
-rust.missing_docs = "warn"
-rust.unreachable_pub = "warn"
-rustdoc.all = "warn"
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+missing_docs = "warn"
+unreachable_pub = "warn"
+"rustdoc.all" = "warn"
 
-rust.unused_must_use = "deny"
-rust.rust_2018_idioms = "deny"
+unused_must_use = "deny"
+"rust_2018_idioms" = "deny"
