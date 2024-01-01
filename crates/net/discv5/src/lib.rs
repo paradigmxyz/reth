@@ -3,10 +3,11 @@ pub use discv5::{
     ConfigBuilder as Discv5ConfigBuilder, Discv5, Enr, Event,
 };
 
-use futures_util::StreamExt;
+use futures_util::{StreamExt,TryFutureExt};
 use k256::ecdsa::SigningKey;
-use parking_lot::{Mutex, MutexGuard};
+use parking_lot::Mutex;
 use secp256k1::SecretKey;
+use tokio::task;
 use std::{
     default::Default,
     fmt,
@@ -18,6 +19,7 @@ use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 
 // Wrapper struct for Discv5
+#[derive(Clone)]
 pub struct Discv5Handle {
     inner: Arc<Mutex<Discv5>>,
 }
@@ -45,31 +47,30 @@ impl Discv5Handle {
         ))
     }
 
-    pub fn lock(&self) -> MutexGuard<'_, Discv5> {
-        self.inner.lock()
-    }
-
     pub fn convert_to_discv5(&self) -> Arc<Mutex<Discv5>> {
         self.inner.clone()
     }
 
-    // Start the Discv5 service
     pub async fn start_service(&self) -> Result<(), Discv5Error> {
-        let mut discv5 = self.inner.lock();
-        discv5.start().await.map_err(|e| Discv5Error::Discv5Construct.into())
+        let discv5 = Arc::clone(&self.inner);
+    
+        tokio::task::spawn_blocking(move || {
+            let mut discv5_guard = discv5.lock();
+            discv5_guard.start()
+        })
+        .await  // Await the JoinHandle
+        .map_err(|_| Discv5Error::Discv5Construct)?  // Handle JoinError
+        .map_err(|_| Discv5Error::Discv5Construct); // Handle error from start()
+    
+        Ok(())
     }
 
     // Create the event stream
     pub async fn create_event_stream(
         &self,
     ) -> Result<tokio::sync::mpsc::Receiver<Event>, Discv5Error> {
-        let discv5 = self.inner.lock();
-        discv5.event_stream().await.map_err(|e| Discv5Error::Discv5EventStreamStart.into())
-    }
-
-    // Method to get a mutable reference to Discv5 from Discv5Handle
-    pub async fn get_mut(&self) -> MutexGuard<'_, Discv5> {
-        self.inner.lock()
+            let discv5 = self.inner.lock();
+            discv5.event_stream().await.map_err(|e| Discv5Error::Discv5EventStreamStart.into())
     }
 }
 

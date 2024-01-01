@@ -88,9 +88,9 @@ impl Discovery {
         // setup discv5
         let (discv5, discv5_event_stream) = if let Some(discv5_config) = discv5_config {
             let discv5 = Discv5Handle::from_secret_key(sk, discv5_config)?;
-            let mut discv5_ref = discv5.get_mut().await;
-            discv5_ref.start().await.unwrap();
-            drop(discv5_ref);
+
+            discv5.clone().start_service().await.unwrap();
+            // drop(discv5);
 
             let discv5_event = discv5
                 .create_event_stream()
