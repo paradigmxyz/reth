@@ -250,7 +250,7 @@ impl SnapshotProvider {
 
     /// Gets the highest snapshot block if it exists for a snapshot segment.
     pub fn get_highest_snapshot_block(&self, segment: SnapshotSegment) -> Option<BlockNumber> {
-        self.snapshots_max_block.read().get(&segment).map(|max_block| *max_block)
+        self.snapshots_max_block.read().get(&segment).copied()
     }
 
     /// Gets the highest snapshotted transaction.
