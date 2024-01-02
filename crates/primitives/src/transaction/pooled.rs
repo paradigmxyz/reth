@@ -325,6 +325,13 @@ impl Encodable for PooledTransactionsElement {
     /// For legacy transactions, this encodes the transaction as `rlp(tx-data)`.
     ///
     /// For EIP-2718 transactions, this encodes the transaction as `rlp(tx_type || rlp(tx-data)))`.
+    ///
+    /// The encoding of `tx-data` depends on the transaction type. Refer to these docs for more
+    /// information on the exact format:
+    /// - [Legacy](TxLegacy::encode_with_signature)
+    /// - [EIP-2930](TxEip2930::encode_with_signature)
+    /// - [EIP-1559](TxEip1559::encode_with_signature)
+    /// - [EIP-4844](BlobTransaction::encode_with_type_inner)
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             Self::Legacy { transaction, signature, .. } => {
