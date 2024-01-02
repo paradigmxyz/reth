@@ -566,6 +566,18 @@ impl NodeConfig {
             let transactions_backup_config =
                 reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
 
+            executor.spawn_critical_with_graceful_shutdown_signal(
+                "local transactions backup task",
+                |shutdown| {
+                    reth_transaction_pool::maintain::backup_local_transactions_task(
+                        shutdown,
+                        pool.clone(),
+                        transactions_backup_config,
+                    )
+                },
+            );
+
+            // spawn the maintenance task
             executor.spawn_critical(
                 "txpool maintenance task",
                 reth_transaction_pool::maintain::maintain_transaction_pool_future(
@@ -574,7 +586,6 @@ impl NodeConfig {
                     chain_events,
                     executor.clone(),
                     Default::default(),
-                    transactions_backup_config,
                 ),
             );
             debug!(target: "reth::cli", "Spawned txpool maintenance task");
