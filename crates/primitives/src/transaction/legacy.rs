@@ -110,6 +110,9 @@ impl TxLegacy {
 
     /// Encodes EIP-155 arguments into the desired buffer. Only encodes values for legacy
     /// transactions.
+    ///
+    /// If a `chain_id` is `Some`, this encodes the `chain_id`, followed by two zeroes, as defined
+    /// by [EIP-155](https://eips.ethereum.org/EIPS/eip-155).
     pub(crate) fn encode_eip155_fields(&self, out: &mut dyn bytes::BufMut) {
         // if this is a legacy transaction without a chain ID, it must be pre-EIP-155
         // and does not need to encode the chain ID for the signature hash encoding
@@ -136,6 +139,12 @@ impl TxLegacy {
     }
 
     /// Encodes the legacy transaction in RLP for signing, including the EIP-155 fields if possible.
+    ///
+    /// If a `chain_id` is `Some`, this encodes the transaction as:
+    /// `rlp(nonce, gas_price, gas_limit, to, value, input, chain_id, 0, 0)`
+    ///
+    /// Otherwise, this encodes the transaction as:
+    /// `rlp(nonce, gas_price, gas_limit, to, value, input)`
     pub(crate) fn encode_for_signing(&self, out: &mut dyn bytes::BufMut) {
         Header { list: true, payload_length: self.fields_len() + self.eip155_fields_len() }
             .encode(out);

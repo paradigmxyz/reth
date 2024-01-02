@@ -372,8 +372,6 @@ impl From<BlobTransactionSidecar> for reth_rpc_types::BlobTransactionSidecar {
 
 impl Encodable for BlobTransactionSidecar {
     /// Encodes the inner [BlobTransactionSidecar] fields as RLP bytes, without a RLP header.
-    ///
-    /// Refer to [BlobTransactionSidecar::encode_inner] for more information on the exact format.
     fn encode(&self, out: &mut dyn BufMut) {
         self.encode_inner(out)
     }

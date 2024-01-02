@@ -672,12 +672,6 @@ impl Default for Transaction {
 impl Encodable for Transaction {
     /// This encodes the transaction _without_ the signature, and is only suitable for creating a
     /// hash intended for signing.
-    ///
-    /// See the following docs for how each transaction type is encoded:
-    /// - [TxLegacy](TxLegacy::encode_for_signing)
-    /// - [TxEip2930](TxEip2930::encode_for_signing)
-    /// - [TxEip1559](TxEip1559::encode_for_signing)
-    /// - [TxEip4844](TxEip4844::encode_for_signing)
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             Transaction::Legacy(legacy_tx) => {
