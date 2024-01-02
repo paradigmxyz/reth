@@ -104,9 +104,9 @@ impl TryFrom<u8> for DisconnectReason {
     }
 }
 
-/// The [`Encodable`] implementation for [`DisconnectReason`] encodes the disconnect reason in a
-/// single-element RLP list.
 impl Encodable for DisconnectReason {
+    /// The [`Encodable`] implementation for [`DisconnectReason`] encodes the disconnect reason in
+    /// a single-element RLP list.
     fn encode(&self, out: &mut dyn BufMut) {
         vec![*self as u8].encode(out);
     }
@@ -115,9 +115,9 @@ impl Encodable for DisconnectReason {
     }
 }
 
-/// The [`Decodable`] implementation for [`DisconnectReason`] supports either a disconnect reason
-/// encoded a single byte or a RLP list containing the disconnect reason.
 impl Decodable for DisconnectReason {
+    /// The [`Decodable`] implementation for [`DisconnectReason`] supports either a disconnect
+    /// reason encoded a single byte or a RLP list containing the disconnect reason.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if buf.is_empty() {
             return Err(RlpError::InputTooShort)

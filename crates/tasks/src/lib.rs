@@ -533,6 +533,34 @@ impl TaskSpawner for TaskExecutor {
     }
 }
 
+/// TaskSpawner with extended behaviour
+pub trait TaskSpawnerExt: Send + Sync + Unpin + std::fmt::Debug + DynClone {
+    /// This spawns a critical task onto the runtime.
+    ///
+    /// If this task panics, the [TaskManager] is notified.
+    /// The [TaskManager] will wait until the given future has completed before shutting down.
+    fn spawn_critical_with_graceful_shutdown_signal<F>(
+        &self,
+        name: &'static str,
+        f: impl FnOnce(GracefulShutdown) -> F,
+    ) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static;
+}
+
+impl TaskSpawnerExt for TaskExecutor {
+    fn spawn_critical_with_graceful_shutdown_signal<F>(
+        &self,
+        name: &'static str,
+        f: impl FnOnce(GracefulShutdown) -> F,
+    ) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        TaskExecutor::spawn_critical_with_graceful_shutdown_signal(self, name, f)
+    }
+}
+
 /// Determines how a task is spawned
 enum TaskKind {
     /// Spawn the task to the default executor [Handle::spawn]
