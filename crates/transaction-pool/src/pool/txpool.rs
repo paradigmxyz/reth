@@ -915,7 +915,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Returns the internal transaction with additional metadata
-    #[cfg(test)]
     pub(crate) fn get(&self, id: &TransactionId) -> Option<&PoolInternalTransaction<T>> {
         self.txs.get(id)
     }

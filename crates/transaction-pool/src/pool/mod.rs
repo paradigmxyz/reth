@@ -81,7 +81,7 @@ use crate::{
     CanonicalStateUpdate, ChangedAccount, PoolConfig, TransactionOrdering, TransactionValidator,
 };
 use best::BestTransactions;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use reth_primitives::{
     Address, BlobTransaction, BlobTransactionSidecar, IntoRecoveredTransaction,
     PooledTransactionsElement, TransactionSigned, TxHash, B256,
@@ -277,6 +277,11 @@ where
         &self,
     ) -> AllTransactionsEvents<T::Transaction> {
         self.event_listener.write().subscribe_all()
+    }
+
+    /// Returns a read lock to the pool's data.
+    pub(crate) fn get_pool_data(&self) -> RwLockReadGuard<'_, TxPool<T>> {
+        self.pool.read()
     }
 
     /// Returns hashes of _all_ transactions in the pool.
