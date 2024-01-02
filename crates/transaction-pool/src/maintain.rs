@@ -632,7 +632,7 @@ pub enum TransactionsBackupError {
 }
 
 /// Task which manages saving local transactions to the persistent file in case of shutdown.
-/// Reloads teh transactions from the file on the boot up and inserts them into the pool
+/// Reloads the transactions from the file on the boot up and inserts them into the pool.
 pub async fn backup_local_transactions_task<P>(
     shutdown: reth_tasks::shutdown::GracefulShutdown,
     pool: P,
