@@ -144,7 +144,7 @@
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use crate::pool::PoolInner;
+use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
@@ -471,6 +471,20 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.get_transactions_by_sender(sender)
+    }
+
+    fn get_transactions_by_sender_and_nonce(
+        &self,
+        sender: Address,
+        nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        let transaction_id = TransactionId::new(self.pool.get_sender_id(sender), nonce);
+
+        self.inner()
+            .get_pool_data()
+            .all()
+            .get(&transaction_id)
+            .map(|tx| Arc::clone(&tx.transaction))
     }
 
     fn get_transactions_by_origin(
