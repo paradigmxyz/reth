@@ -129,6 +129,12 @@ pub fn remove_dir_all(path: impl AsRef<Path>) -> Result<()> {
     fs::remove_dir_all(path).map_err(|err| FsPathError::remove_dir(err, path))
 }
 
+/// Wrapper for `std::fs::remove_file`
+pub fn remove_file(path: impl AsRef<Path>) -> Result<()> {
+    let path = path.as_ref();
+    fs::remove_file(path).map_err(|err| FsPathError::remove_file(err, path))
+}
+
 /// Wrapper for `std::fs::create_dir_all`
 pub fn create_dir_all(path: impl AsRef<Path>) -> Result<()> {
     let path = path.as_ref();
