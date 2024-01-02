@@ -164,7 +164,7 @@ pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 /// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
 #[allow(missing_debug_implementations)]
-pub struct BeaconConsensusEngine<DB, BT, Client>
+pub struct BeaconConsensusEngine<DB, BT, Client, PB>
 where
     DB: Database,
     Client: HeadersClient + BodiesClient,
@@ -173,6 +173,7 @@ where
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader,
+    PB: PayloadBuilderTrait,
 {
     /// Controls syncing triggered by engine updates.
     sync: EngineSyncController<DB, Client>,
@@ -187,7 +188,7 @@ where
     /// Tracks the received forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// The payload store.
-    payload_builder: PayloadBuilderHandle<PayloadBuilderAttributes>,
+    payload_builder: PB,
     /// Validator for execution payloads
     payload_validator: ExecutionPayloadValidator,
     /// Listeners for engine events.
@@ -212,7 +213,7 @@ where
     hooks: EngineHooksController,
 }
 
-impl<DB, BT, Client> BeaconConsensusEngine<DB, BT, Client>
+impl<DB, BT, Client, PB> BeaconConsensusEngine<DB, BT, Client, PB>
 where
     DB: Database + Unpin + 'static,
     BT: BlockchainTreeEngine
@@ -223,6 +224,7 @@ where
         + ChainSpecProvider
         + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    PB: PayloadBuilderTrait + Unpin + 'static,
 {
     /// Create a new instance of the [BeaconConsensusEngine].
     #[allow(clippy::too_many_arguments)]
@@ -234,7 +236,7 @@ where
         sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
-        payload_builder: PayloadBuilderHandle<PayloadBuilderAttributes>,
+        payload_builder: PB,
         target: Option<B256>,
         pipeline_run_threshold: u64,
         hooks: EngineHooks,
@@ -278,7 +280,7 @@ where
         sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
-        payload_builder: PayloadBuilderHandle<PayloadBuilderAttributes>,
+        payload_builder: PB,
         target: Option<B256>,
         pipeline_run_threshold: u64,
         to_engine: UnboundedSender<BeaconEngineMessage>,
@@ -1735,7 +1737,7 @@ where
 /// local forkchoice state, it will launch the pipeline to sync to the head hash.
 /// While the pipeline is syncing, the consensus engine will keep processing messages from the
 /// receiver and forwarding them to the blockchain tree.
-impl<DB, BT, Client> Future for BeaconConsensusEngine<DB, BT, Client>
+impl<DB, BT, Client, PB> Future for BeaconConsensusEngine<DB, BT, Client, PB>
 where
     DB: Database + Unpin + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
@@ -1747,6 +1749,7 @@ where
         + ChainSpecProvider
         + Unpin
         + 'static,
+    PB: PayloadBuilderTrait + Unpin + 'static,
 {
     type Output = Result<(), BeaconConsensusEngineError>;
 
