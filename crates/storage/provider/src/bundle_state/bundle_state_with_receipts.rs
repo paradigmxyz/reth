@@ -95,6 +95,11 @@ impl BundleStateWithReceipts {
         &self.bundle
     }
 
+    /// Returns mutable revm bundle state.
+    pub fn state_mut(&mut self) -> &mut BundleState {
+        &mut self.bundle
+    }
+
     /// Set first block.
     pub fn set_first_block(&mut self, first_block: BlockNumber) {
         self.first_block = first_block;
@@ -268,9 +273,14 @@ impl BundleStateWithReceipts {
         self.receipts.root_slow(self.block_number_to_index(block_number)?, chain_spec, timestamp)
     }
 
-    /// Return reference to receipts.
+    /// Returns reference to receipts.
     pub fn receipts(&self) -> &Receipts {
         &self.receipts
+    }
+
+    /// Returns mutable reference to receipts.
+    pub fn receipts_mut(&mut self) -> &mut Receipts {
+        &mut self.receipts
     }
 
     /// Return all block receipts
