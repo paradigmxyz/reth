@@ -996,7 +996,7 @@ impl TransactionSigned {
         self.signature.recover_signer_unchecked(signature_hash)
     }
 
-    /// Recovers a list of signers from a transaction list iterator
+    /// Recovers a list of signers from a transaction list iterator.
     ///
     /// Returns `None`, if some transaction's signature is invalid, see also
     /// [Self::recover_signer].
@@ -1008,6 +1008,22 @@ impl TransactionSigned {
             txes.into_iter().map(|tx| tx.recover_signer()).collect()
         } else {
             txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
+        }
+    }
+
+    /// Recovers a list of signers from a transaction list iterator _without ensuring that the
+    /// signature has a low `s` value_.
+    ///
+    /// Returns `None`, if some transaction's signature is invalid, see also
+    /// [Self::recover_signer_unchecked].
+    pub fn recover_signers_unchecked<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
+    where
+        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
+    {
+        if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
+            txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()
+        } else {
+            txes.into_par_iter().map(|tx| tx.recover_signer_unchecked()).collect()
         }
     }
 
