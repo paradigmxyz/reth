@@ -260,18 +260,18 @@ mod tests {
     #[test]
     fn test_filename() {
         let test_vectors = [
-            (SnapshotSegment::Headers, 2..=30, "snapshot_headers_2_30_0_1", None),
-            (SnapshotSegment::Receipts, 30..=300, "snapshot_receipts_30_300_110_1000", None),
+            (SnapshotSegment::Headers, 2..=30, "snapshot_headers_2_30", None),
+            (SnapshotSegment::Receipts, 30..=300, "snapshot_receipts_30_300", None),
             (
                 SnapshotSegment::Transactions,
                 1_123_233..=11_223_233,
-                "snapshot_transactions_1123233_11223233_1123233_2123233",
+                "snapshot_transactions_1123233_11223233",
                 None,
             ),
             (
                 SnapshotSegment::Headers,
                 2..=30,
-                "snapshot_headers_2_30_0_1_cuckoo-fmph_lz4",
+                "snapshot_headers_2_30_cuckoo-fmph_lz4",
                 Some((
                     Compression::Lz4,
                     Filters::WithFilters(
@@ -283,7 +283,7 @@ mod tests {
             (
                 SnapshotSegment::Headers,
                 2..=30,
-                "snapshot_headers_2_30_0_1_cuckoo-fmph_zstd",
+                "snapshot_headers_2_30_cuckoo-fmph_zstd",
                 Some((
                     Compression::Zstd,
                     Filters::WithFilters(
@@ -295,7 +295,7 @@ mod tests {
             (
                 SnapshotSegment::Headers,
                 2..=30,
-                "snapshot_headers_2_30_0_1_cuckoo-fmph_zstd-dict",
+                "snapshot_headers_2_30_cuckoo-fmph_zstd-dict",
                 Some((
                     Compression::ZstdWithDictionary,
                     Filters::WithFilters(
@@ -322,7 +322,7 @@ mod tests {
             );
         }
 
-        assert_eq!(SnapshotSegment::parse_filename(OsStr::new("snapshot_headers_2_30_3_2")), None);
-        assert_eq!(SnapshotSegment::parse_filename(OsStr::new("snapshot_headers_2_30_1")), None);
+        assert_eq!(SnapshotSegment::parse_filename(OsStr::new("snapshot_headers_2")), None);
+        assert_eq!(SnapshotSegment::parse_filename(OsStr::new("snapshot_headers_")), None);
     }
 }
