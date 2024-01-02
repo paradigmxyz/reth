@@ -122,24 +122,24 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
     ) -> Result<(File, File, bool), NippyJarError> {
         let is_created = !data.exists() || !offsets.exists();
 
-        let mut data_file = if !data.exists() {
-            File::create(data)?
-        } else {
-            OpenOptions::new().read(true).write(true).open(data)?
-        };
+        if !data.exists() {
+            // File::create is write-only (no reading possible)
+            File::create(data)?;
+        }
+
+        let mut data_file = OpenOptions::new().read(true).write(true).open(data)?;
         data_file.seek(SeekFrom::End(0))?;
 
-        let mut offsets_file = if !offsets.exists() {
-            let mut offsets = File::create(offsets)?;
+        if !offsets.exists() {
+            // File::create is write-only (no reading possible)
+            File::create(offsets)?;
+        }
 
-            // First byte of the offset file is the size of one offset in bytes
-            offsets.write_all(&[OFFSET_SIZE_BYTES as u8])?;
-            offsets.sync_all()?;
+        let mut offsets_file = OpenOptions::new().read(true).write(true).open(offsets)?;
 
-            offsets
-        } else {
-            OpenOptions::new().read(true).write(true).open(offsets)?
-        };
+        // First byte of the offset file is the size of one offset in bytes
+        offsets_file.write_all(&[OFFSET_SIZE_BYTES as u8])?;
+        offsets_file.sync_all()?;
         offsets_file.seek(SeekFrom::End(0))?;
 
         Ok((data_file, offsets_file, is_created))

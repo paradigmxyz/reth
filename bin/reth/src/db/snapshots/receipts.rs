@@ -50,7 +50,7 @@ impl Command {
         let mut row_indexes = tx_range.clone().collect::<Vec<_>>();
 
         let path: PathBuf = SnapshotSegment::Receipts
-            .filename_with_configuration(filters, compression, &block_range, &tx_range)
+            .filename_with_configuration(filters, compression, &block_range)
             .into();
 
         let provider = SnapshotProvider::new(PathBuf::default())?;
