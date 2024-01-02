@@ -669,9 +669,15 @@ impl Default for Transaction {
     }
 }
 
-/// This encodes the transaction _without_ the signature, and is only suitable for creating a hash
-/// intended for signing.
 impl Encodable for Transaction {
+    /// This encodes the transaction _without_ the signature, and is only suitable for creating a
+    /// hash intended for signing.
+    ///
+    /// See the following docs for how each transaction type is encoded:
+    /// - [TxLegacy](TxLegacy::encode_for_signing)
+    /// - [TxEip2930](TxEip2930::encode_for_signing)
+    /// - [TxEip1559](TxEip1559::encode_for_signing)
+    /// - [TxEip4844](TxEip4844::encode_for_signing)
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             Transaction::Legacy(legacy_tx) => {
@@ -771,12 +777,19 @@ impl Compact for TransactionKind {
 }
 
 impl Encodable for TransactionKind {
+    /// This encodes the `to` field of a transaction request.
+    /// If the [TransactionKind] is a [TransactionKind::Call] it will encode the inner address:
+    /// `rlp(address)`
+    ///
+    /// If the [TransactionKind] is a [TransactionKind::Create] it will encode an empty list:
+    /// `rlp([])`, which is also
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         match self {
             TransactionKind::Call(to) => to.encode(out),
             TransactionKind::Create => out.put_u8(EMPTY_STRING_CODE),
         }
     }
+
     fn length(&self) -> usize {
         match self {
             TransactionKind::Call(to) => to.length(),
@@ -1481,6 +1494,9 @@ impl TransactionSignedEcRecovered {
 }
 
 impl Encodable for TransactionSignedEcRecovered {
+    /// This encodes the transaction _with_ the signature, and an rlp header.
+    ///
+    /// Refer to docs for [TransactionSigned::encode] for details on the exact format.
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         self.signed_transaction.encode(out)
     }
@@ -1568,6 +1584,19 @@ mod tests {
         let input = [0x80u8];
         let res = TransactionSigned::decode(&mut &input[..]).unwrap_err();
         assert_eq!(RlpError::InputTooShort, res);
+    }
+
+    #[test]
+    fn raw_kind_encoding_sanity() {
+        // check the 0x80 encoding for Create
+        let mut buf = Vec::new();
+        TransactionKind::Create.encode(&mut buf);
+        assert_eq!(buf, vec![0x80]);
+
+        // check decoding
+        let buf = [0x80];
+        let decoded = TransactionKind::decode(&mut &buf[..]).unwrap();
+        assert_eq!(decoded, TransactionKind::Create);
     }
 
     #[test]
