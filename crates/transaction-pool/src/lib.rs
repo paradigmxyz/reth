@@ -114,8 +114,7 @@
 //! use reth_tasks::TaskManager;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
-//! use reth_transaction_pool::maintain::{maintain_transaction_pool_future,
-//! LocalTransactionBackupConfig};
+//! use reth_transaction_pool::maintain::{maintain_transaction_pool_future};
 //!
 //!  async fn t<C, St>(client: C, stream: St)
 //!    where C: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
@@ -132,7 +131,7 @@
 //!     );
 //!
 //!   // spawn a task that listens for new blocks and updates the pool's transactions, mined transactions etc..
-//!   tokio::task::spawn(  maintain_transaction_pool_future(client, pool, stream, executor.clone(), Default::default(), LocalTransactionBackupConfig::default()));
+//!   tokio::task::spawn(maintain_transaction_pool_future(client, pool, stream, executor.clone(), Default::default()));
 //!
 //! # }
 //! ```
