@@ -15,9 +15,9 @@ const MB_TO_BYTES: u64 = 1024 * 1024;
 #[derive(Debug, Args)]
 #[command(next_help_heading = "Logging")]
 pub struct LogArgs {
-    /// The format to use for logs written to std.
-    #[arg(long = "log.std.format", value_name = "FORMAT", global = true, default_value_t = LogFormat::Terminal)]
-    pub log_std_format: LogFormat,
+    /// The format to use for logs written to stdout.
+    #[arg(long = "log.stdout.format", value_name = "FORMAT", global = true, default_value_t = LogFormat::Terminal)]
+    pub log_stdout_format: LogFormat,
 
     /// The format to use for logs written to the log file.
     #[arg(long = "log.file.format", value_name = "FORMAT", global = true, default_value_t = LogFormat::Terminal)]
