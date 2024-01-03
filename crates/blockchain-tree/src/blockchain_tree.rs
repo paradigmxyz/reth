@@ -726,24 +726,38 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         Ok(())
     }
 
-    /// Check if block is found inside chain and if the chain extends the canonical chain.
+    /// Check if a block is found inside the chain and if the chain extends the canonical chain.
     ///
-    /// if it does extend the canonical chain, return `BlockStatus::Valid`
-    /// if it does not extend the canonical chain, return `BlockStatus::Accepted`
+    /// If the chain extends the canonical chain, returns `BlockStatus::Valid`.
+    /// If it does not extend the canonical chain, returns `BlockStatus::Accepted`.
+    ///
+    /// # Arguments
+    ///
+    /// * `block` - A reference to a `BlockNumHash` to check inside the chain.
+    ///
+    /// # Returns
+    ///
+    /// An `Option` containing `BlockStatus::Valid` if the block's chain extends the canonical
+    /// chain, or `BlockStatus::Accepted` if it does not. Returns `None` if the block is unknown
+    /// or not present in the tree.
+    ///
+    /// # Notes
+    ///
+    /// - Uses the chain ID to locate the block within the tree.
+    /// - Checks if the block's chain extends the canonical chain by comparing against the canonical
+    ///   tip.
     #[track_caller]
     fn is_block_inside_chain(&self, block: &BlockNumHash) -> Option<BlockStatus> {
-        // check if block known and is already in the tree
-        if let Some(chain_id) = self.block_indices().get_blocks_chain_id(&block.hash) {
-            // find the canonical fork of this chain
-            let canonical_fork = self.canonical_fork(chain_id).expect("Chain id is valid");
-            // if the block's chain extends canonical chain
-            return if canonical_fork == self.block_indices().canonical_tip() {
-                Some(BlockStatus::Valid)
-            } else {
-                Some(BlockStatus::Accepted)
-            };
-        }
-        None
+        self.block_indices()
+            .get_blocks_chain_id(&block.hash)
+            .and_then(|chain_id| self.canonical_fork(chain_id))
+            .map(|canonical_fork| {
+                if canonical_fork == self.block_indices().canonical_tip() {
+                    BlockStatus::Valid
+                } else {
+                    BlockStatus::Accepted
+                }
+            })
     }
 
     /// Insert a block (with recovered senders) into the tree.
