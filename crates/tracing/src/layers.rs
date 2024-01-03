@@ -96,9 +96,7 @@ impl Layers {
         filter: &str,
         file_info: FileInfo,
     ) -> eyre::Result<FileWorkerGuard> {
-        let log_dir = file_info.create_log_dir();
-        let (writer, guard) = file_info.create_log_writer(log_dir);
-
+        let (writer, guard) = file_info.create_log_writer();
         let file_filter = build_env_filter(None, filter)?;
         let layer = format.apply(file_filter, None, Some(writer));
         self.inner.push(layer);
@@ -137,15 +135,10 @@ impl FileInfo {
 
     /// Creates a non-blocking writer for the log file.
     ///
-    /// # Arguments
-    /// * `log_dir` - Reference to the log directory path.
-    ///
     /// # Returns
     /// A tuple containing the non-blocking writer and its associated worker guard.
-    fn create_log_writer(
-        &self,
-        log_dir: &Path,
-    ) -> (tracing_appender::non_blocking::NonBlocking, WorkerGuard) {
+    fn create_log_writer(&self) -> (tracing_appender::non_blocking::NonBlocking, WorkerGuard) {
+        let log_dir = self.create_log_dir();
         let (writer, guard) = tracing_appender::non_blocking(
             RollingFileAppender::new(
                 log_dir.join(&self.file_name),
