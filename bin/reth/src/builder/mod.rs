@@ -539,6 +539,7 @@ impl NodeConfig {
         blockchain_db: &BlockchainProvider<DB, Tree>,
         head: Head,
         executor: &TaskExecutor,
+        data_dir: &ChainPath<DataDirPath>,
     ) -> eyre::Result<EthTransactionPool<BlockchainProvider<DB, Tree>, InMemoryBlobStore>>
     where
         DB: Database + Unpin + Clone + 'static,
@@ -558,12 +559,28 @@ impl NodeConfig {
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
         info!(target: "reth::cli", "Transaction pool initialized");
+        let transactions_path = data_dir.txpool_transactions_path();
 
         // spawn txpool maintenance task
         {
             let pool = transaction_pool.clone();
             let chain_events = blockchain_db.canonical_state_stream();
             let client = blockchain_db.clone();
+            let transactions_backup_config =
+                reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+
+            executor.spawn_critical_with_graceful_shutdown_signal(
+                "local transactions backup task",
+                |shutdown| {
+                    reth_transaction_pool::maintain::backup_local_transactions_task(
+                        shutdown,
+                        pool.clone(),
+                        transactions_backup_config,
+                    )
+                },
+            );
+
+            // spawn the maintenance task
             executor.spawn_critical(
                 "txpool maintenance task",
                 reth_transaction_pool::maintain::maintain_transaction_pool_future(
@@ -1058,7 +1075,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
 
         // build transaction pool
         let transaction_pool =
-            self.config.build_and_spawn_txpool(&blockchain_db, head, &executor)?;
+            self.config.build_and_spawn_txpool(&blockchain_db, head, &executor, &self.data_dir)?;
 
         // build network
         let (network_client, mut network_builder) = self

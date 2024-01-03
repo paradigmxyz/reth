@@ -105,9 +105,9 @@ impl ProtocolMessage {
     }
 }
 
-/// Encodes the protocol message into bytes.
-/// The message type is encoded as a single byte and prepended to the message.
 impl Encodable for ProtocolMessage {
+    /// Encodes the protocol message into bytes. The message type is encoded as a single byte and
+    /// prepended to the message.
     fn encode(&self, out: &mut dyn BufMut) {
         self.message_type.encode(out);
         self.message.encode(out);
@@ -130,9 +130,9 @@ pub struct ProtocolBroadcastMessage {
     pub message: EthBroadcastMessage,
 }
 
-/// Encodes the protocol message into bytes.
-/// The message type is encoded as a single byte and prepended to the message.
 impl Encodable for ProtocolBroadcastMessage {
+    /// Encodes the protocol message into bytes. The message type is encoded as a single byte and
+    /// prepended to the message.
     fn encode(&self, out: &mut dyn BufMut) {
         self.message_type.encode(out);
         self.message.encode(out);

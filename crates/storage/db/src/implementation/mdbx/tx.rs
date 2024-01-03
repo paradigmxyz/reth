@@ -13,7 +13,7 @@ use crate::{
 use parking_lot::RwLock;
 use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{ffi::DBI, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
-use reth_tracing::tracing::debug;
+use reth_tracing::tracing::warn;
 use std::{
     backtrace::Backtrace,
     marker::PhantomData,
@@ -192,7 +192,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
                 self.backtrace_recorded.store(true, Ordering::Relaxed);
 
                 let backtrace = Backtrace::force_capture();
-                debug!(
+                warn!(
                     target: "storage::db::mdbx",
                     ?open_duration,
                     ?backtrace,

@@ -194,7 +194,7 @@ impl Chain {
 
         let named: NamedChain = self.try_into().ok()?;
 
-        if matches!(named, C::Mainnet | C::Goerli | C::Sepolia | C::Ropsten | C::Rinkeby) {
+        if matches!(named, C::Mainnet | C::Goerli | C::Sepolia | C::Holesky) {
             return Some(format!("{DNS_PREFIX}all.{}.ethdisco.net", named.as_ref().to_lowercase()))
         }
         None
@@ -453,9 +453,16 @@ mod tests {
     }
 
     #[test]
-    fn test_dns_network() {
+    fn test_dns_main_network() {
         let s = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.mainnet.ethdisco.net";
         let chain: Chain = NamedChain::Mainnet.into();
+        assert_eq!(s, chain.public_dns_network_protocol().unwrap().as_str());
+    }
+
+    #[test]
+    fn test_dns_holesky_network() {
+        let s = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.holesky.ethdisco.net";
+        let chain: Chain = NamedChain::Holesky.into();
         assert_eq!(s, chain.public_dns_network_protocol().unwrap().as_str());
     }
 }

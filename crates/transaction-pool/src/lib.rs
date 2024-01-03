@@ -110,22 +110,28 @@
 //! use reth_primitives::MAINNET;
 //! use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
+//! use reth_tasks::TaskSpawner;
+//! use reth_tasks::TaskManager;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
-//! use reth_transaction_pool::maintain::maintain_transaction_pool_future;
+//! use reth_transaction_pool::maintain::{maintain_transaction_pool_future};
+//!
 //!  async fn t<C, St>(client: C, stream: St)
 //!    where C: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
 //!     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 //!     {
 //!     let blob_store = InMemoryBlobStore::default();
+//!     let rt = tokio::runtime::Runtime::new().unwrap();
+//!     let manager = TaskManager::new(rt.handle().clone());
+//!     let executor = manager.executor();
 //!     let pool = Pool::eth_pool(
-//!         TransactionValidationTaskExecutor::eth(client.clone(), MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
+//!         TransactionValidationTaskExecutor::eth(client.clone(), MAINNET.clone(), blob_store.clone(), executor.clone()),
 //!         blob_store,
 //!         Default::default(),
 //!     );
 //!
 //!   // spawn a task that listens for new blocks and updates the pool's transactions, mined transactions etc..
-//!   tokio::task::spawn(  maintain_transaction_pool_future(client, pool, stream, TokioTaskExecutor::default(), Default::default()));
+//!   tokio::task::spawn(maintain_transaction_pool_future(client, pool, stream, executor.clone(), Default::default()));
 //!
 //! # }
 //! ```
@@ -144,7 +150,7 @@
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use crate::pool::PoolInner;
+use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
@@ -471,6 +477,20 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.get_transactions_by_sender(sender)
+    }
+
+    fn get_transactions_by_sender_and_nonce(
+        &self,
+        sender: Address,
+        nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        let transaction_id = TransactionId::new(self.pool.get_sender_id(sender), nonce);
+
+        self.inner()
+            .get_pool_data()
+            .all()
+            .get(&transaction_id)
+            .map(|tx| Arc::clone(&tx.transaction))
     }
 
     fn get_transactions_by_origin(
