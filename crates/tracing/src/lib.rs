@@ -105,7 +105,6 @@ impl RethTracer {
     ///  # Arguments
     ///  * `config` - The `LayerInfo` to use for the file layer.
     ///  * `file_info` - The `FileInfo` containing details about the log file.
-
     pub fn with_file(mut self, config: LayerInfo, file_info: FileInfo) -> Self {
         self.file = Some((config, file_info));
         self
@@ -150,6 +149,7 @@ impl LayerInfo {
         Self { format, directive, filters, color }
     }
 }
+
 impl Default for LayerInfo {
     ///  Provides default values for `LayerInfo`.
     ///

@@ -122,6 +122,7 @@ impl FileInfo {
     pub fn new(dir: PathBuf, max_size_bytes: u64, max_files: usize) -> Self {
         Self { dir, file_name: RETH_LOG_FILE_NAME.to_string(), max_size_bytes, max_files }
     }
+
     /// Creates the log directory if it doesn't exist.
     ///
     /// # Returns
