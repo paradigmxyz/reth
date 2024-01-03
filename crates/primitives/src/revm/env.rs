@@ -332,7 +332,7 @@ pub fn fill_tx_env<T>(
             tx_env.nonce = None;
         }
     }
-    
+
     #[cfg(feature = "optimism")]
     fill_op_tx_env(tx_env, transaction, envelope);
 }
