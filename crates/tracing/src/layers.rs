@@ -6,6 +6,17 @@ use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
 
 use crate::formatter::LogFormat;
 
+/// A worker guard returned by the file layer.
+///
+///  When a guard is dropped, all events currently in-memory are flushed to the log file this guard
+///  belongs to.
+pub type FileWorkerGuard = tracing_appender::non_blocking::WorkerGuard;
+
+///  A boxed tracing [Layer].
+pub(crate) type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
+
+const RETH_LOG_FILE_NAME: &str = "reth.log";
+
 /// Default [directives](Directive) for [EnvFilter] which disables high-frequency debug logs from
 /// `hyper` and `trust-dns`
 const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 3] =
@@ -106,8 +117,6 @@ pub struct FileInfo {
     max_files: usize,
 }
 
-const RETH_LOG_FILE_NAME: &str = "reth.log";
-
 impl FileInfo {
     /// Creates a new `FileInfo` instance.
     pub fn new(dir: PathBuf, max_size_bytes: u64, max_files: usize) -> Self {
@@ -147,15 +156,6 @@ impl FileInfo {
         (writer, guard)
     }
 }
-
-/// A worker guard returned by the file layer.
-///
-///  When a guard is dropped, all events currently in-memory are flushed to the log file this guard
-///  belongs to.
-pub type FileWorkerGuard = tracing_appender::non_blocking::WorkerGuard;
-
-///  A boxed tracing [Layer].
-pub(crate) type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
 
 /// Builds an environment filter for logging.
 ///

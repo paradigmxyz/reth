@@ -91,7 +91,7 @@ impl LogArgs {
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
         let mut tracer = RethTracer::new();
 
-        let stdout = self.layer(self.log_std_format, true);
+        let stdout = self.layer(self.log_stdout_format, true);
         tracer = tracer.with_stdout(stdout);
 
         if self.journald {
@@ -164,7 +164,7 @@ impl Verbosity {
                 _ => Level::TRACE,
             };
 
-            format!("{level}").parse().unwrap()
+            level.into()
         }
     }
 }

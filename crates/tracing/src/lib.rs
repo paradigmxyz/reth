@@ -173,6 +173,9 @@ impl Default for LayerInfo {
 /// configurations tailored for specific environments (like testing).
 pub trait Tracer {
     /// Initialize the logging configuration.
+    ///  # Returns
+    ///  An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
+    ///  or an `Err` in case of an error during initialization.
     fn init(self) -> eyre::Result<Option<WorkerGuard>>;
 }
 
