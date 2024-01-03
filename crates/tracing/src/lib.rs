@@ -149,6 +149,7 @@ impl LayerInfo {
         Self { format, directive, filters, color }
     }
 }
+
 impl Default for LayerInfo {
     ///  Provides default values for `LayerInfo`.
     ///
