@@ -17,6 +17,7 @@
 
 use crate::{
     config::NetworkConfig,
+    consensus::NetworkConsensusEvent,
     discovery::Discovery,
     error::{NetworkError, ServiceKind},
     eth_requests::IncomingEthRequest,
@@ -107,6 +108,8 @@ pub struct NetworkManager<C> {
     metrics: NetworkMetrics,
     /// Disconnect metrics for the Network
     disconnect_metrics: DisconnectMetrics,
+    ///Sender half to send events to the NetworkClayerManager
+    to_consensus_manager: Option<mpsc::UnboundedSender<NetworkConsensusEvent>>,
 }
 
 // === impl NetworkManager ===
@@ -116,6 +119,11 @@ impl<C> NetworkManager<C> {
     pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent>) {
         self.to_transactions_manager =
             Some(UnboundedMeteredSender::new(tx, NETWORK_POOL_TRANSACTIONS_SCOPE));
+    }
+
+    ///
+    pub fn set_consensus(&mut self, tx: mpsc::UnboundedSender<NetworkConsensusEvent>) {
+        self.to_consensus_manager = Some(tx);
     }
 
     /// Sets the dedicated channel for events indented for the
@@ -253,6 +261,7 @@ where
             num_active_peers,
             metrics: Default::default(),
             disconnect_metrics: Default::default(),
+            to_consensus_manager: None,
         })
     }
 
@@ -285,14 +294,19 @@ where
     /// ```
     pub async fn builder(
         config: NetworkConfig<C>,
-    ) -> Result<NetworkBuilder<C, (), ()>, NetworkError> {
+    ) -> Result<NetworkBuilder<C, (), (), ()>, NetworkError> {
         let network = Self::new(config).await?;
         Ok(network.into_builder())
     }
 
     /// Create a [`NetworkBuilder`] to configure all components of the network
-    pub fn into_builder(self) -> NetworkBuilder<C, (), ()> {
-        NetworkBuilder { network: self, transactions: (), request_handler: () }
+    pub fn into_builder(self) -> NetworkBuilder<C, (), (), ()> {
+        NetworkBuilder {
+            network: self,
+            transactions: (),
+            request_handler: (),
+            consensus_manager: (),
+        }
     }
 
     /// Returns the [`SocketAddr`] that listens for incoming connections.
@@ -370,6 +384,13 @@ where
     /// configured.
     fn notify_tx_manager(&self, event: NetworkTransactionEvent) {
         if let Some(ref tx) = self.to_transactions_manager {
+            let _ = tx.send(event);
+        }
+    }
+
+    /// Sends an event to the [`NetworkClayerManager`]
+    fn notify_consensus_manager(&self, event: NetworkConsensusEvent) {
+        if let Some(ref tx) = self.to_consensus_manager {
             let _ = tx.send(event);
         }
     }
@@ -507,6 +528,13 @@ where
             PeerMessage::Other(other) => {
                 debug!(target: "net", message_id=%other.id, "Ignoring unsupported message");
             }
+            PeerMessage::Consensus(msg) => {
+                debug!(target: "net","received Message from the peer's({}) session",peer_id);
+                self.notify_consensus_manager(NetworkConsensusEvent::IncomingConsensus {
+                    peer_id,
+                    msg,
+                });
+            }
         }
     }
 
@@ -592,6 +620,9 @@ where
                 let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peers));
             }
             NetworkHandleMessage::AddRlpxSubProtocol(proto) => self.add_rlpx_sub_protocol(proto),
+            NetworkHandleMessage::SendConsensus { peer_id, msg } => {
+                self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::Consensus(msg));
+            }
         }
     }
 }

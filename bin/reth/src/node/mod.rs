@@ -5,7 +5,7 @@ use crate::{
     args::{
         get_secret_key,
         utils::{chain_help, genesis_value_parser, parse_socket_address, SUPPORTED_CHAINS},
-        DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
+        ClayerArgs, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
         RpcServerArgs, TxPoolArgs,
     },
     cli::{
@@ -33,7 +33,7 @@ use reth_beacon_consensus::{
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
-use reth_clayer::ConsensusBuilder;
+use reth_clayer::{ClayerConsensusEngine, ConsensusBuilder};
 use reth_config::{
     config::{PruneConfig, StageConfig},
     Config,
@@ -44,6 +44,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::{
+    clayer::ClayerConsensus,
     consensus::Consensus,
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
@@ -182,6 +183,10 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     #[clap(flatten)]
     pub pruning: PruningArgs,
 
+    /// All clayer related arguments
+    #[clap(flatten)]
+    pub clayer: ClayerArgs,
+
     /// Rollup related arguments
     #[cfg(feature = "optimism")]
     #[clap(flatten)]
@@ -211,6 +216,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             db,
             dev,
             pruning,
+            clayer,
             #[cfg(feature = "optimism")]
             rollup,
             ..
@@ -230,6 +236,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             db,
             dev,
             pruning,
+            clayer,
             #[cfg(feature = "optimism")]
             rollup,
             ext,
@@ -369,12 +376,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         self.ext.configure_network(network_builder.network_mut(), &components)?;
 
         // launch network
+        let clayer_consensus = ClayerConsensusEngine::new(self.clayer.mine);
         let network = self.start_network(
             network_builder,
             &ctx.task_executor,
             transaction_pool.clone(),
             network_client,
             default_peers_path,
+            clayer_consensus.clone(),
         );
 
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), enode = %network.local_node_record(), "Connected to P2P network");
@@ -464,6 +473,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 blockchain_db.clone(),
                 transaction_pool.clone(),
                 network.clone(),
+                clayer_consensus,
             )
             .build();
             let pipeline_events = pipeline.events();
@@ -733,23 +743,29 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
     /// Spawns the configured network and associated tasks and returns the [NetworkHandle] connected
     /// to that network.
-    fn start_network<C, Pool>(
+    fn start_network<C, Pool, Consensus>(
         &self,
-        builder: NetworkBuilder<C, (), ()>,
+        builder: NetworkBuilder<C, (), (), ()>,
         task_executor: &TaskExecutor,
         pool: Pool,
         client: C,
         default_peers_path: PathBuf,
+        consensus: Consensus,
     ) -> NetworkHandle
     where
         C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
         Pool: TransactionPool + Unpin + 'static,
+        Consensus: ClayerConsensus + Unpin + 'static,
     {
-        let (handle, network, txpool, eth) =
-            builder.transactions(pool).request_handler(client).split_with_handle();
+        let (handle, network, txpool, eth, consensus_manager) = builder
+            .transactions(pool)
+            .request_handler(client)
+            .consensus(consensus)
+            .split_with_handle();
 
         task_executor.spawn_critical("p2p txpool", txpool);
         task_executor.spawn_critical("p2p eth request handler", eth);
+        task_executor.spawn_critical("p2p consensus", consensus_manager);
 
         let known_peers_file = self.network.persistent_peers_file(default_peers_path);
         task_executor
@@ -826,7 +842,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.seal_slow())
+            return Ok(header.seal_slow());
         }
 
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
@@ -834,7 +850,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header)
+                    return Ok(tip_header);
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");

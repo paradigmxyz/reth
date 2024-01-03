@@ -7,6 +7,7 @@ use crate::engine_api::{
     auth::{strip_prefix, Auth, JwtKey},
     http::HttpJsonRpc,
 };
+pub use consensus::ClayerConsensusEngine;
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_interfaces::{
@@ -331,6 +332,7 @@ pub struct ConsensusBuilder<Client, Pool> {
     storage: ClStorage,
     api: Arc<HttpJsonRpc>,
     network: NetworkHandle,
+    consensus: ClayerConsensusEngine,
 }
 
 impl<Client, Pool: TransactionPool> ConsensusBuilder<Client, Pool>
@@ -344,6 +346,7 @@ where
         client: Client,
         pool: Pool,
         network: NetworkHandle,
+        clayer_consensus: ClayerConsensusEngine,
     ) -> Self {
         let latest_header = client
             .latest_header()
@@ -360,12 +363,13 @@ where
             pool,
             api: Arc::new(api),
             network,
+            consensus: clayer_consensus,
         }
     }
     /// Consumes the type and returns all components
     #[track_caller]
     pub fn build(self) -> ClTask<Client, Pool> {
-        let Self { chain_spec, client, pool, storage, api, network } = self;
+        let Self { chain_spec, client, pool, storage, api, network, consensus } = self;
         let task = ClTask::new(
             Arc::clone(&chain_spec),
             storage,
@@ -373,6 +377,7 @@ where
             pool,
             Arc::clone(&api),
             network.clone(),
+            consensus,
         );
         task
     }

@@ -4,7 +4,9 @@ use crate::{
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
+use reth_eth_wire::{
+    ClayerConsensusMsg, DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions,
+};
 use reth_interfaces::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{
@@ -161,6 +163,14 @@ impl NetworkHandle {
     pub fn secret_key(&self) -> &SecretKey {
         &self.inner.secret_key
     }
+
+    ///
+    pub fn send_consensus(&self, peer_id: PeerId, msg: reth_primitives::Bytes) {
+        self.send_message(NetworkHandleMessage::SendConsensus {
+            peer_id,
+            msg: ClayerConsensusMsg(vec![msg]),
+        })
+    }
 }
 
 // === API Implementations ===
@@ -306,7 +316,7 @@ impl SyncStateProvider for NetworkHandle {
     // used to guard the txpool
     fn is_initially_syncing(&self) -> bool {
         if self.inner.initial_sync_done.load(Ordering::Relaxed) {
-            return false
+            return false;
         }
         self.inner.is_syncing.load(Ordering::Relaxed)
     }
@@ -424,4 +434,6 @@ pub(crate) enum NetworkHandleMessage {
     DiscoveryListener(UnboundedSender<DiscoveryEvent>),
     /// Add an additional [RlpxSubProtocol].
     AddRlpxSubProtocol(RlpxSubProtocol),
+    /// Send consensus message to peer
+    SendConsensus { peer_id: PeerId, msg: ClayerConsensusMsg },
 }

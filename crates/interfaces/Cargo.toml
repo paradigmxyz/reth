@@ -14,6 +14,7 @@ reth-rpc-types.workspace = true
 reth-network-api.workspace = true
 # TODO(onbjerg): We only need this for [BlockBody]
 reth-eth-wire.workspace = true
+async-trait.workspace = true
 
 # async
 futures.workspace = true

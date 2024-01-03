@@ -21,15 +21,18 @@ reth-rpc-types.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
 
 # async
+async-trait.workspace = true
 futures-util.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 tokio-stream.workspace = true
 tracing.workspace = true    
 
+
 # engine api
 serde_json = { workspace = true }
 serde = { workspace = true }
 rand = { workspace = true }
+parking_lot.workspace = true
 alloy-primitives = { workspace = true, features = ["rand", "rlp", "serde", "arbitrary"] }
 reqwest = { version = "0.11", default-features = false, features = ["blocking", "json", "stream", "rustls-tls"] }
 jsonwebtoken = "8"
@@ -46,6 +49,7 @@ tree_hash = "0.5"
 tree_hash_derive = "0.5"
 arbitrary = { version = "1", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+auto_impl = "1.0"
 
 [dev-dependencies]
 reth-interfaces = { workspace = true, features = ["test-utils"] }

@@ -4,7 +4,7 @@ use super::{
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
-use crate::{errors::EthStreamError, EthVersion, SharedTransactions};
+use crate::{errors::EthStreamError, ClayerConsensusMsg, EthVersion, SharedTransactions};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use reth_primitives::bytes::{Buf, BufMut};
 use std::{fmt::Debug, sync::Arc};
@@ -36,6 +36,7 @@ impl ProtocolMessage {
             }
             EthMessageID::NewBlock => EthMessage::NewBlock(Box::new(NewBlock::decode(buf)?)),
             EthMessageID::Transactions => EthMessage::Transactions(Transactions::decode(buf)?),
+            EthMessageID::Consensus => EthMessage::Consensus(ClayerConsensusMsg::decode(buf)?),
             EthMessageID::NewPooledTransactionHashes => {
                 if version >= EthVersion::Eth68 {
                     EthMessage::NewPooledTransactionHashes68(NewPooledTransactionHashes68::decode(
@@ -76,7 +77,7 @@ impl ProtocolMessage {
                     return Err(EthStreamError::EthInvalidMessageError(
                         version,
                         EthMessageID::GetNodeData,
-                    ))
+                    ));
                 }
                 let request_pair = RequestPair::<GetNodeData>::decode(buf)?;
                 EthMessage::GetNodeData(request_pair)
@@ -86,7 +87,7 @@ impl ProtocolMessage {
                     return Err(EthStreamError::EthInvalidMessageError(
                         version,
                         EthMessageID::GetNodeData,
-                    ))
+                    ));
                 }
                 let request_pair = RequestPair::<NodeData>::decode(buf)?;
                 EthMessage::NodeData(request_pair)
@@ -173,6 +174,7 @@ pub enum EthMessage {
     NewBlockHashes(NewBlockHashes),
     NewBlock(Box<NewBlock>),
     Transactions(Transactions),
+    Consensus(ClayerConsensusMsg),
     NewPooledTransactionHashes66(NewPooledTransactionHashes66),
     NewPooledTransactionHashes68(NewPooledTransactionHashes68),
 
@@ -197,8 +199,11 @@ impl EthMessage {
             EthMessage::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
             EthMessage::NewBlock(_) => EthMessageID::NewBlock,
             EthMessage::Transactions(_) => EthMessageID::Transactions,
-            EthMessage::NewPooledTransactionHashes66(_) |
-            EthMessage::NewPooledTransactionHashes68(_) => EthMessageID::NewPooledTransactionHashes,
+            EthMessage::Consensus(_) => EthMessageID::Consensus,
+            EthMessage::NewPooledTransactionHashes66(_)
+            | EthMessage::NewPooledTransactionHashes68(_) => {
+                EthMessageID::NewPooledTransactionHashes
+            }
             EthMessage::GetBlockHeaders(_) => EthMessageID::GetBlockHeaders,
             EthMessage::BlockHeaders(_) => EthMessageID::BlockHeaders,
             EthMessage::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
@@ -220,6 +225,7 @@ impl Encodable for EthMessage {
             EthMessage::NewBlockHashes(new_block_hashes) => new_block_hashes.encode(out),
             EthMessage::NewBlock(new_block) => new_block.encode(out),
             EthMessage::Transactions(transactions) => transactions.encode(out),
+            EthMessage::Consensus(msg) => msg.encode(out),
             EthMessage::NewPooledTransactionHashes66(hashes) => hashes.encode(out),
             EthMessage::NewPooledTransactionHashes68(hashes) => hashes.encode(out),
             EthMessage::GetBlockHeaders(request) => request.encode(out),
@@ -240,6 +246,7 @@ impl Encodable for EthMessage {
             EthMessage::NewBlockHashes(new_block_hashes) => new_block_hashes.length(),
             EthMessage::NewBlock(new_block) => new_block.length(),
             EthMessage::Transactions(transactions) => transactions.length(),
+            EthMessage::Consensus(msg) => msg.length(),
             EthMessage::NewPooledTransactionHashes66(hashes) => hashes.length(),
             EthMessage::NewPooledTransactionHashes68(hashes) => hashes.length(),
             EthMessage::GetBlockHeaders(request) => request.length(),
@@ -267,6 +274,7 @@ impl Encodable for EthMessage {
 pub enum EthBroadcastMessage {
     NewBlock(Arc<NewBlock>),
     Transactions(SharedTransactions),
+    Consensus(ClayerConsensusMsg),
 }
 
 // === impl EthBroadcastMessage ===
@@ -277,6 +285,7 @@ impl EthBroadcastMessage {
         match self {
             EthBroadcastMessage::NewBlock(_) => EthMessageID::NewBlock,
             EthBroadcastMessage::Transactions(_) => EthMessageID::Transactions,
+            EthBroadcastMessage::Consensus(_) => EthMessageID::Consensus,
         }
     }
 }
@@ -286,6 +295,7 @@ impl Encodable for EthBroadcastMessage {
         match self {
             EthBroadcastMessage::NewBlock(new_block) => new_block.encode(out),
             EthBroadcastMessage::Transactions(transactions) => transactions.encode(out),
+            EthBroadcastMessage::Consensus(msg) => msg.encode(out),
         }
     }
 
@@ -293,6 +303,7 @@ impl Encodable for EthBroadcastMessage {
         match self {
             EthBroadcastMessage::NewBlock(new_block) => new_block.length(),
             EthBroadcastMessage::Transactions(transactions) => transactions.length(),
+            EthBroadcastMessage::Consensus(msg) => msg.length(),
         }
     }
 }
@@ -317,6 +328,7 @@ pub enum EthMessageID {
     NodeData = 0x0e,
     GetReceipts = 0x0f,
     Receipts = 0x10,
+    Consensus = 0x11,
 }
 
 impl EthMessageID {
@@ -354,6 +366,7 @@ impl Decodable for EthMessageID {
             0x0e => EthMessageID::NodeData,
             0x0f => EthMessageID::GetReceipts,
             0x10 => EthMessageID::Receipts,
+            0x11 => EthMessageID::Consensus,
             _ => return Err(alloy_rlp::Error::Custom("Invalid message ID")),
         };
         buf.advance(1);
@@ -381,6 +394,7 @@ impl TryFrom<usize> for EthMessageID {
             0x0e => Ok(EthMessageID::NodeData),
             0x0f => Ok(EthMessageID::GetReceipts),
             0x10 => Ok(EthMessageID::Receipts),
+            0x11 => Ok(EthMessageID::Consensus),
             _ => Err("Invalid message ID"),
         }
     }

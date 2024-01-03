@@ -117,6 +117,7 @@ pub mod test_utils;
 mod builder;
 mod cache;
 pub mod config;
+pub mod consensus;
 mod discovery;
 pub mod error;
 pub mod eth_requests;

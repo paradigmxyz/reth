@@ -5,10 +5,10 @@
 
 use futures::FutureExt;
 use reth_eth_wire::{
-    capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockHeaders, EthMessage,
-    GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts, NewBlock,
-    NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
-    SharedTransactions, Transactions,
+    capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockHeaders,
+    ClayerConsensusMsg, EthMessage, GetBlockBodies, GetBlockHeaders, GetNodeData,
+    GetPooledTransactions, GetReceipts, NewBlock, NewBlockHashes, NewPooledTransactionHashes,
+    NodeData, PooledTransactions, Receipts, SharedTransactions, Transactions,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{
@@ -58,6 +58,8 @@ pub enum PeerMessage {
     /// Other than eth namespace message
     #[allow(unused)]
     Other(RawCapabilityMessage),
+    /// Broadcast consenssus _from_ local _to_ a peer.
+    Consensus(ClayerConsensusMsg),
 }
 
 /// Request Variants that only target block related data.

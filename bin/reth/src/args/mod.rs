@@ -47,6 +47,9 @@ pub use dev_args::DevArgs;
 mod pruning_args;
 pub use pruning_args::PruningArgs;
 
+mod clayer_arg;
+pub use clayer_arg::ClayerArgs;
+
 /// RollupArgs for configuring the op-reth rollup
 #[cfg(feature = "optimism")]
 mod rollup_args;
