@@ -260,12 +260,13 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         provider_factory = provider_factory.with_snapshots(data_dir.snapshots_path())?;
 
         // configure snapshotter
-        let snapshotter = reth_snapshot::Snapshotter::new(
+        let _snapshotter = reth_snapshot::Snapshotter::new(
             provider_factory.clone(),
             provider_factory
                 .snapshot_provider
+                .clone()
                 .expect("snapshot provider initialized via provider factory"),
-        )?;
+        );
 
         self.start_metrics_endpoint(prometheus_handle, Arc::clone(&db)).await?;
 
