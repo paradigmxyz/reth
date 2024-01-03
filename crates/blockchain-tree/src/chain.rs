@@ -172,7 +172,7 @@ impl AppendableChain {
             externals,
         )
         .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
-        // extending will also optimise few things, mostly related to selfdestruct and wiping of
+        // extending will also optimize few things, mostly related to selfdestruct and wiping of
         // storage.
         state.extend(block_state);
 
