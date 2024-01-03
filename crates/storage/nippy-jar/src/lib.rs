@@ -5,7 +5,8 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
- // TODO(danipopes): missing_docs
+
+// TODO(danipopes): missing_docs
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use memmap2::Mmap;
