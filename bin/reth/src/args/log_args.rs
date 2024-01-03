@@ -164,7 +164,7 @@ impl Verbosity {
                 _ => Level::TRACE,
             };
 
-            format!("{level}").parse().unwrap()
+            level.into()
         }
     }
 }
