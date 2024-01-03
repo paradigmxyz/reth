@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 // We use jemalloc for performance reasons
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
