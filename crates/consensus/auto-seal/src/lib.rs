@@ -40,7 +40,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{mpsc::UnboundedSender, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use tracing::{trace, warn};
+use tracing::{trace};
 
 mod client;
 mod mode;
