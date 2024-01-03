@@ -1620,6 +1620,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_side_chain_fork() {
+        let data = BlockChainTestData::default_with_numbers(11, 12);
+        let (block1, exec1) = data.blocks[0].clone();
+        let (block2, exec2) = data.blocks[1].clone();
+        let genesis = data.genesis;
+
+        // test pops execution results from vector, so order is from last to first.
+        let externals = setup_externals(vec![exec2.clone(), exec1.clone(), exec2, exec1]);
+
+        // last finalized block would be number 9.
+        setup_genesis(&externals.provider_factory, genesis);
+
+        // make tree
+        let config = BlockchainTreeConfig::new(1, 2, 3, 2);
+        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
+        // genesis block 10 is already canonical
+        tree.make_canonical(&B256::ZERO).unwrap();
+
+        // make genesis block 10 as finalized
+        tree.finalize_block(10);
+
+        assert_eq!(
+            tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid)
+        );
+
+        assert_eq!(
+            tree.insert_block(block2.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid)
+        );
+
+        // we have one chain that has two blocks.
+        // Trie state:
+        //      b2 (pending block)
+        //      |
+        //      |
+        //      b1 (pending block)
+        //    /
+        //  /
+        // g1 (canonical blocks)
+        // |
+        TreeTester::default()
+            .with_chain_num(1)
+            .with_block_to_chain(HashMap::from([(block1.hash, 0.into()), (block2.hash, 0.into())]))
+            .with_fork_to_child(HashMap::from([(block1.parent_hash, HashSet::from([block1.hash]))]))
+            .assert(&tree);
+
+        let mut block2a = block2.clone();
+        let block2a_hash = B256::new([0x34; 32]);
+        block2a.hash = block2a_hash;
+
+        assert_eq!(
+            tree.insert_block(block2a.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Accepted)
+        );
+
+        // fork chain.
+        // Trie state:
+        //      b2  b2a (pending blocks in tree)
+        //      |   /
+        //      | /
+        //      b1
+        //    /
+        //  /
+        // g1 (canonical blocks)
+        // |
+
+        TreeTester::default()
+            .with_chain_num(2)
+            .with_block_to_chain(HashMap::from([
+                (block1.hash, 0.into()),
+                (block2.hash, 0.into()),
+                (block2a.hash, 1.into()),
+            ]))
+            .with_fork_to_child(HashMap::from([
+                (block1.parent_hash, HashSet::from([block1.hash])),
+                (block2a.parent_hash, HashSet::from([block2a.hash])),
+            ]))
+            .assert(&tree);
+        // chain 0 has two blocks so receipts len is 2
+        assert_eq!(tree.state.chains.get(&0.into()).unwrap().state().receipts().len(), 2);
+        // chain 1 has one block so receipts len is 1
+        assert_eq!(tree.state.chains.get(&1.into()).unwrap().state().receipts().len(), 1);
+    }
+
+    #[tokio::test]
     async fn sanity_path() {
         let data = BlockChainTestData::default_with_numbers(11, 12);
         let (block1, exec1) = data.blocks[0].clone();
