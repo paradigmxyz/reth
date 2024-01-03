@@ -172,7 +172,15 @@ impl AppendableChain {
             externals,
         )
         .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
+        // extending will also optimize few things, mostly related to selfdestruct and wiping of
+        // storage.
         state.extend(block_state);
+
+        // remove all receipts and reverts (except the last one), as they belong to the chain we
+        // forked from and not the new chain we are creating.
+        let size = state.receipts().len();
+        state.receipts_mut().drain(0..size - 1);
+        state.state_mut().take_n_reverts(size - 1);
 
         // If all is okay, return new chain back. Present chain is not modified.
         Ok(Self { chain: Chain::from_block(block, state) })
@@ -224,7 +232,7 @@ impl AppendableChain {
                 return Err(ConsensusError::BodyStateRootDiff(
                     GotExpected { got: state_root, expected: block.state_root }.into(),
                 )
-                .into());
+                .into())
             }
         }
 
