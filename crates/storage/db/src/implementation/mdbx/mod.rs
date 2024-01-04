@@ -13,7 +13,7 @@ use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, PageSize, SyncMode, RO, RW,
 };
-use reth_tracing::tracing::error;
+use reth_tracing::tracing::{error, warn};
 use std::{ops::Deref, path::Path};
 use tx::Tx;
 
@@ -25,6 +25,10 @@ const TERABYTE: usize = GIGABYTE * 1024;
 
 /// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`), but we limit it to slightly below that
 const DEFAULT_MAX_READERS: u64 = 32_000;
+
+/// Default space that a read-only transaction can occupy until the warning is emitted.
+/// See [reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers] for more information.
+const DEFAULT_MAX_READER_SPACE: usize = 10 * GIGABYTE;
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
@@ -168,6 +172,30 @@ impl DatabaseEnv {
             shrink_threshold: None,
             page_size: Some(PageSize::Set(default_page_size())),
         });
+        inner_env.set_handle_slow_readers(
+            |process_id: u32, thread_id: u32, read_txn_id: u64, gap: usize, space: usize, retry: isize| -> i32 {
+            // 10GB is max allowed space that a reader can occupy due to MVCC snapshots of data not
+            // being released
+            if space > 10 * GIGABYTE {
+                let message = if process_id == std::process::id() {
+                    "Current process has a long-lived database transaction that grows the database file."
+                } else {
+                    "External process has a long-lived database transaction that grows the database file. Use shorter-lived read transactions or shut down the node."
+                };
+                warn!(
+                    target: "storage::db::mdbx",
+                    ?process_id,
+                    ?thread_id,
+                    ?read_txn_id,
+                    ?gap,
+                    ?space,
+                    ?retry,
+                    message
+                )
+            }
+
+            0
+        });
         inner_env.set_flags(EnvironmentFlags {
             mode,
             // We disable readahead because it improves performance for linear scans, but
@@ -176,7 +204,7 @@ impl DatabaseEnv {
             coalesce: true,
             ..Default::default()
         });
-        // configure more readers
+        // Configure more readers
         inner_env.set_max_readers(DEFAULT_MAX_READERS);
         // This parameter sets the maximum size of the "reclaimed list", and the unit of measurement
         // is "pages". Reclaimed list is the list of freed pages that's populated during the
