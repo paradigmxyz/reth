@@ -1,3 +1,4 @@
+#![allow(unreachable_pub)]
 //! Helper struct for working with a clique geth instance.
 
 use enr::k256::ecdsa::SigningKey;

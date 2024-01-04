@@ -7,6 +7,9 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[lints]
+workspace = true
+
 [package.metadata.cargo-udeps.ignore]
 normal = [
     # Used for diagrams in docs

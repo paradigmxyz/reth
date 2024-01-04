@@ -1,3 +1,4 @@
+#![allow(unreachable_pub)]
 //! Standalone http tests
 
 use crate::utils::{launch_http, launch_http_ws, launch_ws};
