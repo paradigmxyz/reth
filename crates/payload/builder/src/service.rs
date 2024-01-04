@@ -92,8 +92,11 @@ impl<T> PayloadBuilderHandle<T> {
 }
 
 #[async_trait::async_trait]
-impl PayloadBuilderTrait for PayloadBuilderHandle<PayloadBuilderAttributes> {
-    type PayloadAttributes = PayloadBuilderAttributes;
+impl<T> PayloadBuilderTrait for PayloadBuilderHandle<T>
+where
+    T: PayloadBuilderAttributesTrait + std::fmt::Debug + Send,
+{
+    type PayloadAttributes = T;
 
     /// Resolves the payload job and returns the best payload that has been built so far.
     ///
@@ -124,10 +127,7 @@ impl PayloadBuilderTrait for PayloadBuilderHandle<PayloadBuilderAttributes> {
     /// Returns the payload attributes associated with the given identifier.
     ///
     /// Note: this returns the attributes of the payload and does not resolve the job.
-    async fn payload_attributes(
-        &self,
-        id: PayloadId,
-    ) -> Option<Result<PayloadBuilderAttributes, PayloadBuilderError>> {
+    async fn payload_attributes(&self, id: PayloadId) -> Option<Result<T, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
         self.to_service.send(PayloadServiceCommand::PayloadAttributes(id, tx)).ok()?;
         rx.await.ok()?
@@ -139,7 +139,7 @@ impl PayloadBuilderTrait for PayloadBuilderHandle<PayloadBuilderAttributes> {
     /// returns the receiver instead
     fn send_new_payload(
         &self,
-        attr: PayloadBuilderAttributes,
+        attr: T,
     ) -> oneshot::Receiver<Result<PayloadId, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_service.send(PayloadServiceCommand::BuildNewPayload(attr, tx));
@@ -151,10 +151,7 @@ impl PayloadBuilderTrait for PayloadBuilderHandle<PayloadBuilderAttributes> {
     /// Returns the identifier of the payload.
     ///
     /// Note: if there's already payload in progress with same identifier, it will be returned.
-    async fn new_payload(
-        &self,
-        attr: PayloadBuilderAttributes,
-    ) -> Result<PayloadId, PayloadBuilderError> {
+    async fn new_payload(&self, attr: T) -> Result<PayloadId, PayloadBuilderError> {
         self.send_new_payload(attr).await?
     }
 }
