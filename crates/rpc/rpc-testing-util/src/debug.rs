@@ -85,7 +85,7 @@ where
             BlockId::Number(tag) => self.block_by_number(tag, false).await,
         }?
         .ok_or_else(|| RpcError::Custom("block not found".to_string()))?;
-        let hashes = block.transactions.iter().map(|tx| (tx, opts.clone())).collect::<Vec<_>>();
+        let hashes = block.transactions.hashes().map(|tx| (*tx, opts.clone())).collect::<Vec<_>>();
         let stream = futures::stream::iter(hashes.into_iter().map(move |(tx, opts)| async move {
             match self.debug_trace_transaction_json(tx, opts).await {
                 Ok(result) => Ok((result, tx)),

@@ -68,7 +68,7 @@ pub fn try_payload_v2_to_block(payload: ExecutionPayloadV2) -> Result<Block, Pay
     let withdrawals: Vec<_> = payload
         .withdrawals
         .iter()
-        .map(|w| convert_standalone_withdraw_to_withdrawal(w.clone()))
+        .map(|w| convert_standalone_withdraw_to_withdrawal(*w))
         .collect();
     let withdrawals_root = proofs::calculate_withdrawals_root(&withdrawals);
     base_sealed_block.withdrawals = Some(withdrawals);
