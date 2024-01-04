@@ -20,7 +20,12 @@ pub struct LogArgs {
     pub log_stdout_format: LogFormat,
 
     /// The filter to use for logs written to stdout.
-    #[arg(long = "log.stdout.filter", value_name = "FILTER", global = true, default_value = "")]
+    #[arg(
+        long = "log.stdout.filter",
+        value_name = "FILTER",
+        global = true,
+        default_value = "info"
+    )]
     pub log_stdout_filter: String,
 
     /// The format to use for logs written to the log file.
