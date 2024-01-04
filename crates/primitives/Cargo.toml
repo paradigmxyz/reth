@@ -8,6 +8,9 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Commonly used types in reth."
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-codecs.workspace = true

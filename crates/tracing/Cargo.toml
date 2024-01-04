@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "tracing helpers"
 
+[lints]
+workspace = true
+
 [dependencies]
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt"] }

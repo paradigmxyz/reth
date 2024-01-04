@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "Merkle trie implementation"
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-primitives.workspace = true
@@ -22,7 +25,7 @@ tokio = { workspace = true, default-features = false, features = ["sync"] }
 # tracing
 tracing.workspace = true
 
-# misc 
+# misc
 thiserror.workspace = true
 derive_more = "0.99"
 auto_impl = "1"

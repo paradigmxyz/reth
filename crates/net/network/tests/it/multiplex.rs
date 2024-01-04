@@ -1,3 +1,4 @@
+#![allow(unreachable_pub)]
 //! Testing gossiping of transactions.
 
 use crate::multiplex::proto::{PingPongProtoMessage, PingPongProtoMessageKind};

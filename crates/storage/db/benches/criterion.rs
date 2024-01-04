@@ -1,3 +1,4 @@
+#![allow(missing_docs, elided_lifetimes_in_paths)]
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };

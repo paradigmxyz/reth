@@ -8,8 +8,11 @@ homepage.workspace = true
 repository.workspace = true
 description = "revm inspector implementations used by reth"
 
+[lints]
+workspace = true
+
 [dependencies]
-# reth 
+# reth
 reth-rpc-types.workspace = true
 
 # eth
