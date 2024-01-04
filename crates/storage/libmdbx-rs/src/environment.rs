@@ -663,11 +663,12 @@ impl EnvironmentBuilder {
                         )
                     };
                     let closure = libffi::high::Closure8::new(&hsr);
+                    let closure_ptr = *closure.code_ptr();
+                    std::mem::forget(closure);
                     mdbx_result(ffi::mdbx_env_set_hsr(
                         env,
-                        Some(std::mem::transmute(closure.code_ptr())),
+                        Some(std::mem::transmute(closure_ptr)),
                     ))?;
-                    std::mem::forget(closure);
                 }
 
                 #[cfg(unix)]
