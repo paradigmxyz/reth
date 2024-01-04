@@ -644,31 +644,43 @@ impl EnvironmentBuilder {
                 }
 
                 if let Some(handle_slow_readers) = self.handle_slow_readers {
-                    let hsr = |_env: *const MDBX_env,
-                               _txn: *const MDBX_txn,
-                               pid: mdbx_pid_t,
-                               tid: mdbx_tid_t,
-                               laggard: u64,
-                               gap: ::libc::c_uint,
-                               space: usize,
-                               retry: ::libc::c_int|
-                     -> i32 {
-                        handle_slow_readers(
-                            pid as u32,
-                            tid as u32,
-                            laggard,
-                            gap as usize,
-                            space,
-                            retry as isize,
-                        )
-                    };
-                    let closure = libffi::high::Closure8::new(&hsr);
+                    let handle_slow_readers: &'static _ = Box::leak(Box::new(handle_slow_readers));
+                    let hsr: &'static _ = Box::leak(Box::new(
+                        |_env: *const MDBX_env,
+                         _txn: *const MDBX_txn,
+                         pid: mdbx_pid_t,
+                         tid: mdbx_tid_t,
+                         laggard: u64,
+                         gap: ::libc::c_uint,
+                         space: usize,
+                         retry: ::libc::c_int|
+                         -> i32 {
+                            handle_slow_readers(
+                                pid as u32,
+                                tid as u32,
+                                laggard,
+                                gap as usize,
+                                space,
+                                retry as isize,
+                            )
+                        },
+                    ));
+
+                    let closure = libffi::high::Closure8::new(hsr);
                     let closure_ptr = *closure.code_ptr();
+                    let c_ptr: unsafe extern "C" fn(
+                        env: *const MDBX_env,
+                        txn: *const MDBX_txn,
+                        pid: mdbx_pid_t,
+                        tid: mdbx_tid_t,
+                        laggard: u64,
+                        gap: ::libc::c_uint,
+                        space: usize,
+                        retry: ::libc::c_int,
+                    ) -> ::libc::c_int = std::mem::transmute(closure_ptr);
                     std::mem::forget(closure);
-                    mdbx_result(ffi::mdbx_env_set_hsr(
-                        env,
-                        Some(std::mem::transmute(closure_ptr)),
-                    ))?;
+
+                    mdbx_result(ffi::mdbx_env_set_hsr(env, Some(c_ptr)))?;
                 }
 
                 #[cfg(unix)]
