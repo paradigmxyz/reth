@@ -217,9 +217,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-rpc-trace-types"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/alloy#f5174888c523b70fa1a94fad24f3214048d3d462"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types",
+ "itertools 0.12.0",
+ "jsonrpsee-types",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "alloy-rpc-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#ed5a0e820ae4ceecdaabc7ca737648c8f8072439"
+source = "git+https://github.com/alloy-rs/alloy#f5174888c523b70fa1a94fad24f3214048d3d462"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -272,21 +287,6 @@ dependencies = [
  "alloy-sol-macro",
  "const-hex",
  "serde",
-]
-
-[[package]]
-name = "alloy-trace-rpc-types"
-version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#ed5a0e820ae4ceecdaabc7ca737648c8f8072439"
-dependencies = [
- "alloy-primitives",
- "alloy-rlp",
- "alloy-rpc-types",
- "itertools 0.12.0",
- "jsonrpsee-types",
- "serde",
- "serde_json",
- "thiserror",
 ]
 
 [[package]]
@@ -6596,8 +6596,8 @@ version = "0.1.0-alpha.13"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-trace-types",
  "alloy-rpc-types",
- "alloy-trace-rpc-types",
  "arbitrary",
  "bytes",
  "ethereum_ssz",
