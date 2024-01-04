@@ -19,9 +19,17 @@ pub struct LogArgs {
     #[arg(long = "log.stdout.format", value_name = "FORMAT", global = true, default_value_t = LogFormat::Terminal)]
     pub log_stdout_format: LogFormat,
 
+    /// The filter to use for logs written to stdout.
+    #[arg(long = "log.stdout.filter", value_name = "FILTER", global = true, default_value = "")]
+    pub log_stdout_filter: String,
+
     /// The format to use for logs written to the log file.
     #[arg(long = "log.file.format", value_name = "FORMAT", global = true, default_value_t = LogFormat::Terminal)]
     pub log_file_format: LogFormat,
+
+    /// The filter to use for logs written to the log file.
+    #[arg(long = "log.file.filter", value_name = "FILTER", global = true, default_value = "debug")]
+    pub log_file_filter: String,
 
     /// The path to put log files in.
     #[arg(long = "log.file.directory", value_name = "PATH", global = true, default_value_t)]
@@ -35,10 +43,6 @@ pub struct LogArgs {
     /// is disabled.
     #[arg(long = "log.file.max-files", value_name = "COUNT", global = true, default_value_t = 5)]
     pub log_file_max_files: usize,
-
-    /// The filter to use for logs written to the log file.
-    #[arg(long = "log.file.filter", value_name = "FILTER", global = true, default_value = "debug")]
-    pub log_file_filter: String,
 
     /// Write logs to journald.
     #[arg(long = "log.journald", global = true)]
@@ -69,10 +73,10 @@ pub struct LogArgs {
 
 impl LogArgs {
     /// Creates a [LayerInfo] instance.
-    fn layer(&self, format: LogFormat, use_color: bool) -> LayerInfo {
+    fn layer(&self, format: LogFormat, filter: String, use_color: bool) -> LayerInfo {
         LayerInfo::new(
             format,
-            self.log_file_filter.clone(),
+            filter,
             self.verbosity.directive(),
             if use_color { Some(self.color.to_string()) } else { None },
         )
@@ -91,7 +95,7 @@ impl LogArgs {
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
         let mut tracer = RethTracer::new();
 
-        let stdout = self.layer(self.log_stdout_format, true);
+        let stdout = self.layer(self.log_stdout_format, self.log_stdout_filter.clone(), true);
         tracer = tracer.with_stdout(stdout);
 
         if self.journald {
@@ -100,7 +104,7 @@ impl LogArgs {
 
         if self.log_file_max_files > 0 {
             let info = self.file_info();
-            let file = self.layer(self.log_file_format, false);
+            let file = self.layer(self.log_file_format, self.log_file_filter.clone(), false);
             tracer = tracer.with_file(file, info);
         }
 
