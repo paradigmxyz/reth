@@ -40,6 +40,9 @@ thiserror.workspace = true
 sha2 = { version = "0.10", default-features = false }
 tracing.workspace = true
 
+# serde, for traits
+serde.workspace = true
+
 [dev-dependencies]
 revm.workspace = true
 

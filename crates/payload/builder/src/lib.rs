@@ -51,6 +51,7 @@
 //! }
 //!
 //! impl PayloadJob for EmptyBlockPayloadJob {
+//!    type PayloadAttributes = PayloadBuilderAttributes;
 //!    type ResolvePayloadFuture = futures_util::future::Ready<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
 //!
 //! fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
@@ -114,4 +115,7 @@ pub mod test_utils;
 pub use payload::{BuiltPayload, PayloadBuilderAttributes};
 pub use reth_rpc_types::engine::PayloadId;
 pub use service::{PayloadBuilderHandle, PayloadBuilderService, PayloadStore};
-pub use traits::{KeepPayloadJobAlive, PayloadBuilderTrait, PayloadJob, PayloadJobGenerator};
+pub use traits::{
+    KeepPayloadJobAlive, PayloadAttributesTrait, PayloadBuilderAttributesTrait,
+    PayloadBuilderTrait, PayloadJob, PayloadJobGenerator,
+};

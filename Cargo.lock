@@ -6322,6 +6322,7 @@ dependencies = [
  "reth-transaction-pool",
  "revm",
  "revm-primitives",
+ "serde",
  "sha2",
  "thiserror",
  "tokio",

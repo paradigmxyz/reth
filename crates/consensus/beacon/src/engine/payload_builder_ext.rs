@@ -1,5 +1,8 @@
 use crate::engine::message::OnForkChoiceUpdated;
-use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderTrait};
+use reth_payload_builder::{
+    PayloadBuilderAttributes, PayloadBuilderAttributesTrait, PayloadBuilderHandle,
+    PayloadBuilderTrait,
+};
 use reth_primitives::Header;
 use reth_rpc_types::engine::{
     ForkchoiceState, PayloadAttributes, PayloadStatus, PayloadStatusEnum,

@@ -150,34 +150,13 @@ pub struct PayloadBuilderAttributes {
 }
 
 impl PayloadBuilderAttributesTrait for PayloadBuilderAttributes {
-    fn parent(&self) -> B256 {
-        self.parent
-    }
+    type RpcPayloadAttributes = PayloadAttributes;
+    type Error = DecodeError;
 
-    fn payload_id(&self) -> PayloadId {
-        self.id
-    }
-}
-
-/// Optimism Payload Builder Attributes
-#[cfg(feature = "optimism")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OptimismPayloadBuilderAttributes {
-    /// NoTxPool option for the generated payload
-    pub no_tx_pool: bool,
-    /// Transactions for the generated payload
-    pub transactions: Vec<TransactionSigned>,
-    /// The gas limit for the generated payload
-    pub gas_limit: Option<u64>,
-}
-
-// === impl PayloadBuilderAttributes ===
-
-impl PayloadBuilderAttributes {
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
     /// Derives the unique [PayloadId] for the given parent and attributes
-    pub fn try_new(parent: B256, attributes: PayloadAttributes) -> Result<Self, DecodeError> {
+    fn try_new(parent: B256, attributes: PayloadAttributes) -> Result<Self, DecodeError> {
         #[cfg(not(feature = "optimism"))]
         let id = payload_id(&parent, &attributes);
 
@@ -219,6 +198,31 @@ impl PayloadBuilderAttributes {
             },
         })
     }
+
+    fn parent(&self) -> B256 {
+        self.parent
+    }
+
+    fn payload_id(&self) -> PayloadId {
+        self.id
+    }
+}
+
+/// Optimism Payload Builder Attributes
+#[cfg(feature = "optimism")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OptimismPayloadBuilderAttributes {
+    /// NoTxPool option for the generated payload
+    pub no_tx_pool: bool,
+    /// Transactions for the generated payload
+    pub transactions: Vec<TransactionSigned>,
+    /// The gas limit for the generated payload
+    pub gas_limit: Option<u64>,
+}
+
+// === impl PayloadBuilderAttributes ===
+
+impl PayloadBuilderAttributes {
     /// Returns the configured [CfgEnv] and [BlockEnv] for the targeted payload (that has the
     /// `parent` as its parent).
     ///
