@@ -1,20 +1,14 @@
 [package]
-name = "reth-net-common"
+name = "reth-beacon-consensus-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Types shared across network code"
-
-[lints]
-workspace = true
 
 [dependencies]
 # reth
+reth-consensus-common.workspace = true
 reth-primitives.workspace = true
-
-# async
-pin-project.workspace = true
-tokio = { workspace = true, features = ["full"] }
+reth-interfaces.workspace = true

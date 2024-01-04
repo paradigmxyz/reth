@@ -5,6 +5,7 @@ members = [
     "crates/config/",
     "crates/consensus/auto-seal/",
     "crates/consensus/beacon/",
+    "crates/consensus/beacon-core/",
     "crates/consensus/common/",
     "crates/ethereum-forks/",
     "crates/interfaces/",
@@ -65,6 +66,14 @@ default-members = ["bin/reth"]
 # https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html
 resolver = "2"
 
+[workspace.lints]
+rust.missing_debug_implementations = "warn"
+rust.missing_docs = "warn"
+rust.unreachable_pub = "warn"
+rustdoc.all = "warn"
+rust.unused_must_use = "deny"
+rust.rust_2018_idioms = "deny"
+
 [workspace.package]
 version = "0.1.0-alpha.13"
 edition = "2021"
@@ -96,6 +105,7 @@ reth = { path = "bin/reth" }
 reth-auto-seal-consensus = { path = "crates/consensus/auto-seal" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-beacon-consensus = { path = "crates/consensus/beacon" }
+reth-beacon-consensus-core = { path = "crates/consensus/beacon-core" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
 reth-codecs = { path = "crates/storage/codecs" }
 reth-config = { path = "crates/config" }

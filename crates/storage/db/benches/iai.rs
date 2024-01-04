@@ -1,4 +1,4 @@
-#![allow(non_snake_case)]
+#![allow(missing_docs, non_snake_case, unreachable_pub)]
 
 use paste::paste;
 use reth_db::table::{Compress, Decode, Decompress, Encode, Table};

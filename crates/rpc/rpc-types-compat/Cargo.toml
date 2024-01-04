@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "Compatibility layer for reth-primitives and ethereum RPC types"
 
+[lints]
+workspace = true
+
 [dependencies]
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true

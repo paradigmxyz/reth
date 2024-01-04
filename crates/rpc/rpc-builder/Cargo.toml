@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "Helpers for configuring RPC"
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-primitives.workspace = true

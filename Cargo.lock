@@ -5727,8 +5727,8 @@ dependencies = [
  "cfg-if",
  "futures",
  "metrics 0.21.1",
+ "reth-beacon-consensus-core",
  "reth-blockchain-tree",
- "reth-consensus-common",
  "reth-db",
  "reth-downloaders",
  "reth-interfaces",
@@ -5751,6 +5751,15 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+]
+
+[[package]]
+name = "reth-beacon-consensus-core"
+version = "0.1.0-alpha.13"
+dependencies = [
+ "reth-consensus-common",
+ "reth-interfaces",
+ "reth-primitives",
 ]
 
 [[package]]
