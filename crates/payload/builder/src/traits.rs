@@ -2,6 +2,7 @@
 
 use reth_provider::CanonStateNotification;
 use crate::{error::PayloadBuilderError, BuiltPayload};
+use reth_primitives::B256;
 use reth_rpc_types::engine::PayloadId;
 use std::{future::Future, sync::Arc};
 use tokio::sync::oneshot;
@@ -19,7 +20,7 @@ use tokio::sync::oneshot;
 /// Note: A `PayloadJob` need to be cancel safe because it might be dropped after the CL has requested the payload via `engine_getPayloadV1` (see also [engine API docs](https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1))
 pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + Sync {
     /// Represents the payload attributes type that is used to spawn this payload job.
-    type PayloadAttributes: std::fmt::Debug;
+    type PayloadAttributes: PayloadBuilderAttributesTrait + std::fmt::Debug;
     /// Represents the future that resolves the block that's returned to the CL.
     type ResolvePayloadFuture: Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>>
         + Send
@@ -54,6 +55,15 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     /// once more. If this returns [`KeepPayloadJobAlive::No`] then the [`PayloadJob`] will be
     /// dropped after this call.
     fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive);
+}
+
+/// This can be implemented by types that describe a currently running payload job.
+pub trait PayloadBuilderAttributesTrait {
+    /// Returns the [PayloadId] for the running payload job.
+    fn payload_id(&self) -> PayloadId;
+
+    /// Returns the parent block hash for the running payload job.
+    fn parent(&self) -> B256;
 }
 
 /// This is a trait that a payload builder or handle can implement to retrieve information relevant

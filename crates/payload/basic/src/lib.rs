@@ -491,6 +491,9 @@ where
                 best_payload: None,
             };
 
+            // TODO(rjected): create optimism payload job, that wraps this type, that implements
+            // PayloadJob with this branch. remove this branch from the non-op code. remove
+            // `on_missing_payload` requirement from builder trait
             if let Some(payload) = self.builder.on_missing_payload(args) {
                 return (
                     ResolveBestPayload { best_payload: Some(payload), maybe_better, empty_payload },

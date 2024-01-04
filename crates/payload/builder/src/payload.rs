@@ -19,6 +19,8 @@ use reth_rpc_types_compat::engine::payload::{
 #[cfg(feature = "optimism")]
 use reth_primitives::TransactionSigned;
 
+use crate::traits::PayloadBuilderAttributesTrait;
+
 /// Contains the built payload.
 ///
 /// According to the [engine API specification](https://github.com/ethereum/execution-apis/blob/main/src/engine/README.md) the execution layer should build the initial version of the payload with an empty transaction set and then keep update it in order to maximize the revenue.
@@ -121,6 +123,8 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelopeV3 {
     }
 }
 
+// TODO(rjected): separate op into type that wraps this, impl payload builder attributes type for
+// it
 /// Container type for all components required to build a payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PayloadBuilderAttributes {
@@ -143,6 +147,16 @@ pub struct PayloadBuilderAttributes {
     /// Optimism Payload Builder Attributes
     #[cfg(feature = "optimism")]
     pub optimism_payload_attributes: OptimismPayloadBuilderAttributes,
+}
+
+impl PayloadBuilderAttributesTrait for PayloadBuilderAttributes {
+    fn parent(&self) -> B256 {
+        self.parent
+    }
+
+    fn payload_id(&self) -> PayloadId {
+        self.id
+    }
 }
 
 /// Optimism Payload Builder Attributes
