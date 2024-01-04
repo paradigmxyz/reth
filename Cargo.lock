@@ -6290,6 +6290,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-node-builder"
+version = "0.1.0-alpha.13"
+dependencies = [
+ "reth-payload-builder",
+ "reth-primitives",
+ "serde",
+]
+
+[[package]]
 name = "reth-optimism-payload-builder"
 version = "0.1.0-alpha.13"
 dependencies = [
