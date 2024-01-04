@@ -216,6 +216,8 @@ where
     hooks: EngineHooksController,
 }
 
+// TODO(rjected): remove constraint for `RpcPayloadAttributes = PayloadAttributes` after
+// introducing op-specific payload attributes engine rpc type (in alloy?)
 impl<DB, BT, Client, PB> BeaconConsensusEngine<DB, BT, Client, PB>
 where
     DB: Database + Unpin + 'static,
