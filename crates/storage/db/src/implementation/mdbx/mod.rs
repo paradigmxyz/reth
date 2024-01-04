@@ -26,9 +26,9 @@ const TERABYTE: usize = GIGABYTE * 1024;
 /// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`), but we limit it to slightly below that
 const DEFAULT_MAX_READERS: u64 = 32_000;
 
-/// Default space that a read-only transaction can occupy until the warning is emitted.
+/// Space that a read-only transaction can occupy until the warning is emitted.
 /// See [reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers] for more information.
-const DEFAULT_MAX_READER_SPACE: usize = 10 * GIGABYTE;
+const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
@@ -174,9 +174,7 @@ impl DatabaseEnv {
         });
         inner_env.set_handle_slow_readers(
             |process_id: u32, thread_id: u32, read_txn_id: u64, gap: usize, space: usize, retry: isize| -> i32 {
-            // 10GB is max allowed space that a reader can occupy due to MVCC snapshots of data not
-            // being released
-            if space > 10 * GIGABYTE {
+            if space > MAX_SAFE_READER_SPACE {
                 let message = if process_id == std::process::id() {
                     "Current process has a long-lived database transaction that grows the database file."
                 } else {
