@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
+reth-payload-builder.workspace = true
 
 # misc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }

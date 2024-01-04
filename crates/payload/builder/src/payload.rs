@@ -206,6 +206,10 @@ impl PayloadBuilderAttributesTrait for PayloadBuilderAttributes {
     fn payload_id(&self) -> PayloadId {
         self.id
     }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
 }
 
 /// Optimism Payload Builder Attributes

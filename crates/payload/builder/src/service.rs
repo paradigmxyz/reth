@@ -6,8 +6,8 @@
 use crate::{
     error::PayloadBuilderError,
     metrics::PayloadBuilderServiceMetrics,
-    traits::{PayloadBuilderAttributesTrait, PayloadBuilderTrait, PayloadJobGenerator},
-    BuiltPayload, KeepPayloadJobAlive, PayloadBuilderAttributes, PayloadJob,
+    traits::{EngineTypes, PayloadBuilderAttributesTrait, PayloadJobGenerator},
+    BuiltPayload, KeepPayloadJobAlive, PayloadJob,
 };
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_provider::CanonStateNotification;
@@ -25,13 +25,16 @@ use tracing::{debug, info, trace, warn};
 
 /// A communication channel to the [PayloadBuilderService] that can retrieve payloads.
 #[derive(Debug, Clone)]
-pub struct PayloadStore {
-    inner: PayloadBuilderHandle<PayloadBuilderAttributes>,
+pub struct PayloadStore<Types: EngineTypes> {
+    inner: PayloadBuilderHandle<Types>,
 }
 
 // === impl PayloadStore ===
 
-impl PayloadStore {
+impl<Types> PayloadStore<Types>
+where
+    Types: EngineTypes,
+{
     /// Resolves the payload job and returns the best payload that has been built so far.
     ///
     /// Note: depending on the installed [PayloadJobGenerator], this may or may not terminate the
@@ -59,13 +62,16 @@ impl PayloadStore {
     pub async fn payload_attributes(
         &self,
         id: PayloadId,
-    ) -> Option<Result<PayloadBuilderAttributes, PayloadBuilderError>> {
+    ) -> Option<Result<Types::PayloadBuilderAttributes, PayloadBuilderError>> {
         self.inner.payload_attributes(id).await
     }
 }
 
-impl From<PayloadBuilderHandle<PayloadBuilderAttributes>> for PayloadStore {
-    fn from(inner: PayloadBuilderHandle<PayloadBuilderAttributes>) -> Self {
+impl<Types> From<PayloadBuilderHandle<Types>> for PayloadStore<Types>
+where
+    Types: EngineTypes,
+{
+    fn from(inner: PayloadBuilderHandle<Types>) -> Self {
         Self { inner }
     }
 }
@@ -74,29 +80,26 @@ impl From<PayloadBuilderHandle<PayloadBuilderAttributes>> for PayloadStore {
 ///
 /// This is the API used to create new payloads and to get the current state of existing ones.
 #[derive(Debug, Clone)]
-pub struct PayloadBuilderHandle<T> {
+pub struct PayloadBuilderHandle<Types: EngineTypes> {
     /// Sender half of the message channel to the [PayloadBuilderService].
-    to_service: mpsc::UnboundedSender<PayloadServiceCommand<T>>,
+    to_service: mpsc::UnboundedSender<PayloadServiceCommand<Types::PayloadBuilderAttributes>>,
 }
 
 // === impl PayloadBuilderHandle ===
 
-impl<T> PayloadBuilderHandle<T> {
+impl<Types> PayloadBuilderHandle<Types>
+where
+    Types: EngineTypes,
+{
     /// Creates a new payload builder handle for the given channel.
     ///
     /// Note: this is only used internally by the [PayloadBuilderService] to manage the payload
     /// building flow See [PayloadBuilderService::poll] for implementation details.
-    pub fn new(to_service: mpsc::UnboundedSender<PayloadServiceCommand<T>>) -> Self {
+    pub fn new(
+        to_service: mpsc::UnboundedSender<PayloadServiceCommand<Types::PayloadBuilderAttributes>>,
+    ) -> Self {
         Self { to_service }
     }
-}
-
-#[async_trait::async_trait]
-impl<T> PayloadBuilderTrait for PayloadBuilderHandle<T>
-where
-    T: PayloadBuilderAttributesTrait + std::fmt::Debug + Send,
-{
-    type PayloadAttributes = T;
 
     /// Resolves the payload job and returns the best payload that has been built so far.
     ///
@@ -127,7 +130,10 @@ where
     /// Returns the payload attributes associated with the given identifier.
     ///
     /// Note: this returns the attributes of the payload and does not resolve the job.
-    async fn payload_attributes(&self, id: PayloadId) -> Option<Result<T, PayloadBuilderError>> {
+    async fn payload_attributes(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<Types::PayloadBuilderAttributes, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
         self.to_service.send(PayloadServiceCommand::PayloadAttributes(id, tx)).ok()?;
         rx.await.ok()?
@@ -137,9 +143,9 @@ where
     ///
     /// This is the same as [PayloadBuilderHandle::new_payload] but does not wait for the result and
     /// returns the receiver instead
-    fn send_new_payload(
+    pub fn send_new_payload(
         &self,
-        attr: T,
+        attr: Types::PayloadBuilderAttributes,
     ) -> oneshot::Receiver<Result<PayloadId, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_service.send(PayloadServiceCommand::BuildNewPayload(attr, tx));
@@ -151,7 +157,10 @@ where
     /// Returns the identifier of the payload.
     ///
     /// Note: if there's already payload in progress with same identifier, it will be returned.
-    async fn new_payload(&self, attr: T) -> Result<PayloadId, PayloadBuilderError> {
+    async fn new_payload(
+        &self,
+        attr: Types::PayloadBuilderAttributes,
+    ) -> Result<PayloadId, PayloadBuilderError> {
         self.send_new_payload(attr).await?
     }
 }
@@ -166,20 +175,20 @@ where
 /// does know nothing about how to build them, it just drives their jobs to completion.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct PayloadBuilderService<Gen, St>
+pub struct PayloadBuilderService<Gen, St, Types>
 where
+    Types: EngineTypes,
     Gen: PayloadJobGenerator,
+    Gen::Job: PayloadJob<PayloadAttributes = Types::PayloadBuilderAttributes>,
 {
     /// The type that knows how to create new payloads.
     generator: Gen,
     /// All active payload jobs.
     payload_jobs: Vec<(Gen::Job, PayloadId)>,
     /// Copy of the sender half, so new [`PayloadBuilderHandle`] can be created on demand.
-    service_tx:
-        mpsc::UnboundedSender<PayloadServiceCommand<<Gen::Job as PayloadJob>::PayloadAttributes>>,
+    service_tx: mpsc::UnboundedSender<PayloadServiceCommand<Types::PayloadBuilderAttributes>>,
     /// Receiver half of the command channel.
-    command_rx:
-        UnboundedReceiverStream<PayloadServiceCommand<<Gen::Job as PayloadJob>::PayloadAttributes>>,
+    command_rx: UnboundedReceiverStream<PayloadServiceCommand<Types::PayloadBuilderAttributes>>,
     /// Metrics for the payload builder service
     metrics: PayloadBuilderServiceMetrics,
     /// Chain events notification stream
@@ -188,19 +197,18 @@ where
 
 // === impl PayloadBuilderService ===
 
-impl<Gen, St> PayloadBuilderService<Gen, St>
+impl<Gen, St, Types> PayloadBuilderService<Gen, St, Types>
 where
+    Types: EngineTypes,
     Gen: PayloadJobGenerator,
+    Gen::Job: PayloadJob<PayloadAttributes = Types::PayloadBuilderAttributes>,
 {
     /// Creates a new payload builder service and returns the [PayloadBuilderHandle] to interact
     /// with it.
     ///
     /// This also takes a stream of chain events that will be forwarded to the generator to apply
     /// additional logic when new state is committed. See also [PayloadJobGenerator::on_new_state].
-    pub fn new(
-        generator: Gen,
-        chain_events: St,
-    ) -> (Self, PayloadBuilderHandle<<Gen::Job as PayloadJob>::PayloadAttributes>) {
+    pub fn new(generator: Gen, chain_events: St) -> (Self, PayloadBuilderHandle<Types>) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
         let service = Self {
             generator,
@@ -216,7 +224,7 @@ where
     }
 
     /// Returns a handle to the service.
-    pub fn handle(&self) -> PayloadBuilderHandle<<Gen::Job as PayloadJob>::PayloadAttributes> {
+    pub fn handle(&self) -> PayloadBuilderHandle<Types> {
         PayloadBuilderHandle::new(self.service_tx.clone())
     }
 
@@ -271,13 +279,38 @@ where
     }
 }
 
-impl<Gen, St> Future for PayloadBuilderService<Gen, St>
+impl<Gen, St, Types> PayloadBuilderService<Gen, St, Types>
 where
+    Types: EngineTypes,
+    Gen: PayloadJobGenerator,
+    Gen::Job: PayloadJob<PayloadAttributes = Types::PayloadBuilderAttributes>,
+{
+    /// Returns the payload attributes for the given payload.
+    fn payload_attributes(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<<Gen::Job as PayloadJob>::PayloadAttributes, PayloadBuilderError>> {
+        let attributes = self
+            .payload_jobs
+            .iter()
+            .find(|(_, job_id)| *job_id == id)
+            .map(|(j, _)| j.payload_attributes());
+
+        if attributes.is_none() {
+            trace!(%id, "no matching payload job found to get attributes for");
+        }
+
+        attributes
+    }
+}
+
+impl<Gen, St, Types> Future for PayloadBuilderService<Gen, St, Types>
+where
+    Types: EngineTypes,
     Gen: PayloadJobGenerator + Unpin + 'static,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
-    <<Gen as PayloadJobGenerator>::Job as PayloadJob>::PayloadAttributes:
-        PayloadBuilderAttributesTrait + Unpin + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+    Gen::Job: PayloadJob<PayloadAttributes = Types::PayloadBuilderAttributes>,
 {
     type Output = ();
 
@@ -369,7 +402,6 @@ where
 type PayloadFuture =
     Pin<Box<dyn Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>> + Send + Sync>>;
 
-// TODO(rjected): make generic over config type which contains associated types
 /// Message type for the [PayloadBuilderService].
 pub enum PayloadServiceCommand<T> {
     /// Start building a new payload.

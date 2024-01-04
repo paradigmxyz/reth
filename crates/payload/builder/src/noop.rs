@@ -1,6 +1,9 @@
 //! A payload builder service task that does nothing.
 
-use crate::{service::PayloadServiceCommand, PayloadBuilderAttributes, PayloadBuilderHandle};
+use crate::{
+    service::PayloadServiceCommand, traits::EthEngineTypes, PayloadBuilderAttributes,
+    PayloadBuilderHandle,
+};
 use futures_util::{ready, StreamExt};
 use std::{
     future::Future,
@@ -19,7 +22,7 @@ pub struct NoopPayloadBuilderService {
 
 impl NoopPayloadBuilderService {
     /// Creates a new [NoopPayloadBuilderService].
-    pub fn new() -> (Self, PayloadBuilderHandle<PayloadBuilderAttributes>) {
+    pub fn new() -> (Self, PayloadBuilderHandle<EthEngineTypes>) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
         let handle = PayloadBuilderHandle::new(service_tx);
         (Self { command_rx: UnboundedReceiverStream::new(command_rx) }, handle)

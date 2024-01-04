@@ -6,15 +6,14 @@ use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_payload_builder::{PayloadBuilderAttributes, PayloadStore};
+use reth_payload_builder::{EngineTypes, PayloadBuilderAttributesTrait, PayloadStore};
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2,
     ExecutionPayloadEnvelopeV3, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
-    ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration,
-    CAPABILITIES,
+    ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
 };
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
@@ -32,35 +31,38 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
-pub struct EngineApi<Provider> {
-    inner: Arc<EngineApiInner<Provider>>,
+pub struct EngineApi<Provider, Types: EngineTypes> {
+    inner: Arc<EngineApiInner<Provider, Types>>,
 }
 
-struct EngineApiInner<Provider> {
+struct EngineApiInner<Provider, Types: EngineTypes> {
     /// The provider to interact with the chain.
     provider: Provider,
     /// Consensus configuration
     chain_spec: Arc<ChainSpec>,
     /// The channel to send messages to the beacon consensus engine.
-    beacon_consensus: BeaconConsensusEngineHandle,
+    beacon_consensus: BeaconConsensusEngineHandle<Types>,
     /// The type that can communicate with the payload service to retrieve payloads.
-    payload_store: PayloadStore,
+    payload_store: PayloadStore<Types>,
     /// For spawning and executing async tasks
     task_spawner: Box<dyn TaskSpawner>,
     /// The metrics for engine api calls
     metrics: EngineApiMetrics,
 }
 
-impl<Provider> EngineApi<Provider>
+impl<Provider, Types> EngineApi<Provider, Types>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
+    Types: EngineTypes + 'static,
+    for<'a> PayloadOrAttributes<'a>: From<&'a Types::PayloadAttributes>,
+    Types::PayloadBuilderAttributes: Send,
 {
     /// Create new instance of [EngineApi].
     pub fn new(
         provider: Provider,
         chain_spec: Arc<ChainSpec>,
-        beacon_consensus: BeaconConsensusEngineHandle,
-        payload_store: PayloadStore,
+        beacon_consensus: BeaconConsensusEngineHandle<Types>,
+        payload_store: PayloadStore<Types>,
         task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         let inner = Arc::new(EngineApiInner {
@@ -78,7 +80,7 @@ where
     async fn get_payload_attributes(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<PayloadBuilderAttributes> {
+    ) -> EngineApiResult<Types::PayloadBuilderAttributes> {
         Ok(self
             .inner
             .payload_store
@@ -136,7 +138,7 @@ where
     pub async fn fork_choice_updated_v1(
         &self,
         state: ForkchoiceState,
-        payload_attrs: Option<PayloadAttributes>,
+        payload_attrs: Option<Types::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V1, state, payload_attrs)
             .await
@@ -149,7 +151,7 @@ where
     pub async fn fork_choice_updated_v2(
         &self,
         state: ForkchoiceState,
-        payload_attrs: Option<PayloadAttributes>,
+        payload_attrs: Option<Types::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V2, state, payload_attrs)
             .await
@@ -162,7 +164,7 @@ where
     pub async fn fork_choice_updated_v3(
         &self,
         state: ForkchoiceState,
-        payload_attrs: Option<PayloadAttributes>,
+        payload_attrs: Option<Types::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V3, state, payload_attrs)
             .await
@@ -205,7 +207,7 @@ where
         let attributes = self.get_payload_attributes(payload_id).await?;
 
         // validate timestamp according to engine rules
-        self.validate_payload_timestamp(EngineApiMessageVersion::V2, attributes.timestamp)?;
+        self.validate_payload_timestamp(EngineApiMessageVersion::V2, attributes.timestamp())?;
 
         // Now resolve the payload
         Ok(self
@@ -232,7 +234,7 @@ where
         let attributes = self.get_payload_attributes(payload_id).await?;
 
         // validate timestamp according to engine rules
-        self.validate_payload_timestamp(EngineApiMessageVersion::V3, attributes.timestamp)?;
+        self.validate_payload_timestamp(EngineApiMessageVersion::V3, attributes.timestamp())?;
 
         // Now resolve the payload
         Ok(self
@@ -555,7 +557,7 @@ where
         &self,
         version: EngineApiMessageVersion,
         state: ForkchoiceState,
-        payload_attrs: Option<PayloadAttributes>,
+        payload_attrs: Option<Types::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
             let attr_validation_res = self.validate_version_specific_fields(version, &attrs.into());
@@ -596,9 +598,13 @@ where
 }
 
 #[async_trait]
-impl<Provider> EngineApiServer for EngineApi<Provider>
+impl<Provider, Types> EngineApiServer<Types> for EngineApi<Provider, Types>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
+    Types: EngineTypes + 'static + Send,
+    Types::PayloadAttributes: Send,
+    for<'a> PayloadOrAttributes<'a>: From<&'a Types::PayloadAttributes>,
+    Types::PayloadBuilderAttributes: Send,
 {
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
@@ -645,7 +651,7 @@ where
     async fn fork_choice_updated_v1(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<PayloadAttributes>,
+        payload_attributes: Option<Types::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV1");
         let start = Instant::now();
@@ -660,7 +666,7 @@ where
     async fn fork_choice_updated_v2(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<PayloadAttributes>,
+        payload_attributes: Option<Types::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV2");
         let start = Instant::now();
@@ -676,7 +682,7 @@ where
     async fn fork_choice_updated_v3(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<PayloadAttributes>,
+        payload_attributes: Option<Types::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
         let start = Instant::now();
@@ -800,7 +806,10 @@ where
     }
 }
 
-impl<Provider> std::fmt::Debug for EngineApi<Provider> {
+impl<Provider, Types> std::fmt::Debug for EngineApi<Provider, Types>
+where
+    Types: EngineTypes,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApi").finish_non_exhaustive()
     }
@@ -812,7 +821,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_beacon_consensus::BeaconEngineMessage;
     use reth_interfaces::test_utils::generators::random_block;
-    use reth_payload_builder::test_utils::spawn_test_payload_service;
+    use reth_payload_builder::{test_utils::spawn_test_payload_service, EthEngineTypes};
     use reth_primitives::{SealedBlock, B256, MAINNET};
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
@@ -820,7 +829,8 @@ mod tests {
     use std::sync::Arc;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
-    fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>>) {
+    fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>, EthEngineTypes>)
+    {
         let chain_spec: Arc<ChainSpec> = MAINNET.clone();
         let provider = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service();
@@ -840,7 +850,7 @@ mod tests {
     struct EngineApiTestHandle {
         chain_spec: Arc<ChainSpec>,
         provider: Arc<MockEthProvider>,
-        from_api: UnboundedReceiver<BeaconEngineMessage>,
+        from_api: UnboundedReceiver<BeaconEngineMessage<EthEngineTypes>>,
     }
 
     #[tokio::test]

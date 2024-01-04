@@ -20,7 +20,9 @@ use reth_interfaces::{
     sync::{NetworkSyncUpdater, SyncState},
     RethError, RethResult,
 };
-use reth_payload_builder::PayloadBuilderTrait;
+use reth_payload_builder::{
+    EngineTypes, PayloadAttributesTrait, PayloadBuilderAttributesTrait, PayloadBuilderHandle,
+};
 use reth_primitives::{
     constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
     SealedHeader, B256,
@@ -30,8 +32,7 @@ use reth_provider::{
     StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
-    PayloadValidationError,
+    CancunPayloadFields, ExecutionPayload, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
 
 use reth_stages::{ControlFlow, Pipeline, PipelineError};
@@ -74,9 +75,6 @@ use crate::hooks::{EngineHookEvent, EngineHooks, PolledHook};
 pub use forkchoice::ForkchoiceStatus;
 use reth_interfaces::blockchain_tree::BlockValidationKind;
 use reth_payload_validator::ExecutionPayloadValidator;
-
-mod payload_builder_ext;
-use payload_builder_ext::EnginePayloadBuilderExt;
 
 mod metrics;
 
@@ -167,7 +165,7 @@ pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 /// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
 #[allow(missing_debug_implementations)]
-pub struct BeaconConsensusEngine<DB, BT, Client, PB>
+pub struct BeaconConsensusEngine<DB, BT, Client, Types>
 where
     DB: Database,
     Client: HeadersClient + BodiesClient,
@@ -176,7 +174,7 @@ where
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader,
-    PB: PayloadBuilderTrait,
+    Types: EngineTypes,
 {
     /// Controls syncing triggered by engine updates.
     sync: EngineSyncController<DB, Client>,
@@ -185,13 +183,13 @@ where
     /// Used for emitting updates about whether the engine is syncing or not.
     sync_state_updater: Box<dyn NetworkSyncUpdater>,
     /// The Engine API message receiver.
-    engine_message_rx: UnboundedReceiverStream<BeaconEngineMessage>,
+    engine_message_rx: UnboundedReceiverStream<BeaconEngineMessage<Types>>,
     /// A clone of the handle
-    handle: BeaconConsensusEngineHandle,
+    handle: BeaconConsensusEngineHandle<Types>,
     /// Tracks the received forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// The payload store.
-    payload_builder: PB,
+    payload_builder: PayloadBuilderHandle<Types>,
     /// Validator for execution payloads
     payload_validator: ExecutionPayloadValidator,
     /// Listeners for engine events.
@@ -216,9 +214,7 @@ where
     hooks: EngineHooksController,
 }
 
-// TODO(rjected): remove constraint for `RpcPayloadAttributes = PayloadAttributes` after
-// introducing op-specific payload attributes engine rpc type (in alloy?)
-impl<DB, BT, Client, PB> BeaconConsensusEngine<DB, BT, Client, PB>
+impl<DB, BT, Client, Types> BeaconConsensusEngine<DB, BT, Client, Types>
 where
     DB: Database + Unpin + 'static,
     BT: BlockchainTreeEngine
@@ -229,8 +225,107 @@ where
         + ChainSpecProvider
         + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
-    PB: EnginePayloadBuilderExt<RpcPayloadAttributes = PayloadAttributes> + Unpin + 'static,
+    Types: EngineTypes + Unpin + 'static,
 {
+    /// Create a new instance of the [BeaconConsensusEngine].
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        client: Client,
+        pipeline: Pipeline<DB>,
+        blockchain: BT,
+        task_spawner: Box<dyn TaskSpawner>,
+        sync_state_updater: Box<dyn NetworkSyncUpdater>,
+        max_block: Option<BlockNumber>,
+        run_pipeline_continuously: bool,
+        payload_builder: PayloadBuilderHandle<Types>,
+        target: Option<B256>,
+        pipeline_run_threshold: u64,
+        hooks: EngineHooks,
+    ) -> RethResult<(Self, BeaconConsensusEngineHandle<Types>)> {
+        let (to_engine, rx) = mpsc::unbounded_channel();
+        Self::with_channel(
+            client,
+            pipeline,
+            blockchain,
+            task_spawner,
+            sync_state_updater,
+            max_block,
+            run_pipeline_continuously,
+            payload_builder,
+            target,
+            pipeline_run_threshold,
+            to_engine,
+            rx,
+            hooks,
+        )
+    }
+
+    /// Create a new instance of the [BeaconConsensusEngine] using the given channel to configure
+    /// the [BeaconEngineMessage] communication channel.
+    ///
+    /// By default the engine is started with idle pipeline.
+    /// The pipeline can be launched immediately in one of the following ways descending in
+    /// priority:
+    /// - Explicit [Option::Some] target block hash provided via a constructor argument.
+    /// - The process was previously interrupted amidst the pipeline run. This is checked by
+    ///   comparing the checkpoints of the first ([StageId::Headers]) and last ([StageId::Finish])
+    ///   stages. In this case, the latest available header in the database is used as the target.
+    ///
+    /// Propagates any database related error.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_channel(
+        client: Client,
+        pipeline: Pipeline<DB>,
+        blockchain: BT,
+        task_spawner: Box<dyn TaskSpawner>,
+        sync_state_updater: Box<dyn NetworkSyncUpdater>,
+        max_block: Option<BlockNumber>,
+        run_pipeline_continuously: bool,
+        payload_builder: PayloadBuilderHandle<Types>,
+        target: Option<B256>,
+        pipeline_run_threshold: u64,
+        to_engine: UnboundedSender<BeaconEngineMessage<Types>>,
+        rx: UnboundedReceiver<BeaconEngineMessage<Types>>,
+        hooks: EngineHooks,
+    ) -> RethResult<(Self, BeaconConsensusEngineHandle<Types>)> {
+        let handle = BeaconConsensusEngineHandle { to_engine };
+        let sync = EngineSyncController::new(
+            pipeline,
+            client,
+            task_spawner.clone(),
+            run_pipeline_continuously,
+            max_block,
+            blockchain.chain_spec(),
+        );
+        let mut this = Self {
+            sync,
+            payload_validator: ExecutionPayloadValidator::new(blockchain.chain_spec()),
+            blockchain,
+            sync_state_updater,
+            engine_message_rx: UnboundedReceiverStream::new(rx),
+            handle: handle.clone(),
+            forkchoice_state_tracker: Default::default(),
+            payload_builder,
+            listeners: EventListeners::default(),
+            invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
+            metrics: EngineMetrics::default(),
+            pipeline_run_threshold,
+            hooks: EngineHooksController::new(hooks),
+        };
+
+        let maybe_pipeline_target = match target {
+            // Provided target always takes precedence.
+            target @ Some(_) => target,
+            None => this.check_pipeline_consistency()?,
+        };
+
+        if let Some(target) = maybe_pipeline_target {
+            this.sync.set_pipeline_sync_target(target);
+        }
+
+        Ok((this, handle))
+    }
+
     /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
     /// valid chain.
     ///
@@ -241,7 +336,7 @@ where
     fn forkchoice_updated(
         &mut self,
         state: ForkchoiceState,
-        attrs: Option<PayloadAttributes>,
+        attrs: Option<Types::PayloadAttributes>,
     ) -> RethResult<OnForkChoiceUpdated> {
         trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
         if state.head_block_hash.is_zero() {
@@ -344,7 +439,7 @@ where
                     }
 
                     // the CL requested to build a new payload on top of this new VALID head
-                    let payload_response = self.payload_builder.process_payload_attributes(
+                    let payload_response = self.process_payload_attributes(
                         attrs,
                         outcome.into_header().unseal(),
                         state,
@@ -386,7 +481,7 @@ where
     fn on_forkchoice_updated(
         &mut self,
         state: ForkchoiceState,
-        attrs: Option<PayloadAttributes>,
+        attrs: Option<Types::PayloadAttributes>,
         tx: oneshot::Sender<Result<OnForkChoiceUpdated, RethError>>,
     ) -> OnForkchoiceUpdateOutcome {
         self.metrics.forkchoice_updated_messages.increment(1);
@@ -443,119 +538,6 @@ where
 
         OnForkchoiceUpdateOutcome::Processed
     }
-}
-
-impl<DB, BT, Client, PB> BeaconConsensusEngine<DB, BT, Client, PB>
-where
-    DB: Database + Unpin + 'static,
-    BT: BlockchainTreeEngine
-        + BlockReader
-        + BlockIdReader
-        + CanonChainTracker
-        + StageCheckpointReader
-        + ChainSpecProvider
-        + 'static,
-    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
-    PB: PayloadBuilderTrait + Unpin + 'static,
-{
-    /// Create a new instance of the [BeaconConsensusEngine].
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        client: Client,
-        pipeline: Pipeline<DB>,
-        blockchain: BT,
-        task_spawner: Box<dyn TaskSpawner>,
-        sync_state_updater: Box<dyn NetworkSyncUpdater>,
-        max_block: Option<BlockNumber>,
-        run_pipeline_continuously: bool,
-        payload_builder: PB,
-        target: Option<B256>,
-        pipeline_run_threshold: u64,
-        hooks: EngineHooks,
-    ) -> RethResult<(Self, BeaconConsensusEngineHandle)> {
-        let (to_engine, rx) = mpsc::unbounded_channel();
-        Self::with_channel(
-            client,
-            pipeline,
-            blockchain,
-            task_spawner,
-            sync_state_updater,
-            max_block,
-            run_pipeline_continuously,
-            payload_builder,
-            target,
-            pipeline_run_threshold,
-            to_engine,
-            rx,
-            hooks,
-        )
-    }
-
-    /// Create a new instance of the [BeaconConsensusEngine] using the given channel to configure
-    /// the [BeaconEngineMessage] communication channel.
-    ///
-    /// By default the engine is started with idle pipeline.
-    /// The pipeline can be launched immediately in one of the following ways descending in
-    /// priority:
-    /// - Explicit [Option::Some] target block hash provided via a constructor argument.
-    /// - The process was previously interrupted amidst the pipeline run. This is checked by
-    ///   comparing the checkpoints of the first ([StageId::Headers]) and last ([StageId::Finish])
-    ///   stages. In this case, the latest available header in the database is used as the target.
-    ///
-    /// Propagates any database related error.
-    #[allow(clippy::too_many_arguments)]
-    pub fn with_channel(
-        client: Client,
-        pipeline: Pipeline<DB>,
-        blockchain: BT,
-        task_spawner: Box<dyn TaskSpawner>,
-        sync_state_updater: Box<dyn NetworkSyncUpdater>,
-        max_block: Option<BlockNumber>,
-        run_pipeline_continuously: bool,
-        payload_builder: PB,
-        target: Option<B256>,
-        pipeline_run_threshold: u64,
-        to_engine: UnboundedSender<BeaconEngineMessage>,
-        rx: UnboundedReceiver<BeaconEngineMessage>,
-        hooks: EngineHooks,
-    ) -> RethResult<(Self, BeaconConsensusEngineHandle)> {
-        let handle = BeaconConsensusEngineHandle { to_engine };
-        let sync = EngineSyncController::new(
-            pipeline,
-            client,
-            task_spawner.clone(),
-            run_pipeline_continuously,
-            max_block,
-            blockchain.chain_spec(),
-        );
-        let mut this = Self {
-            sync,
-            payload_validator: ExecutionPayloadValidator::new(blockchain.chain_spec()),
-            blockchain,
-            sync_state_updater,
-            engine_message_rx: UnboundedReceiverStream::new(rx),
-            handle: handle.clone(),
-            forkchoice_state_tracker: Default::default(),
-            payload_builder,
-            listeners: EventListeners::default(),
-            invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
-            metrics: EngineMetrics::default(),
-            pipeline_run_threshold,
-            hooks: EngineHooksController::new(hooks),
-        };
-
-        let maybe_pipeline_target = match target {
-            // Provided target always takes precedence.
-            target @ Some(_) => target,
-            None => this.check_pipeline_consistency()?,
-        };
-
-        if let Some(target) = maybe_pipeline_target {
-            this.sync.set_pipeline_sync_target(target);
-        }
-
-        Ok((this, handle))
-    }
 
     /// Check if the pipeline is consistent (all stages have the checkpoint block numbers no less
     /// than the checkpoint of the first stage).
@@ -604,7 +586,7 @@ where
     ///
     /// The [`BeaconConsensusEngineHandle`] can be used to interact with this
     /// [`BeaconConsensusEngine`]
-    pub fn handle(&self) -> BeaconConsensusEngineHandle {
+    pub fn handle(&self) -> BeaconConsensusEngineHandle<Types> {
         self.handle.clone()
     }
 
@@ -1196,6 +1178,58 @@ where
         }
     }
 
+    /// Validates the payload attributes with respect to the header and fork choice state.
+    ///
+    /// Note: At this point, the fork choice update is considered to be VALID, however, we can still
+    /// return an error if the payload attributes are invalid.
+    fn process_payload_attributes(
+        &self,
+        attrs: Types::PayloadAttributes,
+        head: Header,
+        state: ForkchoiceState,
+    ) -> OnForkChoiceUpdated {
+        // 7. Client software MUST ensure that payloadAttributes.timestamp is greater than timestamp
+        //    of a block referenced by forkchoiceState.headBlockHash. If this condition isn't held
+        //    client software MUST respond with -38003: `Invalid payload attributes` and MUST NOT
+        //    begin a payload build process. In such an event, the forkchoiceState update MUST NOT
+        //    be rolled back.
+        if attrs.timestamp() <= head.timestamp {
+            return OnForkChoiceUpdated::invalid_payload_attributes();
+        }
+
+        // 8. Client software MUST begin a payload build process building on top of
+        //    forkchoiceState.headBlockHash and identified via buildProcessId value if
+        //    payloadAttributes is not null and the forkchoice state has been updated successfully.
+        //    The build process is specified in the Payload building section.
+        match <Types::PayloadBuilderAttributes as PayloadBuilderAttributesTrait>::try_new(
+            state.head_block_hash,
+            attrs,
+        ) {
+            Ok(attributes) => {
+                // send the payload to the builder and return the receiver for the pending payload
+                // id, initiating payload job is handled asynchronously
+                let pending_payload_id = self.payload_builder.send_new_payload(attributes);
+
+                // Client software MUST respond to this method call in the following way:
+                // {
+                //      payloadStatus: {
+                //          status: VALID,
+                //          latestValidHash: forkchoiceState.headBlockHash,
+                //          validationError: null
+                //      },
+                //      payloadId: buildProcessId
+                // }
+                //
+                // if the payload is deemed VALID and the build process has begun.
+                OnForkChoiceUpdated::updated_with_pending_payload_id(
+                    PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash)),
+                    pending_payload_id,
+                )
+            }
+            Err(_) => OnForkChoiceUpdated::invalid_payload_attributes(),
+        }
+    }
+
     /// When the pipeline is active, the tree is unable to commit any additional blocks since the
     /// pipeline holds exclusive access to the database.
     ///
@@ -1707,7 +1741,7 @@ where
 /// local forkchoice state, it will launch the pipeline to sync to the head hash.
 /// While the pipeline is syncing, the consensus engine will keep processing messages from the
 /// receiver and forwarding them to the blockchain tree.
-impl<DB, BT, Client, PB> Future for BeaconConsensusEngine<DB, BT, Client, PB>
+impl<DB, BT, Client, Types> Future for BeaconConsensusEngine<DB, BT, Client, Types>
 where
     DB: Database + Unpin + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
@@ -1719,7 +1753,7 @@ where
         + ChainSpecProvider
         + Unpin
         + 'static,
-    PB: EnginePayloadBuilderExt<RpcPayloadAttributes = PayloadAttributes> + Unpin + 'static,
+    Types: EngineTypes + Unpin + 'static,
 {
     type Output = Result<(), BeaconConsensusEngineError>;
 

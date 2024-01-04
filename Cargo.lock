@@ -6529,6 +6529,7 @@ name = "reth-rpc-api"
 version = "0.1.0-alpha.13"
 dependencies = [
  "jsonrpsee",
+ "reth-payload-builder",
  "reth-primitives",
  "reth-rpc-types",
  "serde_json",

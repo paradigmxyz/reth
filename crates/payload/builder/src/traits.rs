@@ -1,11 +1,10 @@
 //! Trait abstractions used by the payload crate.
 
 use reth_provider::CanonStateNotification;
-use crate::{error::PayloadBuilderError, BuiltPayload};
+use crate::{error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::B256;
 use reth_rpc_types::engine::{PayloadAttributes, PayloadId};
 use std::{future::Future, sync::Arc};
-use tokio::sync::oneshot;
 
 /// A type that can build a payload.
 ///
@@ -68,6 +67,7 @@ pub trait PayloadAttributesTrait:
     fn timestamp(&self) -> u64;
 }
 
+// TODO(rjected): find a better place for this impl
 impl PayloadAttributesTrait for PayloadAttributes {
     fn timestamp(&self) -> u64 {
         self.timestamp
@@ -97,58 +97,33 @@ pub trait PayloadBuilderAttributesTrait {
 
     /// Returns the parent block hash for the running payload job.
     fn parent(&self) -> B256;
+
+    /// Returns the timestamp for the running payload job.
+    fn timestamp(&self) -> u64;
 }
 
-/// This is a trait that a payload builder or handle can implement to retrieve information relevant
-/// to each payload job.
-#[async_trait::async_trait]
-pub trait PayloadBuilderTrait {
-    // TODO(rjected): use PayloadBuilderConfig type here which just contains the payload attr +
-    // built payload associated types?
-    /// The payload attributes type that is used to spawn this payload job.
-    type PayloadAttributes: std::fmt::Debug;
+// TODO(rjected): find a better place for this trait
+/// The types that are used by the engine.
+pub trait EngineTypes {
+    /// The RPC payload attributes type the CL node emits via the engine API.
+    type PayloadAttributes: PayloadAttributesTrait + Clone;
 
-    /// Resolves the payload job and returns the best payload that has been built so far.
-    ///
-    /// Note: depending on the installed [PayloadJobGenerator], this may or may not terminate the
-    /// job, See [PayloadJob::resolve].
-    async fn resolve(
-        &self,
-        id: PayloadId,
-    ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
+    /// The payload attributes type that contains information about a running payload job.
+    type PayloadBuilderAttributes: PayloadBuilderAttributesTrait<RpcPayloadAttributes = Self::PayloadAttributes>
+        + Clone
+        + std::fmt::Debug;
 
-    /// Returns the best payload for the given identifier that has been built so far.
-    async fn best_payload(
-        &self,
-        id: PayloadId,
-    ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
+    // TODO(rjected): payload type
+}
 
-    /// Returns the payload attributes associated with the given identifier.
-    ///
-    /// Note: this returns the attributes of the payload and does not resolve the job.
-    async fn payload_attributes(
-        &self,
-        id: PayloadId,
-    ) -> Option<Result<Self::PayloadAttributes, PayloadBuilderError>>;
+// TODO(rjected): find a better place for this struct
+/// The default ethereum engine types.
+#[derive(Debug, Clone)]
+pub struct EthEngineTypes;
 
-    /// Sends a message to the service to start building a new payload for the given payload.
-    ///
-    /// This is the same as [PayloadBuilderTrait::new_payload] but does not wait for the result and
-    /// returns the receiver instead
-    fn send_new_payload(
-        &self,
-        attr: Self::PayloadAttributes,
-    ) -> oneshot::Receiver<Result<PayloadId, PayloadBuilderError>>;
-
-    /// Starts building a new payload for the given payload attributes.
-    ///
-    /// Returns the identifier of the payload.
-    ///
-    /// Note: if there's already payload in progress with same identifier, it will be returned.
-    async fn new_payload(
-        &self,
-        attr: Self::PayloadAttributes,
-    ) -> Result<PayloadId, PayloadBuilderError>;
+impl EngineTypes for EthEngineTypes {
+    type PayloadAttributes = PayloadAttributes;
+    type PayloadBuilderAttributes = PayloadBuilderAttributes;
 }
 
 /// Whether the payload job should be kept alive or terminated after the payload was requested by

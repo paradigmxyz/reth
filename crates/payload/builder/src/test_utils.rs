@@ -1,9 +1,10 @@
 //! Utils for testing purposes.
 
 use crate::{
-    error::PayloadBuilderError, traits::KeepPayloadJobAlive, BuiltPayload,
-    PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
-    PayloadJobGenerator,
+    error::PayloadBuilderError,
+    traits::{EthEngineTypes, KeepPayloadJobAlive},
+    BuiltPayload, PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService,
+    PayloadJob, PayloadJobGenerator,
 };
 use reth_primitives::{Block, U256};
 use reth_provider::CanonStateNotification;
@@ -15,14 +16,15 @@ use std::{
 };
 
 /// Creates a new [PayloadBuilderService] for testing purposes.
-pub fn test_payload_service(
-) -> (PayloadBuilderService<TestPayloadJobGenerator, futures_util::stream::Empty<CanonStateNotification>>, PayloadBuilderHandle<PayloadBuilderAttributes>)
-{
+pub fn test_payload_service() -> (
+    PayloadBuilderService<TestPayloadJobGenerator, futures_util::stream::Empty<CanonStateNotification>, EthEngineTypes>,
+    PayloadBuilderHandle<EthEngineTypes>,
+) {
     PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
 }
 
 /// Creates a new [PayloadBuilderService] for testing purposes and spawns it in the background.
-pub fn spawn_test_payload_service() -> PayloadBuilderHandle<PayloadBuilderAttributes> {
+pub fn spawn_test_payload_service() -> PayloadBuilderHandle<EthEngineTypes> {
     let (service, handle) = test_payload_service();
     tokio::spawn(service);
     handle

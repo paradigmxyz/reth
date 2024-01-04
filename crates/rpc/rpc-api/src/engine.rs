@@ -1,10 +1,11 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_payload_builder::EngineTypes;
 use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64};
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
         ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState,
-        ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration,
+        ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
     BlockOverrides, CallRequest, Filter, Log, RichBlock, SyncStatus,
@@ -12,7 +13,7 @@ use reth_rpc_types::{
 
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "engine"))]
-pub trait EngineApi {
+pub trait EngineApi<Types: EngineTypes> {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
     #[method(name = "newPayloadV1")]
@@ -40,7 +41,7 @@ pub trait EngineApi {
     async fn fork_choice_updated_v1(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<PayloadAttributes>,
+        payload_attributes: Option<Types::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
     /// Post Shanghai forkchoice update handler
@@ -56,7 +57,7 @@ pub trait EngineApi {
     async fn fork_choice_updated_v2(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<PayloadAttributes>,
+        payload_attributes: Option<Types::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
     /// Post Cancun forkchoice update handler
@@ -70,7 +71,7 @@ pub trait EngineApi {
     async fn fork_choice_updated_v3(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<PayloadAttributes>,
+        payload_attributes: Option<Types::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1>

@@ -4,10 +4,10 @@ use crate::{
 };
 use futures::{future::Either, FutureExt};
 use reth_interfaces::{consensus::ForkchoiceState, RethResult};
-use reth_payload_builder::error::PayloadBuilderError;
+use reth_payload_builder::{error::PayloadBuilderError, EngineTypes};
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceUpdateError,
-    ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, PayloadStatusEnum,
+    ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
 use std::{
     future::Future,
@@ -141,7 +141,7 @@ impl Future for PendingPayloadId {
 /// consensus layer).
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
-pub enum BeaconEngineMessage {
+pub enum BeaconEngineMessage<Types: EngineTypes> {
     /// Message with new payload.
     NewPayload {
         /// The execution payload received by Engine API.
@@ -156,7 +156,7 @@ pub enum BeaconEngineMessage {
         /// The updated forkchoice state.
         state: ForkchoiceState,
         /// The payload attributes for block building.
-        payload_attrs: Option<PayloadAttributes>,
+        payload_attrs: Option<Types::PayloadAttributes>,
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },
