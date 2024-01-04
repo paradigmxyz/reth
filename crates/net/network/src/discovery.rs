@@ -97,6 +97,7 @@ impl Discovery {
                 .await
                 .map_err(|_e| NetworkError::Discv5(Discv5Error::SecretKeyDecode))?;
             let discv5_event_stream = Some(ReceiverStream::new(discv5_event));
+
             (Some(discv5), (discv5_event_stream))
         } else {
             (None, None)

@@ -1,13 +1,12 @@
+use core::future::Future;
 pub use discv5::{
     enr, enr::CombinedKey, service::Service, Config as Discv5Config,
     ConfigBuilder as Discv5ConfigBuilder, Discv5, Enr, Event,
 };
-
-use futures_util::{StreamExt};
+use futures_util::{StreamExt, TryFutureExt};
 use k256::ecdsa::SigningKey;
 use parking_lot::Mutex;
 use secp256k1::SecretKey;
-use tokio::task;
 use std::{
     default::Default,
     fmt,
@@ -15,7 +14,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, task};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 
 // Wrapper struct for Discv5
@@ -53,30 +52,31 @@ impl Discv5Handle {
 
     pub async fn start_service(&self) -> Result<(), Discv5Error> {
         let discv5 = Arc::clone(&self.inner);
-    
+
         tokio::task::spawn_blocking(move || {
             let mut discv5_guard = discv5.lock();
-           
+
             let _ = discv5_guard.start();
+            drop(discv5_guard);
         })
         .await
         .map_err(|_| Discv5Error::Discv5Construct.into())
     }
-    
 
     pub async fn create_event_stream(
         &self,
     ) -> Result<tokio::sync::mpsc::Receiver<Event>, Discv5Error> {
         let discv5 = Arc::clone(&self.inner);
         let discv5_guard = discv5.lock();
-    
-        // Directly await the async operation
-        discv5_guard.event_stream().await
-            .map_err(|_| Discv5Error::Discv5EventStreamStart.into())
+        let res = discv5_guard
+            .event_stream()
+            .await
+            .map_err(|_| Discv5Error::Discv5EventStreamStart.into());
+        drop(discv5_guard);
+        return res;
     }
-    
-
 }
+
 impl fmt::Debug for Discv5Handle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Discv5Handle(<Discv5>)")
