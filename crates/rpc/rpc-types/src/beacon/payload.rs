@@ -12,8 +12,8 @@
 
 use crate::{
     beacon::{withdrawals::BeaconWithdrawal, BlsPublicKey},
-    engine::ExecutionPayloadV3,
-    ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, Withdrawal,
+    engine::{ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3},
+    Withdrawal,
 };
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
