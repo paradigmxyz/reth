@@ -49,6 +49,8 @@ use crate::eth::error::OptimismEthApiError;
 #[cfg(feature = "optimism")]
 use reth_revm::optimism::RethL1BlockInfo;
 #[cfg(feature = "optimism")]
+use reth_rpc_types::OptimismTransactionReceiptFields;
+#[cfg(feature = "optimism")]
 use revm::L1BlockInfo;
 #[cfg(feature = "optimism")]
 use std::ops::Div;
@@ -1201,22 +1203,28 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         // EIP-4844 fields
         blob_gas_price: meta.excess_blob_gas.map(calc_blob_gasprice).map(U128::from),
         blob_gas_used: transaction.transaction.blob_gas_used().map(U128::from),
-        // Optimism fields
-        #[cfg(feature = "optimism")]
-        deposit_nonce: receipt.deposit_nonce.map(U64::from),
         ..Default::default()
     };
 
     #[cfg(feature = "optimism")]
-    if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
-        if !transaction.is_deposit() {
-            res_receipt.l1_fee = optimism_tx_meta.l1_fee;
-            res_receipt.l1_gas_used =
-                optimism_tx_meta.l1_data_gas.map(|dg| dg + l1_block_info.l1_fee_overhead);
-            res_receipt.l1_fee_scalar =
-                Some(l1_block_info.l1_fee_scalar.div(U256::from(1_000_000)));
-            res_receipt.l1_gas_price = Some(l1_block_info.l1_base_fee);
+    {
+        let mut op_fields = OptimismTransactionReceiptFields {
+            deposit_nonce: receipt.deposit_nonce.map(U64::from),
+            ..Default::default()
+        };
+
+        if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
+            if !transaction.is_deposit() {
+                op_fields.l1_fee = optimism_tx_meta.l1_fee;
+                op_fields.l1_gas_used =
+                    optimism_tx_meta.l1_data_gas.map(|dg| dg + l1_block_info.l1_fee_overhead);
+                op_fields.l1_fee_scalar =
+                    Some(l1_block_info.l1_fee_scalar.div(U256::from(1_000_000)));
+                op_fields.l1_gas_price = Some(l1_block_info.l1_base_fee);
+            }
         }
+
+        res_receipt.other = op_fields.into();
     }
 
     match transaction.transaction.kind() {

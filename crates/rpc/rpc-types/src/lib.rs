@@ -20,11 +20,22 @@ pub mod relay;
 mod rpc;
 pub mod serde_helpers;
 
+// Ethereum specific rpc types coming from alloy.
+pub use alloy_rpc_types::*;
+// Ethereum specific rpc types related to typed transaction requests and the engine API.
+pub use eth::{
+    engine,
+    engine::{
+        ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
+    },
+    transaction::{
+        self, BlobTransactionSidecar, TransactionKind, TransactionRequest, TypedTransactionRequest,
+    },
+};
+
 pub use admin::*;
-pub use eth::*;
 pub use mev::*;
 pub use net::*;
 pub use otterscan::*;
 pub use peer::*;
 pub use rpc::*;
-pub use serde_helpers::*;

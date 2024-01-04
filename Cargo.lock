@@ -217,6 +217,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-rpc-types"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/alloy#e64c1c2b9e4f80fe13ac4f65504a4c30fe786454"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "arbitrary",
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
+ "itertools 0.12.0",
+ "jsonrpsee-types",
+ "proptest",
+ "proptest-derive",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "alloy-sol-macro"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6562,6 +6581,7 @@ version = "0.1.0-alpha.13"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types",
  "arbitrary",
  "bytes",
  "ethereum_ssz",
@@ -6585,8 +6605,10 @@ name = "reth-rpc-types-compat"
 version = "0.1.0-alpha.13"
 dependencies = [
  "alloy-rlp",
+ "alloy-rpc-types",
  "reth-primitives",
  "reth-rpc-types",
+ "serde_json",
 ]
 
 [[package]]

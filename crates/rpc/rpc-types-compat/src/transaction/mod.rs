@@ -138,11 +138,14 @@ fn fill(
         blob_versioned_hashes,
         // Optimism fields
         #[cfg(feature = "optimism")]
-        optimism: reth_rpc_types::OptimismTransactionFields {
+        other: reth_rpc_types::OptimismTransactionFields {
             source_hash: signed_tx.source_hash(),
             mint: signed_tx.mint().map(U128::from),
             is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
-        },
+        }
+        .into(),
+        #[cfg(not(feature = "optimism"))]
+        other: Default::default(),
     }
 }
 
