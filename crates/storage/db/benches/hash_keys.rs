@@ -1,4 +1,4 @@
-#![allow(missing_docs, elided_lifetimes_in_paths)]
+#![allow(missing_docs)]
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
@@ -38,7 +38,7 @@ pub fn hash_keys(c: &mut Criterion) {
     }
 }
 
-fn measure_table_insertion<T>(group: &mut BenchmarkGroup<WallTime>, size: usize)
+fn measure_table_insertion<T>(group: &mut BenchmarkGroup<'_, WallTime>, size: usize)
 where
     T: Table + Default,
     T::Key: Default
