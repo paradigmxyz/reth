@@ -22,6 +22,10 @@ pub mod serde_helpers;
 
 // Ethereum specific rpc types coming from alloy.
 pub use alloy_rpc_types::*;
+pub mod trace {
+    //! RPC types for trace endpoints and inspectors.
+    pub use alloy_rpc_trace_types::*;
+}
 // Ethereum specific rpc types related to typed transaction requests and the engine API.
 pub use eth::{
     engine,
