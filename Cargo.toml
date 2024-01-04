@@ -5,6 +5,7 @@ members = [
     "crates/config/",
     "crates/consensus/auto-seal/",
     "crates/consensus/beacon/",
+    "crates/consensus/beacon-core/",
     "crates/consensus/common/",
     "crates/ethereum-forks/",
     "crates/interfaces/",
@@ -96,6 +97,7 @@ reth = { path = "bin/reth" }
 reth-auto-seal-consensus = { path = "crates/consensus/auto-seal" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-beacon-consensus = { path = "crates/consensus/beacon" }
+reth-beacon-consensus-core = { path = "crates/consensus/beacon-core" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
 reth-codecs = { path = "crates/storage/codecs" }
 reth-config = { path = "crates/config" }
