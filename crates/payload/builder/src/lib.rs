@@ -114,7 +114,4 @@ pub mod test_utils;
 pub use payload::{BuiltPayload, PayloadBuilderAttributes};
 pub use reth_rpc_types::engine::PayloadId;
 pub use service::{PayloadBuilderHandle, PayloadBuilderService, PayloadStore};
-pub use traits::{
-    KeepPayloadJobAlive, PayloadBuilderTrait, PayloadJob,
-    PayloadJobGenerator,
-};
+pub use traits::{KeepPayloadJobAlive, PayloadBuilderTrait, PayloadJob, PayloadJobGenerator};

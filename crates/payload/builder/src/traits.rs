@@ -1,7 +1,7 @@
 //! Trait abstractions used by the payload crate.
 
 use reth_provider::CanonStateNotification;
-use crate::{error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes};
+use crate::{error::PayloadBuilderError, BuiltPayload};
 use reth_rpc_types::engine::PayloadId;
 use std::{future::Future, sync::Arc};
 use tokio::sync::oneshot;
@@ -60,6 +60,8 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
 /// to each payload job.
 #[async_trait::async_trait]
 pub trait PayloadBuilderTrait {
+    // TODO(rjected): use PayloadBuilderConfig type here which just contains the payload attr +
+    // built payload associated types?
     /// The payload attributes type that is used to spawn this payload job.
     type PayloadAttributes: std::fmt::Debug;
 
@@ -133,7 +135,7 @@ pub trait PayloadJobGenerator: Send + Sync {
     /// returned directly.
     fn new_payload_job(
         &self,
-        attr: PayloadBuilderAttributes,
+        attr: <Self::Job as PayloadJob>::PayloadAttributes,
     ) -> Result<Self::Job, PayloadBuilderError>;
 
     /// Handles new chain state events

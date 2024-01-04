@@ -366,16 +366,15 @@ where
     }
 }
 
+// TODO(rjected): make generic over built payload type
 type PayloadFuture =
     Pin<Box<dyn Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>> + Send + Sync>>;
 
+// TODO(rjected): make generic over config type which contains associated types
 /// Message type for the [PayloadBuilderService].
 pub enum PayloadServiceCommand<T> {
     /// Start building a new payload.
-    BuildNewPayload(
-        PayloadBuilderAttributes,
-        oneshot::Sender<Result<PayloadId, PayloadBuilderError>>,
-    ),
+    BuildNewPayload(T, oneshot::Sender<Result<PayloadId, PayloadBuilderError>>),
     /// Get the best payload so far
     BestPayload(PayloadId, oneshot::Sender<Option<Result<Arc<BuiltPayload>, PayloadBuilderError>>>),
     /// Get the payload attributes for the given payload
@@ -386,7 +385,7 @@ pub enum PayloadServiceCommand<T> {
 
 impl<T> fmt::Debug for PayloadServiceCommand<T>
 where
-    T: fmt::Debug
+    T: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
