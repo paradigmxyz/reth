@@ -4,10 +4,7 @@
 
 #![allow(missing_docs)]
 
-use crate::{
-    eth::transaction::AccessList,
-    kzg::{Blob, Bytes48},
-};
+use alloy_rpc_types::{AccessList, kzg::{Blob, Bytes48}};
 use alloy_primitives::{Address, Bytes, B256, U128, U256, U64};
 use alloy_rlp::{BufMut, Decodable, Encodable, Error as RlpError};
 use serde::{Deserialize, Serialize};
