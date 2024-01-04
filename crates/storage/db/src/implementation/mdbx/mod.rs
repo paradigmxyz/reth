@@ -12,7 +12,8 @@ use metrics::{gauge, Label};
 use once_cell::sync::Lazy;
 use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
-    DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, PageSize, SyncMode, RO, RW,
+    DatabaseFlags, Environment, EnvironmentFlags, Geometry, HandleSlowReadersReturnCode, Mode,
+    PageSize, SyncMode, RO, RW,
 };
 use reth_tracing::tracing::{error, warn};
 use std::{ops::Deref, path::Path};
@@ -178,7 +179,7 @@ impl DatabaseEnv {
         });
         let _ = *PROCESS_ID; // Initialize the process ID at the time of environment opening
         inner_env.set_handle_slow_readers(
-            |process_id: u32, thread_id: u32, read_txn_id: u64, gap: usize, space: usize, retry: isize| -> i32 {
+            |process_id: u32, thread_id: u32, read_txn_id: u64, gap: usize, space: usize, retry: isize| {
             if space > MAX_SAFE_READER_SPACE {
                 let message = if process_id == *PROCESS_ID {
                     "Current process has a long-lived database transaction that grows the database file."
@@ -197,7 +198,7 @@ impl DatabaseEnv {
                 )
             }
 
-            0
+            HandleSlowReadersReturnCode::ProceedWithoutKillingReader
         });
         inner_env.set_flags(EnvironmentFlags {
             mode,

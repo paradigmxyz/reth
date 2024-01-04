@@ -545,7 +545,40 @@ pub type HandleSlowReadersCallback = fn(
     gap: usize,
     space: usize,
     retry: isize,
-) -> i32;
+) -> HandleSlowReadersReturnCode;
+
+#[derive(Debug)]
+pub enum HandleSlowReadersReturnCode {
+    /// An error condition and the reader was not killed.
+    Error,
+    /// The callback was unable to solve the problem and agreed on `MDBX_MAP_FULL` error;
+    /// MDBX should increase the database size or return `MDBX_MAP_FULL` error.
+    ProceedWithoutKillingReader,
+    /// The callback solved the problem or just waited for a while, libmdbx should rescan the
+    /// reader lock table and retry. This also includes a situation when corresponding transaction
+    /// terminated in normal way by `mdbx_txn_abort()` or `mdbx_txn_reset()`, and may be restarted.
+    /// I.e. reader slot isn't needed to be cleaned from transaction.
+    Success,
+    /// Transaction aborted asynchronous and reader slot should be cleared immediately, i.e. read
+    /// transaction will not continue but `mdbx_txn_abort()` nor `mdbx_txn_reset()` will be called
+    /// later.
+    ClearReaderSlot,
+    /// The reader process was terminated or killed, and MDBX should entirely reset reader
+    /// registration.
+    ReaderProcessTerminated,
+}
+
+impl From<HandleSlowReadersReturnCode> for i32 {
+    fn from(value: HandleSlowReadersReturnCode) -> Self {
+        match value {
+            HandleSlowReadersReturnCode::Error => -2,
+            HandleSlowReadersReturnCode::ProceedWithoutKillingReader => -1,
+            HandleSlowReadersReturnCode::Success => 0,
+            HandleSlowReadersReturnCode::ClearReaderSlot => 1,
+            HandleSlowReadersReturnCode::ReaderProcessTerminated => 2,
+        }
+    }
+}
 
 /// Options for opening or creating an environment.
 #[derive(Debug, Clone)]
@@ -644,8 +677,8 @@ impl EnvironmentBuilder {
                 }
 
                 if let Some(handle_slow_readers) = self.handle_slow_readers {
-                    let handle_slow_readers: &'static _ = Box::leak(Box::new(handle_slow_readers));
-                    let hsr: &'static _ = Box::leak(Box::new(
+                    let handle_slow_readers = Box::leak(Box::new(handle_slow_readers));
+                    let hsr = Box::leak(Box::new(
                         |_env: *const MDBX_env,
                          _txn: *const MDBX_txn,
                          pid: mdbx_pid_t,
@@ -663,24 +696,18 @@ impl EnvironmentBuilder {
                                 space,
                                 retry as isize,
                             )
+                            .into()
                         },
                     ));
 
                     let closure = libffi::high::Closure8::new(hsr);
                     let closure_ptr = *closure.code_ptr();
-                    let c_ptr: unsafe extern "C" fn(
-                        env: *const MDBX_env,
-                        txn: *const MDBX_txn,
-                        pid: mdbx_pid_t,
-                        tid: mdbx_tid_t,
-                        laggard: u64,
-                        gap: ::libc::c_uint,
-                        space: usize,
-                        retry: ::libc::c_int,
-                    ) -> ::libc::c_int = std::mem::transmute(closure_ptr);
                     std::mem::forget(closure);
 
-                    mdbx_result(ffi::mdbx_env_set_hsr(env, Some(c_ptr)))?;
+                    mdbx_result(ffi::mdbx_env_set_hsr(
+                        env,
+                        Some(std::mem::transmute(closure_ptr)),
+                    ))?;
                 }
 
                 #[cfg(unix)]

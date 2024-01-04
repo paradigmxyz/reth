@@ -14,7 +14,7 @@ pub use crate::{
     database::Database,
     environment::{
         Environment, EnvironmentBuilder, EnvironmentKind, Geometry, HandleSlowReadersCallback,
-        Info, PageSize, Stat,
+        HandleSlowReadersReturnCode, Info, PageSize, Stat,
     },
     error::{Error, Result},
     flags::*,
