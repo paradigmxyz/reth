@@ -5852,6 +5852,7 @@ dependencies = [
  "itertools 0.12.0",
  "metrics 0.21.1",
  "modular-bitfield",
+ "once_cell",
  "page_size",
  "parity-scale-codec",
  "parking_lot 0.12.1",

@@ -9,6 +9,7 @@ use crate::{
 };
 use eyre::Context;
 use metrics::{gauge, Label};
+use once_cell::sync::Lazy;
 use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, PageSize, SyncMode, RO, RW,
@@ -29,6 +30,9 @@ const DEFAULT_MAX_READERS: u64 = 32_000;
 /// Space that a read-only transaction can occupy until the warning is emitted.
 /// See [reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers] for more information.
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
+
+static PROCESS_ID: Lazy<u32> =
+    Lazy::new(|| if cfg!(unix) { std::os::unix::process::parent_id() } else { std::process::id() });
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
@@ -172,10 +176,11 @@ impl DatabaseEnv {
             shrink_threshold: None,
             page_size: Some(PageSize::Set(default_page_size())),
         });
+        let _ = *PROCESS_ID; // Initialize the process ID at the time of environment opening
         inner_env.set_handle_slow_readers(
             |process_id: u32, thread_id: u32, read_txn_id: u64, gap: usize, space: usize, retry: isize| -> i32 {
             if space > MAX_SAFE_READER_SPACE {
-                let message = if process_id == std::process::id() {
+                let message = if process_id == *PROCESS_ID {
                     "Current process has a long-lived database transaction that grows the database file."
                 } else {
                     "External process has a long-lived database transaction that grows the database file. Use shorter-lived read transactions or shut down the node."
