@@ -4,9 +4,12 @@
 
 #![allow(missing_docs)]
 
-use alloy_rpc_types::{AccessList, kzg::{Blob, Bytes48}};
 use alloy_primitives::{Address, Bytes, B256, U128, U256, U64};
 use alloy_rlp::{BufMut, Decodable, Encodable, Error as RlpError};
+use alloy_rpc_types::{
+    kzg::{Blob, Bytes48},
+    AccessList,
+};
 use serde::{Deserialize, Serialize};
 
 /// Container type for various Ethereum transaction requests

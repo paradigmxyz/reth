@@ -43,13 +43,13 @@ use revm::{
 };
 
 #[cfg(feature = "optimism")]
-use reth_rpc_types::OptimismTransactionReceiptFields;
-#[cfg(feature = "optimism")]
 use crate::eth::api::optimism::OptimismTxMeta;
 #[cfg(feature = "optimism")]
 use crate::eth::error::OptimismEthApiError;
 #[cfg(feature = "optimism")]
 use reth_revm::optimism::RethL1BlockInfo;
+#[cfg(feature = "optimism")]
+use reth_rpc_types::OptimismTransactionReceiptFields;
 #[cfg(feature = "optimism")]
 use revm::L1BlockInfo;
 #[cfg(feature = "optimism")]
@@ -1227,24 +1227,24 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         res_receipt.other = op_fields.into();
     }
 
-        match transaction.transaction.kind() {
-            Create => {
-                res_receipt.contract_address = Some(from.create(transaction.transaction.nonce()));
-            }
-            Call(addr) => {
-                res_receipt.to = Some(*addr);
-            }
+    match transaction.transaction.kind() {
+        Create => {
+            res_receipt.contract_address = Some(from.create(transaction.transaction.nonce()));
         }
-
-        // get number of logs in the block
-        let mut num_logs = 0;
-        for prev_receipt in all_receipts.iter().take(meta.index as usize) {
-            num_logs += prev_receipt.logs.len();
+        Call(addr) => {
+            res_receipt.to = Some(*addr);
         }
+    }
 
-        for (tx_log_idx, log) in receipt.logs.into_iter().enumerate() {
-            let rpclog = Log {
-                address: log.address,
+    // get number of logs in the block
+    let mut num_logs = 0;
+    for prev_receipt in all_receipts.iter().take(meta.index as usize) {
+        num_logs += prev_receipt.logs.len();
+    }
+
+    for (tx_log_idx, log) in receipt.logs.into_iter().enumerate() {
+        let rpclog = Log {
+            address: log.address,
             topics: log.topics,
             data: log.data,
             block_hash: Some(meta.block_hash),

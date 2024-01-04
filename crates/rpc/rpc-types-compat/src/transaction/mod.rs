@@ -142,7 +142,8 @@ fn fill(
             source_hash: signed_tx.source_hash(),
             mint: signed_tx.mint().map(U128::from),
             is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
-        }.into(),
+        }
+        .into(),
         #[cfg(not(feature = "optimism"))]
         other: Default::default(),
     }

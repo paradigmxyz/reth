@@ -1,8 +1,11 @@
-use crate::eth::transaction::typed::{
-    BlobTransactionSidecar, EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
-    LegacyTransactionRequest, TransactionKind, TypedTransactionRequest,
+use crate::{
+    eth::transaction::typed::{
+        BlobTransactionSidecar, EIP1559TransactionRequest, EIP2930TransactionRequest,
+        EIP4844TransactionRequest, LegacyTransactionRequest, TransactionKind,
+        TypedTransactionRequest,
+    },
+    AccessList,
 };
-use crate::AccessList;
 use alloy_primitives::{Address, Bytes, B256, U128, U256, U64, U8};
 use serde::{Deserialize, Serialize};
 
