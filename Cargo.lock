@@ -6252,6 +6252,7 @@ dependencies = [
  "reth-revm",
  "reth-transaction-pool",
  "revm",
+ "thiserror",
  "tracing",
 ]
 
