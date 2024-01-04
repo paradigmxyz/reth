@@ -19,8 +19,6 @@ use reth_rpc_types_compat::engine::payload::{
 #[cfg(feature = "optimism")]
 use reth_primitives::TransactionSigned;
 
-use crate::traits::PayloadAttributesTrait;
-
 /// Contains the built payload.
 ///
 /// According to the [engine API specification](https://github.com/ethereum/execution-apis/blob/main/src/engine/README.md) the execution layer should build the initial version of the payload with an empty transaction set and then keep update it in order to maximize the revenue.
@@ -158,8 +156,6 @@ pub struct OptimismPayloadBuilderAttributes {
     /// The gas limit for the generated payload
     pub gas_limit: Option<u64>,
 }
-
-impl PayloadAttributesTrait for PayloadBuilderAttributes {}
 
 // === impl PayloadBuilderAttributes ===
 

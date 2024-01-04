@@ -19,7 +19,7 @@ use tokio::sync::oneshot;
 /// Note: A `PayloadJob` need to be cancel safe because it might be dropped after the CL has requested the payload via `engine_getPayloadV1` (see also [engine API docs](https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1))
 pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + Sync {
     /// Represents the payload attributes type that is used to spawn this payload job.
-    type PayloadAttributes: PayloadAttributesTrait + std::fmt::Debug;
+    type PayloadAttributes: std::fmt::Debug;
     /// Represents the future that resolves the block that's returned to the CL.
     type ResolvePayloadFuture: Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>>
         + Send
@@ -56,15 +56,12 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive);
 }
 
-/// This is a trait that can be implemented by different built payload attributes types.
-pub trait PayloadAttributesTrait {}
-
 /// This is a trait that a payload builder or handle can implement to retrieve information relevant
 /// to each payload job.
 #[async_trait::async_trait]
 pub trait PayloadBuilderTrait {
-    /// The [PayloadAttributesTrait] type that is used to spawn this payload job.
-    type PayloadAttributes: PayloadAttributesTrait + std::fmt::Debug;
+    /// The payload attributes type that is used to spawn this payload job.
+    type PayloadAttributes: std::fmt::Debug;
 
     /// Resolves the payload job and returns the best payload that has been built so far.
     ///

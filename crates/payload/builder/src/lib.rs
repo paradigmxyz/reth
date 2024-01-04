@@ -115,6 +115,6 @@ pub use payload::{BuiltPayload, PayloadBuilderAttributes};
 pub use reth_rpc_types::engine::PayloadId;
 pub use service::{PayloadBuilderHandle, PayloadBuilderService, PayloadStore};
 pub use traits::{
-    KeepPayloadJobAlive, PayloadAttributesTrait, PayloadBuilderTrait, PayloadJob,
+    KeepPayloadJobAlive, PayloadBuilderTrait, PayloadJob,
     PayloadJobGenerator,
 };

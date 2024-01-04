@@ -6,7 +6,7 @@
 use crate::{
     error::PayloadBuilderError,
     metrics::PayloadBuilderServiceMetrics,
-    traits::{PayloadAttributesTrait, PayloadBuilderTrait, PayloadJobGenerator},
+    traits::{PayloadBuilderTrait, PayloadJobGenerator},
     BuiltPayload, KeepPayloadJobAlive, PayloadBuilderAttributes, PayloadJob,
 };
 use futures_util::{future::FutureExt, Stream, StreamExt};
@@ -74,20 +74,14 @@ impl From<PayloadBuilderHandle<PayloadBuilderAttributes>> for PayloadStore {
 ///
 /// This is the API used to create new payloads and to get the current state of existing ones.
 #[derive(Debug, Clone)]
-pub struct PayloadBuilderHandle<T>
-where
-    T: PayloadAttributesTrait,
-{
+pub struct PayloadBuilderHandle<T> {
     /// Sender half of the message channel to the [PayloadBuilderService].
     to_service: mpsc::UnboundedSender<PayloadServiceCommand<T>>,
 }
 
 // === impl PayloadBuilderHandle ===
 
-impl<T> PayloadBuilderHandle<T>
-where
-    T: PayloadAttributesTrait,
-{
+impl<T> PayloadBuilderHandle<T> {
     /// Creates a new payload builder handle for the given channel.
     ///
     /// Note: this is only used internally by the [PayloadBuilderService] to manage the payload
@@ -376,10 +370,7 @@ type PayloadFuture =
     Pin<Box<dyn Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>> + Send + Sync>>;
 
 /// Message type for the [PayloadBuilderService].
-pub enum PayloadServiceCommand<T>
-where
-    T: PayloadAttributesTrait,
-{
+pub enum PayloadServiceCommand<T> {
     /// Start building a new payload.
     BuildNewPayload(
         PayloadBuilderAttributes,
@@ -395,7 +386,7 @@ where
 
 impl<T> fmt::Debug for PayloadServiceCommand<T>
 where
-    T: PayloadAttributesTrait + fmt::Debug,
+    T: fmt::Debug
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
