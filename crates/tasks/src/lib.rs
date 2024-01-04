@@ -160,6 +160,16 @@ pub struct TaskManager {
 // === impl TaskManager ===
 
 impl TaskManager {
+    /// Returns a a [TaskManager] over the currently running Runtime.
+    ///
+    /// # Panics
+    ///
+    /// This will panic if called outside the context of a Tokio runtime.
+    pub fn current() -> Self {
+        let handle = Handle::current();
+        Self::new(handle)
+    }
+
     /// Create a new instance connected to the given handle's tokio runtime.
     pub fn new(handle: Handle) -> Self {
         let (panicked_tasks_tx, panicked_tasks_rx) = unbounded_channel();
@@ -520,6 +530,34 @@ impl TaskSpawner for TaskExecutor {
         fut: BoxFuture<'static, ()>,
     ) -> JoinHandle<()> {
         TaskExecutor::spawn_critical_blocking(self, name, fut)
+    }
+}
+
+/// TaskSpawner with extended behaviour
+pub trait TaskSpawnerExt: Send + Sync + Unpin + std::fmt::Debug + DynClone {
+    /// This spawns a critical task onto the runtime.
+    ///
+    /// If this task panics, the [TaskManager] is notified.
+    /// The [TaskManager] will wait until the given future has completed before shutting down.
+    fn spawn_critical_with_graceful_shutdown_signal<F>(
+        &self,
+        name: &'static str,
+        f: impl FnOnce(GracefulShutdown) -> F,
+    ) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static;
+}
+
+impl TaskSpawnerExt for TaskExecutor {
+    fn spawn_critical_with_graceful_shutdown_signal<F>(
+        &self,
+        name: &'static str,
+        f: impl FnOnce(GracefulShutdown) -> F,
+    ) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        TaskExecutor::spawn_critical_with_graceful_shutdown_signal(self, name, f)
     }
 }
 

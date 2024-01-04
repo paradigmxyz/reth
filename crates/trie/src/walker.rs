@@ -233,6 +233,7 @@ impl<C: TrieCursor> TrieWalker<C> {
             })
     }
 
+    /// Updates the skip node flag based on the walker's current state.
     fn update_skip_node(&mut self) {
         self.can_skip_current_node = if let Some(node) = self.stack.last() {
             !self.changes.contains(node.full_key()) && node.hash_flag()

@@ -6,9 +6,9 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs,
     },
+    commands::node::events,
     dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
-    node::events,
     runner::CliContext,
     utils::get_single_header,
 };

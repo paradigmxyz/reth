@@ -7,8 +7,7 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-mod beacon_consensus;
-pub use beacon_consensus::BeaconConsensus;
+pub use reth_beacon_consensus_core::BeaconConsensus;
 
 mod engine;
 pub use engine::*;

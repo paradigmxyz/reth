@@ -8,7 +8,7 @@ use reth::{
         components::RethNodeComponents,
         ext::{NoArgs, NoArgsCliExt, RethNodeCommandConfig},
     },
-    node::NodeCommand,
+    commands::node::NodeCommand,
     runner::CliRunner,
     tasks::TaskSpawner,
 };

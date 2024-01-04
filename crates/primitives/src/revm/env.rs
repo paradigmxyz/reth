@@ -246,9 +246,6 @@ pub fn fill_tx_env<T>(
             tx_env.access_list.clear();
             tx_env.blob_hashes.clear();
             tx_env.max_fee_per_blob_gas.take();
-
-            #[cfg(feature = "optimism")]
-            fill_op_tx_env(tx_env, transaction, envelope);
         }
         Transaction::Eip2930(tx) => {
             tx_env.gas_limit = tx.gas_limit;
@@ -272,9 +269,6 @@ pub fn fill_tx_env<T>(
                 .collect();
             tx_env.blob_hashes.clear();
             tx_env.max_fee_per_blob_gas.take();
-
-            #[cfg(feature = "optimism")]
-            fill_op_tx_env(tx_env, transaction, envelope);
         }
         Transaction::Eip1559(tx) => {
             tx_env.gas_limit = tx.gas_limit;
@@ -298,9 +292,6 @@ pub fn fill_tx_env<T>(
                 .collect();
             tx_env.blob_hashes.clear();
             tx_env.max_fee_per_blob_gas.take();
-
-            #[cfg(feature = "optimism")]
-            fill_op_tx_env(tx_env, transaction, envelope);
         }
         Transaction::Eip4844(tx) => {
             tx_env.gas_limit = tx.gas_limit;
@@ -324,9 +315,6 @@ pub fn fill_tx_env<T>(
                 .collect();
             tx_env.blob_hashes = tx.blob_versioned_hashes.clone();
             tx_env.max_fee_per_blob_gas = Some(U256::from(tx.max_fee_per_blob_gas));
-
-            #[cfg(feature = "optimism")]
-            fill_op_tx_env(tx_env, transaction, envelope);
         }
         #[cfg(feature = "optimism")]
         Transaction::Deposit(tx) => {
@@ -342,10 +330,11 @@ pub fn fill_tx_env<T>(
             tx_env.data = tx.input.clone();
             tx_env.chain_id = None;
             tx_env.nonce = None;
-
-            fill_op_tx_env(tx_env, transaction, envelope);
         }
     }
+
+    #[cfg(feature = "optimism")]
+    fill_op_tx_env(tx_env, transaction, envelope);
 }
 
 #[cfg(feature = "optimism")]

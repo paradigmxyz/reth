@@ -646,8 +646,8 @@ impl From<U64> for BlockHashOrNumber {
     }
 }
 
-/// Allows for RLP encoding of either a block hash or block number
 impl Encodable for BlockHashOrNumber {
+    /// RLP encodes either the block hash or block number, depending on the variant.
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             Self::Hash(block_hash) => block_hash.encode(out),
@@ -662,8 +662,10 @@ impl Encodable for BlockHashOrNumber {
     }
 }
 
-/// Allows for RLP decoding of a block hash or block number
 impl Decodable for BlockHashOrNumber {
+    /// RLP decodes the data into a block hash or number.
+    /// If the data is exactly 32 bytes and a RLP string, it will be decoded into a block hash.
+    /// Otherwise, this will try to decode a `u64` from the data as a block number.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let header: u8 = *buf.first().ok_or(RlpError::InputTooShort)?;
         // if the byte string is exactly 32 bytes, decode it into a Hash

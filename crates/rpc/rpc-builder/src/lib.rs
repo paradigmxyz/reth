@@ -1780,11 +1780,11 @@ impl TransportRpcModules {
         &self.config
     }
 
-    /// Merge the given Methods in the configured http methods.
+    /// Merge the given [Methods] in the configured http methods.
     ///
     /// Fails if any of the methods in other is present already.
     ///
-    /// Returns Ok(false) if no http transport is configured.
+    /// Returns [Ok(false)] if no http transport is configured.
     pub fn merge_http(
         &mut self,
         other: impl Into<Methods>,
@@ -1795,11 +1795,11 @@ impl TransportRpcModules {
         Ok(false)
     }
 
-    /// Merge the given Methods in the configured ws methods.
+    /// Merge the given [Methods] in the configured ws methods.
     ///
     /// Fails if any of the methods in other is present already.
     ///
-    /// Returns Ok(false) if no http transport is configured.
+    /// Returns [Ok(false)] if no ws transport is configured.
     pub fn merge_ws(
         &mut self,
         other: impl Into<Methods>,
@@ -1810,11 +1810,11 @@ impl TransportRpcModules {
         Ok(false)
     }
 
-    /// Merge the given Methods in the configured ipc methods.
+    /// Merge the given [Methods] in the configured ipc methods.
     ///
     /// Fails if any of the methods in other is present already.
     ///
-    /// Returns Ok(false) if no ipc transport is configured.
+    /// Returns [Ok(false)] if no ipc transport is configured.
     pub fn merge_ipc(
         &mut self,
         other: impl Into<Methods>,
@@ -1825,7 +1825,7 @@ impl TransportRpcModules {
         Ok(false)
     }
 
-    /// Merge the given Methods in all configured methods.
+    /// Merge the given [Methods] in all configured methods.
     ///
     /// Fails if any of the methods in other is present already.
     pub fn merge_configured(
