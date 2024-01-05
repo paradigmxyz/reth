@@ -423,6 +423,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         }
 
         let mut cumulative_gas_used = 0;
+        let mut cumulative_logs_emitted: u64 = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
         for (sender, transaction) in block.transactions_with_sender() {
             let time = Instant::now();
@@ -452,6 +453,8 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
 
             // append gas used
             cumulative_gas_used += result.gas_used();
+            // add logs emitted by the transaction to cumulative logs emitted, before creating the receipt
+            cumulative_logs_emitted += result.logs().len() as u64;
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             receipts.push(Receipt {
@@ -460,6 +463,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                 // receipts`.
                 success: result.is_success(),
                 cumulative_gas_used,
+                cumulative_logs_emitted,
                 // convert to reth log
                 logs: result.into_logs().into_iter().map(into_reth_log).collect(),
             });

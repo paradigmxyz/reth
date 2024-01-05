@@ -55,6 +55,7 @@ impl PendingBlockEnv {
         let mut db = State::builder().with_database(Box::new(state)).with_bundle_update().build();
 
         let mut cumulative_gas_used = 0;
+        let mut cumulative_logs_emitted = 0;
         let mut sum_blob_gas_used = 0;
         let block_gas_limit: u64 = block_env.gas_limit.to::<u64>();
         let base_fee = block_env.basefee.to::<u64>();
@@ -166,11 +167,15 @@ impl PendingBlockEnv {
             // add gas used by the transaction to cumulative gas used, before creating the receipt
             cumulative_gas_used += gas_used;
 
+            // add logs emitted by the transaction to cumulative logs emitted, before creating the receipt
+            cumulative_logs_emitted += result.logs().len() as u64;
+
             // Push transaction changeset and calculate header bloom filter for receipt.
             receipts.push(Some(Receipt {
                 tx_type: tx.tx_type(),
                 success: result.is_success(),
                 cumulative_gas_used,
+                cumulative_logs_emitted,
                 logs: result.logs().into_iter().map(into_reth_log).collect(),
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,

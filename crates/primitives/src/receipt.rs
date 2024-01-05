@@ -28,6 +28,8 @@ pub struct Receipt {
     pub success: bool,
     /// Gas used
     pub cumulative_gas_used: u64,
+    /// Logs emitted till previous transaction.
+    pub cumulative_logs_emitted: u64,
     /// Log send from contracts.
     pub logs: Vec<Log>,
     /// Deposit nonce for Optimism deposit transactions
@@ -214,6 +216,7 @@ impl proptest::arbitrary::Arbitrary for Receipt {
             fn arbitrary_receipt()(tx_type in any::<TxType>(),
                         success in any::<bool>(),
                         cumulative_gas_used in any::<u64>(),
+                        cumulative_logs_emitted in any::<u64>(),
                         logs in proptest::collection::vec(proptest::arbitrary::any::<Log>(), 0..=20),
                         _deposit_nonce in any::<Option<u64>>(),
                         _deposit_receipt_version in any::<Option<u64>>()) -> Receipt
@@ -231,6 +234,7 @@ impl proptest::arbitrary::Arbitrary for Receipt {
                 Receipt { tx_type,
                     success,
                     cumulative_gas_used,
+                    cumulative_logs_emitted,
                     logs,
                     // Only receipts for deposit transactions may contain a deposit nonce
                     #[cfg(feature = "optimism")]
@@ -253,6 +257,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
         let tx_type = TxType::arbitrary(u)?;
         let success = bool::arbitrary(u)?;
         let cumulative_gas_used = u64::arbitrary(u)?;
+        let cumulative_logs_emitted = u64::arbitrary(u)?;
         let logs = Vec::<Log>::arbitrary(u)?;
 
         // Only receipts for deposit transactions may contain a deposit nonce
@@ -270,6 +275,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
             tx_type,
             success,
             cumulative_gas_used,
+            cumulative_logs_emitted,
             logs,
             #[cfg(feature = "optimism")]
             deposit_nonce,
@@ -296,6 +302,7 @@ impl ReceiptWithBloom {
 
         let success = alloy_rlp::Decodable::decode(b)?;
         let cumulative_gas_used = alloy_rlp::Decodable::decode(b)?;
+        let cumulative_logs_emitted = alloy_rlp::Decodable::decode(b)?;
         let bloom = Decodable::decode(b)?;
         let logs = alloy_rlp::Decodable::decode(b)?;
 
@@ -321,6 +328,7 @@ impl ReceiptWithBloom {
                 tx_type,
                 success,
                 cumulative_gas_used,
+                cumulative_logs_emitted,
                 logs,
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
@@ -560,6 +568,7 @@ mod tests {
             receipt: Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 0x1u64,
+                cumulative_logs_emitted: 0x1u64,
                 logs: vec![Log {
                     address: address!("0000000000000000000000000000000000000011"),
                     topics: vec![
@@ -594,6 +603,7 @@ mod tests {
             receipt: Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 0x1u64,
+                cumulative_logs_emitted: 0x1u64,
                 logs: vec![Log {
                     address: address!("0000000000000000000000000000000000000011"),
                     topics: vec![
@@ -671,6 +681,7 @@ mod tests {
     fn gigantic_receipt() {
         let receipt = Receipt {
             cumulative_gas_used: 16747627,
+            cumulative_logs_emitted: 0,
             success: true,
             tx_type: TxType::Legacy,
             logs: vec![

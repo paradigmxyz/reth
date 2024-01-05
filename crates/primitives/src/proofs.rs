@@ -557,6 +557,7 @@ mod tests {
                 tx_type: TxType::EIP2930,
                 success: true,
                 cumulative_gas_used: 102068,
+                cumulative_logs_emitted: 1,
                 logs,
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,

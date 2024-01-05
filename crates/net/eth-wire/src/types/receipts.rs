@@ -48,6 +48,7 @@ mod test {
                 tx_type: TxType::EIP1559,
                 success: false,
                 cumulative_gas_used: 0,
+                cumulative_logs_emitted: 0,
                 logs: vec![],
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
@@ -111,6 +112,7 @@ mod test {
                     receipt: Receipt {
                         tx_type: TxType::Legacy,
                         cumulative_gas_used: 0x1u64,
+                        cumulative_logs_emitted: 0x1u64,
                         logs: vec![
                             Log {
                                 address: hex!("0000000000000000000000000000000000000011").into(),
@@ -150,6 +152,7 @@ mod test {
                             receipt: Receipt {
                                 tx_type: TxType::Legacy,
                                 cumulative_gas_used: 0x1u64,
+                                cumulative_logs_emitted: 0x1u64,
                                 logs: vec![
                                     Log {
                                         address: hex!("0000000000000000000000000000000000000011").into(),

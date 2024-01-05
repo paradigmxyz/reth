@@ -912,7 +912,12 @@ where
             Some(recpts) => recpts,
             None => return Err(EthApiError::UnknownBlockNumber),
         };
-        build_transaction_receipt_with_block_receipts(tx, meta, receipt, &all_receipts)
+        let prev_receipt = if meta.index == 0 {
+            None
+        } else {
+            all_receipts.get((meta.index - 1) as usize)
+        };
+        build_transaction_receipt_with_block_receipts(tx, meta, receipt, prev_receipt)
     }
 
     /// Helper function for `eth_getTransactionReceipt` (optimism)
@@ -935,11 +940,17 @@ where
         let l1_block_info = reth_revm::optimism::extract_l1_info(&block).ok();
         let optimism_tx_meta = self.build_op_tx_meta(&tx, l1_block_info, block.timestamp)?;
 
+        let prev_receipt = if meta.index == 0 {
+            None
+        } else {
+            receipts.get((meta.index - 1) as usize)
+        };
+
         build_transaction_receipt_with_block_receipts(
             tx,
             meta,
             receipt,
-            &receipts,
+            prev_receipt,
             optimism_tx_meta,
         )
     }
@@ -1163,7 +1174,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     transaction: TransactionSigned,
     meta: TransactionMeta,
     receipt: Receipt,
-    all_receipts: &[Receipt],
+    prev_receipt: Option<&Receipt>,
     #[cfg(feature = "optimism")] optimism_tx_meta: OptimismTxMeta,
 ) -> EthResult<TransactionReceipt> {
     // Note: we assume this transaction is valid, because it's mined (or part of pending block) and
@@ -1175,11 +1186,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     let gas_used = if meta.index == 0 {
         receipt.cumulative_gas_used
     } else {
-        let prev_tx_idx = (meta.index - 1) as usize;
-        all_receipts
-            .get(prev_tx_idx)
-            .map(|prev_receipt| receipt.cumulative_gas_used - prev_receipt.cumulative_gas_used)
-            .unwrap_or_default()
+        receipt.cumulative_gas_used - prev_receipt.unwrap().cumulative_gas_used
     };
 
     #[allow(clippy::needless_update)]
@@ -1236,11 +1243,13 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         }
     }
 
-    // get number of logs in the block
-    let mut num_logs = 0;
-    for prev_receipt in all_receipts.iter().take(meta.index as usize) {
-        num_logs += prev_receipt.logs.len();
-    }
+    // logs emitted till the last transaction
+    let num_logs = if meta.index == 0 {
+        0
+    } else {
+        prev_receipt.unwrap().cumulative_logs_emitted
+    };
+    
 
     for (tx_log_idx, log) in receipt.logs.into_iter().enumerate() {
         let rpclog = Log {
@@ -1251,7 +1260,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
             block_number: Some(U256::from(meta.block_number)),
             transaction_hash: Some(meta.tx_hash),
             transaction_index: Some(U256::from(meta.index)),
-            log_index: Some(U256::from(num_logs + tx_log_idx)),
+            log_index: Some(U256::from(num_logs + tx_log_idx as u64)),
             removed: false,
         };
         res_receipt.logs.push(rpclog);

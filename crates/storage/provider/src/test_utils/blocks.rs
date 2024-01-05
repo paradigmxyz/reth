@@ -132,6 +132,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
             tx_type: TxType::EIP2930,
             success: true,
             cumulative_gas_used: 300,
+            cumulative_logs_emitted: 1,
             logs: vec![Log {
                 address: Address::new([0x60; 20]),
                 topics: vec![B256::with_last_byte(1), B256::with_last_byte(2)],
@@ -191,6 +192,7 @@ fn block2(
             tx_type: TxType::EIP1559,
             success: false,
             cumulative_gas_used: 400,
+            cumulative_logs_emitted: 1,
             logs: vec![Log {
                 address: Address::new([0x61; 20]),
                 topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],

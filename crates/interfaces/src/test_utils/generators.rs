@@ -361,6 +361,7 @@ pub fn random_receipt<R: Rng>(
         tx_type: transaction.tx_type(),
         success,
         cumulative_gas_used: rng.gen_range(0..=transaction.gas_limit()),
+        cumulative_logs_emitted: 0,
         logs: if success {
             (0..logs_count).map(|_| random_log(rng, None, None)).collect()
         } else {

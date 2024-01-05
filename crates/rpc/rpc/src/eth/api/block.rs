@@ -107,12 +107,18 @@ where
                     #[cfg(feature = "optimism")]
                     let op_tx_meta =
                         self.build_op_tx_meta(&tx, l1_block_info.clone(), block_timestamp)?;
+                    
+                    let prev_receipt = if meta.index == 0 {
+                        None
+                    } else {
+                        receipts.get((meta.index - 1) as usize)
+                    };
 
                     build_transaction_receipt_with_block_receipts(
                         tx,
                         meta,
                         receipt.clone(),
-                        &receipts,
+                        prev_receipt,
                         #[cfg(feature = "optimism")]
                         op_tx_meta,
                     )

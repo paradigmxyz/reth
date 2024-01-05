@@ -86,6 +86,7 @@ mod builder {
 
         debug!(target: "payload_builder", id=%attributes.id, parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building new payload");
         let mut cumulative_gas_used = 0;
+        let mut cumulative_logs_emitted = 0;
         let mut sum_blob_gas_used = 0;
         let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
         let base_fee = initialized_block_env.basefee.to::<u64>();
@@ -195,11 +196,15 @@ mod builder {
             // add gas used by the transaction to cumulative gas used, before creating the receipt
             cumulative_gas_used += gas_used;
 
+            // add logs emitted by the transaction to cumulative logs emitted, before creating the receipt
+            cumulative_logs_emitted += result.logs().len() as u64;
+
             // Push transaction changeset and calculate header bloom filter for receipt.
             receipts.push(Some(Receipt {
                 tx_type: tx.tx_type(),
                 success: result.is_success(),
                 cumulative_gas_used,
+                cumulative_logs_emitted,
                 logs: result.logs().into_iter().map(into_reth_log).collect(),
             }));
 

@@ -1495,6 +1495,7 @@ mod tests {
                         tx_type: tx.tx_type(),
                         success: true,
                         cumulative_gas_used: (idx as u64 + 1) * 21_000,
+                        cumulative_logs_emitted: 0,
                         ..Default::default()
                     }
                     .with_bloom()
