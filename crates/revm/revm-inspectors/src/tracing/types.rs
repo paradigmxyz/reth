@@ -369,17 +369,21 @@ impl CallTraceNode {
     }
 }
 
-/// A unified representation of a call
+/// A unified representation of a call.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
-#[allow(missing_docs)]
 pub enum CallKind {
-    #[default]
+    /// Represents a regular call.
     Call,
+    /// Represents a static call.
     StaticCall,
+    /// Represents a call code operation.
     CallCode,
+    /// Represents a delegate call.
     DelegateCall,
+    /// Represents a contract creation operation.
     Create,
+    /// Represents a contract creation operation using the CREATE2 opcode.
     Create2,
 }
 
