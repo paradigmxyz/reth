@@ -1,6 +1,7 @@
 //! Contains types required for building a payload.
 
 use alloy_rlp::{Encodable, Error as DecodeError};
+use reth_node_api::PayloadBuilderAttributesTrait;
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge,
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId},
@@ -18,8 +19,6 @@ use reth_rpc_types_compat::engine::payload::{
 
 #[cfg(feature = "optimism")]
 use reth_primitives::TransactionSigned;
-
-use crate::traits::PayloadBuilderAttributesTrait;
 
 /// Contains the built payload.
 ///

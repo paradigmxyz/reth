@@ -22,6 +22,8 @@ reth-beacon-consensus.workspace = true
 reth-payload-builder.workspace = true
 reth-tasks.workspace = true
 reth-rpc-types-compat.workspace = true
+reth-node-api.workspace = true
+
 # async
 tokio = { workspace = true, features = ["sync"] }
 

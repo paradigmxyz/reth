@@ -1,11 +1,12 @@
 //! Utils for testing purposes.
 
 use crate::{
-    error::PayloadBuilderError,
-    traits::{EthEngineTypes, KeepPayloadJobAlive},
-    BuiltPayload, PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService,
-    PayloadJob, PayloadJobGenerator,
+    error::PayloadBuilderError, traits::KeepPayloadJobAlive, BuiltPayload,
+    PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
+    PayloadJobGenerator,
 };
+// TODO(rjected): cyclic
+// use reth_node_builder::EthEngineTypes;
 use reth_primitives::{Block, U256};
 use reth_provider::CanonStateNotification;
 use std::{

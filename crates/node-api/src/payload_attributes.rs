@@ -1,5 +1,5 @@
-use reth_payload_builder::PayloadId;
 use reth_primitives::B256;
+use reth_rpc_types::engine::{PayloadAttributes, PayloadId};
 
 /// This can be implemented by types that describe a currently running payload job.
 pub trait PayloadBuilderAttributesTrait {
@@ -7,7 +7,7 @@ pub trait PayloadBuilderAttributesTrait {
     /// [PayloadBuilderAttributesTrait::try_new].
     type RpcPayloadAttributes;
     /// The error type used in [PayloadBuilderAttributesTrait::try_new].
-    type Error;
+    type Error: std::error::Error;
 
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
@@ -24,6 +24,9 @@ pub trait PayloadBuilderAttributesTrait {
 
     /// Returns the parent block hash for the running payload job.
     fn parent(&self) -> B256;
+
+    /// Returns the timestmap for the running payload job.
+    fn timestamp(&self) -> u64;
 }
 
 /// The execution payload attribute type the CL node emits via the engine API.
@@ -35,4 +38,25 @@ pub trait PayloadAttributesTrait:
 {
     /// Returns the timestamp to be used in the payload job.
     fn timestamp(&self) -> u64;
+
+    /// Returns the withdrawals for the given payload attributes.
+    fn withdrawals(&self) -> Option<&Vec<reth_rpc_types::engine::payload::Withdrawal>>;
+
+    /// Return the parent beacon block root for the payload attributes.
+    fn parent_beacon_block_root(&self) -> Option<B256>;
+}
+
+// TODO(rjected): find a better place for this impl
+impl PayloadAttributesTrait for PayloadAttributes {
+    fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    fn withdrawals(&self) -> Option<&Vec<reth_rpc_types::engine::payload::Withdrawal>> {
+        self.withdrawals.as_ref()
+    }
+
+    fn parent_beacon_block_root(&self) -> Option<B256> {
+        self.parent_beacon_block_root
+    }
 }

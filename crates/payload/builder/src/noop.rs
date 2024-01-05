@@ -1,10 +1,10 @@
 //! A payload builder service task that does nothing.
 
-use crate::{
-    service::PayloadServiceCommand, traits::EthEngineTypes, PayloadBuilderAttributes,
-    PayloadBuilderHandle,
-};
+use crate::{service::PayloadServiceCommand, PayloadBuilderAttributes, PayloadBuilderHandle};
 use futures_util::{ready, StreamExt};
+use reth_node_api::EngineTypes;
+// TODO: cyclic
+// use reth_node_builder::EthEngineTypes;
 use std::{
     future::Future,
     pin::Pin,

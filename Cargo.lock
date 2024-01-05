@@ -5686,6 +5686,7 @@ dependencies = [
  "reth-network",
  "reth-network-api",
  "reth-nippy-jar",
+ "reth-node-api",
  "reth-optimism-payload-builder",
  "reth-payload-builder",
  "reth-payload-validator",
@@ -6294,8 +6295,8 @@ dependencies = [
 name = "reth-node-api"
 version = "0.1.0-alpha.13"
 dependencies = [
- "reth-payload-builder",
  "reth-primitives",
+ "reth-rpc-types",
  "serde",
 ]
 
@@ -6335,6 +6336,7 @@ dependencies = [
  "metrics",
  "reth-interfaces",
  "reth-metrics",
+ "reth-node-api",
  "reth-primitives",
  "reth-provider",
  "reth-rpc-types",
@@ -6617,6 +6619,7 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-interfaces",
  "reth-metrics",
+ "reth-node-api",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
