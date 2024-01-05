@@ -832,7 +832,8 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_beacon_consensus::BeaconEngineMessage;
     use reth_interfaces::test_utils::generators::random_block;
-    use reth_payload_builder::{test_utils::spawn_test_payload_service, EthEngineTypes};
+    use reth_node_builder::EthEngineTypes;
+    use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{SealedBlock, B256, MAINNET};
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
