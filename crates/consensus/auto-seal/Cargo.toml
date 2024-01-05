@@ -21,6 +21,9 @@ reth-stages.workspace = true
 reth-revm.workspace = true
 reth-transaction-pool.workspace = true
 
+# TODO(rjected): remove or replace
+reth-payload-builder.workspace = true
+
 # async
 futures-util.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }

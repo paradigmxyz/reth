@@ -14,6 +14,7 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-payload-builder.workspace = true
+reth-rpc-types.workspace = true
 
 # io
 serde.workspace = true

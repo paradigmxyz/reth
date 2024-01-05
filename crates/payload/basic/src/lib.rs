@@ -7,13 +7,14 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use crate::metrics::PayloadBuilderMetrics;
 use alloy_rlp::Encodable;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_interfaces::RethResult;
 use reth_payload_builder::{
-    database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
-    PayloadBuilderAttributes, PayloadId, PayloadJob, PayloadJobGenerator,
+    database::CachedReads, error::PayloadBuilderError, BuiltPayload,
+    KeepPayloadJobAlive, PayloadBuilderAttributes, PayloadId, PayloadJob, PayloadJobGenerator,
 };
 use reth_primitives::{
     bytes::BytesMut,
@@ -51,8 +52,6 @@ use tokio::{
     time::{Interval, Sleep},
 };
 use tracing::{debug, trace, warn};
-
-use crate::metrics::PayloadBuilderMetrics;
 
 mod metrics;
 

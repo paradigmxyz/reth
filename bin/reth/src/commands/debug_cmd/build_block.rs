@@ -20,7 +20,9 @@ use reth_blockchain_tree::{
 };
 use reth_db::{init_db, DatabaseEnv};
 use reth_interfaces::{consensus::Consensus, RethResult};
-use reth_payload_builder::{database::CachedReads, PayloadBuilderAttributes};
+use reth_payload_builder::{
+    database::CachedReads, PayloadBuilderAttributes, PayloadBuilderAttributesTrait,
+};
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     fs,

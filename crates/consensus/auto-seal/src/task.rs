@@ -2,6 +2,7 @@ use crate::{mode::MiningMode, Storage};
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_interfaces::consensus::ForkchoiceState;
+use reth_payload_builder::EthEngineTypes;
 use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_stages::PipelineEvent;
@@ -34,7 +35,7 @@ pub struct MiningTask<Client, Pool: TransactionPool> {
     /// backlog of sets of transactions ready to be mined
     queued: VecDeque<Vec<Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>>,
     // TODO: ideally this would just be a sender of hashes
-    to_engine: UnboundedSender<BeaconEngineMessage>,
+    to_engine: UnboundedSender<BeaconEngineMessage<EthEngineTypes>>,
     /// Used to notify consumers of new blocks
     canon_state_notification: CanonStateNotificationSender,
     /// The pipeline events to listen on
@@ -48,7 +49,7 @@ impl<Client, Pool: TransactionPool> MiningTask<Client, Pool> {
     pub(crate) fn new(
         chain_spec: Arc<ChainSpec>,
         miner: MiningMode,
-        to_engine: UnboundedSender<BeaconEngineMessage>,
+        to_engine: UnboundedSender<BeaconEngineMessage<EthEngineTypes>>,
         canon_state_notification: CanonStateNotificationSender,
         storage: Storage,
         client: Client,

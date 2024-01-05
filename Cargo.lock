@@ -5730,6 +5730,7 @@ dependencies = [
  "reth",
  "reth-beacon-consensus",
  "reth-interfaces",
+ "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -6295,6 +6296,7 @@ version = "0.1.0-alpha.13"
 dependencies = [
  "reth-payload-builder",
  "reth-primitives",
+ "reth-rpc-types",
  "serde",
 ]
 

@@ -18,6 +18,7 @@ use clap::{
 };
 use futures::TryFutureExt;
 use reth_network_api::{NetworkInfo, Peers};
+use reth_payload_builder::EngineTypes;
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, StateProviderFactory,
@@ -224,7 +225,7 @@ impl RpcServerArgs {
     /// Returns the handles for the launched regular RPC server(s) (if any) and the server handle
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
-    pub async fn start_servers<Reth, Engine, Conf>(
+    pub async fn start_servers<Reth, Engine, Conf, Types: EngineTypes>(
         &self,
         components: &Reth,
         engine_api: Engine,
@@ -233,7 +234,7 @@ impl RpcServerArgs {
     ) -> eyre::Result<RethRpcServerHandles>
     where
         Reth: RethNodeComponents,
-        Engine: EngineApiServer,
+        Engine: EngineApiServer<Types>,
         Conf: RethNodeCommandConfig,
     {
         let auth_config = self.auth_server_config(jwt_secret)?;
@@ -322,13 +323,13 @@ impl RpcServerArgs {
     }
 
     /// Create Engine API server.
-    pub async fn start_auth_server<Provider, Pool, Network, Tasks>(
+    pub async fn start_auth_server<Provider, Pool, Network, Tasks, Types>(
         &self,
         provider: Provider,
         pool: Pool,
         network: Network,
         executor: Tasks,
-        engine_api: EngineApi<Provider>,
+        engine_api: EngineApi<Provider, Types>,
         jwt_secret: JwtSecret,
     ) -> Result<AuthServerHandle, RpcError>
     where
@@ -343,6 +344,7 @@ impl RpcServerArgs {
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
+        Types: EngineTypes + 'static,
     {
         let socket_address = SocketAddr::new(self.auth_addr, self.auth_port);
 

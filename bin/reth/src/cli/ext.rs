@@ -7,7 +7,9 @@ use crate::cli::{
 use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_provider::CanonStateSubscriptions;
-use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService};
+use reth_payload_builder::{
+    EngineTypes, PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService,
+};
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
 
@@ -125,14 +127,15 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     ///
     /// By default this spawns a [BasicPayloadJobGenerator] with the default configuration
     /// [BasicPayloadJobGeneratorConfig].
-    fn spawn_payload_builder_service<Conf, Reth>(
+    fn spawn_payload_builder_service<Conf, Reth, Types>(
         &mut self,
         conf: &Conf,
         components: &Reth,
-    ) -> eyre::Result<PayloadBuilderHandle<PayloadBuilderAttributes>>
+    ) -> eyre::Result<PayloadBuilderHandle<Types>>
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
+        Types: EngineTypes<PayloadBuilderAttributes = PayloadBuilderAttributes> + 'static,
     {
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
             .interval(conf.interval())
@@ -315,14 +318,15 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         }
     }
 
-    fn spawn_payload_builder_service<Conf, Reth>(
+    fn spawn_payload_builder_service<Conf, Reth, Types>(
         &mut self,
         conf: &Conf,
         components: &Reth,
-    ) -> eyre::Result<PayloadBuilderHandle<PayloadBuilderAttributes>>
+    ) -> eyre::Result<PayloadBuilderHandle<Types>>
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
+        Types: EngineTypes<PayloadBuilderAttributes = PayloadBuilderAttributes> + 'static,
     {
         self.inner_mut()
             .ok_or_else(|| eyre::eyre!("config value must be set"))?

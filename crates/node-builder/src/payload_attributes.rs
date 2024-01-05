@@ -1,3 +1,6 @@
+use reth_payload_builder::PayloadId;
+use reth_primitives::B256;
+
 /// This can be implemented by types that describe a currently running payload job.
 pub trait PayloadBuilderAttributesTrait {
     /// The payload attributes that can be used to construct this type. Used as the argument in

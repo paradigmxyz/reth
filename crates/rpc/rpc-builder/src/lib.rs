@@ -69,6 +69,7 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
+//! use reth_payload_builder::EngineTypes;
 //! use reth_provider::{
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -102,6 +103,7 @@
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
 //!     EngineApi: EngineApiServer<Types>,
+//!     Types: EngineTypes,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![

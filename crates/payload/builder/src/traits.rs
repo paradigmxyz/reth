@@ -65,12 +65,26 @@ pub trait PayloadAttributesTrait:
 {
     /// Returns the timestamp to be used in the payload job.
     fn timestamp(&self) -> u64;
+
+    /// Returns the withdrawals for the given payload attributes.
+    fn withdrawals(&self) -> Option<&Vec<reth_rpc_types::engine::payload::Withdrawal>>;
+
+    /// Return the parent beacon block root for the payload attributes.
+    fn parent_beacon_block_root(&self) -> Option<B256>;
 }
 
 // TODO(rjected): find a better place for this impl
 impl PayloadAttributesTrait for PayloadAttributes {
     fn timestamp(&self) -> u64 {
         self.timestamp
+    }
+
+    fn withdrawals(&self) -> Option<&Vec<reth_rpc_types::engine::payload::Withdrawal>> {
+        self.withdrawals.as_ref()
+    }
+
+    fn parent_beacon_block_root(&self) -> Option<B256> {
+        self.parent_beacon_block_root
     }
 }
 
@@ -106,10 +120,11 @@ pub trait PayloadBuilderAttributesTrait {
 /// The types that are used by the engine.
 pub trait EngineTypes: Send + Sync {
     /// The RPC payload attributes type the CL node emits via the engine API.
-    type PayloadAttributes: PayloadAttributesTrait + Clone;
+    type PayloadAttributes: PayloadAttributesTrait + Send + Clone;
 
     /// The payload attributes type that contains information about a running payload job.
     type PayloadBuilderAttributes: PayloadBuilderAttributesTrait<RpcPayloadAttributes = Self::PayloadAttributes>
+        + Send
         + Clone
         + std::fmt::Debug;
 

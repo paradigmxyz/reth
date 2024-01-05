@@ -7,8 +7,10 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+/// Contains the [EngineTypes] trait, used to configure the types used by the engine.
 pub mod engine_types;
 pub use engine_types::EngineTypes;
 
+/// Contains traits and types used to abstract over payload attributes types.
 pub mod payload_attributes;
 pub use payload_attributes::{PayloadAttributesTrait, PayloadBuilderAttributesTrait};

@@ -19,6 +19,7 @@ use reth_interfaces::{
     consensus::{Consensus, ConsensusError},
     executor::{BlockExecutionError, BlockValidationError},
 };
+use reth_payload_builder::EthEngineTypes;
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom,
@@ -99,7 +100,7 @@ pub struct AutoSealBuilder<Client, Pool> {
     pool: Pool,
     mode: MiningMode,
     storage: Storage,
-    to_engine: UnboundedSender<BeaconEngineMessage>,
+    to_engine: UnboundedSender<BeaconEngineMessage<EthEngineTypes>>,
     canon_state_notification: CanonStateNotificationSender,
 }
 
@@ -114,7 +115,7 @@ where
         chain_spec: Arc<ChainSpec>,
         client: Client,
         pool: Pool,
-        to_engine: UnboundedSender<BeaconEngineMessage>,
+        to_engine: UnboundedSender<BeaconEngineMessage<EthEngineTypes>>,
         canon_state_notification: CanonStateNotificationSender,
         mode: MiningMode,
     ) -> Self {

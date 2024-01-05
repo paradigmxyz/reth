@@ -6,7 +6,9 @@ use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_payload_builder::{EngineTypes, PayloadBuilderAttributesTrait, PayloadStore};
+use reth_payload_builder::{
+    EngineTypes, PayloadAttributesTrait, PayloadBuilderAttributesTrait, PayloadStore,
+};
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
@@ -54,7 +56,6 @@ impl<Provider, Types> EngineApi<Provider, Types>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     Types: EngineTypes + 'static,
-    for<'a> PayloadOrAttributes<'a>: From<&'a Types::PayloadAttributes>,
     Types::PayloadBuilderAttributes: Send,
 {
     /// Create new instance of [EngineApi].
@@ -96,7 +97,10 @@ where
         payload: ExecutionPayloadV1,
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionPayload::from(payload);
-        let payload_or_attrs = PayloadOrAttributes::from_execution_payload(&payload, None);
+        let payload_or_attrs =
+            PayloadOrAttributes::<'_, Types::PayloadAttributes>::from_execution_payload(
+                &payload, None,
+            );
         self.validate_version_specific_fields(EngineApiMessageVersion::V1, &payload_or_attrs)?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
@@ -107,7 +111,10 @@ where
         payload: ExecutionPayloadInputV2,
     ) -> EngineApiResult<PayloadStatus> {
         let payload = convert_payload_input_v2_to_payload(payload);
-        let payload_or_attrs = PayloadOrAttributes::from_execution_payload(&payload, None);
+        let payload_or_attrs =
+            PayloadOrAttributes::<'_, Types::PayloadAttributes>::from_execution_payload(
+                &payload, None,
+            );
         self.validate_version_specific_fields(EngineApiMessageVersion::V2, &payload_or_attrs)?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
@@ -121,7 +128,10 @@ where
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionPayload::from(payload);
         let payload_or_attrs =
-            PayloadOrAttributes::from_execution_payload(&payload, Some(parent_beacon_block_root));
+            PayloadOrAttributes::<'_, Types::PayloadAttributes>::from_execution_payload(
+                &payload,
+                Some(parent_beacon_block_root),
+            );
         self.validate_version_specific_fields(EngineApiMessageVersion::V3, &payload_or_attrs)?;
 
         let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };
@@ -523,11 +533,14 @@ where
 
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
     /// and the message version.
-    fn validate_version_specific_fields(
+    fn validate_version_specific_fields<Type>(
         &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: &PayloadOrAttributes<'_>,
-    ) -> EngineApiResult<()> {
+        payload_or_attrs: &PayloadOrAttributes<'_, Type>,
+    ) -> EngineApiResult<()>
+    where
+        Type: PayloadAttributesTrait,
+    {
         self.validate_withdrawals_presence(
             version,
             payload_or_attrs.timestamp(),
@@ -603,7 +616,6 @@ where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     Types: EngineTypes + 'static + Send,
     Types::PayloadAttributes: Send,
-    for<'a> PayloadOrAttributes<'a>: From<&'a Types::PayloadAttributes>,
     Types::PayloadBuilderAttributes: Send,
 {
     /// Handler for `engine_newPayloadV1`
