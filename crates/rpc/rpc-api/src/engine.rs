@@ -11,10 +11,8 @@ use reth_rpc_types::{
     BlockOverrides, CallRequest, Filter, Log, RichBlock, SyncStatus,
 };
 
-// TODO: can't use associated type because of jsonrpsee, also need `Types` to be Deserialize
-// otherwise. Maybe jsonrpsee needs to support
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "engine"))]
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"), server_bounds(Types::PayloadAttributes: jsonrpsee::core::Serialize + Clone))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "engine", client_bounds(Types::PayloadAttributes: jsonrpsee::core::DeserializeOwned), server_bounds(Types::PayloadAttributes: jsonrpsee::core::Serialize + Clone)))]
 pub trait EngineApi<Types: EngineTypes> {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
@@ -149,6 +147,13 @@ pub trait EngineApi<Types: EngineTypes> {
     #[method(name = "exchangeCapabilities")]
     async fn exchange_capabilities(&self, capabilities: Vec<String>) -> RpcResult<Vec<String>>;
 }
+
+// NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
+// generic here. It would be nice if the rpc macro would understand which types need to have serde.
+// By default, if the trait has a generic, the rpc macro will add e.g. `Types: DeserializeOwned` to
+// the trait bounds, which is not what we want, because `Types` is not used directly in any of the
+// trait methods. Instead, we have to add the bounds manually. This would be disastrous if we had
+// more than one associated type used in the trait methods.
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 ///
