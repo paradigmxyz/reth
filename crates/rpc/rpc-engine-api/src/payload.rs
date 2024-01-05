@@ -2,7 +2,7 @@ use reth_node_api::PayloadAttributesTrait;
 use reth_primitives::B256;
 use reth_rpc_types::engine::ExecutionPayload;
 
-/// Either an [ExecutionPayload] or a [PayloadAttributes].
+/// Either an [ExecutionPayload] or a types that implements the [PayloadAttributesTrait].
 #[derive(Debug)]
 pub(crate) enum PayloadOrAttributes<'a, AttributesType> {
     /// An [ExecutionPayload] and optional parent beacon block root.
