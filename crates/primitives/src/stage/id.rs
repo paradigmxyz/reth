@@ -2,21 +2,34 @@
 ///
 /// For custom stages, use [`StageId::Other`]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[allow(missing_docs)]
 pub enum StageId {
+    /// Header stage in the process.
     Headers,
+    /// Total difficulty stage in the process.
     TotalDifficulty,
+    /// Bodies stage in the process.
     Bodies,
+    /// Sender recovery stage in the process.
     SenderRecovery,
+    /// Execution stage in the process.
     Execution,
+    /// Merkle unwind stage in the process.
     MerkleUnwind,
+    /// Account hashing stage in the process.
     AccountHashing,
+    /// Storage hashing stage in the process.
     StorageHashing,
+    /// Merkle execute stage in the process.
     MerkleExecute,
+    /// Transaction lookup stage in the process.
     TransactionLookup,
+    /// Index storage history stage in the process.
     IndexStorageHistory,
+    /// Index account history stage in the process.
     IndexAccountHistory,
+    /// Finish stage in the process.
     Finish,
+    /// Other custom stage with a provided string identifier.
     Other(&'static str),
 }
 

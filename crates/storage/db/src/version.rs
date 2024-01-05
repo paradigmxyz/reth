@@ -12,20 +12,33 @@ pub const DB_VERSION_FILE_NAME: &str = "database.version";
 pub const DB_VERSION: u64 = 1;
 
 /// Error when checking a database version using [check_db_version_file]
-#[allow(missing_docs)]
 #[derive(thiserror::Error, Debug)]
 pub enum DatabaseVersionError {
+    /// Unable to determine the version of the database; the file is missing.
     #[error("unable to determine the version of the database, file is missing")]
     MissingFile,
+    /// Unable to determine the version of the database; the file is malformed.
     #[error("unable to determine the version of the database, file is malformed")]
     MalformedFile,
+    /// Breaking database change detected.
+    ///
+    /// Your database version is incompatible with the latest database version.
     #[error(
         "breaking database change detected: your database version (v{version}) \
          is incompatible with the latest database version (v{DB_VERSION})"
     )]
-    VersionMismatch { version: u64 },
+    VersionMismatch {
+        /// The detected version in the database.
+        version: u64,
+    },
+    /// IO error occurred while reading the database version file.
     #[error("IO error occurred while reading {path}: {err}")]
-    IORead { err: io::Error, path: PathBuf },
+    IORead {
+        /// The encountered IO error.
+        err: io::Error,
+        /// The path to the database version file.
+        path: PathBuf,
+    },
 }
 
 /// Checks the database version file with [DB_VERSION_FILE_NAME] name.

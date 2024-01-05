@@ -1255,18 +1255,30 @@ enum TransactionsCommand {
 
 /// All events related to transactions emitted by the network.
 #[derive(Debug)]
-#[allow(missing_docs)]
 pub enum NetworkTransactionEvent {
-    /// Received list of transactions from the given peer.
+    /// Represents the event of receiving a list of transactions from a peer.
     ///
-    /// This represents transactions that were broadcasted to use from the peer.
-    IncomingTransactions { peer_id: PeerId, msg: Transactions },
-    /// Received list of transactions hashes to the given peer.
-    IncomingPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes },
-    /// Incoming `GetPooledTransactions` request from a peer.
-    GetPooledTransactions {
+    /// This indicates transactions that were broadcasted to us from the peer.
+    IncomingTransactions {
+        /// The ID of the peer from which the transactions were received.
         peer_id: PeerId,
+        /// The received transactions.
+        msg: Transactions,
+    },
+    /// Represents the event of receiving a list of transaction hashes from a peer.
+    IncomingPooledTransactionHashes {
+        /// The ID of the peer from which the transaction hashes were received.
+        peer_id: PeerId,
+        /// The received new pooled transaction hashes.
+        msg: NewPooledTransactionHashes,
+    },
+    /// Represents the event of receiving a `GetPooledTransactions` request from a peer.
+    GetPooledTransactions {
+        /// The ID of the peer from which the request was received.
+        peer_id: PeerId,
+        /// The received `GetPooledTransactions` request.
         request: GetPooledTransactions,
+        /// The sender for responding to the request with a result of `PooledTransactions`.
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     },
 }
