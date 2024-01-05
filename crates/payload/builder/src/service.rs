@@ -151,14 +151,12 @@ where
         rx
     }
 
-    // TODO(rjected): remove this or do something
     /// Starts building a new payload for the given payload attributes.
     ///
     /// Returns the identifier of the payload.
     ///
     /// Note: if there's already payload in progress with same identifier, it will be returned.
-    #[allow(dead_code)]
-    async fn new_payload(
+    pub async fn new_payload(
         &self,
         attr: Types::PayloadBuilderAttributes,
     ) -> Result<PayloadId, PayloadBuilderError> {

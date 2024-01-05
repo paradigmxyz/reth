@@ -47,7 +47,7 @@ pub trait EngineApi<Types: EngineTypes> {
     /// Post Shanghai forkchoice update handler
     ///
     /// This is the same as `forkchoiceUpdatedV1`, but expects an additional `withdrawals` field in
-    /// the [PayloadAttributes], if payload attributes are provided.
+    /// the `payloadAttributes`, if payload attributes are provided.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
     ///
@@ -63,8 +63,8 @@ pub trait EngineApi<Types: EngineTypes> {
     /// Post Cancun forkchoice update handler
     ///
     /// This is the same as `forkchoiceUpdatedV2`, but expects an additional
-    /// `parentBeaconBlockRoot` field in the the [PayloadAttributes], if payload attributes are
-    /// provided.
+    /// `parentBeaconBlockRoot` field in the the `payloadAttributes`, if payload attributes
+    /// are provided.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
     #[method(name = "forkchoiceUpdatedV3")]
