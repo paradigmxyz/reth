@@ -1,5 +1,5 @@
 [package]
-name = "reth-node-builder"
+name = "reth-node-api"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,8 +14,6 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-payload-builder.workspace = true
-reth-rpc-types.workspace = true
-reth-node-api.workspace = true
 
 # io
 serde.workspace = true
