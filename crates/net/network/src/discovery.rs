@@ -86,21 +86,18 @@ impl Discovery {
         };
 
         // setup discv5
-        let (discv5, discv5_event_stream) = if let Some(discv5_config) = discv5_config {
+        let (discv5,) = if let Some(discv5_config) = discv5_config {
             let discv5 = Discv5Handle::from_secret_key(sk, discv5_config)?;
-
             discv5.clone().start_service().await.unwrap();
-            // drop(discv5);
-
-            let discv5_event = discv5
-                .create_event_stream()
-                .await
-                .map_err(|_e| NetworkError::Discv5(Discv5Error::SecretKeyDecode))?;
-            let discv5_event_stream = Some(ReceiverStream::new(discv5_event));
-
-            (Some(discv5), (discv5_event_stream))
+            // let discv5_event_stream : ;
+            // let discv5_event = discv5
+            //     .create_event_stream()
+            //     .await
+            //     .map_err(|_e| NetworkError::Discv5(Discv5Error::SecretKeyDecode))?;
+            // let discv5_event_stream = Some(ReceiverStream::new(discv5_event));
+            (Some(discv5),)
         } else {
-            (None, None)
+            (None,)
         };
 
         // setup DNS discovery
@@ -122,7 +119,7 @@ impl Discovery {
             local_enr,
             discv4,
             discv5,
-            discv5_event_stream,
+            discv5_event_stream: Default::default(),
             discv4_updates,
             _discv4_service,
             discovered_nodes: Default::default(),
