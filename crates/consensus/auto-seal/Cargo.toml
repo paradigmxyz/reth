@@ -20,9 +20,7 @@ reth-provider.workspace = true
 reth-stages.workspace = true
 reth-revm.workspace = true
 reth-transaction-pool.workspace = true
-
-# TODO(rjected): remove or replace
-reth-payload-builder.workspace = true
+reth-node-api.workspace = true
 
 # async
 futures-util.workspace = true

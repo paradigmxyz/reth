@@ -57,6 +57,7 @@ reth-snapshot = { workspace = true, features = ["clap"] }
 reth-trie.workspace = true
 reth-nippy-jar.workspace = true
 reth-node-api.workspace = true
+reth-node-builder.workspace = true
 
 # crypto
 alloy-rlp.workspace = true

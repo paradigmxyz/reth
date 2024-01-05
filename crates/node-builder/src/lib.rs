@@ -7,5 +7,7 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+/// Exports commonly used concrete instances of the [EngineTypes](reth_node_api::EngineTypes)
+/// trait.
 pub mod engine;
 pub use engine::EthEngineTypes;

@@ -7,9 +7,8 @@ use crate::cli::{
 use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_provider::CanonStateSubscriptions;
-use reth_payload_builder::{
-    EngineTypes, PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService,
-};
+use reth_node_api::EngineTypes;
+use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService};
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
 

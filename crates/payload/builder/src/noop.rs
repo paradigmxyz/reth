@@ -3,8 +3,6 @@
 use crate::{service::PayloadServiceCommand, PayloadBuilderHandle};
 use futures_util::{ready, StreamExt};
 use reth_node_api::{EngineTypes, PayloadBuilderAttributesTrait};
-// TODO: cyclic
-// use reth_node_builder::EthEngineTypes;
 use std::{
     future::Future,
     pin::Pin,

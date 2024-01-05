@@ -59,6 +59,8 @@ use reth_interfaces::{
 };
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle, NetworkManager};
 use reth_network_api::{NetworkInfo, PeersInfo};
+use reth_node_builder::EthEngineTypes;
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     kzg::KzgSettings,
@@ -1109,7 +1111,8 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         ext.on_components_initialized(&components)?;
 
         debug!(target: "reth::cli", "Spawning payload builder service");
-        let payload_builder =
+        // TODO: remove this and use an associated type
+        let payload_builder: PayloadBuilderHandle<EthEngineTypes> =
             ext.spawn_payload_builder_service(&self.config.builder, &components)?;
 
         let (consensus_engine_tx, mut consensus_engine_rx) = unbounded_channel();

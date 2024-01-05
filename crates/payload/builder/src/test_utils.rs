@@ -6,8 +6,6 @@ use crate::{
     PayloadJobGenerator,
 };
 use reth_node_api::EngineTypes;
-// TODO(rjected): cyclic
-// use reth_node_builder::EthEngineTypes;
 use reth_primitives::{Block, U256};
 use reth_provider::CanonStateNotification;
 use std::{

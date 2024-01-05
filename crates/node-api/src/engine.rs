@@ -1,7 +1,7 @@
 use crate::{PayloadAttributesTrait, PayloadBuilderAttributesTrait};
 
 /// The types that are used by the engine.
-pub trait EngineTypes {
+pub trait EngineTypes: Send + Sync {
     /// The RPC payload attributes type the CL node emits via the engine API.
     type PayloadAttributes: PayloadAttributesTrait + Send + Clone;
 

@@ -18,7 +18,7 @@ use clap::{
 };
 use futures::TryFutureExt;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_payload_builder::EngineTypes;
+use reth_node_api::EngineTypes;
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, StateProviderFactory,
