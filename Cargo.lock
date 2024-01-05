@@ -219,7 +219,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-trace-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#f5174888c523b70fa1a94fad24f3214048d3d462"
+source = "git+https://github.com/alloy-rs/alloy#ec44bb040721e4dd85a3f1de5aeb92d4b29563ce"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -234,7 +234,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#f5174888c523b70fa1a94fad24f3214048d3d462"
+source = "git+https://github.com/alloy-rs/alloy#ec44bb040721e4dd85a3f1de5aeb92d4b29563ce"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
