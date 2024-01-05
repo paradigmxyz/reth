@@ -1,4 +1,3 @@
-use core::future::Future;
 pub use discv5::{
     enr, enr::CombinedKey, service::Service, Config as Discv5Config,
     ConfigBuilder as Discv5ConfigBuilder, Discv5, Enr, Event,
@@ -14,19 +13,18 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::{sync::mpsc, task};
+use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 
 // Wrapper struct for Discv5
-#[derive(Clone)]
 pub struct Discv5Handle {
-    inner: Arc<Mutex<Discv5>>,
+    inner: Discv5,
 }
 
 impl Discv5Handle {
     // Constructor to create a new Discv5Handle
     pub fn new(discv5: Discv5) -> Self {
-        Discv5Handle { inner: Arc::new(Mutex::new(discv5)) }
+        Discv5Handle { inner: discv5 }
     }
 
     pub fn from_secret_key(
@@ -46,34 +44,18 @@ impl Discv5Handle {
         ))
     }
 
-    pub fn convert_to_discv5(&self) -> Arc<Mutex<Discv5>> {
-        self.inner.clone()
+    pub fn convert_to_discv5(&self) -> &Discv5 {
+        &self.inner
     }
 
-    pub async fn start_service(&self) -> Result<(), Discv5Error> {
-        let discv5 = Arc::clone(&self.inner);
-
-        tokio::task::spawn_blocking(move || {
-            let mut discv5_guard = discv5.lock();
-
-            let _ = discv5_guard.start();
-            drop(discv5_guard);
-        })
-        .await
-        .map_err(|_| Discv5Error::Discv5Construct.into())
+    pub async fn start_service(&mut self) -> Result<(), Discv5Error> {
+        self.inner.start().await.map_err(|_| Discv5Error::Discv5Construct.into())
     }
 
     pub async fn create_event_stream(
-        &self,
+        &mut self,
     ) -> Result<tokio::sync::mpsc::Receiver<Event>, Discv5Error> {
-        let discv5 = Arc::clone(&self.inner);
-        let discv5_guard = discv5.lock();
-        let res = discv5_guard
-            .event_stream()
-            .await
-            .map_err(|_| Discv5Error::Discv5EventStreamStart.into());
-        drop(discv5_guard);
-        return res;
+        self.inner.event_stream().await.map_err(|_| Discv5Error::Discv5EventStreamStart.into())
     }
 }
 
