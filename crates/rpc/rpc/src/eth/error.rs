@@ -39,7 +39,7 @@ pub enum EthApiError {
     #[error("unknown block number")]
     UnknownBlockNumber,
     /// Thrown when querying for `finalized` or `safe` block before the merge transition is
-    /// finalized
+    /// finalized, <https://github.com/ethereum/execution-apis/blob/6d17705a875e52c26826124c2a8a15ed542aeca2/src/schemas/block.yaml#L109>
     #[error("unknown block")]
     UnknownSafeOrFinalizedBlock,
     /// Thrown when an unknown block or transaction index is encountered
@@ -54,7 +54,8 @@ pub enum EthApiError {
     /// `excess_blob_gas` is not set for Cancun and above
     #[error("excess blob gas missing in the EVM's environment after Cancun")]
     ExcessBlobGasNotSet,
-    /// Thrown when a call or transaction request contains conflicting fields (legacy, EIP-1559)
+    /// Thrown when a call or transaction request (`eth_call`, `eth_estimateGas`,
+    /// `eth_sendTransaction`) contains conflicting fields (legacy, EIP-1559)
     #[error("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")]
     ConflictingFeeFieldsInRequest,
     /// Errors related to invalid transactions
