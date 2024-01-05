@@ -11,7 +11,7 @@ pub enum Error {
     #[error("key/data pair already exists")]
     KeyExist,
     /// No matching key/data pair found.
-    #[error("ko matching key/data pair found")]
+    #[error("no matching key/data pair found")]
     NotFound,
     /// The cursor is already at the end of data.
     #[error("the cursor is already at the end of data")]
