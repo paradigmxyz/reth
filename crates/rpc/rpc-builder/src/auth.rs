@@ -11,6 +11,7 @@ use jsonrpsee::{
     server::{RpcModule, ServerHandle},
 };
 use reth_network_api::{NetworkInfo, Peers};
+use reth_payload_builder::EngineTypes;
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
     StateProviderFactory,
@@ -33,7 +34,7 @@ use std::{
 
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
-pub async fn launch<Provider, Pool, Network, Tasks, EngineApi>(
+pub async fn launch<Provider, Pool, Network, Tasks, EngineApi, Types>(
     provider: Provider,
     pool: Pool,
     network: Network,
@@ -55,7 +56,8 @@ where
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EngineApi: EngineApiServer,
+    Types: EngineTypes,
+    EngineApi: EngineApiServer<Types>,
 {
     // spawn a new cache task
     let eth_cache =
@@ -85,7 +87,7 @@ where
 }
 
 /// Configure and launch a _standalone_ auth server with existing EthApi implementation.
-pub async fn launch_with_eth_api<Provider, Pool, Network, EngineApi>(
+pub async fn launch_with_eth_api<Provider, Pool, Network, EngineApi, Types>(
     eth_api: EthApi<Provider, Pool, Network>,
     eth_filter: EthFilter<Provider, Pool>,
     engine_api: EngineApi,
@@ -103,7 +105,8 @@ where
         + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
-    EngineApi: EngineApiServer,
+    Types: EngineTypes,
+    EngineApi: EngineApiServer<Types>,
 {
     // Configure the module and start the server.
     let mut module = RpcModule::new(());
@@ -253,9 +256,10 @@ pub struct AuthRpcModule {
 
 impl AuthRpcModule {
     /// Create a new `AuthRpcModule` with the given `engine_api`.
-    pub fn new<EngineApi>(engine: EngineApi) -> Self
+    pub fn new<EngineApi, Types>(engine: EngineApi) -> Self
     where
-        EngineApi: EngineApiServer,
+        Types: EngineTypes,
+        EngineApi: EngineApiServer<Types>,
     {
         let mut module = RpcModule::new(());
         module.merge(engine.into_rpc()).expect("No conflicting methods");

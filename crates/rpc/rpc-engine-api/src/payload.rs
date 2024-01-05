@@ -1,8 +1,9 @@
 use reth_primitives::B256;
-
 use reth_rpc_types::engine::{ExecutionPayload, PayloadAttributes};
+
 /// Either an [ExecutionPayload] or a [PayloadAttributes].
-pub(crate) enum PayloadOrAttributes<'a> {
+#[derive(Debug)]
+pub enum PayloadOrAttributes<'a> {
     /// An [ExecutionPayload] and optional parent beacon block root.
     ExecutionPayload {
         /// The inner execution payload

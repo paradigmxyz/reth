@@ -11,6 +11,8 @@ use reth_rpc_types::{
     BlockOverrides, CallRequest, Filter, Log, RichBlock, SyncStatus,
 };
 
+// TODO: can't use associated type because of jsonrpsee, also need `Types` to be Deserialize
+// otherwise. Maybe jsonrpsee needs to support
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "engine"))]
 pub trait EngineApi<Types: EngineTypes> {

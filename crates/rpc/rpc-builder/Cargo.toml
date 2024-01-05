@@ -26,6 +26,9 @@ reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
 reth-rpc-types-compat.workspace = true
 
+# TODO: replace with standalone crate
+reth-payload-builder.workspace = true
+
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }
 tower-http = { version = "0.4", features = ["full"] }
