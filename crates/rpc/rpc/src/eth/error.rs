@@ -103,6 +103,7 @@ pub enum EthApiError {
     #[error("{0}")]
     InternalJsTracerError(String),
     #[error(transparent)]
+    /// Call Input error when both `data` and `input` fields are set and not equal.
     CallInputError(#[from] CallInputError),
     /// Optimism related error
     #[error(transparent)]

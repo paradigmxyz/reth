@@ -374,6 +374,7 @@ impl CallTraceNode {
 #[serde(rename_all = "UPPERCASE")]
 pub enum CallKind {
     /// Represents a regular call.
+    #[default]
     Call,
     /// Represents a static call.
     StaticCall,

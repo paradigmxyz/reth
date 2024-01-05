@@ -93,6 +93,15 @@ pub enum FsPathError {
         to: PathBuf,
     },
 
+    /// Error variant for failed file opening operation with additional path context.
+    #[error("failed to open file {path:?}: {source}")]
+    Open {
+        /// The source `io::Error`.
+        source: io::Error,
+        /// The path related to the operation.
+        path: PathBuf,
+    },
+
     /// Error variant for failed file read as JSON operation with additional path context.
     #[error("failed to parse json file: {path:?}: {source}")]
     ReadJson {
