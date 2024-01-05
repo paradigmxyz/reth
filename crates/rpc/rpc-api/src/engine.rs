@@ -11,8 +11,8 @@ use reth_rpc_types::{
     BlockOverrides, CallRequest, Filter, Log, RichBlock, SyncStatus,
 };
 
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"), server_bounds(Types::PayloadAttributes: jsonrpsee::core::Serialize + Clone))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "engine", client_bounds(Types::PayloadAttributes: jsonrpsee::core::DeserializeOwned), server_bounds(Types::PayloadAttributes: jsonrpsee::core::Serialize + Clone)))]
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"), server_bounds(Types::PayloadAttributes: jsonrpsee::core::DeserializeOwned))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "engine", client_bounds(Types::PayloadAttributes: jsonrpsee::core::Serialize + Clone), server_bounds(Types::PayloadAttributes: jsonrpsee::core::DeserializeOwned)))]
 pub trait EngineApi<Types: EngineTypes> {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
