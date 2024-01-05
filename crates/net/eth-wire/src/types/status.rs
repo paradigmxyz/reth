@@ -1,8 +1,9 @@
 use crate::{EthVersion, StatusBuilder};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
+use alloy_chains::{ChainKind, NamedChain};
 use reth_primitives::{
-    hex, Chain, ChainSpec, ForkId, Genesis, Hardfork, Head, NamedChain, B256, MAINNET, U256,
+    hex, Chain, ChainSpec, ForkId, Genesis, Hardfork, Head, B256, MAINNET, U256,
 };
 use std::fmt::{Debug, Display};
 
@@ -24,7 +25,7 @@ pub struct Status {
 
     /// The chain id, as introduced in
     /// [EIP155](https://eips.ethereum.org/EIPS/eip-155#list-of-chain-ids).
-    pub chain: Chain,
+    pub chain: ChainKind,
 
     /// Total difficulty of the best chain.
     pub total_difficulty: U256,
@@ -51,7 +52,7 @@ impl From<Genesis> for Status {
 
         Status {
             version: EthVersion::Eth68 as u8,
-            chain: Chain::Id(chain),
+            chain: ChainKind::Id(chain),
             total_difficulty,
             blockhash: chainspec.genesis_hash(),
             genesis: chainspec.genesis_hash(),
@@ -138,7 +139,7 @@ impl Default for Status {
         let mainnet_genesis = MAINNET.genesis_hash();
         Status {
             version: EthVersion::Eth68 as u8,
-            chain: Chain::Named(NamedChain::Mainnet),
+            chain: ChainKind::Named(NamedChain::Mainnet),
             total_difficulty: U256::from(17_179_869_184u64),
             blockhash: mainnet_genesis,
             genesis: mainnet_genesis,
