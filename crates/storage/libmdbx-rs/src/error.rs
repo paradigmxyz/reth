@@ -87,7 +87,7 @@ pub enum Error {
     #[error("the given key value is mismatched to the current cursor position")]
     KeyMismatch,
     /// Decode error: An invalid parameter was specified.
-    #[error("Invalid parameter specified")]
+    #[error("invalid parameter specified")]
     DecodeError,
     /// The environment opened in read-only.
     #[error("the environment opened in read-only")]
@@ -103,11 +103,11 @@ pub enum Error {
     /// If the [Environment](crate::Environment) was opened with
     /// [EnvironmentKind::WriteMap](crate::EnvironmentKind::WriteMap) flag, nested transactions are
     /// not supported.
-    #[error("Nested transactions are not supported with WriteMap")]
+    #[error("nested transactions are not supported with WriteMap")]
     NestedTransactionsUnsupportedWithWriteMap,
     /// If the [Environment](crate::Environment) was opened with in read-only mode
     /// [Mode::ReadOnly](crate::flags::Mode::ReadOnly), write transactions can't be opened.
-    #[error("Write transactions are not supported in read-only mode")]
+    #[error("write transactions are not supported in read-only mode")]
     WriteTransactionUnsupportedInReadOnlyMode,
     /// Unknown error code.
     #[error("unknown error code")]
@@ -222,9 +222,9 @@ mod test {
 
     #[test]
     fn test_description() {
-        assert_eq!("Permission denied", Error::from_err_code(13).to_string());
+        assert_eq!("the environment opened in read-only", Error::from_err_code(13).to_string());
 
-        assert_eq!("MDBX_INVALID: File is not an MDBX file", Error::Invalid.to_string());
+        assert_eq!("file is not an MDBX file", Error::Invalid.to_string());
     }
 
     #[test]
