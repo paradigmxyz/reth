@@ -101,13 +101,19 @@ pub struct RethRpcComponents<'a, Reth: RethNodeComponents> {
 }
 
 /// A Generic implementation of the RethNodeComponents trait.
+///
+/// Represents components required for the Reth node.
 #[derive(Clone, Debug)]
-#[allow(missing_docs)]
 pub struct RethNodeComponentsImpl<Provider, Pool, Network, Events, Tasks> {
+    /// Represents the provider instance.
     pub provider: Provider,
+    /// Represents the transaction pool instance.
     pub pool: Pool,
+    /// Represents the network instance used for communication.
     pub network: Network,
+    /// Represents the task executor instance.
     pub task_executor: Tasks,
+    /// Represents the events subscription handler instance.
     pub events: Events,
 }
 

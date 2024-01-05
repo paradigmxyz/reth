@@ -2,9 +2,9 @@ use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
 /// Network Errors
-#[allow(missing_docs)]
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum NetworkError {
+    /// Indicates that the sender has been dropped.
     #[error("sender has been dropped")]
     ChannelClosed,
 }

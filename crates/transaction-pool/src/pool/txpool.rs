@@ -1621,8 +1621,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
 }
 
 #[cfg(test)]
-#[allow(missing_docs)]
 impl<T: PoolTransaction> AllTransactions<T> {
+    /// This function retrieves the number of transactions stored in the pool for a specific sender.
+    ///
+    /// If there are no transactions for the given sender, it returns zero by default.
     pub(crate) fn tx_count(&self, sender: SenderId) -> usize {
         self.tx_counter.get(&sender).copied().unwrap_or_default()
     }
