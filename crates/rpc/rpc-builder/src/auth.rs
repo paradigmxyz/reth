@@ -11,7 +11,7 @@ use jsonrpsee::{
     server::{RpcModule, ServerHandle},
 };
 use reth_network_api::{NetworkInfo, Peers};
-use reth_payload_builder::EngineTypes;
+use reth_node_api::EngineTypes;
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
     StateProviderFactory,

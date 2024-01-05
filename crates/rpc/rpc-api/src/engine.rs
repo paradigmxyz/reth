@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_payload_builder::EngineTypes;
+use reth_node_api::EngineTypes;
 use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64};
 use reth_rpc_types::{
     engine::{

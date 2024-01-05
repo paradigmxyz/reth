@@ -20,8 +20,8 @@ use reth_interfaces::{
     sync::{NetworkSyncUpdater, SyncState},
     RethError, RethResult,
 };
-use reth_node_api::{PayloadAttributesTrait, PayloadBuilderAttributesTrait};
-use reth_payload_builder::{EngineTypes, PayloadBuilderHandle};
+use reth_node_api::{EngineTypes, PayloadAttributesTrait, PayloadBuilderAttributesTrait};
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{
     constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
     SealedHeader, B256,

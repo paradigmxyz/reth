@@ -6,7 +6,7 @@ use crate::{
 };
 use futures::TryFutureExt;
 use reth_interfaces::RethResult;
-use reth_payload_builder::EngineTypes;
+use reth_node_api::EngineTypes;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };

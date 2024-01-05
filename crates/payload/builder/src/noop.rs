@@ -1,8 +1,8 @@
 //! A payload builder service task that does nothing.
 
-use crate::{service::PayloadServiceCommand, PayloadBuilderAttributes, PayloadBuilderHandle};
+use crate::{service::PayloadServiceCommand, PayloadBuilderHandle};
 use futures_util::{ready, StreamExt};
-use reth_node_api::EngineTypes;
+use reth_node_api::{EngineTypes, PayloadBuilderAttributesTrait};
 // TODO: cyclic
 // use reth_node_builder::EthEngineTypes;
 use std::{
@@ -15,21 +15,27 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A service task that does not build any payloads.
 #[derive(Debug)]
-pub struct NoopPayloadBuilderService {
+pub struct NoopPayloadBuilderService<Types: EngineTypes> {
     /// Receiver half of the command channel.
-    command_rx: UnboundedReceiverStream<PayloadServiceCommand<PayloadBuilderAttributes>>,
+    command_rx: UnboundedReceiverStream<PayloadServiceCommand<Types::PayloadBuilderAttributes>>,
 }
 
-impl NoopPayloadBuilderService {
+impl<Types> NoopPayloadBuilderService<Types>
+where
+    Types: EngineTypes,
+{
     /// Creates a new [NoopPayloadBuilderService].
-    pub fn new() -> (Self, PayloadBuilderHandle<EthEngineTypes>) {
+    pub fn new() -> (Self, PayloadBuilderHandle<Types>) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
         let handle = PayloadBuilderHandle::new(service_tx);
         (Self { command_rx: UnboundedReceiverStream::new(command_rx) }, handle)
     }
 }
 
-impl Future for NoopPayloadBuilderService {
+impl<Types> Future for NoopPayloadBuilderService<Types>
+where
+    Types: EngineTypes,
+{
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

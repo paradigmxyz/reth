@@ -69,7 +69,7 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_payload_builder::EngineTypes;
+//! use reth_node_api::EngineTypes;
 //! use reth_provider::{
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -150,7 +150,7 @@ use jsonrpsee::{
     server::{IdProvider, Server, ServerHandle},
     Methods, RpcModule,
 };
-use reth_payload_builder::EngineTypes;
+use reth_node_api::EngineTypes;
 use serde::{Deserialize, Serialize, Serializer};
 use strum::{AsRefStr, EnumIter, EnumVariantNames, IntoStaticStr, ParseError, VariantNames};
 use tower::layer::util::{Identity, Stack};

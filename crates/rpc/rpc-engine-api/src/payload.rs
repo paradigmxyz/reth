@@ -1,4 +1,4 @@
-use reth_payload_builder::PayloadAttributesTrait;
+use reth_node_api::PayloadAttributesTrait;
 use reth_primitives::B256;
 use reth_rpc_types::engine::ExecutionPayload;
 

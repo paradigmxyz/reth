@@ -2,9 +2,7 @@
 
 use reth_provider::CanonStateNotification;
 use crate::{error::PayloadBuilderError, BuiltPayload};
-use reth_node_api::{PayloadAttributesTrait, PayloadBuilderAttributesTrait};
-use reth_primitives::B256;
-use reth_rpc_types::engine::PayloadAttributes;
+use reth_node_api::PayloadBuilderAttributesTrait;
 use std::{future::Future, sync::Arc};
 
 /// A type that can build a payload.

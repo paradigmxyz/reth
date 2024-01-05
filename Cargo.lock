@@ -5779,6 +5779,7 @@ dependencies = [
  "reth-downloaders",
  "reth-interfaces",
  "reth-metrics",
+ "reth-node-api",
  "reth-payload-builder",
  "reth-payload-validator",
  "reth-primitives",
@@ -6552,6 +6553,7 @@ name = "reth-rpc-api"
 version = "0.1.0-alpha.13"
 dependencies = [
  "jsonrpsee",
+ "reth-node-api",
  "reth-payload-builder",
  "reth-primitives",
  "reth-rpc-types",
@@ -6585,6 +6587,7 @@ dependencies = [
  "reth-ipc",
  "reth-metrics",
  "reth-network-api",
+ "reth-node-api",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",

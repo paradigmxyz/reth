@@ -27,7 +27,7 @@ reth-transaction-pool.workspace = true
 reth-rpc-types-compat.workspace = true
 
 # TODO: replace with standalone crate
-reth-payload-builder.workspace = true
+reth-node-api.workspace = true
 
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }

@@ -5,6 +5,7 @@ use crate::{
     PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
     PayloadJobGenerator,
 };
+use reth_node_api::EngineTypes;
 // TODO(rjected): cyclic
 // use reth_node_builder::EthEngineTypes;
 use reth_primitives::{Block, U256};
@@ -17,15 +18,25 @@ use std::{
 };
 
 /// Creates a new [PayloadBuilderService] for testing purposes.
-pub fn test_payload_service() -> (
-    PayloadBuilderService<TestPayloadJobGenerator, futures_util::stream::Empty<CanonStateNotification>, EthEngineTypes>,
-    PayloadBuilderHandle<EthEngineTypes>,
-) {
+pub fn test_payload_service<Types>() -> (
+    PayloadBuilderService<
+        TestPayloadJobGenerator,
+        futures_util::stream::Empty<CanonStateNotification>,
+        Types,
+    >,
+    PayloadBuilderHandle<Types>,
+)
+where
+    Types: EngineTypes<PayloadBuilderAttributes = PayloadBuilderAttributes> + 'static,
+{
     PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
 }
 
 /// Creates a new [PayloadBuilderService] for testing purposes and spawns it in the background.
-pub fn spawn_test_payload_service() -> PayloadBuilderHandle<EthEngineTypes> {
+pub fn spawn_test_payload_service<Types>() -> PayloadBuilderHandle<Types>
+where
+    Types: EngineTypes<PayloadBuilderAttributes = PayloadBuilderAttributes> + 'static,
+{
     let (service, handle) = test_payload_service();
     tokio::spawn(service);
     handle
