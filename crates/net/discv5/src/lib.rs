@@ -2,15 +2,13 @@ pub use discv5::{
     enr, enr::CombinedKey, service::Service, Config as Discv5Config,
     ConfigBuilder as Discv5ConfigBuilder, Discv5, Enr, Event,
 };
-use futures_util::{StreamExt, TryFutureExt};
+use futures_util::StreamExt;
 use k256::ecdsa::SigningKey;
-use parking_lot::Mutex;
 use secp256k1::SecretKey;
 use std::{
     default::Default,
     fmt,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::sync::mpsc;

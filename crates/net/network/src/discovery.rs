@@ -5,9 +5,9 @@ use crate::{
     manager::DiscoveredEvent,
 };
 use futures::{stream::Stream, StreamExt};
-use k256::ecdsa::SigningKey;
+// use k256::ecdsa::SigningKey;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry};
-use reth_discv5::{CombinedKey, Discv5, Discv5Config, Discv5Error, Discv5Handle, Event};
+use reth_discv5::{Discv5Config, Discv5Handle, Event};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
@@ -85,7 +85,7 @@ impl Discovery {
         };
 
         // setup discv5
-        let (discv5, discv5_event_stream) = if let Some(discv5_config) = discv5_config {
+        let (discv5, _discv5_event_stream) = if let Some(discv5_config) = discv5_config {
             let mut discv5 = Discv5Handle::from_secret_key(sk, discv5_config)?;
             discv5.start_service().await.unwrap();
             let discv5_event_stream = discv5.create_event_stream().await.unwrap();
@@ -222,7 +222,7 @@ impl Discovery {
                     id: node_id,
                 };
                 self.on_node_record_update(node_record, None)
-            } // #5576 handle replaced variable
+            }
             Event::EnrAdded { enr, replaced } => {
                 if let Some(discv5) = &self.discv5 {
                     let discv5 = Discv5Handle::convert_to_discv5(discv5);
@@ -232,7 +232,7 @@ impl Discovery {
                         discv5.remove_node(&node_id);
                     }
                 }
-            } // #5576 handle replaced variable
+            }
             Event::NodeInserted { node_id, replaced } => {
                 if let Some(discv5) = &self.discv5 {
                     let discv5 = Discv5Handle::convert_to_discv5(discv5);
