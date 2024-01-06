@@ -56,6 +56,7 @@ reth-nippy-jar.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
+alloy-chains.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 # tracing

@@ -20,6 +20,7 @@ revm-primitives = { workspace = true, features = ["serde"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie = { version = "0.1", features = ["serde"] }
+alloy-chains = { workspace = true, features = ["serde"] }
 ethers-core = { workspace = true, default-features = false, optional = true }
 nybbles = { version = "0.1.2", features = ["serde", "rlp"] }
 

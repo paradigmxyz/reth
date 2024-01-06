@@ -413,7 +413,8 @@ mod tests {
     use crate::tree::TreeRootEntry;
     use alloy_rlp::Encodable;
     use enr::{EnrBuilder, EnrKey};
-    use reth_primitives::{Chain, Hardfork, MAINNET};
+    use alloy_chains::Chain;
+    use reth_primitives::{Hardfork, MAINNET};
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
     use tokio_stream::StreamExt;

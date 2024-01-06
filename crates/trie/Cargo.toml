@@ -15,7 +15,7 @@ reth-interfaces.workspace = true
 reth-db.workspace = true
 
 alloy-rlp.workspace = true
-
+alloy-chains.workspace = true
 # tokio
 tokio = { workspace = true, default-features = false, features = ["sync"] }
 

@@ -5,7 +5,7 @@ use crate::{
     version::ParseVersionError,
     DisconnectReason, EthMessageID, EthVersion,
 };
-use alloy_chains::ChainKind;
+use alloy_chains::Chain;
 use reth_primitives::{GotExpected, GotExpectedBoxed, ValidationError, B256};
 use std::io;
 
@@ -102,7 +102,7 @@ pub enum EthHandshakeError {
     MismatchedProtocolVersion(GotExpected<u8>),
     #[error("mismatched chain in status message: {0}")]
     /// Mismatch in chain details in status messages.
-    MismatchedChain(GotExpected<ChainKind>),
+    MismatchedChain(GotExpected<Chain>),
     #[error("total difficulty bitlen is too large: got {got}, maximum {maximum}")]
     /// Excessively large total difficulty bit lengths.
     TotalDifficultyBitLenTooLarge {

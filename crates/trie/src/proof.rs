@@ -168,7 +168,8 @@ mod tests {
     use once_cell::sync::Lazy;
     use reth_db::database::Database;
     use reth_interfaces::RethResult;
-    use reth_primitives::{Account, Bytes, Chain, ChainSpec, StorageEntry, HOLESKY, MAINNET, U256};
+    use reth_primitives::{Account, Bytes, ChainSpec, StorageEntry, HOLESKY, MAINNET, U256};
+    use alloy_chains::Chain;
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter, ProviderFactory};
     use std::{str::FromStr, sync::Arc};
 

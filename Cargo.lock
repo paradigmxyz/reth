@@ -144,7 +144,10 @@ version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa1873637aa7f20369eae38b312cf7550c266d13ebc60f176fd5c82c5127810b"
 dependencies = [
+ "alloy-rlp",
+ "arbitrary",
  "num_enum 0.7.1",
+ "proptest",
  "serde",
  "strum",
 ]
@@ -4173,6 +4176,7 @@ dependencies = [
 name = "manual-p2p"
 version = "0.0.0"
 dependencies = [
+ "alloy-chains",
  "eyre",
  "futures",
  "once_cell",
@@ -5606,6 +5610,7 @@ dependencies = [
 name = "reth"
 version = "0.1.0-alpha.13"
 dependencies = [
+ "alloy-chains",
  "alloy-rlp",
  "aquamarine",
  "backon",
@@ -5733,6 +5738,7 @@ dependencies = [
 name = "reth-beacon-consensus"
 version = "0.1.0-alpha.13"
 dependencies = [
+ "alloy-chains",
  "assert_matches",
  "cfg-if",
  "futures",
@@ -5819,6 +5825,7 @@ dependencies = [
 name = "reth-consensus-common"
 version = "0.1.0-alpha.13"
 dependencies = [
+ "alloy-chains",
  "assert_matches",
  "cfg-if",
  "mockall",
@@ -5899,6 +5906,7 @@ dependencies = [
 name = "reth-dns-discovery"
 version = "0.1.0-alpha.13"
 dependencies = [
+ "alloy-chains",
  "alloy-rlp",
  "async-trait",
  "data-encoding",
@@ -6214,6 +6222,7 @@ dependencies = [
 name = "reth-network-api"
 version = "0.1.0-alpha.13"
 dependencies = [
+ "alloy-chains",
  "async-trait",
  "reth-discv4",
  "reth-eth-wire",
@@ -6294,6 +6303,7 @@ name = "reth-primitives"
 version = "0.1.0-alpha.13"
 dependencies = [
  "ahash",
+ "alloy-chains",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
@@ -6721,6 +6731,7 @@ name = "reth-trie"
 version = "0.1.0-alpha.13"
 dependencies = [
  "ahash",
+ "alloy-chains",
  "alloy-rlp",
  "auto_impl",
  "criterion",

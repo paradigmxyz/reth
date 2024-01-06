@@ -1,5 +1,5 @@
-use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, Chain, ChainSpec, Hardfork, U256};
-
+use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, ChainSpec, Hardfork, U256};
+use alloy_chains::Chain;
 /// Calculates the base block reward.
 ///
 /// The base block reward is defined as:

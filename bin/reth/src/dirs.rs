@@ -1,7 +1,7 @@
 //! reth data directories.
 
 use crate::utils::parse_path;
-use reth_primitives::Chain;
+use alloy_chains::Chain;
 use std::{
     env::VarError,
     fmt::{Debug, Display, Formatter},
@@ -12,8 +12,8 @@ use std::{
 /// Constructs a string to be used as a path for configuration and db paths.
 pub fn config_path_prefix(chain: Chain) -> String {
     match chain {
-        Chain::Named(name) => name.to_string(),
-        Chain::Id(id) => id.to_string(),
+        Chain::from_named(name) => name.to_string(),
+        Chain::from_id(id) => id.to_string(),
     }
 }
 

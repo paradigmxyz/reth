@@ -7,7 +7,7 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_interfaces::db::LogLevel;
-use reth_primitives::Chain;
+use alloy_chains::Chain;
 use std::{str::FromStr, sync::Arc};
 
 /// A type that represents either a _real_ (represented by a path), or _test_ database, which will
@@ -101,7 +101,7 @@ impl DatabaseInstance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::Chain;
+    use alloy_chains::Chain;
 
     #[test]
     fn test_database_db_dir() {

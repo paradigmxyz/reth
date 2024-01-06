@@ -1,9 +1,9 @@
 use crate::{EthVersion, StatusBuilder};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
-use alloy_chains::{ChainKind, NamedChain};
+use alloy_chains::{Chain, NamedChain};
 use reth_primitives::{
-    hex, Chain, ChainSpec, ForkId, Genesis, Hardfork, Head, B256, MAINNET, U256,
+    hex, ChainSpec, ForkId, Genesis, Hardfork, Head, B256, MAINNET, U256,
 };
 use std::fmt::{Debug, Display};
 
@@ -25,7 +25,7 @@ pub struct Status {
 
     /// The chain id, as introduced in
     /// [EIP155](https://eips.ethereum.org/EIPS/eip-155#list-of-chain-ids).
-    pub chain: ChainKind,
+    pub chain: Chain,
 
     /// Total difficulty of the best chain.
     pub total_difficulty: U256,
@@ -52,7 +52,7 @@ impl From<Genesis> for Status {
 
         Status {
             version: EthVersion::Eth68 as u8,
-            chain: ChainKind::Id(chain),
+            chain: Chain::from_id(chain),
             total_difficulty,
             blockhash: chainspec.genesis_hash(),
             genesis: chainspec.genesis_hash(),
@@ -139,7 +139,7 @@ impl Default for Status {
         let mainnet_genesis = MAINNET.genesis_hash();
         Status {
             version: EthVersion::Eth68 as u8,
-            chain: ChainKind::Named(NamedChain::Mainnet),
+            chain: Chain::from_named(NamedChain::Mainnet),
             total_difficulty: U256::from(17_179_869_184u64),
             blockhash: mainnet_genesis,
             genesis: mainnet_genesis,
@@ -155,9 +155,10 @@ mod tests {
     use crate::types::{EthVersion, Status};
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
+    use alloy_chains::{Chain, NamedChain};
     use reth_primitives::{
-        hex, Chain, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head,
-        NamedChain, B256, U256,
+        hex, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head,
+         B256, U256,
     };
     use std::str::FromStr;
 
@@ -166,7 +167,7 @@ mod tests {
         let expected = hex!("f85643018a07aac59dabcdd74bc567a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80");
         let status = Status {
             version: EthVersion::Eth67 as u8,
-            chain: Chain::Named(NamedChain::Mainnet),
+            chain: Chain::from_named(NamedChain::Mainnet),
             total_difficulty: U256::from(36206751599115524359527u128),
             blockhash: B256::from_str(
                 "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
@@ -189,7 +190,7 @@ mod tests {
         let data = hex!("f85643018a07aac59dabcdd74bc567a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80");
         let expected = Status {
             version: EthVersion::Eth67 as u8,
-            chain: Chain::Named(NamedChain::Mainnet),
+            chain: Chain::from_named(NamedChain::Mainnet),
             total_difficulty: U256::from(36206751599115524359527u128),
             blockhash: B256::from_str(
                 "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
@@ -210,7 +211,7 @@ mod tests {
         let expected = hex!("f850423884024190faa0f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27ba00d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5bc6845d43d2fd80");
         let status = Status {
             version: EthVersion::Eth66 as u8,
-            chain: Chain::Named(NamedChain::BinanceSmartChain),
+            chain: Chain::from_named(NamedChain::BinanceSmartChain),
             total_difficulty: U256::from(37851386u64),
             blockhash: B256::from_str(
                 "f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27b",
@@ -233,7 +234,7 @@ mod tests {
         let data = hex!("f850423884024190faa0f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27ba00d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5bc6845d43d2fd80");
         let expected = Status {
             version: EthVersion::Eth66 as u8,
-            chain: Chain::Named(NamedChain::BinanceSmartChain),
+            chain: Chain::from_named(NamedChain::BinanceSmartChain),
             total_difficulty: U256::from(37851386u64),
             blockhash: B256::from_str(
                 "f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27b",
@@ -254,7 +255,7 @@ mod tests {
         let data = hex!("f86142820834936d68fcffffffffffffffffffffffffdeab81b8a0523e8163a6d620a4cc152c547a05f28a03fec91a2a615194cb86df9731372c0ca06499dccdc7c7def3ebb1ce4c6ee27ec6bd02aee570625ca391919faf77ef27bdc6841a67ccd880");
         let expected = Status {
             version: EthVersion::Eth66 as u8,
-            chain: Chain::Id(2100),
+            chain: Chain::from_id(2100),
             total_difficulty: U256::from_str(
                 "0x000000000000000000000000006d68fcffffffffffffffffffffffffdeab81b8",
             )
@@ -324,7 +325,7 @@ mod tests {
 
         let status = Status::spec_builder(&spec, &head).build();
 
-        assert_eq!(status.chain, Chain::Id(1337));
+        assert_eq!(status.chain, Chain::from_id(1337));
         assert_eq!(status.forkid, forkid);
         assert_eq!(status.total_difficulty, total_difficulty);
         assert_eq!(status.blockhash, head_hash);

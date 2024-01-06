@@ -5,7 +5,7 @@ use crate::{
     },
     proofs::state_root_ref_unhashed,
     revm_primitives::{address, b256},
-    Address, BlockNumber, Chain, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis, Hardfork,
+    Address, BlockNumber, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis, Hardfork,
     Head, Header, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use once_cell::sync::Lazy;
@@ -15,6 +15,7 @@ use std::{
     fmt::{Display, Formatter},
     sync::Arc,
 };
+use alloy_chains::Chain;
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -1602,13 +1603,13 @@ impl DepositContract {
 mod tests {
     use super::*;
     use crate::{
-        b256, hex, trie::TrieAccount, ChainConfig, GenesisAccount, NamedChain, B256, DEV, GOERLI,
+        b256, hex, trie::TrieAccount, ChainConfig, GenesisAccount, B256, DEV, GOERLI,
         HOLESKY, MAINNET, SEPOLIA, U256,
     };
     use alloy_rlp::Encodable;
     use bytes::BytesMut;
     use std::{collections::HashMap, str::FromStr};
-
+    use alloy_chains::NamedChain;
     #[cfg(feature = "optimism")]
     use crate::OP_GOERLI;
 
@@ -2492,7 +2493,7 @@ Post-merge hard forks (timestamp based):
     fn test_timestamp_fork_in_genesis() {
         let timestamp = 1690475657u64;
         let default_spec_builder = ChainSpecBuilder::default()
-            .chain(Chain::Id(1337))
+            .chain(Chain::from_id(1337))
             .genesis(Genesis::default().with_timestamp(timestamp))
             .paris_activated();
 
@@ -2753,7 +2754,7 @@ Post-merge hard forks (timestamp based):
         let genesis = serde_json::from_str::<AllGenesisFormats>(hive_json).unwrap();
         let chainspec: ChainSpec = genesis.into();
         assert_eq!(chainspec.genesis_hash, None);
-        assert_eq!(chainspec.chain, Chain::Named(NamedChain::Optimism));
+        assert_eq!(chainspec.chain, Chain::from_named(NamedChain::Optimism));
         let expected_state_root: B256 =
             hex!("9a6049ac535e3dc7436c189eaa81c73f35abd7f282ab67c32944ff0301d63360").into();
         assert_eq!(chainspec.genesis_header().state_root, expected_state_root);
@@ -2825,7 +2826,7 @@ Post-merge hard forks (timestamp based):
         // set the gas limit from the hive test genesis according to the hash
         let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
         let default_chainspec = ChainSpecBuilder::default()
-            .chain(Chain::Id(1337))
+            .chain(Chain::from_id(1337))
             .genesis(genesis)
             .cancun_activated()
             .build();
