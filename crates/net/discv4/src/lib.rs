@@ -1605,7 +1605,9 @@ impl Discv4Service {
             // process all incoming datagrams
             while let Poll::Ready(Some(event)) = self.ingress.poll_recv(cx) {
                 match event {
-                    IngressEvent::RecvError(_) => {}
+                    IngressEvent::RecvError(err) => {
+                        debug!(target: "discv4", %err, "failed to read datagram");
+                    }
                     IngressEvent::BadPacket(from, err, data) => {
                         debug!(target: "discv4", ?from, ?err, packet=?hex::encode(&data),   "bad packet");
                     }
