@@ -8,7 +8,6 @@ use crate::tracing::{
         builtins::{register_builtins, PrecompileList},
     },
     types::CallKind,
-    utils::get_create_address,
 };
 use alloy_primitives::{Address, Bytes, B256, U256};
 use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
@@ -449,7 +448,7 @@ where
 
         let _ = data.journaled_state.load_account(inputs.caller, data.db);
         let nonce = data.journaled_state.account(inputs.caller).info.nonce;
-        let address = get_create_address(inputs, nonce);
+        let address = inputs.created_address(nonce);
         self.push_call(
             address,
             inputs.init_code.clone(),
