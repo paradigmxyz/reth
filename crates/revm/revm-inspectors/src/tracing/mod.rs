@@ -1,6 +1,10 @@
+use self::parity::stack_push_count;
 use crate::tracing::{
-    types::{CallKind, LogCallOrder},
-    utils::get_create_address,
+    arena::PushTraceKind,
+    types::{
+        CallKind, CallTraceNode, LogCallOrder, RecordedMemory, StorageChange, StorageChangeReason,
+    },
+    utils::gas_used,
 };
 use alloy_primitives::{Address, Bytes, Log, B256, U256};
 pub use arena::CallTraceArena;
@@ -22,12 +26,6 @@ mod fourbyte;
 mod opcount;
 pub mod types;
 mod utils;
-use self::parity::stack_push_count;
-use crate::tracing::{
-    arena::PushTraceKind,
-    types::{CallTraceNode, RecordedMemory, StorageChange, StorageChangeReason},
-    utils::gas_used,
-};
 pub use builder::{
     geth::{self, GethTraceBuilder},
     parity::{self, ParityTraceBuilder},
@@ -502,7 +500,7 @@ where
         let nonce = data.journaled_state.account(inputs.caller).info.nonce;
         self.start_trace_on_call(
             data,
-            get_create_address(inputs, nonce),
+            inputs.created_address(nonce),
             inputs.init_code.clone(),
             inputs.value,
             inputs.scheme.into(),

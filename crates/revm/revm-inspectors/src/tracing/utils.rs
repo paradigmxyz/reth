@@ -1,10 +1,9 @@
 //! Util functions for revm related ops
 
-use alloy_primitives::{hex, Address, Bytes, B256};
+use alloy_primitives::{hex, Bytes};
 use alloy_sol_types::{ContractError, GenericRevertReason};
 use revm::{
-    interpreter::CreateInputs,
-    primitives::{CreateScheme, SpecId, KECCAK_EMPTY},
+    primitives::{SpecId, KECCAK_EMPTY},
     DatabaseRef,
 };
 
@@ -25,17 +24,6 @@ pub(crate) fn convert_memory(data: &[u8]) -> Vec<String> {
 pub(crate) fn gas_used(spec: SpecId, spent: u64, refunded: u64) -> u64 {
     let refund_quotient = if SpecId::enabled(spec, SpecId::LONDON) { 5 } else { 2 };
     spent - (refunded).min(spent / refund_quotient)
-}
-
-/// Get the address of a contract creation
-#[inline]
-pub(crate) fn get_create_address(call: &CreateInputs, nonce: u64) -> Address {
-    match call.scheme {
-        CreateScheme::Create => call.caller.create(nonce),
-        CreateScheme::Create2 { salt } => {
-            call.caller.create2_from_code(B256::from(salt), call.init_code.clone())
-        }
-    }
 }
 
 /// Loads the code for the given account from the account itself or the database
