@@ -126,6 +126,19 @@ impl Default for Header {
 }
 
 impl Header {
+    /// Checks if the block's difficulty is set to zero, indicating a Proof-of-Stake header.
+    ///
+    /// This function is linked to EIP-3675, proposing the consensus upgrade to Proof-of-Stake:
+    /// [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0)
+    ///
+    /// Verifies whether, as per the EIP, the block's difficulty is updated to zero,
+    /// signifying the transition to a Proof-of-Stake mechanism.
+    ///
+    /// Returns `true` if the block's difficulty matches the constant zero set by the EIP.
+    pub fn is_zero_difficulty(&self) -> bool {
+        self.difficulty == U256::ZERO
+    }
+
     /// Performs a sanity check on the extradata field of the header.
     ///
     /// # Errors

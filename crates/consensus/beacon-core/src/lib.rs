@@ -55,9 +55,7 @@ impl Consensus for BeaconConsensus {
     ) -> Result<(), ConsensusError> {
         if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, header.difficulty)
         {
-            // EIP-3675: Upgrade consensus to Proof-of-Stake:
-            // https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0
-            if header.difficulty != U256::ZERO {
+            if !header.is_zero_difficulty() {
                 return Err(ConsensusError::TheMergeDifficultyIsNotZero)
             }
 
