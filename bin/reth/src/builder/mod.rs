@@ -438,19 +438,19 @@ impl NodeConfig {
 
     /// Returns the max block that the node should run to, looking it up from the network if
     /// necessary
-    pub async fn max_block<DB, Client>(
+    async fn max_block<Provider, Client>(
         &self,
         network_client: &Client,
-        provider_factory: ProviderFactory<DB>,
+        provider: Provider,
     ) -> eyre::Result<Option<BlockNumber>>
     where
-        DB: Database,
+        Provider: HeaderProvider,
         Client: HeadersClient,
     {
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
         } else if let Some(tip) = self.debug.tip {
-            Some(self.lookup_or_fetch_tip(provider_factory, network_client, tip).await?)
+            Some(self.lookup_or_fetch_tip(provider, network_client, tip).await?)
         } else {
             None
         };
@@ -754,42 +754,38 @@ impl NodeConfig {
     /// If it doesn't exist, download the header and return the block number.
     ///
     /// NOTE: The download is attempted with infinite retries.
-    async fn lookup_or_fetch_tip<DB, Client>(
+    async fn lookup_or_fetch_tip<Provider, Client>(
         &self,
-        provider_factory: ProviderFactory<DB>,
+        provider: Provider,
         client: Client,
         tip: B256,
     ) -> RethResult<u64>
     where
-        DB: Database,
+        Provider: HeaderProvider,
         Client: HeadersClient,
     {
-        Ok(self.fetch_tip(provider_factory, client, BlockHashOrNumber::Hash(tip)).await?.number)
+        let header = provider.header_by_hash_or_number(tip.into())?;
+
+        // try to look up the header in the database
+        if let Some(header) = header {
+            info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
+            return Ok(header.number)
+        }
+
+        Ok(self.fetch_tip_from_network(client, tip.into()).await?.number)
     }
 
     /// Attempt to look up the block with the given number and return the header.
     ///
     /// NOTE: The download is attempted with infinite retries.
-    async fn fetch_tip<DB, Client>(
+    async fn fetch_tip_from_network<Client>(
         &self,
-        factory: ProviderFactory<DB>,
         client: Client,
         tip: BlockHashOrNumber,
     ) -> RethResult<SealedHeader>
     where
-        DB: Database,
         Client: HeadersClient,
     {
-        let provider = factory.provider()?;
-
-        let header = provider.header_by_hash_or_number(tip)?;
-
-        // try to look up the header in the database
-        if let Some(header) = header {
-            info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.seal_slow())
-        }
-
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
         loop {
             match get_single_header(&client, tip).await {
