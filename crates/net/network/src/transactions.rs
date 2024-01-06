@@ -1297,7 +1297,6 @@ mod tests {
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
-    #[cfg_attr(not(feature = "geth-tests"), ignore)]
     async fn test_ignored_tx_broadcasts_while_initially_syncing() {
         reth_tracing::init_test_tracing();
         let net = Testnet::create(3).await;
@@ -1380,7 +1379,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[cfg_attr(not(feature = "geth-tests"), ignore)]
     async fn test_tx_broadcasts_through_two_syncs() {
         reth_tracing::init_test_tracing();
         let net = Testnet::create(3).await;
