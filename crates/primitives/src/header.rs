@@ -136,7 +136,7 @@ impl Header {
     ///
     /// Returns `true` if the block's difficulty matches the constant zero set by the EIP.
     pub fn is_zero_difficulty(&self) -> bool {
-        self.difficulty == U256::ZERO
+        self.difficulty.is_zero()
     }
 
     /// Performs a sanity check on the extradata field of the header.
