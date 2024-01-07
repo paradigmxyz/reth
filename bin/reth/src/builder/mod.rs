@@ -483,10 +483,7 @@ impl NodeConfig {
         DB: Database + Unpin + Clone + 'static,
     {
         info!(target: "reth::cli", "Connecting to P2P network");
-        let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
-        debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
-        let secret_key = get_secret_key(&network_secret_path)?;
+        let secret_key = self.network_secret(data_dir)?;
         let default_peers_path = data_dir.known_peers_path();
         let network_config = self.load_network_config(
             config,
