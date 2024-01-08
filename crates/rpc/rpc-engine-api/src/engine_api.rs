@@ -439,13 +439,6 @@ where
             let attr_validation_res =
                 attrs.ensure_well_formed_attributes(&self.inner.chain_spec, version);
 
-            #[cfg(feature = "optimism")]
-            if attrs.optimism_payload_attributes.gas_limit.is_none() &&
-                self.inner.chain_spec.is_optimism()
-            {
-                return Err(EngineApiError::MissingGasLimitInPayloadAttributes)
-            }
-
             // From the engine API spec:
             //
             // Client software MUST ensure that payloadAttributes.timestamp is greater than

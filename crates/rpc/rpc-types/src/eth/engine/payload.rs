@@ -623,17 +623,15 @@ pub struct PayloadAttributes {
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3>
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_beacon_block_root: Option<B256>,
-    /// Optimism Payload Attributes
-    #[cfg(feature = "optimism")]
-    #[serde(flatten)]
-    pub optimism_payload_attributes: OptimismPayloadAttributes,
 }
 
 /// Optimism Payload Attributes
-#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg(feature = "optimism")]
 pub struct OptimismPayloadAttributes {
+    /// The payload attributes
+    #[serde(flatten)]
+    pub payload_attributes: PayloadAttributes,
     /// Transactions is a field for rollups: the transactions list is forced into the block
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transactions: Option<Vec<Bytes>>,

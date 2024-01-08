@@ -3,7 +3,7 @@ use crate::{
     AttributesValidationError,
 };
 use reth_primitives::{ChainSpec, B256};
-use reth_rpc_types::engine::{PayloadAttributes, PayloadId};
+use reth_rpc_types::engine::{OptimismPayloadAttributes, PayloadAttributes, PayloadId, Withdrawal};
 
 /// This can be implemented by types that describe a currently running payload job.
 pub trait PayloadBuilderAttributesTrait {
@@ -44,7 +44,7 @@ pub trait PayloadAttributesTrait:
     fn timestamp(&self) -> u64;
 
     /// Returns the withdrawals for the given payload attributes.
-    fn withdrawals(&self) -> Option<&Vec<reth_rpc_types::engine::payload::Withdrawal>>;
+    fn withdrawals(&self) -> Option<&Vec<Withdrawal>>;
 
     /// Return the parent beacon block root for the payload attributes.
     fn parent_beacon_block_root(&self) -> Option<B256>;
@@ -58,13 +58,12 @@ pub trait PayloadAttributesTrait:
     ) -> Result<(), AttributesValidationError>;
 }
 
-// TODO(rjected): find a better place for this impl
 impl PayloadAttributesTrait for PayloadAttributes {
     fn timestamp(&self) -> u64 {
         self.timestamp
     }
 
-    fn withdrawals(&self) -> Option<&Vec<reth_rpc_types::engine::payload::Withdrawal>> {
+    fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
         self.withdrawals.as_ref()
     }
 
@@ -78,5 +77,36 @@ impl PayloadAttributesTrait for PayloadAttributes {
         version: EngineApiMessageVersion,
     ) -> Result<(), AttributesValidationError> {
         validate_version_specific_fields(chain_spec, version, &self.into())
+    }
+}
+
+impl PayloadAttributesTrait for OptimismPayloadAttributes {
+    fn timestamp(&self) -> u64 {
+        self.payload_attributes.timestamp
+    }
+
+    fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
+        self.payload_attributes.withdrawals.as_ref()
+    }
+
+    fn parent_beacon_block_root(&self) -> Option<B256> {
+        self.payload_attributes.parent_beacon_block_root
+    }
+
+    fn ensure_well_formed_attributes(
+        &self,
+        chain_spec: &ChainSpec,
+        version: EngineApiMessageVersion,
+    ) -> Result<(), AttributesValidationError> {
+        validate_version_specific_fields(chain_spec, version, &self.into())?;
+
+        if self.gas_limit.is_none() && chain_spec.is_optimism() {
+            // return Err(EngineApiError::MissingGasLimitInPayloadAttributes)
+            return Err(AttributesValidationError::InvalidParams(
+                "MissingGasLimitInPayloadAttributes".to_string().into(),
+            ))
+        }
+
+        Ok(())
     }
 }

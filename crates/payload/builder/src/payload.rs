@@ -143,9 +143,6 @@ pub struct PayloadBuilderAttributes {
     pub withdrawals: Vec<Withdrawal>,
     /// Root of the parent beacon block
     pub parent_beacon_block_root: Option<B256>,
-    /// Optimism Payload Builder Attributes
-    #[cfg(feature = "optimism")]
-    pub optimism_payload_attributes: OptimismPayloadBuilderAttributes,
 }
 
 impl PayloadBuilderAttributesTrait for PayloadBuilderAttributes {
@@ -212,9 +209,10 @@ impl PayloadBuilderAttributesTrait for PayloadBuilderAttributes {
 }
 
 /// Optimism Payload Builder Attributes
-#[cfg(feature = "optimism")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OptimismPayloadBuilderAttributes {
+    /// Inner ethereum payload builder attributes
+    pub payload_attributes: PayloadBuilderAttributes,
     /// NoTxPool option for the generated payload
     pub no_tx_pool: bool,
     /// Transactions for the generated payload
