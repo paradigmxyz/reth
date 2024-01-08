@@ -561,11 +561,9 @@ where
 
             // enforce recommended soft limit, however the peer may enforce an arbitrary limit on
             // the response (2MB)
-            let left_over_hashes =
-                hashes.drain(..GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES).collect::<Vec<_>>();
-            for hash in left_over_hashes {
-                self.transaction_fetcher.buffered_hashes.insert(hash);
-            }
+            self.transaction_fetcher
+                .buffered_hashes
+                .extend(hashes.drain(..GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES));
 
             // request the missing transactions
             let request_sent =
@@ -607,20 +605,28 @@ where
         }
     }
 
+    // Returns any idle peer for the given hash.
+    fn get_idle_peer_for(&self, hash: TxHash) -> Option<PeerId> {
+        let peers = self.transaction_fetcher.hash_to_fallback_peers.get(&hash)?;
+        for peer_id in peers {
+            let peer_id: &PeerId = peer_id;
+            if let Some(peer) = self.peers.get(peer_id) {
+                let inflight_requests_count = *peer.inflight_requests_semaphore_rx.borrow();
+                if inflight_requests_count < 1 {
+                    return Some(*peer_id)
+                }
+            }
+        }
+        None
+    }
+
     // Returns any idle peer.
     fn get_any_idle_peer(&self, hashes: &mut Vec<TxHash>) -> Option<PeerId> {
         for hash in &self.transaction_fetcher.buffered_hashes {
-            if let Some(peers) = self.transaction_fetcher.hash_to_fallback_peers.get(hash) {
-                for peer_id in peers {
-                    let peer_id: &PeerId = peer_id;
-                    if let Some(peer) = self.peers.get(peer_id) {
-                        let inflight_requests_count = *peer.inflight_requests_semaphore_rx.borrow();
-                        if inflight_requests_count < 1 {
-                            hashes.push(*hash);
-                            return Some(*peer_id)
-                        }
-                    }
-                }
+            let idle_peer = self.get_idle_peer_for(*hash);
+            if idle_peer.is_some() {
+                hashes.push(*hash);
+                return idle_peer
             }
         }
         None
