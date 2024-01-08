@@ -51,20 +51,14 @@ impl<K: TransactionKind> Tx<K> {
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
     #[track_caller]
     pub fn new_with_metrics(inner: Transaction<K>, with_metrics: bool) -> Self {
-        let metrics_handler = with_metrics.then(|| {
+        let metrics_handler = if with_metrics {
             let handler = MetricsHandler::<K>::new(inner.id());
             TransactionMetrics::record_open(handler.transaction_mode());
-            handler
-        });
-
-        debug!(
-            target: "storage::db::mdbx",
-            caller = %core::panic::Location::caller(),
-            tx_id = inner.id(),
-            read_only = K::IS_READ_ONLY,
-            "Transaction opened",
-        );
-
+            handler.log_transaction_opened();
+            Some(handler)
+        } else {
+            None
+        };
         Self { inner, db_handles: Default::default(), metrics_handler }
     }
 
@@ -187,6 +181,18 @@ impl<K: TransactionKind> MetricsHandler<K> {
         }
     }
 
+    /// Logs the caller location and ID of the transaction that was opened.
+    #[track_caller]
+    fn log_transaction_opened(&self) {
+        debug!(
+            target: "storage::db::mdbx",
+            caller = %core::panic::Location::caller(),
+            id = %self.txn_id,
+            mode = %self.transaction_mode().as_str(),
+            "Transaction opened",
+        );
+    }
+
     /// Logs the backtrace of current call if the duration that the read transaction has been open
     /// is more than [LONG_TRANSACTION_DURATION].
     /// The backtrace is recorded and logged just once, guaranteed by `backtrace_recorded` atomic.
@@ -206,6 +212,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
                     target: "storage::db::mdbx",
                     ?open_duration,
                     ?backtrace,
+                    %self.txn_id,
                     "The database read transaction has been open for too long"
                 );
             }
