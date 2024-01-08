@@ -16,9 +16,11 @@ pub trait Database: Send + Sync + Sealed {
     type TXMut: DbTxMut + DbTx + TableImporter + Send + Sync + Debug + 'static;
 
     /// Create read only transaction.
+    #[track_caller]
     fn tx(&self) -> Result<Self::TX, DatabaseError>;
 
     /// Create read write transaction only possible if database is open with write access.
+    #[track_caller]
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError>;
 
     /// Takes a function and passes a read-only transaction into it, making sure it's closed in the
@@ -54,12 +56,10 @@ impl<DB: Database> Database for Arc<DB> {
     type TX = <DB as Database>::TX;
     type TXMut = <DB as Database>::TXMut;
 
-    #[track_caller]
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         <DB as Database>::tx(self)
     }
 
-    #[track_caller]
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         <DB as Database>::tx_mut(self)
     }
@@ -69,12 +69,10 @@ impl<DB: Database> Database for &DB {
     type TX = <DB as Database>::TX;
     type TXMut = <DB as Database>::TXMut;
 
-    #[track_caller]
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         <DB as Database>::tx(self)
     }
 
-    #[track_caller]
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         <DB as Database>::tx_mut(self)
     }

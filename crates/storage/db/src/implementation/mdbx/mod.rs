@@ -48,7 +48,6 @@ impl Database for DatabaseEnv {
     type TX = tx::Tx<RO>;
     type TXMut = tx::Tx<RW>;
 
-    #[track_caller]
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         Ok(Tx::new_with_metrics(
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
@@ -56,7 +55,6 @@ impl Database for DatabaseEnv {
         ))
     }
 
-    #[track_caller]
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         Ok(Tx::new_with_metrics(
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
