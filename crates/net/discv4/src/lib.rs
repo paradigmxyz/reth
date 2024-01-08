@@ -41,14 +41,9 @@ use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    hex,
-    revm_primitives::FixedBytes,
-    ForkId, PeerId, B256,
+    hex, ForkId, PeerId, B256,
 };
-use secp256k1::{
-    rand::{rngs::OsRng, RngCore},
-    SecretKey,
-};
+use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque},
@@ -293,25 +288,9 @@ impl Discv4 {
         self.new_random_lookup().await
     }
 
-    /// Creates a new random lookup for nodes.
-    ///
-    /// This method generates a random target using cryptographic random number generation
-    /// and then initiates a node lookup based on this target.
-    ///
-    /// # Steps
-    /// 1. Generates a random `FixedBytes<64>` as the target.
-    /// 2. Calls `lookup_node` with the generated target.
-    ///
-    /// # Returns
-    /// A `Result` which is `Ok` with a `Vec<NodeRecord>` if the lookup is successful, or
-    /// `Err(Discv4Error)` in case of an error during the process.
-    ///
-    /// # Errors
-    /// Returns `Discv4Error` if the lookup process fails at any point.
+    /// Calls [Self::lookup_node] with a new random PeerId
     pub async fn new_random_lookup(&self) -> Result<Vec<NodeRecord>, Discv4Error> {
-        let mut rng = OsRng;
-        let mut target = FixedBytes::<64>([0u8; 64]);
-        rng.fill_bytes(target.as_mut_slice());
+        let target = PeerId::random();
         self.lookup_node(Some(target)).await
     }
 
