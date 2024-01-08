@@ -300,95 +300,87 @@ pub struct ChainConfig {
 
 impl ChainConfig {
     /// Checks if the blockchain is active at or after the Homestead fork block.
-    pub fn is_homestead_active_at_block(&self, block: Option<u64>) -> bool {
+    pub fn is_homestead_active_at_block(&self, block: u64) -> bool {
         self.is_active_at_block(self.homestead_block, block)
     }
 
     /// Checks if the blockchain is active at or after the EIP150 fork block.
-    pub fn is_eip150_active_at_block(&self, block: Option<u64>) -> bool {
+    pub fn is_eip150_active_at_block(&self, block: u64) -> bool {
         self.is_active_at_block(self.eip150_block, block)
     }
 
     /// Checks if the blockchain is active at or after the EIP155 fork block.
-    pub fn is_eip155_active_at_block(&self, block: Option<u64>) -> bool {
+    pub fn is_eip155_active_at_block(&self, block: u64) -> bool {
         self.is_active_at_block(self.eip155_block, block)
     }
 
     /// Checks if the blockchain is active at or after the EIP158 fork block.
-    pub fn is_eip158_active_at_block(&self, block: Option<u64>) -> bool {
+    pub fn is_eip158_active_at_block(&self, block: u64) -> bool {
         self.is_active_at_block(self.eip158_block, block)
     }
 
     /// Checks if the blockchain is active at or after the Byzantium fork block.
-    pub fn is_byzantium_active_at_block(&self, block: Option<u64>) -> bool {
+    pub fn is_byzantium_active_at_block(&self, block: u64) -> bool {
         self.is_active_at_block(self.byzantium_block, block)
     }
 
     /// Checks if the blockchain is active at or after the Constantinople fork block.
-    pub fn is_constantinople_active_at_block(&self, block: Option<u64>) -> bool {
+    pub fn is_constantinople_active_at_block(&self, block: u64) -> bool {
         self.is_active_at_block(self.constantinople_block, block)
     }
 
     /// Checks if the blockchain is active at or after the Muir Glacier (EIP-2384) fork block.
-    pub fn is_muir_glacier_active_at_block(&self, block: Option<u64>) -> bool {
+    pub fn is_muir_glacier_active_at_block(&self, block: u64) -> bool {
         self.is_active_at_block(self.muir_glacier_block, block)
     }
 
     /// Checks if the blockchain is active at or after the Petersburg fork block.
-    pub fn is_petersburg_active_at_block(&self, block: Option<u64>) -> bool {
+    pub fn is_petersburg_active_at_block(&self, block: u64) -> bool {
         self.is_active_at_block(self.petersburg_block, block)
     }
 
     /// Checks if the blockchain is active at or after the Istanbul fork block.
-    pub fn is_istanbul_active_at_block(&self, block: Option<u64>) -> bool {
+    pub fn is_istanbul_active_at_block(&self, block: u64) -> bool {
         self.is_active_at_block(self.istanbul_block, block)
     }
 
     /// Checks if the blockchain is active at or after the Berlin fork block.
-    pub fn is_berlin_active_at_block(&self, block: Option<u64>) -> bool {
+    pub fn is_berlin_active_at_block(&self, block: u64) -> bool {
         self.is_active_at_block(self.berlin_block, block)
     }
 
     /// Checks if the blockchain is active at or after the London fork block.
-    pub fn is_london_active_at_block(&self, block: Option<u64>) -> bool {
+    pub fn is_london_active_at_block(&self, block: u64) -> bool {
         self.is_active_at_block(self.london_block, block)
     }
 
     /// Checks if the blockchain is active at or after the Arrow Glacier (EIP-4345) fork block.
-    pub fn is_arrow_glacier_active_at_block(&self, block: Option<u64>) -> bool {
+    pub fn is_arrow_glacier_active_at_block(&self, block: u64) -> bool {
         self.is_active_at_block(self.arrow_glacier_block, block)
     }
 
     /// Checks if the blockchain is active at or after the Gray Glacier (EIP-5133) fork block.
-    pub fn is_gray_glacier_active_at_block(&self, block: Option<u64>) -> bool {
+    pub fn is_gray_glacier_active_at_block(&self, block: u64) -> bool {
         self.is_active_at_block(self.gray_glacier_block, block)
     }
 
     /// Checks if the blockchain is active at or after the Shanghai fork block and the specified
     /// timestamp.
-    pub fn is_shanghai_active_at_block_and_timestamp(
-        &self,
-        block: Option<u64>,
-        timestamp: u64,
-    ) -> bool {
+    pub fn is_shanghai_active_at_block_and_timestamp(&self, block: u64, timestamp: u64) -> bool {
         self.is_london_active_at_block(block) &&
             self.is_active_at_timestamp(self.shanghai_time, timestamp)
     }
 
     /// Checks if the blockchain is active at or after the Cancun fork block and the specified
     /// timestamp.
-    pub fn is_cancun_active_at_block_and_timestamp(
-        &self,
-        block: Option<u64>,
-        timestamp: u64,
-    ) -> bool {
+    pub fn is_cancun_active_at_block_and_timestamp(&self, block: u64, timestamp: u64) -> bool {
         self.is_london_active_at_block(block) &&
             self.is_active_at_timestamp(self.cancun_time, timestamp)
     }
 
     // Private function handling the comparison logic for block numbers
-    fn is_active_at_block(&self, config_block: Option<u64>, block: Option<u64>) -> bool {
-        config_block.map_or(false, |cb| block.map_or(false, |b| cb <= b))
+    fn is_active_at_block(&self, config_block: Option<u64>, block: u64) -> bool {
+        config_block.map_or(false, |cb| cb <= block)
     }
 
     // Private function handling the comparison logic for timestamps
