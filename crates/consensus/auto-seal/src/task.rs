@@ -192,8 +192,11 @@ where
 
                             debug!(target: "consensus::auto", header=?sealed_block_with_senders.hash(), "sending block notification");
 
-                            let chain =
-                                Arc::new(Chain::new(vec![sealed_block_with_senders], bundle_state));
+                            let chain = Arc::new(Chain::new(
+                                vec![sealed_block_with_senders],
+                                bundle_state,
+                                None,
+                            ));
 
                             // send block notification
                             let _ = canon_state_notification

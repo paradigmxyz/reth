@@ -859,12 +859,12 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         &mut self,
         hashes: impl IntoIterator<Item = impl Into<BlockNumHash>>,
     ) -> RethResult<()> {
-        // check unconnected block buffer for childs of the canonical hashes
+        // check unconnected block buffer for children of the canonical hashes
         for added_block in hashes.into_iter() {
             self.try_connect_buffered_blocks(added_block.into())
         }
 
-        // check unconnected block buffer for childs of the chains
+        // check unconnected block buffer for children of the chains
         let mut all_chain_blocks = Vec::new();
         for (_, chain) in self.state.chains.iter() {
             for (&number, blocks) in chain.blocks().iter() {
@@ -969,7 +969,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     /// # Note
     ///
     /// This unwinds the database if necessary, i.e. if parts of the canonical chain have been
-    /// re-orged.
+    /// reorged.
     ///
     /// # Returns
     ///
@@ -1160,29 +1160,43 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         chain: Chain,
         recorder: &mut MakeCanonicalDurationsRecorder,
     ) -> RethResult<()> {
-        // Compute state root before opening write transaction.
-        let hashed_state = chain.state().hash_state_slow();
-        let (state_root, trie_updates) = chain
-            .state()
-            .state_root_calculator(
-                self.externals.provider_factory.provider()?.tx_ref(),
-                &hashed_state,
-            )
-            .root_with_updates()
-            .map_err(Into::<DatabaseError>::into)?;
-        let tip = chain.tip();
-        if state_root != tip.state_root {
-            return Err(RethError::Provider(ProviderError::StateRootMismatch(Box::new(
-                RootMismatch {
-                    root: GotExpected { got: state_root, expected: tip.state_root },
-                    block_number: tip.number,
-                    block_hash: tip.hash,
-                },
-            ))))
-        }
+        let (blocks, state, chain_trie_updates) = chain.into_inner();
+        let hashed_state = state.hash_state_slow();
+
+        // Compute state root or retrieve cached trie updates before opening write transaction.
+        let block_hash_numbers =
+            blocks.iter().map(|(number, b)| (number, b.hash)).collect::<Vec<_>>();
+        let trie_updates = match chain_trie_updates {
+            Some(updates) => {
+                debug!(target: "blockchain_tree", blocks = ?block_hash_numbers, "Using cached trie updates");
+                self.metrics.trie_updates_insert_cached.increment(1);
+                updates
+            }
+            None => {
+                debug!(target: "blockchain_tree", blocks = ?block_hash_numbers, "Recomputing state root for insert");
+                let (state_root, trie_updates) = state
+                    .state_root_calculator(
+                        self.externals.provider_factory.provider()?.tx_ref(),
+                        &hashed_state,
+                    )
+                    .root_with_updates()
+                    .map_err(Into::<DatabaseError>::into)?;
+                let tip = blocks.tip();
+                if state_root != tip.state_root {
+                    return Err(RethError::Provider(ProviderError::StateRootMismatch(Box::new(
+                        RootMismatch {
+                            root: GotExpected { got: state_root, expected: tip.state_root },
+                            block_number: tip.number,
+                            block_hash: tip.hash,
+                        },
+                    ))));
+                }
+                self.metrics.trie_updates_insert_recomputed.increment(1);
+                trie_updates
+            }
+        };
         recorder.record_relative(MakeCanonicalAction::RetrieveStateTrieUpdates);
 
-        let (blocks, state) = chain.into_inner();
         let provider_rw = self.externals.provider_factory.provider_rw()?;
         provider_rw
             .append_blocks_with_state(
