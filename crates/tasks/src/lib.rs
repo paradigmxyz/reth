@@ -581,6 +581,16 @@ pub trait TaskSpawnerExt: Send + Sync + Unpin + std::fmt::Debug + DynClone {
     ) -> JoinHandle<()>
     where
         F: Future<Output = ()> + Send + 'static;
+
+    /// This spawns a regular task onto the runtime.
+    ///
+    /// The [TaskManager] will wait until the given future has completed before shutting down.
+    fn spawn_with_graceful_shutdown_signal<F>(
+        &self,
+        f: impl FnOnce(GracefulShutdown) -> F,
+    ) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static;
 }
 
 impl TaskSpawnerExt for TaskExecutor {
@@ -593,6 +603,16 @@ impl TaskSpawnerExt for TaskExecutor {
         F: Future<Output = ()> + Send + 'static,
     {
         TaskExecutor::spawn_critical_with_graceful_shutdown_signal(self, name, f)
+    }
+
+    fn spawn_with_graceful_shutdown_signal<F>(
+        &self,
+        f: impl FnOnce(GracefulShutdown) -> F,
+    ) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        TaskExecutor::spawn_with_graceful_shutdown_signal(self, f)
     }
 }
 
