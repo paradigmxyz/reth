@@ -871,9 +871,13 @@ impl EnvironmentBuilder {
     }
 }
 
+/// Creates an instance of `MDBX_hsr_func`.
+///
+/// Caution: this leaks the memory for callbacks, so they're alive throughout the program. It's
+/// fine, because we also expect the database environment to be alive during this whole time.
 unsafe fn handle_slow_readers_callback(callback: HandleSlowReadersCallback) -> MDBX_hsr_func {
-    // Move the callback function to heap and intionally leak it, so it's not dropped and the MDBX
-    // env can use it throughout the whole program.
+    // Move the callback function to heap and intentionally leak it, so it's not dropped and the
+    // MDBX env can use it throughout the whole program.
     let callback = Box::leak(Box::new(callback));
 
     // Wrap the callback into an ffi binding. The callback is needed for a nicer UX with Rust types,
