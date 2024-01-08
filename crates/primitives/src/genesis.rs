@@ -270,7 +270,7 @@ pub struct ChainConfig {
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub merge_netsplit_block: Option<u64>,
 
-    /// Shanghai switch time (None = no fork, 0 = already on shangai).
+    /// Shanghai switch time (None = no fork, 0 = already on shanghai).
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub shanghai_time: Option<u64>,
 
