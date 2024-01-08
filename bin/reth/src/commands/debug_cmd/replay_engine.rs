@@ -261,7 +261,7 @@ impl EngineApiStore {
 
     fn on_message(&self, msg: &BeaconEngineMessage, received_at: SystemTime) -> eyre::Result<()> {
         fs::create_dir_all(&self.path)?; // ensure that store path had been created
-        let timestamp = received_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+        let timestamp = received_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
         match msg {
             BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx: _tx } => {
                 let filename = format!("{}-fcu-{}.json", timestamp, state.head_block_hash);
