@@ -1,4 +1,4 @@
-use reth_primitives::EIP4844_TX_TYPE_ID;
+use reth_primitives::{Address, EIP4844_TX_TYPE_ID};
 
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
@@ -118,6 +118,8 @@ pub struct LocalTransactionConfig {
     ///   - no price exemptions
     ///   - no eviction exemptions
     pub no_exemptions: bool,
+    /// Addresses that will be considered as local . Above exemptions apply
+    pub local_addresses: Vec<Address>,
 }
 
 impl LocalTransactionConfig {
@@ -125,5 +127,19 @@ impl LocalTransactionConfig {
     #[inline]
     pub fn no_local_exemptions(&self) -> bool {
         self.no_exemptions
+    }
+
+    /// Returns whether the local addresses vector contains the given address.
+    #[inline]
+    pub fn contains_local_address(&self, address: Address) -> bool {
+        self.local_addresses.contains(&address)
+    }
+
+    /// Checks if local_addresses is non-empty
+    ///
+    /// Returns `true` if local_addresses is non-empty , otherwise returns `false`
+    #[inline]
+    pub fn has_local_address(&self) -> bool {
+        !self.local_addresses.is_empty()
     }
 }

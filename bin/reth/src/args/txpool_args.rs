@@ -2,6 +2,7 @@
 
 use crate::cli::config::RethTransactionPoolConfig;
 use clap::Args;
+use reth_primitives::Address;
 use reth_transaction_pool::{
     LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
     REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
@@ -47,6 +48,9 @@ pub struct TxPoolArgs {
     /// Flag to disable local transaction exemptions.
     #[arg(long = "txpool.nolocals")]
     pub no_locals: bool,
+    /// Flag to allow certain addresses as local
+    #[arg(long = "txpool.locals")]
+    pub locals: Vec<Address>,
 }
 
 impl Default for TxPoolArgs {
@@ -62,6 +66,7 @@ impl Default for TxPoolArgs {
             price_bump: DEFAULT_PRICE_BUMP,
             blob_transaction_price_bump: REPLACE_BLOB_PRICE_BUMP,
             no_locals: false,
+            locals: vec![],
         }
     }
 }
@@ -70,7 +75,10 @@ impl RethTransactionPoolConfig for TxPoolArgs {
     /// Returns transaction pool configuration.
     fn pool_config(&self) -> PoolConfig {
         PoolConfig {
-            local_transactions_config: LocalTransactionConfig { no_exemptions: self.no_locals },
+            local_transactions_config: LocalTransactionConfig {
+                no_exemptions: self.no_locals,
+                local_addresses: self.locals.clone(),
+            },
             pending_limit: SubPoolLimit {
                 max_txs: self.pending_max_count,
                 max_size: self.pending_max_size * 1024 * 1024,
