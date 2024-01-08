@@ -62,7 +62,7 @@ pub struct DebugArgs {
     /// The path to store engine API messages at.
     /// If specified, all of the intercepted engine API messages
     /// will be written to specified location.
-    #[arg(long = "debug.engine-api-store", value_name = "PATH")]
+    #[arg(long = "debug.engine-api-store", help_heading = "Debug", value_name = "PATH")]
     pub engine_api_store: Option<PathBuf>,
 }
 
