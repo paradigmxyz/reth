@@ -2,7 +2,7 @@
 
 Gets the content of a table for the given key
 
-```bash
+```text
 $ reth db get --help
 Usage: reth db get [OPTIONS] <TABLE> <KEY>
 

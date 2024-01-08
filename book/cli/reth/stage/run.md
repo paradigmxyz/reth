@@ -2,7 +2,7 @@
 
 Run a single stage.
 
-```bash
+```text
 $ reth stage run --help
 Usage: reth stage run [OPTIONS] --from <FROM> --to <TO> <STAGE>
 
