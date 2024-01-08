@@ -1,4 +1,4 @@
-//!  The `tracer` module provides functionalities for setting up and configuring logging.
+//!  The `tracing` module provides functionalities for setting up and configuring logging.
 //!
 //!  It includes structures and functions to create and manage various logging layers: stdout,
 //!  file, or journald. The module's primary entry point is the `Tracer` struct, which can be
