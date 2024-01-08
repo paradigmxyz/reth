@@ -21,6 +21,7 @@ use reth_provider::{
     providers::BundleStateProvider, BundleStateDataProvider, BundleStateWithReceipts, Chain,
     ExecutorFactory, StateRootProvider,
 };
+use reth_trie::updates::TrieUpdates;
 use std::{
     collections::BTreeMap,
     ops::{Deref, DerefMut},
@@ -84,7 +85,7 @@ impl AppendableChain {
             canonical_fork,
         };
 
-        let bundle_state = Self::validate_and_execute(
+        let (bundle_state, trie_updates) = Self::validate_and_execute(
             block.clone(),
             parent_header,
             state_provider,
@@ -94,7 +95,7 @@ impl AppendableChain {
         )
         .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
 
-        Ok(Self { chain: Chain::new(vec![block], bundle_state) })
+        Ok(Self { chain: Chain::new(vec![block], bundle_state, trie_updates) })
     }
 
     /// Create a new chain that forks off of the canonical chain.
@@ -127,7 +128,7 @@ impl AppendableChain {
         )
         .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
 
-        Ok(Self { chain: Chain::new(vec![block], bundle_state) })
+        Ok(Self { chain: Chain::new(vec![block], bundle_state, None) })
     }
 
     /// Create a new chain that forks off of an existing sidechain.
@@ -183,7 +184,7 @@ impl AppendableChain {
         state.state_mut().take_n_reverts(size - 1);
 
         // If all is okay, return new chain back. Present chain is not modified.
-        Ok(Self { chain: Chain::from_block(block, state) })
+        Ok(Self { chain: Chain::from_block(block, state, None) })
     }
 
     /// Validate and execute the given block that _extends the canonical chain_, validating its
@@ -202,7 +203,7 @@ impl AppendableChain {
         externals: &TreeExternals<DB, EF>,
         block_kind: BlockKind,
         block_validation_kind: BlockValidationKind,
-    ) -> RethResult<BundleStateWithReceipts>
+    ) -> RethResult<(BundleStateWithReceipts, Option<TrieUpdates>)>
     where
         BSDP: BundleStateDataProvider,
         DB: Database,
@@ -227,16 +228,18 @@ impl AppendableChain {
         // validation was requested.
         if block_kind.extends_canonical_head() && block_validation_kind.is_exhaustive() {
             // check state root
-            let state_root = provider.state_root(&bundle_state)?;
+            let (state_root, trie_updates) = provider.state_root_with_updates(&bundle_state)?;
             if block.state_root != state_root {
                 return Err(ConsensusError::BodyStateRootDiff(
                     GotExpected { got: state_root, expected: block.state_root }.into(),
                 )
                 .into())
             }
-        }
 
-        Ok(bundle_state)
+            Ok((bundle_state, Some(trie_updates)))
+        } else {
+            Ok((bundle_state, None))
+        }
     }
 
     /// Validate and execute the given sidechain block, skipping state root validation.
@@ -251,14 +254,15 @@ impl AppendableChain {
         DB: Database,
         EF: ExecutorFactory,
     {
-        Self::validate_and_execute(
+        let (state, _) = Self::validate_and_execute(
             block,
             parent_block,
             bundle_state_data_provider,
             externals,
             BlockKind::ForksHistoricalBlock,
             BlockValidationKind::SkipStateRootValidation,
-        )
+        )?;
+        Ok(state)
     }
 
     /// Validate and execute the given block, and append it to this chain.
@@ -297,7 +301,7 @@ impl AppendableChain {
             canonical_fork,
         };
 
-        let block_state = Self::validate_and_execute(
+        let (block_state, trie_updates) = Self::validate_and_execute(
             block.clone(),
             parent_block,
             bundle_state_data,
@@ -307,7 +311,8 @@ impl AppendableChain {
         )
         .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
         // extend the state.
-        self.chain.append_block(block, block_state);
+        self.chain.append_block(block, block_state, trie_updates);
+
         Ok(())
     }
 }
