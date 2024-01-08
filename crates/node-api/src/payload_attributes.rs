@@ -1,5 +1,7 @@
-use reth_primitives::B256;
+use reth_primitives::{ChainSpec, B256};
 use reth_rpc_types::engine::{PayloadAttributes, PayloadId};
+
+use crate::AttributesValidationError;
 
 /// This can be implemented by types that describe a currently running payload job.
 pub trait PayloadBuilderAttributesTrait {
@@ -44,6 +46,14 @@ pub trait PayloadAttributesTrait:
 
     /// Return the parent beacon block root for the payload attributes.
     fn parent_beacon_block_root(&self) -> Option<B256>;
+
+    /// Ensures that the payload attributes are valid for the given [ChainSpec] and
+    /// [EngineApiMessageVersion].
+    fn ensure_well_formed_attributes(
+        &self,
+        chain_spec: &ChainSpec,
+        version: EngineApiMessageVersion,
+    ) -> Result<(), AttributesValidationError>;
 }
 
 // TODO(rjected): find a better place for this impl
@@ -58,5 +68,13 @@ impl PayloadAttributesTrait for PayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.parent_beacon_block_root
+    }
+
+    fn ensure_well_formed_attributes(
+        &self,
+        chain_spec: &ChainSpec,
+        version: EngineApiMessageVersion,
+    ) -> Result<(), AttributesValidationError> {
+        todo!()
     }
 }
