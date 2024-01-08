@@ -578,15 +578,12 @@ where
             if num_already_seen > 0 {
                 self.metrics.messages_with_already_seen_hashes.increment(1);
                 trace!(target: "net::tx", num_hashes=%num_already_seen, ?peer_id, client=?peer.client_version, "Peer sent already seen hashes");
+                self.report_already_seen(peer_id);
             }
         }
 
         // request buffered transactions
         self.request_buffered_hashes();
-
-        if num_already_seen > 0 {
-            self.report_already_seen(peer_id);
-        }
     }
 
     // Requests buffered hashes for which an idle peer exists.
