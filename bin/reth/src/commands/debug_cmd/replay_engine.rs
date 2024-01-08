@@ -33,7 +33,12 @@ use reth_rpc_types::{
 use reth_stages::Pipeline;
 use reth_transaction_pool::noop::NoopTransactionPool;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::SystemTime};
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -72,7 +77,11 @@ pub struct Command {
 
     /// The path to read engine API messages from.
     #[arg(long = "engine-api-store", value_name = "PATH")]
-    pub engine_api_store: PathBuf,
+    engine_api_store: PathBuf,
+
+    /// The number of milliseconds between Engine API messages.
+    #[arg(long = "interval", default_value_t = 1_000)]
+    interval: u64,
 }
 
 impl Command {
@@ -166,6 +175,9 @@ impl Command {
                     debug!(target: "reth::cli", ?response, "Received for new payload");
                 }
             };
+
+            // Pause before next message
+            tokio::time::sleep(Duration::from_millis(self.interval)).await;
         }
 
         match rx.await? {
