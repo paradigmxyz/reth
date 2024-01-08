@@ -112,7 +112,7 @@ pub mod noop;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-pub use payload::{BuiltPayload, PayloadBuilderAttributes};
+pub use payload::{BuiltPayload, OptimismPayloadBuilderAttributes, PayloadBuilderAttributes};
 pub use reth_rpc_types::engine::PayloadId;
 pub use service::{PayloadBuilderHandle, PayloadBuilderService, PayloadStore};
 pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
