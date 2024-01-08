@@ -507,6 +507,41 @@ impl TaskExecutor {
 
         self.handle.spawn(task)
     }
+
+    /// This spawns a regular task onto the runtime.
+    ///
+    /// The [TaskManager] will wait until the given future has completed before shutting down.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn t(executor: reth_tasks::TaskExecutor) {
+    ///
+    /// executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
+    ///     // await the shutdown signal
+    ///     let guard = shutdown.await;
+    ///     // do work before exiting the program
+    ///     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    ///     // allow graceful shutdown
+    ///     drop(guard);
+    /// });
+    /// # }
+    /// ```
+    pub fn spawn_with_graceful_shutdown_signal<F>(
+        &self,
+        f: impl FnOnce(GracefulShutdown) -> F,
+    ) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let on_shutdown = GracefulShutdown::new(
+            self.on_shutdown.clone(),
+            GracefulShutdownGuard::new(Arc::clone(&self.graceful_tasks)),
+        );
+        let fut = f(on_shutdown);
+
+        self.handle.spawn(fut)
+    }
 }
 
 impl TaskSpawner for TaskExecutor {
@@ -546,6 +581,16 @@ pub trait TaskSpawnerExt: Send + Sync + Unpin + std::fmt::Debug + DynClone {
     ) -> JoinHandle<()>
     where
         F: Future<Output = ()> + Send + 'static;
+
+    /// This spawns a regular task onto the runtime.
+    ///
+    /// The [TaskManager] will wait until the given future has completed before shutting down.
+    fn spawn_with_graceful_shutdown_signal<F>(
+        &self,
+        f: impl FnOnce(GracefulShutdown) -> F,
+    ) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static;
 }
 
 impl TaskSpawnerExt for TaskExecutor {
@@ -558,6 +603,16 @@ impl TaskSpawnerExt for TaskExecutor {
         F: Future<Output = ()> + Send + 'static,
     {
         TaskExecutor::spawn_critical_with_graceful_shutdown_signal(self, name, f)
+    }
+
+    fn spawn_with_graceful_shutdown_signal<F>(
+        &self,
+        f: impl FnOnce(GracefulShutdown) -> F,
+    ) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        TaskExecutor::spawn_with_graceful_shutdown_signal(self, f)
     }
 }
 
