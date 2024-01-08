@@ -229,6 +229,8 @@ impl Command {
             tokio::time::sleep(Duration::from_millis(self.interval)).await;
         }
 
+        info!("Finished replaying engine API messages");
+
         match rx.await? {
             Ok(()) => info!("Beacon consensus engine exited successfully"),
             Err(error) => {
