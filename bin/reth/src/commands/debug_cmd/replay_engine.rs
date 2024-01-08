@@ -93,7 +93,7 @@ impl EngineApiStore {
             let entry = entry?;
             let filename = entry.file_name();
             if let Some(filename) = filename.to_str().filter(|n| n.ends_with(".json")) {
-                if let Some(Ok(timestamp)) = filename.split("-").next().map(|n| n.parse::<u64>()) {
+                if let Some(Ok(timestamp)) = filename.split('-').next().map(|n| n.parse::<u64>()) {
                     filenames_by_ts.entry(timestamp).or_default().push(entry.path());
                     tracing::debug!(target: "engine::store", timestamp, filename, "Queued engine API message");
                 } else {
@@ -202,7 +202,7 @@ impl Command {
             Pipeline::builder().build(provider_factory),
             blockchain_db.clone(),
             Box::new(ctx.task_executor.clone()),
-            Box::new(NoopSyncStateUpdater::default()),
+            Box::<NoopSyncStateUpdater>::default(),
             None,
             false,
             payload_builder,
