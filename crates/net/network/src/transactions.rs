@@ -579,9 +579,6 @@ where
                 self.report_already_seen(peer_id);
             }
         }
-
-        // request buffered transactions
-        self.request_buffered_hashes();
     }
 
     // Requests buffered hashes for which an idle peer exists.
@@ -914,6 +911,9 @@ where
             }
         }
 
+        // try drain buffered transactions
+        this.request_buffered_hashes();
+
         this.update_request_metrics();
         this.update_import_metrics();
 
@@ -1178,13 +1178,14 @@ impl TransactionFetcher {
         if let Poll::Ready(Some(GetPooledTxResponse { peer_id, requested_hashes, result })) =
             self.inflight_requests.poll_next_unpin(cx)
         {
+            self.remove_inflight_hashes(requested_hashes.iter());
+
             return match result {
                 Ok(Ok(transactions)) => {
                     // clear received hashes
-                    self.remove_inflight_hashes(transactions.hashes());
-
-                    // TODO: re-request missing hashes, for now clear all of them
-                    self.remove_inflight_hashes(requested_hashes.iter());
+                    self.buffered_hashes.extend(requested_hashes.iter().filter(|requested_hash| {
+                        !transactions.hashes().any(|hash| hash == *requested_hash)
+                    }));
 
                     Poll::Ready(FetchEvent::TransactionsFetched {
                         peer_id,
@@ -1192,13 +1193,11 @@ impl TransactionFetcher {
                     })
                 }
                 Ok(Err(req_err)) => {
-                    // TODO: re-request missing hashes
-                    self.remove_inflight_hashes(&requested_hashes);
+                    self.buffered_hashes.extend(requested_hashes);
                     Poll::Ready(FetchEvent::FetchError { peer_id, error: req_err })
                 }
                 Err(_) => {
-                    // TODO: re-request missing hashes
-                    self.remove_inflight_hashes(&requested_hashes);
+                    self.buffered_hashes.extend(requested_hashes);
                     // request channel closed/dropped
                     Poll::Ready(FetchEvent::FetchError {
                         peer_id,
