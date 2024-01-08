@@ -2,6 +2,7 @@
 
 use clap::Args;
 use reth_primitives::{TxHash, B256};
+use std::path::PathBuf;
 
 /// Parameters for debugging purposes
 #[derive(Debug, Args, PartialEq, Default)]
@@ -57,6 +58,12 @@ pub struct DebugArgs {
         conflicts_with = "hook_transaction"
     )]
     pub hook_all: bool,
+
+    /// The path to store engine API messages at.
+    /// If specified, all of the intercepted engine API messages
+    /// will be written to specified location.
+    #[arg(long = "debug.engine-api-store", value_name = "PATH")]
+    pub engine_api_store: Option<PathBuf>,
 }
 
 #[cfg(test)]
