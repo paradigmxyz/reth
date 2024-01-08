@@ -187,8 +187,6 @@ impl From<GenesisAccount> for Account {
 
 /// Defines core blockchain settings per block.
 ///
-/// Stores essential network configurations persistently in the database.
-///
 /// Tailors unique settings for each network based on its genesis block.
 ///
 /// Governs crucial blockchain behavior and adaptability.
@@ -217,29 +215,18 @@ pub struct ChainConfig {
     pub dao_fork_support: bool,
 
     /// The [EIP-150](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-150.md) hard fork block (None = no fork).
-    ///
-    /// EIP-150 introduces gas cost changes for critical operations to mitigate network performance
-    /// vulnerabilities.
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub eip150_block: Option<u64>,
 
     /// The [EIP-150](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-150.md) hard fork hash.
-    ///
-    /// EIP-150 introduces gas cost changes for critical operations to mitigate network
-    /// performance vulnerabilities.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub eip150_hash: Option<B256>,
 
     /// The [EIP-155](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-155.md) hard fork block.
-    ///
-    /// EIP-155 primarily focusing on replay protection for secure transaction execution.
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub eip155_block: Option<u64>,
 
     /// The [EIP-158](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-158.md) hard fork block.
-    ///
-    /// EIP-158 aims at clearing empty accounts from the blockchain state, significantly reducing
-    /// state size and simplifying protocol functionality in Ethereum.
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub eip158_block: Option<u64>,
 
