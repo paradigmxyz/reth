@@ -20,7 +20,7 @@ const RETH_LOG_FILE_NAME: &str = "reth.log";
 /// Default [directives](Directive) for [EnvFilter] which disables high-frequency debug logs from
 /// `hyper` and `trust-dns`
 const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 3] =
-    ["hyper::proto::h1=off", "trust_dns_proto=off", "atrust_dns_resolver=off"];
+    ["hyper::proto::h1=off", "trust_dns_proto=off", "trust_dns_resolver=off"];
 
 /// Manages the collection of layers for a tracing subscriber.
 ///
