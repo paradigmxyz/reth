@@ -77,7 +77,7 @@ rust.rust_2018_idioms = "deny"
 [workspace.package]
 version = "0.1.0-alpha.13"
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.75"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
