@@ -39,14 +39,16 @@ use discv5::{
 use enr::{Enr, EnrBuilder};
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
-use rand::{rngs::OsRng, RngCore};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     hex,
     revm_primitives::FixedBytes,
     ForkId, PeerId, B256,
 };
-use secp256k1::SecretKey;
+use secp256k1::{
+    rand::{rngs::OsRng, RngCore},
+    SecretKey,
+};
 use std::{
     cell::RefCell,
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque},
