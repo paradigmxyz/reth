@@ -81,16 +81,14 @@ struct BeaconPayloadAttributes {
     withdrawals: Option<Vec<Withdrawal>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     parent_beacon_block_root: Option<B256>,
-    #[cfg(feature = "optimism")]
-    #[serde(flatten)]
-    optimism_payload_attributes: BeaconOptimismPayloadAttributes,
 }
 
 /// Optimism Payload Attributes
-#[cfg(feature = "optimism")]
 #[serde_as]
 #[derive(Serialize, Deserialize)]
 struct BeaconOptimismPayloadAttributes {
+    #[serde(flatten)]
+    payload_attributes: BeaconPayloadAttributes,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     transactions: Option<Vec<Bytes>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -98,6 +96,69 @@ struct BeaconOptimismPayloadAttributes {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     gas_limit: Option<u64>,
+}
+
+/// A helper module for serializing and deserializing optimism payload attributes for the beacon
+/// API.
+///
+/// See docs for [beacon_api_payload_attributes].
+pub mod beacon_api_payload_attributes_optimism {
+    use super::*;
+    use crate::engine::{OptimismPayloadAttributes, PayloadAttributes};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    /// Serialize the payload attributes for the beacon API.
+    pub fn serialize<S>(
+        payload_attributes: &OptimismPayloadAttributes,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let beacon_api_payload_attributes = BeaconPayloadAttributes {
+            timestamp: payload_attributes.payload_attributes.timestamp,
+            prev_randao: payload_attributes.payload_attributes.prev_randao,
+            suggested_fee_recipient: payload_attributes.payload_attributes.suggested_fee_recipient,
+            withdrawals: payload_attributes.payload_attributes.withdrawals.clone(),
+            parent_beacon_block_root: payload_attributes
+                .payload_attributes
+                .parent_beacon_block_root,
+        };
+
+        let op_beacon_api_payload_attributes = BeaconOptimismPayloadAttributes {
+            payload_attributes: beacon_api_payload_attributes,
+            transactions: payload_attributes.transactions.clone(),
+            no_tx_pool: payload_attributes.no_tx_pool,
+            gas_limit: payload_attributes.gas_limit,
+        };
+
+        op_beacon_api_payload_attributes.serialize(serializer)
+    }
+
+    /// Deserialize the payload attributes for the beacon API.
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<OptimismPayloadAttributes, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let beacon_api_payload_attributes =
+            BeaconOptimismPayloadAttributes::deserialize(deserializer)?;
+        Ok(OptimismPayloadAttributes {
+            payload_attributes: PayloadAttributes {
+                timestamp: beacon_api_payload_attributes.payload_attributes.timestamp,
+                prev_randao: beacon_api_payload_attributes.payload_attributes.prev_randao,
+                suggested_fee_recipient: beacon_api_payload_attributes
+                    .payload_attributes
+                    .suggested_fee_recipient,
+                withdrawals: beacon_api_payload_attributes.payload_attributes.withdrawals,
+                parent_beacon_block_root: beacon_api_payload_attributes
+                    .payload_attributes
+                    .parent_beacon_block_root,
+            },
+            transactions: beacon_api_payload_attributes.transactions,
+            no_tx_pool: beacon_api_payload_attributes.no_tx_pool,
+            gas_limit: beacon_api_payload_attributes.gas_limit,
+        })
+    }
 }
 
 /// A helper module for serializing and deserializing the payload attributes for the beacon API.
@@ -125,12 +186,6 @@ pub mod beacon_api_payload_attributes {
             suggested_fee_recipient: payload_attributes.suggested_fee_recipient,
             withdrawals: payload_attributes.withdrawals.clone(),
             parent_beacon_block_root: payload_attributes.parent_beacon_block_root,
-            #[cfg(feature = "optimism")]
-            optimism_payload_attributes: BeaconOptimismPayloadAttributes {
-                transactions: payload_attributes.optimism_payload_attributes.transactions.clone(),
-                no_tx_pool: payload_attributes.optimism_payload_attributes.no_tx_pool,
-                gas_limit: payload_attributes.optimism_payload_attributes.gas_limit,
-            },
         };
         beacon_api_payload_attributes.serialize(serializer)
     }
@@ -147,14 +202,6 @@ pub mod beacon_api_payload_attributes {
             suggested_fee_recipient: beacon_api_payload_attributes.suggested_fee_recipient,
             withdrawals: beacon_api_payload_attributes.withdrawals,
             parent_beacon_block_root: beacon_api_payload_attributes.parent_beacon_block_root,
-            #[cfg(feature = "optimism")]
-            optimism_payload_attributes: crate::eth::engine::OptimismPayloadAttributes {
-                transactions: beacon_api_payload_attributes
-                    .optimism_payload_attributes
-                    .transactions,
-                no_tx_pool: beacon_api_payload_attributes.optimism_payload_attributes.no_tx_pool,
-                gas_limit: beacon_api_payload_attributes.optimism_payload_attributes.gas_limit,
-            },
         })
     }
 }

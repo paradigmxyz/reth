@@ -12,6 +12,7 @@ use alloy_rlp::Encodable;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_interfaces::RethResult;
+use reth_node_api::{EngineTypes, PayloadBuilderAttributesTrait};
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, BuiltPayload,
     KeepPayloadJobAlive, PayloadBuilderAttributes, PayloadId, PayloadJob, PayloadJobGenerator,
@@ -152,27 +153,28 @@ where
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
+    <Builder as PayloadBuilder<Pool, Client>>::Attributes: Unpin + Clone,
 {
     type Job = BasicPayloadJob<Client, Pool, Tasks, Builder>;
 
     fn new_payload_job(
         &self,
-        attributes: PayloadBuilderAttributes,
+        attributes: <Self::Job as PayloadJob>::PayloadAttributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        let parent_block = if attributes.parent.is_zero() {
+        let parent_block = if attributes.parent().is_zero() {
             // use latest block if parent is zero: genesis block
             self.client
                 .block_by_number_or_tag(BlockNumberOrTag::Latest)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent))?
+                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent()))?
                 .seal_slow()
         } else {
             let block = self
                 .client
-                .find_block_by_hash(attributes.parent, BlockSource::Any)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent))?;
+                .find_block_by_hash(attributes.parent(), BlockSource::Any)?
+                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent()))?;
 
             // we already know the hash, so we can seal it
-            block.seal(attributes.parent)
+            block.seal(attributes.parent())
         };
 
         let config = PayloadConfig::new(
@@ -182,7 +184,7 @@ where
             Arc::clone(&self.chain_spec),
         );
 
-        let until = self.job_deadline(config.attributes.timestamp);
+        let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
 
         let cached_reads = self.maybe_pre_cached(config.parent_block.hash());
@@ -324,9 +326,12 @@ impl Default for BasicPayloadJobGeneratorConfig {
 
 /// A basic payload job that continuously builds a payload with the best transactions from the pool.
 #[derive(Debug)]
-pub struct BasicPayloadJob<Client, Pool, Tasks, Builder> {
+pub struct BasicPayloadJob<Client, Pool, Tasks, Builder>
+where
+    Builder: PayloadBuilder<Pool, Client>,
+{
     /// The configuration for how the payload will be created.
-    config: PayloadConfig,
+    config: PayloadConfig<Builder::Attributes>,
     /// The client that can interact with the chain.
     client: Client,
     /// The transaction pool.
@@ -362,6 +367,7 @@ where
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
+    <Builder as PayloadBuilder<Pool, Client>>::Attributes: Unpin + Clone,
 {
     type Output = Result<(), PayloadBuilderError>;
 
@@ -451,8 +457,9 @@ where
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
+    <Builder as PayloadBuilder<Pool, Client>>::Attributes: Unpin + Clone,
 {
-    type PayloadAttributes = PayloadBuilderAttributes;
+    type PayloadAttributes = Builder::Attributes;
     type ResolvePayloadFuture = ResolveBestPayload;
 
     fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
@@ -469,7 +476,7 @@ where
         build_empty_payload(&self.client, self.config.clone()).map(Arc::new)
     }
 
-    fn payload_attributes(&self) -> Result<PayloadBuilderAttributes, PayloadBuilderError> {
+    fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError> {
         Ok(self.config.attributes.clone())
     }
 
@@ -621,7 +628,7 @@ impl Drop for Cancelled {
 
 /// Static config for how to build a payload.
 #[derive(Clone, Debug)]
-pub struct PayloadConfig {
+pub struct PayloadConfig<Attributes: PayloadBuilderAttributesTrait> {
     /// Pre-configured block environment.
     pub initialized_block_env: BlockEnv,
     /// Configuration for the environment.
@@ -631,12 +638,15 @@ pub struct PayloadConfig {
     /// Block extra data.
     pub extra_data: Bytes,
     /// Requested attributes for the payload.
-    pub attributes: PayloadBuilderAttributes,
+    pub attributes: Attributes,
     /// The chain spec.
     pub chain_spec: Arc<ChainSpec>,
 }
 
-impl PayloadConfig {
+impl<Attributes> PayloadConfig<Attributes>
+where
+    Attributes: PayloadBuilderAttributesTrait,
+{
     /// Returns an owned instance of the [PayloadConfig]'s extra_data bytes.
     pub fn extra_data(&self) -> Bytes {
         self.extra_data.clone()
@@ -644,16 +654,14 @@ impl PayloadConfig {
 
     /// Returns the payload id.
     pub fn payload_id(&self) -> PayloadId {
-        self.attributes.id
+        self.attributes.payload_id()
     }
-}
 
-impl PayloadConfig {
     /// Create new payload config.
     pub fn new(
         parent_block: Arc<SealedBlock>,
         extra_data: Bytes,
-        attributes: PayloadBuilderAttributes,
+        attributes: Attributes,
         chain_spec: Arc<ChainSpec>,
     ) -> Self {
         // configure evm env based on parent block
@@ -698,7 +706,7 @@ pub enum BuildOutcome {
 /// building process. It holds references to the Ethereum client, transaction pool, cached reads,
 /// payload configuration, cancellation status, and the best payload achieved so far.
 #[derive(Debug)]
-pub struct BuildArguments<Pool, Client> {
+pub struct BuildArguments<Pool, Client, Attributes: PayloadBuilderAttributesTrait> {
     /// How to interact with the chain.
     pub client: Client,
     /// The transaction pool.
@@ -706,20 +714,23 @@ pub struct BuildArguments<Pool, Client> {
     /// Previously cached disk reads
     pub cached_reads: CachedReads,
     /// How to configure the payload.
-    pub config: PayloadConfig,
+    pub config: PayloadConfig<Attributes>,
     /// A marker that can be used to cancel the job.
     pub cancel: Cancelled,
     /// The best payload achieved so far.
     pub best_payload: Option<Arc<BuiltPayload>>,
 }
 
-impl<Pool, Client> BuildArguments<Pool, Client> {
+impl<Pool, Client, Attributes> BuildArguments<Pool, Client, Attributes>
+where
+    Attributes: PayloadBuilderAttributesTrait,
+{
     /// Create new build arguments.
     pub fn new(
         client: Client,
         pool: Pool,
         cached_reads: CachedReads,
-        config: PayloadConfig,
+        config: PayloadConfig<Attributes>,
         cancel: Cancelled,
         best_payload: Option<Arc<BuiltPayload>>,
     ) -> Self {
@@ -736,6 +747,8 @@ impl<Pool, Client> BuildArguments<Pool, Client> {
 /// Generic parameters `Pool` and `Client` represent the transaction pool and
 /// Ethereum client types.
 pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
+    type Attributes: PayloadBuilderAttributesTrait + Send + Sync + std::fmt::Debug;
+
     /// Tries to build a transaction payload using provided arguments.
     ///
     /// Constructs a transaction payload based on the given arguments,
@@ -750,7 +763,7 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
     /// A `Result` indicating the build outcome or an error.
     fn try_build(
         &self,
-        args: BuildArguments<Pool, Client>,
+        args: BuildArguments<Pool, Client, Self::Attributes>,
     ) -> Result<BuildOutcome, PayloadBuilderError>;
 
     /// Invoked when the payload job is being resolved and there is no payload yet.
@@ -758,19 +771,23 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
     /// If this returns a payload, it will be used as the final payload for the job.
     ///
     /// TODO(mattsse): This needs to be refined a bit because this only exists for OP atm
-    fn on_missing_payload(&self, args: BuildArguments<Pool, Client>) -> Option<Arc<BuiltPayload>> {
+    fn on_missing_payload(
+        &self,
+        args: BuildArguments<Pool, Client, Self::Attributes>,
+    ) -> Option<Arc<BuiltPayload>> {
         let _args = args;
         None
     }
 }
 
 /// Builds an empty payload without any transactions.
-fn build_empty_payload<Client>(
+fn build_empty_payload<Client, Attributes>(
     client: &Client,
-    config: PayloadConfig,
+    config: PayloadConfig<Attributes>,
 ) -> Result<BuiltPayload, PayloadBuilderError>
 where
     Client: StateProviderFactory,
+    Attributes: PayloadBuilderAttributesTrait,
 {
     let extra_data = config.extra_data();
     let PayloadConfig {
@@ -811,7 +828,7 @@ where
     })?;
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
-        commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals).map_err(|err| {
+        commit_withdrawals(&mut db, &chain_spec, attributes.timestamp(), attributes.withdrawals().clone()).map_err(|err| {
             warn!(target: "payload_builder", parent_hash=%parent_block.hash,?err,  "failed to commit withdrawals for empty payload");
             err
         })?;
@@ -837,8 +854,8 @@ where
         withdrawals_root,
         receipts_root: EMPTY_RECEIPTS,
         logs_bloom: Default::default(),
-        timestamp: attributes.timestamp,
-        mix_hash: attributes.prev_randao,
+        timestamp: attributes.timestamp(),
+        mix_hash: attributes.prev_randao(),
         nonce: BEACON_NONCE,
         base_fee_per_gas: Some(base_fee),
         number: parent_block.number + 1,
@@ -848,13 +865,13 @@ where
         extra_data,
         blob_gas_used: None,
         excess_blob_gas: None,
-        parent_beacon_block_root: attributes.parent_beacon_block_root,
+        parent_beacon_block_root: attributes.parent_beacon_block_root(),
     };
 
     let block = Block { header, body: vec![], ommers: vec![], withdrawals };
     let sealed_block = block.seal_slow();
 
-    Ok(BuiltPayload::new(attributes.id, sealed_block, U256::ZERO))
+    Ok(BuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO))
 }
 
 /// Represents the outcome of committing withdrawals to the runtime database and post state.
@@ -922,16 +939,17 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
 ///
 /// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
 /// change.
-pub fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit>(
+pub fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit, Attributes>(
     db: &mut DB,
     chain_spec: &ChainSpec,
     block_number: u64,
     initialized_cfg: &CfgEnv,
     initialized_block_env: &BlockEnv,
-    attributes: &PayloadBuilderAttributes,
+    attributes: &Attributes,
 ) -> Result<(), PayloadBuilderError>
 where
     DB::Error: std::fmt::Display,
+    Attributes: PayloadBuilderAttributesTrait,
 {
     // Configure the environment for the block.
     let env = Env {
@@ -947,9 +965,9 @@ where
     // initialize a block from the env, because the pre block call needs the block itself
     apply_beacon_root_contract_call(
         chain_spec,
-        attributes.timestamp,
+        attributes.timestamp(),
         block_number,
-        attributes.parent_beacon_block_root,
+        attributes.parent_beacon_block_root(),
         &mut evm_pre_block,
     )
     .map_err(|err| PayloadBuilderError::Internal(err.into()))

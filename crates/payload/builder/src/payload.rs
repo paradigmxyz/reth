@@ -183,6 +183,22 @@ impl PayloadBuilderAttributesTrait for PayloadBuilderAttributes {
     fn timestamp(&self) -> u64 {
         self.timestamp
     }
+
+    fn parent_beacon_block_root(&self) -> Option<B256> {
+        self.parent_beacon_block_root
+    }
+
+    fn suggested_fee_recipient(&self) -> Address {
+        self.suggested_fee_recipient
+    }
+
+    fn prev_randao(&self) -> B256 {
+        self.prev_randao
+    }
+
+    fn withdrawals(&self) -> &Vec<Withdrawal> {
+        &self.withdrawals
+    }
 }
 
 /// Optimism Payload Builder Attributes
@@ -254,6 +270,22 @@ impl PayloadBuilderAttributesTrait for OptimismPayloadBuilderAttributes {
 
     fn timestamp(&self) -> u64 {
         self.payload_attributes.timestamp
+    }
+
+    fn parent_beacon_block_root(&self) -> Option<B256> {
+        self.payload_attributes.parent_beacon_block_root
+    }
+
+    fn suggested_fee_recipient(&self) -> Address {
+        self.payload_attributes.suggested_fee_recipient
+    }
+
+    fn prev_randao(&self) -> B256 {
+        self.payload_attributes.prev_randao
+    }
+
+    fn withdrawals(&self) -> &Vec<Withdrawal> {
+        &self.payload_attributes.withdrawals
     }
 }
 
