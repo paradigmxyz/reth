@@ -12,10 +12,10 @@ use alloy_rlp::Encodable;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_interfaces::RethResult;
-use reth_node_api::{EngineTypes, PayloadBuilderAttributesTrait};
+use reth_node_api::PayloadBuilderAttributesTrait;
 use reth_payload_builder::{
-    database::CachedReads, error::PayloadBuilderError, BuiltPayload,
-    KeepPayloadJobAlive, PayloadBuilderAttributes, PayloadId, PayloadJob, PayloadJobGenerator,
+    database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
+    PayloadId, PayloadJob, PayloadJobGenerator,
 };
 use reth_primitives::{
     bytes::BytesMut,
@@ -747,6 +747,7 @@ where
 /// Generic parameters `Pool` and `Client` represent the transaction pool and
 /// Ethereum client types.
 pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
+    /// The payload attributes type to accept for building.
     type Attributes: PayloadBuilderAttributesTrait + Send + Sync + std::fmt::Debug;
 
     /// Tries to build a transaction payload using provided arguments.
