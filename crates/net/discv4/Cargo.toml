@@ -23,7 +23,6 @@ discv5.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
 rlp = "0.5" # needed for enr
-
 # async/futures
 tokio = { workspace = true, features = ["io-util", "net", "time"] }
 tokio-stream.workspace = true
