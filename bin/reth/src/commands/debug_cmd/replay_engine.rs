@@ -40,86 +40,6 @@ use tokio::sync::{
 };
 use tracing::*;
 
-#[derive(Debug, Serialize, Deserialize)]
-enum StoredEngineApiMessage {
-    ForkchoiceUpdated { state: ForkchoiceState, payload_attrs: Option<PayloadAttributes> },
-    NewPayload { payload: ExecutionPayload, cancun_fields: Option<CancunPayloadFields> },
-}
-
-pub(crate) struct EngineApiStore {
-    path: PathBuf,
-}
-
-impl EngineApiStore {
-    pub(crate) fn new(path: PathBuf) -> Self {
-        Self { path }
-    }
-
-    fn on_message(&self, msg: &BeaconEngineMessage, received_at: SystemTime) -> eyre::Result<()> {
-        fs::create_dir_all(&self.path)?; // ensure that store path had been created
-        let timestamp = received_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
-        match msg {
-            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx: _tx } => {
-                let filename = format!("{}-fcu-{}.json", timestamp, state.head_block_hash);
-                fs::write(
-                    self.path.join(filename),
-                    serde_json::to_vec(&StoredEngineApiMessage::ForkchoiceUpdated {
-                        state: *state,
-                        payload_attrs: payload_attrs.clone(),
-                    })?,
-                )?;
-            }
-            BeaconEngineMessage::NewPayload { payload, cancun_fields, tx: _tx } => {
-                let filename = format!("{}-new_payload-{}.json", timestamp, payload.block_hash());
-                fs::write(
-                    self.path.join(filename),
-                    serde_json::to_vec(&StoredEngineApiMessage::NewPayload {
-                        payload: payload.clone(),
-                        cancun_fields: cancun_fields.clone(),
-                    })?,
-                )?;
-            }
-            // noop
-            BeaconEngineMessage::TransitionConfigurationExchanged |
-            BeaconEngineMessage::EventListener(_) => (),
-        };
-        Ok(())
-    }
-
-    pub(crate) fn engine_messages_iter(&self) -> eyre::Result<impl Iterator<Item = PathBuf>> {
-        let mut filenames_by_ts = BTreeMap::<u64, Vec<PathBuf>>::default();
-        for entry in fs::read_dir(&self.path)? {
-            let entry = entry?;
-            let filename = entry.file_name();
-            if let Some(filename) = filename.to_str().filter(|n| n.ends_with(".json")) {
-                if let Some(Ok(timestamp)) = filename.split('-').next().map(|n| n.parse::<u64>()) {
-                    filenames_by_ts.entry(timestamp).or_default().push(entry.path());
-                    tracing::debug!(target: "engine::store", timestamp, filename, "Queued engine API message");
-                } else {
-                    tracing::warn!(target: "engine::store", %filename, "Could not parse timestamp from filename")
-                }
-            } else {
-                tracing::warn!(target: "engine::store", ?filename, "Skipping non json file");
-            }
-        }
-        Ok(filenames_by_ts.into_iter().flat_map(|(_, paths)| paths))
-    }
-
-    pub(crate) async fn intercept(
-        self,
-        mut rx: UnboundedReceiver<BeaconEngineMessage>,
-        to_engine: UnboundedSender<BeaconEngineMessage>,
-    ) {
-        loop {
-            let Some(msg) = rx.recv().await else { break };
-            if let Err(error) = self.on_message(&msg, SystemTime::now()) {
-                error!(target: "engine::intercept", ?msg, %error, "Error handling Engine API message");
-            }
-            let _ = to_engine.send(msg);
-        }
-    }
-}
-
 /// `reth debug replay-engine` command
 /// This script will read stored engine API messages and replay them by the timestamp.
 /// It does not require
@@ -256,5 +176,87 @@ impl Command {
         };
 
         Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum StoredEngineApiMessage {
+    ForkchoiceUpdated { state: ForkchoiceState, payload_attrs: Option<PayloadAttributes> },
+    NewPayload { payload: ExecutionPayload, cancun_fields: Option<CancunPayloadFields> },
+}
+
+#[derive(Debug)]
+pub(crate) struct EngineApiStore {
+    path: PathBuf,
+}
+
+impl EngineApiStore {
+    pub(crate) fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    fn on_message(&self, msg: &BeaconEngineMessage, received_at: SystemTime) -> eyre::Result<()> {
+        fs::create_dir_all(&self.path)?; // ensure that store path had been created
+        let timestamp = received_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+        match msg {
+            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx: _tx } => {
+                let filename = format!("{}-fcu-{}.json", timestamp, state.head_block_hash);
+                fs::write(
+                    self.path.join(filename),
+                    serde_json::to_vec(&StoredEngineApiMessage::ForkchoiceUpdated {
+                        state: *state,
+                        payload_attrs: payload_attrs.clone(),
+                    })?,
+                )?;
+            }
+            BeaconEngineMessage::NewPayload { payload, cancun_fields, tx: _tx } => {
+                let filename = format!("{}-new_payload-{}.json", timestamp, payload.block_hash());
+                fs::write(
+                    self.path.join(filename),
+                    serde_json::to_vec(&StoredEngineApiMessage::NewPayload {
+                        payload: payload.clone(),
+                        cancun_fields: cancun_fields.clone(),
+                    })?,
+                )?;
+            }
+            // noop
+            BeaconEngineMessage::TransitionConfigurationExchanged |
+            BeaconEngineMessage::EventListener(_) => (),
+        };
+        Ok(())
+    }
+
+    pub(crate) fn engine_messages_iter(&self) -> eyre::Result<impl Iterator<Item = PathBuf>> {
+        let mut filenames_by_ts = BTreeMap::<u64, Vec<PathBuf>>::default();
+        for entry in fs::read_dir(&self.path)? {
+            let entry = entry?;
+            let filename = entry.file_name();
+            if let Some(filename) = filename.to_str().filter(|n| n.ends_with(".json")) {
+                if let Some(Ok(timestamp)) = filename.split('-').next().map(|n| n.parse::<u64>()) {
+                    filenames_by_ts.entry(timestamp).or_default().push(entry.path());
+                    tracing::debug!(target: "engine::store", timestamp, filename, "Queued engine API message");
+                } else {
+                    tracing::warn!(target: "engine::store", %filename, "Could not parse timestamp from filename")
+                }
+            } else {
+                tracing::warn!(target: "engine::store", ?filename, "Skipping non json file");
+            }
+        }
+        Ok(filenames_by_ts.into_iter().flat_map(|(_, paths)| paths))
+    }
+
+    pub(crate) async fn intercept(
+        self,
+        mut rx: UnboundedReceiver<BeaconEngineMessage>,
+        to_engine: UnboundedSender<BeaconEngineMessage>,
+    ) {
+        loop {
+            let Some(msg) = rx.recv().await else { break };
+            if let Err(error) = self.on_message(&msg, SystemTime::now()) {
+                error!(target: "engine::intercept", ?msg, %error, "Error handling Engine API message");
+            }
+            let _ = to_engine.send(msg);
+        }
     }
 }
