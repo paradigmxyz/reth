@@ -18,3 +18,15 @@ pub use payload_attributes::{PayloadAttributesTrait, PayloadBuilderAttributesTra
 /// Contains error types used in the traits defined in this crate.
 pub mod error;
 pub use error::AttributesValidationError;
+
+/// Contains types and methods that are used to validate types that implement
+/// [PayloadAttributesTrait].
+pub mod attributes_validation;
+pub use attributes_validation::{
+    validate_payload_timestamp, validate_version_specific_fields, validate_withdrawals_presence,
+    EngineApiMessageVersion,
+};
+
+/// Contains types used in implementations of [PayloadAttributesTrait].
+pub mod payload;
+pub use payload::PayloadOrAttributes;

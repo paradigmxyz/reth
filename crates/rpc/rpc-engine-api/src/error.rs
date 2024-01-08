@@ -236,7 +236,7 @@ mod tests {
         ensure_engine_rpc_error(
             UNSUPPORTED_FORK_CODE,
             "Unsupported fork",
-            EngineApiError::UnsupportedFork,
+            EngineApiError::AttributesValidationError(AttributesValidationError::UnsupportedFork),
         );
 
         ensure_engine_rpc_error(

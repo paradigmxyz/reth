@@ -1,7 +1,9 @@
+use crate::{
+    attributes_validation::EngineApiMessageVersion, validate_version_specific_fields,
+    AttributesValidationError,
+};
 use reth_primitives::{ChainSpec, B256};
 use reth_rpc_types::engine::{PayloadAttributes, PayloadId};
-
-use crate::AttributesValidationError;
 
 /// This can be implemented by types that describe a currently running payload job.
 pub trait PayloadBuilderAttributesTrait {
@@ -75,6 +77,6 @@ impl PayloadAttributesTrait for PayloadAttributes {
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
     ) -> Result<(), AttributesValidationError> {
-        todo!()
+        validate_version_specific_fields(chain_spec, version, &self.into())
     }
 }
