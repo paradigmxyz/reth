@@ -1,7 +1,8 @@
 use crate::{
     args::{
+        get_secret_key,
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
+        DatabaseArgs, NetworkArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
@@ -15,10 +16,11 @@ use reth_beacon_consensus::{
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
-use reth_db::init_db;
-use reth_interfaces::{
-    consensus::Consensus, sync::NoopSyncStateUpdater, test_utils::NoopFullBlockClient,
-};
+use reth_config::Config;
+use reth_db::{init_db, DatabaseEnv};
+use reth_interfaces::consensus::Consensus;
+use reth_network::NetworkHandle;
+use reth_network_api::NetworkInfo;
 use reth_payload_builder::PayloadBuilderService;
 use reth_primitives::{
     fs::{self},
@@ -31,10 +33,12 @@ use reth_rpc_types::{
     ExecutionPayload,
 };
 use reth_stages::Pipeline;
+use reth_tasks::TaskExecutor;
 use reth_transaction_pool::noop::NoopTransactionPool;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
+    net::{SocketAddr, SocketAddrV4},
     path::PathBuf,
     sync::Arc,
     time::{Duration, SystemTime},
@@ -75,6 +79,9 @@ pub struct Command {
     #[clap(flatten)]
     db: DatabaseArgs,
 
+    #[clap(flatten)]
+    network: NetworkArgs,
+
     /// The path to read engine API messages from.
     #[arg(long = "engine-api-store", value_name = "PATH")]
     engine_api_store: PathBuf,
@@ -85,8 +92,36 @@ pub struct Command {
 }
 
 impl Command {
+    async fn build_network(
+        &self,
+        config: &Config,
+        task_executor: TaskExecutor,
+        db: Arc<DatabaseEnv>,
+        network_secret_path: PathBuf,
+        default_peers_path: PathBuf,
+    ) -> eyre::Result<NetworkHandle> {
+        let secret_key = get_secret_key(&network_secret_path)?;
+        let network = self
+            .network
+            .network_config(config, self.chain.clone(), secret_key, default_peers_path)
+            .with_task_executor(Box::new(task_executor))
+            .listener_addr(SocketAddr::V4(SocketAddrV4::new(self.network.addr, self.network.port)))
+            .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
+                self.network.discovery.addr,
+                self.network.discovery.port,
+            )))
+            .build(ProviderFactory::new(db, self.chain.clone()))
+            .start_network()
+            .await?;
+        info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
+        debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
+        Ok(network)
+    }
+
     /// Execute `debug replay-engine` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
+        let config = Config::default();
+
         // Add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
@@ -111,6 +146,19 @@ impl Command {
         let blockchain_db =
             BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
 
+        // Set up network
+        let network_secret_path =
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
+        let network = self
+            .build_network(
+                &config,
+                ctx.task_executor.clone(),
+                db.clone(),
+                network_secret_path,
+                data_dir.known_peers_path(),
+            )
+            .await?;
+
         // Set up payload builder
         #[cfg(not(feature = "optimism"))]
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
@@ -131,13 +179,14 @@ impl Command {
         ctx.task_executor.spawn_critical("payload builder service", Box::pin(payload_service));
 
         // Configure the consensus engine
+        let network_client = network.fetch_client().await?;
         let (consensus_engine_tx, consensus_engine_rx) = mpsc::unbounded_channel();
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
-            NoopFullBlockClient::default(),
+            network_client,
             Pipeline::builder().build(provider_factory),
             blockchain_db.clone(),
             Box::new(ctx.task_executor.clone()),
-            Box::<NoopSyncStateUpdater>::default(),
+            Box::new(network),
             None,
             false,
             payload_builder,
