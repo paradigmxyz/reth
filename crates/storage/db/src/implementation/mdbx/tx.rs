@@ -103,7 +103,7 @@ impl<K: TransactionKind> Tx<K> {
     ) -> R {
         if let Some(mut metrics_handler) = self.metrics_handler.take() {
             metrics_handler.close_recorded = true;
-            metrics_handler.log_backtrace_on_long_transaction();
+            metrics_handler.log_backtrace_on_long_read_transaction();
 
             let start = Instant::now();
             let (result, commit_latency) = f(self);
@@ -135,7 +135,7 @@ impl<K: TransactionKind> Tx<K> {
         f: impl FnOnce(&Transaction<K>) -> R,
     ) -> R {
         if let Some(metrics_handler) = &self.metrics_handler {
-            metrics_handler.log_backtrace_on_long_transaction();
+            metrics_handler.log_backtrace_on_long_read_transaction();
             OperationMetrics::record(T::NAME, operation, value_size, || f(&self.inner))
         } else {
             f(&self.inner)
@@ -153,7 +153,7 @@ struct MetricsHandler<K: TransactionKind> {
     /// to do anything on [Drop::drop].
     close_recorded: bool,
     /// If `true`, the backtrace of transaction has already been recorded and logged.
-    /// See [MetricsHandler::log_backtrace_on_long_transaction].
+    /// See [MetricsHandler::log_backtrace_on_long_read_transaction].
     backtrace_recorded: AtomicBool,
     _marker: PhantomData<K>,
 }
@@ -183,7 +183,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
     ///
     /// NOTE: Backtrace is recorded using [Backtrace::force_capture], so `RUST_BACKTRACE` env var is
     /// not needed.
-    fn log_backtrace_on_long_transaction(&self) {
+    fn log_backtrace_on_long_read_transaction(&self) {
         if !self.backtrace_recorded.load(Ordering::Relaxed) &&
             self.transaction_mode().is_read_only()
         {
@@ -206,7 +206,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
 impl<K: TransactionKind> Drop for MetricsHandler<K> {
     fn drop(&mut self) {
         if !self.close_recorded {
-            self.log_backtrace_on_long_transaction();
+            self.log_backtrace_on_long_read_transaction();
 
             TransactionMetrics::record_close(
                 self.transaction_mode(),
