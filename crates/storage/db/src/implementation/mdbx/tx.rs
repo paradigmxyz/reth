@@ -57,10 +57,9 @@ impl<K: TransactionKind> Tx<K> {
             handler
         });
 
-        let caller = core::panic::Location::caller();
         debug!(
             target: "storage::db::mdbx",
-            %caller,
+            caller = %core::panic::Location::caller(),
             tx_id = inner.id(),
             read_only = K::IS_READ_ONLY,
             "Transaction opened",
