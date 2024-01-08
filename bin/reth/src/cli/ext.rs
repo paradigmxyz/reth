@@ -8,7 +8,7 @@ use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_provider::CanonStateSubscriptions;
 use reth_node_api::EngineTypes;
-use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService};
+use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
 
@@ -134,7 +134,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
-        Types: EngineTypes<PayloadBuilderAttributes = PayloadBuilderAttributes> + 'static,
+        Types: EngineTypes + 'static,
     {
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
             .interval(conf.interval())
@@ -325,7 +325,7 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
-        Types: EngineTypes<PayloadBuilderAttributes = PayloadBuilderAttributes> + 'static,
+        Types: EngineTypes + 'static,
     {
         self.inner_mut()
             .ok_or_else(|| eyre::eyre!("config value must be set"))?
