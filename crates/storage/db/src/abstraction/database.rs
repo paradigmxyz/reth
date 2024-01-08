@@ -54,10 +54,12 @@ impl<DB: Database> Database for Arc<DB> {
     type TX = <DB as Database>::TX;
     type TXMut = <DB as Database>::TXMut;
 
+    #[track_caller]
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         <DB as Database>::tx(self)
     }
 
+    #[track_caller]
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         <DB as Database>::tx_mut(self)
     }
@@ -66,10 +68,13 @@ impl<DB: Database> Database for Arc<DB> {
 impl<DB: Database> Database for &DB {
     type TX = <DB as Database>::TX;
     type TXMut = <DB as Database>::TXMut;
+
+    #[track_caller]
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         <DB as Database>::tx(self)
     }
 
+    #[track_caller]
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         <DB as Database>::tx_mut(self)
     }

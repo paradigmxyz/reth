@@ -13,7 +13,7 @@ use crate::{
 use parking_lot::RwLock;
 use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{ffi::DBI, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
-use reth_tracing::tracing::warn;
+use reth_tracing::tracing::{debug, warn};
 use std::{
     backtrace::Backtrace,
     marker::PhantomData,
@@ -49,12 +49,23 @@ impl<K: TransactionKind> Tx<K> {
     }
 
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
+    #[track_caller]
     pub fn new_with_metrics(inner: Transaction<K>, with_metrics: bool) -> Self {
         let metrics_handler = with_metrics.then(|| {
             let handler = MetricsHandler::<K>::new(inner.id());
             TransactionMetrics::record_open(handler.transaction_mode());
             handler
         });
+
+        let caller = core::panic::Location::caller();
+        debug!(
+            target: "storage::db::mdbx",
+            %caller,
+            tx_id = inner.id(),
+            read_only = K::IS_READ_ONLY,
+            "Transaction opened",
+        );
+
         Self { inner, db_handles: Default::default(), metrics_handler }
     }
 
