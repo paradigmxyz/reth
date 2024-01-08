@@ -1255,8 +1255,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
         if !transaction.origin.is_local() ||
             self.local_transactions_config.no_local_exemptions() ||
-            !self
-                .local_transactions_config
+            self.local_transactions_config
                 .contains_local_address(transaction.transaction.sender())
         {
             let current_txs =
@@ -1266,6 +1265,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     transaction: Arc::new(transaction),
                 });
             }
+            println!("max slots");
         }
         if transaction.gas_limit() > self.block_gas_limit {
             return Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas {
