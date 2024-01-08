@@ -6,7 +6,7 @@ use crate::{
     Mode, Transaction, TransactionKind,
 };
 use byteorder::{ByteOrder, NativeEndian};
-use ffi::{mdbx_pid_t, mdbx_tid_t, MDBX_env, MDBX_txn};
+use ffi::{mdbx_pid_t, mdbx_tid_t, MDBX_env, MDBX_hsr_func, MDBX_txn};
 use mem::size_of;
 use std::{
     ffi::CString,
@@ -677,36 +677,9 @@ impl EnvironmentBuilder {
                 }
 
                 if let Some(handle_slow_readers) = self.handle_slow_readers {
-                    let handle_slow_readers = Box::leak(Box::new(handle_slow_readers));
-                    let hsr = Box::leak(Box::new(
-                        |_env: *const MDBX_env,
-                         _txn: *const MDBX_txn,
-                         pid: mdbx_pid_t,
-                         tid: mdbx_tid_t,
-                         laggard: u64,
-                         gap: ::libc::c_uint,
-                         space: usize,
-                         retry: ::libc::c_int|
-                         -> i32 {
-                            handle_slow_readers(
-                                pid as u32,
-                                tid as u32,
-                                laggard,
-                                gap as usize,
-                                space,
-                                retry as isize,
-                            )
-                            .into()
-                        },
-                    ));
-
-                    let closure = libffi::high::Closure8::new(hsr);
-                    let closure_ptr = *closure.code_ptr();
-                    std::mem::forget(closure);
-
                     mdbx_result(ffi::mdbx_env_set_hsr(
                         env,
-                        Some(std::mem::transmute(closure_ptr)),
+                        handle_slow_readers_callback(handle_slow_readers),
                     ))?;
                 }
 
@@ -895,5 +868,114 @@ impl EnvironmentBuilder {
     pub fn set_log_level(&mut self, log_level: ffi::MDBX_log_level_t) -> &mut Self {
         self.log_level = Some(log_level);
         self
+    }
+}
+
+unsafe fn handle_slow_readers_callback(callback: HandleSlowReadersCallback) -> MDBX_hsr_func {
+    // Move the callback function to heap and intionally leak it, so it's not dropped and the MDBX
+    // env can use it throughout the whole program.
+    let callback = Box::leak(Box::new(callback));
+
+    // Wrap the callback into an ffi binding. The callback is needed for a nicer UX with Rust types,
+    // and without `env` and `txn` arguments that we don't want to expose to the user. Again,
+    // move the closure to heap and leak.
+    let hsr = Box::leak(Box::new(
+        |_env: *const MDBX_env,
+         _txn: *const MDBX_txn,
+         pid: mdbx_pid_t,
+         tid: mdbx_tid_t,
+         laggard: u64,
+         gap: ::libc::c_uint,
+         space: usize,
+         retry: ::libc::c_int|
+         -> i32 {
+            callback(pid as u32, tid as u32, laggard, gap as usize, space, retry as isize).into()
+        },
+    ));
+
+    // Create a pointer to the C function from the Rust closure, and forcefully forget the original
+    // closure.
+    let closure = libffi::high::Closure8::new(hsr);
+    let closure_ptr = *closure.code_ptr();
+    std::mem::forget(closure);
+
+    // Cast the closure to FFI `extern fn` type.
+    Some(std::mem::transmute(closure_ptr))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Environment, Error, Geometry, HandleSlowReadersReturnCode, PageSize, WriteFlags};
+    use std::{
+        ops::RangeInclusive,
+        sync::atomic::{AtomicBool, Ordering},
+    };
+
+    #[test]
+    fn test_handle_slow_readers_callback() {
+        static CALLED: AtomicBool = AtomicBool::new(false);
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let env = Environment::builder()
+            .set_geometry(Geometry::<RangeInclusive<usize>> {
+                size: Some(0..=1024 * 1024), // Max 1MB, so we can hit the limit
+                page_size: Some(PageSize::MinimalAcceptable), // To create as many pages as possible
+                ..Default::default()
+            })
+            .set_handle_slow_readers(
+                |_process_id: u32,
+                 _thread_id: u32,
+                 _read_txn_id: u64,
+                 _gap: usize,
+                 _space: usize,
+                 _retry: isize| {
+                    CALLED.store(true, Ordering::Relaxed);
+
+                    HandleSlowReadersReturnCode::ProceedWithoutKillingReader
+                },
+            )
+            .open(tempdir.path())
+            .unwrap();
+
+        // Insert some data in the database, so the read transaction can lock on the snapshot of it
+        {
+            let tx = env.begin_rw_txn().unwrap();
+            let db = tx.open_db(None).unwrap();
+            for i in 0usize..1_000 {
+                tx.put(db.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty()).unwrap()
+            }
+            tx.commit().unwrap();
+        }
+
+        // Create a read transaction
+        let _tx_ro = env.begin_ro_txn().unwrap();
+
+        // Change previously inserted data, so the read transaction would use the previous snapshot
+        {
+            let tx = env.begin_rw_txn().unwrap();
+            let db = tx.open_db(None).unwrap();
+            for i in 0usize..1_000 {
+                tx.put(db.dbi(), i.to_le_bytes(), b"1", WriteFlags::empty()).unwrap();
+            }
+            tx.commit().unwrap();
+        }
+
+        // Insert more data in the database, so we hit the DB size limit error, and MDBX tries to
+        // kick long-lived readers and delete their snapshots
+        {
+            let tx = env.begin_rw_txn().unwrap();
+            let db = tx.open_db(None).unwrap();
+            for i in 1_000usize..1_000_000 {
+                match tx.put(db.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty()) {
+                    Ok(_) => continue,
+                    Err(Error::MapFull) => break,
+                    result @ Err(_) => result.unwrap(),
+                }
+            }
+            tx.commit().unwrap();
+        }
+
+        // Expect the HSR to be called
+        assert!(CALLED.load(Ordering::Relaxed));
     }
 }
