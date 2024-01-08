@@ -57,7 +57,10 @@ use std::{
     },
     task::{Context, Poll},
 };
-use tokio::sync::mpsc::{self, error::TrySendError};
+use tokio::sync::{
+    mpsc::{self, error::TrySendError},
+    watch,
+};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, trace, warn};
 
@@ -708,6 +711,7 @@ where
                             capabilities,
                             version,
                             messages,
+                            inflight_requests_semaphore_rx,
                             status,
                             direction,
                         } => {
@@ -739,6 +743,7 @@ where
                                 version,
                                 status,
                                 messages,
+                                inflight_requests_semaphore_rx,
                             });
                         }
                         SwarmEvent::PeerAdded(peer_id) => {
@@ -951,6 +956,9 @@ pub enum NetworkEvent {
         capabilities: Arc<Capabilities>,
         /// A request channel to the session task.
         messages: PeerRequestSender,
+        /// Counting semaphore for inflight requests read by
+        /// [`crate::transactions::TransactionsManager`].
+        inflight_requests_semaphore_rx: watch::Receiver<usize>,
         /// The status of the peer to which a session was established.
         status: Arc<Status>,
         /// negotiated eth version of the session

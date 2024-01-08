@@ -21,6 +21,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
+use tokio::sync::watch;
 use tracing::trace;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -124,6 +125,7 @@ where
                 version,
                 status,
                 messages,
+                inflight_requests_semaphore_rx,
                 direction,
                 timeout,
             } => {
@@ -141,6 +143,7 @@ where
                     capabilities,
                     version,
                     messages,
+                    inflight_requests_semaphore_rx,
                     status,
                     direction,
                 })
@@ -392,6 +395,7 @@ pub(crate) enum SwarmEvent {
         /// negotiated eth version
         version: EthVersion,
         messages: PeerRequestSender,
+        inflight_requests_semaphore_rx: watch::Receiver<usize>,
         status: Arc<Status>,
         direction: Direction,
     },

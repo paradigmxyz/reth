@@ -33,12 +33,12 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    sync::{mpsc::error::TrySendError, oneshot},
+    sync::{mpsc::error::TrySendError, oneshot, watch},
     time::Interval,
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 // Constants for timeout updating.
 
@@ -84,6 +84,9 @@ pub(crate) struct ActiveSession {
     pub(crate) internal_request_tx: Fuse<ReceiverStream<PeerRequest>>,
     /// All requests sent to the remote peer we're waiting on a response
     pub(crate) inflight_requests: FnvHashMap<u64, InflightRequest>,
+    /// Counting semaphore notifies [`crate::transactions::TransactionsManager`] of total inflight
+    /// requests.
+    pub(crate) inflight_requests_semaphore_tx: watch::Sender<usize>,
     /// All requests that were sent by the remote peer and we're waiting on an internal response
     pub(crate) received_requests_from_remote: Vec<ReceivedRequest>,
     /// Buffered messages that should be handled and sent to the peer.
@@ -162,6 +165,7 @@ impl ActiveSession {
                             self.update_request_timeout(req.timestamp, Instant::now());
                         }
                     };
+                    self.update_inflight_requests_count();
                 } else {
                     // we received a response to a request we never sent
                     self.on_bad_message();
@@ -247,6 +251,7 @@ impl ActiveSession {
             deadline,
         };
         self.inflight_requests.insert(request_id, req);
+        self.update_inflight_requests_count()
     }
 
     /// Handle a message received from the internal network
@@ -466,6 +471,13 @@ impl ActiveSession {
         }
         // terminate the task
         Some(Poll::Ready(()))
+    }
+
+    fn update_inflight_requests_count(&mut self) {
+        let inflight_requests_count = self.inflight_requests.len();
+        if let Err(e) = self.inflight_requests_semaphore_tx.send(inflight_requests_count) {
+            warn!("failed to update inflight request counting semaphore, {e}")
+        }
     }
 }
 
@@ -869,6 +881,8 @@ mod tests {
                     ..
                 } => {
                     let (_to_session_tx, messages_rx) = mpsc::channel(10);
+                    let (inflight_requests_semaphore_tx, _inflight_requests_semaphore_rx) =
+                        watch::channel(0);
                     let (commands_to_session, commands_rx) = mpsc::channel(10);
                     let poll_sender = PollSender::new(self.active_session_tx.clone());
 
@@ -888,6 +902,7 @@ mod tests {
                         pending_message_to_session: None,
                         internal_request_tx: ReceiverStream::new(messages_rx).fuse(),
                         inflight_requests: Default::default(),
+                        inflight_requests_semaphore_tx,
                         conn,
                         queued_outgoing: Default::default(),
                         received_requests_from_remote: Default::default(),

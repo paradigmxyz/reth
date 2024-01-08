@@ -33,7 +33,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
+use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::error::RecvError, watch};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
 
@@ -542,9 +542,30 @@ where
                 return
             }
 
+            // filter out hashes already in request, for those hashes add the peer as fallback
+            self.transaction_fetcher.filter_new_hashes(&mut hashes, peer);
+
+            if hashes.is_empty() {
+                // nothing to request
+                return
+            }
+
+            let inflight_requests_count = *peer.inflight_requests_semaphore_rx.borrow();
+            if inflight_requests_count > 0 {
+                // since all hashes new at this point, no idle peer can exist that announced them
+                for hash in hashes {
+                    self.transaction_fetcher.buffered_hashes.insert(hash);
+                }
+                return
+            }
+
             // enforce recommended soft limit, however the peer may enforce an arbitrary limit on
             // the response (2MB)
-            hashes.truncate(GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES);
+            let left_over_hashes =
+                hashes.drain(..GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES).collect::<Vec<_>>();
+            for hash in left_over_hashes {
+                self.transaction_fetcher.buffered_hashes.insert(hash);
+            }
 
             // request the missing transactions
             let request_sent =
@@ -560,9 +581,52 @@ where
             }
         }
 
+        // request buffered transactions
+        self.request_buffered_hashes();
+
         if num_already_seen > 0 {
             self.report_already_seen(peer_id);
         }
+    }
+
+    // Requests buffered hashes for which an idle peer exists.
+    fn request_buffered_hashes(&mut self) {
+        loop {
+            let mut hashes = vec![];
+            let Some(peer_id) = self.get_any_idle_peer(&mut hashes) else {
+                return;
+            };
+            // fill the request with other buffered hashes that have been announced by the peer
+            if let Some(peer) = self.peers.get(&peer_id) {
+                self.transaction_fetcher.fill_request_for_peer(peer_id, &mut hashes);
+                // request the buffered missing transactions
+                let request_sent =
+                    self.transaction_fetcher.request_transactions_from_peer(hashes, peer);
+                if !request_sent {
+                    self.metrics.egress_peer_channel_full.increment(1);
+                    return
+                }
+            }
+        }
+    }
+
+    // Returns any idle peer.
+    fn get_any_idle_peer(&self, hashes: &mut Vec<TxHash>) -> Option<PeerId> {
+        for hash in &self.transaction_fetcher.buffered_hashes {
+            if let Some(peers) = self.transaction_fetcher.hash_to_fallback_peers.get(hash) {
+                for peer_id in peers {
+                    let peer_id: &PeerId = peer_id;
+                    if let Some(peer) = self.peers.get(peer_id) {
+                        let inflight_requests_count = *peer.inflight_requests_semaphore_rx.borrow();
+                        if inflight_requests_count < 1 {
+                            hashes.push(*hash);
+                            return Some(*peer_id)
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Handles dedicated transaction events related to the `eth` protocol.
@@ -645,7 +709,12 @@ where
                 self.peers.remove(&peer_id);
             }
             NetworkEvent::SessionEstablished {
-                peer_id, client_version, messages, version, ..
+                peer_id,
+                client_version,
+                messages,
+                inflight_requests_semaphore_rx,
+                version,
+                ..
             } => {
                 // insert a new peer into the peerset
                 self.peers.insert(
@@ -655,6 +724,7 @@ where
                             NonZeroUsize::new(PEER_TRANSACTION_CACHE_LIMIT).unwrap(),
                         ),
                         request_tx: messages,
+                        inflight_requests_semaphore_rx,
                         version,
                         client_version,
                     },
@@ -1064,6 +1134,8 @@ struct Peer {
     transactions: LruCache<B256>,
     /// A communication channel directly to the peer's session task.
     request_tx: PeerRequestSender,
+    /// Counting semaphore for inflight requests.
+    inflight_requests_semaphore_rx: watch::Receiver<usize>,
     /// negotiated version of the session.
     version: EthVersion,
     /// The peer's client version.
@@ -1078,8 +1150,10 @@ struct Peer {
 struct TransactionFetcher {
     /// All currently active requests for pooled transactions.
     inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
-    /// Set that tracks all hashes that are currently being fetched.
-    inflight_hash_to_fallback_peers: HashMap<TxHash, Vec<PeerId>>,
+    /// Hashes that are awaiting fetch from an idle peer.
+    buffered_hashes: HashSet<TxHash>,
+    /// Tracks all hashes that are currently being fetched or are buffered.
+    hash_to_fallback_peers: HashMap<TxHash, Vec<PeerId>>,
 }
 
 // === impl TransactionFetcher ===
@@ -1092,7 +1166,7 @@ impl TransactionFetcher {
         I: IntoIterator<Item = &'a TxHash>,
     {
         for &hash in hashes {
-            self.inflight_hash_to_fallback_peers.remove(&hash);
+            self.hash_to_fallback_peers.remove(&hash);
         }
     }
 
@@ -1144,20 +1218,11 @@ impl TransactionFetcher {
         self.remove_inflight_hashes(hashes)
     }
 
-    /// Requests the missing transactions from the announced hashes of the peer
-    ///
-    /// This filters all announced hashes that are already in flight, and requests the missing,
-    /// while marking the given peer as an alternative peer for the hashes that are already in
-    /// flight.
-    fn request_transactions_from_peer(
-        &mut self,
-        mut announced_hashes: Vec<TxHash>,
-        peer: &Peer,
-    ) -> bool {
+    fn filter_new_hashes(&mut self, announced_hashes: &mut Vec<TxHash>, peer: &Peer) {
         let peer_id: PeerId = peer.request_tx.peer_id;
         // 1. filter out inflight hashes, and register the peer as fallback for all inflight hashes
         announced_hashes.retain(|&hash| {
-            match self.inflight_hash_to_fallback_peers.entry(hash) {
+            match self.hash_to_fallback_peers.entry(hash) {
                 Entry::Vacant(entry) => {
                     // the hash is not in inflight hashes, insert it and retain in the vector
                     entry.insert(vec![peer_id]);
@@ -1174,16 +1239,24 @@ impl TransactionFetcher {
                 }
             }
         });
+    }
 
-        // 2. request all missing from peer
-        if announced_hashes.is_empty() {
-            // nothing to request
-            return false
-        }
+    /// Requests the missing transactions from the announced hashes of the peer. Returns `true` if
+    /// the request was successfully sent over the channel to the peer's session task.
+    ///
+    /// This filters all announced hashes that are already in flight, and requests the missing,
+    /// while marking the given peer as an alternative peer for the hashes that are already in
+    /// flight.
+    fn request_transactions_from_peer(
+        &mut self,
+        new_announced_hashes: Vec<TxHash>,
+        peer: &Peer,
+    ) -> bool {
+        let peer_id: PeerId = peer.request_tx.peer_id;
 
         let (response, rx) = oneshot::channel();
         let req: PeerRequest = PeerRequest::GetPooledTransactions {
-            request: GetPooledTransactions(announced_hashes.clone()),
+            request: GetPooledTransactions(new_announced_hashes.clone()),
             response,
         };
 
@@ -1197,17 +1270,38 @@ impl TransactionFetcher {
 
                     // we know that the peer is the only entry in the map, so we can remove all
                     for hash in req.0.into_iter() {
-                        self.inflight_hash_to_fallback_peers.remove(&hash);
+                        self.hash_to_fallback_peers.remove(&hash);
                     }
                 }
             }
             return false
         } else {
+            self.buffered_hashes.retain(|hash| !new_announced_hashes.contains(hash));
             //create a new request for it, from that peer
-            self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, announced_hashes, rx))
+            self.inflight_requests.push(GetPooledTxRequestFut::new(
+                peer_id,
+                new_announced_hashes,
+                rx,
+            ))
         }
 
         true
+    }
+
+    fn fill_request_for_peer(&self, peer_id: PeerId, hashes: &mut Vec<TxHash>) {
+        for hash in &self.buffered_hashes {
+            if *hash == hashes[0] {
+                continue;
+            }
+            if let Some(peers) = self.hash_to_fallback_peers.get(hash) {
+                if peers.contains(&peer_id) {
+                    hashes.push(*hash)
+                }
+            }
+            if hashes.len() >= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
+                return
+            }
+        }
     }
 }
 
@@ -1342,6 +1436,7 @@ mod tests {
                     client_version,
                     capabilities,
                     messages,
+                    inflight_requests_semaphore_rx,
                     status,
                     version,
                 } => {
@@ -1352,6 +1447,7 @@ mod tests {
                         client_version,
                         capabilities,
                         messages,
+                        inflight_requests_semaphore_rx,
                         status,
                         version,
                     })
@@ -1427,6 +1523,7 @@ mod tests {
                     client_version,
                     capabilities,
                     messages,
+                    inflight_requests_semaphore_rx,
                     status,
                     version,
                 } => {
@@ -1437,6 +1534,7 @@ mod tests {
                         client_version,
                         capabilities,
                         messages,
+                        inflight_requests_semaphore_rx,
                         status,
                         version,
                     })
@@ -1510,6 +1608,7 @@ mod tests {
                     client_version,
                     capabilities,
                     messages,
+                    inflight_requests_semaphore_rx,
                     status,
                     version,
                 } => {
@@ -1520,6 +1619,7 @@ mod tests {
                         client_version,
                         capabilities,
                         messages,
+                        inflight_requests_semaphore_rx,
                         status,
                         version,
                     })
@@ -1599,6 +1699,7 @@ mod tests {
                     client_version,
                     capabilities,
                     messages,
+                    inflight_requests_semaphore_rx,
                     status,
                     version,
                 } => transactions.on_network_event(NetworkEvent::SessionEstablished {
@@ -1607,6 +1708,7 @@ mod tests {
                     client_version,
                     capabilities,
                     messages,
+                    inflight_requests_semaphore_rx,
                     status,
                     version,
                 }),
