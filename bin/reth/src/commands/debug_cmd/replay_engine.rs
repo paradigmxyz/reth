@@ -16,7 +16,6 @@ use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
 use reth_db::init_db;
-use reth_ethereum_payload_builder::EthereumPayloadBuilder;
 use reth_interfaces::{
     consensus::Consensus, sync::NoopSyncStateUpdater, test_utils::NoopFullBlockClient,
 };
@@ -184,13 +183,20 @@ impl Command {
             BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
 
         // Set up payload builder
+        #[cfg(not(feature = "optimism"))]
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
+
+        // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
+        #[cfg(feature = "optimism")]
+        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default();
+
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             blockchain_db.clone(),
             NoopTransactionPool::default(),
             ctx.task_executor.clone(),
             BasicPayloadJobGeneratorConfig::default(),
             self.chain.clone(),
-            EthereumPayloadBuilder::default(),
+            payload_builder,
         );
         let (payload_service, payload_builder) = PayloadBuilderService::new(payload_generator);
         ctx.task_executor.spawn_critical("payload builder service", Box::pin(payload_service));
