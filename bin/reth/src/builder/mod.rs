@@ -1111,8 +1111,9 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         ext.on_components_initialized(&components)?;
 
         debug!(target: "reth::cli", "Spawning payload builder service");
+
         // TODO: remove this and use an associated type
-        let payload_builder: PayloadBuilderHandle<EthEngineTypes> =
+        let payload_builder: PayloadBuilderHandle =
             ext.spawn_payload_builder_service(&self.config.builder, &components)?;
 
         let (consensus_engine_tx, mut consensus_engine_rx) = unbounded_channel();
