@@ -1,4 +1,5 @@
 use reth_primitives::{Address, EIP4844_TX_TYPE_ID};
+use std::collections::HashSet;
 
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
@@ -119,7 +120,7 @@ pub struct LocalTransactionConfig {
     ///   - no eviction exemptions
     pub no_exemptions: bool,
     /// Addresses that will be considered as local . Above exemptions apply
-    pub local_addresses: Vec<Address>,
+    pub local_addresses: HashSet<Address>,
 }
 
 impl LocalTransactionConfig {
@@ -133,13 +134,5 @@ impl LocalTransactionConfig {
     #[inline]
     pub fn contains_local_address(&self, address: Address) -> bool {
         self.local_addresses.contains(&address)
-    }
-
-    /// Checks if local_addresses is non-empty
-    ///
-    /// Returns `true` if local_addresses is non-empty , otherwise returns `false`
-    #[inline]
-    pub fn has_local_address(&self) -> bool {
-        !self.local_addresses.is_empty()
     }
 }

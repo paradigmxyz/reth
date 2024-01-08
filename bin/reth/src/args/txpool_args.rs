@@ -8,7 +8,6 @@ use reth_transaction_pool::{
     REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
     TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
 };
-
 /// Parameters for debugging purposes
 #[derive(Debug, Args, PartialEq)]
 #[clap(next_help_heading = "TxPool")]
@@ -66,7 +65,7 @@ impl Default for TxPoolArgs {
             price_bump: DEFAULT_PRICE_BUMP,
             blob_transaction_price_bump: REPLACE_BLOB_PRICE_BUMP,
             no_locals: false,
-            locals: vec![],
+            locals: Default::default(),
         }
     }
 }
@@ -77,7 +76,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
         PoolConfig {
             local_transactions_config: LocalTransactionConfig {
                 no_exemptions: self.no_locals,
-                local_addresses: self.locals.clone(),
+                local_addresses: self.locals.clone().into_iter().collect(),
             },
             pending_limit: SubPoolLimit {
                 max_txs: self.pending_max_count,
