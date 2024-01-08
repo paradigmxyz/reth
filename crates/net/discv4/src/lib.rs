@@ -285,11 +285,6 @@ impl Discv4 {
 
     /// Performs a random lookup for node records.
     pub async fn lookup_random(&self) -> Result<Vec<NodeRecord>, Discv4Error> {
-        self.new_random_lookup().await
-    }
-
-    /// Calls [Self::lookup_node] with a new random PeerId
-    pub async fn new_random_lookup(&self) -> Result<Vec<NodeRecord>, Discv4Error> {
         let target = PeerId::random();
         self.lookup_node(Some(target)).await
     }
