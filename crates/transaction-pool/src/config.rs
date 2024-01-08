@@ -1,6 +1,6 @@
+use crate::TransactionOrigin;
 use reth_primitives::{Address, EIP4844_TX_TYPE_ID};
 use std::collections::HashSet;
-
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
 
@@ -134,5 +134,11 @@ impl LocalTransactionConfig {
     #[inline]
     pub fn contains_local_address(&self, address: Address) -> bool {
         self.local_addresses.contains(&address)
+    }
+
+    /// Returns whether the particular instance is local
+    #[inline]
+    pub fn is_local(&self, origin: TransactionOrigin, sender: Address) -> bool {
+        origin.is_local() || !self.no_local_exemptions() || self.contains_local_address(sender)
     }
 }
