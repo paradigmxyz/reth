@@ -39,9 +39,12 @@ use discv5::{
 use enr::{Enr, EnrBuilder};
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
+use rand::{rngs::OsRng, RngCore};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    hex, ForkId, PeerId, B256,
+    hex,
+    revm_primitives::FixedBytes,
+    ForkId, PeerId, B256,
 };
 use secp256k1::SecretKey;
 use std::{
@@ -281,6 +284,33 @@ impl Discv4 {
     /// Returning the closest nodes to the given node id.
     pub async fn lookup(&self, node_id: PeerId) -> Result<Vec<NodeRecord>, Discv4Error> {
         self.lookup_node(Some(node_id)).await
+    }
+
+    /// Performs a random lookup for node records.
+    pub async fn lookup_random(&self) -> Result<Vec<NodeRecord>, Discv4Error> {
+        self.new_random_lookup().await
+    }
+
+    /// Creates a new random lookup for nodes.
+    ///
+    /// This method generates a random target using cryptographic random number generation
+    /// and then initiates a node lookup based on this target.
+    ///
+    /// # Steps
+    /// 1. Generates a random `FixedBytes<64>` as the target.
+    /// 2. Calls `lookup_node` with the generated target.
+    ///
+    /// # Returns
+    /// A `Result` which is `Ok` with a `Vec<NodeRecord>` if the lookup is successful, or
+    /// `Err(Discv4Error)` in case of an error during the process.
+    ///
+    /// # Errors
+    /// Returns `Discv4Error` if the lookup process fails at any point.
+    pub async fn new_random_lookup(&self) -> Result<Vec<NodeRecord>, Discv4Error> {
+        let mut rng = OsRng;
+        let mut target = FixedBytes::<64>([0u8; 64]);
+        rng.fill_bytes(target.as_mut_slice());
+        self.lookup_node(Some(target)).await
     }
 
     /// Sends a message to the service to lookup the closest nodes
