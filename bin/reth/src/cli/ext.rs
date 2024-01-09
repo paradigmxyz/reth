@@ -8,9 +8,9 @@ use clap::Args;
 use reth_basic_payload_builder::{
     BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, PayloadBuilder,
 };
-use reth_provider::CanonStateSubscriptions;
 use reth_node_api::EngineTypes;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_provider::CanonStateSubscriptions;
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
 

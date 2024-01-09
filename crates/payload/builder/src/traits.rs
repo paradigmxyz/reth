@@ -1,8 +1,8 @@
 //! Trait abstractions used by the payload crate.
 
-use reth_provider::CanonStateNotification;
 use crate::{error::PayloadBuilderError, BuiltPayload};
 use reth_node_api::PayloadBuilderAttributes;
+use reth_provider::CanonStateNotification;
 use std::{future::Future, sync::Arc};
 
 /// A type that can build a payload.
