@@ -176,7 +176,6 @@ impl PayloadAttributes for OptimismPayloadAttributes {
         validate_version_specific_fields(chain_spec, version, &self.into())?;
 
         if self.gas_limit.is_none() && chain_spec.is_optimism() {
-            // return Err(EngineApiError::MissingGasLimitInPayloadAttributes)
             return Err(AttributesValidationError::InvalidParams(
                 "MissingGasLimitInPayloadAttributes".to_string().into(),
             ))
