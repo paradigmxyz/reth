@@ -15,7 +15,7 @@ pub trait EngineTypes: Send + Sync {
         + Unpin
         + std::fmt::Debug;
 
-    // TODO(rjected): payload type
+    // TODO: payload type
 }
 
 /// Validates the timestamp depending on the version called:

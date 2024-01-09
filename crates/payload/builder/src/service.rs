@@ -397,7 +397,7 @@ where
     }
 }
 
-// TODO(rjected): make generic over built payload type
+// TODO: make generic over built payload type
 type PayloadFuture =
     Pin<Box<dyn Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>> + Send + Sync>>;
 
