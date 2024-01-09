@@ -1,5 +1,6 @@
-use reth_primitives::EIP4844_TX_TYPE_ID;
-
+use crate::TransactionOrigin;
+use reth_primitives::{Address, EIP4844_TX_TYPE_ID};
+use std::collections::HashSet;
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
 
@@ -118,6 +119,8 @@ pub struct LocalTransactionConfig {
     ///   - no price exemptions
     ///   - no eviction exemptions
     pub no_exemptions: bool,
+    /// Addresses that will be considered as local . Above exemptions apply
+    pub local_addresses: HashSet<Address>,
 }
 
 impl LocalTransactionConfig {
@@ -125,5 +128,22 @@ impl LocalTransactionConfig {
     #[inline]
     pub fn no_local_exemptions(&self) -> bool {
         self.no_exemptions
+    }
+
+    /// Returns whether the local addresses vector contains the given address.
+    #[inline]
+    pub fn contains_local_address(&self, address: Address) -> bool {
+        self.local_addresses.contains(&address)
+    }
+
+    /// Returns whether the particular transaction should be considered local.
+    ///
+    /// This always returns false if the local exemptions are disabled.
+    #[inline]
+    pub fn is_local(&self, origin: TransactionOrigin, sender: Address) -> bool {
+        if self.no_local_exemptions() {
+            return false
+        }
+        origin.is_local() || self.contains_local_address(sender)
     }
 }

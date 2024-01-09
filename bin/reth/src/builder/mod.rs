@@ -11,7 +11,10 @@ use crate::{
         db_type::{DatabaseBuilder, DatabaseInstance},
         ext::{RethCliExt, RethNodeCommandConfig},
     },
-    commands::node::{cl_events::ConsensusLayerHealthEvents, events},
+    commands::{
+        debug_cmd::EngineApiStore,
+        node::{cl_events::ConsensusLayerHealthEvents, events},
+    },
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     init::init_genesis,
     prometheus_exporter,
@@ -1109,7 +1112,16 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         let payload_builder =
             ext.spawn_payload_builder_service(&self.config.builder, &components)?;
 
-        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
+        let (consensus_engine_tx, mut consensus_engine_rx) = unbounded_channel();
+        if let Some(store_path) = self.config.debug.engine_api_store.clone() {
+            let (engine_intercept_tx, engine_intercept_rx) = unbounded_channel();
+            let engine_api_store = EngineApiStore::new(store_path);
+            executor.spawn_critical(
+                "engine api interceptor",
+                engine_api_store.intercept(consensus_engine_rx, engine_intercept_tx),
+            );
+            consensus_engine_rx = engine_intercept_rx;
+        };
         let max_block = self.config.max_block(&network_client, provider_factory.clone()).await?;
 
         // Configure the pipeline
