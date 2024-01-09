@@ -81,6 +81,11 @@ impl TracingInspector {
         }
     }
 
+    /// Returns the config of the inspector.
+    pub fn config(&self) -> &TracingInspectorConfig {
+        &self.config
+    }
+
     /// Gets a reference to the recorded call traces.
     pub fn get_traces(&self) -> &CallTraceArena {
         &self.traces
