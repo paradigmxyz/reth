@@ -22,7 +22,11 @@ use reth_interfaces::consensus::Consensus;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_node_api::EngineTypes;
-use reth_payload_builder::PayloadBuilderService;
+#[cfg(not(feature = "optimism"))]
+use reth_node_builder::EthEngineTypes;
+#[cfg(feature = "optimism")]
+use reth_node_builder::OptimismEngineTypes;
+use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{
     fs::{self},
     ChainSpec,
@@ -176,8 +180,17 @@ impl Command {
             self.chain.clone(),
             payload_builder,
         );
-        let (payload_service, payload_builder) =
+
+        #[cfg(feature = "optimism")]
+        let (payload_service, payload_builder): (
+            _,
+            PayloadBuilderHandle<OptimismEngineTypes>,
+        ) = PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
+
+        #[cfg(not(feature = "optimism"))]
+        let (payload_service, payload_builder): (_, PayloadBuilderHandle<EthEngineTypes>) =
             PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
+
         ctx.task_executor.spawn_critical("payload builder service", Box::pin(payload_service));
 
         // Configure the consensus engine
@@ -322,8 +335,7 @@ impl EngineApiStore {
         self,
         mut rx: UnboundedReceiver<BeaconEngineMessage<Types>>,
         to_engine: UnboundedSender<BeaconEngineMessage<Types>>,
-    )
-    where
+    ) where
         Types: EngineTypes<PayloadAttributes = PayloadAttributes>,
         BeaconEngineMessage<Types>: std::fmt::Debug,
     {
