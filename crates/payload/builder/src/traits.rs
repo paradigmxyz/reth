@@ -79,10 +79,15 @@ pub trait PayloadJobGenerator: Send + Sync {
     /// This is expected to initially build a new (empty) payload without transactions, so it can be
     /// returned directly.
     fn new_payload_job(
-        &self,
+        &mut self,
         attr: PayloadBuilderAttributes,
     ) -> Result<Self::Job, PayloadBuilderError>;
 
     /// Handles new chain state events
-    fn on_new_state(&mut self, new_state: CanonStateNotification);
+    ///
+    /// This is intended for any logic that needs to be run when the chain state changes or used to
+    /// use the in memory state for the head block.
+    fn on_new_state(&mut self, new_state: CanonStateNotification) {
+        let _ = new_state;
+    }
 }

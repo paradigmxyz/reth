@@ -18,14 +18,11 @@ use reth_payload_builder::{
 use reth_primitives::{
     bytes::BytesMut,
     constants::{
-        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
-        EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
+        BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
+        ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
-    eip4844::calculate_excess_blob_gas,
-    proofs,
-    revm::{compat::into_reth_log, env::tx_env_with_recovered},
-    Block, BlockNumberOrTag, Bytes, ChainSpec, Header, IntoRecoveredTransaction, Receipt, Receipts,
-    SealedBlock, Withdrawal, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    proofs, Block, BlockNumberOrTag, Bytes, ChainSpec, Header, Receipts, SealedBlock, Withdrawal,
+    B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, BlockSource, BundleStateWithReceipts, CanonStateNotification, ProviderError,
@@ -43,10 +40,9 @@ use revm::{
     Database, DatabaseCommit, State,
 };
 use std::{
-    cell::RefCell,
     future::Future,
     pin::Pin,
-    sync::{atomic::AtomicBool, Arc, RwLock},
+    sync::{atomic::AtomicBool, Arc},
     task::{Context, Poll},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -55,30 +51,6 @@ use tokio::{
     time::{Interval, Sleep},
 };
 use tracing::{debug, trace, warn};
-
-use reth_interfaces::RethResult;
-use reth_payload_builder::{
-    database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
-    PayloadBuilderAttributes, PayloadId, PayloadJob, PayloadJobGenerator,
-};
-use reth_primitives::{
-    bytes::BytesMut,
-    constants::{
-        BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
-        ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
-    },
-    proofs, Block, BlockNumberOrTag, Bytes, ChainSpec, Header, Receipts, SealedBlock, Withdrawal,
-    B256, EMPTY_OMMER_ROOT_HASH, U256,
-};
-use reth_provider::{
-    BlockReaderIdExt, BlockSource, BundleStateWithReceipts, ProviderError, StateProviderFactory,
-};
-use reth_revm::{
-    database::StateProviderDatabase,
-    state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
-};
-use reth_tasks::TaskSpawner;
-use reth_transaction_pool::TransactionPool;
 
 use crate::metrics::PayloadBuilderMetrics;
 
@@ -103,8 +75,8 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     ///
     /// See [PayloadBuilder]
     builder: Builder,
-    /// Stored cached_reads for new payload jobs
-    cached_reads: Arc<CachedReads>,
+    /// Stored cached_reads for new payload jobs.
+    pre_cached: Option<PrecachedState>,
 }
 
 // === impl BasicPayloadJobGenerator ===
@@ -127,7 +99,7 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
             config,
             chain_spec,
             builder,
-            cached_reads: Arc::new(CachedReads::default()),
+            pre_cached: None,
         }
     }
 
@@ -159,6 +131,17 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
     pub fn tasks(&self) -> &Tasks {
         &self.executor
     }
+
+    /// Returns the pre-cached reads for the given parent block if it matches the cached state's
+    /// block.
+    fn take_pre_cached(&mut self, parent: B256) -> Option<CachedReads> {
+        let pre_cached = self.pre_cached.take()?;
+        if pre_cached.block == parent {
+            Some(pre_cached.cached)
+        } else {
+            None
+        }
+    }
 }
 
 // === impl BasicPayloadJobGenerator ===
@@ -174,7 +157,7 @@ where
     type Job = BasicPayloadJob<Client, Pool, Tasks, Builder>;
 
     fn new_payload_job(
-        &self,
+        &mut self,
         attributes: PayloadBuilderAttributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
         let parent_block = if attributes.parent.is_zero() {
@@ -202,9 +185,8 @@ where
 
         let until = self.job_deadline(config.attributes.timestamp);
         let deadline = Box::pin(tokio::time::sleep_until(until));
-        let read_cached_reads = self.cached_reads.read().unwrap();
 
-        let cached_reads = Some(read_cached_reads.clone());
+        let cached_reads = self.take_pre_cached(config.parent_block.hash());
 
         Ok(BasicPayloadJob {
             config,
@@ -223,11 +205,36 @@ where
     }
 
     fn on_new_state(&mut self, new_state: CanonStateNotification) {
-        let mut cached_reads = CachedReads::default();
-        cached_reads.as_db(new_state.committed().unwrap().state().state().state.clone());
-        self.cached_reads = cached_reads;
-        ()
+        if let Some(committed) = new_state.committed() {
+            let mut cached = CachedReads::default();
+
+            // extract the state from the notification and put it into the cache
+            let new_state = committed.state();
+            for (addr, acc) in new_state.accounts_iter() {
+                if let Some(acc) = acc {
+                    let storage = if let Some(acc) = new_state.state().account(&addr) {
+                        acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)).collect()
+                    } else {
+                        Default::default()
+                    };
+                    cached.insert_account(addr, acc.clone(), storage);
+                }
+            }
+
+            self.pre_cached = Some(PrecachedState { block: committed.tip().hash, cached });
+        }
     }
+}
+
+/// Pre-filled [CachedReads] for a specific block.
+///
+/// This is extracted from the [CanonStateNotification] for the tip block.
+#[derive(Debug, Clone)]
+pub struct PrecachedState {
+    /// The block for which the state is pre-cached.
+    pub block: B256,
+    /// Cached state for the block.
+    pub cached: CachedReads,
 }
 
 /// Restricts how many generator tasks can be executed at once.

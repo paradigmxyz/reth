@@ -6,6 +6,7 @@ use crate::{
     PayloadJobGenerator,
 };
 use reth_primitives::{Block, U256};
+use reth_provider::CanonStateNotification;
 use std::{
     future::Future,
     pin::Pin,
@@ -35,7 +36,7 @@ impl PayloadJobGenerator for TestPayloadJobGenerator {
     type Job = TestPayloadJob;
 
     fn new_payload_job(
-        &self,
+        &mut self,
         attr: PayloadBuilderAttributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
         Ok(TestPayloadJob { attr })
