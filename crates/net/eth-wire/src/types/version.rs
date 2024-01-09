@@ -112,7 +112,7 @@ impl From<EthVersion> for &'static str {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::{EthVersion, ParseVersionError};
     use std::{convert::TryFrom, string::ToString};
 

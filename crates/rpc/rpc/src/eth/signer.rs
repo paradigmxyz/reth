@@ -95,7 +95,7 @@ impl EthSigner for DevSigner {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use reth_primitives::U256;
     use std::str::FromStr;
