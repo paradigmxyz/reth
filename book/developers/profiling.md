@@ -126,4 +126,4 @@ If this happens, jemalloc likely needs to be rebuilt with the `jemalloc-prof` fe
 If everything is working, this will output `jeprof.*.heap` files while reth is running.
 [The jemalloc website](http://jemalloc.net/jemalloc.3.html#opt.abort) has a helpful overview of the options available, for example `lg_prof_interval`, `lg_prof_sample`, `prof_leak`, and `prof_final`.
 
-Now that we have the heap snapshots, we can analyze them using `jeprof`. An example of jeprof usage and output can be seen here: https://github.com/jemalloc/jemalloc/wiki/Use-Case:-Leak-Checking
+Now that we have the heap snapshots, we can analyze them using `jeprof`. An example of jeprof usage and output can be seen on the jemalloc github repository: https://github.com/jemalloc/jemalloc/wiki/Use-Case:-Leak-Checking
