@@ -6198,6 +6198,7 @@ dependencies = [
  "async-trait",
  "auto_impl",
  "criterion",
+ "derive_more",
  "enr",
  "ethers-core",
  "ethers-middleware",

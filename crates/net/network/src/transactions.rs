@@ -7,6 +7,7 @@ use crate::{
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     NetworkEvents, NetworkHandle,
 };
+use derive_more::{Deref, DerefMut};
 use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt};
 use reth_eth_wire::{
     EthVersion, GetPooledTransactions, NewPooledTransactionHashes, NewPooledTransactionHashes66,
@@ -39,6 +40,9 @@ use tracing::{debug, trace, warn};
 
 /// Cache limit of transactions to keep track of for a single peer.
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
+
+/// Cache limit of transactions waiting for idle peer to be fetched.
+const MAX_CAPACITY_BUFFERED_HASHES: usize = 100 * 1024;
 
 /// Soft limit for NewPooledTransactions
 const NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT: usize = 4096;
@@ -635,7 +639,7 @@ where
 
     // Returns any idle peer.
     fn get_any_idle_peer(&self, hashes: &mut Vec<TxHash>) -> Option<PeerId> {
-        for hash in &self.transaction_fetcher.buffered_hashes {
+        for hash in self.transaction_fetcher.buffered_hashes.iter() {
             let idle_peer = self.get_idle_peer_for(*hash);
             if idle_peer.is_some() {
                 hashes.push(*hash);
@@ -1161,6 +1165,18 @@ struct Peer {
     client_version: Arc<str>,
 }
 
+#[derive(Debug, Deref, DerefMut)]
+struct BufferedHashes(LruCache<TxHash>);
+
+impl Default for BufferedHashes {
+    fn default() -> Self {
+        Self(LruCache::new(
+            NonZeroUsize::new(MAX_CAPACITY_BUFFERED_HASHES)
+                .expect("buffered cache limit should be non-zero"),
+        ))
+    }
+}
+
 /// The type responsible for fetching missing transactions from peers.
 ///
 /// This will keep track of unique transaction hashes that are currently being fetched and submits
@@ -1173,7 +1189,7 @@ struct TransactionFetcher {
     /// All currently active requests for pooled transactions.
     inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
     /// Hashes that are awaiting fetch from an idle peer.
-    buffered_hashes: HashSet<TxHash>,
+    buffered_hashes: BufferedHashes,
     /// Tracks all hashes that are currently being fetched or are buffered, mapping them to
     /// request retries and last recently seen fallback peers (max one request try for any peer).
     hash_to_fallback_peers: HashMap<TxHash, (u8, LruCache<PeerId>)>,
@@ -1393,7 +1409,9 @@ impl TransactionFetcher {
             return false
         } else {
             // remove requested hashes from buffered hashes
-            self.buffered_hashes.retain(|hash| !new_announced_hashes.contains(hash));
+            for hash in &new_announced_hashes {
+                self.buffered_hashes.remove(hash);
+            }
             // stores a new request future for the request
             self.store_request_fut(peer_id, new_announced_hashes, rx);
         }
@@ -1402,7 +1420,7 @@ impl TransactionFetcher {
     }
 
     fn fill_up_request_for_peer(&self, peer_id: PeerId, hashes: &mut Vec<TxHash>) {
-        for hash in &self.buffered_hashes {
+        for hash in self.buffered_hashes.iter() {
             if *hash == hashes[0] {
                 continue;
             }
@@ -1433,9 +1451,9 @@ impl Future for TransactionFetcher {
             return match result {
                 Ok(Ok(transactions)) => {
                     // clear received hashes
-                    self.buffered_hashes.extend(requested_hashes.iter().filter(|requested_hash| {
-                        !transactions.hashes().any(|hash| hash == *requested_hash)
-                    }));
+                    self.buffered_hashes.extend(requested_hashes.into_iter().filter(
+                        |requested_hash| !transactions.hashes().any(|hash| hash == requested_hash),
+                    ));
 
                     Poll::Ready(FetchEvent::TransactionsFetched {
                         peer_id,

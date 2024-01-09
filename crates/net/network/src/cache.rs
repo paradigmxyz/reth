@@ -44,6 +44,11 @@ impl<T: Hash + Eq> LruCache<T> {
         self.inner.pop_front();
     }
 
+    /// Expels the given value. Returns true if the value existed.
+    pub fn remove(&mut self, value: &T) -> bool {
+        self.inner.remove(value)
+    }
+
     /// Returns `true` if the set contains a value.
     pub fn contains<Q: ?Sized>(&self, value: &Q) -> bool
     where
