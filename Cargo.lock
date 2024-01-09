@@ -5692,7 +5692,6 @@ dependencies = [
  "reth-provider",
  "reth-prune",
  "reth-revm",
- "reth-revm-inspectors",
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-builder",
@@ -5705,6 +5704,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie",
+ "revm-inspectors",
  "secp256k1 0.27.0",
  "serde",
  "serde_json",
@@ -6446,27 +6446,10 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
- "reth-revm-inspectors",
  "reth-trie",
  "revm",
+ "revm-inspectors",
  "tracing",
-]
-
-[[package]]
-name = "reth-revm-inspectors"
-version = "0.1.0-alpha.14"
-dependencies = [
- "alloy-primitives",
- "alloy-rpc-trace-types",
- "alloy-rpc-types",
- "alloy-sol-types",
- "boa_engine",
- "boa_gc",
- "revm",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
 ]
 
 [[package]]
@@ -6803,6 +6786,24 @@ dependencies = [
  "auto_impl",
  "revm-interpreter",
  "revm-precompile",
+]
+
+[[package]]
+name = "revm-inspectors"
+version = "0.1.0"
+source = "git+https://github.com/paradigmxyz/evm-inspectors#4a3f82fa0d2010b3de69479b42fafe82339dae5e"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rpc-trace-types",
+ "alloy-rpc-types",
+ "alloy-sol-types",
+ "boa_engine",
+ "boa_gc",
+ "revm",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]

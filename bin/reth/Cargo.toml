@@ -26,7 +26,6 @@ reth-db = { workspace = true, features = ["mdbx", "test-utils"] }
 # TODO: Temporary use of the test-utils feature
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm.workspace = true
-reth-revm-inspectors.workspace = true
 reth-stages.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils", "clap"] }
 reth-transaction-pool.workspace = true
@@ -60,6 +59,7 @@ reth-nippy-jar.workspace = true
 # crypto
 alloy-rlp.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+revm-inspectors.workspace = true
 
 # tracing
 tracing.workspace = true
