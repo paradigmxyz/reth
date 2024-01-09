@@ -15,9 +15,14 @@ use std::{
 };
 
 /// Creates a new [PayloadBuilderService] for testing purposes.
-pub fn test_payload_service(
-) -> (PayloadBuilderService<TestPayloadJobGenerator>, PayloadBuilderHandle) {
-    PayloadBuilderService::new(Default::default())
+pub fn test_payload_service() -> (
+    PayloadBuilderService<
+        TestPayloadJobGenerator,
+        futures_util::stream::Empty<CanonStateNotification>,
+    >,
+    PayloadBuilderHandle,
+) {
+    PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
 }
 
 /// Creates a new [PayloadBuilderService] for testing purposes and spawns it in the background.
@@ -36,7 +41,7 @@ impl PayloadJobGenerator for TestPayloadJobGenerator {
     type Job = TestPayloadJob;
 
     fn new_payload_job(
-        &mut self,
+        &self,
         attr: PayloadBuilderAttributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
         Ok(TestPayloadJob { attr })

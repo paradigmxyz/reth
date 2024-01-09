@@ -134,10 +134,10 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
 
     /// Returns the pre-cached reads for the given parent block if it matches the cached state's
     /// block.
-    fn take_pre_cached(&mut self, parent: B256) -> Option<CachedReads> {
-        let pre_cached = self.pre_cached.take()?;
+    fn maybe_pre_cached(&self, parent: B256) -> Option<CachedReads> {
+        let pre_cached = self.pre_cached.as_ref()?;
         if pre_cached.block == parent {
-            Some(pre_cached.cached)
+            Some(pre_cached.cached.clone())
         } else {
             None
         }
@@ -157,7 +157,7 @@ where
     type Job = BasicPayloadJob<Client, Pool, Tasks, Builder>;
 
     fn new_payload_job(
-        &mut self,
+        &self,
         attributes: PayloadBuilderAttributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
         let parent_block = if attributes.parent.is_zero() {
@@ -186,7 +186,7 @@ where
         let until = self.job_deadline(config.attributes.timestamp);
         let deadline = Box::pin(tokio::time::sleep_until(until));
 
-        let cached_reads = self.take_pre_cached(config.parent_block.hash());
+        let cached_reads = self.maybe_pre_cached(config.parent_block.hash());
 
         Ok(BasicPayloadJob {
             config,

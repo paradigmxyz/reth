@@ -187,6 +187,9 @@ where
 {
     /// Creates a new payload builder service and returns the [PayloadBuilderHandle] to interact
     /// with it.
+    ///
+    /// This also takes a stream of chain events that will be forwarded to the generator to apply
+    /// additional logic when new state is committed. See also [PayloadJobGenerator::on_new_state].
     pub fn new(generator: Gen, chain_events: St) -> (Self, PayloadBuilderHandle) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
         let service = Self {
