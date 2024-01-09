@@ -35,7 +35,7 @@ use std::{
 };
 use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::error::RecvError, watch};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 /// Cache limit of transactions to keep track of for a single peer.
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
@@ -63,6 +63,10 @@ const MAX_ALTERNATIVE_PEERS_PER_TX: usize = 3;
 
 /// Maximum concurrent [`GetPooledTxRequest`]s to allow per peer.
 const MAX_INFLIGHT_GET_POOLED_TX_REQUESTS_PER_PEER: u8 = 1;
+
+/// Maximum request retires per [`TxHash`]. Note, this is reset should the [`TxHash`] re-appear in
+/// an announcement after it has been ejected from the hash buffer.
+const MAX_REQUEST_RETRIES_PER_TX_HASH: u8 = 2;
 
 /// The future for inserting a function into the pool
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<TxHash>> + Send + 'static>>;
@@ -573,7 +577,7 @@ where
             // the response (2MB)
             let (hashes, left_over_hashes) = TransactionFetcher::pack_hashes(msg);
 
-            self.transaction_fetcher.buffered_hashes.extend(left_over_hashes);
+            self.transaction_fetcher.buffer_hashes(left_over_hashes);
 
             // request the missing transactions
             let request_sent =
@@ -614,7 +618,7 @@ where
 
     // Returns any idle peer for the given hash.
     fn get_idle_peer_for(&self, hash: TxHash) -> Option<PeerId> {
-        let peers = self.transaction_fetcher.hash_to_fallback_peers.get(&hash)?;
+        let (_, peers) = self.transaction_fetcher.hash_to_fallback_peers.get(&hash)?;
         for peer_id in peers {
             let peer_id: &PeerId = peer_id;
             if self.peers.get(peer_id).is_some() {
@@ -1170,7 +1174,7 @@ struct TransactionFetcher {
     /// Hashes that are awaiting fetch from an idle peer.
     buffered_hashes: HashSet<TxHash>,
     /// Tracks all hashes that are currently being fetched or are buffered.
-    hash_to_fallback_peers: HashMap<TxHash, Vec<PeerId>>,
+    hash_to_fallback_peers: HashMap<TxHash, (u8, Vec<PeerId>)>,
 }
 
 // === impl TransactionFetcher ===
@@ -1301,6 +1305,18 @@ impl TransactionFetcher {
         }
     }
 
+    fn buffer_hashes(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
+        for hash in hashes {
+            let (retries, _) = self.hash_to_fallback_peers.entry(hash).or_default();
+            *retries += 1;
+            if *retries >= MAX_REQUEST_RETRIES_PER_TX_HASH {
+                warn!("retried fetching tx max times ({}), discarding hash, {}", retries, hash);
+                continue;
+            }
+            self.buffered_hashes.insert(hash);
+        }
+    }
+
     /// Removes the provided transaction hashes from the inflight requests set.
     ///
     /// This is called when we receive full transactions that are currently scheduled for fetching.
@@ -1318,20 +1334,20 @@ impl TransactionFetcher {
             match self.hash_to_fallback_peers.entry(hash) {
                 Entry::Vacant(entry) => {
                     // the hash is not in inflight hashes, insert it and retain in the vector
-                    entry.insert(vec![peer_id]);
+                    entry.insert((0, vec![peer_id]));
                     true
                 }
                 Entry::Occupied(mut entry) => {
                     // the hash is already in inflight, add this peer as a backup if not more than 3
                     // backups already
-                    let backups = entry.get_mut();
+                    let (_, backups) = entry.get_mut();
                     if backups.len() < MAX_ALTERNATIVE_PEERS_PER_TX {
                         backups.push(peer_id);
                     }
                     false
                 }
             }
-        });
+        })
     }
 
     /// Requests the missing transactions from the announced hashes of the peer. Returns `true` if
@@ -1383,7 +1399,7 @@ impl TransactionFetcher {
             if *hash == hashes[0] {
                 continue;
             }
-            if let Some(peers) = self.hash_to_fallback_peers.get(hash) {
+            if let Some((_, peers)) = self.hash_to_fallback_peers.get(hash) {
                 if peers.contains(&peer_id) {
                     hashes.push(*hash)
                 }
