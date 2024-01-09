@@ -1,6 +1,10 @@
+use self::parity::stack_push_count;
 use crate::tracing::{
-    types::{CallKind, LogCallOrder},
-    utils::get_create_address,
+    arena::PushTraceKind,
+    types::{
+        CallKind, CallTraceNode, LogCallOrder, RecordedMemory, StorageChange, StorageChangeReason,
+    },
+    utils::gas_used,
 };
 use alloy_primitives::{Address, Bytes, Log, B256, U256};
 pub use arena::CallTraceArena;
@@ -22,16 +26,11 @@ mod fourbyte;
 mod opcount;
 pub mod types;
 mod utils;
-use crate::tracing::{
-    arena::PushTraceKind,
-    types::{CallTraceNode, RecordedMemory, StorageChange, StorageChangeReason},
-    utils::gas_used,
-};
 pub use builder::{
     geth::{self, GethTraceBuilder},
     parity::{self, ParityTraceBuilder},
 };
-pub use config::TracingInspectorConfig;
+pub use config::{StackSnapshotType, TracingInspectorConfig};
 pub use fourbyte::FourByteInspector;
 pub use opcount::OpcodeCountInspector;
 
@@ -80,6 +79,16 @@ impl TracingInspector {
             gas_inspector: Default::default(),
             spec_id: None,
         }
+    }
+
+    /// Gets a reference to the recorded call traces.
+    pub fn get_traces(&self) -> &CallTraceArena {
+        &self.traces
+    }
+
+    /// Gets a mutable reference to the recorded call traces.
+    pub fn get_traces_mut(&mut self) -> &mut CallTraceArena {
+        &mut self.traces
     }
 
     /// Manually the gas used of the root trace.
@@ -133,7 +142,7 @@ impl TracingInspector {
     ) -> bool {
         if data.precompiles.contains(to) {
             // only if this is _not_ the root call
-            return self.is_deep() && value == U256::ZERO
+            return self.is_deep() && value.is_zero()
         }
         false
     }
@@ -282,7 +291,11 @@ impl TracingInspector {
             .record_memory_snapshots
             .then(|| RecordedMemory::new(interp.shared_memory.context_memory().to_vec()))
             .unwrap_or_default();
-        let stack = self.config.record_stack_snapshots.then(|| interp.stack.data().clone());
+        let stack = if self.config.record_stack_snapshots.is_full() {
+            Some(interp.stack.data().clone())
+        } else {
+            None
+        };
 
         let op = OpCode::new(interp.current_opcode())
             .or_else(|| {
@@ -325,12 +338,10 @@ impl TracingInspector {
             self.step_stack.pop().expect("can't fill step without starting a step first");
         let step = &mut self.traces.arena[trace_idx].trace.steps[step_idx];
 
-        if let Some(stack) = step.stack.as_ref() {
-            // only check stack changes if record stack snapshots is enabled: if stack is Some
-            if interp.stack.len() > stack.len() {
-                // if the stack grew, we need to record the new values
-                step.push_stack = Some(interp.stack.data()[stack.len()..].to_vec());
-            }
+        if self.config.record_stack_snapshots.is_pushes() {
+            let num_pushed = stack_push_count(step.op);
+            let start = interp.stack.len() - num_pushed;
+            step.push_stack = Some(interp.stack.data()[start..].to_vec());
         }
 
         if self.config.record_memory_snapshots {
@@ -489,7 +500,7 @@ where
         let nonce = data.journaled_state.account(inputs.caller).info.nonce;
         self.start_trace_on_call(
             data,
-            get_create_address(inputs, nonce),
+            inputs.created_address(nonce),
             inputs.init_code.clone(),
             inputs.value,
             inputs.scheme.into(),

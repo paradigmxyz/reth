@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_payload_builder::PayloadStore;
+use reth_payload_builder::{PayloadBuilderAttributes, PayloadStore};
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
@@ -72,6 +72,19 @@ where
             metrics: EngineApiMetrics::default(),
         });
         Self { inner }
+    }
+
+    /// Fetches the attributes for the payload with the given id.
+    async fn get_payload_attributes(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<PayloadBuilderAttributes> {
+        Ok(self
+            .inner
+            .payload_store
+            .payload_attributes(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)??)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
@@ -189,12 +202,7 @@ where
         payload_id: PayloadId,
     ) -> EngineApiResult<ExecutionPayloadEnvelopeV2> {
         // First we fetch the payload attributes to check the timestamp
-        let attributes = self
-            .inner
-            .payload_store
-            .payload_attributes(payload_id)
-            .await
-            .ok_or(EngineApiError::UnknownPayload)??;
+        let attributes = self.get_payload_attributes(payload_id).await?;
 
         // validate timestamp according to engine rules
         self.validate_payload_timestamp(EngineApiMessageVersion::V2, attributes.timestamp)?;
@@ -221,12 +229,7 @@ where
         payload_id: PayloadId,
     ) -> EngineApiResult<ExecutionPayloadEnvelopeV3> {
         // First we fetch the payload attributes to check the timestamp
-        let attributes = self
-            .inner
-            .payload_store
-            .payload_attributes(payload_id)
-            .await
-            .ok_or(EngineApiError::UnknownPayload)??;
+        let attributes = self.get_payload_attributes(payload_id).await?;
 
         // validate timestamp according to engine rules
         self.validate_payload_timestamp(EngineApiMessageVersion::V3, attributes.timestamp)?;

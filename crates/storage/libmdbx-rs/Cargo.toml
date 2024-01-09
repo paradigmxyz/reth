@@ -8,6 +8,9 @@ description = "Idiomatic and safe MDBX wrapper with good licence"
 homepage.workspace = true
 repository.workspace = true
 
+[lints]
+workspace = true
+
 [lib]
 name = "reth_libmdbx"
 
@@ -17,6 +20,7 @@ byteorder = "1"
 derive_more = "0.99"
 indexmap = "2"
 libc = "0.2"
+libffi = "3.2.0"
 parking_lot.workspace = true
 thiserror.workspace = true
 

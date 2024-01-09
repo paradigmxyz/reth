@@ -1,9 +1,6 @@
 //! Configuration files.
+
 use reth_discv4::Discv4Config;
-use reth_downloaders::{
-    bodies::bodies::BodiesDownloaderBuilder,
-    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
-};
 use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
 use reth_primitives::PruneModes;
 use secp256k1::SecretKey;
@@ -110,17 +107,6 @@ impl Default for HeadersConfig {
     }
 }
 
-impl From<HeadersConfig> for ReverseHeadersDownloaderBuilder {
-    fn from(config: HeadersConfig) -> Self {
-        ReverseHeadersDownloaderBuilder::default()
-            .request_limit(config.downloader_request_limit)
-            .min_concurrent_requests(config.downloader_min_concurrent_requests)
-            .max_concurrent_requests(config.downloader_max_concurrent_requests)
-            .max_buffered_responses(config.downloader_max_buffered_responses)
-            .stream_batch_size(config.commit_threshold as usize)
-    }
-}
-
 /// Total difficulty stage configuration
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
@@ -172,19 +158,6 @@ impl Default for BodiesConfig {
             downloader_min_concurrent_requests: 5,
             downloader_max_concurrent_requests: 100,
         }
-    }
-}
-
-impl From<BodiesConfig> for BodiesDownloaderBuilder {
-    fn from(config: BodiesConfig) -> Self {
-        BodiesDownloaderBuilder::default()
-            .with_stream_batch_size(config.downloader_stream_batch_size)
-            .with_request_limit(config.downloader_request_limit)
-            .with_max_buffered_blocks_size_bytes(config.downloader_max_buffered_blocks_size_bytes)
-            .with_concurrent_requests_range(
-                config.downloader_min_concurrent_requests..=
-                    config.downloader_max_concurrent_requests,
-            )
     }
 }
 

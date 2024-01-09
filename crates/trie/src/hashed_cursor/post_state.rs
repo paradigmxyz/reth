@@ -1,12 +1,12 @@
 use super::{HashedAccountCursor, HashedCursorFactory, HashedStorageCursor};
 use crate::prefix_set::{PrefixSet, PrefixSetMut};
+use ahash::{AHashMap, AHashSet};
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     tables,
     transaction::DbTx,
 };
 use reth_primitives::{trie::Nibbles, Account, StorageEntry, B256, U256};
-use std::collections::{HashMap, HashSet};
 
 /// The post state account storage with hashed slots.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -14,7 +14,7 @@ pub struct HashedStorage {
     /// Hashed storage slots with non-zero.
     non_zero_valued_storage: Vec<(B256, U256)>,
     /// Slots that have been zero valued.
-    zero_valued_slots: HashSet<B256>,
+    zero_valued_slots: AHashSet<B256>,
     /// Whether the storage was wiped or not.
     wiped: bool,
     /// Whether the storage entries were sorted or not.
@@ -26,10 +26,23 @@ impl HashedStorage {
     pub fn new(wiped: bool) -> Self {
         Self {
             non_zero_valued_storage: Vec::new(),
-            zero_valued_slots: HashSet::new(),
+            zero_valued_slots: AHashSet::new(),
             wiped,
             sorted: true, // empty is sorted
         }
+    }
+
+    /// Returns `true` if the storage was wiped.
+    pub fn wiped(&self) -> bool {
+        self.wiped
+    }
+
+    /// Returns all storage slots.
+    pub fn storage_slots(&self) -> impl Iterator<Item = (B256, U256)> + '_ {
+        self.zero_valued_slots
+            .iter()
+            .map(|slot| (*slot, U256::ZERO))
+            .chain(self.non_zero_valued_storage.iter().cloned())
     }
 
     /// Sorts the non zero value storage entries.
@@ -58,10 +71,10 @@ impl HashedStorage {
 pub struct HashedPostState {
     /// Map of hashed addresses to account info.
     accounts: Vec<(B256, Account)>,
-    /// Set of cleared accounts.
-    cleared_accounts: HashSet<B256>,
+    /// Set of destroyed accounts.
+    destroyed_accounts: AHashSet<B256>,
     /// Map of hashed addresses to hashed storage.
-    storages: HashMap<B256, HashedStorage>,
+    storages: AHashMap<B256, HashedStorage>,
     /// Whether the account and storage entries were sorted or not.
     sorted: bool,
 }
@@ -70,8 +83,8 @@ impl Default for HashedPostState {
     fn default() -> Self {
         Self {
             accounts: Vec::new(),
-            cleared_accounts: HashSet::new(),
-            storages: HashMap::new(),
+            destroyed_accounts: AHashSet::new(),
+            storages: AHashMap::new(),
             sorted: true, // empty is sorted
         }
     }
@@ -82,6 +95,18 @@ impl HashedPostState {
     pub fn sorted(mut self) -> Self {
         self.sort();
         self
+    }
+
+    /// Returns all accounts with their state.
+    pub fn accounts(&self) -> impl Iterator<Item = (B256, Option<Account>)> + '_ {
+        self.destroyed_accounts.iter().map(|hashed_address| (*hashed_address, None)).chain(
+            self.accounts.iter().map(|(hashed_address, account)| (*hashed_address, Some(*account))),
+        )
+    }
+
+    /// Returns all account storages.
+    pub fn storages(&self) -> impl Iterator<Item = (&B256, &HashedStorage)> {
+        self.storages.iter()
     }
 
     /// Sort account and storage entries.
@@ -102,9 +127,9 @@ impl HashedPostState {
         self.sorted = false;
     }
 
-    /// Insert cleared hashed account key.
-    pub fn insert_cleared_account(&mut self, hashed_address: B256) {
-        self.cleared_accounts.insert(hashed_address);
+    /// Insert destroyed hashed account key.
+    pub fn insert_destroyed_account(&mut self, hashed_address: B256) {
+        self.destroyed_accounts.insert(hashed_address);
     }
 
     /// Insert hashed storage entry.
@@ -113,19 +138,24 @@ impl HashedPostState {
         self.storages.insert(hashed_address, hashed_storage);
     }
 
+    /// Returns all destroyed accounts.
+    pub fn destroyed_accounts(&self) -> AHashSet<B256> {
+        self.destroyed_accounts.clone()
+    }
+
     /// Construct (PrefixSet)[PrefixSet] from hashed post state.
     /// The prefix sets contain the hashed account and storage keys that have been changed in the
     /// post state.
-    pub fn construct_prefix_sets(&self) -> (PrefixSet, HashMap<B256, PrefixSet>) {
+    pub fn construct_prefix_sets(&self) -> (PrefixSet, AHashMap<B256, PrefixSet>) {
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSetMut::default();
-        let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
+        let mut storage_prefix_set: AHashMap<B256, PrefixSetMut> = AHashMap::default();
 
         // Populate account prefix set.
         for (hashed_address, _) in &self.accounts {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
         }
-        for hashed_address in &self.cleared_accounts {
+        for hashed_address in &self.destroyed_accounts {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
         }
 
@@ -213,7 +243,7 @@ impl<'b, C> HashedPostStateAccountCursor<'b, C> {
     /// This function only checks the post state, not the database, because the latter does not
     /// store destroyed accounts.
     fn is_account_cleared(&self, account: &B256) -> bool {
-        self.post_state.cleared_accounts.contains(account)
+        self.post_state.destroyed_accounts.contains(account)
     }
 
     /// Return the account with the lowest hashed account key.
@@ -667,7 +697,7 @@ mod tests {
         let mut hashed_post_state = HashedPostState::default();
         for (hashed_address, account) in accounts.iter().filter(|x| x.0[31] % 2 != 0) {
             if removed_keys.contains(hashed_address) {
-                hashed_post_state.insert_cleared_account(*hashed_address);
+                hashed_post_state.insert_destroyed_account(*hashed_address);
             } else {
                 hashed_post_state.insert_account(*hashed_address, *account);
             }
@@ -722,7 +752,7 @@ mod tests {
                     if let Some(account) = account {
                         hashed_post_state.insert_account(*hashed_address, *account);
                     } else {
-                        hashed_post_state.insert_cleared_account(*hashed_address);
+                        hashed_post_state.insert_destroyed_account(*hashed_address);
                     }
                 }
                 hashed_post_state.sort();
@@ -886,7 +916,7 @@ mod tests {
         let wiped = false;
         let mut hashed_storage = HashedStorage::new(wiped);
         for (slot, value) in post_state_storage.iter() {
-            if *value == U256::ZERO {
+            if value.is_zero() {
                 hashed_storage.insert_zero_valued_slot(*slot);
             } else {
                 hashed_storage.insert_non_zero_valued_storage(*slot, *value);
@@ -1000,7 +1030,7 @@ mod tests {
             for (address, (wiped, storage)) in &post_state_storages {
                 let mut hashed_storage = HashedStorage::new(*wiped);
                 for (slot, value) in storage {
-                    if *value == U256::ZERO {
+                    if value.is_zero() {
                         hashed_storage.insert_zero_valued_slot(*slot);
                     } else {
                         hashed_storage.insert_non_zero_valued_storage(*slot, *value);

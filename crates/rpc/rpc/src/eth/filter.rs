@@ -1,8 +1,8 @@
 use super::cache::EthStateCache;
 use crate::{
     eth::{
-        error::{EthApiError, EthResult},
-        logs_utils,
+        error::EthApiError,
+        logs_utils::{self, append_matching_block_logs},
     },
     result::{rpc_error_with_code, ToRpcResult},
     EthSubscriptionIdProvider,
@@ -11,11 +11,11 @@ use core::fmt;
 
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{BlockHashOrNumber, IntoRecoveredTransaction, Receipt, SealedBlock, TxHash};
+use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{
-    Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
+    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind,
 };
 use reth_tasks::TaskSpawner;
@@ -351,17 +351,18 @@ where
             FilterBlockOption::AtBlockHash(block_hash) => {
                 let mut all_logs = Vec::new();
                 // all matching logs in the block, if it exists
-                if let Some((block, receipts)) =
-                    self.eth_cache.get_block_and_receipts(block_hash).await?
-                {
-                    let filter = FilteredParams::new(Some(filter));
-                    logs_utils::append_matching_block_logs(
-                        &mut all_logs,
-                        &filter,
-                        (block_hash, block.number).into(),
-                        block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
-                        false,
-                    );
+                if let Some(block_number) = self.provider.block_number_for_id(block_hash.into())? {
+                    if let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? {
+                        let filter = FilteredParams::new(Some(filter));
+                        logs_utils::append_matching_block_logs(
+                            &mut all_logs,
+                            &self.provider,
+                            &filter,
+                            (block_hash, block_number).into(),
+                            &receipts,
+                            false,
+                        )?;
+                    }
                 }
                 Ok(all_logs)
             }
@@ -402,19 +403,6 @@ where
         Ok(id)
     }
 
-    /// Fetches both receipts and block for the given block number.
-    async fn block_and_receipts_by_number(
-        &self,
-        hash_or_number: BlockHashOrNumber,
-    ) -> EthResult<Option<(SealedBlock, Vec<Receipt>)>> {
-        let block_hash = match self.provider.convert_block_hash(hash_or_number)? {
-            Some(hash) => hash,
-            None => return Ok(None),
-        };
-
-        Ok(self.eth_cache.get_block_and_receipts(block_hash).await?)
-    }
-
     /// Returns all logs in the given _inclusive_ range that match the filter
     ///
     /// Returns an error if:
@@ -447,29 +435,29 @@ where
             let headers = self.provider.headers_range(from..=to)?;
 
             for (idx, header) in headers.iter().enumerate() {
-                // these are consecutive headers, so we can use the parent hash of the next block to
-                // get the current header's hash
-                let num_hash: BlockHashOrNumber = headers
-                    .get(idx + 1)
-                    .map(|h| h.parent_hash.into())
-                    .unwrap_or_else(|| header.number.into());
-
                 // only if filter matches
                 if FilteredParams::matches_address(header.logs_bloom, &address_filter) &&
                     FilteredParams::matches_topics(header.logs_bloom, &topics_filter)
                 {
-                    if let Some((block, receipts)) =
-                        self.block_and_receipts_by_number(num_hash).await?
-                    {
-                        let block_hash = block.hash;
+                    // these are consecutive headers, so we can use the parent hash of the next
+                    // block to get the current header's hash
+                    let block_hash = match headers.get(idx + 1) {
+                        Some(parent) => parent.parent_hash,
+                        None => self
+                            .provider
+                            .block_hash(header.number)?
+                            .ok_or(ProviderError::BlockNotFound(header.number.into()))?,
+                    };
 
-                        logs_utils::append_matching_block_logs(
+                    if let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? {
+                        append_matching_block_logs(
                             &mut all_logs,
+                            &self.provider,
                             &filter_params,
-                            (block.number, block_hash).into(),
-                            block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
+                            BlockNumHash::new(header.number, block_hash),
+                            &receipts,
                             false,
-                        );
+                        )?;
 
                         // size check but only if range is multiple blocks, so we always return all
                         // logs of a single block

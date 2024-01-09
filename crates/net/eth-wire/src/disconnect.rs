@@ -104,9 +104,9 @@ impl TryFrom<u8> for DisconnectReason {
     }
 }
 
-/// The [`Encodable`] implementation for [`DisconnectReason`] encodes the disconnect reason in a
-/// single-element RLP list.
 impl Encodable for DisconnectReason {
+    /// The [`Encodable`] implementation for [`DisconnectReason`] encodes the disconnect reason in
+    /// a single-element RLP list.
     fn encode(&self, out: &mut dyn BufMut) {
         vec![*self as u8].encode(out);
     }
@@ -115,9 +115,9 @@ impl Encodable for DisconnectReason {
     }
 }
 
-/// The [`Decodable`] implementation for [`DisconnectReason`] supports either a disconnect reason
-/// encoded a single byte or a RLP list containing the disconnect reason.
 impl Decodable for DisconnectReason {
+    /// The [`Decodable`] implementation for [`DisconnectReason`] supports either a disconnect
+    /// reason encoded a single byte or a RLP list containing the disconnect reason.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if buf.is_empty() {
             return Err(RlpError::InputTooShort)
@@ -150,7 +150,7 @@ impl Decodable for DisconnectReason {
 /// lower-level disconnect functions (such as those that exist in the `p2p` protocol) if the
 /// underlying stream supports it.
 #[async_trait::async_trait]
-pub trait CanDisconnect<T>: Sink<T> + Unpin + Sized {
+pub trait CanDisconnect<T>: Sink<T> + Unpin {
     /// Disconnects from the underlying stream, using a [`DisconnectReason`] as disconnect
     /// information if the stream implements a protocol that can carry the additional disconnect
     /// metadata.

@@ -344,6 +344,13 @@ impl ReceiptProvider for MockEthProvider {
     fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
         Ok(None)
     }
+
+    fn receipts_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Receipt>> {
+        Ok(vec![])
+    }
 }
 
 impl ReceiptProviderIdExt for MockEthProvider {}
@@ -462,8 +469,14 @@ impl BlockReader for MockEthProvider {
         Ok(None)
     }
 
-    fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
-        Ok(vec![])
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
+        let lock = self.blocks.lock();
+
+        let mut blocks: Vec<_> =
+            lock.values().filter(|block| range.contains(&block.number)).cloned().collect();
+        blocks.sort_by_key(|block| block.number);
+
+        Ok(blocks)
     }
 }
 
@@ -502,14 +515,14 @@ impl AccountReader for MockEthProvider {
 
 impl StateRootProvider for MockEthProvider {
     fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
-        todo!()
+        Ok(B256::default())
     }
 
     fn state_root_with_updates(
         &self,
         _bundle_state: &BundleStateWithReceipts,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        todo!()
+        Ok((B256::default(), Default::default()))
     }
 }
 
@@ -536,7 +549,7 @@ impl StateProvider for MockEthProvider {
     }
 
     fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
-        todo!()
+        Ok(AccountProof::default())
     }
 }
 

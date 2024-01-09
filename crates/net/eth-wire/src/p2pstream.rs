@@ -1,28 +1,3 @@
-#![allow(dead_code, unreachable_pub, missing_docs, unused_variables)]
-
-use std::{
-    collections::VecDeque,
-    fmt, io,
-    pin::Pin,
-    task::{ready, Context, Poll},
-    time::Duration,
-};
-
-use alloy_rlp::{Decodable, Encodable, Error as RlpError, EMPTY_LIST_CODE};
-use futures::{Sink, SinkExt, StreamExt};
-use pin_project::pin_project;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-use tokio_stream::Stream;
-use tracing::{debug, trace};
-
-use reth_codecs::derive_arbitrary;
-use reth_metrics::metrics::counter;
-use reth_primitives::{
-    bytes::{Buf, BufMut, Bytes, BytesMut},
-    hex, GotExpected,
-};
-
 use crate::{
     capability::SharedCapabilities,
     disconnect::CanDisconnect,
@@ -30,6 +5,27 @@ use crate::{
     pinger::{Pinger, PingerEvent},
     DisconnectReason, HelloMessage, HelloMessageWithProtocols,
 };
+use alloy_rlp::{Decodable, Encodable, Error as RlpError, EMPTY_LIST_CODE};
+use futures::{Sink, SinkExt, StreamExt};
+use pin_project::pin_project;
+use reth_codecs::derive_arbitrary;
+use reth_metrics::metrics::counter;
+use reth_primitives::{
+    bytes::{Buf, BufMut, Bytes, BytesMut},
+    hex, GotExpected,
+};
+use std::{
+    collections::VecDeque,
+    fmt, io,
+    pin::Pin,
+    task::{ready, Context, Poll},
+    time::Duration,
+};
+use tokio_stream::Stream;
+use tracing::{debug, trace};
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// [`MAX_PAYLOAD_SIZE`] is the maximum size of an uncompressed message payload.
 /// This is defined in [EIP-706](https://eips.ethereum.org/EIPS/eip-706).
@@ -56,6 +52,7 @@ const PING_INTERVAL: Duration = Duration::from_secs(60);
 
 /// [`GRACE_PERIOD`] determines the amount of time to wait for a peer to disconnect after sending a
 /// [`P2PMessage::Disconnect`] message.
+#[allow(dead_code)]
 const GRACE_PERIOD: Duration = Duration::from_secs(2);
 
 /// [`MAX_P2P_CAPACITY`] is the maximum number of messages that can be buffered to be sent in the
@@ -228,9 +225,10 @@ where
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/rlpx.md#message-id-based-multiplexing>
 ///
-/// This stream emits Bytes that start with the normalized message id, so that the first byte of
-/// each message starts from 0. If this stream only supports a single capability, for example `eth`
-/// then the first byte of each message will match [EthMessageID](crate::types::EthMessageID).
+/// This stream emits _non-empty_ Bytes that start with the normalized message id, so that the first
+/// byte of each message starts from 0. If this stream only supports a single capability, for
+/// example `eth` then the first byte of each message will match
+/// [EthMessageID](crate::types::EthMessageID).
 #[pin_project]
 #[derive(Debug)]
 pub struct P2PStream<S> {
@@ -300,11 +298,6 @@ impl<S> P2PStream<S> {
         &self.shared_capabilities
     }
 
-    /// Returns `true` if the connection is about to disconnect.
-    pub fn is_disconnecting(&self) -> bool {
-        self.disconnecting
-    }
-
     /// Returns `true` if the stream has outgoing capacity.
     fn has_outgoing_capacity(&self) -> bool {
         self.outgoing_messages.len() < self.outgoing_message_buffer_capacity
@@ -325,7 +318,19 @@ impl<S> P2PStream<S> {
         ping.encode(&mut ping_bytes);
         self.outgoing_messages.push_back(ping_bytes.freeze());
     }
+}
 
+/// Gracefully disconnects the connection by sending a disconnect message and stop reading new
+/// messages.
+pub trait DisconnectP2P {
+    /// Starts to gracefully disconnect.
+    fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), P2PStreamError>;
+
+    /// Returns `true` if the connection is about to disconnect.
+    fn is_disconnecting(&self) -> bool;
+}
+
+impl<S> DisconnectP2P for P2PStream<S> {
     /// Starts to gracefully disconnect the connection by sending a Disconnect message and stop
     /// reading new messages.
     ///
@@ -334,7 +339,7 @@ impl<S> P2PStream<S> {
     /// # Errors
     ///
     /// Returns an error only if the message fails to compress.
-    pub fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), snap::Error> {
+    fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), P2PStreamError> {
         // clear any buffered messages and queue in
         self.outgoing_messages.clear();
         let disconnect = P2PMessage::Disconnect(reason);
@@ -363,6 +368,10 @@ impl<S> P2PStream<S> {
         self.outgoing_messages.push_back(compressed.freeze());
         self.disconnecting = true;
         Ok(())
+    }
+
+    fn is_disconnecting(&self) -> bool {
+        self.disconnecting
     }
 }
 
@@ -405,6 +414,11 @@ where
                 None => return Poll::Ready(None),
             };
 
+            if bytes.is_empty() {
+                // empty messages are not allowed
+                return Poll::Ready(Some(Err(P2PStreamError::EmptyProtocolMessage)))
+            }
+
             // first check that the compressed message length does not exceed the max
             // payload size
             let decompressed_len = snap::raw::decompress_len(&bytes[1..])?;
@@ -430,7 +444,7 @@ where
                 err
             })?;
 
-            let id = *bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
+            let id = bytes[0];
             match id {
                 _ if id == P2PMessageID::Ping as u8 => {
                     trace!("Received Ping, Sending Pong");
@@ -572,8 +586,7 @@ where
         Ok(())
     }
 
-    /// Returns Poll::Ready(Ok(())) when no buffered items remain and the sink has been successfully
-    /// closed.
+    /// Returns `Poll::Ready(Ok(()))` when no buffered items remain.
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let mut this = self.project();
         loop {
@@ -593,6 +606,7 @@ where
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         ready!(self.as_mut().poll_flush(cx))?;
+        ready!(self.project().inner.poll_close(cx))?;
 
         Poll::Ready(Ok(()))
     }
@@ -629,11 +643,11 @@ impl P2PMessage {
     }
 }
 
-/// The [`Encodable`] implementation for [`P2PMessage::Ping`] and [`P2PMessage::Pong`] encodes the
-/// message as RLP, and prepends a snappy header to the RLP bytes for all variants except the
-/// [`P2PMessage::Hello`] variant, because the hello message is never compressed in the `p2p`
-/// subprotocol.
 impl Encodable for P2PMessage {
+    /// The [`Encodable`] implementation for [`P2PMessage::Ping`] and [`P2PMessage::Pong`] encodes
+    /// the message as RLP, and prepends a snappy header to the RLP bytes for all variants except
+    /// the [`P2PMessage::Hello`] variant, because the hello message is never compressed in the
+    /// `p2p` subprotocol.
     fn encode(&self, out: &mut dyn BufMut) {
         (self.message_id() as u8).encode(out);
         match self {
@@ -666,13 +680,13 @@ impl Encodable for P2PMessage {
     }
 }
 
-/// The [`Decodable`] implementation for [`P2PMessage`] assumes that each of the message variants
-/// are snappy compressed, except for the [`P2PMessage::Hello`] variant since the hello message is
-/// never compressed in the `p2p` subprotocol.
-///
-/// The [`Decodable`] implementation for [`P2PMessage::Ping`] and [`P2PMessage::Pong`] expects a
-/// snappy encoded payload, see [`Encodable`] implementation.
 impl Decodable for P2PMessage {
+    /// The [`Decodable`] implementation for [`P2PMessage`] assumes that each of the message
+    /// variants are snappy compressed, except for the [`P2PMessage::Hello`] variant since the
+    /// hello message is never compressed in the `p2p` subprotocol.
+    ///
+    /// The [`Decodable`] implementation for [`P2PMessage::Ping`] and [`P2PMessage::Pong`] expects
+    /// a snappy encoded payload, see [`Encodable`] implementation.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         /// Removes the snappy prefix from the Ping/Pong buffer
         fn advance_snappy_ping_pong_payload(buf: &mut &[u8]) -> alloy_rlp::Result<()> {
@@ -828,6 +842,8 @@ mod tests {
             P2PStreamError::Disconnected(reason) => assert_eq!(reason, expected_disconnect),
             e => panic!("unexpected err: {e}"),
         }
+
+        handle.await.unwrap();
     }
 
     #[tokio::test]

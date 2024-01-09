@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "A basic payload builder for reth that uses the txpool API to build payloads."
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-primitives.workspace = true
@@ -33,12 +36,3 @@ metrics.workspace = true
 
 # misc
 tracing.workspace = true
-
-[features]
-optimism = [
-  "reth-primitives/optimism",
-  "reth-revm/optimism",
-  "reth-transaction-pool/optimism",
-  "reth-provider/optimism",
-  "reth-payload-builder/optimism"
-]

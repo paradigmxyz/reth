@@ -1,4 +1,5 @@
 //! Collection of methods for block validation.
+
 use reth_interfaces::{consensus::ConsensusError, RethResult};
 use reth_primitives::{
     constants::{
@@ -66,6 +67,7 @@ pub fn validate_transaction_regarding_header(
     transaction: &Transaction,
     chain_spec: &ChainSpec,
     at_block_number: BlockNumber,
+    at_timestamp: u64,
     base_fee: Option<u64>,
 ) -> Result<(), ConsensusError> {
     let chain_id = match transaction {
@@ -92,7 +94,7 @@ pub fn validate_transaction_regarding_header(
             ..
         }) => {
             // EIP-1559: Fee market change for ETH 1.0 chain https://eips.ethereum.org/EIPS/eip-1559
-            if !chain_spec.fork(Hardfork::Berlin).active_at_block(at_block_number) {
+            if !chain_spec.fork(Hardfork::London).active_at_block(at_block_number) {
                 return Err(InvalidTransactionError::Eip1559Disabled.into())
             }
 
@@ -110,6 +112,11 @@ pub fn validate_transaction_regarding_header(
             max_priority_fee_per_gas,
             ..
         }) => {
+            // EIP-4844: Shard Blob Transactions https://eips.ethereum.org/EIPS/eip-4844
+            if !chain_spec.fork(Hardfork::Cancun).active_at_timestamp(at_timestamp) {
+                return Err(InvalidTransactionError::Eip4844Disabled.into())
+            }
+
             // EIP-1559: add more constraints to the tx validation
             // https://github.com/ethereum/EIPs/pull/3594
             if max_priority_fee_per_gas > max_fee_per_gas {
@@ -155,6 +162,7 @@ pub fn validate_all_transaction_regarding_block_and_nonces<
             transaction,
             chain_spec,
             header.number,
+            header.timestamp,
             header.base_fee_per_gas,
         )?;
 
@@ -263,7 +271,8 @@ fn check_gas_limit(
     // By consensus, gas_limit is multiplied by elasticity (*2) on
     // on exact block that hardfork happens.
     if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
-        parent_gas_limit = parent.gas_limit * chain_spec.base_fee_params.elasticity_multiplier;
+        parent_gas_limit =
+            parent.gas_limit * chain_spec.base_fee_params(child.timestamp).elasticity_multiplier;
     }
 
     if child.gas_limit > parent_gas_limit {
@@ -336,7 +345,7 @@ pub fn validate_header_regarding_parent(
             } else {
                 // This BaseFeeMissing will not happen as previous blocks are checked to have them.
                 parent
-                    .next_block_base_fee(chain_spec.base_fee_params)
+                    .next_block_base_fee(chain_spec.base_fee_params(child.timestamp))
                     .ok_or(ConsensusError::BaseFeeMissing)?
             };
         if expected_base_fee != base_fee {

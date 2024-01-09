@@ -8,12 +8,16 @@ homepage.workspace = true
 repository.workspace = true
 description = "Implementations of various block downloaders"
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-interfaces.workspace = true
 reth-primitives.workspace = true
 reth-tasks.workspace = true
 reth-provider.workspace = true
+reth-config.workspace = true
 
 # async
 futures.workspace = true

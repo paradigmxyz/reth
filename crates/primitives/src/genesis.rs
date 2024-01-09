@@ -1,16 +1,12 @@
 use crate::{
-    constants::EMPTY_ROOT_HASH,
     keccak256,
     serde_helper::{
         json_u256::{deserialize_json_ttd_opt, deserialize_json_u256},
         num::{u64_hex_or_decimal, u64_hex_or_decimal_opt},
         storage::deserialize_storage_map,
     },
-    trie::{HashBuilder, Nibbles},
-    Account, Address, Bytes, B256, KECCAK_EMPTY, U256,
+    Account, Address, Bytes, B256, U256,
 };
-use alloy_rlp::{encode_fixed_size, length_of_length, Encodable, Header as RlpHeader};
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -153,19 +149,6 @@ pub struct GenesisAccount {
 }
 
 impl GenesisAccount {
-    /// Determines the RLP payload length, without the RLP header.
-    fn payload_len(&self) -> usize {
-        let mut len = 0;
-        len += self.nonce.unwrap_or_default().length();
-        len += self.balance.length();
-        // rather than rlp-encoding the storage, we just return the length of a single hash
-        // hashes are a fixed size, so it is safe to use the empty root for this
-        len += EMPTY_ROOT_HASH.length();
-        // we are encoding a hash, so let's just use the length of the empty hash for the code hash
-        len += KECCAK_EMPTY.length();
-        len
-    }
-
     /// Set the nonce.
     pub fn with_nonce(mut self, nonce: Option<u64>) -> Self {
         self.nonce = nonce;
@@ -188,45 +171,6 @@ impl GenesisAccount {
     pub fn with_storage(mut self, storage: Option<HashMap<B256, B256>>) -> Self {
         self.storage = storage;
         self
-    }
-}
-
-impl Encodable for GenesisAccount {
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        let header = RlpHeader { list: true, payload_length: self.payload_len() };
-        header.encode(out);
-
-        self.nonce.unwrap_or_default().encode(out);
-        self.balance.encode(out);
-        self.storage
-            .as_ref()
-            .map_or(EMPTY_ROOT_HASH, |storage| {
-                if storage.is_empty() {
-                    return EMPTY_ROOT_HASH
-                }
-
-                let storage_with_sorted_hashed_keys = storage
-                    .iter()
-                    .filter(|(_k, &v)| v != B256::ZERO)
-                    .map(|(slot, value)| (keccak256(slot), value))
-                    .sorted_by_key(|(key, _)| *key);
-
-                let mut hb = HashBuilder::default();
-                for (hashed_slot, value) in storage_with_sorted_hashed_keys {
-                    let encoded_value = encode_fixed_size(&U256::from_be_bytes(**value));
-                    hb.add_leaf(Nibbles::unpack(hashed_slot), &encoded_value);
-                }
-
-                hb.root()
-            })
-            .encode(out);
-        self.code.as_ref().map_or(KECCAK_EMPTY, keccak256).encode(out);
-    }
-
-    fn length(&self) -> usize {
-        let len = self.payload_len();
-        // RLP header length + payload length
-        len + length_of_length(len)
     }
 }
 
@@ -378,14 +322,11 @@ mod ethers_compat {
         EthashConfig as EthersEthashConfig, GenesisAccount as EthersGenesisAccount,
     };
 
+    /// Converts an `ethers_core::utils::Genesis` into a `Genesis`.
     impl From<ethers_core::utils::Genesis> for Genesis {
+        /// This conversion function extracts and maps specific fields from the input `genesis` to
+        /// create a new `Genesis` instance
         fn from(genesis: ethers_core::utils::Genesis) -> Genesis {
-            let alloc = genesis
-                .alloc
-                .iter()
-                .map(|(addr, account)| (addr.0.into(), account.clone().into()))
-                .collect::<HashMap<Address, GenesisAccount>>();
-
             Genesis {
                 config: genesis.config.into(),
                 nonce: genesis.nonce.as_u64(),
@@ -399,12 +340,23 @@ mod ethers_compat {
                 // TODO: if/when ethers has cancun fields they should be added here
                 excess_blob_gas: None,
                 blob_gas_used: None,
-                alloc,
+                alloc: genesis
+                    .alloc
+                    .iter()
+                    .map(|(addr, account)| (addr.0.into(), account.clone().into()))
+                    .collect(),
             }
         }
     }
 
+    /// Converts an `EthersGenesisAccount` into a `GenesisAccount`.
     impl From<EthersGenesisAccount> for GenesisAccount {
+        /// Converts fields from `EthersGenesisAccount` to construct a `GenesisAccount`.
+        ///
+        /// - Maps the `balance` from limbs.
+        /// - Sets the `nonce`.
+        /// - Handles the `code` field, converting it if present.
+        /// - Processes the `storage` field into key-value pairs.
         fn from(genesis_account: EthersGenesisAccount) -> Self {
             Self {
                 balance: U256::from_limbs(genesis_account.balance.0),
@@ -417,6 +369,7 @@ mod ethers_compat {
         }
     }
 
+    /// Converts an `EthersChainConfig` into a `ChainConfig`.
     impl From<EthersChainConfig> for ChainConfig {
         fn from(chain_config: EthersChainConfig) -> Self {
             let EthersChainConfig {
@@ -475,12 +428,14 @@ mod ethers_compat {
         }
     }
 
+    /// Converts an `EthersEthashConfig` into an `EthashConfig`.
     impl From<EthersEthashConfig> for EthashConfig {
         fn from(_: EthersEthashConfig) -> Self {
             EthashConfig {}
         }
     }
 
+    /// Converts an `EthersCliqueConfig` into a `CliqueConfig`.
     impl From<EthersCliqueConfig> for CliqueConfig {
         fn from(clique_config: EthersCliqueConfig) -> Self {
             let EthersCliqueConfig { period, epoch } = clique_config;

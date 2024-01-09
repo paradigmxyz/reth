@@ -1,5 +1,5 @@
 use libc::c_int;
-use std::{ffi::CStr, fmt, result, str};
+use std::result;
 
 /// An MDBX result.
 pub type Result<T> = result::Result<T, Error>;
@@ -7,31 +7,47 @@ pub type Result<T> = result::Result<T, Error>;
 /// An MDBX error kind.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum Error {
-    /// The key/value pair already exists.
+    /// Key/data pair already exists.
+    #[error("key/data pair already exists")]
     KeyExist,
-    /// The requested key/value pair was not found.
+    /// No matching key/data pair found.
+    #[error("no matching key/data pair found")]
     NotFound,
+    /// The cursor is already at the end of data.
+    #[error("the cursor is already at the end of data")]
     NoData,
-    /// The requested page was not found.
+    /// Requested page not found.
+    #[error("requested page not found")]
     PageNotFound,
-    /// The database is corrupted (e.g. a page was a wrong type)
+    /// Database is corrupted.
+    #[error("database is corrupted")]
     Corrupted,
-    /// The environment had a fatal error (e.g. failed to update a meta page)
+    /// Fatal environment error.
+    #[error("fatal environment error")]
     Panic,
+    /// DB version mismatch.
+    #[error("DB version mismatch")]
     VersionMismatch,
-    /// File is not a valid MDBX file
+    /// File is not an MDBX file.
+    #[error("file is not an MDBX file")]
     Invalid,
-    /// Environment map size reached.
+    /// Environment map size limit reached.
+    #[error("environment map size limit reached")]
     MapFull,
-    /// Environment reached the maximum number of databases.
+    /// Too many DBI-handles (maxdbs reached).
+    #[error("too many DBI-handles (maxdbs reached)")]
     DbsFull,
-    /// Environment reached the maximum number of readers.
+    /// Too many readers (maxreaders reached).
+    #[error("too many readers (maxreaders reached)")]
     ReadersFull,
-    /// The transaction has too many dirty pages (i.e. the transaction is too big).
+    /// Transaction has too many dirty pages (i.e., the transaction is too big).
+    #[error("transaction has too many dirty pages (i.e., the transaction is too big)")]
     TxnFull,
-    /// The cursor stack is too deep.
+    /// Cursor stack limit reached.
+    #[error("cursor stack limit reached")]
     CursorFull,
-    /// The page does not have enough space.
+    /// Page has no more space.
+    #[error("page has no more space")]
     PageFull,
     /// The database engine was unable to extend mapping, e.g. the address space is unavailable or
     /// busy.
@@ -42,29 +58,67 @@ pub enum Error {
     ///   environment should be re-opened to continue.
     /// - The engine was unable to extend the mapping during a write transaction or an explicit
     ///   call to change the geometry of the environment.
+    #[error("database engine was unable to extend mapping")]
     UnableExtendMapSize,
+    /// Environment or database is not compatible with the requested operation or flags.
+    #[error("environment or database is not compatible with the requested operation or flags")]
     Incompatible,
+    /// Invalid reuse of reader locktable slot.
+    #[error("invalid reuse of reader locktable slot")]
     BadRslot,
+    /// Transaction is not valid for requested operation.
+    #[error("transaction is not valid for requested operation")]
     BadTxn,
+    /// Invalid size or alignment of key or data for the target database.
+    #[error("invalid size or alignment of key or data for the target database")]
     BadValSize,
+    /// The specified DBI-handle is invalid.
+    #[error("the specified DBI-handle is invalid")]
     BadDbi,
+    /// Unexpected internal error.
+    #[error("unexpected internal error")]
     Problem,
+    /// Another write transaction is running.
+    #[error("another write transaction is running")]
     Busy,
+    /// The specified key has more than one associated value.
+    #[error("the specified key has more than one associated value")]
     Multival,
+    /// Wrong signature of a runtime object(s).
+    #[error("wrong signature of a runtime object(s)")]
     BadSignature,
+    /// Database should be recovered, but cannot be done automatically since it's in read-only
+    /// mode.
+    #[error("database should be recovered, but cannot be done automatically since it's in read-only mode")]
     WannaRecovery,
+    /// The given key value is mismatched to the current cursor position.
+    #[error("the given key value is mismatched to the current cursor position")]
     KeyMismatch,
+    /// Decode error: An invalid parameter was specified.
+    #[error("invalid parameter specified")]
     DecodeError,
+    /// The environment opened in read-only.
+    #[error("the environment opened in read-only")]
     Access,
+    /// Database is too large for the current system.
+    #[error("database is too large for the current system")]
     TooLarge,
+    /// Decode error length difference:
+    ///
+    /// An invalid parameter was specified, or the environment has an active write transaction.
+    #[error("invalid parameter specified or active write transaction")]
     DecodeErrorLenDiff,
     /// If the [Environment](crate::Environment) was opened with
     /// [EnvironmentKind::WriteMap](crate::EnvironmentKind::WriteMap) flag, nested transactions are
     /// not supported.
+    #[error("nested transactions are not supported with WriteMap")]
     NestedTransactionsUnsupportedWithWriteMap,
     /// If the [Environment](crate::Environment) was opened with in read-only mode
-    /// [Mode::ReadOnly](crate::flags::Mode::ReadOnly), write transactions can't be opened..
+    /// [Mode::ReadOnly](crate::flags::Mode::ReadOnly), write transactions can't be opened.
+    #[error("write transactions are not supported in read-only mode")]
     WriteTransactionUnsupportedInReadOnlyMode,
+    /// Unknown error code.
+    #[error("unknown error code")]
     Other(i32),
 }
 
@@ -142,23 +196,6 @@ impl Error {
             Error::Other(err_code) => *err_code,
         }
     }
-
-    /// Returns the message for this error
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::DecodeErrorLenDiff => "mismatched data length",
-            Self::NestedTransactionsUnsupportedWithWriteMap => {
-                "nested transactions are not supported on an environment with writemap"
-            }
-            Self::WriteTransactionUnsupportedInReadOnlyMode => {
-                "write transactions are not supported on an environment opened in read-only mode"
-            }
-            _ => unsafe {
-                let err = ffi::mdbx_strerror(self.to_err_code());
-                str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes())
-            },
-        }
-    }
 }
 
 impl From<Error> for i32 {
@@ -167,14 +204,8 @@ impl From<Error> for i32 {
     }
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(fmt, "{}", self.as_str())
-    }
-}
-
 #[inline]
-pub fn mdbx_result(err_code: c_int) -> Result<bool> {
+pub(crate) fn mdbx_result(err_code: c_int) -> Result<bool> {
     match err_code {
         ffi::MDBX_SUCCESS => Ok(false),
         ffi::MDBX_RESULT_TRUE => Ok(true),
@@ -199,9 +230,9 @@ mod test {
 
     #[test]
     fn test_description() {
-        assert_eq!("Permission denied", Error::from_err_code(13).to_string());
+        assert_eq!("the environment opened in read-only", Error::from_err_code(13).to_string());
 
-        assert_eq!("MDBX_INVALID: File is not an MDBX file", Error::Invalid.to_string());
+        assert_eq!("file is not an MDBX file", Error::Invalid.to_string());
     }
 
     #[test]

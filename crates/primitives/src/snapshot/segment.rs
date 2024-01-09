@@ -5,7 +5,7 @@ use crate::{
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use std::{ffi::OsStr, ops::RangeInclusive, str::FromStr};
-use strum::{AsRefStr, EnumString};
+use strum::{AsRefStr, EnumIter, EnumString};
 
 #[derive(
     Debug,
@@ -19,6 +19,7 @@ use strum::{AsRefStr, EnumString};
     Deserialize,
     Serialize,
     EnumString,
+    EnumIter,
     AsRefStr,
     Display,
 )]
@@ -117,7 +118,7 @@ impl SnapshotSegment {
     ) -> Option<(Self, RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)> {
         let mut parts = name.to_str()?.split('_');
         if parts.next() != Some("snapshot") {
-            return None;
+            return None
         }
 
         let segment = Self::from_str(parts.next()?).ok()?;
@@ -125,7 +126,7 @@ impl SnapshotSegment {
         let (tx_start, tx_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
 
         if block_start >= block_end || tx_start > tx_end {
-            return None;
+            return None
         }
 
         Some((segment, block_start..=block_end, tx_start..=tx_end))
@@ -153,9 +154,24 @@ impl SegmentHeader {
         Self { block_range, tx_range, segment }
     }
 
+    /// Returns the transaction range.
+    pub fn tx_range(&self) -> &RangeInclusive<TxNumber> {
+        &self.tx_range
+    }
+
+    /// Returns the block range.
+    pub fn block_range(&self) -> &RangeInclusive<BlockNumber> {
+        &self.block_range
+    }
+
     /// Returns the first block number of the segment.
     pub fn block_start(&self) -> BlockNumber {
         *self.block_range.start()
+    }
+
+    /// Returns the last block number of the segment.
+    pub fn block_end(&self) -> BlockNumber {
+        *self.block_range.end()
     }
 
     /// Returns the first transaction number of the segment.

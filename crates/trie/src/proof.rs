@@ -1,9 +1,8 @@
 use crate::{
-    account::EthAccount,
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{AccountNode, AccountNodeIter, StorageNode, StorageNodeIter},
     prefix_set::PrefixSetMut,
-    trie_cursor::{AccountTrieCursor, StorageTrieCursor},
+    trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
     walker::TrieWalker,
     StateRootError, StorageRootError,
 };
@@ -12,7 +11,7 @@ use reth_db::{tables, transaction::DbTx};
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
     keccak256,
-    trie::{AccountProof, HashBuilder, Nibbles, StorageProof},
+    trie::{AccountProof, HashBuilder, Nibbles, StorageProof, TrieAccount},
     Address, B256,
 };
 
@@ -52,7 +51,8 @@ where
         let mut account_proof = AccountProof::new(address);
 
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
-        let trie_cursor = AccountTrieCursor::new(self.tx.cursor_read::<tables::AccountsTrie>()?);
+        let trie_cursor =
+            DatabaseAccountTrieCursor::new(self.tx.cursor_read::<tables::AccountsTrie>()?);
 
         // Create the walker.
         let mut prefix_set = PrefixSetMut::default();
@@ -81,7 +81,7 @@ where
                     };
 
                     account_rlp.clear();
-                    let account = EthAccount::from(account).with_storage_root(storage_root);
+                    let account = TrieAccount::from((account, storage_root));
                     account.encode(&mut account_rlp as &mut dyn BufMut);
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
@@ -120,7 +120,7 @@ where
 
         let target_nibbles = proofs.iter().map(|p| p.nibbles.clone()).collect::<Vec<_>>();
         let prefix_set = PrefixSetMut::from(target_nibbles.clone()).freeze();
-        let trie_cursor = StorageTrieCursor::new(
+        let trie_cursor = DatabaseStorageTrieCursor::new(
             self.tx.cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
         );
@@ -222,7 +222,7 @@ mod tests {
         });
         provider.insert_storage_for_hashing(alloc_storage)?;
 
-        let (_, updates) = StateRoot::new(provider.tx_ref())
+        let (_, updates) = StateRoot::from_tx(provider.tx_ref())
             .root_with_updates()
             .map_err(Into::<reth_db::DatabaseError>::into)?;
         updates.flush(provider.tx_mut())?;

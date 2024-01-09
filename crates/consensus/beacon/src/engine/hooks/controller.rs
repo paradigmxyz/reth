@@ -10,7 +10,7 @@ use tracing::debug;
 
 #[derive(Debug)]
 pub(crate) struct PolledHook {
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub(crate) name: &'static str,
     pub(crate) event: EngineHookEvent,
     pub(crate) action: Option<EngineHookAction>,

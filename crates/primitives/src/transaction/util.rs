@@ -11,7 +11,10 @@ pub(crate) mod secp256k1 {
     /// Recovers the address of the sender using secp256k1 pubkey recovery.
     ///
     /// Converts the public key into an ethereum address by hashing the public key with keccak256.
-    pub fn recover_signer(sig: &[u8; 65], msg: &[u8; 32]) -> Result<Address, Error> {
+    ///
+    /// This does not ensure that the `s` value in the signature is low, and _just_ wraps the
+    /// underlying secp256k1 library.
+    pub fn recover_signer_unchecked(sig: &[u8; 65], msg: &[u8; 32]) -> Result<Address, Error> {
         let sig =
             RecoverableSignature::from_compact(&sig[0..64], RecoveryId::from_i32(sig[64] as i32)?)?;
 
@@ -55,6 +58,6 @@ mod tests {
         let hash = hex!("47173285a8d7341e5e972fc677286384f802f8ef42a5ec5f03bbfa254cb01fad");
         let out = address!("c08b5542d177ac6686946920409741463a15dddb");
 
-        assert_eq!(secp256k1::recover_signer(&sig, &hash), Ok(out));
+        assert_eq!(secp256k1::recover_signer_unchecked(&sig, &hash), Ok(out));
     }
 }

@@ -1,6 +1,7 @@
 //! Additional `eth_` functions for bundles
 //!
 //! See also <https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint>
+
 use jsonrpsee::proc_macros::rpc;
 use reth_primitives::{Bytes, B256};
 use reth_rpc_types::{

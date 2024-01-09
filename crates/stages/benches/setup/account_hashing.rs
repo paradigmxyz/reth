@@ -1,8 +1,9 @@
+#![allow(unreachable_pub)]
 use super::{constants, StageRange};
 use reth_db::{
     cursor::DbCursorRO, database::Database, tables, transaction::DbTx, DatabaseError as DbError,
 };
-use reth_primitives::stage::StageCheckpoint;
+use reth_primitives::{fs, stage::StageCheckpoint};
 use reth_stages::{
     stages::{AccountHashingStage, SeedOpts},
     test_utils::TestStageDB,
@@ -33,6 +34,7 @@ fn find_stage_range(db: &Path) -> StageRange {
     let mut stage_range = None;
     TestStageDB::new(db)
         .factory
+        .db_ref()
         .view(|tx| {
             let mut cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let from = cursor.first()?.unwrap().0;
@@ -60,10 +62,10 @@ fn generate_testdata_db(num_blocks: u64) -> (PathBuf, StageRange) {
 
     if !path.exists() {
         // create the dirs
-        std::fs::create_dir_all(&path).unwrap();
+        fs::create_dir_all(&path).unwrap();
         println!("Account Hashing testdata not found, generating to {:?}", path.display());
-        let tx = TestStageDB::new(&path);
-        let provider = tx.provider_rw();
+        let db = TestStageDB::new(&path);
+        let provider = db.factory.provider_rw().unwrap();
         let _accounts = AccountHashingStage::seed(&provider, opts);
         provider.commit().expect("failed to commit");
     }

@@ -32,7 +32,8 @@ where
 {
     /// Handler for `net_version`
     fn version(&self) -> Result<String> {
-        Ok(self.eth.chain_id().to_string())
+        // Note: net_version is numeric: <https://github.com/paradigmxyz/reth/issues/5569
+        Ok(self.eth.chain_id().to::<u64>().to_string())
     }
 
     /// Handler for `net_peerCount`

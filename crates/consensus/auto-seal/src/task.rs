@@ -33,7 +33,7 @@ pub struct MiningTask<Client, Pool: TransactionPool> {
     pool: Pool,
     /// backlog of sets of transactions ready to be mined
     queued: VecDeque<Vec<Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>>,
-    /// TODO: ideally this would just be a sender of hashes
+    // TODO: ideally this would just be a sender of hashes
     to_engine: UnboundedSender<BeaconEngineMessage>,
     /// Used to notify consumers of new blocks
     canon_state_notification: CanonStateNotificationSender,
@@ -192,8 +192,11 @@ where
 
                             debug!(target: "consensus::auto", header=?sealed_block_with_senders.hash(), "sending block notification");
 
-                            let chain =
-                                Arc::new(Chain::new(vec![sealed_block_with_senders], bundle_state));
+                            let chain = Arc::new(Chain::new(
+                                vec![sealed_block_with_senders],
+                                bundle_state,
+                                None,
+                            ));
 
                             // send block notification
                             let _ = canon_state_notification

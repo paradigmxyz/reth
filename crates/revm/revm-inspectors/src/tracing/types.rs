@@ -1,9 +1,9 @@
 //! Types for representing call trace items.
 
-use crate::tracing::{config::TraceStyle, utils::convert_memory};
+use crate::tracing::{config::TraceStyle, utils, utils::convert_memory};
 pub use alloy_primitives::Log;
 use alloy_primitives::{Address, Bytes, U256, U64};
-use alloy_sol_types::decode_revert_reason;
+
 use reth_rpc_types::trace::{
     geth::{CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
     parity::{
@@ -61,7 +61,7 @@ impl CallTrace {
     /// Returns true if the status code is an error or revert, See [InstructionResult::Revert]
     #[inline]
     pub fn is_error(&self) -> bool {
-        self.status.is_error()
+        !self.status.is_ok()
     }
 
     /// Returns true if the status code is a revert
@@ -347,7 +347,8 @@ impl CallTraceNode {
 
         // we need to populate error and revert reason
         if !self.trace.success {
-            call_frame.revert_reason = decode_revert_reason(self.trace.output.as_ref());
+            call_frame.revert_reason = utils::maybe_revert_reason(self.trace.output.as_ref());
+
             // Note: the call tracer mimics parity's trace transaction and geth maps errors to parity style error messages, <https://github.com/ethereum/go-ethereum/blob/34d507215951fb3f4a5983b65e127577989a6db8/eth/tracers/native/call_flat.go#L39-L55>
             call_frame.error = self.trace.as_error_msg(TraceStyle::Parity);
         }
@@ -368,17 +369,22 @@ impl CallTraceNode {
     }
 }
 
-/// A unified representation of a call
+/// A unified representation of a call.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
-#[allow(missing_docs)]
 pub enum CallKind {
+    /// Represents a regular call.
     #[default]
     Call,
+    /// Represents a static call.
     StaticCall,
+    /// Represents a call code operation.
     CallCode,
+    /// Represents a delegate call.
     DelegateCall,
+    /// Represents a contract creation operation.
     Create,
+    /// Represents a contract creation operation using the CREATE2 opcode.
     Create2,
 }
 
