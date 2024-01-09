@@ -112,9 +112,9 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
 }
 
 /// The execution payload attribute type the CL node emits via the engine API.
-/// This type should be implemented by types that could be used to spawn a payload job.
+/// This trait should be implemented by types that could be used to spawn a payload job.
 ///
-/// This type is emitted as part of the fork choice update call
+/// This type is emitted as part of the forkchoiceUpdated call
 pub trait PayloadAttributes:
     serde::de::DeserializeOwned + serde::Serialize + std::fmt::Debug + Clone + Send + Sync + 'static
 {
