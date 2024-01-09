@@ -40,7 +40,7 @@ pub fn deserialize_opt_prune_mode_with_min_blocks<
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::PruneMode;
     use assert_matches::assert_matches;
     use serde::Deserialize;

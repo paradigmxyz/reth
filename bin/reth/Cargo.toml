@@ -76,7 +76,7 @@ toml = { workspace = true, features = ["display"] }
 # metrics
 metrics-exporter-prometheus = "0.12.1"
 metrics-util = "0.15.0"
-metrics-process = "1.0.9"
+metrics-process = "=1.0.14"
 reth-metrics.workspace = true
 metrics.workspace = true
 once_cell.workspace = true

@@ -154,7 +154,7 @@ pub enum EliasFanoError {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

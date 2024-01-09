@@ -33,7 +33,7 @@ pub struct Receipts(
 );
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::{
         types::{message::RequestPair, GetReceipts},
         Receipts,
