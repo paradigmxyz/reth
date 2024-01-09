@@ -22,7 +22,7 @@
 //! See also <https://geth.ethereum.org/docs/developers/evm-tracing/built-in-tracers>
 
 use alloy_primitives::{hex, Bytes, Selector};
-use reth_rpc_types::trace::geth::FourByteFrame;
+use alloy_rpc_trace_types::geth::FourByteFrame;
 use revm::{
     interpreter::{CallInputs, Gas, InstructionResult},
     Database, EVMData, Inspector,
