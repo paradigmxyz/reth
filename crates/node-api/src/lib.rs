@@ -23,6 +23,6 @@ pub use payload_attributes::{PayloadAttributes, PayloadBuilderAttributes};
 pub mod error;
 pub use error::AttributesValidationError;
 
-/// Contains types used in implementations of [PayloadAttributesTrait].
+/// Contains types used in implementations of the [PayloadAttributes] trait.
 pub mod payload;
 pub use payload::PayloadOrAttributes;

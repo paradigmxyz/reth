@@ -11,9 +11,9 @@ use reth_rpc_types::engine::{
 /// This can be implemented by types that describe a currently running payload job.
 pub trait PayloadBuilderAttributes {
     /// The payload attributes that can be used to construct this type. Used as the argument in
-    /// [PayloadBuilderAttributesTrait::try_new].
+    /// [PayloadBuilderAttributes::try_new].
     type RpcPayloadAttributes;
-    /// The error type used in [PayloadBuilderAttributesTrait::try_new].
+    /// The error type used in [PayloadBuilderAttributes::try_new].
     type Error: std::error::Error;
 
     /// Creates a new payload builder for the given parent block and the attributes.

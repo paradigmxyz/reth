@@ -23,7 +23,7 @@ pub trait EngineTypes: Send + Sync {
 /// * If V2, this ensure that the payload timestamp is pre-Cancun.
 /// * If V3, this ensures that the payload timestamp is within the Cancun timestamp.
 ///
-/// Otherwise, this will return [EngineApiError::UnsupportedFork].
+/// Otherwise, this will return [AttributesValidationError::UnsupportedFork].
 pub fn validate_payload_timestamp(
     chain_spec: &ChainSpec,
     version: EngineApiMessageVersion,
