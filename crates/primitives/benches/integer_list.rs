@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use rand::prelude::*;
 
@@ -86,7 +87,7 @@ criterion_main!(benches);
 
 /// Implementation from https://github.com/paradigmxyz/reth/blob/cda5d4e7c53ccc898b7725eb5d3b46c35e4da7f8/crates/primitives/src/integer_list.rs
 /// adapted to work with `sucds = "0.8.1"`
-#[allow(unused)]
+#[allow(unused, unreachable_pub)]
 mod elias_fano {
     use std::{fmt, ops::Deref};
     use sucds::{mii_sequences::EliasFano, Serializable};
@@ -232,7 +233,7 @@ mod elias_fano {
         fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self, arbitrary::Error> {
             let mut nums: Vec<usize> = Vec::arbitrary(u)?;
             nums.sort();
-            Ok(Self::new(&nums).map_err(|_| arbitrary::Error::IncorrectFormat)?)
+            Self::new(&nums).map_err(|_| arbitrary::Error::IncorrectFormat)
         }
     }
 
