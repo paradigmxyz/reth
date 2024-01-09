@@ -20,11 +20,13 @@ byteorder = "1"
 derive_more = "0.99"
 indexmap = "2"
 libc = "0.2"
-libffi = "3.2.0"
 parking_lot.workspace = true
 thiserror.workspace = true
 
 ffi = { package = "reth-mdbx-sys", path = "./mdbx-sys" }
+
+[target.'cfg(not(windows))'.dependencies]
+libffi = "3.2.0"
 
 [features]
 default = []

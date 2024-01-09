@@ -177,16 +177,17 @@ impl DatabaseEnv {
             shrink_threshold: None,
             page_size: Some(PageSize::Set(default_page_size())),
         });
-        let _ = *PROCESS_ID; // Initialize the process ID at the time of environment opening
-        inner_env.set_handle_slow_readers(
-            |process_id: u32, thread_id: u32, read_txn_id: u64, gap: usize, space: usize, retry: isize| {
-            if space > MAX_SAFE_READER_SPACE {
-                let message = if process_id == *PROCESS_ID {
-                    "Current process has a long-lived database transaction that grows the database file."
-                } else {
-                    "External process has a long-lived database transaction that grows the database file. Use shorter-lived read transactions or shut down the node."
-                };
-                warn!(
+        if cfg!(not(windows)) {
+            let _ = *PROCESS_ID; // Initialize the process ID at the time of environment opening
+            inner_env.set_handle_slow_readers(
+                |process_id: u32, thread_id: u32, read_txn_id: u64, gap: usize, space: usize, retry: isize| {
+                    if space > MAX_SAFE_READER_SPACE {
+                        let message = if process_id == *PROCESS_ID {
+                            "Current process has a long-lived database transaction that grows the database file."
+                        } else {
+                            "External process has a long-lived database transaction that grows the database file. Use shorter-lived read transactions or shut down the node."
+                        };
+                        warn!(
                     target: "storage::db::mdbx",
                     ?process_id,
                     ?thread_id,
@@ -196,10 +197,11 @@ impl DatabaseEnv {
                     ?retry,
                     message
                 )
-            }
+                    }
 
-            HandleSlowReadersReturnCode::ProceedWithoutKillingReader
-        });
+                    HandleSlowReadersReturnCode::ProceedWithoutKillingReader
+                });
+        }
         inner_env.set_flags(EnvironmentFlags {
             mode,
             // We disable readahead because it improves performance for linear scans, but
