@@ -73,7 +73,6 @@ use reth_provider::{
 };
 use reth_prune::PrunerBuilder;
 use reth_revm::EvmProcessorFactory;
-use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
 use reth_stages::{
     prelude::*,
@@ -89,6 +88,7 @@ use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, EthTransactionPool, TransactionPool,
     TransactionValidationTaskExecutor,
 };
+use revm_inspectors::stack::Hook;
 use secp256k1::SecretKey;
 use std::{
     net::{SocketAddr, SocketAddrV4},
@@ -862,7 +862,7 @@ impl NodeConfig {
         }
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        use reth_revm_inspectors::stack::InspectorStackConfig;
+        use revm_inspectors::stack::InspectorStackConfig;
         let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
 
         let stack_config = InspectorStackConfig {

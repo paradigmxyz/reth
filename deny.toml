@@ -18,9 +18,7 @@ multiple-versions = "warn"
 wildcards = "allow"
 highlight = "all"
 # List of crates to deny
-deny = [
-    { name = "openssl" },
-]
+deny = [{ name = "openssl" }]
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = []
 # Similarly to `skip` allows you to skip certain crates during duplicate
@@ -97,7 +95,7 @@ allow-git = [
     # TODO: remove, see ./Cargo.toml
     "https://github.com/bluealloy/revm",
     "https://github.com/alloy-rs/alloy",
-    "https://github.com/ethereum/c-kzg-4844",
+    "https://github.com/paradigmxyz/evm-inspectors",
     "https://github.com/sigp/discv5",
     "https://github.com/stevefan1999-personal/rust-igd",
 ]
