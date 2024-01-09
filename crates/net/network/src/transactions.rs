@@ -59,7 +59,7 @@ const GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE: GetPooledTransactionLimit =
     GetPooledTransactionLimit::SizeSoftLimit(2 * 1024 * 1024);
 
 /// How many peers we keep track of for each missing transaction.
-const MAX_ALTERNATIVE_PEERS_PER_TX: usize = 3;
+const MAX_ALTERNATIVE_PEERS_PER_TX: u8 = MAX_REQUEST_RETRIES_PER_TX_HASH + 1;
 
 /// Maximum concurrent [`GetPooledTxRequest`]s to allow per peer.
 const MAX_INFLIGHT_GET_POOLED_TX_REQUESTS_PER_PEER: u8 = 1;
@@ -619,9 +619,10 @@ where
     // Returns any idle peer for the given hash.
     fn get_idle_peer_for(&self, hash: TxHash) -> Option<PeerId> {
         let (_, peers) = self.transaction_fetcher.hash_to_fallback_peers.get(&hash)?;
-        for peer_id in peers {
+        for peer_id in peers.iter() {
             let peer_id: &PeerId = peer_id;
             if self.peers.get(peer_id).is_some() {
+                // todo: check if session still active
                 // todo: choose idle status based on total inflight requests too?
                 // let inflight_requests_count = *peer.inflight_requests_semaphore_rx.borrow();
                 if self.transaction_fetcher.is_idle(*peer_id) {
@@ -1173,8 +1174,9 @@ struct TransactionFetcher {
     inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
     /// Hashes that are awaiting fetch from an idle peer.
     buffered_hashes: HashSet<TxHash>,
-    /// Tracks all hashes that are currently being fetched or are buffered.
-    hash_to_fallback_peers: HashMap<TxHash, (u8, Vec<PeerId>)>,
+    /// Tracks all hashes that are currently being fetched or are buffered, mapping them to
+    /// request retries and last recently seen fallback peers (max one request try for any peer).
+    hash_to_fallback_peers: HashMap<TxHash, (u8, LruCache<PeerId>)>,
 }
 
 // === impl TransactionFetcher ===
@@ -1307,11 +1309,14 @@ impl TransactionFetcher {
 
     fn buffer_hashes(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
         for hash in hashes {
-            let (retries, _) = self.hash_to_fallback_peers.entry(hash).or_default();
-            *retries += 1;
-            if *retries >= MAX_REQUEST_RETRIES_PER_TX_HASH {
-                warn!("retried fetching tx max times ({}), discarding hash, {}", retries, hash);
-                continue;
+            debug_assert!(self.hash_to_fallback_peers.get(&hash).is_some());
+
+            if let Some((retries, _)) = self.hash_to_fallback_peers.get_mut(&hash) {
+                *retries += 1;
+                if *retries >= MAX_REQUEST_RETRIES_PER_TX_HASH {
+                    warn!("retried fetching tx max times ({}), discarding hash, {}", retries, hash);
+                    continue;
+                }
             }
             self.buffered_hashes.insert(hash);
         }
@@ -1333,17 +1338,19 @@ impl TransactionFetcher {
         announced_hashes.retain(|&hash| {
             match self.hash_to_fallback_peers.entry(hash) {
                 Entry::Vacant(entry) => {
-                    // the hash is not in inflight hashes, insert it and retain in the vector
-                    entry.insert((0, vec![peer_id]));
+                    if let Some(limit) = NonZeroUsize::new(MAX_ALTERNATIVE_PEERS_PER_TX.into()) {
+                        // the hash is not in inflight hashes, insert it and retain in the vector
+                        entry.insert((0, LruCache::new(limit)));
+                    }
                     true
                 }
                 Entry::Occupied(mut entry) => {
                     // the hash is already in inflight, add this peer as a backup if not more than 3
                     // backups already
                     let (_, backups) = entry.get_mut();
-                    if backups.len() < MAX_ALTERNATIVE_PEERS_PER_TX {
-                        backups.push(peer_id);
-                    }
+                    // last recently seen peer is most likely to be responsive, so we prefer it
+                    // todo: check if session is still active
+                    backups.insert(peer_id);
                     false
                 }
             }
