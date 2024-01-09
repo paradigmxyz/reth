@@ -3,7 +3,8 @@ use reth_payload_builder::{OptimismPayloadBuilderAttributes, PayloadBuilderAttri
 use reth_rpc_types::engine::{OptimismPayloadAttributes, PayloadAttributes};
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
 pub struct EthEngineTypes;
 
 impl EngineTypes for EthEngineTypes {
@@ -12,7 +13,8 @@ impl EngineTypes for EthEngineTypes {
 }
 
 /// The types used in the optimism beacon consensus engine.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
 pub struct OptimismEngineTypes;
 
 impl EngineTypes for OptimismEngineTypes {
