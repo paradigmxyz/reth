@@ -34,7 +34,7 @@ use reth_primitives::{
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory};
 use reth_revm::EvmProcessorFactory;
 use reth_rpc_types::{
-    engine::{CancunPayloadFields, ForkchoiceState, PayloadAttributes},
+    engine::{CancunPayloadFields, ForkchoiceState},
     ExecutionPayload,
 };
 use reth_stages::Pipeline;
@@ -259,8 +259,8 @@ impl Command {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-enum StoredEngineApiMessage {
-    ForkchoiceUpdated { state: ForkchoiceState, payload_attrs: Option<PayloadAttributes> },
+enum StoredEngineApiMessage<Attributes> {
+    ForkchoiceUpdated { state: ForkchoiceState, payload_attrs: Option<Attributes> },
     NewPayload { payload: ExecutionPayload, cancun_fields: Option<CancunPayloadFields> },
 }
 
@@ -280,7 +280,7 @@ impl EngineApiStore {
         received_at: SystemTime,
     ) -> eyre::Result<()>
     where
-        Types: EngineTypes<PayloadAttributes = PayloadAttributes>,
+        Types: EngineTypes,
     {
         fs::create_dir_all(&self.path)?; // ensure that store path had been created
         let timestamp = received_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
@@ -299,10 +299,12 @@ impl EngineApiStore {
                 let filename = format!("{}-new_payload-{}.json", timestamp, payload.block_hash());
                 fs::write(
                     self.path.join(filename),
-                    serde_json::to_vec(&StoredEngineApiMessage::NewPayload {
-                        payload: payload.clone(),
-                        cancun_fields: cancun_fields.clone(),
-                    })?,
+                    serde_json::to_vec(
+                        &StoredEngineApiMessage::<Types::PayloadAttributes>::NewPayload {
+                            payload: payload.clone(),
+                            cancun_fields: cancun_fields.clone(),
+                        },
+                    )?,
                 )?;
             }
             // noop
@@ -336,7 +338,7 @@ impl EngineApiStore {
         mut rx: UnboundedReceiver<BeaconEngineMessage<Types>>,
         to_engine: UnboundedSender<BeaconEngineMessage<Types>>,
     ) where
-        Types: EngineTypes<PayloadAttributes = PayloadAttributes>,
+        Types: EngineTypes,
         BeaconEngineMessage<Types>: std::fmt::Debug,
     {
         loop {
