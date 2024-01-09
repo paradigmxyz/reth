@@ -11,9 +11,10 @@ use std::{
 
 /// Constructs a string to be used as a path for configuration and db paths.
 pub fn config_path_prefix(chain: Chain) -> String {
-    match chain {
-        Chain::from_named(name) => name.to_string(),
-        Chain::from_id(id) => id.to_string(),
+    if let Some(named) = chain.named() {
+        named.to_string()
+    } else {
+        chain.id().to_string()
     }
 }
 

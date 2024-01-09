@@ -1,4 +1,6 @@
 use crate::{
+    holesky_nodes,
+    net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
     constants::{
         EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR, EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
         EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
@@ -6,7 +8,7 @@ use crate::{
     proofs::state_root_ref_unhashed,
     revm_primitives::{address, b256},
     Address, BlockNumber, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis, Hardfork,
-    Head, Header, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Head, Header, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256, NodeRecord
 };
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -15,7 +17,7 @@ use std::{
     fmt::{Display, Formatter},
     sync::Arc,
 };
-use alloy_chains::Chain;
+use alloy_chains::{Chain, NamedChain};
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -958,6 +960,19 @@ impl ChainSpec {
     /// Build a chainspec using [`ChainSpecBuilder`]
     pub fn builder() -> ChainSpecBuilder {
         ChainSpecBuilder::default()
+    }
+
+    /// Returns bootnodes for the given chain.
+    pub fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
+        let chain = self.chain;
+        use NamedChain as C;
+        match chain.try_into().ok()? {
+            C::Mainnet => Some(mainnet_nodes()),
+            C::Goerli => Some(goerli_nodes()),
+            C::Sepolia => Some(sepolia_nodes()),
+            C::Holesky => Some(holesky_nodes()),
+            _ => None,
+        }
     }
 }
 
