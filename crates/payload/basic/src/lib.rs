@@ -10,6 +10,30 @@
 use alloy_rlp::Encodable;
 use futures_core::ready;
 use futures_util::FutureExt;
+use reth_interfaces::RethResult;
+use reth_payload_builder::{
+    database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
+    PayloadBuilderAttributes, PayloadId, PayloadJob, PayloadJobGenerator,
+};
+use reth_primitives::{
+    bytes::BytesMut,
+    constants::{
+        BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
+        ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
+    },
+    proofs, Block, BlockNumberOrTag, Bytes, ChainSpec, Header, Receipts, SealedBlock, Withdrawal,
+    B256, EMPTY_OMMER_ROOT_HASH, U256,
+};
+use reth_provider::{
+    BlockReaderIdExt, BlockSource, BundleStateWithReceipts, CanonStateNotification, ProviderError,
+    StateProviderFactory,
+};
+use reth_revm::{
+    database::StateProviderDatabase,
+    state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
+};
+use reth_tasks::TaskSpawner;
+use reth_transaction_pool::TransactionPool;
 use revm::{
     db::states::bundle_state::BundleRetention,
     primitives::{BlockEnv, CfgEnv, Env},
@@ -27,30 +51,6 @@ use tokio::{
     time::{Interval, Sleep},
 };
 use tracing::{debug, trace, warn};
-
-use reth_interfaces::RethResult;
-use reth_payload_builder::{
-    database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
-    PayloadBuilderAttributes, PayloadId, PayloadJob, PayloadJobGenerator,
-};
-use reth_primitives::{
-    bytes::BytesMut,
-    constants::{
-        BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
-        ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
-    },
-    proofs, Block, BlockNumberOrTag, Bytes, ChainSpec, Header, Receipts, SealedBlock, Withdrawal,
-    B256, EMPTY_OMMER_ROOT_HASH, U256,
-};
-use reth_provider::{
-    BlockReaderIdExt, BlockSource, BundleStateWithReceipts, ProviderError, StateProviderFactory,
-};
-use reth_revm::{
-    database::StateProviderDatabase,
-    state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
-};
-use reth_tasks::TaskSpawner;
-use reth_transaction_pool::TransactionPool;
 
 use crate::metrics::PayloadBuilderMetrics;
 
@@ -75,6 +75,8 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     ///
     /// See [PayloadBuilder]
     builder: Builder,
+    /// Stored cached_reads for new payload jobs.
+    pre_cached: Option<PrecachedState>,
 }
 
 // === impl BasicPayloadJobGenerator ===
@@ -97,6 +99,7 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
             config,
             chain_spec,
             builder,
+            pre_cached: None,
         }
     }
 
@@ -122,6 +125,22 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
     #[inline]
     fn job_deadline(&self, unix_timestamp: u64) -> tokio::time::Instant {
         tokio::time::Instant::now() + self.max_job_duration(unix_timestamp)
+    }
+
+    /// Returns a reference to the tasks type
+    pub fn tasks(&self) -> &Tasks {
+        &self.executor
+    }
+
+    /// Returns the pre-cached reads for the given parent block if it matches the cached state's
+    /// block.
+    fn maybe_pre_cached(&self, parent: B256) -> Option<CachedReads> {
+        let pre_cached = self.pre_cached.as_ref()?;
+        if pre_cached.block == parent {
+            Some(pre_cached.cached.clone())
+        } else {
+            None
+        }
     }
 }
 
@@ -167,6 +186,8 @@ where
         let until = self.job_deadline(config.attributes.timestamp);
         let deadline = Box::pin(tokio::time::sleep_until(until));
 
+        let cached_reads = self.maybe_pre_cached(config.parent_block.hash());
+
         Ok(BasicPayloadJob {
             config,
             client: self.client.clone(),
@@ -176,12 +197,43 @@ where
             interval: tokio::time::interval(self.config.interval),
             best_payload: None,
             pending_block: None,
-            cached_reads: None,
+            cached_reads,
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
             builder: self.builder.clone(),
         })
     }
+
+    fn on_new_state(&mut self, new_state: CanonStateNotification) {
+        if let Some(committed) = new_state.committed() {
+            let mut cached = CachedReads::default();
+
+            // extract the state from the notification and put it into the cache
+            let new_state = committed.state();
+            for (addr, acc) in new_state.bundle_accounts_iter() {
+                if let Some(info) = acc.info.clone() {
+                    // we want pre cache existing accounts and their storage
+                    // this only includes changed accounts and storage but is better than nothing
+                    let storage =
+                        acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)).collect();
+                    cached.insert_account(addr, info, storage);
+                }
+            }
+
+            self.pre_cached = Some(PrecachedState { block: committed.tip().hash, cached });
+        }
+    }
+}
+
+/// Pre-filled [CachedReads] for a specific block.
+///
+/// This is extracted from the [CanonStateNotification] for the tip block.
+#[derive(Debug, Clone)]
+pub struct PrecachedState {
+    /// The block for which the state is pre-cached.
+    pub block: B256,
+    /// Cached state for the block.
+    pub cached: CachedReads,
 }
 
 /// Restricts how many generator tasks can be executed at once.
