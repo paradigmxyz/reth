@@ -13,7 +13,7 @@ use crate::{
 use parking_lot::RwLock;
 use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{ffi::DBI, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
-use reth_tracing::tracing::{debug, warn};
+use reth_tracing::tracing::{trace, warn};
 use std::{
     backtrace::Backtrace,
     marker::PhantomData,
@@ -184,7 +184,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
     /// Logs the caller location and ID of the transaction that was opened.
     #[track_caller]
     fn log_transaction_opened(&self) {
-        debug!(
+        trace!(
             target: "storage::db::mdbx",
             caller = %core::panic::Location::caller(),
             id = %self.txn_id,
