@@ -2,7 +2,7 @@
 
 Execution stage
 
-```bash
+```text
 $ reth stage dump execution --help
 Usage: reth stage dump execution [OPTIONS] --output-db <OUTPUT_PATH> --from <FROM> --to <TO>
 

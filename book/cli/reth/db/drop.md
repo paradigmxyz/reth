@@ -2,7 +2,7 @@
 
 Deletes all database entries
 
-```bash
+```text
 $ reth db drop --help
 Usage: reth db drop [OPTIONS]
 
