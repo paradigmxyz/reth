@@ -6299,6 +6299,7 @@ dependencies = [
 name = "reth-node-api"
 version = "0.1.0-alpha.13"
 dependencies = [
+ "reth-payload-builder",
  "reth-primitives",
  "reth-rpc-types",
  "serde",

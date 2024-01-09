@@ -18,3 +18,7 @@ thiserror.workspace = true
 
 # io
 serde.workspace = true
+
+[dev-dependencies]
+# for examples
+reth-payload-builder.workspace = true

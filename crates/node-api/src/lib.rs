@@ -7,22 +7,12 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-/// Contains the [EngineTypes] trait, used to configure the types used by the engine. Also contains
-/// methods that can be used to validate payload attributes.
+/// Traits, validation methods, and helper types used to abstract over engine types.
+///
+/// Notably contains the [EngineTypes] trait and implementations for ethereum mainnet types.
 pub mod engine;
 pub use engine::{
     validate_payload_timestamp, validate_version_specific_fields, validate_withdrawals_presence,
-    EngineApiMessageVersion, EngineTypes,
+    AttributesValidationError, EngineApiMessageVersion, EngineTypes, PayloadAttributes,
+    PayloadBuilderAttributes, PayloadOrAttributes,
 };
-
-/// Contains traits and types used to abstract over payload attributes types.
-pub mod payload_attributes;
-pub use payload_attributes::{PayloadAttributes, PayloadBuilderAttributes};
-
-/// Contains error types used in the traits defined in this crate.
-pub mod error;
-pub use error::AttributesValidationError;
-
-/// Contains types used in implementations of the [PayloadAttributes] trait.
-pub mod payload;
-pub use payload::PayloadOrAttributes;

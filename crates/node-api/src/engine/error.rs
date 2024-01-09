@@ -29,3 +29,13 @@ pub enum AttributesValidationError {
     #[error("Invalid params: {0}")]
     InvalidParams(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
+
+impl AttributesValidationError {
+    /// Creates an instance of the `InvalidParams` variant with the given error.
+    pub fn invalid_params<E>(error: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self::InvalidParams(Box::new(error))
+    }
+}
