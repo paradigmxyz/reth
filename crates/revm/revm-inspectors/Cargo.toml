@@ -12,12 +12,11 @@ description = "revm inspector implementations used by reth"
 workspace = true
 
 [dependencies]
-# reth
-reth-rpc-types.workspace = true
-
 # eth
 alloy-sol-types.workspace = true
 alloy-primitives.workspace = true
+alloy-rpc-types.workspace = true
+alloy-rpc-trace-types.workspace = true
 
 revm.workspace = true
 

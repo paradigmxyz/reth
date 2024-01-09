@@ -6457,10 +6457,11 @@ name = "reth-revm-inspectors"
 version = "0.1.0-alpha.14"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-trace-types",
+ "alloy-rpc-types",
  "alloy-sol-types",
  "boa_engine",
  "boa_gc",
- "reth-rpc-types",
  "revm",
  "serde",
  "serde_json",
