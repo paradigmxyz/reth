@@ -907,7 +907,7 @@ where
         this.update_request_metrics();
 
         // drain fetching transaction events
-        while let Poll::Ready(fetch_event) = this.transaction_fetcher.poll(cx) {
+        while let Poll::Ready(fetch_event) = this.transaction_fetcher.poll_unpin(cx) {
             match fetch_event {
                 FetchEvent::TransactionsFetched { peer_id, transactions } => {
                     this.import_transactions(peer_id, transactions, TransactionSource::Response);
@@ -1234,44 +1234,6 @@ impl TransactionFetcher {
         ))
     }
 
-    /// Advances all inflight requests and returns the next event.
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<FetchEvent> {
-        if let Poll::Ready(Some(response)) = self.inflight_requests.poll_next_unpin(cx) {
-            self.update_peer_activity(&response);
-
-            let GetPooledTxResponse { peer_id, requested_hashes, result } = response;
-
-            self.remove_fallback_peers_for(requested_hashes.iter());
-
-            return match result {
-                Ok(Ok(transactions)) => {
-                    // clear received hashes
-                    self.buffered_hashes.extend(requested_hashes.iter().filter(|requested_hash| {
-                        !transactions.hashes().any(|hash| hash == *requested_hash)
-                    }));
-
-                    Poll::Ready(FetchEvent::TransactionsFetched {
-                        peer_id,
-                        transactions: transactions.0,
-                    })
-                }
-                Ok(Err(req_err)) => {
-                    self.buffered_hashes.extend(requested_hashes);
-                    Poll::Ready(FetchEvent::FetchError { peer_id, error: req_err })
-                }
-                Err(_) => {
-                    self.buffered_hashes.extend(requested_hashes);
-                    // request channel closed/dropped
-                    Poll::Ready(FetchEvent::FetchError {
-                        peer_id,
-                        error: RequestError::ChannelClosed,
-                    })
-                }
-            }
-        }
-        Poll::Pending
-    }
-
     /// Removes the provided transaction hashes from the inflight requests set.
     ///
     /// This is called when we receive full transactions that are currently scheduled for fetching.
@@ -1363,6 +1325,48 @@ impl TransactionFetcher {
                 return
             }
         }
+    }
+}
+
+impl Future for TransactionFetcher {
+    type Output = FetchEvent;
+
+    /// Advances all inflight requests and returns the next event.
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if let Poll::Ready(Some(response)) = self.inflight_requests.poll_next_unpin(cx) {
+            self.update_peer_activity(&response);
+
+            let GetPooledTxResponse { peer_id, requested_hashes, result } = response;
+
+            self.remove_fallback_peers_for(requested_hashes.iter());
+
+            return match result {
+                Ok(Ok(transactions)) => {
+                    // clear received hashes
+                    self.buffered_hashes.extend(requested_hashes.iter().filter(|requested_hash| {
+                        !transactions.hashes().any(|hash| hash == *requested_hash)
+                    }));
+
+                    Poll::Ready(FetchEvent::TransactionsFetched {
+                        peer_id,
+                        transactions: transactions.0,
+                    })
+                }
+                Ok(Err(req_err)) => {
+                    self.buffered_hashes.extend(requested_hashes);
+                    Poll::Ready(FetchEvent::FetchError { peer_id, error: req_err })
+                }
+                Err(_) => {
+                    self.buffered_hashes.extend(requested_hashes);
+                    // request channel closed/dropped
+                    Poll::Ready(FetchEvent::FetchError {
+                        peer_id,
+                        error: RequestError::ChannelClosed,
+                    })
+                }
+            }
+        }
+        Poll::Pending
     }
 }
 
