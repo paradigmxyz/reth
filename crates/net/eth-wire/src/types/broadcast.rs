@@ -144,6 +144,14 @@ impl NewPooledTransactionHashes {
         }
     }
 
+    /// Returns an iterator over all transaction hashes.
+    pub fn hashes_mut(&mut self) -> &mut Vec<B256> {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => &mut msg.0,
+            NewPooledTransactionHashes::Eth68(msg) => &mut msg.hashes,
+        }
+    }
+
     /// Consumes the type and returns all hashes
     pub fn into_hashes(self) -> Vec<B256> {
         match self {

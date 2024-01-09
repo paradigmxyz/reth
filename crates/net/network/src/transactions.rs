@@ -51,6 +51,9 @@ const MAX_FULL_TRANSACTIONS_PACKET_SIZE: usize = 100 * 1024;
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>
 const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES: usize = 256;
 
+/// Recommended limit for a response is 2MiB.
+const RESPONSE_SIZE_LIMIT_BYTES: usize = 2 * 1048576;
+
 /// Softlimit for the response size of a GetPooledTransactions message (2MB)
 const GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE: GetPooledTransactionLimit =
     GetPooledTransactionLimit::SizeSoftLimit(2 * 1024 * 1024);
@@ -517,7 +520,7 @@ where
     fn on_new_pooled_transaction_hashes(
         &mut self,
         peer_id: PeerId,
-        msg: NewPooledTransactionHashes,
+        mut msg: NewPooledTransactionHashes,
     ) {
         // If the node is initially syncing, ignore transactions
         if self.network.is_initially_syncing() {
@@ -530,7 +533,7 @@ where
         let mut num_already_seen = 0;
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
-            let mut hashes = msg.into_hashes();
+            let hashes = msg.hashes_mut();
             // keep track of the transactions the peer knows
             for tx in hashes.iter().copied() {
                 if !peer.transactions.insert(tx) {
@@ -538,7 +541,7 @@ where
                 }
             }
 
-            self.pool.retain_unknown(&mut hashes);
+            self.pool.retain_unknown(hashes);
 
             if hashes.is_empty() {
                 // nothing to request
@@ -548,7 +551,7 @@ where
             let peer_id: PeerId = peer.request_tx.peer_id;
 
             // filter out hashes already in request, for those hashes add the peer as fallback
-            self.transaction_fetcher.filter_new_hashes(&mut hashes, peer_id);
+            self.transaction_fetcher.filter_new_hashes(hashes, peer_id);
 
             if hashes.is_empty() {
                 // nothing to request
@@ -561,16 +564,16 @@ where
             if self.transaction_fetcher.is_idle(peer_id) {
                 // since all hashes new at this point, no idle peer can exist that announced them
                 for hash in hashes {
-                    self.transaction_fetcher.buffered_hashes.insert(hash);
+                    self.transaction_fetcher.buffered_hashes.insert(*hash);
                 }
                 return
             }
 
             // enforce recommended soft limit, however the peer may enforce an arbitrary limit on
             // the response (2MB)
-            self.transaction_fetcher
-                .buffered_hashes
-                .extend(hashes.drain(..GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES));
+            let (hashes, left_over_hashes) = TransactionFetcher::pack_hashes(msg);
+
+            self.transaction_fetcher.buffered_hashes.extend(left_over_hashes);
 
             // request the missing transactions
             let request_sent =
@@ -597,7 +600,7 @@ where
             };
             // fill the request with other buffered hashes that have been announced by the peer
             if let Some(peer) = self.peers.get(&peer_id) {
-                self.transaction_fetcher.fill_request_for_peer(peer_id, &mut hashes);
+                self.transaction_fetcher.fill_up_request_for_peer(peer_id, &mut hashes);
                 // request the buffered missing transactions
                 let request_sent =
                     self.transaction_fetcher.request_transactions_from_peer(hashes, peer);
@@ -1234,6 +1237,70 @@ impl TransactionFetcher {
         ))
     }
 
+    /// Packages hashes for [`GetPooledTxRequest`] up to limit. Returns `(hashes-to-include,
+    /// left-over-hashes)`.
+    fn pack_hashes(msg: NewPooledTransactionHashes) -> (Vec<TxHash>, Vec<TxHash>) {
+        match msg {
+            NewPooledTransactionHashes::Eth66(NewPooledTransactionHashes66(mut hashes)) => {
+                let left_over = hashes
+                    .drain(..GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES)
+                    .collect::<Vec<_>>();
+
+                (hashes, left_over)
+            }
+            NewPooledTransactionHashes::Eth68(NewPooledTransactionHashes68 {
+                sizes,
+                mut hashes,
+                ..
+            }) => {
+                let mut acc = 0;
+                let first_left_over_size = sizes.iter().enumerate().find(|(_, size)| {
+                    if acc < RESPONSE_SIZE_LIMIT_BYTES {
+                        acc += **size;
+                        false
+                    } else {
+                        true
+                    }
+                });
+
+                let mut include_indices = vec![];
+
+                // not all hashes included in request
+                let Some((i, _)) = first_left_over_size else {
+                    let left_over = hashes
+                        .drain(..GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES)
+                        .collect::<Vec<_>>();
+
+                    return (hashes, left_over)
+                };
+
+                // some space will be left in response
+                if acc < RESPONSE_SIZE_LIMIT_BYTES {
+                    for (j, size) in sizes[i..].iter().enumerate() {
+                        if *size <= RESPONSE_SIZE_LIMIT_BYTES - acc {
+                            // tx will fit into response, include hash in request
+                            include_indices.push(j);
+                            acc += *size;
+                        }
+                    }
+                }
+
+                let mut left_over_hashes = hashes.drain(..i).collect::<Vec<_>>();
+                let len_hashes = hashes.len();
+
+                // re-insert hashes to include
+                for (j, h) in include_indices.into_iter().enumerate() {
+                    // elements in left over hashes budge on every iteration due to remove
+                    let n = h + 1;
+                    let hash = left_over_hashes.remove(j - len_hashes - n);
+                    hashes.push(hash);
+                }
+
+                (hashes, left_over_hashes)
+            }
+        }
+    }
+
     /// Removes the provided transaction hashes from the inflight requests set.
     ///
     /// This is called when we receive full transactions that are currently scheduled for fetching.
@@ -1311,7 +1378,7 @@ impl TransactionFetcher {
         true
     }
 
-    fn fill_request_for_peer(&self, peer_id: PeerId, hashes: &mut Vec<TxHash>) {
+    fn fill_up_request_for_peer(&self, peer_id: PeerId, hashes: &mut Vec<TxHash>) {
         for hash in &self.buffered_hashes {
             if *hash == hashes[0] {
                 continue;
