@@ -136,9 +136,14 @@ impl LocalTransactionConfig {
         self.local_addresses.contains(&address)
     }
 
-    /// Returns whether the particular instance is local
+    /// Returns whether the particular transaction should be considered local.
+    ///
+    /// This always returns false if the local exemptions are disabled.
     #[inline]
     pub fn is_local(&self, origin: TransactionOrigin, sender: Address) -> bool {
-        origin.is_local() || !self.no_local_exemptions() || self.contains_local_address(sender)
+        if self.no_local_exemptions() {
+            return false
+        }
+        origin.is_local() || self.contains_local_address(sender)
     }
 }
