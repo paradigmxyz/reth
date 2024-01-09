@@ -4,12 +4,12 @@
 
 #![allow(missing_docs)]
 
-use crate::{
-    eth::transaction::AccessList,
-    kzg::{Blob, Bytes48},
-};
 use alloy_primitives::{Address, Bytes, B256, U128, U256, U64};
 use alloy_rlp::{BufMut, Decodable, Encodable, Error as RlpError};
+use alloy_rpc_types::{
+    kzg::{Blob, Bytes48},
+    AccessList,
+};
 use serde::{Deserialize, Serialize};
 
 /// Container type for various Ethereum transaction requests
@@ -107,6 +107,12 @@ impl TransactionKind {
 }
 
 impl Encodable for TransactionKind {
+    /// This encodes the `to` field of a transaction request.
+    /// If the [TransactionKind] is a [TransactionKind::Call] it will encode the inner address:
+    /// `rlp(address)`
+    ///
+    /// If the [TransactionKind] is a [TransactionKind::Create] it will encode an empty list:
+    /// `rlp([])`, which is also
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
             TransactionKind::Call(to) => to.encode(out),
@@ -147,4 +153,22 @@ pub struct BlobTransactionSidecar {
     pub commitments: Vec<Bytes48>,
     /// The blob proofs.
     pub proofs: Vec<Bytes48>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_kind_encoding_sanity() {
+        // check the 0x80 encoding for Create
+        let mut buf = Vec::new();
+        TransactionKind::Create.encode(&mut buf);
+        assert_eq!(buf, vec![0x80]);
+
+        // check decoding
+        let buf = [0x80];
+        let decoded = TransactionKind::decode(&mut &buf[..]).unwrap();
+        assert_eq!(decoded, TransactionKind::Create);
+    }
 }

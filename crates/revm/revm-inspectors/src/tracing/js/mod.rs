@@ -8,7 +8,6 @@ use crate::tracing::{
         builtins::{register_builtins, PrecompileList},
     },
     types::CallKind,
-    utils::get_create_address,
 };
 use alloy_primitives::{Address, Bytes, B256, U256};
 use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
@@ -449,7 +448,7 @@ where
 
         let _ = data.journaled_state.load_account(inputs.caller, data.db);
         let nonce = data.journaled_state.account(inputs.caller).info.nonce;
-        let address = get_create_address(inputs, nonce);
+        let address = inputs.created_address(nonce);
         self.push_call(
             address,
             inputs.init_code.clone(),
@@ -547,23 +546,38 @@ struct CallStackItem {
     gas_limit: u64,
 }
 
+/// Error variants that can occur during JavaScript inspection.
 #[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
 pub enum JsInspectorError {
+    /// Error originating from a JavaScript operation.
     #[error(transparent)]
     JsError(#[from] JsError),
+
+    /// Failure during the evaluation of JavaScript code.
     #[error("failed to evaluate JS code: {0}")]
     EvalCode(JsError),
+
+    /// The evaluated code is not a JavaScript object.
     #[error("the evaluated code is not a JS object")]
     ExpectedJsObject,
+
+    /// The trace object must expose a function named `result()`.
     #[error("trace object must expose a function result()")]
     ResultFunctionMissing,
+
+    /// The trace object must expose a function named `fault()`.
     #[error("trace object must expose a function fault()")]
     FaultFunctionMissing,
+
+    /// The setup object must be a callable function.
     #[error("setup object must be a function")]
     SetupFunctionNotCallable,
+
+    /// Failure during the invocation of the `setup()` function.
     #[error("failed to call setup(): {0}")]
     SetupCallFailed(JsError),
+
+    /// Invalid JSON configuration encountered.
     #[error("invalid JSON config: {0}")]
     InvalidJsonConfig(JsError),
 }

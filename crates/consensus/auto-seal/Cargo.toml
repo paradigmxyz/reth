@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "A consensus impl for local testing purposes"
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-beacon-consensus.workspace = true

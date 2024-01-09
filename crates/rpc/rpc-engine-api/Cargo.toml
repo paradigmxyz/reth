@@ -8,8 +8,11 @@ homepage.workspace = true
 repository.workspace = true
 description = "Implementation of Engine API"
 
+[lints]
+workspace = true
+
 [dependencies]
-# reth 
+# reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true

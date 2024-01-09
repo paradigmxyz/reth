@@ -5,20 +5,18 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 #[cfg(feature = "optimism")]
 pub use builder::*;
 
+pub mod error;
+
 #[cfg(feature = "optimism")]
 mod builder {
+    use crate::error::OptimismPayloadBuilderError;
     use reth_basic_payload_builder::*;
-    use reth_payload_builder::{
-        error::{OptimismPayloadBuilderError, PayloadBuilderError},
-        BuiltPayload,
-    };
+    use reth_payload_builder::{error::PayloadBuilderError, BuiltPayload};
     use reth_primitives::{
         constants::BEACON_NONCE,
         proofs,
@@ -160,7 +158,7 @@ mod builder {
             &mut db,
         )
         .map_err(|_| {
-            PayloadBuilderError::Optimism(OptimismPayloadBuilderError::ForceCreate2DeployerFail)
+            PayloadBuilderError::other(OptimismPayloadBuilderError::ForceCreate2DeployerFail)
         })?;
 
         let mut receipts = Vec::new();
@@ -175,9 +173,7 @@ mod builder {
             // Deposit transactions do not have signatures, so if the tx is a deposit, this
             // will just pull in its `from` address.
             let sequencer_tx = sequencer_tx.clone().try_into_ecrecovered().map_err(|_| {
-                PayloadBuilderError::Optimism(
-                    OptimismPayloadBuilderError::TransactionEcRecoverFailed,
-                )
+                PayloadBuilderError::other(OptimismPayloadBuilderError::TransactionEcRecoverFailed)
             })?;
 
             // Cache the depositor account prior to the state transition for the deposit nonce.
@@ -192,7 +188,7 @@ mod builder {
                 })
                 .transpose()
                 .map_err(|_| {
-                    PayloadBuilderError::Optimism(OptimismPayloadBuilderError::AccountLoadFailed(
+                    PayloadBuilderError::other(OptimismPayloadBuilderError::AccountLoadFailed(
                         sequencer_tx.signer(),
                     ))
                 })?;

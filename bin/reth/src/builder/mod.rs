@@ -438,19 +438,19 @@ impl NodeConfig {
 
     /// Returns the max block that the node should run to, looking it up from the network if
     /// necessary
-    pub async fn max_block<DB, Client>(
+    async fn max_block<Provider, Client>(
         &self,
         network_client: &Client,
-        provider_factory: ProviderFactory<DB>,
+        provider: Provider,
     ) -> eyre::Result<Option<BlockNumber>>
     where
-        DB: Database,
+        Provider: HeaderProvider,
         Client: HeadersClient,
     {
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
         } else if let Some(tip) = self.debug.tip {
-            Some(self.lookup_or_fetch_tip(provider_factory, network_client, tip).await?)
+            Some(self.lookup_or_fetch_tip(provider, network_client, tip).await?)
         } else {
             None
         };
@@ -483,10 +483,7 @@ impl NodeConfig {
         DB: Database + Unpin + Clone + 'static,
     {
         info!(target: "reth::cli", "Connecting to P2P network");
-        let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
-        debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
-        let secret_key = get_secret_key(&network_secret_path)?;
+        let secret_key = self.network_secret(data_dir)?;
         let default_peers_path = data_dir.known_peers_path();
         let network_config = self.load_network_config(
             config,
@@ -536,6 +533,7 @@ impl NodeConfig {
         blockchain_db: &BlockchainProvider<DB, Tree>,
         head: Head,
         executor: &TaskExecutor,
+        data_dir: &ChainPath<DataDirPath>,
     ) -> eyre::Result<EthTransactionPool<BlockchainProvider<DB, Tree>, InMemoryBlobStore>>
     where
         DB: Database + Unpin + Clone + 'static,
@@ -555,12 +553,28 @@ impl NodeConfig {
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
         info!(target: "reth::cli", "Transaction pool initialized");
+        let transactions_path = data_dir.txpool_transactions_path();
 
         // spawn txpool maintenance task
         {
             let pool = transaction_pool.clone();
             let chain_events = blockchain_db.canonical_state_stream();
             let client = blockchain_db.clone();
+            let transactions_backup_config =
+                reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+
+            executor.spawn_critical_with_graceful_shutdown_signal(
+                "local transactions backup task",
+                |shutdown| {
+                    reth_transaction_pool::maintain::backup_local_transactions_task(
+                        shutdown,
+                        pool.clone(),
+                        transactions_backup_config,
+                    )
+                },
+            );
+
+            // spawn the maintenance task
             executor.spawn_critical(
                 "txpool maintenance task",
                 reth_transaction_pool::maintain::maintain_transaction_pool_future(
@@ -737,42 +751,38 @@ impl NodeConfig {
     /// If it doesn't exist, download the header and return the block number.
     ///
     /// NOTE: The download is attempted with infinite retries.
-    async fn lookup_or_fetch_tip<DB, Client>(
+    async fn lookup_or_fetch_tip<Provider, Client>(
         &self,
-        provider_factory: ProviderFactory<DB>,
+        provider: Provider,
         client: Client,
         tip: B256,
     ) -> RethResult<u64>
     where
-        DB: Database,
+        Provider: HeaderProvider,
         Client: HeadersClient,
     {
-        Ok(self.fetch_tip(provider_factory, client, BlockHashOrNumber::Hash(tip)).await?.number)
+        let header = provider.header_by_hash_or_number(tip.into())?;
+
+        // try to look up the header in the database
+        if let Some(header) = header {
+            info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
+            return Ok(header.number)
+        }
+
+        Ok(self.fetch_tip_from_network(client, tip.into()).await?.number)
     }
 
     /// Attempt to look up the block with the given number and return the header.
     ///
     /// NOTE: The download is attempted with infinite retries.
-    async fn fetch_tip<DB, Client>(
+    async fn fetch_tip_from_network<Client>(
         &self,
-        factory: ProviderFactory<DB>,
         client: Client,
         tip: BlockHashOrNumber,
     ) -> RethResult<SealedHeader>
     where
-        DB: Database,
         Client: HeadersClient,
     {
-        let provider = factory.provider()?;
-
-        let header = provider.header_by_hash_or_number(tip)?;
-
-        // try to look up the header in the database
-        if let Some(header) = header {
-            info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.seal_slow())
-        }
-
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
         loop {
             match get_single_header(&client, tip).await {
@@ -1055,7 +1065,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
 
         // build transaction pool
         let transaction_pool =
-            self.config.build_and_spawn_txpool(&blockchain_db, head, &executor)?;
+            self.config.build_and_spawn_txpool(&blockchain_db, head, &executor, &self.data_dir)?;
 
         // build network
         let (network_client, mut network_builder) = self

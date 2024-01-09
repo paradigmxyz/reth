@@ -7,6 +7,10 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 description = "Reth RPC implementation"
+
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-interfaces.workspace = true

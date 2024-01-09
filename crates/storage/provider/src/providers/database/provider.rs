@@ -1348,7 +1348,14 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
             })
             .collect();
 
-        Ok(Some(Block { header, body, ommers, withdrawals }.with_senders(senders)))
+        let block = Block { header, body, ommers, withdrawals };
+        let block = block
+            // Note: we're using unchecked here because we know the block contains valid txs wrt to
+            // its height and can ignore the s value check so pre EIP-2 txs are allowed
+            .try_with_senders_unchecked(senders)
+            .map_err(|_| ProviderError::SenderRecoveryError)?;
+
+        Ok(Some(block))
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
@@ -2310,7 +2317,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
             }
         }
 
-        Ok(Chain::new(blocks, execution_state))
+        Ok(Chain::new(blocks, execution_state, None))
     }
 }
 
