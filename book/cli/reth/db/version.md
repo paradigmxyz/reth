@@ -2,7 +2,7 @@
 
 Lists current and local database versions
 
-```bash
+```text
 $ reth db version --help
 Usage: reth db version [OPTIONS]
 

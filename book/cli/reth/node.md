@@ -2,7 +2,7 @@
 
 Start the node
 
-```bash
+```text
 $ reth node --help
 Usage: reth node [OPTIONS]
 

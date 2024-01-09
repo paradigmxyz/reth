@@ -2,7 +2,7 @@
 
 Generates test vectors for specified tables. If no table is specified, generate for all
 
-```bash
+```text
 $ reth test-vectors tables --help
 Usage: reth test-vectors tables [OPTIONS] [NAMES]...
 

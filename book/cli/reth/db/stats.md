@@ -2,7 +2,7 @@
 
 Lists all the tables, their entry count and their size
 
-```bash
+```text
 $ reth db stats --help
 Usage: reth db stats [OPTIONS]
 
