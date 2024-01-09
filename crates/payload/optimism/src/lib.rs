@@ -16,7 +16,7 @@ pub mod error;
 mod builder {
     use crate::error::OptimismPayloadBuilderError;
     use reth_basic_payload_builder::*;
-    use reth_node_api::PayloadBuilderAttributesTrait;
+    use reth_node_api::PayloadBuilderAttributes;
     use reth_payload_builder::{
         error::PayloadBuilderError, BuiltPayload, OptimismPayloadBuilderAttributes,
     };

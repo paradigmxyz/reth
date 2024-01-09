@@ -2,7 +2,7 @@
 
 use crate::{
     error::PayloadBuilderError, traits::KeepPayloadJobAlive, BuiltPayload,
-    PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
+    EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
     PayloadJobGenerator,
 };
 use reth_node_api::EngineTypes;
@@ -25,7 +25,7 @@ pub fn test_payload_service<Types>() -> (
     PayloadBuilderHandle<Types>,
 )
 where
-    Types: EngineTypes<PayloadBuilderAttributes = PayloadBuilderAttributes> + 'static,
+    Types: EngineTypes<PayloadBuilderAttributes = EthPayloadBuilderAttributes>,
 {
     PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
 }
@@ -33,7 +33,7 @@ where
 /// Creates a new [PayloadBuilderService] for testing purposes and spawns it in the background.
 pub fn spawn_test_payload_service<Types>() -> PayloadBuilderHandle<Types>
 where
-    Types: EngineTypes<PayloadBuilderAttributes = PayloadBuilderAttributes> + 'static,
+    Types: EngineTypes<PayloadBuilderAttributes = EthPayloadBuilderAttributes> + 'static,
 {
     let (service, handle) = test_payload_service();
     tokio::spawn(service);
@@ -50,7 +50,7 @@ impl PayloadJobGenerator for TestPayloadJobGenerator {
 
     fn new_payload_job(
         &self,
-        attr: PayloadBuilderAttributes,
+        attr: EthPayloadBuilderAttributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
         Ok(TestPayloadJob { attr })
     }
@@ -59,7 +59,7 @@ impl PayloadJobGenerator for TestPayloadJobGenerator {
 /// A [PayloadJobGenerator] for testing purposes
 #[derive(Debug)]
 pub struct TestPayloadJob {
-    attr: PayloadBuilderAttributes,
+    attr: EthPayloadBuilderAttributes,
 }
 
 impl Future for TestPayloadJob {
@@ -71,7 +71,7 @@ impl Future for TestPayloadJob {
 }
 
 impl PayloadJob for TestPayloadJob {
-    type PayloadAttributes = PayloadBuilderAttributes;
+    type PayloadAttributes = EthPayloadBuilderAttributes;
     type ResolvePayloadFuture =
         futures_util::future::Ready<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
 
@@ -83,7 +83,7 @@ impl PayloadJob for TestPayloadJob {
         )))
     }
 
-    fn payload_attributes(&self) -> Result<PayloadBuilderAttributes, PayloadBuilderError> {
+    fn payload_attributes(&self) -> Result<EthPayloadBuilderAttributes, PayloadBuilderError> {
         Ok(self.attr.clone())
     }
 

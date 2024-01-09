@@ -20,7 +20,7 @@ use reth_interfaces::{
     sync::{NetworkSyncUpdater, SyncState},
     RethError, RethResult,
 };
-use reth_node_api::{EngineTypes, PayloadAttributesTrait, PayloadBuilderAttributesTrait};
+use reth_node_api::{EngineTypes, PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{
     constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
@@ -1200,7 +1200,7 @@ where
         //    forkchoiceState.headBlockHash and identified via buildProcessId value if
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
-        match <Types::PayloadBuilderAttributes as PayloadBuilderAttributesTrait>::try_new(
+        match <Types::PayloadBuilderAttributes as PayloadBuilderAttributes>::try_new(
             state.head_block_hash,
             attrs,
         ) {

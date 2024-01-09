@@ -20,7 +20,7 @@ use reth_blockchain_tree::{
 };
 use reth_db::{init_db, DatabaseEnv};
 use reth_interfaces::{consensus::Consensus, RethResult};
-use reth_node_api::PayloadBuilderAttributesTrait;
+use reth_node_api::PayloadBuilderAttributes;
 use reth_payload_builder::database::CachedReads;
 #[cfg(feature = "optimism")]
 use reth_payload_builder::OptimismPayloadBuilderAttributes;
@@ -48,7 +48,7 @@ use std::{path::PathBuf, str::FromStr, sync::Arc};
 use tracing::*;
 
 #[cfg(not(feature = "optimism"))]
-use reth_payload_builder::PayloadBuilderAttributes;
+use reth_payload_builder::EthPayloadBuilderAttributes;
 
 /// `reth debug build-block` command
 /// This debug routine requires that the node is positioned at the block before the target.
@@ -264,7 +264,7 @@ impl Command {
         let payload_config = PayloadConfig::new(
             Arc::clone(&best_block),
             Bytes::default(),
-            PayloadBuilderAttributes::try_new(best_block.hash, payload_attrs)?,
+            EthPayloadBuilderAttributes::try_new(best_block.hash, payload_attrs)?,
             self.chain.clone(),
         );
 

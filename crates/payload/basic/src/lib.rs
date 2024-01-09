@@ -12,7 +12,7 @@ use alloy_rlp::Encodable;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_interfaces::RethResult;
-use reth_node_api::PayloadBuilderAttributesTrait;
+use reth_node_api::PayloadBuilderAttributes;
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
     PayloadId, PayloadJob, PayloadJobGenerator,
@@ -457,8 +457,7 @@ where
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
-    <Builder as PayloadBuilder<Pool, Client>>::Attributes:
-        PayloadBuilderAttributesTrait + Unpin + Clone,
+    <Builder as PayloadBuilder<Pool, Client>>::Attributes: PayloadBuilderAttributes + Unpin + Clone,
 {
     type PayloadAttributes = Builder::Attributes;
     type ResolvePayloadFuture = ResolveBestPayload;
@@ -653,7 +652,7 @@ impl<Attributes> PayloadConfig<Attributes> {
 
 impl<Attributes> PayloadConfig<Attributes>
 where
-    Attributes: PayloadBuilderAttributesTrait,
+    Attributes: PayloadBuilderAttributes,
 {
     /// Create new payload config.
     pub fn new(
@@ -748,7 +747,7 @@ impl<Pool, Client, Attributes> BuildArguments<Pool, Client, Attributes> {
 /// Ethereum client types.
 pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
     /// The payload attributes type to accept for building.
-    type Attributes: PayloadBuilderAttributesTrait + Send + Sync + std::fmt::Debug;
+    type Attributes: PayloadBuilderAttributes + Send + Sync + std::fmt::Debug;
 
     /// Tries to build a transaction payload using provided arguments.
     ///
@@ -788,7 +787,7 @@ fn build_empty_payload<Client, Attributes>(
 ) -> Result<BuiltPayload, PayloadBuilderError>
 where
     Client: StateProviderFactory,
-    Attributes: PayloadBuilderAttributesTrait,
+    Attributes: PayloadBuilderAttributes,
 {
     let extra_data = config.extra_data();
     let PayloadConfig {
@@ -950,7 +949,7 @@ pub fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit, Attrib
 ) -> Result<(), PayloadBuilderError>
 where
     DB::Error: std::fmt::Display,
-    Attributes: PayloadBuilderAttributesTrait,
+    Attributes: PayloadBuilderAttributes,
 {
     // Configure the environment for the block.
     let env = Env {

@@ -4,10 +4,12 @@ use reth_primitives::{
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId},
     Address, ChainSpec, Header, B256, U256,
 };
-use reth_rpc_types::engine::{OptimismPayloadAttributes, PayloadAttributes, PayloadId, Withdrawal};
+use reth_rpc_types::engine::{
+    OptimismPayloadAttributes, PayloadAttributes as EthPayloadAttributes, PayloadId, Withdrawal,
+};
 
 /// This can be implemented by types that describe a currently running payload job.
-pub trait PayloadBuilderAttributesTrait {
+pub trait PayloadBuilderAttributes {
     /// The payload attributes that can be used to construct this type. Used as the argument in
     /// [PayloadBuilderAttributesTrait::try_new].
     type RpcPayloadAttributes;
@@ -110,7 +112,7 @@ pub trait PayloadBuilderAttributesTrait {
 /// This type should be implemented by types that could be used to spawn a payload job.
 ///
 /// This type is emitted as part of the fork choice update call
-pub trait PayloadAttributesTrait:
+pub trait PayloadAttributes:
     serde::de::DeserializeOwned + serde::Serialize + std::fmt::Debug + Clone + Send + Sync + 'static
 {
     /// Returns the timestamp to be used in the payload job.
@@ -131,7 +133,7 @@ pub trait PayloadAttributesTrait:
     ) -> Result<(), AttributesValidationError>;
 }
 
-impl PayloadAttributesTrait for PayloadAttributes {
+impl PayloadAttributes for EthPayloadAttributes {
     fn timestamp(&self) -> u64 {
         self.timestamp
     }
@@ -153,7 +155,7 @@ impl PayloadAttributesTrait for PayloadAttributes {
     }
 }
 
-impl PayloadAttributesTrait for OptimismPayloadAttributes {
+impl PayloadAttributes for OptimismPayloadAttributes {
     fn timestamp(&self) -> u64 {
         self.payload_attributes.timestamp
     }

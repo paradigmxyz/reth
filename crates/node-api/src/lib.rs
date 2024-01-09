@@ -17,7 +17,7 @@ pub use engine::{
 
 /// Contains traits and types used to abstract over payload attributes types.
 pub mod payload_attributes;
-pub use payload_attributes::{PayloadAttributesTrait, PayloadBuilderAttributesTrait};
+pub use payload_attributes::{PayloadAttributes, PayloadBuilderAttributes};
 
 /// Contains error types used in the traits defined in this crate.
 pub mod error;

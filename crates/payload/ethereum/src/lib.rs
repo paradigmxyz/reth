@@ -17,7 +17,7 @@ mod builder {
         BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
     };
     use reth_payload_builder::{
-        error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes,
+        error::PayloadBuilderError, BuiltPayload, EthPayloadBuilderAttributes,
     };
     use reth_primitives::{
         constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
@@ -47,11 +47,11 @@ mod builder {
         Client: StateProviderFactory,
         Pool: TransactionPool,
     {
-        type Attributes = PayloadBuilderAttributes;
+        type Attributes = EthPayloadBuilderAttributes;
 
         fn try_build(
             &self,
-            args: BuildArguments<Pool, Client, PayloadBuilderAttributes>,
+            args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes>,
         ) -> Result<BuildOutcome, PayloadBuilderError> {
             default_ethereum_payload_builder(args)
         }
@@ -64,7 +64,7 @@ mod builder {
     /// a result indicating success with the payload or an error in case of failure.
     #[inline]
     pub fn default_ethereum_payload_builder<Pool, Client>(
-        args: BuildArguments<Pool, Client, PayloadBuilderAttributes>,
+        args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes>,
     ) -> Result<BuildOutcome, PayloadBuilderError>
     where
         Client: StateProviderFactory,

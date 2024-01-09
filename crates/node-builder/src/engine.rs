@@ -1,5 +1,5 @@
 use reth_node_api::EngineTypes;
-use reth_payload_builder::{OptimismPayloadBuilderAttributes, PayloadBuilderAttributes};
+use reth_payload_builder::{EthPayloadBuilderAttributes, OptimismPayloadBuilderAttributes};
 use reth_rpc_types::engine::{OptimismPayloadAttributes, PayloadAttributes};
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
@@ -9,7 +9,7 @@ pub struct EthEngineTypes;
 
 impl EngineTypes for EthEngineTypes {
     type PayloadAttributes = PayloadAttributes;
-    type PayloadBuilderAttributes = PayloadBuilderAttributes;
+    type PayloadBuilderAttributes = EthPayloadBuilderAttributes;
 }
 
 /// The types used in the optimism beacon consensus engine.

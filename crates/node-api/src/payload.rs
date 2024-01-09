@@ -1,4 +1,4 @@
-use crate::PayloadAttributesTrait;
+use crate::PayloadAttributes;
 use reth_primitives::B256;
 use reth_rpc_types::engine::ExecutionPayload;
 
@@ -18,7 +18,7 @@ pub enum PayloadOrAttributes<'a, AttributesType> {
 
 impl<'a, AttributesType> PayloadOrAttributes<'a, AttributesType>
 where
-    AttributesType: PayloadAttributesTrait,
+    AttributesType: PayloadAttributes,
 {
     /// Construct a [PayloadOrAttributes] from an [ExecutionPayload] and optional parent beacon
     /// block root.
@@ -56,7 +56,7 @@ where
 
 impl<'a, AttributesType> From<&'a AttributesType> for PayloadOrAttributes<'a, AttributesType>
 where
-    AttributesType: PayloadAttributesTrait,
+    AttributesType: PayloadAttributes,
 {
     fn from(attributes: &'a AttributesType) -> Self {
         Self::PayloadAttributes(attributes)

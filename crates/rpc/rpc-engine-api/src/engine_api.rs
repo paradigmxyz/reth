@@ -5,7 +5,7 @@ use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_node_api::{
     validate_payload_timestamp, validate_version_specific_fields, EngineApiMessageVersion,
-    EngineTypes, PayloadAttributesTrait, PayloadBuilderAttributesTrait, PayloadOrAttributes,
+    EngineTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
 };
 use reth_payload_builder::PayloadStore;
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};

@@ -1,7 +1,7 @@
 //! Contains types required for building a payload.
 
 use alloy_rlp::{Encodable, Error as DecodeError};
-use reth_node_api::PayloadBuilderAttributesTrait;
+use reth_node_api::PayloadBuilderAttributes;
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge,
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId},
@@ -119,11 +119,9 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelopeV3 {
     }
 }
 
-// TODO(rjected): separate op into type that wraps this, impl payload builder attributes type for
-// it
 /// Container type for all components required to build a payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PayloadBuilderAttributes {
+pub struct EthPayloadBuilderAttributes {
     /// Id of the payload
     pub id: PayloadId,
     /// Parent block to build the payload on top
@@ -142,7 +140,7 @@ pub struct PayloadBuilderAttributes {
     pub parent_beacon_block_root: Option<B256>,
 }
 
-impl PayloadBuilderAttributesTrait for PayloadBuilderAttributes {
+impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
     type RpcPayloadAttributes = PayloadAttributes;
     type Error = DecodeError;
 
@@ -205,7 +203,7 @@ impl PayloadBuilderAttributesTrait for PayloadBuilderAttributes {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OptimismPayloadBuilderAttributes {
     /// Inner ethereum payload builder attributes
-    pub payload_attributes: PayloadBuilderAttributes,
+    pub payload_attributes: EthPayloadBuilderAttributes,
     /// NoTxPool option for the generated payload
     pub no_tx_pool: bool,
     /// Transactions for the generated payload
@@ -214,7 +212,7 @@ pub struct OptimismPayloadBuilderAttributes {
     pub gas_limit: Option<u64>,
 }
 
-impl PayloadBuilderAttributesTrait for OptimismPayloadBuilderAttributes {
+impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
     type RpcPayloadAttributes = OptimismPayloadAttributes;
     type Error = DecodeError;
 
@@ -242,7 +240,7 @@ impl PayloadBuilderAttributesTrait for OptimismPayloadBuilderAttributes {
             },
         );
 
-        let payload_attributes = PayloadBuilderAttributes {
+        let payload_attributes = EthPayloadBuilderAttributes {
             id,
             parent,
             timestamp: attributes.payload_attributes.timestamp,
@@ -291,7 +289,7 @@ impl PayloadBuilderAttributesTrait for OptimismPayloadBuilderAttributes {
 
 // === impl PayloadBuilderAttributes ===
 
-impl PayloadBuilderAttributes {
+impl EthPayloadBuilderAttributes {
     /// Returns the configured [CfgEnv] and [BlockEnv] for the targeted payload (that has the
     /// `parent` as its parent).
     ///

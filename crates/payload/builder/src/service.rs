@@ -9,7 +9,7 @@ use crate::{
 };
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_provider::CanonStateNotification;
-use reth_node_api::{EngineTypes, PayloadBuilderAttributesTrait};
+use reth_node_api::{EngineTypes, PayloadBuilderAttributes};
 use reth_rpc_types::engine::PayloadId;
 use std::{
     fmt,
