@@ -1,4 +1,5 @@
 //! Prometheus exporter
+
 use eyre::WrapErr;
 use hyper::{
     service::{make_service_fn, service_fn},
@@ -7,7 +8,7 @@ use hyper::{
 use metrics::{describe_gauge, gauge};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
-use reth_db::{database::Database, tables, DatabaseEnv};
+use reth_db::database_metrics::DatabaseMetrics;
 use reth_metrics::metrics::Unit;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 use tracing::error;
@@ -74,56 +75,24 @@ async fn start_endpoint<F: Hook + 'static>(
 }
 
 /// Serves Prometheus metrics over HTTP with database and process metrics.
-pub(crate) async fn serve(
+pub(crate) async fn serve<Metrics>(
     listen_addr: SocketAddr,
     handle: PrometheusHandle,
-    db: Arc<DatabaseEnv>,
+    db: Metrics,
     process: metrics_process::Collector,
-) -> eyre::Result<()> {
-    let db_stats = move || {
-        // TODO: A generic stats abstraction for other DB types to deduplicate this and `reth db
-        //  stats`
-        let _ = db.view(|tx| {
-            for table in tables::Tables::ALL.iter().map(|table| table.name()) {
-                let table_db =
-                    tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
-
-                let stats = tx
-                    .inner
-                    .db_stat(&table_db)
-                    .wrap_err(format!("Could not find table: {table}"))?;
-
-                let page_size = stats.page_size() as usize;
-                let leaf_pages = stats.leaf_pages();
-                let branch_pages = stats.branch_pages();
-                let overflow_pages = stats.overflow_pages();
-                let num_pages = leaf_pages + branch_pages + overflow_pages;
-                let table_size = page_size * num_pages;
-                let entries = stats.entries();
-
-                gauge!("db.table_size", table_size as f64, "table" => table);
-                gauge!("db.table_pages", leaf_pages as f64, "table" => table, "type" => "leaf");
-                gauge!("db.table_pages", branch_pages as f64, "table" => table, "type" => "branch");
-                gauge!("db.table_pages", overflow_pages as f64, "table" => table, "type" => "overflow");
-                gauge!("db.table_entries", entries as f64, "table" => table);
-            }
-
-            Ok::<(), eyre::Report>(())
-        }).map_err(|error| error!(?error, "Failed to read db table stats"));
-
-        if let Ok(freelist) =
-            db.freelist().map_err(|error| error!(?error, "Failed to read db.freelist"))
-        {
-            gauge!("db.freelist", freelist as f64);
-        }
-    };
+) -> eyre::Result<()>
+where
+    Metrics: DatabaseMetrics + 'static + Send + Sync,
+{
+    let db_metrics_hook = move || db.report_metrics();
 
     // Clone `process` to move it into the hook and use the original `process` for describe below.
     let cloned_process = process.clone();
     let hooks: Vec<Box<dyn Hook<Output = ()>>> = vec![
-        Box::new(db_stats),
+        Box::new(db_metrics_hook),
         Box::new(move || cloned_process.collect()),
         Box::new(collect_memory_stats),
+        Box::new(collect_io_stats),
     ];
     serve_with_hooks(listen_addr, handle, hooks).await?;
 
@@ -135,6 +104,7 @@ pub(crate) async fn serve(
     describe_gauge!("db.freelist", "The number of pages on the freelist");
     process.describe();
     describe_memory_stats();
+    describe_io_stats();
 
     Ok(())
 }
@@ -225,3 +195,47 @@ fn collect_memory_stats() {}
 
 #[cfg(not(all(feature = "jemalloc", unix)))]
 fn describe_memory_stats() {}
+
+#[cfg(target_os = "linux")]
+fn collect_io_stats() {
+    use metrics::absolute_counter;
+
+    let Ok(process) = procfs::process::Process::myself()
+        .map_err(|error| error!(?error, "Failed to get currently running process"))
+    else {
+        return
+    };
+
+    let Ok(io) = process.io().map_err(|error| {
+        error!(?error, "Failed to get IO stats for the currently running process")
+    }) else {
+        return
+    };
+
+    absolute_counter!("io.rchar", io.rchar);
+    absolute_counter!("io.wchar", io.wchar);
+    absolute_counter!("io.syscr", io.syscr);
+    absolute_counter!("io.syscw", io.syscw);
+    absolute_counter!("io.read_bytes", io.read_bytes);
+    absolute_counter!("io.write_bytes", io.write_bytes);
+    absolute_counter!("io.cancelled_write_bytes", io.cancelled_write_bytes);
+}
+
+#[cfg(target_os = "linux")]
+fn describe_io_stats() {
+    use metrics::describe_counter;
+
+    describe_counter!("io.rchar", "Characters read");
+    describe_counter!("io.wchar", "Characters written");
+    describe_counter!("io.syscr", "Read syscalls");
+    describe_counter!("io.syscw", "Write syscalls");
+    describe_counter!("io.read_bytes", Unit::Bytes, "Bytes read");
+    describe_counter!("io.write_bytes", Unit::Bytes, "Bytes written");
+    describe_counter!("io.cancelled_write_bytes", Unit::Bytes, "Cancelled write bytes");
+}
+
+#[cfg(not(target_os = "linux"))]
+fn collect_io_stats() {}
+
+#[cfg(not(target_os = "linux"))]
+fn describe_io_stats() {}

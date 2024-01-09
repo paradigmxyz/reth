@@ -7,6 +7,10 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 description = "Reth node implementation"
+default-run = "reth"
+
+[lints]
+workspace = true
 
 [package.metadata.cargo-udeps.ignore]
 normal = [
@@ -42,7 +46,10 @@ reth-downloaders = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 reth-tasks.workspace = true
 reth-net-nat.workspace = true
+reth-optimism-payload-builder = { path = "../../crates/payload/optimism", optional = true }
+reth-ethereum-payload-builder.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-discv4.workspace = true
 reth-prune.workspace = true
@@ -58,7 +65,7 @@ secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recov
 tracing.workspace = true
 
 # io
-fdlimit = "0.2.1"
+fdlimit = "0.3.0"
 serde.workspace = true
 serde_json.workspace = true
 shellexpand = "3.0.0"
@@ -72,6 +79,7 @@ metrics-util = "0.15.0"
 metrics-process = "1.0.9"
 reth-metrics.workspace = true
 metrics.workspace = true
+once_cell.workspace = true
 
 # test vectors generation
 proptest.workspace = true
@@ -103,10 +111,14 @@ humantime = "2.1.0"
 const-str = "0.5.6"
 boyer-moore-magiclen = "0.2.16"
 itertools.workspace = true
+rayon.workspace = true
 
 [target.'cfg(not(windows))'.dependencies]
 jemallocator = { version = "0.5.0", optional = true }
 jemalloc-ctl = { version = "0.5.0", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+procfs = { version = "0.16.0" }
 
 [features]
 default = ["jemalloc"]
@@ -126,9 +138,13 @@ optimism = [
     "reth-transaction-pool/optimism",
     "reth-provider/optimism",
     "reth-beacon-consensus/optimism",
-    "reth-basic-payload-builder/optimism",
+    "reth-auto-seal-consensus/optimism",
     "reth-network/optimism",
     "reth-network-api/optimism",
+    "reth-blockchain-tree/optimism",
+    "reth-payload-builder/optimism",
+    "reth-optimism-payload-builder/optimism",
+    "reth-ethereum-payload-builder/optimism",
 ]
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []

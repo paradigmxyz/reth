@@ -1,12 +1,12 @@
+#![allow(missing_docs)]
 use criterion::{
     async_executor::FuturesExecutor, criterion_group, criterion_main, measurement::WallTime,
     BenchmarkGroup, Criterion,
 };
 use pprof::criterion::{Output, PProfProfiler};
-use reth_db::DatabaseEnv;
+use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_interfaces::test_utils::TestConsensus;
-use reth_primitives::{stage::StageCheckpoint, MAINNET};
-use reth_provider::ProviderFactory;
+use reth_primitives::stage::StageCheckpoint;
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
     test_utils::TestStageDB,
@@ -116,28 +116,27 @@ fn merkle(c: &mut Criterion) {
 
 fn measure_stage_with_path<F, S>(
     path: PathBuf,
-    group: &mut BenchmarkGroup<WallTime>,
+    group: &mut BenchmarkGroup<'_, WallTime>,
     setup: F,
     stage: S,
     stage_range: StageRange,
     label: String,
 ) where
-    S: Clone + Stage<DatabaseEnv>,
+    S: Clone + Stage<Arc<TempDatabase<DatabaseEnv>>>,
     F: Fn(S, &TestStageDB, StageRange),
 {
-    let tx = TestStageDB::new(&path);
+    let db = TestStageDB::new(&path);
     let (input, _) = stage_range;
 
     group.bench_function(label, move |b| {
         b.to_async(FuturesExecutor).iter_with_setup(
             || {
                 // criterion setup does not support async, so we have to use our own runtime
-                setup(stage.clone(), &tx, stage_range)
+                setup(stage.clone(), &db, stage_range)
             },
             |_| async {
                 let mut stage = stage.clone();
-                let factory = ProviderFactory::new(tx.factory.db(), MAINNET.clone());
-                let provider = factory.provider_rw().unwrap();
+                let provider = db.factory.provider_rw().unwrap();
                 stage
                     .execute_ready(input)
                     .await
@@ -150,13 +149,13 @@ fn measure_stage_with_path<F, S>(
 }
 
 fn measure_stage<F, S>(
-    group: &mut BenchmarkGroup<WallTime>,
+    group: &mut BenchmarkGroup<'_, WallTime>,
     setup: F,
     stage: S,
     block_interval: std::ops::Range<u64>,
     label: String,
 ) where
-    S: Clone + Stage<DatabaseEnv>,
+    S: Clone + Stage<Arc<TempDatabase<DatabaseEnv>>>,
     F: Fn(S, &TestStageDB, StageRange),
 {
     let path = setup::txs_testdata(block_interval.end);

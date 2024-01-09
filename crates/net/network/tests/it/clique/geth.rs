@@ -1,4 +1,6 @@
+#![allow(unreachable_pub)]
 //! Helper struct for working with a clique geth instance.
+
 use enr::k256::ecdsa::SigningKey;
 use ethers_core::utils::{Geth, GethInstance};
 use ethers_middleware::SignerMiddleware;

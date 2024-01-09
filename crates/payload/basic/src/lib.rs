@@ -5,41 +5,14 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use crate::metrics::PayloadBuilderMetrics;
 use alloy_rlp::Encodable;
 use futures_core::ready;
 use futures_util::FutureExt;
-use reth_interfaces::{RethError, RethResult};
-use reth_payload_builder::{
-    database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
-    PayloadBuilderAttributes, PayloadJob, PayloadJobGenerator,
-};
-use reth_primitives::{
-    bytes::BytesMut,
-    constants::{
-        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
-        EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
-    },
-    eip4844::calculate_excess_blob_gas,
-    proofs,
-    revm::{compat::into_reth_log, env::tx_env_with_recovered},
-    Block, BlockNumberOrTag, Bytes, ChainSpec, Header, IntoRecoveredTransaction, Receipt, Receipts,
-    SealedBlock, Withdrawal, B256, EMPTY_OMMER_ROOT_HASH, U256,
-};
-use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
-use reth_revm::{
-    database::StateProviderDatabase,
-    state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
-};
-use reth_tasks::TaskSpawner;
-use reth_transaction_pool::TransactionPool;
 use revm::{
     db::states::bundle_state::BundleRetention,
-    primitives::{BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState},
+    primitives::{BlockEnv, CfgEnv, Env},
     Database, DatabaseCommit, State,
 };
 use std::{
@@ -47,29 +20,45 @@ use std::{
     pin::Pin,
     sync::{atomic::AtomicBool, Arc},
     task::{Context, Poll},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     sync::{oneshot, Semaphore},
     time::{Interval, Sleep},
 };
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
+
+use reth_interfaces::RethResult;
+use reth_payload_builder::{
+    database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
+    PayloadBuilderAttributes, PayloadId, PayloadJob, PayloadJobGenerator,
+};
+use reth_primitives::{
+    bytes::BytesMut,
+    constants::{
+        BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
+        ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
+    },
+    proofs, Block, BlockNumberOrTag, Bytes, ChainSpec, Header, Receipts, SealedBlock, Withdrawal,
+    B256, EMPTY_OMMER_ROOT_HASH, U256,
+};
+use reth_provider::{
+    BlockReaderIdExt, BlockSource, BundleStateWithReceipts, ProviderError, StateProviderFactory,
+};
+use reth_revm::{
+    database::StateProviderDatabase,
+    state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
+};
+use reth_tasks::TaskSpawner;
+use reth_transaction_pool::TransactionPool;
+
+use crate::metrics::PayloadBuilderMetrics;
 
 mod metrics;
 
-#[cfg(feature = "optimism")]
-mod optimism;
-#[cfg(feature = "optimism")]
-pub use optimism::OptimismPayloadBuilder;
-
-/// Ethereum payload builder
-#[derive(Debug, Clone, Copy, Default)]
-#[non_exhaustive]
-pub struct EthereumPayloadBuilder;
-
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 #[derive(Debug)]
-pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = EthereumPayloadBuilder> {
+pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     /// The client that can interact with the chain.
     client: Client,
     /// txpool
@@ -90,26 +79,6 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = EthereumPaylo
 
 // === impl BasicPayloadJobGenerator ===
 
-impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
-    /// Creates a new [BasicPayloadJobGenerator] with the given config.
-    pub fn new(
-        client: Client,
-        pool: Pool,
-        executor: Tasks,
-        config: BasicPayloadJobGeneratorConfig,
-        chain_spec: Arc<ChainSpec>,
-    ) -> Self {
-        BasicPayloadJobGenerator::with_builder(
-            client,
-            pool,
-            executor,
-            config,
-            chain_spec,
-            EthereumPayloadBuilder,
-        )
-    }
-}
-
 impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     /// Creates a new [BasicPayloadJobGenerator] with the given config and custom [PayloadBuilder]
     pub fn with_builder(
@@ -129,6 +98,30 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
             chain_spec,
             builder,
         }
+    }
+
+    /// Returns the maximum duration a job should be allowed to run.
+    ///
+    /// This adheres to the following specification:
+    // > Client software SHOULD stop the updating process when either a call to engine_getPayload
+    // > with the build process's payloadId is made or SECONDS_PER_SLOT (12s in the Mainnet
+    // > configuration) have passed since the point in time identified by the timestamp parameter.
+    // See also <https://github.com/ethereum/execution-apis/blob/431cf72fd3403d946ca3e3afc36b973fc87e0e89/src/engine/paris.md?plain=1#L137>
+    #[inline]
+    fn max_job_duration(&self, unix_timestamp: u64) -> Duration {
+        let duration_until_timestamp = duration_until(unix_timestamp);
+
+        // safety in case clocks are bad
+        let duration_until_timestamp = duration_until_timestamp.min(self.config.deadline * 3);
+
+        self.config.deadline + duration_until_timestamp
+    }
+
+    /// Returns the [Instant](tokio::time::Instant) at which the job should be terminated because it
+    /// is considered timed out.
+    #[inline]
+    fn job_deadline(&self, unix_timestamp: u64) -> tokio::time::Instant {
+        tokio::time::Instant::now() + self.max_job_duration(unix_timestamp)
     }
 }
 
@@ -169,11 +162,9 @@ where
             self.config.extradata.clone(),
             attributes,
             Arc::clone(&self.chain_spec),
-            #[cfg(feature = "optimism")]
-            self.config.compute_pending_block,
         );
 
-        let until = tokio::time::Instant::now() + self.config.deadline;
+        let until = self.job_deadline(config.attributes.timestamp);
         let deadline = Box::pin(tokio::time::sleep_until(until));
 
         Ok(BasicPayloadJob {
@@ -215,12 +206,11 @@ pub struct BasicPayloadJobGeneratorConfig {
     /// The interval at which the job should build a new payload after the last.
     interval: Duration,
     /// The deadline for when the payload builder job should resolve.
+    ///
+    /// By default this is [SLOT_DURATION]: 12s
     deadline: Duration,
     /// Maximum number of tasks to spawn for building a payload.
     max_payload_tasks: usize,
-    /// The rollup's compute pending block configuration option.
-    #[cfg(feature = "optimism")]
-    compute_pending_block: bool,
 }
 
 // === impl BasicPayloadJobGeneratorConfig ===
@@ -264,15 +254,6 @@ impl BasicPayloadJobGeneratorConfig {
         self.max_gas_limit = max_gas_limit;
         self
     }
-
-    /// Sets the compute pending block configuration option.
-    ///
-    /// Defaults to `false`.
-    #[cfg(feature = "optimism")]
-    pub fn compute_pending_block(mut self, compute_pending_block: bool) -> Self {
-        self.compute_pending_block = compute_pending_block;
-        self
-    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
@@ -286,8 +267,6 @@ impl Default for BasicPayloadJobGeneratorConfig {
             // 12s slot time
             deadline: SLOT_DURATION,
             max_payload_tasks: 3,
-            #[cfg(feature = "optimism")]
-            compute_pending_block: false,
         }
     }
 }
@@ -316,7 +295,7 @@ pub struct BasicPayloadJob<Client, Pool, Tasks, Builder> {
     /// Caches all disk reads for the state the new payloads builds on
     ///
     /// This is used to avoid reading the same state over and over again when new attempts are
-    /// triggerd, because during the building process we'll repeatedly execute the transactions.
+    /// triggered, because during the building process we'll repeatedly execute the transactions.
     cached_reads: Option<CachedReads>,
     /// metrics for this type
     metrics: PayloadBuilderMetrics,
@@ -387,7 +366,7 @@ where
                     match outcome {
                         BuildOutcome::Better { payload, cached_reads } => {
                             this.cached_reads = Some(cached_reads);
-                            trace!(target: "payload_builder", value = %payload.fees(), "built better payload");
+                            debug!(target: "payload_builder", value = %payload.fees(), "built better payload");
                             let payload = Arc::new(payload);
                             this.best_payload = Some(payload);
                         }
@@ -402,7 +381,7 @@ where
                 }
                 Poll::Ready(Err(error)) => {
                     // job failed, but we simply try again next interval
-                    trace!(target: "payload_builder", ?error, "payload build attempt failed");
+                    debug!(target: "payload_builder", ?error, "payload build attempt failed");
                     this.metrics.inc_failed_payload_builds();
                 }
                 Poll::Pending => {
@@ -448,6 +427,24 @@ where
         let mut empty_payload = None;
 
         if best_payload.is_none() {
+            debug!(target: "payload_builder", id=%self.config.payload_id(), "no best payload yet to resolve, building empty payload");
+
+            let args = BuildArguments {
+                client: self.client.clone(),
+                pool: self.pool.clone(),
+                cached_reads: self.cached_reads.take().unwrap_or_default(),
+                config: self.config.clone(),
+                cancel: Cancelled::default(),
+                best_payload: None,
+            };
+
+            if let Some(payload) = self.builder.on_missing_payload(args) {
+                return (
+                    ResolveBestPayload { best_payload: Some(payload), maybe_better, empty_payload },
+                    KeepPayloadJobAlive::Yes,
+                )
+            }
+
             // if no payload has been built yet
             self.metrics.inc_requested_empty_payload();
             // no payload built yet, so we need to return an empty payload
@@ -458,39 +455,6 @@ where
                 let res = build_empty_payload(&client, config);
                 let _ = tx.send(res);
             }));
-
-            // In Optimism, the PayloadAttributes can specify a `no_tx_pool` option that implies we
-            // should not pull transactions from the tx pool. In this case, we build the payload
-            // upfront with the list of transactions sent in the attributes without caring about
-            // the results of the polling job, if a best payload has not already been built.
-            #[cfg(feature = "optimism")]
-            if self.config.chain_spec.is_optimism() &&
-                self.config.attributes.optimism_payload_attributes.no_tx_pool
-            {
-                let args = BuildArguments {
-                    client: self.client.clone(),
-                    pool: self.pool.clone(),
-                    cached_reads: self.cached_reads.take().unwrap_or_default(),
-                    config: self.config.clone(),
-                    cancel: Cancelled::default(),
-                    best_payload: None,
-                };
-                if let Ok(BuildOutcome::Better { payload, cached_reads }) =
-                    self.builder.try_build(args)
-                {
-                    self.cached_reads = Some(cached_reads);
-                    trace!(target: "payload_builder", "[OPTIMISM] Forced best payload");
-                    let payload = Arc::new(payload);
-                    return (
-                        ResolveBestPayload {
-                            best_payload: Some(payload),
-                            maybe_better,
-                            empty_payload,
-                        },
-                        KeepPayloadJobAlive::Yes,
-                    )
-                }
-            }
 
             empty_payload = Some(rx);
         }
@@ -531,18 +495,27 @@ impl Future for ResolveBestPayload {
             if let Poll::Ready(res) = fut.poll(cx) {
                 this.maybe_better = None;
                 if let Ok(BuildOutcome::Better { payload, .. }) = res {
+                    debug!(target: "payload_builder", "resolving better payload");
                     return Poll::Ready(Ok(Arc::new(payload)))
                 }
             }
         }
 
         if let Some(best) = this.best_payload.take() {
+            debug!(target: "payload_builder", "resolving best payload");
             return Poll::Ready(Ok(best))
         }
 
         let mut empty_payload = this.empty_payload.take().expect("polled after completion");
         match empty_payload.poll_unpin(cx) {
-            Poll::Ready(Ok(res)) => Poll::Ready(res.map(Arc::new)),
+            Poll::Ready(Ok(res)) => {
+                if let Err(err) = &res {
+                    warn!(target: "payload_builder", ?err, "failed to resolve empty payload");
+                } else {
+                    debug!(target: "payload_builder", "resolving empty payload");
+                }
+                Poll::Ready(res.map(Arc::new))
+            }
             Poll::Ready(Err(err)) => Poll::Ready(Err(err.into())),
             Poll::Pending => {
                 this.empty_payload = Some(empty_payload);
@@ -595,32 +568,28 @@ impl Drop for Cancelled {
 #[derive(Clone, Debug)]
 pub struct PayloadConfig {
     /// Pre-configured block environment.
-    initialized_block_env: BlockEnv,
+    pub initialized_block_env: BlockEnv,
     /// Configuration for the environment.
-    initialized_cfg: CfgEnv,
+    pub initialized_cfg: CfgEnv,
     /// The parent block.
-    parent_block: Arc<SealedBlock>,
+    pub parent_block: Arc<SealedBlock>,
     /// Block extra data.
-    extra_data: Bytes,
+    pub extra_data: Bytes,
     /// Requested attributes for the payload.
-    attributes: PayloadBuilderAttributes,
+    pub attributes: PayloadBuilderAttributes,
     /// The chain spec.
-    chain_spec: Arc<ChainSpec>,
-    /// The rollup's compute pending block configuration option.
-    /// TODO(clabby): Implement this feature.
-    #[cfg(feature = "optimism")]
-    #[allow(dead_code)]
-    compute_pending_block: bool,
+    pub chain_spec: Arc<ChainSpec>,
 }
 
 impl PayloadConfig {
     /// Returns an owned instance of the [PayloadConfig]'s extra_data bytes.
-    pub(crate) fn extra_data(&self) -> reth_primitives::Bytes {
-        #[cfg(feature = "optimism")]
-        if self.chain_spec.is_optimism() {
-            return Default::default()
-        }
+    pub fn extra_data(&self) -> Bytes {
         self.extra_data.clone()
+    }
+
+    /// Returns the payload id.
+    pub fn payload_id(&self) -> PayloadId {
+        self.attributes.id
     }
 }
 
@@ -631,7 +600,6 @@ impl PayloadConfig {
         extra_data: Bytes,
         attributes: PayloadBuilderAttributes,
         chain_spec: Arc<ChainSpec>,
-        #[cfg(feature = "optimism")] compute_pending_block: bool,
     ) -> Self {
         // configure evm env based on parent block
         let (initialized_cfg, initialized_block_env) =
@@ -644,8 +612,6 @@ impl PayloadConfig {
             extra_data,
             attributes,
             chain_spec,
-            #[cfg(feature = "optimism")]
-            compute_pending_block,
         }
     }
 }
@@ -678,12 +644,18 @@ pub enum BuildOutcome {
 /// payload configuration, cancellation status, and the best payload achieved so far.
 #[derive(Debug)]
 pub struct BuildArguments<Pool, Client> {
-    client: Client,
-    pool: Pool,
-    cached_reads: CachedReads,
-    config: PayloadConfig,
-    cancel: Cancelled,
-    best_payload: Option<Arc<BuiltPayload>>,
+    /// How to interact with the chain.
+    pub client: Client,
+    /// The transaction pool.
+    pub pool: Pool,
+    /// Previously cached disk reads
+    pub cached_reads: CachedReads,
+    /// How to configure the payload.
+    pub config: PayloadConfig,
+    /// A marker that can be used to cancel the job.
+    pub cancel: Cancelled,
+    /// The best payload achieved so far.
+    pub best_payload: Option<Arc<BuiltPayload>>,
 }
 
 impl<Pool, Client> BuildArguments<Pool, Client> {
@@ -725,268 +697,16 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
         &self,
         args: BuildArguments<Pool, Client>,
     ) -> Result<BuildOutcome, PayloadBuilderError>;
-}
 
-// Default implementation of [PayloadBuilder] for unit type
-impl<Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder
-where
-    Client: StateProviderFactory,
-    Pool: TransactionPool,
-{
-    fn try_build(
-        &self,
-        args: BuildArguments<Pool, Client>,
-    ) -> Result<BuildOutcome, PayloadBuilderError> {
-        default_payload_builder(args)
+    /// Invoked when the payload job is being resolved and there is no payload yet.
+    ///
+    /// If this returns a payload, it will be used as the final payload for the job.
+    ///
+    /// TODO(mattsse): This needs to be refined a bit because this only exists for OP atm
+    fn on_missing_payload(&self, args: BuildArguments<Pool, Client>) -> Option<Arc<BuiltPayload>> {
+        let _args = args;
+        None
     }
-}
-
-/// Constructs an Ethereum transaction payload using the best transactions from the pool.
-///
-/// Given build arguments including an Ethereum client, transaction pool,
-/// and configuration, this function creates a transaction payload. Returns
-/// a result indicating success with the payload or an error in case of failure.
-#[inline]
-pub fn default_payload_builder<Pool, Client>(
-    args: BuildArguments<Pool, Client>,
-) -> Result<BuildOutcome, PayloadBuilderError>
-where
-    Client: StateProviderFactory,
-    Pool: TransactionPool,
-{
-    let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
-
-    let state_provider = client.state_by_block_hash(config.parent_block.hash)?;
-    let state = StateProviderDatabase::new(&state_provider);
-    let mut db =
-        State::builder().with_database_ref(cached_reads.as_db(&state)).with_bundle_update().build();
-    let extra_data = config.extra_data();
-    let PayloadConfig {
-        initialized_block_env,
-        initialized_cfg,
-        parent_block,
-        attributes,
-        chain_spec,
-        ..
-    } = config;
-
-    debug!(target: "payload_builder", parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building new payload");
-    let mut cumulative_gas_used = 0;
-    let mut sum_blob_gas_used = 0;
-    let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
-    let base_fee = initialized_block_env.basefee.to::<u64>();
-
-    let mut executed_txs = Vec::new();
-    let mut best_txs = pool.best_transactions_with_base_fee(base_fee);
-
-    let mut total_fees = U256::ZERO;
-
-    let block_number = initialized_block_env.number.to::<u64>();
-
-    // apply eip-4788 pre block contract call
-    pre_block_beacon_root_contract_call(
-        &mut db,
-        &chain_spec,
-        block_number,
-        &initialized_cfg,
-        &initialized_block_env,
-        &attributes,
-    )?;
-
-    let mut receipts = Vec::new();
-    while let Some(pool_tx) = best_txs.next() {
-        // ensure we still have capacity for this transaction
-        if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
-            // we can't fit this transaction into the block, so we need to mark it as invalid
-            // which also removes all dependent transaction from the iterator before we can
-            // continue
-            best_txs.mark_invalid(&pool_tx);
-            continue
-        }
-
-        // check if the job was cancelled, if so we can exit early
-        if cancel.is_cancelled() {
-            return Ok(BuildOutcome::Cancelled)
-        }
-
-        // convert tx to a signed transaction
-        let tx = pool_tx.to_recovered_transaction();
-
-        // There's only limited amount of blob space available per block, so we need to check if the
-        // EIP-4844 can still fit in the block
-        if let Some(blob_tx) = tx.transaction.as_eip4844() {
-            let tx_blob_gas = blob_tx.blob_gas();
-            if sum_blob_gas_used + tx_blob_gas > MAX_DATA_GAS_PER_BLOCK {
-                // we can't fit this _blob_ transaction into the block, so we mark it as invalid,
-                // which removes its dependent transactions from the iterator. This is similar to
-                // the gas limit condition for regular transactions above.
-                trace!(target: "payload_builder", tx=?tx.hash, ?sum_blob_gas_used, ?tx_blob_gas, "skipping blob transaction because it would exceed the max data gas per block");
-                best_txs.mark_invalid(&pool_tx);
-                continue
-            }
-        }
-
-        // Configure the environment for the block.
-        let env = Env {
-            cfg: initialized_cfg.clone(),
-            block: initialized_block_env.clone(),
-            tx: tx_env_with_recovered(&tx),
-        };
-
-        let mut evm = revm::EVM::with_env(env);
-        evm.database(&mut db);
-
-        let ResultAndState { result, state } = match evm.transact() {
-            Ok(res) => res,
-            Err(err) => {
-                match err {
-                    EVMError::Transaction(err) => {
-                        if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
-                            // if the nonce is too low, we can skip this transaction
-                            trace!(target: "payload_builder", ?err, ?tx, "skipping nonce too low transaction");
-                        } else {
-                            // if the transaction is invalid, we can skip it and all of its
-                            // descendants
-                            trace!(target: "payload_builder", ?err, ?tx, "skipping invalid transaction and its descendants");
-                            best_txs.mark_invalid(&pool_tx);
-                        }
-
-                        continue
-                    }
-                    err => {
-                        // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err))
-                    }
-                }
-            }
-        };
-
-        // commit changes
-        db.commit(state);
-
-        // add to the total blob gas used if the transaction successfully executed
-        if let Some(blob_tx) = tx.transaction.as_eip4844() {
-            let tx_blob_gas = blob_tx.blob_gas();
-            sum_blob_gas_used += tx_blob_gas;
-
-            // if we've reached the max data gas per block, we can skip blob txs entirely
-            if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
-                best_txs.skip_blobs();
-            }
-        }
-
-        let gas_used = result.gas_used();
-
-        // add gas used by the transaction to cumulative gas used, before creating the receipt
-        cumulative_gas_used += gas_used;
-
-        // Push transaction changeset and calculate header bloom filter for receipt.
-        receipts.push(Some(Receipt {
-            tx_type: tx.tx_type(),
-            success: result.is_success(),
-            cumulative_gas_used,
-            logs: result.logs().into_iter().map(into_reth_log).collect(),
-            #[cfg(feature = "optimism")]
-            deposit_nonce: None,
-        }));
-
-        // update add to total fees
-        let miner_fee = tx
-            .effective_tip_per_gas(Some(base_fee))
-            .expect("fee is always valid; execution succeeded");
-        total_fees += U256::from(miner_fee) * U256::from(gas_used);
-
-        // append transaction to the list of executed transactions
-        executed_txs.push(tx.into_signed());
-    }
-
-    // check if we have a better block
-    if !is_better_payload(best_payload.as_deref(), total_fees) {
-        // can skip building the block
-        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
-    }
-
-    let WithdrawalsOutcome { withdrawals_root, withdrawals } =
-        commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
-
-    // merge all transitions into bundle state, this would apply the withdrawal balance changes and
-    // 4788 contract call
-    db.merge_transitions(BundleRetention::PlainState);
-
-    let bundle = BundleStateWithReceipts::new(
-        db.take_bundle(),
-        Receipts::from_vec(vec![receipts]),
-        block_number,
-    );
-    let receipts_root = bundle.receipts_root_slow(block_number).expect("Number is in range");
-    let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
-
-    // calculate the state root
-    let state_root = state_provider.state_root(&bundle)?;
-
-    // create the block header
-    let transactions_root = proofs::calculate_transaction_root(&executed_txs);
-
-    // initialize empty blob sidecars at first. If cancun is active then this will
-    let mut blob_sidecars = Vec::new();
-    let mut excess_blob_gas = None;
-    let mut blob_gas_used = None;
-
-    // only determine cancun fields when active
-    if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp) {
-        // grab the blob sidecars from the executed txs
-        blob_sidecars = pool.get_all_blobs_exact(
-            executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash).collect(),
-        )?;
-
-        excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
-            let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
-            let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
-            Some(calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
-        } else {
-            // for the first post-fork block, both parent.blob_gas_used and parent.excess_blob_gas
-            // are evaluated as 0
-            Some(calculate_excess_blob_gas(0, 0))
-        };
-
-        blob_gas_used = Some(sum_blob_gas_used);
-    }
-
-    let header = Header {
-        parent_hash: parent_block.hash,
-        ommers_hash: EMPTY_OMMER_ROOT_HASH,
-        beneficiary: initialized_block_env.coinbase,
-        state_root,
-        transactions_root,
-        receipts_root,
-        withdrawals_root,
-        logs_bloom,
-        timestamp: attributes.timestamp,
-        mix_hash: attributes.prev_randao,
-        nonce: BEACON_NONCE,
-        base_fee_per_gas: Some(base_fee),
-        number: parent_block.number + 1,
-        gas_limit: block_gas_limit,
-        difficulty: U256::ZERO,
-        gas_used: cumulative_gas_used,
-        extra_data,
-        parent_beacon_block_root: attributes.parent_beacon_block_root,
-        blob_gas_used,
-        excess_blob_gas,
-    };
-
-    // seal the block
-    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
-
-    let sealed_block = block.seal_slow();
-    debug!(target: "payload_builder", ?sealed_block, "sealed built block");
-
-    let mut payload = BuiltPayload::new(attributes.id, sealed_block, total_fees);
-
-    // extend the payload with the blob sidecars from the executed txs
-    payload.extend_sidecars(blob_sidecars);
-
-    Ok(BuildOutcome::Better { payload, cached_reads })
 }
 
 /// Builds an empty payload without any transactions.
@@ -1009,7 +729,10 @@ where
 
     debug!(target: "payload_builder", parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building empty payload");
 
-    let state = client.state_by_block_hash(parent_block.hash)?;
+    let state = client.state_by_block_hash(parent_block.hash).map_err(|err| {
+        warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to get state for empty payload");
+        err
+    })?;
     let mut db = State::builder()
         .with_database_boxed(Box::new(StateProviderDatabase::new(&state)))
         .with_bundle_update()
@@ -1027,10 +750,16 @@ where
         &initialized_cfg,
         &initialized_block_env,
         &attributes,
-    )?;
+    ).map_err(|err| {
+        warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to apply beacon root contract call for empty payload");
+        err
+    })?;
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
-        commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
+        commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals).map_err(|err| {
+            warn!(target: "payload_builder", parent_hash=%parent_block.hash,?err,  "failed to commit withdrawals for empty payload");
+            err
+        })?;
 
     // merge all transitions into bundle state, this would apply the withdrawal balance changes and
     // 4788 contract call
@@ -1039,7 +768,10 @@ where
     // calculate the state root
     let bundle_state =
         BundleStateWithReceipts::new(db.take_bundle(), Receipts::new(), block_number);
-    let state_root = state.state_root(&bundle_state)?;
+    let state_root = state.state_root(&bundle_state).map_err(|err| {
+        warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to calculate state root for empty payload");
+        err
+    })?;
 
     let header = Header {
         parent_hash: parent_block.hash,
@@ -1072,19 +804,22 @@ where
 
 /// Represents the outcome of committing withdrawals to the runtime database and post state.
 /// Pre-shanghai these are `None` values.
-#[derive(Default)]
-struct WithdrawalsOutcome {
-    withdrawals: Option<Vec<Withdrawal>>,
-    withdrawals_root: Option<B256>,
+#[derive(Default, Debug)]
+pub struct WithdrawalsOutcome {
+    /// committed withdrawals, if any.
+    pub withdrawals: Option<Vec<Withdrawal>>,
+    /// withdrawals root if any.
+    pub withdrawals_root: Option<B256>,
 }
 
 impl WithdrawalsOutcome {
     /// No withdrawals pre shanghai
-    fn pre_shanghai() -> Self {
+    pub fn pre_shanghai() -> Self {
         Self { withdrawals: None, withdrawals_root: None }
     }
 
-    fn empty() -> Self {
+    /// No withdrawals
+    pub fn empty() -> Self {
         Self { withdrawals: Some(vec![]), withdrawals_root: Some(EMPTY_WITHDRAWALS) }
     }
 }
@@ -1094,7 +829,7 @@ impl WithdrawalsOutcome {
 /// Returns the withdrawals root.
 ///
 /// Returns `None` values pre shanghai
-fn commit_withdrawals<DB: Database<Error = RethError>>(
+pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
     db: &mut State<DB>,
     chain_spec: &ChainSpec,
     timestamp: u64,
@@ -1132,7 +867,7 @@ fn commit_withdrawals<DB: Database<Error = RethError>>(
 ///
 /// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
 /// change.
-fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit>(
+pub fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit>(
     db: &mut DB,
     chain_spec: &ChainSpec,
     block_number: u64,
@@ -1169,10 +904,19 @@ where
 ///
 /// This compares the total fees of the blocks, higher is better.
 #[inline(always)]
-fn is_better_payload(best_payload: Option<&BuiltPayload>, new_fees: U256) -> bool {
+pub fn is_better_payload(best_payload: Option<&BuiltPayload>, new_fees: U256) -> bool {
     if let Some(best_payload) = best_payload {
         new_fees > best_payload.fees()
     } else {
         true
     }
+}
+
+/// Returns the duration until the given unix timestamp in seconds.
+///
+/// Returns `Duration::ZERO` if the given timestamp is in the past.
+fn duration_until(unix_timestamp_secs: u64) -> Duration {
+    let unix_now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let timestamp = Duration::from_secs(unix_timestamp_secs);
+    timestamp.saturating_sub(unix_now)
 }

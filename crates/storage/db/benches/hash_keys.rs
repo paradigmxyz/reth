@@ -1,5 +1,4 @@
-#![allow(dead_code, unused_imports, non_snake_case)]
-
+#![allow(missing_docs)]
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
@@ -10,12 +9,8 @@ use proptest::{
     strategy::{Strategy, ValueTree},
     test_runner::TestRunner,
 };
-use reth_db::{
-    cursor::{DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    TxHashNumber,
-};
-use std::{collections::HashSet, time::Instant};
-use test_fuzz::runtime::num_traits::Zero;
+use reth_db::{cursor::DbCursorRW, TxHashNumber};
+use std::collections::HashSet;
 
 criterion_group! {
     name = benches;
@@ -43,7 +38,7 @@ pub fn hash_keys(c: &mut Criterion) {
     }
 }
 
-fn measure_table_insertion<T>(group: &mut BenchmarkGroup<WallTime>, size: usize)
+fn measure_table_insertion<T>(group: &mut BenchmarkGroup<'_, WallTime>, size: usize)
 where
     T: Table + Default,
     T::Key: Default
@@ -216,6 +211,7 @@ where
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct TableStats {
     page_size: usize,
     leaf_pages: usize,

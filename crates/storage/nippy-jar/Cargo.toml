@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "Immutable data store format"
 
+[lints]
+workspace = true
+
 [lib]
 name = "reth_nippy_jar"
 

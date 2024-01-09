@@ -1,4 +1,5 @@
 //! Implements the `GetNodeData` and `NodeData` message types.
+
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Bytes, B256};

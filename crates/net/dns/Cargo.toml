@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "Support for EIP-1459 Node Discovery via DNS"
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-primitives.workspace = true

@@ -9,10 +9,9 @@ use reth_db::{
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
-    keccak256, trie::AccountProof, Account, Address, BlockNumber, Bytecode, StorageKey,
-    StorageValue, B256,
+    trie::AccountProof, Account, Address, BlockNumber, Bytecode, StorageKey, StorageValue, B256,
 };
-use reth_trie::updates::TrieUpdates;
+use reth_trie::{proof::Proof, updates::TrieUpdates};
 
 /// State provider over latest state that takes tx reference.
 #[derive(Debug)]
@@ -95,17 +94,10 @@ impl<'b, TX: DbTx> StateProvider for LatestStateProviderRef<'b, TX> {
         self.db.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 
-    fn proof(&self, address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
-        let _hashed_address = keccak256(address);
-        let _root = self
-            .db
-            .cursor_read::<tables::Headers>()?
-            .last()?
-            .ok_or_else(|| ProviderError::HeaderNotFound(0.into()))?
-            .1
-            .state_root;
-
-        unimplemented!()
+    fn proof(&self, address: Address, slots: &[B256]) -> ProviderResult<AccountProof> {
+        Ok(Proof::new(self.db)
+            .account_proof(address, slots)
+            .map_err(Into::<reth_db::DatabaseError>::into)?)
     }
 }
 
@@ -137,7 +129,7 @@ mod tests {
     use super::*;
 
     fn assert_state_provider<T: StateProvider>() {}
-    #[allow(unused)]
+    #[allow(dead_code)]
     fn assert_latest_state_provider<T: DbTx>() {
         assert_state_provider::<LatestStateProvider<T>>();
     }

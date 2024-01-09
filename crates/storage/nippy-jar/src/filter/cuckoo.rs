@@ -39,6 +39,10 @@ impl InclusionFilter for Cuckoo {
     fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError> {
         Ok(self.filter.contains(element))
     }
+
+    fn size(&self) -> usize {
+        self.filter.memory_usage()
+    }
 }
 
 impl std::fmt::Debug for Cuckoo {

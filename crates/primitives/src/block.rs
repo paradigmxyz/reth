@@ -53,14 +53,61 @@ impl Block {
         }
     }
 
-    /// Transform into a [`BlockWithSenders`].
-    pub fn with_senders(self, senders: Vec<Address>) -> BlockWithSenders {
-        assert_eq!(self.body.len(), senders.len(), "Unequal number of senders");
+    /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
+    pub fn senders(&self) -> Option<Vec<Address>> {
+        TransactionSigned::recover_signers(&self.body, self.body.len())
+    }
 
-        BlockWithSenders { block: self, senders }
+    /// Transform into a [`BlockWithSenders`].
+    ///
+    /// # Panics
+    ///
+    /// If the number of senders does not match the number of transactions in the block
+    /// and the signer recovery for one of the transactions fails.
+    ///
+    /// Note: this is expected to be called with blocks read from disk.
+    #[track_caller]
+    pub fn with_senders_unchecked(self, senders: Vec<Address>) -> BlockWithSenders {
+        self.try_with_senders_unchecked(senders).expect("stored block is valid")
+    }
+
+    /// Transform into a [`BlockWithSenders`] using the given senders.
+    ///
+    /// If the number of senders does not match the number of transactions in the block, this falls
+    /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
+    /// See also [TransactionSigned::recover_signer_unchecked]
+    ///
+    /// Returns an error if a signature is invalid.
+    #[track_caller]
+    pub fn try_with_senders_unchecked(
+        self,
+        senders: Vec<Address>,
+    ) -> Result<BlockWithSenders, Self> {
+        let senders = if self.body.len() == senders.len() {
+            senders
+        } else {
+            let Some(senders) =
+                TransactionSigned::recover_signers_unchecked(&self.body, self.body.len())
+            else {
+                return Err(self);
+            };
+            senders
+        };
+
+        Ok(BlockWithSenders { block: self, senders })
+    }
+
+    /// **Expensive**. Transform into a [`BlockWithSenders`] by recovering senders in the contained
+    /// transactions.
+    ///
+    /// Returns `None` if a transaction is invalid.
+    pub fn with_recovered_senders(self) -> Option<BlockWithSenders> {
+        let senders = self.senders()?;
+        Some(BlockWithSenders { block: self, senders })
     }
 
     /// Returns whether or not the block contains any blob transactions.
+    #[inline]
     pub fn has_blob_transactions(&self) -> bool {
         self.body.iter().any(|tx| tx.is_eip4844())
     }
@@ -208,9 +255,30 @@ impl SealedBlock {
         )
     }
 
+    /// Returns an iterator over all blob transactions of the block
+    #[inline]
+    pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+        self.body.iter().filter(|tx| tx.is_eip4844())
+    }
+
     /// Returns only the blob transactions, if any, from the block body.
+    #[inline]
     pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
-        self.body.iter().filter(|tx| tx.is_eip4844()).collect()
+        self.blob_transactions_iter().collect()
+    }
+
+    /// Returns an iterator over all blob versioned hashes from the block body.
+    #[inline]
+    pub fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
+        self.blob_transactions_iter()
+            .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
+            .flatten()
+    }
+
+    /// Returns all blob versioned hashes from the block body.
+    #[inline]
+    pub fn blob_versioned_hashes(&self) -> Vec<&B256> {
+        self.blob_versioned_hashes_iter().collect()
     }
 
     /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
@@ -410,15 +478,6 @@ impl BlockBody {
         self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
     }
 
-    /// Calculate all roots (transaction, ommers, withdrawals) for the block body.
-    pub fn calculate_roots(&self) -> BlockBodyRoots {
-        BlockBodyRoots {
-            tx_root: self.calculate_tx_root(),
-            ommers_hash: self.calculate_ommers_root(),
-            withdrawals_root: self.calculate_withdrawals_root(),
-        }
-    }
-
     /// Calculates a heuristic for the in-memory size of the [BlockBody].
     #[inline]
     pub fn size(&self) -> usize {
@@ -434,18 +493,6 @@ impl BlockBody {
                 })
                 .unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
     }
-}
-
-/// A struct that represents roots associated with a block body. This can be used to correlate
-/// block body responses with headers.
-#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Hash)]
-pub struct BlockBodyRoots {
-    /// The transaction root for the block body.
-    pub tx_root: B256,
-    /// The ommers hash for the block body.
-    pub ommers_hash: B256,
-    /// The withdrawals root for the block body, if withdrawals exist.
-    pub withdrawals_root: Option<B256>,
 }
 
 #[cfg(test)]

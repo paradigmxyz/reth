@@ -33,7 +33,7 @@ use crate::{
     transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
-use futures::{Future, StreamExt};
+use futures::{pin_mut, Future, StreamExt};
 use parking_lot::Mutex;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
@@ -45,7 +45,9 @@ use reth_network_api::ReputationChangeKind;
 use reth_primitives::{ForkId, NodeRecord, PeerId, B256};
 use reth_provider::{BlockNumReader, BlockReader};
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
+use reth_tasks::shutdown::GracefulShutdown;
 use reth_tokio_util::EventListeners;
+use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
     pin::Pin,
@@ -59,34 +61,14 @@ use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, trace, warn};
 
+#[cfg_attr(doc, aquamarine::aquamarine)]
 /// Manages the _entire_ state of the network.
 ///
 /// This is an endless [`Future`] that consistently drives the state of the entire network forward.
 ///
 /// The [`NetworkManager`] is the container type for all parts involved with advancing the network.
-#[cfg_attr(doc, aquamarine::aquamarine)]
-/// ```mermaid
-///  graph TB
-///    handle(NetworkHandle)
-///    events(NetworkEvents)
-///    transactions(Transactions Task)
-///    ethrequest(ETH Request Task)
-///    discovery(Discovery Task)
-///    subgraph NetworkManager
-///      direction LR
-///      subgraph Swarm
-///          direction TB
-///          B1[(Session Manager)]
-///          B2[(Connection Lister)]
-///          B3[(Network State)]
-///      end
-///   end
-///   handle <--> |request response channel| NetworkManager
-///   NetworkManager --> |Network events| events
-///   transactions <--> |transactions| NetworkManager
-///   ethrequest <--> |ETH request handing| NetworkManager
-///   discovery --> |Discovered peers| NetworkManager
-/// ```
+///
+/// include_mmd!("docs/mermaid/network-manager.mmd")
 #[derive(Debug)]
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<C> {
@@ -159,6 +141,11 @@ impl<C> NetworkManager<C> {
     /// inside of the [`NetworkHandle`]
     pub fn bandwidth_meter(&self) -> &BandwidthMeter {
         self.handle.bandwidth_meter()
+    }
+
+    /// Returns the secret key used for authenticating sessions.
+    pub fn secret_key(&self) -> SecretKey {
+        self.swarm.sessions().secret_key()
     }
 }
 
@@ -245,6 +232,7 @@ where
             Arc::clone(&num_active_peers),
             listener_address,
             to_manager_tx,
+            secret_key,
             local_peer_id,
             peers_handle,
             network_mode,
@@ -536,7 +524,7 @@ where
                 if self.handle.mode().is_stake() {
                     // See [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
                     warn!(target: "net", "Peer performed block propagation, but it is not supported in proof of stake (EIP-3675)");
-                    return
+                    return;
                 }
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
                 self.swarm.state_mut().announce_new_block(msg);
@@ -609,6 +597,34 @@ where
     }
 }
 
+impl<C> NetworkManager<C>
+where
+    C: BlockReader + Unpin,
+{
+    /// Drives the [NetworkManager] future until a [GracefulShutdown] signal is received.
+    ///
+    /// This also run the given function `shutdown_hook` afterwards.
+    pub async fn run_until_graceful_shutdown(
+        self,
+        shutdown: GracefulShutdown,
+        shutdown_hook: impl FnOnce(&mut Self),
+    ) {
+        let network = self;
+        pin_mut!(network, shutdown);
+
+        let mut graceful_guard = None;
+        tokio::select! {
+            _ = &mut network => {},
+            guard = shutdown => {
+                graceful_guard = Some(guard);
+            },
+        }
+
+        shutdown_hook(&mut network);
+        drop(graceful_guard);
+    }
+}
+
 impl<C> Future for NetworkManager<C>
 where
     C: BlockReader + Unpin,
@@ -631,7 +647,7 @@ where
                     // This is only possible if the channel was deliberately closed since we always
                     // have an instance of `NetworkHandle`
                     error!("Network message channel closed.");
-                    return Poll::Ready(())
+                    return Poll::Ready(());
                 }
                 Poll::Ready(Some(msg)) => this.on_handle_message(msg),
             };
@@ -902,7 +918,7 @@ where
             if budget == 0 {
                 // make sure we're woken up again
                 cx.waker().wake_by_ref();
-                break
+                break;
             }
         }
 

@@ -15,24 +15,41 @@ use thiserror::Error;
 
 /// Errors returned by the [`JwtSecret`]
 #[derive(Error, Debug)]
-#[allow(missing_docs)]
 pub enum JwtError {
+    /// An error encountered while decoding the hexadecimal string for the JWT secret.
     #[error(transparent)]
     JwtSecretHexDecodeError(#[from] hex::FromHexError),
+
+    /// The JWT key length provided is invalid, expecting a specific length.
     #[error("JWT key is expected to have a length of {0} digits. {1} digits key provided")]
     InvalidLength(usize, usize),
+
+    /// The signature algorithm used in the JWT is not supported. Only HS256 is supported.
     #[error("unsupported signature algorithm. Only HS256 is supported")]
     UnsupportedSignatureAlgorithm,
+
+    /// The provided signature in the JWT is invalid.
     #[error("provided signature is invalid")]
     InvalidSignature,
+
+    /// The "iat" (issued-at) claim in the JWT is not within the allowed ±60 seconds from the
+    /// current time.
     #[error("IAT (issued-at) claim is not within ±60 seconds from the current time")]
     InvalidIssuanceTimestamp,
+
+    /// The Authorization header is missing or invalid in the context of JWT validation.
     #[error("Authorization header is missing or invalid")]
     MissingOrInvalidAuthorizationHeader,
+
+    /// An error occurred during JWT decoding.
     #[error("JWT decoding error: {0}")]
     JwtDecodingError(String),
+
+    /// An error related to file system path handling encountered during JWT operations.
     #[error(transparent)]
     JwtFsPathError(#[from] FsPathError),
+
+    /// An I/O error occurred during JWT operations.
     #[error(transparent)]
     IOError(#[from] std::io::Error),
 }
@@ -56,7 +73,7 @@ const JWT_SIGNATURE_ALGO: Algorithm = Algorithm::HS256;
 /// for the JWT, which is included in the JWT along with its payload.
 ///
 /// See also: [Secret key - Engine API specs](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md#key-distribution)
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct JwtSecret([u8; 32]);
 
 impl JwtSecret {

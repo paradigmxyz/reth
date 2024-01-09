@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+
 use super::{
     broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
@@ -104,9 +105,9 @@ impl ProtocolMessage {
     }
 }
 
-/// Encodes the protocol message into bytes.
-/// The message type is encoded as a single byte and prepended to the message.
 impl Encodable for ProtocolMessage {
+    /// Encodes the protocol message into bytes. The message type is encoded as a single byte and
+    /// prepended to the message.
     fn encode(&self, out: &mut dyn BufMut) {
         self.message_type.encode(out);
         self.message.encode(out);
@@ -129,9 +130,9 @@ pub struct ProtocolBroadcastMessage {
     pub message: EthBroadcastMessage,
 }
 
-/// Encodes the protocol message into bytes.
-/// The message type is encoded as a single byte and prepended to the message.
 impl Encodable for ProtocolBroadcastMessage {
+    /// Encodes the protocol message into bytes. The message type is encoded as a single byte and
+    /// prepended to the message.
     fn encode(&self, out: &mut dyn BufMut) {
         self.message_type.encode(out);
         self.message.encode(out);
@@ -317,6 +318,13 @@ pub enum EthMessageID {
     NodeData = 0x0e,
     GetReceipts = 0x0f,
     Receipts = 0x10,
+}
+
+impl EthMessageID {
+    /// Returns the max value.
+    pub const fn max() -> u8 {
+        Self::Receipts as u8
+    }
 }
 
 impl Encodable for EthMessageID {

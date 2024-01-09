@@ -6,7 +6,7 @@ use crate::{
     Metrics, PrunerError, PrunerEvent,
 };
 use reth_db::database::Database;
-use reth_primitives::{BlockNumber, ChainSpec, PruneMode, PruneProgress, PruneSegment};
+use reth_primitives::{BlockNumber, PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{ProviderFactory, PruneCheckpointReader};
 use reth_snapshot::HighestSnapshotsTracker;
 use reth_tokio_util::EventListeners;
@@ -34,6 +34,9 @@ pub struct Pruner<DB> {
     previous_tip_block_number: Option<BlockNumber>,
     /// Maximum total entries to prune (delete from database) per block.
     delete_limit: usize,
+    /// Maximum number of blocks to be pruned per run, as an additional restriction to
+    /// `previous_tip_block_number`.
+    prune_max_blocks_per_run: usize,
     #[allow(dead_code)]
     highest_snapshots_tracker: HighestSnapshotsTracker,
     metrics: Metrics,
@@ -43,19 +46,20 @@ pub struct Pruner<DB> {
 impl<DB: Database> Pruner<DB> {
     /// Creates a new [Pruner].
     pub fn new(
-        db: DB,
-        chain_spec: Arc<ChainSpec>,
+        provider_factory: ProviderFactory<DB>,
         segments: Vec<Arc<dyn Segment<DB>>>,
         min_block_interval: usize,
         delete_limit: usize,
+        prune_max_blocks_per_run: usize,
         highest_snapshots_tracker: HighestSnapshotsTracker,
     ) -> Self {
         Self {
-            provider_factory: ProviderFactory::new(db, chain_spec),
+            provider_factory,
             segments,
             min_block_interval,
             previous_tip_block_number: None,
             delete_limit,
+            prune_max_blocks_per_run,
             highest_snapshots_tracker,
             metrics: Metrics::default(),
             listeners: Default::default(),
@@ -87,14 +91,22 @@ impl<DB: Database> Pruner<DB> {
         // TODO(alexey): prune snapshotted segments of data (headers, transactions)
         let highest_snapshots = *self.highest_snapshots_tracker.borrow();
 
-        // Multiply `delete_limit` (number of row to delete per block) by number of blocks since
-        // last pruner run. `previous_tip_block_number` is close to `tip_block_number`, usually
-        // within `self.block_interval` blocks, so `delete_limit` will not be too high. Also see
-        // docs for `self.previous_tip_block_number`.
-        let mut delete_limit = self.delete_limit *
-            self.previous_tip_block_number
-                .map_or(1, |previous_tip_block_number| tip_block_number - previous_tip_block_number)
-                as usize;
+        // Multiply `self.delete_limit` (number of rows to delete per block) by number of blocks
+        // since last pruner run. `self.previous_tip_block_number` is close to
+        // `tip_block_number`, usually within `self.block_interval` blocks, so
+        // `delete_limit` will not be too high. If it's too high, we additionally limit it by
+        // `self.prune_max_blocks_per_run`.
+        //
+        // Also see docs for `self.previous_tip_block_number`.
+        let blocks_since_last_run =
+            (self.previous_tip_block_number.map_or(1, |previous_tip_block_number| {
+                // Saturating subtraction is needed for the case when the chain was reverted,
+                // meaning current block number might be less than the previous tip
+                // block number.
+                tip_block_number.saturating_sub(previous_tip_block_number) as usize
+            }))
+            .min(self.prune_max_blocks_per_run);
+        let mut delete_limit = self.delete_limit * blocks_since_last_run;
 
         for segment in &self.segments {
             if delete_limit == 0 {
@@ -254,12 +266,14 @@ mod tests {
     use crate::Pruner;
     use reth_db::test_utils::create_test_rw_db;
     use reth_primitives::MAINNET;
+    use reth_provider::ProviderFactory;
     use tokio::sync::watch;
 
     #[test]
     fn is_pruning_needed() {
         let db = create_test_rw_db();
-        let mut pruner = Pruner::new(db, MAINNET.clone(), vec![], 5, 0, watch::channel(None).1);
+        let provider_factory = ProviderFactory::new(db, MAINNET.clone());
+        let mut pruner = Pruner::new(provider_factory, vec![], 5, 0, 5, watch::channel(None).1);
 
         // No last pruned block number was set before
         let first_block_number = 1;

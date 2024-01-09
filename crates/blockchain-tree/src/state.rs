@@ -99,7 +99,7 @@ impl TreeState {
 
     /// Checks the block buffer for the given block.
     pub(crate) fn get_buffered_block(&self, hash: &BlockHash) -> Option<&SealedBlockWithSenders> {
-        self.buffered_blocks.block_by_hash(hash)
+        self.buffered_blocks.block(hash)
     }
 
     /// Gets the lowest ancestor for the given block in the block buffer.

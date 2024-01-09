@@ -1,3 +1,4 @@
+#![allow(unreachable_pub)]
 pub mod clique_middleware;
 mod geth;
 

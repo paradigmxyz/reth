@@ -95,6 +95,11 @@ impl BundleStateWithReceipts {
         &self.bundle
     }
 
+    /// Returns mutable revm bundle state.
+    pub fn state_mut(&mut self) -> &mut BundleState {
+        &mut self.bundle
+    }
+
     /// Set first block.
     pub fn set_first_block(&mut self, first_block: BlockNumber) {
         self.first_block = first_block;
@@ -128,7 +133,6 @@ impl BundleStateWithReceipts {
     ///
     /// The hashed post state.
     pub fn hash_state_slow(&self) -> HashedPostState {
-        //let mut storages = BTreeMap::default();
         let mut hashed_state = HashedPostState::default();
 
         for (address, account) in self.bundle.state() {
@@ -136,7 +140,7 @@ impl BundleStateWithReceipts {
             if let Some(account) = &account.info {
                 hashed_state.insert_account(hashed_address, into_reth_acc(account.clone()))
             } else {
-                hashed_state.insert_cleared_account(hashed_address);
+                hashed_state.insert_destroyed_account(hashed_address);
             }
 
             // insert storage.
@@ -144,7 +148,7 @@ impl BundleStateWithReceipts {
 
             for (key, value) in account.storage.iter() {
                 let hashed_key = keccak256(B256::new(key.to_be_bytes()));
-                if value.present_value == U256::ZERO {
+                if value.present_value.is_zero() {
                     hashed_storage.insert_zero_valued_slot(hashed_key);
                 } else {
                     hashed_storage.insert_non_zero_valued_storage(hashed_key, value.present_value);
@@ -155,18 +159,19 @@ impl BundleStateWithReceipts {
         hashed_state.sorted()
     }
 
-    /// Returns [StateRoot] calculator.
-    fn state_root_calculator<'a, 'b, TX: DbTx>(
+    /// Returns [StateRoot] calculator based on database and in-memory state.
+    pub fn state_root_calculator<'a, 'b, TX: DbTx>(
         &self,
         tx: &'a TX,
         hashed_post_state: &'b HashedPostState,
-    ) -> StateRoot<'a, TX, HashedPostStateCursorFactory<'a, 'b, TX>> {
+    ) -> StateRoot<&'a TX, HashedPostStateCursorFactory<'a, 'b, TX>> {
         let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, hashed_post_state);
-        StateRoot::new(tx)
+        StateRoot::from_tx(tx)
             .with_hashed_cursor_factory(hashed_cursor_factory)
             .with_changed_account_prefixes(account_prefix_set)
             .with_changed_storage_prefixes(storage_prefix_set)
+            .with_destroyed_accounts(hashed_post_state.destroyed_accounts())
     }
 
     /// Calculate the state root for this [BundleState].
@@ -250,13 +255,32 @@ impl BundleStateWithReceipts {
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
+    #[cfg(not(feature = "optimism"))]
     pub fn receipts_root_slow(&self, block_number: BlockNumber) -> Option<B256> {
         self.receipts.root_slow(self.block_number_to_index(block_number)?)
     }
 
-    /// Return reference to receipts.
+    /// Returns the receipt root for all recorded receipts.
+    /// Note: this function calculated Bloom filters for every receipt and created merkle trees
+    /// of receipt. This is a expensive operation.
+    #[cfg(feature = "optimism")]
+    pub fn receipts_root_slow(
+        &self,
+        block_number: BlockNumber,
+        chain_spec: &reth_primitives::ChainSpec,
+        timestamp: u64,
+    ) -> Option<B256> {
+        self.receipts.root_slow(self.block_number_to_index(block_number)?, chain_spec, timestamp)
+    }
+
+    /// Returns reference to receipts.
     pub fn receipts(&self) -> &Receipts {
         &self.receipts
+    }
+
+    /// Returns mutable reference to receipts.
+    pub fn receipts_mut(&mut self) -> &mut Receipts {
+        &mut self.receipts
     }
 
     /// Return all block receipts
@@ -335,6 +359,22 @@ impl BundleStateWithReceipts {
     pub fn extend(&mut self, other: Self) {
         self.bundle.extend(other.bundle);
         self.receipts.extend(other.receipts.receipt_vec);
+    }
+
+    /// Prepends present the state with the given BundleState.
+    /// It adds changes from the given state but does not override any existing changes.
+    ///
+    /// Reverts  and receipts are not updated.
+    pub fn prepend_state(&mut self, mut other: BundleState) {
+        let other_len = other.reverts.len();
+        // take this bundle
+        let this_bundle = std::mem::take(&mut self.bundle);
+        // extend other bundle with this
+        other.extend(this_bundle);
+        // discard other reverts
+        other.take_n_reverts(other_len);
+        // swap bundles
+        std::mem::swap(&mut self.bundle, &mut other)
     }
 
     /// Write bundle state to database.
@@ -1206,7 +1246,7 @@ mod tests {
                 }
             }
 
-            let (_, updates) = StateRoot::new(tx).root_with_updates().unwrap();
+            let (_, updates) = StateRoot::from_tx(tx).root_with_updates().unwrap();
             updates.flush(tx).unwrap();
         })
         .unwrap();
@@ -1340,5 +1380,43 @@ mod tests {
         )]));
         state.merge_transitions(BundleRetention::PlainState);
         assert_state_root(&state, &prestate, "recreated changed storage");
+    }
+
+    #[test]
+    fn prepend_state() {
+        let address1 = Address::random();
+        let address2 = Address::random();
+
+        let account1 = RevmAccountInfo { nonce: 1, ..Default::default() };
+        let account1_changed = RevmAccountInfo { nonce: 1, ..Default::default() };
+        let account2 = RevmAccountInfo { nonce: 1, ..Default::default() };
+
+        let present_state = BundleState::builder(2..=2)
+            .state_present_account_info(address1, account1_changed.clone())
+            .build();
+        assert_eq!(present_state.reverts.len(), 1);
+        let previous_state = BundleState::builder(1..=1)
+            .state_present_account_info(address1, account1)
+            .state_present_account_info(address2, account2.clone())
+            .build();
+        assert_eq!(previous_state.reverts.len(), 1);
+
+        let mut test = BundleStateWithReceipts {
+            bundle: present_state,
+            receipts: Receipts::from_vec(vec![vec![Some(Receipt::default()); 2]; 1]),
+            first_block: 2,
+        };
+
+        test.prepend_state(previous_state);
+
+        assert_eq!(test.receipts.len(), 1);
+        let end_state = test.state();
+        assert_eq!(end_state.state.len(), 2);
+        // reverts num should stay the same.
+        assert_eq!(end_state.reverts.len(), 1);
+        // account1 is not overwritten.
+        assert_eq!(end_state.state.get(&address1).unwrap().info, Some(account1_changed));
+        // account2 got inserted
+        assert_eq!(end_state.state.get(&address2).unwrap().info, Some(account2));
     }
 }

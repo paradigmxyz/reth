@@ -1,135 +1,225 @@
-//! Reth tracing subscribers and utilities.
+//!  The `tracing` module provides functionalities for setting up and configuring logging.
 //!
-//! Contains a standardized set of layers:
+//!  It includes structures and functions to create and manage various logging layers: stdout,
+//!  file, or journald. The module's primary entry point is the `Tracer` struct, which can be
+//!  configured to use different logging formats and destinations. If no layer is specified, it will
+//!  default to stdout.
 //!
-//! - [`stdout()`]
-//! - [`file()`]
-//! - [`journald()`]
+//!  # Examples
 //!
-//! As well as a simple way to initialize a subscriber: [`init`].
+//!  Basic usage:
+//!
+//!  ```
+//!  use reth_tracing::{
+//!      LayerInfo, RethTracer, Tracer,
+//!      tracing::level_filters::LevelFilter,
+//!      LogFormat,
+//!  };
+//!
+//!  fn main() -> eyre::Result<()> {
+//!      let tracer = RethTracer::new().with_stdout(LayerInfo::new(
+//!          LogFormat::Json,
+//!          "debug".to_string(),
+//!          LevelFilter::INFO.into(),
+//!          None,
+//!      ));
+//!
+//!      tracer.init()?;
+//!
+//!      // Your application logic here
+//!
+//!      Ok(())
+//!  }
+//!  ```
+//!
+//!  This example sets up a tracer with JSON format logging for journald and terminal-friendly
+//! format  for file logging.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use rolling_file::{RollingConditionBasic, RollingFileAppender};
-use std::path::Path;
-use tracing::Subscriber;
-use tracing_subscriber::{
-    filter::Directive, prelude::*, registry::LookupSpan, EnvFilter, Layer, Registry,
-};
+use tracing_subscriber::{filter::Directive, EnvFilter};
 
 // Re-export tracing crates
 pub use tracing;
 pub use tracing_subscriber;
 
-/// A boxed tracing [Layer].
-pub type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
+// Re-export LogFormat
+pub use formatter::LogFormat;
+pub use layers::{FileInfo, FileWorkerGuard};
 
-/// Initializes a new [Subscriber] based on the given layers.
-pub fn init(layers: Vec<BoxedLayer<Registry>>) {
-    tracing_subscriber::registry().with(layers).init();
+mod formatter;
+mod layers;
+
+use crate::layers::Layers;
+use tracing::level_filters::LevelFilter;
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+///  Tracer for application logging.
+///
+///  Manages the configuration and initialization of logging layers,
+/// including standard output, optional journald, and optional file logging.
+#[derive(Debug, Clone)]
+pub struct RethTracer {
+    stdout: LayerInfo,
+    journald: Option<String>,
+    file: Option<(LayerInfo, FileInfo)>,
 }
 
-/// Builds a new tracing layer that writes to stdout.
-///
-/// The events are filtered by `default_directive`, unless overridden by `RUST_LOG`.
-///
-/// Colors can be disabled with `RUST_LOG_STYLE=never`, and event targets can be displayed with
-/// `RUST_LOG_TARGET=1`.
-pub fn stdout<S>(default_directive: impl Into<Directive>, color: &str) -> BoxedLayer<S>
-where
-    S: Subscriber,
-    for<'a> S: LookupSpan<'a>,
-{
-    // TODO: Auto-detect
-    let with_ansi =
-        std::env::var("RUST_LOG_STYLE").map(|val| val != "never").unwrap_or(color != "never");
-    let with_target = std::env::var("RUST_LOG_TARGET").map(|val| val != "0").unwrap_or(true);
-
-    let filter =
-        EnvFilter::builder().with_default_directive(default_directive.into()).from_env_lossy();
-
-    tracing_subscriber::fmt::layer()
-        .with_ansi(with_ansi)
-        .with_target(with_target)
-        .with_filter(filter)
-        .boxed()
-}
-
-/// Builds a new tracing layer that appends to a log file.
-///
-/// The events are filtered by `filter`.
-///
-/// The boxed layer and a guard is returned. When the guard is dropped the buffer for the log
-/// file is immediately flushed to disk. Any events after the guard is dropped may be missed.
-#[must_use = "tracing guard must be kept alive to flush events to disk"]
-pub fn file<S>(
-    filter: EnvFilter,
-    dir: impl AsRef<Path>,
-    file_name: impl AsRef<Path>,
-    max_size_bytes: u64,
-    max_files: usize,
-) -> (BoxedLayer<S>, tracing_appender::non_blocking::WorkerGuard)
-where
-    S: Subscriber,
-    for<'a> S: LookupSpan<'a>,
-{
-    // Create log dir if it doesn't exist (RFA doesn't do this for us)
-    let log_dir = dir.as_ref();
-    if !log_dir.exists() {
-        std::fs::create_dir_all(log_dir).expect("Could not create log directory");
+impl RethTracer {
+    ///  Constructs a new `Tracer` with default settings.
+    ///
+    ///  Initializes with default stdout layer configuration.
+    ///  Journald and file layers are not set by default.
+    pub fn new() -> Self {
+        Self { stdout: LayerInfo::default(), journald: None, file: None }
     }
 
-    // Create layer
-    let (writer, guard) = tracing_appender::non_blocking(
-        RollingFileAppender::new(
-            log_dir.join(file_name.as_ref()),
-            RollingConditionBasic::new().max_size(max_size_bytes),
-            max_files,
-        )
-        .expect("Could not initialize file logging"),
-    );
-    let layer = tracing_subscriber::fmt::layer()
-        .with_ansi(false)
-        .with_writer(writer)
-        .with_filter(filter)
-        .boxed();
+    ///  Sets a custom configuration for the stdout layer.
+    ///
+    ///  # Arguments
+    ///  * `config` - The `LayerInfo` to use for the stdout layer.
+    pub fn with_stdout(mut self, config: LayerInfo) -> Self {
+        self.stdout = config;
+        self
+    }
 
-    (layer, guard)
+    ///  Sets the journald layer filter.
+    ///
+    ///  # Arguments
+    ///  * `filter` - The `filter` to use for the journald layer.
+    pub fn with_journald(mut self, filter: String) -> Self {
+        self.journald = Some(filter);
+        self
+    }
+
+    ///  Sets the file layer configuration and associated file info.
+    ///
+    ///  # Arguments
+    ///  * `config` - The `LayerInfo` to use for the file layer.
+    ///  * `file_info` - The `FileInfo` containing details about the log file.
+    pub fn with_file(mut self, config: LayerInfo, file_info: FileInfo) -> Self {
+        self.file = Some((config, file_info));
+        self
+    }
 }
 
-/// A worker guard returned by [`file()`].
-///
-/// When a guard is dropped, all events currently in-memory are flushed to the log file this guard
-/// belongs to.
-pub type FileWorkerGuard = tracing_appender::non_blocking::WorkerGuard;
-
-/// Builds a new tracing layer that writes events to journald.
-///
-/// The events are filtered by `filter`.
-///
-/// If the layer cannot connect to journald for any reason this function will return an error.
-pub fn journald<S>(filter: EnvFilter) -> std::io::Result<BoxedLayer<S>>
-where
-    S: Subscriber,
-    for<'a> S: LookupSpan<'a>,
-{
-    Ok(tracing_journald::layer()?.with_filter(filter).boxed())
+impl Default for RethTracer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
-/// Initializes a tracing subscriber for tests.
+///  Configuration for a logging layer.
 ///
-/// The filter is configurable via `RUST_LOG`.
+///  This struct holds configuration parameters for a tracing layer, including
+///  the format, filtering directives, optional coloring, and directive.
+#[derive(Debug, Clone)]
+pub struct LayerInfo {
+    format: LogFormat,
+    filters: String,
+    directive: Directive,
+    color: Option<String>,
+}
+
+impl LayerInfo {
+    ///  Constructs a new `LayerInfo`.
+    ///
+    ///  # Arguments
+    ///  * `format` - Specifies the format for log messages. Possible values are:
+    ///      - `LogFormat::Json` for JSON formatting.
+    ///      - `LogFormat::LogFmt` for logfmt (key=value) formatting.
+    ///      - `LogFormat::Terminal` for human-readable, terminal-friendly formatting.
+    ///  * `filters` - Additional filtering parameters as a string.
+    ///  * `directive` - Directive for filtering log messages.
+    ///  * `color` - Optional color configuration for the log messages.
+    pub fn new(
+        format: LogFormat,
+        filters: String,
+        directive: Directive,
+        color: Option<String>,
+    ) -> Self {
+        Self { format, directive, filters, color }
+    }
+}
+
+impl Default for LayerInfo {
+    ///  Provides default values for `LayerInfo`.
+    ///
+    ///  By default, it uses terminal format, INFO level filter,
+    ///  no additional filters, and no color configuration.
+    fn default() -> Self {
+        Self {
+            format: LogFormat::Terminal,
+            directive: LevelFilter::INFO.into(),
+            filters: "debug".to_string(),
+            color: Some("always".to_string()),
+        }
+    }
+}
+
+/// Trait defining a general interface for logging configuration.
 ///
-/// # Note
+/// The `Tracer` trait provides a standardized way to initialize logging configurations
+/// in an application. Implementations of this trait can specify different logging setups,
+/// such as standard output logging, file logging, journald logging, or custom logging
+/// configurations tailored for specific environments (like testing).
+pub trait Tracer {
+    /// Initialize the logging configuration.
+    ///  # Returns
+    ///  An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
+    ///  or an `Err` in case of an error during initialization.
+    fn init(self) -> eyre::Result<Option<WorkerGuard>>;
+}
+
+impl Tracer for RethTracer {
+    ///  Initializes the logging system based on the configured layers.
+    ///
+    ///  This method sets up the global tracing subscriber with the specified
+    ///  stdout, journald, and file layers.
+    ///
+    ///  The default layer is stdout.
+    ///
+    ///  # Returns
+    ///  An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
+    ///  or an `Err` in case of an error during initialization.
+    fn init(self) -> eyre::Result<Option<WorkerGuard>> {
+        let mut layers = Layers::new();
+
+        layers.stdout(
+            self.stdout.format,
+            self.stdout.directive,
+            &self.stdout.filters,
+            self.stdout.color,
+        )?;
+
+        if let Some(config) = self.journald {
+            layers.journald(&config)?;
+        }
+
+        let file_guard = if let Some((config, file_info)) = self.file {
+            Some(layers.file(config.format, &config.filters, file_info)?)
+        } else {
+            None
+        };
+
+        tracing_subscriber::registry().with(layers.into_inner()).init();
+        Ok(file_guard)
+    }
+}
+
+///  Initializes a tracing subscriber for tests.
 ///
-/// The subscriber will silently fail if it could not be installed.
+///  The filter is configurable via `RUST_LOG`.
+///
+///  # Note
+///
+///  The subscriber will silently fail if it could not be installed.
 pub fn init_test_tracing() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())

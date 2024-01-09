@@ -2,14 +2,20 @@
 
 use crate::{
     database::Database,
+    database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
     tables::{TableType, Tables},
     utils::default_page_size,
     DatabaseError,
 };
+use eyre::Context;
+use metrics::{gauge, Label};
+use once_cell::sync::Lazy;
 use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
-    DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, PageSize, SyncMode, RO, RW,
+    DatabaseFlags, Environment, EnvironmentFlags, Geometry, HandleSlowReadersReturnCode, Mode,
+    PageSize, SyncMode, RO, RW,
 };
+use reth_tracing::tracing::{error, warn};
 use std::{ops::Deref, path::Path};
 use tx::Tx;
 
@@ -21,6 +27,13 @@ const TERABYTE: usize = GIGABYTE * 1024;
 
 /// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`), but we limit it to slightly below that
 const DEFAULT_MAX_READERS: u64 = 32_000;
+
+/// Space that a read-only transaction can occupy until the warning is emitted.
+/// See [reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers] for more information.
+const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
+
+static PROCESS_ID: Lazy<u32> =
+    Lazy::new(|| if cfg!(unix) { std::os::unix::process::parent_id() } else { std::process::id() });
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
@@ -59,6 +72,81 @@ impl Database for DatabaseEnv {
     }
 }
 
+impl DatabaseMetrics for DatabaseEnv {
+    fn report_metrics(&self) {
+        for (name, value, labels) in self.gauge_metrics() {
+            gauge!(name, value, labels);
+        }
+    }
+
+    fn gauge_metrics(&self) -> Vec<(&'static str, f64, Vec<Label>)> {
+        let mut metrics = Vec::new();
+
+        let _ = self
+            .view(|tx| {
+                for table in Tables::ALL.iter().map(|table| table.name()) {
+                    let table_db = tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
+
+                    let stats = tx
+                        .inner
+                        .db_stat(&table_db)
+                        .wrap_err(format!("Could not find table: {table}"))?;
+
+                    let page_size = stats.page_size() as usize;
+                    let leaf_pages = stats.leaf_pages();
+                    let branch_pages = stats.branch_pages();
+                    let overflow_pages = stats.overflow_pages();
+                    let num_pages = leaf_pages + branch_pages + overflow_pages;
+                    let table_size = page_size * num_pages;
+                    let entries = stats.entries();
+
+                    metrics.push((
+                        "db.table_size",
+                        table_size as f64,
+                        vec![Label::new("table", table)],
+                    ));
+                    metrics.push((
+                        "db.table_pages",
+                        leaf_pages as f64,
+                        vec![Label::new("table", table), Label::new("type", "leaf")],
+                    ));
+                    metrics.push((
+                        "db.table_pages",
+                        branch_pages as f64,
+                        vec![Label::new("table", table), Label::new("type", "branch")],
+                    ));
+                    metrics.push((
+                        "db.table_pages",
+                        overflow_pages as f64,
+                        vec![Label::new("table", table), Label::new("type", "overflow")],
+                    ));
+                    metrics.push((
+                        "db.table_entries",
+                        entries as f64,
+                        vec![Label::new("table", table)],
+                    ));
+                }
+
+                Ok::<(), eyre::Report>(())
+            })
+            .map_err(|error| error!(?error, "Failed to read db table stats"));
+
+        if let Ok(freelist) =
+            self.freelist().map_err(|error| error!(?error, "Failed to read db.freelist"))
+        {
+            metrics.push(("db.freelist", freelist as f64, vec![]));
+        }
+
+        metrics
+    }
+}
+
+impl DatabaseMetadata for DatabaseEnv {
+    fn metadata(&self) -> DatabaseMetadataValue {
+        DatabaseMetadataValue::new(self.freelist().ok())
+    }
+}
+
 impl DatabaseEnv {
     /// Opens the database at the specified path with the given `EnvKind`.
     ///
@@ -92,6 +180,29 @@ impl DatabaseEnv {
             shrink_threshold: None,
             page_size: Some(PageSize::Set(default_page_size())),
         });
+        let _ = *PROCESS_ID; // Initialize the process ID at the time of environment opening
+        inner_env.set_handle_slow_readers(
+            |process_id: u32, thread_id: u32, read_txn_id: u64, gap: usize, space: usize, retry: isize| {
+            if space > MAX_SAFE_READER_SPACE {
+                let message = if process_id == *PROCESS_ID {
+                    "Current process has a long-lived database transaction that grows the database file."
+                } else {
+                    "External process has a long-lived database transaction that grows the database file. Use shorter-lived read transactions or shut down the node."
+                };
+                warn!(
+                    target: "storage::db::mdbx",
+                    ?process_id,
+                    ?thread_id,
+                    ?read_txn_id,
+                    ?gap,
+                    ?space,
+                    ?retry,
+                    message
+                )
+            }
+
+            HandleSlowReadersReturnCode::ProceedWithoutKillingReader
+        });
         inner_env.set_flags(EnvironmentFlags {
             mode,
             // We disable readahead because it improves performance for linear scans, but
@@ -100,8 +211,34 @@ impl DatabaseEnv {
             coalesce: true,
             ..Default::default()
         });
-        // configure more readers
+        // Configure more readers
         inner_env.set_max_readers(DEFAULT_MAX_READERS);
+        // This parameter sets the maximum size of the "reclaimed list", and the unit of measurement
+        // is "pages". Reclaimed list is the list of freed pages that's populated during the
+        // lifetime of DB transaction, and through which MDBX searches when it needs to insert new
+        // record with overflow pages. The flow is roughly the following:
+        // 0. We need to insert a record that requires N number of overflow pages (in consecutive
+        //    sequence inside the DB file).
+        // 1. Get some pages from the freelist, put them into the reclaimed list.
+        // 2. Search through the reclaimed list for the sequence of size N.
+        // 3. a. If found, return the sequence.
+        // 3. b. If not found, repeat steps 1-3. If the reclaimed list size is larger than
+        //    the `rp augment limit`, stop the search and allocate new pages at the end of the file:
+        //    https://github.com/paradigmxyz/reth/blob/2a4c78759178f66e30c8976ec5d243b53102fc9a/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L11479-L11480.
+        //
+        // Basically, this parameter controls for how long do we search through the freelist before
+        // trying to allocate new pages. Smaller value will make MDBX to fallback to
+        // allocation faster, higher value will force MDBX to search through the freelist
+        // longer until the sequence of pages is found.
+        //
+        // The default value of this parameter is set depending on the DB size. The bigger the
+        // database, the larger is `rp augment limit`.
+        // https://github.com/paradigmxyz/reth/blob/2a4c78759178f66e30c8976ec5d243b53102fc9a/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L10018-L10024.
+        //
+        // Previously, MDBX set this value as `256 * 1024` constant. Let's fallback to this,
+        // because we want to prioritize freelist lookup speed over database growth.
+        // https://github.com/paradigmxyz/reth/blob/fa2b9b685ed9787636d962f4366caf34a9186e66/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L16017.
+        inner_env.set_rp_augment_limit(256 * 1024);
 
         if let Some(log_level) = log_level {
             // Levels higher than [LogLevel::Notice] require libmdbx built with `MDBX_DEBUG` option.
@@ -125,7 +262,7 @@ impl DatabaseEnv {
                     LogLevel::Extra => 7,
                 });
             } else {
-                return Err(DatabaseError::LogLevelUnavailable(log_level))
+                return Err(DatabaseError::LogLevelUnavailable(log_level));
             }
         }
 

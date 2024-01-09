@@ -135,7 +135,7 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
         logs_bloom,
         timestamp: U256::from(timestamp),
         difficulty,
-        mix_hash,
+        mix_hash: Some(mix_hash),
         nonce: Some(nonce.to_be_bytes().into()),
         base_fee_per_gas: base_fee_per_gas.map(U256::from),
         blob_gas_used: blob_gas_used.map(U64::from),
@@ -179,6 +179,7 @@ fn from_block_with_transactions(
         total_difficulty: Some(total_difficulty),
         size: Some(U256::from(block_length)),
         withdrawals,
+        other: Default::default(),
     }
 }
 
@@ -196,5 +197,6 @@ pub fn uncle_block_from_header(header: PrimitiveHeader) -> Block {
         withdrawals: Some(vec![]),
         size,
         total_difficulty: None,
+        other: Default::default(),
     }
 }
