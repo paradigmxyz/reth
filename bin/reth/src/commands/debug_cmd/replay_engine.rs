@@ -26,7 +26,7 @@ use reth_primitives::{
     fs::{self},
     ChainSpec,
 };
-use reth_provider::{providers::BlockchainProvider, ProviderFactory};
+use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory};
 use reth_revm::EvmProcessorFactory;
 use reth_rpc_types::{
     engine::{CancunPayloadFields, ForkchoiceState, PayloadAttributes},
@@ -175,7 +175,8 @@ impl Command {
             self.chain.clone(),
             payload_builder,
         );
-        let (payload_service, payload_builder) = PayloadBuilderService::new(payload_generator);
+        let (payload_service, payload_builder) =
+            PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
         ctx.task_executor.spawn_critical("payload builder service", Box::pin(payload_service));
 
         // Configure the consensus engine

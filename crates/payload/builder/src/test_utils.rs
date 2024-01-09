@@ -6,6 +6,7 @@ use crate::{
     PayloadJobGenerator,
 };
 use reth_primitives::{Block, U256};
+use reth_provider::CanonStateNotification;
 use std::{
     future::Future,
     pin::Pin,
@@ -14,9 +15,14 @@ use std::{
 };
 
 /// Creates a new [PayloadBuilderService] for testing purposes.
-pub fn test_payload_service(
-) -> (PayloadBuilderService<TestPayloadJobGenerator>, PayloadBuilderHandle) {
-    PayloadBuilderService::new(Default::default())
+pub fn test_payload_service() -> (
+    PayloadBuilderService<
+        TestPayloadJobGenerator,
+        futures_util::stream::Empty<CanonStateNotification>,
+    >,
+    PayloadBuilderHandle,
+) {
+    PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
 }
 
 /// Creates a new [PayloadBuilderService] for testing purposes and spawns it in the background.

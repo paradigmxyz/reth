@@ -7,6 +7,7 @@ use crate::cli::{
 use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_provider::CanonStateSubscriptions;
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
 
@@ -161,7 +162,10 @@ pub trait RethNodeCommandConfig: fmt::Debug {
             components.chain_spec(),
             payload_builder,
         );
-        let (payload_service, payload_builder) = PayloadBuilderService::new(payload_generator);
+        let (payload_service, payload_builder) = PayloadBuilderService::new(
+            payload_generator,
+            components.events().canonical_state_stream(),
+        );
 
         components
             .task_executor()

@@ -7,7 +7,8 @@ use crate::{
     error::PayloadBuilderError, metrics::PayloadBuilderServiceMetrics, traits::PayloadJobGenerator,
     BuiltPayload, KeepPayloadJobAlive, PayloadBuilderAttributes, PayloadJob,
 };
-use futures_util::{future::FutureExt, StreamExt};
+use futures_util::{future::FutureExt, Stream, StreamExt};
+use reth_provider::CanonStateNotification;
 use reth_rpc_types::engine::PayloadId;
 use std::{
     fmt,
@@ -160,7 +161,7 @@ impl PayloadBuilderHandle {
 /// does know nothing about how to build them, it just drives their jobs to completion.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct PayloadBuilderService<Gen>
+pub struct PayloadBuilderService<Gen, St>
 where
     Gen: PayloadJobGenerator,
 {
@@ -174,17 +175,22 @@ where
     command_rx: UnboundedReceiverStream<PayloadServiceCommand>,
     /// Metrics for the payload builder service
     metrics: PayloadBuilderServiceMetrics,
+    /// Chain events notification stream
+    chain_events: St,
 }
 
 // === impl PayloadBuilderService ===
 
-impl<Gen> PayloadBuilderService<Gen>
+impl<Gen, St> PayloadBuilderService<Gen, St>
 where
     Gen: PayloadJobGenerator,
 {
     /// Creates a new payload builder service and returns the [PayloadBuilderHandle] to interact
     /// with it.
-    pub fn new(generator: Gen) -> (Self, PayloadBuilderHandle) {
+    ///
+    /// This also takes a stream of chain events that will be forwarded to the generator to apply
+    /// additional logic when new state is committed. See also [PayloadJobGenerator::on_new_state].
+    pub fn new(generator: Gen, chain_events: St) -> (Self, PayloadBuilderHandle) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
         let service = Self {
             generator,
@@ -192,7 +198,9 @@ where
             service_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
             metrics: Default::default(),
+            chain_events,
         };
+
         let handle = service.handle();
         (service, handle)
     }
@@ -271,17 +279,22 @@ where
     }
 }
 
-impl<Gen> Future for PayloadBuilderService<Gen>
+impl<Gen, St> Future for PayloadBuilderService<Gen, St>
 where
     Gen: PayloadJobGenerator + Unpin + 'static,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
+    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-
         loop {
+            // notify the generator of new chain events
+            while let Poll::Ready(Some(new_head)) = this.chain_events.poll_next_unpin(cx) {
+                this.generator.on_new_state(new_head);
+            }
+
             // we poll all jobs first, so we always have the latest payload that we can report if
             // requests
             // we don't care about the order of the jobs, so we can just swap_remove them
