@@ -676,6 +676,7 @@ impl EnvironmentBuilder {
                     ))?;
                 }
 
+                #[cfg(not(windows))]
                 if let Some(handle_slow_readers) = self.handle_slow_readers {
                     mdbx_result(ffi::mdbx_env_set_hsr(
                         env,
@@ -860,6 +861,7 @@ impl EnvironmentBuilder {
     }
 
     /// Set the Handle-Slow-Readers callback. See [HandleSlowReadersCallback] for more information.
+    #[cfg(not(windows))]
     pub fn set_handle_slow_readers(&mut self, hsr: HandleSlowReadersCallback) -> &mut Self {
         self.handle_slow_readers = Some(hsr);
         self
@@ -875,6 +877,7 @@ impl EnvironmentBuilder {
 ///
 /// Caution: this leaks the memory for callbacks, so they're alive throughout the program. It's
 /// fine, because we also expect the database environment to be alive during this whole time.
+#[cfg(not(windows))]
 unsafe fn handle_slow_readers_callback(callback: HandleSlowReadersCallback) -> MDBX_hsr_func {
     // Move the callback function to heap and intentionally leak it, so it's not dropped and the
     // MDBX env can use it throughout the whole program.
@@ -915,6 +918,7 @@ mod tests {
         sync::atomic::{AtomicBool, Ordering},
     };
 
+    #[cfg(not(windows))]
     #[test]
     fn test_handle_slow_readers_callback() {
         static CALLED: AtomicBool = AtomicBool::new(false);
