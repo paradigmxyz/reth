@@ -10,7 +10,7 @@ use reth_primitives::{
 use secp256k1::{KeyPair, Secp256k1};
 use std::{
     cmp::{max, min},
-    collections::{hash_map::DefaultHasher, BTreeMap, BTreeSet},
+    collections::{hash_map::DefaultHasher, BTreeMap},
     hash::Hasher,
     ops::{Range, RangeInclusive},
 };
