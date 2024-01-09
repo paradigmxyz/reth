@@ -457,7 +457,8 @@ where
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
-    <Builder as PayloadBuilder<Pool, Client>>::Attributes: Unpin + Clone,
+    <Builder as PayloadBuilder<Pool, Client>>::Attributes:
+        PayloadBuilderAttributesTrait + Unpin + Clone,
 {
     type PayloadAttributes = Builder::Attributes;
     type ResolvePayloadFuture = ResolveBestPayload;
@@ -628,7 +629,7 @@ impl Drop for Cancelled {
 
 /// Static config for how to build a payload.
 #[derive(Clone, Debug)]
-pub struct PayloadConfig<Attributes: PayloadBuilderAttributesTrait> {
+pub struct PayloadConfig<Attributes> {
     /// Pre-configured block environment.
     pub initialized_block_env: BlockEnv,
     /// Configuration for the environment.
@@ -643,20 +644,17 @@ pub struct PayloadConfig<Attributes: PayloadBuilderAttributesTrait> {
     pub chain_spec: Arc<ChainSpec>,
 }
 
-impl<Attributes> PayloadConfig<Attributes>
-where
-    Attributes: PayloadBuilderAttributesTrait,
-{
+impl<Attributes> PayloadConfig<Attributes> {
     /// Returns an owned instance of the [PayloadConfig]'s extra_data bytes.
     pub fn extra_data(&self) -> Bytes {
         self.extra_data.clone()
     }
+}
 
-    /// Returns the payload id.
-    pub fn payload_id(&self) -> PayloadId {
-        self.attributes.payload_id()
-    }
-
+impl<Attributes> PayloadConfig<Attributes>
+where
+    Attributes: PayloadBuilderAttributesTrait,
+{
     /// Create new payload config.
     pub fn new(
         parent_block: Arc<SealedBlock>,
@@ -676,6 +674,11 @@ where
             attributes,
             chain_spec,
         }
+    }
+
+    /// Returns the payload id.
+    pub fn payload_id(&self) -> PayloadId {
+        self.attributes.payload_id()
     }
 }
 
@@ -706,7 +709,7 @@ pub enum BuildOutcome {
 /// building process. It holds references to the Ethereum client, transaction pool, cached reads,
 /// payload configuration, cancellation status, and the best payload achieved so far.
 #[derive(Debug)]
-pub struct BuildArguments<Pool, Client, Attributes: PayloadBuilderAttributesTrait> {
+pub struct BuildArguments<Pool, Client, Attributes> {
     /// How to interact with the chain.
     pub client: Client,
     /// The transaction pool.
@@ -721,10 +724,7 @@ pub struct BuildArguments<Pool, Client, Attributes: PayloadBuilderAttributesTrai
     pub best_payload: Option<Arc<BuiltPayload>>,
 }
 
-impl<Pool, Client, Attributes> BuildArguments<Pool, Client, Attributes>
-where
-    Attributes: PayloadBuilderAttributesTrait,
-{
+impl<Pool, Client, Attributes> BuildArguments<Pool, Client, Attributes> {
     /// Create new build arguments.
     pub fn new(
         client: Client,
