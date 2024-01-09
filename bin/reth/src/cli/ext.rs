@@ -128,18 +128,21 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     ///
     /// By default this spawns a [BasicPayloadJobGenerator] with the default configuration
     /// [BasicPayloadJobGeneratorConfig].
-    fn spawn_payload_builder_service<Conf, Reth, Builder, Types>(
+    fn spawn_payload_builder_service<Conf, Reth, Builder, Engine>(
         &mut self,
         conf: &Conf,
         components: &Reth,
         payload_builder: Builder,
-    ) -> eyre::Result<PayloadBuilderHandle<Types>>
+    ) -> eyre::Result<PayloadBuilderHandle<Engine>>
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
-        Types: EngineTypes + 'static,
-        Builder: PayloadBuilder<Reth::Pool, Reth::Provider, Attributes = Types::PayloadBuilderAttributes>
-            + Unpin
+        Engine: EngineTypes + 'static,
+        Builder: PayloadBuilder<
+                Reth::Pool,
+                Reth::Provider,
+                Attributes = Engine::PayloadBuilderAttributes,
+            > + Unpin
             + 'static,
     {
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
@@ -324,18 +327,21 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         }
     }
 
-    fn spawn_payload_builder_service<Conf, Reth, Builder, Types>(
+    fn spawn_payload_builder_service<Conf, Reth, Builder, Engine>(
         &mut self,
         conf: &Conf,
         components: &Reth,
         payload_builder: Builder,
-    ) -> eyre::Result<PayloadBuilderHandle<Types>>
+    ) -> eyre::Result<PayloadBuilderHandle<Engine>>
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
-        Types: EngineTypes + 'static,
-        Builder: PayloadBuilder<Reth::Pool, Reth::Provider, Attributes = Types::PayloadBuilderAttributes>
-            + Unpin
+        Engine: EngineTypes + 'static,
+        Builder: PayloadBuilder<
+                Reth::Pool,
+                Reth::Provider,
+                Attributes = Engine::PayloadBuilderAttributes,
+            > + Unpin
             + 'static,
     {
         self.inner_mut()

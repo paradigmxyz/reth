@@ -142,7 +142,7 @@ impl Future for PendingPayloadId {
 /// consensus layer).
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
-pub enum BeaconEngineMessage<Types: EngineTypes> {
+pub enum BeaconEngineMessage<Engine: EngineTypes> {
     /// Message with new payload.
     NewPayload {
         /// The execution payload received by Engine API.
@@ -157,7 +157,7 @@ pub enum BeaconEngineMessage<Types: EngineTypes> {
         /// The updated forkchoice state.
         state: ForkchoiceState,
         /// The payload attributes for block building.
-        payload_attrs: Option<Types::PayloadAttributes>,
+        payload_attrs: Option<Engine::PayloadAttributes>,
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },

@@ -274,13 +274,13 @@ impl EngineApiStore {
         Self { path }
     }
 
-    fn on_message<Types>(
+    fn on_message<Engine>(
         &self,
-        msg: &BeaconEngineMessage<Types>,
+        msg: &BeaconEngineMessage<Engine>,
         received_at: SystemTime,
     ) -> eyre::Result<()>
     where
-        Types: EngineTypes,
+        Engine: EngineTypes,
     {
         fs::create_dir_all(&self.path)?; // ensure that store path had been created
         let timestamp = received_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
@@ -300,7 +300,7 @@ impl EngineApiStore {
                 fs::write(
                     self.path.join(filename),
                     serde_json::to_vec(
-                        &StoredEngineApiMessage::<Types::PayloadAttributes>::NewPayload {
+                        &StoredEngineApiMessage::<Engine::PayloadAttributes>::NewPayload {
                             payload: payload.clone(),
                             cancun_fields: cancun_fields.clone(),
                         },
@@ -333,13 +333,13 @@ impl EngineApiStore {
         Ok(filenames_by_ts.into_iter().flat_map(|(_, paths)| paths))
     }
 
-    pub(crate) async fn intercept<Types>(
+    pub(crate) async fn intercept<Engine>(
         self,
-        mut rx: UnboundedReceiver<BeaconEngineMessage<Types>>,
-        to_engine: UnboundedSender<BeaconEngineMessage<Types>>,
+        mut rx: UnboundedReceiver<BeaconEngineMessage<Engine>>,
+        to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
     ) where
-        Types: EngineTypes,
-        BeaconEngineMessage<Types>: std::fmt::Debug,
+        Engine: EngineTypes,
+        BeaconEngineMessage<Engine>: std::fmt::Debug,
     {
         loop {
             let Some(msg) = rx.recv().await else { break };

@@ -164,7 +164,7 @@ pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 /// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
 #[allow(missing_debug_implementations)]
-pub struct BeaconConsensusEngine<DB, BT, Client, Types>
+pub struct BeaconConsensusEngine<DB, BT, Client, EngineT>
 where
     DB: Database,
     Client: HeadersClient + BodiesClient,
@@ -173,7 +173,7 @@ where
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader,
-    Types: EngineTypes,
+    EngineT: EngineTypes,
 {
     /// Controls syncing triggered by engine updates.
     sync: EngineSyncController<DB, Client>,
@@ -182,13 +182,13 @@ where
     /// Used for emitting updates about whether the engine is syncing or not.
     sync_state_updater: Box<dyn NetworkSyncUpdater>,
     /// The Engine API message receiver.
-    engine_message_rx: UnboundedReceiverStream<BeaconEngineMessage<Types>>,
+    engine_message_rx: UnboundedReceiverStream<BeaconEngineMessage<EngineT>>,
     /// A clone of the handle
-    handle: BeaconConsensusEngineHandle<Types>,
+    handle: BeaconConsensusEngineHandle<EngineT>,
     /// Tracks the received forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// The payload store.
-    payload_builder: PayloadBuilderHandle<Types>,
+    payload_builder: PayloadBuilderHandle<EngineT>,
     /// Validator for execution payloads
     payload_validator: ExecutionPayloadValidator,
     /// Listeners for engine events.
@@ -213,7 +213,7 @@ where
     hooks: EngineHooksController,
 }
 
-impl<DB, BT, Client, Types> BeaconConsensusEngine<DB, BT, Client, Types>
+impl<DB, BT, Client, EngineT> BeaconConsensusEngine<DB, BT, Client, EngineT>
 where
     DB: Database + Unpin + 'static,
     BT: BlockchainTreeEngine
@@ -224,7 +224,7 @@ where
         + ChainSpecProvider
         + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
-    Types: EngineTypes + Unpin + 'static,
+    EngineT: EngineTypes + Unpin + 'static,
 {
     /// Create a new instance of the [BeaconConsensusEngine].
     #[allow(clippy::too_many_arguments)]
@@ -236,11 +236,11 @@ where
         sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
-        payload_builder: PayloadBuilderHandle<Types>,
+        payload_builder: PayloadBuilderHandle<EngineT>,
         target: Option<B256>,
         pipeline_run_threshold: u64,
         hooks: EngineHooks,
-    ) -> RethResult<(Self, BeaconConsensusEngineHandle<Types>)> {
+    ) -> RethResult<(Self, BeaconConsensusEngineHandle<EngineT>)> {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
             client,
@@ -280,13 +280,13 @@ where
         sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
         run_pipeline_continuously: bool,
-        payload_builder: PayloadBuilderHandle<Types>,
+        payload_builder: PayloadBuilderHandle<EngineT>,
         target: Option<B256>,
         pipeline_run_threshold: u64,
-        to_engine: UnboundedSender<BeaconEngineMessage<Types>>,
-        rx: UnboundedReceiver<BeaconEngineMessage<Types>>,
+        to_engine: UnboundedSender<BeaconEngineMessage<EngineT>>,
+        rx: UnboundedReceiver<BeaconEngineMessage<EngineT>>,
         hooks: EngineHooks,
-    ) -> RethResult<(Self, BeaconConsensusEngineHandle<Types>)> {
+    ) -> RethResult<(Self, BeaconConsensusEngineHandle<EngineT>)> {
         let handle = BeaconConsensusEngineHandle { to_engine };
         let sync = EngineSyncController::new(
             pipeline,
@@ -335,7 +335,7 @@ where
     fn forkchoice_updated(
         &mut self,
         state: ForkchoiceState,
-        attrs: Option<Types::PayloadAttributes>,
+        attrs: Option<EngineT::PayloadAttributes>,
     ) -> RethResult<OnForkChoiceUpdated> {
         trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
         if state.head_block_hash.is_zero() {
@@ -480,7 +480,7 @@ where
     fn on_forkchoice_updated(
         &mut self,
         state: ForkchoiceState,
-        attrs: Option<Types::PayloadAttributes>,
+        attrs: Option<EngineT::PayloadAttributes>,
         tx: oneshot::Sender<Result<OnForkChoiceUpdated, RethError>>,
     ) -> OnForkchoiceUpdateOutcome {
         self.metrics.forkchoice_updated_messages.increment(1);
@@ -585,7 +585,7 @@ where
     ///
     /// The [`BeaconConsensusEngineHandle`] can be used to interact with this
     /// [`BeaconConsensusEngine`]
-    pub fn handle(&self) -> BeaconConsensusEngineHandle<Types> {
+    pub fn handle(&self) -> BeaconConsensusEngineHandle<EngineT> {
         self.handle.clone()
     }
 
@@ -1183,7 +1183,7 @@ where
     /// return an error if the payload attributes are invalid.
     fn process_payload_attributes(
         &self,
-        attrs: Types::PayloadAttributes,
+        attrs: EngineT::PayloadAttributes,
         head: Header,
         state: ForkchoiceState,
     ) -> OnForkChoiceUpdated {
@@ -1200,7 +1200,7 @@ where
         //    forkchoiceState.headBlockHash and identified via buildProcessId value if
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
-        match <Types::PayloadBuilderAttributes as PayloadBuilderAttributes>::try_new(
+        match <EngineT::PayloadBuilderAttributes as PayloadBuilderAttributes>::try_new(
             state.head_block_hash,
             attrs,
         ) {
@@ -1740,7 +1740,7 @@ where
 /// local forkchoice state, it will launch the pipeline to sync to the head hash.
 /// While the pipeline is syncing, the consensus engine will keep processing messages from the
 /// receiver and forwarding them to the blockchain tree.
-impl<DB, BT, Client, Types> Future for BeaconConsensusEngine<DB, BT, Client, Types>
+impl<DB, BT, Client, EngineT> Future for BeaconConsensusEngine<DB, BT, Client, EngineT>
 where
     DB: Database + Unpin + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
@@ -1752,7 +1752,7 @@ where
         + ChainSpecProvider
         + Unpin
         + 'static,
-    Types: EngineTypes + Unpin + 'static,
+    EngineT: EngineTypes + Unpin + 'static,
 {
     type Output = Result<(), BeaconConsensusEngineError>;
 

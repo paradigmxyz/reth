@@ -32,37 +32,37 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
-pub struct EngineApi<Provider, Types: EngineTypes> {
-    inner: Arc<EngineApiInner<Provider, Types>>,
+pub struct EngineApi<Provider, EngineT: EngineTypes> {
+    inner: Arc<EngineApiInner<Provider, EngineT>>,
 }
 
-struct EngineApiInner<Provider, Types: EngineTypes> {
+struct EngineApiInner<Provider, EngineT: EngineTypes> {
     /// The provider to interact with the chain.
     provider: Provider,
     /// Consensus configuration
     chain_spec: Arc<ChainSpec>,
     /// The channel to send messages to the beacon consensus engine.
-    beacon_consensus: BeaconConsensusEngineHandle<Types>,
+    beacon_consensus: BeaconConsensusEngineHandle<EngineT>,
     /// The type that can communicate with the payload service to retrieve payloads.
-    payload_store: PayloadStore<Types>,
+    payload_store: PayloadStore<EngineT>,
     /// For spawning and executing async tasks
     task_spawner: Box<dyn TaskSpawner>,
     /// The metrics for engine api calls
     metrics: EngineApiMetrics,
 }
 
-impl<Provider, Types> EngineApi<Provider, Types>
+impl<Provider, EngineT> EngineApi<Provider, EngineT>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
-    Types: EngineTypes + 'static,
-    Types::PayloadBuilderAttributes: Send,
+    EngineT: EngineTypes + 'static,
+    EngineT::PayloadBuilderAttributes: Send,
 {
     /// Create new instance of [EngineApi].
     pub fn new(
         provider: Provider,
         chain_spec: Arc<ChainSpec>,
-        beacon_consensus: BeaconConsensusEngineHandle<Types>,
-        payload_store: PayloadStore<Types>,
+        beacon_consensus: BeaconConsensusEngineHandle<EngineT>,
+        payload_store: PayloadStore<EngineT>,
         task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         let inner = Arc::new(EngineApiInner {
@@ -80,7 +80,7 @@ where
     async fn get_payload_attributes(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<Types::PayloadBuilderAttributes> {
+    ) -> EngineApiResult<EngineT::PayloadBuilderAttributes> {
         Ok(self
             .inner
             .payload_store
@@ -97,7 +97,7 @@ where
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionPayload::from(payload);
         let payload_or_attrs =
-            PayloadOrAttributes::<'_, Types::PayloadAttributes>::from_execution_payload(
+            PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
                 &payload, None,
             );
         validate_version_specific_fields(
@@ -115,7 +115,7 @@ where
     ) -> EngineApiResult<PayloadStatus> {
         let payload = convert_payload_input_v2_to_payload(payload);
         let payload_or_attrs =
-            PayloadOrAttributes::<'_, Types::PayloadAttributes>::from_execution_payload(
+            PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
                 &payload, None,
             );
         validate_version_specific_fields(
@@ -135,7 +135,7 @@ where
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionPayload::from(payload);
         let payload_or_attrs =
-            PayloadOrAttributes::<'_, Types::PayloadAttributes>::from_execution_payload(
+            PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
                 &payload,
                 Some(parent_beacon_block_root),
             );
@@ -159,7 +159,7 @@ where
     pub async fn fork_choice_updated_v1(
         &self,
         state: ForkchoiceState,
-        payload_attrs: Option<Types::PayloadAttributes>,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V1, state, payload_attrs)
             .await
@@ -172,7 +172,7 @@ where
     pub async fn fork_choice_updated_v2(
         &self,
         state: ForkchoiceState,
-        payload_attrs: Option<Types::PayloadAttributes>,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V2, state, payload_attrs)
             .await
@@ -185,7 +185,7 @@ where
     pub async fn fork_choice_updated_v3(
         &self,
         state: ForkchoiceState,
-        payload_attrs: Option<Types::PayloadAttributes>,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V3, state, payload_attrs)
             .await
@@ -433,7 +433,7 @@ where
         &self,
         version: EngineApiMessageVersion,
         state: ForkchoiceState,
-        payload_attrs: Option<Types::PayloadAttributes>,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
             let attr_validation_res =
@@ -468,12 +468,12 @@ where
 }
 
 #[async_trait]
-impl<Provider, Types> EngineApiServer<Types> for EngineApi<Provider, Types>
+impl<Provider, EngineT> EngineApiServer<EngineT> for EngineApi<Provider, EngineT>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
-    Types: EngineTypes + 'static + Send,
-    Types::PayloadAttributes: Send,
-    Types::PayloadBuilderAttributes: Send,
+    EngineT: EngineTypes + 'static + Send,
+    EngineT::PayloadAttributes: Send,
+    EngineT::PayloadBuilderAttributes: Send,
 {
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
@@ -520,7 +520,7 @@ where
     async fn fork_choice_updated_v1(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<Types::PayloadAttributes>,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV1");
         let start = Instant::now();
@@ -535,7 +535,7 @@ where
     async fn fork_choice_updated_v2(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<Types::PayloadAttributes>,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV2");
         let start = Instant::now();
@@ -551,7 +551,7 @@ where
     async fn fork_choice_updated_v3(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<Types::PayloadAttributes>,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
         let start = Instant::now();
@@ -675,9 +675,9 @@ where
     }
 }
 
-impl<Provider, Types> std::fmt::Debug for EngineApi<Provider, Types>
+impl<Provider, EngineT> std::fmt::Debug for EngineApi<Provider, EngineT>
 where
-    Types: EngineTypes,
+    EngineT: EngineTypes,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApi").finish_non_exhaustive()

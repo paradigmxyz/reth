@@ -83,7 +83,7 @@
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //! use tokio::try_join;
-//! pub async fn launch<Provider, Pool, Network, Events, EngineApi, Types>(
+//! pub async fn launch<Provider, Pool, Network, Events, EngineApi, EngineT>(
 //!     provider: Provider,
 //!     pool: Pool,
 //!     network: Network,
@@ -102,8 +102,8 @@
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
-//!     EngineApi: EngineApiServer<Types>,
-//!     Types: EngineTypes,
+//!     EngineApi: EngineApiServer<EngineT>,
+//!     EngineT: EngineTypes,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -382,7 +382,7 @@ where
     ///
     /// This behaves exactly as [RpcModuleBuilder::build] for the [TransportRpcModules], but also
     /// configures the auth (engine api) server, which exposes a subset of the `eth_` namespace.
-    pub fn build_with_auth_server<EngineApi, Types: EngineTypes>(
+    pub fn build_with_auth_server<EngineApi, EngineT: EngineTypes>(
         self,
         module_config: TransportRpcModuleConfig,
         engine: EngineApi,
@@ -392,7 +392,7 @@ where
         RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
     )
     where
-        EngineApi: EngineApiServer<Types>,
+        EngineApi: EngineApiServer<EngineT>,
     {
         let mut modules = TransportRpcModules::default();
 
@@ -1023,10 +1023,10 @@ where
     ///   * `api_` namespace
     ///
     /// Note: This does _not_ register the `engine_` in this registry.
-    pub fn create_auth_module<EngineApi, Types>(&mut self, engine_api: EngineApi) -> AuthRpcModule
+    pub fn create_auth_module<EngineApi, EngineT>(&mut self, engine_api: EngineApi) -> AuthRpcModule
     where
-        Types: EngineTypes,
-        EngineApi: EngineApiServer<Types>,
+        EngineT: EngineTypes,
+        EngineApi: EngineApiServer<EngineT>,
     {
         let eth_handlers = self.eth_handlers();
         let mut module = RpcModule::new(());

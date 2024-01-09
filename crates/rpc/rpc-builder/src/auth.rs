@@ -34,7 +34,7 @@ use std::{
 
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
-pub async fn launch<Provider, Pool, Network, Tasks, EngineApi, Types>(
+pub async fn launch<Provider, Pool, Network, Tasks, EngineApi, EngineT>(
     provider: Provider,
     pool: Pool,
     network: Network,
@@ -56,8 +56,8 @@ where
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Types: EngineTypes,
-    EngineApi: EngineApiServer<Types>,
+    EngineT: EngineTypes,
+    EngineApi: EngineApiServer<EngineT>,
 {
     // spawn a new cache task
     let eth_cache =
@@ -87,7 +87,7 @@ where
 }
 
 /// Configure and launch a _standalone_ auth server with existing EthApi implementation.
-pub async fn launch_with_eth_api<Provider, Pool, Network, EngineApi, Types>(
+pub async fn launch_with_eth_api<Provider, Pool, Network, EngineApi, EngineT>(
     eth_api: EthApi<Provider, Pool, Network>,
     eth_filter: EthFilter<Provider, Pool>,
     engine_api: EngineApi,
@@ -105,8 +105,8 @@ where
         + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
-    Types: EngineTypes,
-    EngineApi: EngineApiServer<Types>,
+    EngineT: EngineTypes,
+    EngineApi: EngineApiServer<EngineT>,
 {
     // Configure the module and start the server.
     let mut module = RpcModule::new(());
@@ -256,10 +256,10 @@ pub struct AuthRpcModule {
 
 impl AuthRpcModule {
     /// Create a new `AuthRpcModule` with the given `engine_api`.
-    pub fn new<EngineApi, Types>(engine: EngineApi) -> Self
+    pub fn new<EngineApi, EngineT>(engine: EngineApi) -> Self
     where
-        Types: EngineTypes,
-        EngineApi: EngineApiServer<Types>,
+        EngineT: EngineTypes,
+        EngineApi: EngineApiServer<EngineT>,
     {
         let mut module = RpcModule::new(());
         module.merge(engine.into_rpc()).expect("No conflicting methods");

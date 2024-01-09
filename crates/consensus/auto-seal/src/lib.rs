@@ -94,30 +94,30 @@ impl Consensus for AutoSealConsensus {
 
 /// Builder type for configuring the setup
 #[derive(Debug)]
-pub struct AutoSealBuilder<Client, Pool, Types: EngineTypes> {
+pub struct AutoSealBuilder<Client, Pool, Engine: EngineTypes> {
     client: Client,
     consensus: AutoSealConsensus,
     pool: Pool,
     mode: MiningMode,
     storage: Storage,
-    to_engine: UnboundedSender<BeaconEngineMessage<Types>>,
+    to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
     canon_state_notification: CanonStateNotificationSender,
 }
 
 // === impl AutoSealBuilder ===
 
-impl<Client, Pool, Types> AutoSealBuilder<Client, Pool, Types>
+impl<Client, Pool, Engine> AutoSealBuilder<Client, Pool, Engine>
 where
     Client: BlockReaderIdExt,
     Pool: TransactionPool,
-    Types: EngineTypes,
+    Engine: EngineTypes,
 {
     /// Creates a new builder instance to configure all parts.
     pub fn new(
         chain_spec: Arc<ChainSpec>,
         client: Client,
         pool: Pool,
-        to_engine: UnboundedSender<BeaconEngineMessage<Types>>,
+        to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
         canon_state_notification: CanonStateNotificationSender,
         mode: MiningMode,
     ) -> Self {
@@ -146,7 +146,7 @@ where
 
     /// Consumes the type and returns all components
     #[track_caller]
-    pub fn build(self) -> (AutoSealConsensus, AutoSealClient, MiningTask<Client, Pool, Types>) {
+    pub fn build(self) -> (AutoSealConsensus, AutoSealClient, MiningTask<Client, Pool, Engine>) {
         let Self { client, consensus, pool, mode, storage, to_engine, canon_state_notification } =
             self;
         let auto_client = AutoSealClient::new(storage.clone());

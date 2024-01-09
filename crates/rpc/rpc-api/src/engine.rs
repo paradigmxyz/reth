@@ -11,9 +11,9 @@ use reth_rpc_types::{
     BlockOverrides, CallRequest, Filter, Log, RichBlock, SyncStatus,
 };
 
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"), server_bounds(Types::PayloadAttributes: jsonrpsee::core::DeserializeOwned))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "engine", client_bounds(Types::PayloadAttributes: jsonrpsee::core::Serialize + Clone), server_bounds(Types::PayloadAttributes: jsonrpsee::core::DeserializeOwned)))]
-pub trait EngineApi<Types: EngineTypes> {
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "engine", client_bounds(Engine::PayloadAttributes: jsonrpsee::core::Serialize + Clone), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned)))]
+pub trait EngineApi<Engine: EngineTypes> {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
     #[method(name = "newPayloadV1")]
@@ -41,7 +41,7 @@ pub trait EngineApi<Types: EngineTypes> {
     async fn fork_choice_updated_v1(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<Types::PayloadAttributes>,
+        payload_attributes: Option<Engine::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
     /// Post Shanghai forkchoice update handler
@@ -57,7 +57,7 @@ pub trait EngineApi<Types: EngineTypes> {
     async fn fork_choice_updated_v2(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<Types::PayloadAttributes>,
+        payload_attributes: Option<Engine::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
     /// Post Cancun forkchoice update handler
@@ -71,7 +71,7 @@ pub trait EngineApi<Types: EngineTypes> {
     async fn fork_choice_updated_v3(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<Types::PayloadAttributes>,
+        payload_attributes: Option<Engine::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1>
@@ -150,7 +150,7 @@ pub trait EngineApi<Types: EngineTypes> {
 
 // NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
 // generic here. It would be nice if the rpc macro would understand which types need to have serde.
-// By default, if the trait has a generic, the rpc macro will add e.g. `Types: DeserializeOwned` to
+// By default, if the trait has a generic, the rpc macro will add e.g. `Engine: DeserializeOwned` to
 // the trait bounds, which is not what we want, because `Types` is not used directly in any of the
 // trait methods. Instead, we have to add the bounds manually. This would be disastrous if we had
 // more than one associated type used in the trait methods.

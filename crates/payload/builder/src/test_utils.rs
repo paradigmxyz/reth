@@ -16,24 +16,24 @@ use std::{
 };
 
 /// Creates a new [PayloadBuilderService] for testing purposes.
-pub fn test_payload_service<Types>() -> (
+pub fn test_payload_service<Engine>() -> (
     PayloadBuilderService<
         TestPayloadJobGenerator,
         futures_util::stream::Empty<CanonStateNotification>,
-        Types,
+        Engine,
     >,
-    PayloadBuilderHandle<Types>,
+    PayloadBuilderHandle<Engine>,
 )
 where
-    Types: EngineTypes<PayloadBuilderAttributes = EthPayloadBuilderAttributes>,
+    Engine: EngineTypes<PayloadBuilderAttributes = EthPayloadBuilderAttributes>,
 {
     PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
 }
 
 /// Creates a new [PayloadBuilderService] for testing purposes and spawns it in the background.
-pub fn spawn_test_payload_service<Types>() -> PayloadBuilderHandle<Types>
+pub fn spawn_test_payload_service<Engine>() -> PayloadBuilderHandle<Engine>
 where
-    Types: EngineTypes<PayloadBuilderAttributes = EthPayloadBuilderAttributes> + 'static,
+    Engine: EngineTypes<PayloadBuilderAttributes = EthPayloadBuilderAttributes> + 'static,
 {
     let (service, handle) = test_payload_service();
     tokio::spawn(service);
