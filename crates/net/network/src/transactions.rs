@@ -58,6 +58,9 @@ const GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE: GetPooledTransactionLimit =
 /// How many peers we keep track of for each missing transaction.
 const MAX_ALTERNATIVE_PEERS_PER_TX: usize = 3;
 
+/// Maximum concurrent [`GetPooledTxRequest`]s to allow per peer.
+const MAX_INFLIGHT_GET_POOLED_TX_REQUESTS_PER_PEER: u8 = 1;
+
 /// The future for inserting a function into the pool
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<TxHash>> + Send + 'static>>;
 
@@ -542,16 +545,20 @@ where
                 return
             }
 
+            let peer_id: PeerId = peer.request_tx.peer_id;
+
             // filter out hashes already in request, for those hashes add the peer as fallback
-            self.transaction_fetcher.filter_new_hashes(&mut hashes, peer);
+            self.transaction_fetcher.filter_new_hashes(&mut hashes, peer_id);
 
             if hashes.is_empty() {
                 // nothing to request
                 return
             }
 
-            let inflight_requests_count = *peer.inflight_requests_semaphore_rx.borrow();
-            if inflight_requests_count > 0 {
+            // todo: choose idle status based on total inflight requests too?
+            //let inflight_requests_count = *peer.inflight_requests_semaphore_rx.borrow();
+
+            if self.transaction_fetcher.is_idle(peer_id) {
                 // since all hashes new at this point, no idle peer can exist that announced them
                 for hash in hashes {
                     self.transaction_fetcher.buffered_hashes.insert(hash);
@@ -607,9 +614,10 @@ where
         let peers = self.transaction_fetcher.hash_to_fallback_peers.get(&hash)?;
         for peer_id in peers {
             let peer_id: &PeerId = peer_id;
-            if let Some(peer) = self.peers.get(peer_id) {
-                let inflight_requests_count = *peer.inflight_requests_semaphore_rx.borrow();
-                if inflight_requests_count < 1 {
+            if self.peers.get(peer_id).is_some() {
+                // todo: choose idle status based on total inflight requests too?
+                // let inflight_requests_count = *peer.inflight_requests_semaphore_rx.borrow();
+                if self.transaction_fetcher.is_idle(*peer_id) {
                     return Some(*peer_id)
                 }
             }
@@ -712,7 +720,7 @@ where
                 peer_id,
                 client_version,
                 messages,
-                inflight_requests_semaphore_rx,
+                inflight_requests_semaphore_rx: _inflight_requests_semaphore_rx,
                 version,
                 ..
             } => {
@@ -724,7 +732,7 @@ where
                             NonZeroUsize::new(PEER_TRANSACTION_CACHE_LIMIT).unwrap(),
                         ),
                         request_tx: messages,
-                        inflight_requests_semaphore_rx,
+                        _inflight_requests_semaphore_rx,
                         version,
                         client_version,
                     },
@@ -1138,7 +1146,7 @@ struct Peer {
     /// A communication channel directly to the peer's session task.
     request_tx: PeerRequestSender,
     /// Counting semaphore for inflight requests.
-    inflight_requests_semaphore_rx: watch::Receiver<usize>,
+    _inflight_requests_semaphore_rx: watch::Receiver<usize>,
     /// negotiated version of the session.
     version: EthVersion,
     /// The peer's client version.
@@ -1151,6 +1159,9 @@ struct Peer {
 /// new requests on announced hashes.
 #[derive(Debug, Default)]
 struct TransactionFetcher {
+    /// All peers to which a request for pooled transactions is currently active. Maps 1-1 to
+    /// `inflight_requests`.
+    active_peers: HashMap<PeerId, u8>,
     /// All currently active requests for pooled transactions.
     inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
     /// Hashes that are awaiting fetch from an idle peer.
@@ -1164,7 +1175,7 @@ struct TransactionFetcher {
 impl TransactionFetcher {
     /// Removes the specified hashes from inflight tracking.
     #[inline]
-    fn remove_inflight_hashes<'a, I>(&mut self, hashes: I)
+    fn remove_fallback_peers_for<'a, I>(&mut self, hashes: I)
     where
         I: IntoIterator<Item = &'a TxHash>,
     {
@@ -1173,12 +1184,64 @@ impl TransactionFetcher {
         }
     }
 
+    /// Updates peer's activity status upon a resolved [`GetPooledTxRequest`].
+    fn update_peer_activity(&mut self, resp: &GetPooledTxResponse) {
+        let GetPooledTxResponse { peer_id, .. } = resp;
+
+        debug_assert!(self.active_peers.contains_key(peer_id));
+
+        let mut remove = || -> bool {
+            if let Some(inflight_count) = self.active_peers.get_mut(peer_id) {
+                if *inflight_count <= 1 {
+                    return true
+                }
+                *inflight_count -= 1;
+            }
+            false
+        };
+        if remove() {
+            self.active_peers.remove(peer_id);
+        }
+    }
+
+    /// Returns `true` if peer is idle.
+    fn is_idle(&self, peer_id: PeerId) -> bool {
+        let Some(inflight_count) = self.active_peers.get(&peer_id) else { return true };
+        if *inflight_count < MAX_INFLIGHT_GET_POOLED_TX_REQUESTS_PER_PEER {
+            return true
+        }
+        false
+    }
+
+    /// Stores callback from a [`GetPooledTxRequest`].
+    fn store_request_fut(
+        &mut self,
+        peer_id: PeerId,
+        requested_hashes: Vec<TxHash>,
+        response_rx: oneshot::Receiver<Result<PooledTransactions, RequestError>>,
+    ) {
+        let inflight_count = self.active_peers.entry(peer_id).or_default();
+        if *inflight_count >= MAX_INFLIGHT_GET_POOLED_TX_REQUESTS_PER_PEER {
+            return
+        }
+
+        *inflight_count += 1;
+
+        self.inflight_requests.push(GetPooledTxRequestFut::new(
+            peer_id,
+            requested_hashes,
+            response_rx,
+        ))
+    }
+
     /// Advances all inflight requests and returns the next event.
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<FetchEvent> {
-        if let Poll::Ready(Some(GetPooledTxResponse { peer_id, requested_hashes, result })) =
-            self.inflight_requests.poll_next_unpin(cx)
-        {
-            self.remove_inflight_hashes(requested_hashes.iter());
+        if let Poll::Ready(Some(response)) = self.inflight_requests.poll_next_unpin(cx) {
+            self.update_peer_activity(&response);
+
+            let GetPooledTxResponse { peer_id, requested_hashes, result } = response;
+
+            self.remove_fallback_peers_for(requested_hashes.iter());
 
             return match result {
                 Ok(Ok(transactions)) => {
@@ -1217,11 +1280,10 @@ impl TransactionFetcher {
         &mut self,
         hashes: impl IntoIterator<Item = &'a TxHash>,
     ) {
-        self.remove_inflight_hashes(hashes)
+        self.remove_fallback_peers_for(hashes)
     }
 
-    fn filter_new_hashes(&mut self, announced_hashes: &mut Vec<TxHash>, peer: &Peer) {
-        let peer_id: PeerId = peer.request_tx.peer_id;
+    fn filter_new_hashes(&mut self, announced_hashes: &mut Vec<TxHash>, peer_id: PeerId) {
         // 1. filter out inflight hashes, and register the peer as fallback for all inflight hashes
         announced_hashes.retain(|&hash| {
             match self.hash_to_fallback_peers.entry(hash) {
@@ -1278,13 +1340,10 @@ impl TransactionFetcher {
             }
             return false
         } else {
+            // remove requested hashes from buffered hashes
             self.buffered_hashes.retain(|hash| !new_announced_hashes.contains(hash));
-            //create a new request for it, from that peer
-            self.inflight_requests.push(GetPooledTxRequestFut::new(
-                peer_id,
-                new_announced_hashes,
-                rx,
-            ))
+            // stores a new request future for the request
+            self.store_request_fut(peer_id, new_announced_hashes, rx);
         }
 
         true
