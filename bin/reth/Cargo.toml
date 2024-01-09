@@ -22,12 +22,11 @@ normal = [
 # reth
 reth-config.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
-reth-db = { workspace = true, features = ["mdbx", "test-utils"] }
-# TODO: Temporary use of the test-utils feature
-reth-provider = { workspace = true, features = ["test-utils"] }
+reth-db = { workspace = true, features = ["mdbx"] }
+reth-provider = { workspace = true }
 reth-revm.workspace = true
 reth-stages.workspace = true
-reth-interfaces = { workspace = true, features = ["test-utils", "clap"] }
+reth-interfaces = { workspace = true, features = ["clap"] }
 reth-transaction-pool.workspace = true
 reth-beacon-consensus.workspace = true
 reth-auto-seal-consensus.workspace = true
