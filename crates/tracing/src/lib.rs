@@ -208,7 +208,9 @@ impl Tracer for RethTracer {
             None
         };
 
-        tracing_subscriber::registry().with(layers.into_inner()).init();
+        // The error is returned if the global default subscriber is already set,
+        // so it's safe to ignore it
+        let _ = tracing_subscriber::registry().with(layers.into_inner()).try_init();
         Ok(file_guard)
     }
 }
