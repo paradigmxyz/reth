@@ -21,6 +21,7 @@ use reth_db::{init_db, DatabaseEnv};
 use reth_interfaces::consensus::Consensus;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
+use reth_node_api::EngineTypes;
 use reth_payload_builder::PayloadBuilderService;
 use reth_primitives::{
     fs::{self},
@@ -260,7 +261,14 @@ impl EngineApiStore {
         Self { path }
     }
 
-    fn on_message(&self, msg: &BeaconEngineMessage, received_at: SystemTime) -> eyre::Result<()> {
+    fn on_message<Types>(
+        &self,
+        msg: &BeaconEngineMessage<Types>,
+        received_at: SystemTime,
+    ) -> eyre::Result<()>
+    where
+        Types: EngineTypes<PayloadAttributes = PayloadAttributes>,
+    {
         fs::create_dir_all(&self.path)?; // ensure that store path had been created
         let timestamp = received_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
         match msg {
@@ -310,11 +318,15 @@ impl EngineApiStore {
         Ok(filenames_by_ts.into_iter().flat_map(|(_, paths)| paths))
     }
 
-    pub(crate) async fn intercept(
+    pub(crate) async fn intercept<Types>(
         self,
-        mut rx: UnboundedReceiver<BeaconEngineMessage>,
-        to_engine: UnboundedSender<BeaconEngineMessage>,
-    ) {
+        mut rx: UnboundedReceiver<BeaconEngineMessage<Types>>,
+        to_engine: UnboundedSender<BeaconEngineMessage<Types>>,
+    )
+    where
+        Types: EngineTypes<PayloadAttributes = PayloadAttributes>,
+        BeaconEngineMessage<Types>: std::fmt::Debug,
+    {
         loop {
             let Some(msg) = rx.recv().await else { break };
             if let Err(error) = self.on_message(&msg, SystemTime::now()) {
