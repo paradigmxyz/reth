@@ -1,7 +1,4 @@
-use crate::{
-    attributes_validation::EngineApiMessageVersion, validate_version_specific_fields,
-    AttributesValidationError,
-};
+use crate::{validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion};
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge,
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId},
