@@ -5,7 +5,9 @@ use crate::cli::{
     config::{PayloadBuilderConfig, RethNetworkConfig, RethRpcConfig},
 };
 use clap::Args;
-use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
+use reth_basic_payload_builder::{
+    BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, PayloadBuilder,
+};
 use reth_provider::CanonStateSubscriptions;
 use reth_node_api::EngineTypes;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
@@ -126,15 +128,19 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     ///
     /// By default this spawns a [BasicPayloadJobGenerator] with the default configuration
     /// [BasicPayloadJobGeneratorConfig].
-    fn spawn_payload_builder_service<Conf, Reth, Types>(
+    fn spawn_payload_builder_service<Conf, Reth, Builder, Types>(
         &mut self,
         conf: &Conf,
         components: &Reth,
+        payload_builder: Builder,
     ) -> eyre::Result<PayloadBuilderHandle<Types>>
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
         Types: EngineTypes + 'static,
+        Builder: PayloadBuilder<Reth::Pool, Reth::Provider, Attributes = Types::PayloadBuilderAttributes>
+            + Unpin
+            + 'static,
     {
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
             .interval(conf.interval())
@@ -144,17 +150,18 @@ pub trait RethNodeCommandConfig: fmt::Debug {
             .max_gas_limit(conf.max_gas_limit());
 
         // no extradata for optimism
-        #[cfg(feature = "optimism")]
-        let payload_job_config = payload_job_config.extradata(Default::default());
+        // #[cfg(feature = "optimism")]
+        // let payload_job_config = payload_job_config.extradata(Default::default());
 
         // The default payload builder is implemented on the unit type.
-        #[cfg(not(feature = "optimism"))]
-        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
+        // #[cfg(not(feature = "optimism"))]
+        // let payload_builder: PayloadBuilderHandle<EthEngineTypes> =
+        // reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
 
         // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
-        #[cfg(feature = "optimism")]
-        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
-            .set_compute_pending_block(conf.compute_pending_block());
+        // #[cfg(feature = "optimism")]
+        // let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
+        //     .set_compute_pending_block(conf.compute_pending_block());
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             components.provider(),
@@ -317,19 +324,23 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         }
     }
 
-    fn spawn_payload_builder_service<Conf, Reth, Types>(
+    fn spawn_payload_builder_service<Conf, Reth, Builder, Types>(
         &mut self,
         conf: &Conf,
         components: &Reth,
+        payload_builder: Builder,
     ) -> eyre::Result<PayloadBuilderHandle<Types>>
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
         Types: EngineTypes + 'static,
+        Builder: PayloadBuilder<Reth::Pool, Reth::Provider, Attributes = Types::PayloadBuilderAttributes>
+            + Unpin
+            + 'static,
     {
         self.inner_mut()
             .ok_or_else(|| eyre::eyre!("config value must be set"))?
-            .spawn_payload_builder_service(conf, components)
+            .spawn_payload_builder_service(conf, components, payload_builder)
     }
 }
 

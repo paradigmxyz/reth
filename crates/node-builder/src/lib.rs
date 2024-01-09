@@ -10,4 +10,4 @@
 /// Exports commonly used concrete instances of the [EngineTypes](reth_node_api::EngineTypes)
 /// trait.
 pub mod engine;
-pub use engine::EthEngineTypes;
+pub use engine::{EthEngineTypes, OptimismEngineTypes};
