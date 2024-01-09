@@ -6296,7 +6296,7 @@ dependencies = [
  "ph",
  "rand 0.8.5",
  "serde",
- "sucds 0.8.1",
+ "sucds",
  "tempfile",
  "thiserror",
  "tracing",
@@ -6391,8 +6391,7 @@ dependencies = [
  "sha2",
  "smallvec",
  "strum",
- "sucds 0.6.0",
- "sucds 0.8.1",
+ "sucds",
  "tempfile",
  "test-fuzz",
  "thiserror",
@@ -7808,15 +7807,6 @@ name = "subtle"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
-
-[[package]]
-name = "sucds"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64accd20141dfbef67ad83c51d588146cff7810616e1bda35a975be369059533"
-dependencies = [
- "anyhow",
-]
 
 [[package]]
 name = "sucds"

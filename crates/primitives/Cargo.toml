@@ -49,7 +49,6 @@ rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10.7"
-sucds = "~0.6"
 tempfile.workspace = true
 thiserror.workspace = true
 zstd = { version = "0.12", features = ["experimental"] }
