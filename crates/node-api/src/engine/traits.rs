@@ -9,7 +9,10 @@ use reth_rpc_types::engine::{
 };
 
 /// This can be implemented by types that describe a currently running payload job.
-pub trait PayloadBuilderAttributes {
+///
+/// This is used as a conversion type, transforming a payload attributes type that the engine API
+/// receives, into a type that the payload builder can use.
+pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     /// The payload attributes that can be used to construct this type. Used as the argument in
     /// [PayloadBuilderAttributes::try_new].
     type RpcPayloadAttributes;
