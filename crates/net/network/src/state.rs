@@ -179,36 +179,34 @@ where
         let number = msg.block.block.header.number;
         let mut count = 0;
 
-        // Shuffle peers to propagate to a random sample of peers on every block announcement
-        let mut peer_ids: Vec<PeerId> = self.active_peers.keys().cloned().collect();
-        peer_ids.shuffle(&mut rand::thread_rng());
+        // Shuffle to propagate to a random sample of peers on every block announcement
+        let mut peers: Vec<_> = self.active_peers.iter_mut().collect();
+        peers.shuffle(&mut rand::thread_rng());
 
-        for peer_id in peer_ids.iter() {
-            if let Some(peer) = self.active_peers.get_mut(peer_id) {
-                if peer.blocks.contains(&msg.hash) {
-                    // skip peers which already reported the block
-                    continue
+        for (peer_id, peer) in peers.into_iter() {
+            if peer.blocks.contains(&msg.hash) {
+                // skip peers which already reported the block
+                continue
+            }
+
+            // Queue a `NewBlock` message for the peer
+            if count < num_propagate {
+                self.queued_messages
+                    .push_back(StateAction::NewBlock { peer_id: *peer_id, block: msg.clone() });
+
+                // update peer block info
+                if self.state_fetcher.update_peer_block(peer_id, msg.hash, number) {
+                    peer.best_hash = msg.hash;
                 }
 
-                // Queue a `NewBlock` message for the peer
-                if count < num_propagate {
-                    self.queued_messages
-                        .push_back(StateAction::NewBlock { peer_id: *peer_id, block: msg.clone() });
+                // mark the block as seen by the peer
+                peer.blocks.insert(msg.hash);
 
-                    // update peer block info
-                    if self.state_fetcher.update_peer_block(peer_id, msg.hash, number) {
-                        peer.best_hash = msg.hash;
-                    }
+                count += 1;
+            }
 
-                    // mark the block as seen by the peer
-                    peer.blocks.insert(msg.hash);
-
-                    count += 1;
-                }
-
-                if count >= num_propagate {
-                    break
-                }
+            if count >= num_propagate {
+                break
             }
         }
     }
