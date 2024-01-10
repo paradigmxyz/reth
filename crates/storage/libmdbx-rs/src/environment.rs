@@ -6,7 +6,6 @@ use crate::{
     Mode, Transaction, TransactionKind,
 };
 use byteorder::{ByteOrder, NativeEndian};
-use ffi::{mdbx_pid_t, mdbx_tid_t, MDBX_env, MDBX_hsr_func, MDBX_txn};
 use mem::size_of;
 use std::{
     ffi::CString,
@@ -49,6 +48,7 @@ impl Environment {
             geometry: None,
             log_level: None,
             kind: Default::default(),
+            #[cfg(not(windows))]
             handle_slow_readers: None,
         }
     }
@@ -595,6 +595,7 @@ pub struct EnvironmentBuilder {
     geometry: Option<Geometry<(Option<usize>, Option<usize>)>>,
     log_level: Option<ffi::MDBX_log_level_t>,
     kind: EnvironmentKind,
+    #[cfg(not(windows))]
     handle_slow_readers: Option<HandleSlowReadersCallback>,
 }
 
@@ -878,7 +879,7 @@ impl EnvironmentBuilder {
 /// Caution: this leaks the memory for callbacks, so they're alive throughout the program. It's
 /// fine, because we also expect the database environment to be alive during this whole time.
 #[cfg(not(windows))]
-unsafe fn handle_slow_readers_callback(callback: HandleSlowReadersCallback) -> MDBX_hsr_func {
+unsafe fn handle_slow_readers_callback(callback: HandleSlowReadersCallback) -> ffi::MDBX_hsr_func {
     // Move the callback function to heap and intentionally leak it, so it's not dropped and the
     // MDBX env can use it throughout the whole program.
     let callback = Box::leak(Box::new(callback));
@@ -887,10 +888,10 @@ unsafe fn handle_slow_readers_callback(callback: HandleSlowReadersCallback) -> M
     // and without `env` and `txn` arguments that we don't want to expose to the user. Again,
     // move the closure to heap and leak.
     let hsr = Box::leak(Box::new(
-        |_env: *const MDBX_env,
-         _txn: *const MDBX_txn,
-         pid: mdbx_pid_t,
-         tid: mdbx_tid_t,
+        |_env: *const ffi::MDBX_env,
+         _txn: *const ffi::MDBX_txn,
+         pid: ffi::mdbx_pid_t,
+         tid: ffi::mdbx_tid_t,
          laggard: u64,
          gap: ::libc::c_uint,
          space: usize,

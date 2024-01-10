@@ -464,7 +464,7 @@ impl Default for ExecutionStageThresholds {
         Self {
             max_blocks: Some(500_000),
             max_changes: Some(5_000_000),
-            // 30M block per gas on 50k blocks
+            // 30M gas per block on 50k blocks
             max_cumulative_gas: Some(30_000_000 * 50_000),
         }
     }
