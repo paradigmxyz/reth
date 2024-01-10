@@ -245,6 +245,7 @@ pub mod test_utils {
     pub fn create_test_rw_db() -> Arc<TempDatabase<DatabaseEnv>> {
         let path = tempdir_path();
         let emsg = format!("{}: {:?}", ERROR_DB_CREATION, path);
+
         let db = init_db(&path, None).expect(&emsg);
 
         Arc::new(TempDatabase { db: Some(db), path })
