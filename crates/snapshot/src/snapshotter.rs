@@ -71,8 +71,7 @@ impl<DB: Database> Snapshotter<DB> {
     }
 
     /// Run the snapshotter
-    pub fn run(&mut self, targets: SnapshotTargets) -> SnapshotterResult {
-        let provider = self.provider_factory.provider()?;
+    pub fn run(&self, targets: SnapshotTargets) -> SnapshotterResult {
         let snapshot_provider = &self.snapshot_provider;
 
         debug_assert!(
@@ -83,17 +82,22 @@ impl<DB: Database> Snapshotter<DB> {
             let mut snapshot_writer =
                 snapshot_provider.writer(*block_range.start(), SnapshotSegment::Transactions)?;
 
-            let mut transactions_cursor =
-                provider.tx_ref().cursor_read::<tables::Transactions>()?;
-
             for block in block_range {
+                // Create a new database transaction on every block to prevent long-lived read-only
+                // transactions
+                let provider = self.provider_factory.provider()?;
+
                 let Some(block_body_indices) = provider.block_body_indices(block)? else {
+                    // TODO(alexey): return an error?
                     continue
                 };
-                let tx_range = block_body_indices.tx_num_range();
-                let tx_walker = transactions_cursor.walk_range(tx_range)?;
 
-                for entry in tx_walker {
+                let mut transactions_cursor =
+                    provider.tx_ref().cursor_read::<tables::Transactions>()?;
+                let transactions_walker =
+                    transactions_cursor.walk_range(block_body_indices.tx_num_range())?;
+
+                for entry in transactions_walker {
                     let (tx_number, transaction) = entry?;
 
                     snapshot_writer.append_transaction(block, tx_number, transaction)?;
@@ -110,24 +114,29 @@ impl<DB: Database> Snapshotter<DB> {
     }
 
     /// Returns a snapshot targets at the provided finalized block number.
-    /// The target is determined by the check against highest snapshots.
+    /// The target is determined by the check against highest snapshots using
+    /// [SnapshotProvider::get_highest_snapshots].
     pub fn get_snapshot_targets(
         &self,
         finalized_block_number: BlockNumber,
     ) -> RethResult<SnapshotTargets> {
         let highest_snapshots = self.snapshot_provider.get_highest_snapshots();
 
-        // Calculate block ranges to snapshot
-        let headers = highest_snapshots.headers.unwrap_or_default() + 1..=finalized_block_number;
-        let receipts = highest_snapshots.receipts.unwrap_or_default() + 1..=finalized_block_number;
-        let transactions =
-            highest_snapshots.transactions.unwrap_or_default() + 1..=finalized_block_number;
-
         Ok(SnapshotTargets {
-            headers: (!headers.is_empty()).then_some(headers),
-            receipts: (!receipts.is_empty()).then_some(receipts),
-            transactions: (!transactions.is_empty()).then_some(transactions),
+            headers: self.get_snapshot_target(highest_snapshots.headers, finalized_block_number),
+            receipts: self.get_snapshot_target(highest_snapshots.receipts, finalized_block_number),
+            transactions: self
+                .get_snapshot_target(highest_snapshots.transactions, finalized_block_number),
         })
+    }
+
+    fn get_snapshot_target(
+        &self,
+        highest_snapshot: Option<BlockNumber>,
+        finalized_block_number: BlockNumber,
+    ) -> Option<RangeInclusive<BlockNumber>> {
+        let range = highest_snapshot.unwrap_or_default() + 1..=finalized_block_number;
+        (!range.is_empty()).then_some(range)
     }
 }
 
@@ -152,11 +161,10 @@ mod tests {
             .factory
             .with_snapshots(snapshots_dir.path().to_path_buf())
             .expect("factory with snapshots");
-        let snapshot_provider = provider_factory.snapshot_provider.clone().unwrap();
+        let snapshot_provider = provider_factory.snapshot_provider().unwrap();
 
-        let mut snapshotter = Snapshotter::new(provider_factory, snapshot_provider.clone());
+        let snapshotter = Snapshotter::new(provider_factory, snapshot_provider.clone());
 
-        // Snapshot targets has data per part up to the passed finalized block number
         let targets = snapshotter.get_snapshot_targets(1).expect("get snapshot targets");
         assert_eq!(
             targets,
@@ -173,7 +181,6 @@ mod tests {
             HighestSnapshots { headers: None, receipts: None, transactions: Some(1) }
         );
 
-        // Snapshot targets has data per part up to the passed finalized block number
         let targets = snapshotter.get_snapshot_targets(5).expect("get snapshot targets");
         assert_eq!(
             targets,

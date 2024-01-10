@@ -41,7 +41,7 @@ pub struct ProviderFactory<DB> {
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Snapshot Provider
-    pub snapshot_provider: Option<Arc<SnapshotProvider>>,
+    snapshot_provider: Option<Arc<SnapshotProvider>>,
 }
 
 impl<DB: Clone> Clone for ProviderFactory<DB> {

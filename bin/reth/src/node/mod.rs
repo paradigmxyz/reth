@@ -263,8 +263,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let _snapshotter = reth_snapshot::Snapshotter::new(
             provider_factory.clone(),
             provider_factory
-                .snapshot_provider
-                .clone()
+                .snapshot_provider()
                 .expect("snapshot provider initialized via provider factory"),
         );
 
