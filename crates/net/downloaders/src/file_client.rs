@@ -127,15 +127,13 @@ impl FileClient {
     }
 
     /// Use the provided bodies as the file client's block body buffer.
-    #[allow(dead_code)]
-    pub(crate) fn with_bodies(mut self, bodies: HashMap<BlockHash, BlockBody>) -> Self {
+    pub fn with_bodies(mut self, bodies: HashMap<BlockHash, BlockBody>) -> Self {
         self.bodies = bodies;
         self
     }
 
     /// Use the provided headers as the file client's block body buffer.
-    #[allow(dead_code)]
-    pub(crate) fn with_headers(mut self, headers: HashMap<BlockNumber, Header>) -> Self {
+    pub fn with_headers(mut self, headers: HashMap<BlockNumber, Header>) -> Self {
         self.headers = headers;
         for (number, header) in &self.headers {
             self.hash_to_number.insert(header.hash_slow(), *number);
