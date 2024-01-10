@@ -1,25 +1,14 @@
 //! Support for snapshotting.
 
-use crate::{segments, segments::Segment, SnapshotterError};
-use reth_db::{
-    cursor::DbCursorRO, database::Database, snapshot::iter_snapshots, tables, transaction::DbTx,
-    Tables,
-};
+use crate::SnapshotterError;
+use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::RethResult;
-use reth_primitives::{snapshot::HighestSnapshots, BlockNumber, SnapshotSegment, TxNumber};
+use reth_primitives::{snapshot::HighestSnapshots, BlockNumber, SnapshotSegment};
 use reth_provider::{
     providers::{SnapshotProvider, SnapshotWriter},
-    BlockReader, DatabaseProviderRO, ProviderFactory, ReceiptProvider, TransactionsProvider,
-    TransactionsProviderExt,
+    BlockReader, ProviderFactory,
 };
-use std::{
-    collections::HashMap,
-    ops::RangeInclusive,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
-use tokio::sync::watch;
-use tracing::{warn, Value};
+use std::{ops::RangeInclusive, sync::Arc};
 
 /// Result of [Snapshotter::run] execution.
 pub type SnapshotterResult = Result<SnapshotTargets, SnapshotterError>;
@@ -142,11 +131,7 @@ impl<DB: Database> Snapshotter<DB> {
 #[cfg(test)]
 mod tests {
     use crate::{snapshotter::SnapshotTargets, Snapshotter};
-    use assert_matches::assert_matches;
-    use reth_interfaces::{
-        test_utils::{generators, generators::random_block_range},
-        RethError,
-    };
+    use reth_interfaces::test_utils::{generators, generators::random_block_range};
     use reth_primitives::{snapshot::HighestSnapshots, B256};
     use reth_stages::test_utils::TestStageDB;
 

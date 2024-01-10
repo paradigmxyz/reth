@@ -36,7 +36,7 @@ impl Default for TestStageDB {
     fn default() -> Self {
         Self {
             factory: ProviderFactory::new(create_test_rw_db(), MAINNET.clone())
-                .with_snapshots(create_test_snapshots_dir(), tokio::sync::watch::channel(None).1)
+                .with_snapshots(create_test_snapshots_dir())
                 .unwrap(),
         }
     }
@@ -46,7 +46,7 @@ impl TestStageDB {
     pub fn new(path: &Path) -> Self {
         Self {
             factory: ProviderFactory::new(create_test_rw_db_with_path(path), MAINNET.clone())
-                .with_snapshots(create_test_snapshots_dir(), tokio::sync::watch::channel(None).1)
+                .with_snapshots(create_test_snapshots_dir())
                 .unwrap(),
         }
     }
