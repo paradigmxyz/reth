@@ -170,6 +170,12 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                     BlockResponse::Empty(_) => 0,
                 },
             };
+
+            // Increment block on snapshot header.
+            if block_number > 0 {
+                snapshotter.increment_block(SnapshotSegment::Transactions)?;
+            }
+
             match response {
                 BlockResponse::Full(block) => {
                     // write transaction block index
@@ -179,11 +185,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
                     // Write transactions
                     for transaction in block.body {
-                        snapshotter.append_transaction(
-                            block_number,
-                            next_tx_num,
-                            transaction.into(),
-                        )?;
+                        snapshotter.append_transaction(next_tx_num, transaction.into())?;
 
                         // Increment transaction id for each transaction.
                         next_tx_num += 1;
@@ -367,7 +369,8 @@ mod tests {
             }, done: false }) if block_number < 200 &&
                 processed == 1 + batch_size && total == previous_stage
         );
-        assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
+        runner.validate_execution(input, output.ok()).unwrap();
+        // assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
     /// Same as [partial_body_download] except the `batch_size` is not hit.
@@ -658,13 +661,14 @@ mod tests {
                             first_tx_num: 1,
                             tx_count: progress.body.len() as u64,
                         };
+
+                        for _ in 0..progress.number {
+                            snapshotter.increment_block(SnapshotSegment::Transactions)?;
+                        }
+
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx(&mut rng);
-                            snapshotter.append_transaction(
-                                progress.number,
-                                tx_num,
-                                transaction.into(),
-                            )
+                            snapshotter.append_transaction(tx_num, transaction.into())
                         })?;
 
                         if body.tx_count != 0 {

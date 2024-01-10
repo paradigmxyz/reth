@@ -235,6 +235,11 @@ impl SegmentHeader {
         self.block_range = block_range;
     }
 
+    /// Sets a new tx_range.
+    pub fn set_tx_range(&mut self, tx_range: RangeInclusive<TxNumber>) {
+        self.tx_range = Some(tx_range);
+    }
+
     /// Returns the row offset which depends on whether the segment is block or transaction based.
     pub fn start(&self) -> u64 {
         match self.segment {
