@@ -976,7 +976,6 @@ where
             return invalid_ancestor;
         }
 
-        #[allow(clippy::single_match)]
         match &error {
             RethError::Canonical(
                 error @ CanonicalError::Validation(BlockValidationError::BlockPreMerge { .. }),
