@@ -2121,14 +2121,15 @@ dependencies = [
 
 [[package]]
 name = "discv5"
-version = "0.3.1"
-source = "git+https://github.com/sigp/discv5?rev=f289bbd4c57d499bb1bdb393af3c249600a1c662#f289bbd4c57d499bb1bdb393af3c249600a1c662"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63b0b31b65aa1fcbd4e0171f1afed5363ccf25efb988ecd42450036f4c6d8539"
 dependencies = [
  "aes 0.7.5",
  "aes-gcm",
  "arrayvec",
  "delay_map",
- "enr",
+ "enr 0.10.0",
  "fnv",
  "futures",
  "hashlink",
@@ -2322,6 +2323,24 @@ name = "enr"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe81b5c06ecfdbc71dd845216f225f53b62a10cb8a16c946836a3467f701d05b"
+dependencies = [
+ "base64 0.21.5",
+ "bytes",
+ "hex",
+ "k256",
+ "log",
+ "rand 0.8.5",
+ "rlp",
+ "serde",
+ "sha3",
+ "zeroize",
+]
+
+[[package]]
+name = "enr"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a3d8dc56e02f954cac8eb489772c552c473346fc34f67412bb6244fd647f7e4"
 dependencies = [
  "base64 0.21.5",
  "bytes",
@@ -2618,7 +2637,7 @@ dependencies = [
  "base64 0.21.5",
  "bytes",
  "const-hex",
- "enr",
+ "enr 0.9.1",
  "ethers-core",
  "futures-channel",
  "futures-core",
@@ -5931,7 +5950,7 @@ version = "0.1.0-alpha.13"
 dependencies = [
  "alloy-rlp",
  "discv5",
- "enr",
+ "enr 0.10.0",
  "generic-array",
  "parking_lot 0.12.1",
  "rand 0.8.5",
@@ -5955,7 +5974,7 @@ dependencies = [
  "alloy-rlp",
  "async-trait",
  "data-encoding",
- "enr",
+ "enr 0.10.0",
  "linked_hash_set",
  "parking_lot 0.12.1",
  "reth-net-common",
@@ -6220,7 +6239,7 @@ dependencies = [
  "async-trait",
  "auto_impl",
  "criterion",
- "enr",
+ "enr 0.10.0",
  "ethers-core",
  "ethers-middleware",
  "ethers-providers",
