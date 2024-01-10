@@ -86,11 +86,6 @@ impl<DB> ProviderFactory<DB> {
     pub fn db_ref(&self) -> &DB {
         &self.db
     }
-
-    /// Returns snapshot provider
-    pub fn snapshot_provider(&self) -> Option<Arc<SnapshotProvider>> {
-        self.snapshot_provider.clone()
-    }
 }
 
 impl<DB: Database> ProviderFactory<DB> {

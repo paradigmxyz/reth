@@ -164,8 +164,6 @@ pub mod test_utils {
     pub const ERROR_DB_OPEN: &str = "Not able to open the database file.";
     /// Error during database creation
     pub const ERROR_DB_CREATION: &str = "Not able to create the database file.";
-    /// Error during database creation
-    pub const ERROR_SNAPSHOTS_CREATION: &str = "Not able to create the snapshot path.";
     /// Error during table creation
     pub const ERROR_TABLE_CREATION: &str = "Not able to create tables in the database.";
     /// Error during tempdir creation
@@ -228,19 +226,11 @@ pub mod test_utils {
         }
     }
 
-    /// Create snapshots path for testing
-    pub fn create_test_snapshots_dir() -> PathBuf {
-        let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
-        let emsg = format!("{}: {:?}", ERROR_SNAPSHOTS_CREATION, path);
-
-        std::fs::create_dir_all(path.clone()).expect(&emsg);
-        path
-    }
-
     /// Create read/write database for testing
     pub fn create_test_rw_db() -> Arc<TempDatabase<DatabaseEnv>> {
         let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
         let emsg = format!("{}: {:?}", ERROR_DB_CREATION, path);
+
         let db = init_db(&path, None).expect(&emsg);
 
         Arc::new(TempDatabase { db: Some(db), path })
