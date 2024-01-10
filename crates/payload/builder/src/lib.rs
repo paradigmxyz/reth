@@ -103,6 +103,7 @@
 pub mod database;
 pub mod error;
 mod metrics;
+mod optimism;
 mod payload;
 mod service;
 mod traits;
@@ -112,7 +113,8 @@ pub mod noop;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-pub use payload::{BuiltPayload, EthPayloadBuilderAttributes, OptimismPayloadBuilderAttributes};
+pub use optimism::OptimismPayloadBuilderAttributes;
+pub use payload::{BuiltPayload, EthPayloadBuilderAttributes};
 pub use reth_rpc_types::engine::PayloadId;
 pub use service::{PayloadBuilderHandle, PayloadBuilderService, PayloadStore};
 pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
