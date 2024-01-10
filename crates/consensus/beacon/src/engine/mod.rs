@@ -2351,7 +2351,7 @@ mod tests {
     mod new_payload {
         use super::*;
         use reth_interfaces::test_utils::{generators, generators::random_block};
-        use reth_primitives::{AllocBuilder, Genesis, Hardfork, U256};
+        use reth_primitives::{Genesis, GenesisAllocator, Hardfork, U256};
         use reth_provider::test_utils::blocks::BlockChainTestData;
 
         #[tokio::test]
@@ -2457,13 +2457,13 @@ mod tests {
             let mut rng = generators::rng();
             // let genesis_keys = generate_keys(&mut rng, 16);
             let amount = 1000000000000000000u64;
-            let mut alloc_builder = AllocBuilder::default().with_rng(&mut rng);
+            let mut allocator = GenesisAllocator::default().with_rng(&mut rng);
             for _ in 0..16 {
                 // add 16 new accounts
-                alloc_builder.new_funded_account(U256::from(amount));
+                allocator.new_funded_account(U256::from(amount));
             }
 
-            let alloc = alloc_builder.build();
+            let alloc = allocator.build();
 
             let genesis = Genesis::default().extend_accounts(alloc);
 

@@ -59,7 +59,7 @@ pub use constants::{
     KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
 pub use error::{GotExpected, GotExpectedBoxed};
-pub use genesis::{AllocBuilder, ChainConfig, Genesis, GenesisAccount};
+pub use genesis::{ChainConfig, Genesis, GenesisAccount, GenesisAllocator};
 pub use header::{Header, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
 pub use log::{logs_bloom, Log};
