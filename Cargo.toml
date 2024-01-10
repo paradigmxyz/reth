@@ -164,14 +164,15 @@ revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_fr
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors" }
 
 # eth
-alloy-primitives = "0.5"
-alloy-dyn-abi = "0.5"
-alloy-sol-types = "0.5"
+alloy-primitives = "0.6"
+alloy-dyn-abi = "0.6"
+alloy-sol-types = "0.6"
 alloy-rlp = "0.3"
 alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", features = ["jsonrpsee-types"] }
 alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", features = [
     "jsonrpsee-types",
 ] }
+alloy-trie = "0.2"
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
@@ -205,6 +206,7 @@ hex-literal = "0.4"
 once_cell = "1.17"
 syn = "2.0"
 ahash = "0.8.6"
+nybbles = "0.1"
 
 # proc-macros
 proc-macro2 = "1.0"
