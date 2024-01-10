@@ -458,6 +458,15 @@ fn on_stage_error<DB: Database>(
                 }))
             }
         }
+    } else if let StageError::MissingSnapshotData { block } = err {
+        error!(
+            target: "sync::pipeline",
+            stage = %stage_id,
+            bad_block = %block.number,
+            "Stage is missing snapshot data."
+        );
+
+        Ok(Some(ControlFlow::Unwind { target: block.number - 1, bad_block: block }))
     } else if err.is_fatal() {
         error!(target: "sync::pipeline", stage = %stage_id, "Stage encountered a fatal error: {err}");
         Err(err.into())

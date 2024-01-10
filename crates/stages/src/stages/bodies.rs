@@ -130,11 +130,24 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             .unwrap_or_default();
         let db_tx_num = tx_block_cursor.last()?.unwrap_or_default().0;
 
+        dbg!(snapshot_tx_num);
+        dbg!(db_tx_num);
+
         match snapshot_tx_num.cmp(&db_tx_num) {
             Ordering::Greater => {
                 snapshotter.prune_transactions(snapshot_tx_num - db_tx_num, from_block - 1)?
             }
-            Ordering::Less => return Err(StageError::MissingSnapshotData),
+            Ordering::Less => {
+                let last_block = snapshot_provider
+                    .get_highest_snapshot_block(SnapshotSegment::Transactions)
+                    .unwrap_or_default();
+
+                let missing_block = Box::new(
+                    tx.get::<tables::Headers>(last_block + 1)?.unwrap_or_default().seal_slow(),
+                );
+
+                return Err(StageError::MissingSnapshotData { block: missing_block })
+            }
             Ordering::Equal => {}
         }
 
@@ -270,7 +283,15 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
         // If there are more transactions
         if db_tx_num > snapshot_tx_num {
-            return Err(StageError::MissingSnapshotData)
+            let last_block = snapshot_provider
+                .get_highest_snapshot_block(SnapshotSegment::Transactions)
+                .unwrap_or_default();
+
+            let missing_block = Box::new(
+                tx.get::<tables::Headers>(last_block + 1)?.unwrap_or_default().seal_slow(),
+            );
+
+            return Err(StageError::MissingSnapshotData { block: missing_block })
         }
 
         // Unwinds static file
