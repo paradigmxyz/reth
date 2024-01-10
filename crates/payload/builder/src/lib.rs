@@ -28,7 +28,7 @@
 //! use std::pin::Pin;
 //! use std::sync::Arc;
 //! use std::task::{Context, Poll};
-//! use reth_payload_builder::{BuiltPayload, KeepPayloadJobAlive, PayloadBuilderAttributes, PayloadJob, PayloadJobGenerator};
+//! use reth_payload_builder::{BuiltPayload, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator};
 //! use reth_payload_builder::error::PayloadBuilderError;
 //! use reth_primitives::{Block, Header, U256};
 //!
@@ -39,7 +39,7 @@
 //!     type Job = EmptyBlockPayloadJob;
 //!
 //! /// This is invoked when the node receives payload attributes from the beacon node via `engine_forkchoiceUpdatedV1`
-//! fn new_payload_job(&self, attr: PayloadBuilderAttributes) -> Result<Self::Job, PayloadBuilderError> {
+//! fn new_payload_job(&self, attr: EthPayloadBuilderAttributes) -> Result<Self::Job, PayloadBuilderError> {
 //!         Ok(EmptyBlockPayloadJob{ attributes: attr,})
 //!     }
 //!
@@ -47,10 +47,11 @@
 //!
 //! /// A [PayloadJob] that builds empty blocks.
 //! pub struct EmptyBlockPayloadJob {
-//!   attributes: PayloadBuilderAttributes,
+//!   attributes: EthPayloadBuilderAttributes,
 //! }
 //!
 //! impl PayloadJob for EmptyBlockPayloadJob {
+//!    type PayloadAttributes = EthPayloadBuilderAttributes;
 //!    type ResolvePayloadFuture = futures_util::future::Ready<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
 //!
 //! fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
@@ -68,7 +69,7 @@
 //!     Ok(Arc::new(payload))
 //! }
 //!
-//! fn payload_attributes(&self) -> Result<PayloadBuilderAttributes, PayloadBuilderError> {
+//! fn payload_attributes(&self) -> Result<EthPayloadBuilderAttributes, PayloadBuilderError> {
 //!     Ok(self.attributes.clone())
 //! }
 //!
@@ -111,7 +112,7 @@ pub mod noop;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-pub use payload::{BuiltPayload, PayloadBuilderAttributes};
+pub use payload::{BuiltPayload, EthPayloadBuilderAttributes, OptimismPayloadBuilderAttributes};
 pub use reth_rpc_types::engine::PayloadId;
 pub use service::{PayloadBuilderHandle, PayloadBuilderService, PayloadStore};
 pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
