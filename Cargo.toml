@@ -161,17 +161,20 @@ revm = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", feat
 revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", features = [
     "std",
 ], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "4a3f82fa0d2010b3de69479b42fafe82339dae5e" }
 
 # eth
 alloy-primitives = "0.5"
 alloy-dyn-abi = "0.5"
 alloy-sol-types = "0.5"
 alloy-rlp = "0.3"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", features = ["jsonrpsee-types"] }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", features = [
+    "jsonrpsee-types",
+], rev = "9d997a2faf4f78bcf1b4cb59e52d45aada80bd32" }
 alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", features = [
     "jsonrpsee-types",
-] }
+], rev = "9d997a2faf4f78bcf1b4cb59e52d45aada80bd32" }
+
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
@@ -222,9 +225,9 @@ pin-project = "1.0.12"
 futures-util = "0.3.25"
 
 # rpc
-jsonrpsee = { version = "0.20" }
-jsonrpsee-core = { version = "0.20" }
-jsonrpsee-types = { version = "0.20" }
+jsonrpsee = "0.20"
+jsonrpsee-core = "0.20"
+jsonrpsee-types = "0.20"
 
 # crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = [
