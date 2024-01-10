@@ -1,9 +1,7 @@
 //! Prune hook for the engine implementation.
 
 use crate::{
-    engine::hooks::{
-        EngineContext, EngineHook, EngineHookAction, EngineHookError, EngineHookEvent,
-    },
+    engine::hooks::{EngineContext, EngineHook, EngineHookError, EngineHookEvent},
     hooks::EngineHookDBAccessLevel,
 };
 use futures::FutureExt;
@@ -52,10 +50,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
     /// Advances the pruner state.
     ///
     /// This checks for the result in the channel, or returns pending if the pruner is idle.
-    fn poll_pruner(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<RethResult<(EngineHookEvent, Option<EngineHookAction>)>> {
+    fn poll_pruner(&mut self, cx: &mut Context<'_>) -> Poll<RethResult<EngineHookEvent>> {
         let result = match self.pruner_state {
             PrunerState::Idle(_) => return Poll::Pending,
             PrunerState::Running(ref mut fut) => {
@@ -78,7 +73,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
             }
         };
 
-        Poll::Ready(Ok((event, None)))
+        Poll::Ready(Ok(event))
     }
 
     /// This will try to spawn the pruner if it is idle:
@@ -89,10 +84,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
     ///     2. If pruning is not needed, set pruner state back to [PrunerState::Idle].
     ///
     /// If pruner is already running, do nothing.
-    fn try_spawn_pruner(
-        &mut self,
-        tip_block_number: BlockNumber,
-    ) -> Option<(EngineHookEvent, Option<EngineHookAction>)> {
+    fn try_spawn_pruner(&mut self, tip_block_number: BlockNumber) -> Option<EngineHookEvent> {
         match &mut self.pruner_state {
             PrunerState::Idle(pruner) => {
                 let mut pruner = pruner.take()?;
@@ -110,10 +102,10 @@ impl<DB: Database + 'static> PruneHook<DB> {
                     self.metrics.runs.increment(1);
                     self.pruner_state = PrunerState::Running(rx);
 
-                    Some((EngineHookEvent::Started, None))
+                    Some(EngineHookEvent::Started)
                 } else {
                     self.pruner_state = PrunerState::Idle(Some(pruner));
-                    Some((EngineHookEvent::NotReady, None))
+                    Some(EngineHookEvent::NotReady)
                 }
             }
             PrunerState::Running(_) => None,
@@ -130,11 +122,11 @@ impl<DB: Database + 'static> EngineHook for PruneHook<DB> {
         &mut self,
         cx: &mut Context<'_>,
         ctx: EngineContext,
-    ) -> Poll<RethResult<(EngineHookEvent, Option<EngineHookAction>)>> {
+    ) -> Poll<RethResult<EngineHookEvent>> {
         // Try to spawn a pruner
         match self.try_spawn_pruner(ctx.tip_block_number) {
-            Some((EngineHookEvent::NotReady, _)) => return Poll::Pending,
-            Some((event, action)) => return Poll::Ready(Ok((event, action))),
+            Some(EngineHookEvent::NotReady) => return Poll::Pending,
+            Some(event) => return Poll::Ready(Ok(event)),
             None => (),
         }
 
