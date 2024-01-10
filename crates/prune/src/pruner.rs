@@ -143,7 +143,7 @@ impl<DB: Database> Pruner<DB> {
             }
         }
 
-        if let Some(snapshot_provider) = self.provider_factory.provider()?.snapshot_provider {
+        if let Some(snapshot_provider) = self.provider_factory.snapshot_provider() {
             if let (Some(to_block), true) = (
                 snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Headers),
                 delete_limit > 0,
@@ -265,7 +265,6 @@ mod tests {
     use reth_db::test_utils::create_test_rw_db;
     use reth_primitives::MAINNET;
     use reth_provider::ProviderFactory;
-    use tokio::sync::watch;
 
     #[test]
     fn is_pruning_needed() {
