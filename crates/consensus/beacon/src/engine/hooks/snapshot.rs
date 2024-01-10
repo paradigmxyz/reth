@@ -80,7 +80,7 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
     ) -> RethResult<Option<(EngineHookEvent, Option<EngineHookAction>)>> {
         Ok(match &mut self.state {
             SnapshotterState::Idle(snapshotter) => {
-                let Some(mut snapshotter) = snapshotter.take() else { return Ok(None) };
+                let Some(snapshotter) = snapshotter.take() else { return Ok(None) };
 
                 let targets = snapshotter.get_snapshot_targets(finalized_block_number)?;
 

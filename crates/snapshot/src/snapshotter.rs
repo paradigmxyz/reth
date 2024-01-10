@@ -100,7 +100,7 @@ impl<DB: Database> Snapshotter<DB> {
                 for entry in transactions_walker {
                     let (tx_number, transaction) = entry?;
 
-                    snapshot_writer.append_transaction(block, tx_number, transaction)?;
+                    snapshot_writer.append_transaction(tx_number, transaction)?;
                 }
             }
         }
