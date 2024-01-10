@@ -26,6 +26,7 @@ alloy-trie = { version = "0.1", features = ["serde"] }
 ethers-core = { workspace = true, default-features = false, optional = true }
 nybbles = { version = "0.1.2", features = ["serde", "rlp"] }
 
+
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
 
@@ -109,6 +110,7 @@ optimism = [
     "revm/optimism",
 ]
 test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
+asm-keccak = ["alloy-primitives/asm-keccak"]
 
 [[bench]]
 name = "recover_ecdsa_crit"
