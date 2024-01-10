@@ -601,7 +601,7 @@ impl ChainConfig {
         }
 
         // Validates EIP-158 activation at the current block and different chain IDs.
-        if self.is_eip158_active_at_block(head_block) && !(self.chain_id == rhs_config.chain_id) {
+        if self.is_eip158_active_at_block(head_block) && self.chain_id != rhs_config.chain_id {
             return Err(ConfigCompatError::EIP158ChainIdError(
                 self.eip158_block,
                 rhs_config.eip158_block,
@@ -831,7 +831,7 @@ impl ChainConfig {
     ) -> bool {
         (self.is_active_at_block(lhs_config_block, block) ||
             rhs_config.is_active_at_block(rhs_config_block, block)) &&
-            !(lhs_config_block.unwrap_or_default() == rhs_config_block.unwrap_or_default())
+            lhs_config_block.unwrap_or_default() != rhs_config_block.unwrap_or_default()
     }
 
     /// Checks if two fork timestamps are incompatible based on given configurations and timestamp.
@@ -844,8 +844,7 @@ impl ChainConfig {
     ) -> bool {
         (self.is_active_at_timestamp(lhs_config_timestamp, timestamp) ||
             rhs_config.is_active_at_timestamp(rhs_config_timestamp, timestamp)) &&
-            !(lhs_config_timestamp.unwrap_or_default() ==
-                rhs_config_timestamp.unwrap_or_default())
+            lhs_config_timestamp.unwrap_or_default() != rhs_config_timestamp.unwrap_or_default()
     }
 }
 
