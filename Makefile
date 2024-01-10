@@ -231,4 +231,4 @@ update-book-cli: ## Update book cli documentation.
 
 .PHONY: maxperf
 maxperf:
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features "jemalloc asm-keccak"
