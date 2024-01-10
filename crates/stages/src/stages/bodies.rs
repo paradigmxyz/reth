@@ -366,8 +366,7 @@ mod tests {
             }, done: false }) if block_number < 200 &&
                 processed == 1 + batch_size && total == previous_stage
         );
-        runner.validate_execution(input, output.ok()).unwrap();
-        // assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
+        assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
     /// Same as [partial_body_download] except the `batch_size` is not hit.
