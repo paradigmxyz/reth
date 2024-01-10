@@ -194,104 +194,104 @@ pub enum ConfigCompatError {
     #[error(
         "Homestead fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
     )]
-    HomesteadBlockError(Option<u64>, Option<u64>, u64),
+    HomesteadBlock(Option<u64>, Option<u64>, u64),
 
     /// Error for DAO fork block incompatibility with stored, new blocks, and rewind block.
     #[error("DAO fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}")]
-    DAOBlockError(Option<u64>, Option<u64>, u64),
+    DAOBlock(Option<u64>, Option<u64>, u64),
 
     /// Error for DAO fork support flag incompatibility with stored, new blocks, and rewind block.
     #[error(
         "DAO fork support flag error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
     )]
-    DAOSupporFlagError(Option<u64>, Option<u64>, u64),
+    DAOSupporFlag(Option<u64>, Option<u64>, u64),
 
     /// Error for EIP-150 fork block incompatibility with stored, new blocks, and rewind block.
     #[error(
         "EIP-150 fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
     )]
-    EIP150BlockError(Option<u64>, Option<u64>, u64),
+    EIP150Block(Option<u64>, Option<u64>, u64),
 
     /// Error for EIP-155 fork block incompatibility with stored, new blocks, and rewind block.
     #[error(
         "EIP-155 fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
     )]
-    EIP155BlockError(Option<u64>, Option<u64>, u64),
+    EIP155Block(Option<u64>, Option<u64>, u64),
 
     /// Error for EIP-158 fork block incompatibility with stored, new blocks, and rewind block.
     #[error(
         "EIP-158 fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
     )]
-    EIP158BlockError(Option<u64>, Option<u64>, u64),
+    EIP158Block(Option<u64>, Option<u64>, u64),
 
     /// Error for EIP-158 chain ID incompatibility with stored, new blocks, and rewind block.
     #[error("EIP-158 chain ID error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}")]
-    EIP158ChainIdError(Option<u64>, Option<u64>, u64),
+    EIP158ChainId(Option<u64>, Option<u64>, u64),
 
     /// Error for Byzantium fork block incompatibility with stored, new blocks, and rewind block.
     #[error(
         "Byzantium fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
     )]
-    ByzantiumBlockError(Option<u64>, Option<u64>, u64),
+    ByzantiumBlock(Option<u64>, Option<u64>, u64),
 
     /// Error for Constantinople fork block incompatibility with stored, new blocks, and rewind
     /// block.
     #[error("Constantinople fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}")]
-    ConstantinopleBlockError(Option<u64>, Option<u64>, u64),
+    ConstantinopleBlock(Option<u64>, Option<u64>, u64),
 
     /// Error for Petersburg fork block incompatibility with stored, new blocks, and rewind block.
     #[error(
         "Petersburg fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
     )]
-    PetersburgBlockError(Option<u64>, Option<u64>, u64),
+    PetersburgBlock(Option<u64>, Option<u64>, u64),
 
     /// Error for Istanbul fork block incompatibility with stored, new blocks, and rewind block.
     #[error(
         "Istanbul fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
     )]
-    IstanbulBlockError(Option<u64>, Option<u64>, u64),
+    IstanbulBlock(Option<u64>, Option<u64>, u64),
 
     /// Error for Muir Glacier fork block incompatibility with stored, new blocks, and rewind
     /// block.
     #[error("Muir Glacier fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}")]
-    MuirGlacierBlockError(Option<u64>, Option<u64>, u64),
+    MuirGlacierBlock(Option<u64>, Option<u64>, u64),
 
     /// Error for Berlin fork block incompatibility with stored, new blocks, and rewind block.
     #[error(
         "Berlin fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
     )]
-    BerlinBlockError(Option<u64>, Option<u64>, u64),
+    BerlinBlock(Option<u64>, Option<u64>, u64),
 
     /// Error for London fork block incompatibility with stored, new blocks, and rewind block.
     #[error(
         "London fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
     )]
-    LondonBlockError(Option<u64>, Option<u64>, u64),
+    LondonBlock(Option<u64>, Option<u64>, u64),
 
     /// Error for Arrow Glacier fork block incompatibility with stored, new blocks, and rewind
     /// block.
     #[error("Arrow Glacier fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}")]
-    ArrowGlacierBlockError(Option<u64>, Option<u64>, u64),
+    ArrowGlacierBlock(Option<u64>, Option<u64>, u64),
 
     /// Error for Gray Glacier fork block incompatibility with stored, new blocks, and rewind
     /// block.
     #[error("Gray Glacier fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}")]
-    GrayGlacierBlockError(Option<u64>, Option<u64>, u64),
+    GrayGlacierBlock(Option<u64>, Option<u64>, u64),
 
     /// Error for Merge netsplit fork block incompatibility with stored, new blocks, and rewind
     /// block.
     #[error("Merge netsplit fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}")]
-    MergeNetsplitBlockError(Option<u64>, Option<u64>, u64),
+    MergeNetsplitBlock(Option<u64>, Option<u64>, u64),
 
     /// Error for Shanghai fork timestamp incompatibility with stored, new timestamps, and rewind
     /// timestamp.
     #[error("Shanghai fork timestamp error. Stored timestamp: {0:?}, New timestamp: {1:?}, Rewind to timestamp: {2}")]
-    ShanghaiTimestampError(Option<u64>, Option<u64>, u64),
+    ShanghaiTimestamp(Option<u64>, Option<u64>, u64),
 
     /// Error for Cancun fork timestamp incompatibility with stored, new timestamps, and rewind
     /// timestamp.
     #[error("Cancun fork timestamp error. Stored timestamp: {0:?}, New timestamp: {1:?}, Rewind to timestamp: {2}")]
-    CancunTimestampError(Option<u64>, Option<u64>, u64),
+    CancunTimestamp(Option<u64>, Option<u64>, u64),
 }
 
 /// Defines core blockchain settings per block.
@@ -523,7 +523,7 @@ impl ChainConfig {
             rhs_config.homestead_block,
             head_block,
         ) {
-            return Err(ConfigCompatError::HomesteadBlockError(
+            return Err(ConfigCompatError::HomesteadBlock(
                 self.homestead_block,
                 rhs_config.homestead_block,
                 Self::block_or_timestamp_to_rewind(
@@ -540,7 +540,7 @@ impl ChainConfig {
             rhs_config.dao_fork_block,
             head_block,
         ) {
-            return Err(ConfigCompatError::DAOBlockError(
+            return Err(ConfigCompatError::DAOBlock(
                 self.dao_fork_block,
                 rhs_config.dao_fork_block,
                 Self::block_or_timestamp_to_rewind(self.dao_fork_block, rhs_config.dao_fork_block),
@@ -551,7 +551,7 @@ impl ChainConfig {
         if self.is_dao_fork_active_at_block(head_block) &&
             self.dao_fork_support != rhs_config.dao_fork_support
         {
-            return Err(ConfigCompatError::DAOSupporFlagError(
+            return Err(ConfigCompatError::DAOSupporFlag(
                 self.dao_fork_block,
                 rhs_config.dao_fork_block,
                 Self::block_or_timestamp_to_rewind(self.dao_fork_block, rhs_config.dao_fork_block),
@@ -565,7 +565,7 @@ impl ChainConfig {
             rhs_config.eip150_block,
             head_block,
         ) {
-            return Err(ConfigCompatError::EIP150BlockError(
+            return Err(ConfigCompatError::EIP150Block(
                 self.eip150_block,
                 rhs_config.eip150_block,
                 Self::block_or_timestamp_to_rewind(self.eip150_block, rhs_config.eip150_block),
@@ -579,7 +579,7 @@ impl ChainConfig {
             rhs_config.eip155_block,
             head_block,
         ) {
-            return Err(ConfigCompatError::EIP155BlockError(
+            return Err(ConfigCompatError::EIP155Block(
                 self.eip155_block,
                 rhs_config.eip155_block,
                 Self::block_or_timestamp_to_rewind(self.eip155_block, rhs_config.eip155_block),
@@ -593,7 +593,7 @@ impl ChainConfig {
             rhs_config.eip158_block,
             head_block,
         ) {
-            return Err(ConfigCompatError::EIP158BlockError(
+            return Err(ConfigCompatError::EIP158Block(
                 self.eip158_block,
                 rhs_config.eip158_block,
                 Self::block_or_timestamp_to_rewind(self.eip158_block, rhs_config.eip158_block),
@@ -602,7 +602,7 @@ impl ChainConfig {
 
         // Validates EIP-158 activation at the current block and different chain IDs.
         if self.is_eip158_active_at_block(head_block) && self.chain_id != rhs_config.chain_id {
-            return Err(ConfigCompatError::EIP158ChainIdError(
+            return Err(ConfigCompatError::EIP158ChainId(
                 self.eip158_block,
                 rhs_config.eip158_block,
                 Self::block_or_timestamp_to_rewind(self.eip158_block, rhs_config.eip158_block),
@@ -616,7 +616,7 @@ impl ChainConfig {
             rhs_config.byzantium_block,
             head_block,
         ) {
-            return Err(ConfigCompatError::ByzantiumBlockError(
+            return Err(ConfigCompatError::ByzantiumBlock(
                 self.byzantium_block,
                 rhs_config.byzantium_block,
                 Self::block_or_timestamp_to_rewind(
@@ -633,7 +633,7 @@ impl ChainConfig {
             rhs_config.constantinople_block,
             head_block,
         ) {
-            return Err(ConfigCompatError::ConstantinopleBlockError(
+            return Err(ConfigCompatError::ConstantinopleBlock(
                 self.constantinople_block,
                 rhs_config.constantinople_block,
                 Self::block_or_timestamp_to_rewind(
@@ -657,7 +657,7 @@ impl ChainConfig {
             rhs_config.petersburg_block,
             head_block,
         ) {
-            return Err(ConfigCompatError::PetersburgBlockError(
+            return Err(ConfigCompatError::PetersburgBlock(
                 self.petersburg_block,
                 rhs_config.petersburg_block,
                 Self::block_or_timestamp_to_rewind(
@@ -674,7 +674,7 @@ impl ChainConfig {
             rhs_config.istanbul_block,
             head_block,
         ) {
-            return Err(ConfigCompatError::IstanbulBlockError(
+            return Err(ConfigCompatError::IstanbulBlock(
                 self.istanbul_block,
                 rhs_config.istanbul_block,
                 Self::block_or_timestamp_to_rewind(self.istanbul_block, rhs_config.istanbul_block),
@@ -688,7 +688,7 @@ impl ChainConfig {
             rhs_config.muir_glacier_block,
             head_block,
         ) {
-            return Err(ConfigCompatError::MuirGlacierBlockError(
+            return Err(ConfigCompatError::MuirGlacierBlock(
                 self.muir_glacier_block,
                 rhs_config.muir_glacier_block,
                 Self::block_or_timestamp_to_rewind(
@@ -705,7 +705,7 @@ impl ChainConfig {
             rhs_config.berlin_block,
             head_block,
         ) {
-            return Err(ConfigCompatError::BerlinBlockError(
+            return Err(ConfigCompatError::BerlinBlock(
                 self.berlin_block,
                 rhs_config.berlin_block,
                 Self::block_or_timestamp_to_rewind(self.berlin_block, rhs_config.berlin_block),
@@ -719,7 +719,7 @@ impl ChainConfig {
             rhs_config.london_block,
             head_block,
         ) {
-            return Err(ConfigCompatError::LondonBlockError(
+            return Err(ConfigCompatError::LondonBlock(
                 self.london_block,
                 rhs_config.london_block,
                 Self::block_or_timestamp_to_rewind(self.london_block, rhs_config.london_block),
@@ -733,7 +733,7 @@ impl ChainConfig {
             rhs_config.arrow_glacier_block,
             head_block,
         ) {
-            return Err(ConfigCompatError::ArrowGlacierBlockError(
+            return Err(ConfigCompatError::ArrowGlacierBlock(
                 self.arrow_glacier_block,
                 rhs_config.arrow_glacier_block,
                 Self::block_or_timestamp_to_rewind(
@@ -750,7 +750,7 @@ impl ChainConfig {
             rhs_config.gray_glacier_block,
             head_block,
         ) {
-            return Err(ConfigCompatError::GrayGlacierBlockError(
+            return Err(ConfigCompatError::GrayGlacierBlock(
                 self.gray_glacier_block,
                 rhs_config.gray_glacier_block,
                 Self::block_or_timestamp_to_rewind(
@@ -767,7 +767,7 @@ impl ChainConfig {
             rhs_config.merge_netsplit_block,
             head_block,
         ) {
-            return Err(ConfigCompatError::MergeNetsplitBlockError(
+            return Err(ConfigCompatError::MergeNetsplitBlock(
                 self.merge_netsplit_block,
                 rhs_config.merge_netsplit_block,
                 Self::block_or_timestamp_to_rewind(
@@ -784,7 +784,7 @@ impl ChainConfig {
             rhs_config.shanghai_time,
             head_timestamp,
         ) {
-            return Err(ConfigCompatError::ShanghaiTimestampError(
+            return Err(ConfigCompatError::ShanghaiTimestamp(
                 self.shanghai_time,
                 rhs_config.shanghai_time,
                 Self::block_or_timestamp_to_rewind(self.shanghai_time, rhs_config.shanghai_time),
@@ -798,7 +798,7 @@ impl ChainConfig {
             rhs_config.cancun_time,
             head_timestamp,
         ) {
-            return Err(ConfigCompatError::CancunTimestampError(
+            return Err(ConfigCompatError::CancunTimestamp(
                 self.cancun_time,
                 rhs_config.cancun_time,
                 Self::block_or_timestamp_to_rewind(self.cancun_time, rhs_config.cancun_time),
@@ -1796,7 +1796,7 @@ mod tests {
                 100,
                 200
             ),
-            Err(ConfigCompatError::LondonBlockError(None, Some(34), 33))
+            Err(ConfigCompatError::LondonBlock(None, Some(34), 33))
         );
 
         // Test compatibility between lhs and config with Shanghai time set at 233 and different
@@ -1817,7 +1817,7 @@ mod tests {
                 100,
                 300
             ),
-            Err(ConfigCompatError::ShanghaiTimestampError(None, Some(233), 232))
+            Err(ConfigCompatError::ShanghaiTimestamp(None, Some(233), 232))
         );
     }
 }
