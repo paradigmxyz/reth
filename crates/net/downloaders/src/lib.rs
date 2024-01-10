@@ -26,8 +26,7 @@ pub mod metrics;
 /// efficiently buffering headers and bodies for retrieval.
 pub mod file_client;
 
-/// Module with a codec [BlockFileCodec](file_codec::BlockFileCodec) for reading and encoding block
-/// bodies in files.
+/// Module with a codec for reading and encoding block bodies in files.
 ///
 /// Enables decoding and encoding `Block` types within file contexts.
 pub mod file_codec;
