@@ -1,5 +1,15 @@
+use derive_more::{Deref, DerefMut};
 use linked_hash_set::LinkedHashSet;
-use std::{borrow::Borrow, hash::Hash, num::NonZeroUsize};
+use schnellru::{self, ByLength};
+use std::{
+    borrow::Borrow,
+    fmt::{self, Write},
+    hash,
+    hash::Hash,
+    num::NonZeroUsize,
+};
+use tokio::sync::mpsc::UnboundedSender;
+use tracing::warn;
 
 /// A minimal LRU cache based on a `LinkedHashSet` with limited capacity.
 ///
@@ -9,12 +19,19 @@ use std::{borrow::Borrow, hash::Hash, num::NonZeroUsize};
 pub struct LruCache<T: Hash + Eq> {
     limit: NonZeroUsize,
     inner: LinkedHashSet<T>,
+    tx: Option<UnboundedSender<T>>,
 }
 
 impl<T: Hash + Eq> LruCache<T> {
-    /// Creates a new `LruCache` using the given limit
+    /// Creates a new [`LruCache`] using the given limit
     pub fn new(limit: NonZeroUsize) -> Self {
-        Self { inner: LinkedHashSet::new(), limit }
+        Self { inner: LinkedHashSet::new(), limit, tx: None }
+    }
+
+    /// Creates a new [`LruCache`] using the given limit and with a channel for sending eviction
+    /// feedback. Note, that it is up to the caller's context to drain the buffer!
+    pub fn new_with_feedback(limit: NonZeroUsize, tx: UnboundedSender<T>) -> Self {
+        Self { inner: LinkedHashSet::new(), limit, tx: Some(tx) }
     }
 
     /// Insert an element into the set.
@@ -29,7 +46,7 @@ impl<T: Hash + Eq> LruCache<T> {
         if self.inner.insert(entry) {
             if self.limit.get() == self.inner.len() {
                 // remove the oldest element in the set
-                _ = self.remove_lru();
+                self.remove_lru();
             }
             return true
         }
@@ -38,10 +55,25 @@ impl<T: Hash + Eq> LruCache<T> {
 
     /// Remove the least recently used entry and return it.
     ///
-    /// If the `LruCache` is empty this will return None.
+    /// If the `LruCache` is empty or if the eviction feedback is
+    /// configured, this will return None.
     #[inline]
     fn remove_lru(&mut self) -> Option<T> {
-        self.inner.pop_front()
+        if let Some(item) = self.inner.pop_front() {
+            if let Some(tx) = &self.tx {
+                if let Err(e) = tx.send(item) {
+                    warn!("failed to send eviction feedback, {e}");
+                }
+            } else {
+                return Some(item)
+            }
+        }
+        None
+    }
+
+    /// Expels the given value. Returns true if the value existed.
+    pub fn remove(&mut self, value: &T) -> bool {
+        self.inner.remove(value)
     }
 
     /// Returns `true` if the set contains a value.
@@ -70,8 +102,48 @@ where
     }
 }
 
+/// Wrapper of [`schnellru::LruMap`] that implements [`fmt::Debug`].
+#[derive(Deref, DerefMut)]
+pub struct LruMap<K, V>(schnellru::LruMap<K, V>)
+where
+    K: hash::Hash + PartialEq;
+
+impl<K, V> fmt::Debug for LruMap<K, V>
+where
+    K: hash::Hash + PartialEq + fmt::Display,
+    V: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug_struct = f.debug_struct("LruMap");
+        for (k, v) in self.0.iter() {
+            let mut key_str = String::new();
+            write!(&mut key_str, "{k}")?;
+            debug_struct.field(&key_str, &v);
+        }
+        debug_struct.finish()
+    }
+}
+
+impl<K, V> LruMap<K, V>
+where
+    K: hash::Hash + PartialEq,
+{
+    pub fn new(max_length: u32) -> Self {
+        Self(schnellru::LruMap::new(ByLength::new(max_length)))
+    }
+}
+
+impl<K, V> From<LruMap<K, V>> for schnellru::LruMap<K, V>
+where
+    K: hash::Hash + PartialEq,
+{
+    fn from(value: LruMap<K, V>) -> Self {
+        value.0
+    }
+}
+
 #[cfg(test)]
-mod tests {
+mod test {
     use super::*;
 
     #[test]
