@@ -170,7 +170,7 @@ pub struct BuilderBlockValidationRequest {
 #[serde_as]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuilderBlockValidationRequestV2 {
-    /// The `SubmitBlockRequest` data to be validated.
+    /// The [SubmitBlockRequest] data to be validated.
     #[serde(flatten)]
     pub request: SubmitBlockRequest,
     /// The registered gas limit for the validation request.
