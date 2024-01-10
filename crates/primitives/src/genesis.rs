@@ -199,23 +199,24 @@ impl<T> RngDebugClone for T where T: RngCore + std::fmt::Debug {}
 ///
 /// # Example
 /// ```
-/// # use reth_primitives::AllocBuilder;
+/// # use reth_primitives::{AllocBuilder, Address, U256, hex, Bytes};
+/// # use std::str::FromStr;
 /// let mut builder = AllocBuilder::default();
 ///
 /// // This will add a genesis account to the alloc builder, with the provided balance. The
 /// // signer for the account will be returned.
-/// let (_signer, _addr) = builder.new_funded_account(100_000_000_000_000_000u128.into());
+/// let (_signer, _addr) = builder.new_funded_account(U256::from(100_000_000_000_000_000u128));
 ///
 /// // You can also provide code for the account.
-/// let code = hex::decode("0x1234").unwrap();
+/// let code = Bytes::from_str("0x1234").unwrap();
 /// let (_second_signer, _second_addr) =
-///     builder.new_funded_account_with_code(100_000_000_000_000_000u128.into(), code);
+///     builder.new_funded_account_with_code(U256::from(100_000_000_000_000_000u128), code);
 ///
 /// // You can also add an account with a specific address.
 /// // This will not return a signer, since the address is provided by the user and the signer
 /// // may be unknown.
 /// let addr = "0Ac1dF02185025F65202660F8167210A80dD5086".parse::<Address>().unwrap();
-/// builder.add_funded_account_with_address(addr, 100_000_000_000_000_000u128.into());
+/// builder.add_funded_account_with_address(addr, U256::from(100_000_000_000_000_000u128));
 ///
 /// // Once you're done adding accounts, you can build the alloc.
 /// let alloc = builder.build();
