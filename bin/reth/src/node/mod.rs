@@ -27,7 +27,7 @@ use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
 use metrics_exporter_prometheus::PrometheusHandle;
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::{
-    hooks::{EngineHooks, PruneHook},
+    hooks::{EngineHooks, PruneHook, SnapshotHook},
     BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{
@@ -259,14 +259,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         provider_factory = provider_factory.with_snapshots(data_dir.snapshots_path())?;
 
-        // configure snapshotter
-        let _snapshotter = reth_snapshot::Snapshotter::new(
-            provider_factory.clone(),
-            provider_factory
-                .snapshot_provider()
-                .expect("snapshot provider initialized via provider factory"),
-        );
-
         self.start_metrics_endpoint(prometheus_handle, Arc::clone(&db)).await?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
@@ -474,7 +466,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let mut hooks = EngineHooks::new();
 
         let pruner_events = if let Some(prune_config) = prune_config {
-            let mut pruner = self.build_pruner(&prune_config, provider_factory, tree_config);
+            let mut pruner =
+                self.build_pruner(&prune_config, provider_factory.clone(), tree_config);
 
             let events = pruner.events();
             hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
@@ -484,6 +477,17 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         } else {
             Either::Right(stream::empty())
         };
+
+        if false {
+            let snapshotter = reth_snapshot::Snapshotter::new(
+                provider_factory.clone(),
+                provider_factory
+                    .snapshot_provider()
+                    .expect("snapshot provider initialized via provider factory"),
+            );
+
+            hooks.add(SnapshotHook::new(snapshotter, Box::new(ctx.task_executor.clone())));
+        }
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
