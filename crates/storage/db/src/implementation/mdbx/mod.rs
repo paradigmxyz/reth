@@ -186,7 +186,8 @@ impl DatabaseEnv {
             shrink_threshold: None,
             page_size: Some(PageSize::Set(default_page_size())),
         });
-        if cfg!(not(windows)) {
+        #[cfg(not(windows))]
+        {
             let _ = *PROCESS_ID; // Initialize the process ID at the time of environment opening
             inner_env.set_handle_slow_readers(
                 |process_id: u32, thread_id: u32, read_txn_id: u64, gap: usize, space: usize, retry: isize| {
