@@ -9,6 +9,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use thiserror::Error;
 
 /// The genesis block specification.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -185,6 +186,114 @@ impl From<GenesisAccount> for Account {
     }
 }
 
+/// ConfigCompatError represents errors that occur when initializing the local blockchain
+/// with a ChainConfig that would affect the historical state.
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+pub enum ConfigCompatError {
+    /// Error for Homestead fork block incompatibility with stored, new blocks, and rewind block.
+    #[error(
+        "Homestead fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
+    )]
+    HomesteadBlockError(Option<u64>, Option<u64>, u64),
+
+    /// Error for DAO fork block incompatibility with stored, new blocks, and rewind block.
+    #[error("DAO fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}")]
+    DAOBlockError(Option<u64>, Option<u64>, u64),
+
+    /// Error for DAO fork support flag incompatibility with stored, new blocks, and rewind block.
+    #[error(
+        "DAO fork support flag error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
+    )]
+    DAOSupporFlagError(Option<u64>, Option<u64>, u64),
+
+    /// Error for EIP-150 fork block incompatibility with stored, new blocks, and rewind block.
+    #[error(
+        "EIP-150 fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
+    )]
+    EIP150BlockError(Option<u64>, Option<u64>, u64),
+
+    /// Error for EIP-155 fork block incompatibility with stored, new blocks, and rewind block.
+    #[error(
+        "EIP-155 fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
+    )]
+    EIP155BlockError(Option<u64>, Option<u64>, u64),
+
+    /// Error for EIP-158 fork block incompatibility with stored, new blocks, and rewind block.
+    #[error(
+        "EIP-158 fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
+    )]
+    EIP158BlockError(Option<u64>, Option<u64>, u64),
+
+    /// Error for EIP-158 chain ID incompatibility with stored, new blocks, and rewind block.
+    #[error("EIP-158 chain ID error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}")]
+    EIP158ChainIdError(Option<u64>, Option<u64>, u64),
+
+    /// Error for Byzantium fork block incompatibility with stored, new blocks, and rewind block.
+    #[error(
+        "Byzantium fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
+    )]
+    ByzantiumBlockError(Option<u64>, Option<u64>, u64),
+
+    /// Error for Constantinople fork block incompatibility with stored, new blocks, and rewind
+    /// block.
+    #[error("Constantinople fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}")]
+    ConstantinopleBlockError(Option<u64>, Option<u64>, u64),
+
+    /// Error for Petersburg fork block incompatibility with stored, new blocks, and rewind block.
+    #[error(
+        "Petersburg fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
+    )]
+    PetersburgBlockError(Option<u64>, Option<u64>, u64),
+
+    /// Error for Istanbul fork block incompatibility with stored, new blocks, and rewind block.
+    #[error(
+        "Istanbul fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
+    )]
+    IstanbulBlockError(Option<u64>, Option<u64>, u64),
+
+    /// Error for Muir Glacier fork block incompatibility with stored, new blocks, and rewind
+    /// block.
+    #[error("Muir Glacier fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}")]
+    MuirGlacierBlockError(Option<u64>, Option<u64>, u64),
+
+    /// Error for Berlin fork block incompatibility with stored, new blocks, and rewind block.
+    #[error(
+        "Berlin fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
+    )]
+    BerlinBlockError(Option<u64>, Option<u64>, u64),
+
+    /// Error for London fork block incompatibility with stored, new blocks, and rewind block.
+    #[error(
+        "London fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}"
+    )]
+    LondonBlockError(Option<u64>, Option<u64>, u64),
+
+    /// Error for Arrow Glacier fork block incompatibility with stored, new blocks, and rewind
+    /// block.
+    #[error("Arrow Glacier fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}")]
+    ArrowGlacierBlockError(Option<u64>, Option<u64>, u64),
+
+    /// Error for Gray Glacier fork block incompatibility with stored, new blocks, and rewind
+    /// block.
+    #[error("Gray Glacier fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}")]
+    GrayGlacierBlockError(Option<u64>, Option<u64>, u64),
+
+    /// Error for Merge netsplit fork block incompatibility with stored, new blocks, and rewind
+    /// block.
+    #[error("Merge netsplit fork block error. Stored block: {0:?}, New block: {1:?}, Rewind to block: {2}")]
+    MergeNetsplitBlockError(Option<u64>, Option<u64>, u64),
+
+    /// Error for Shanghai fork timestamp incompatibility with stored, new timestamps, and rewind
+    /// timestamp.
+    #[error("Shanghai fork timestamp error. Stored timestamp: {0:?}, New timestamp: {1:?}, Rewind to timestamp: {2}")]
+    ShanghaiTimestampError(Option<u64>, Option<u64>, u64),
+
+    /// Error for Cancun fork timestamp incompatibility with stored, new timestamps, and rewind
+    /// timestamp.
+    #[error("Cancun fork timestamp error. Stored timestamp: {0:?}, New timestamp: {1:?}, Rewind to timestamp: {2}")]
+    CancunTimestampError(Option<u64>, Option<u64>, u64),
+}
+
 /// Defines core blockchain settings per block.
 ///
 /// Tailors unique settings for each network based on its genesis block.
@@ -304,6 +413,11 @@ impl ChainConfig {
         self.is_active_at_block(self.homestead_block, block)
     }
 
+    /// Checks if the blockchain is active at or after the DAO Fork fork block.
+    pub fn is_dao_fork_active_at_block(&self, block: u64) -> bool {
+        self.is_active_at_block(self.dao_fork_block, block)
+    }
+
     /// Checks if the blockchain is active at or after the EIP150 fork block.
     pub fn is_eip150_active_at_block(&self, block: u64) -> bool {
         self.is_active_at_block(self.eip150_block, block)
@@ -379,13 +493,359 @@ impl ChainConfig {
     }
 
     // Private function handling the comparison logic for block numbers
-    fn is_active_at_block(&self, config_block: Option<u64>, block: u64) -> bool {
-        config_block.map_or(false, |cb| cb <= block)
+    fn is_active_at_block(&self, lhs_config_block: Option<u64>, block: u64) -> bool {
+        lhs_config_block.map_or(false, |cb| cb <= block)
     }
 
     // Private function handling the comparison logic for timestamps
     fn is_active_at_timestamp(&self, config_timestamp: Option<u64>, timestamp: u64) -> bool {
         config_timestamp.map_or(false, |cb| cb <= timestamp)
+    }
+
+    /// Compares block numbers and timestamps between two chain configurations
+    /// to determine their compatibility.
+    ///
+    ///
+    /// Returns `Ok(())` for compatible configurations.
+    ///
+    /// Otherwise, specific errors indicate incompatibility due to mismatched blocks, timestamps, or
+    /// chain IDs.
+    pub fn are_configs_compatible(
+        &self,
+        rhs_config: &Self,
+        head_block: u64,
+        head_timestamp: u64,
+    ) -> Result<(), ConfigCompatError> {
+        // Checks if the Homestead block numbers between configurations are incompatible.
+        if self.are_fork_blocks_incompatible(
+            rhs_config,
+            self.homestead_block,
+            rhs_config.homestead_block,
+            head_block,
+        ) {
+            return Err(ConfigCompatError::HomesteadBlockError(
+                self.homestead_block,
+                rhs_config.homestead_block,
+                Self::block_or_timestamp_to_rewind(
+                    self.homestead_block,
+                    rhs_config.homestead_block,
+                ),
+            ));
+        }
+
+        // Checks if DAO fork block numbers are incompatible between configurations.
+        if self.are_fork_blocks_incompatible(
+            rhs_config,
+            self.dao_fork_block,
+            rhs_config.dao_fork_block,
+            head_block,
+        ) {
+            return Err(ConfigCompatError::DAOBlockError(
+                self.dao_fork_block,
+                rhs_config.dao_fork_block,
+                Self::block_or_timestamp_to_rewind(self.dao_fork_block, rhs_config.dao_fork_block),
+            ));
+        }
+
+        // Validates DAO fork activity at the current block and support status compatibility.
+        if self.is_dao_fork_active_at_block(head_block) &&
+            self.dao_fork_support != rhs_config.dao_fork_support
+        {
+            return Err(ConfigCompatError::DAOSupporFlagError(
+                self.dao_fork_block,
+                rhs_config.dao_fork_block,
+                Self::block_or_timestamp_to_rewind(self.dao_fork_block, rhs_config.dao_fork_block),
+            ));
+        }
+
+        // Checks if EIP150 block numbers are incompatible between configurations.
+        if self.are_fork_blocks_incompatible(
+            rhs_config,
+            self.eip150_block,
+            rhs_config.eip150_block,
+            head_block,
+        ) {
+            return Err(ConfigCompatError::EIP150BlockError(
+                self.eip150_block,
+                rhs_config.eip150_block,
+                Self::block_or_timestamp_to_rewind(self.eip150_block, rhs_config.eip150_block),
+            ));
+        }
+
+        // Checks if EIP-155 block numbers are incompatible between configurations.
+        if self.are_fork_blocks_incompatible(
+            rhs_config,
+            self.eip155_block,
+            rhs_config.eip155_block,
+            head_block,
+        ) {
+            return Err(ConfigCompatError::EIP155BlockError(
+                self.eip155_block,
+                rhs_config.eip155_block,
+                Self::block_or_timestamp_to_rewind(self.eip155_block, rhs_config.eip155_block),
+            ));
+        }
+
+        // Checks if EIP-158 block numbers are incompatible between configurations.
+        if self.are_fork_blocks_incompatible(
+            rhs_config,
+            self.eip158_block,
+            rhs_config.eip158_block,
+            head_block,
+        ) {
+            return Err(ConfigCompatError::EIP158BlockError(
+                self.eip158_block,
+                rhs_config.eip158_block,
+                Self::block_or_timestamp_to_rewind(self.eip158_block, rhs_config.eip158_block),
+            ));
+        }
+
+        // Validates EIP-158 activation at the current block and different chain IDs.
+        if self.is_eip158_active_at_block(head_block) && !(self.chain_id == rhs_config.chain_id) {
+            return Err(ConfigCompatError::EIP158ChainIdError(
+                self.eip158_block,
+                rhs_config.eip158_block,
+                Self::block_or_timestamp_to_rewind(self.eip158_block, rhs_config.eip158_block),
+            ));
+        }
+
+        // Checks if Byzantium block numbers are incompatible between configurations.
+        if self.are_fork_blocks_incompatible(
+            rhs_config,
+            self.byzantium_block,
+            rhs_config.byzantium_block,
+            head_block,
+        ) {
+            return Err(ConfigCompatError::ByzantiumBlockError(
+                self.byzantium_block,
+                rhs_config.byzantium_block,
+                Self::block_or_timestamp_to_rewind(
+                    self.byzantium_block,
+                    rhs_config.byzantium_block,
+                ),
+            ));
+        }
+
+        // Checks for Constantinople block number incompatibility between configurations.
+        if self.are_fork_blocks_incompatible(
+            rhs_config,
+            self.constantinople_block,
+            rhs_config.constantinople_block,
+            head_block,
+        ) {
+            return Err(ConfigCompatError::ConstantinopleBlockError(
+                self.constantinople_block,
+                rhs_config.constantinople_block,
+                Self::block_or_timestamp_to_rewind(
+                    self.constantinople_block,
+                    rhs_config.constantinople_block,
+                ),
+            ));
+        }
+
+        // Validates Petersburg block compatibility with a condition:
+        // Allows Petersburg to be set in the past only if it is equal to Constantinople
+        // This condition satisfies fork ordering requirements.
+        if self.are_fork_blocks_incompatible(
+            rhs_config,
+            self.petersburg_block,
+            rhs_config.petersburg_block,
+            head_block,
+        ) && self.are_fork_blocks_incompatible(
+            rhs_config,
+            self.constantinople_block,
+            rhs_config.petersburg_block,
+            head_block,
+        ) {
+            return Err(ConfigCompatError::PetersburgBlockError(
+                self.petersburg_block,
+                rhs_config.petersburg_block,
+                Self::block_or_timestamp_to_rewind(
+                    self.petersburg_block,
+                    rhs_config.petersburg_block,
+                ),
+            ));
+        }
+
+        // Checks for Istanbul block number incompatibility between configurations.
+        if self.are_fork_blocks_incompatible(
+            rhs_config,
+            self.istanbul_block,
+            rhs_config.istanbul_block,
+            head_block,
+        ) {
+            return Err(ConfigCompatError::IstanbulBlockError(
+                self.istanbul_block,
+                rhs_config.istanbul_block,
+                Self::block_or_timestamp_to_rewind(self.istanbul_block, rhs_config.istanbul_block),
+            ));
+        }
+
+        // Checks for Muir Glacier block number incompatibility between configurations.
+        if self.are_fork_blocks_incompatible(
+            rhs_config,
+            self.muir_glacier_block,
+            rhs_config.muir_glacier_block,
+            head_block,
+        ) {
+            return Err(ConfigCompatError::MuirGlacierBlockError(
+                self.muir_glacier_block,
+                rhs_config.muir_glacier_block,
+                Self::block_or_timestamp_to_rewind(
+                    self.muir_glacier_block,
+                    rhs_config.muir_glacier_block,
+                ),
+            ));
+        }
+
+        // Checks for Berlin block number incompatibility between configurations.
+        if self.are_fork_blocks_incompatible(
+            rhs_config,
+            self.berlin_block,
+            rhs_config.berlin_block,
+            head_block,
+        ) {
+            return Err(ConfigCompatError::BerlinBlockError(
+                self.berlin_block,
+                rhs_config.berlin_block,
+                Self::block_or_timestamp_to_rewind(self.berlin_block, rhs_config.berlin_block),
+            ));
+        }
+
+        // Checks for London block number incompatibility between configurations.
+        if self.are_fork_blocks_incompatible(
+            rhs_config,
+            self.london_block,
+            rhs_config.london_block,
+            head_block,
+        ) {
+            return Err(ConfigCompatError::LondonBlockError(
+                self.london_block,
+                rhs_config.london_block,
+                Self::block_or_timestamp_to_rewind(self.london_block, rhs_config.london_block),
+            ));
+        }
+
+        // Checks for Arrow Glacier block number incompatibility between configurations.
+        if self.are_fork_blocks_incompatible(
+            rhs_config,
+            self.arrow_glacier_block,
+            rhs_config.arrow_glacier_block,
+            head_block,
+        ) {
+            return Err(ConfigCompatError::ArrowGlacierBlockError(
+                self.arrow_glacier_block,
+                rhs_config.arrow_glacier_block,
+                Self::block_or_timestamp_to_rewind(
+                    self.arrow_glacier_block,
+                    rhs_config.arrow_glacier_block,
+                ),
+            ));
+        }
+
+        // Checks for Gray Glacier block number incompatibility between configurations.
+        if self.are_fork_blocks_incompatible(
+            rhs_config,
+            self.gray_glacier_block,
+            rhs_config.gray_glacier_block,
+            head_block,
+        ) {
+            return Err(ConfigCompatError::GrayGlacierBlockError(
+                self.gray_glacier_block,
+                rhs_config.gray_glacier_block,
+                Self::block_or_timestamp_to_rewind(
+                    self.gray_glacier_block,
+                    rhs_config.gray_glacier_block,
+                ),
+            ));
+        }
+
+        // Checks for Merge Netsplit block number incompatibility between configurations.
+        if self.are_fork_blocks_incompatible(
+            rhs_config,
+            self.merge_netsplit_block,
+            rhs_config.merge_netsplit_block,
+            head_block,
+        ) {
+            return Err(ConfigCompatError::MergeNetsplitBlockError(
+                self.merge_netsplit_block,
+                rhs_config.merge_netsplit_block,
+                Self::block_or_timestamp_to_rewind(
+                    self.merge_netsplit_block,
+                    rhs_config.merge_netsplit_block,
+                ),
+            ));
+        }
+
+        // Checks for Shanghai timestamp incompatibility between configurations.
+        if self.are_fork_timestamps_incompatible(
+            rhs_config,
+            self.shanghai_time,
+            rhs_config.shanghai_time,
+            head_timestamp,
+        ) {
+            return Err(ConfigCompatError::ShanghaiTimestampError(
+                self.shanghai_time,
+                rhs_config.shanghai_time,
+                Self::block_or_timestamp_to_rewind(self.shanghai_time, rhs_config.shanghai_time),
+            ));
+        }
+
+        // Checks for Cancun timestamp incompatibility between configurations.
+        if self.are_fork_timestamps_incompatible(
+            rhs_config,
+            self.cancun_time,
+            rhs_config.cancun_time,
+            head_timestamp,
+        ) {
+            return Err(ConfigCompatError::CancunTimestampError(
+                self.cancun_time,
+                rhs_config.cancun_time,
+                Self::block_or_timestamp_to_rewind(self.cancun_time, rhs_config.cancun_time),
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Calculates the block or timestamp to rewind based on stored and new values.
+    ///
+    /// Returns the rewind value.
+    fn block_or_timestamp_to_rewind(stored_value: Option<u64>, new_value: Option<u64>) -> u64 {
+        stored_value.map_or(new_value, |s| new_value.filter(|&n| s < n)).map_or(0, |value| {
+            if value > 0 {
+                value - 1
+            } else {
+                0
+            }
+        })
+    }
+
+    /// Checks if two fork blocks are incompatible based on given configurations and block number.
+    fn are_fork_blocks_incompatible(
+        &self,
+        rhs_config: &Self,
+        lhs_config_block: Option<u64>,
+        rhs_config_block: Option<u64>,
+        block: u64,
+    ) -> bool {
+        (self.is_active_at_block(lhs_config_block, block) ||
+            rhs_config.is_active_at_block(rhs_config_block, block)) &&
+            !(lhs_config_block.unwrap_or_default() == rhs_config_block.unwrap_or_default())
+    }
+
+    /// Checks if two fork timestamps are incompatible based on given configurations and timestamp.
+    fn are_fork_timestamps_incompatible(
+        &self,
+        rhs_config: &Self,
+        lhs_config_timestamp: Option<u64>,
+        rhs_config_timestamp: Option<u64>,
+        timestamp: u64,
+    ) -> bool {
+        (self.is_active_at_timestamp(lhs_config_timestamp, timestamp) ||
+            rhs_config.is_active_at_timestamp(rhs_config_timestamp, timestamp)) &&
+            !(lhs_config_timestamp.unwrap_or_default() ==
+                rhs_config_timestamp.unwrap_or_default())
     }
 }
 
@@ -1268,6 +1728,97 @@ mod tests {
             deserialized_genesis, expected_genesis,
             "deserialized genesis
     {deserialized_genesis:#?} does not match expected {expected_genesis:#?}"
+        );
+    }
+
+    #[test]
+    fn test_are_configs_compatible() {
+        // Create a sample chain configuration with default values.
+        let lhs_chain_config = ChainConfig {
+            ethash: Some(EthashConfig {}),
+            chain_id: 10,
+            homestead_block: Some(0),
+            eip150_block: Some(0),
+            eip155_block: Some(0),
+            eip158_block: Some(0),
+            byzantium_block: Some(0),
+            constantinople_block: Some(0),
+            petersburg_block: Some(0),
+            istanbul_block: Some(0),
+            ..Default::default()
+        };
+
+        // Create a configuration with a block (London) set at a specific height (34).
+        let rhs_chain_config_incompatible_london = ChainConfig {
+            ethash: Some(EthashConfig {}),
+            chain_id: 10,
+            homestead_block: Some(0),
+            eip150_block: Some(0),
+            eip155_block: Some(0),
+            eip158_block: Some(0),
+            byzantium_block: Some(0),
+            constantinople_block: Some(0),
+            petersburg_block: Some(0),
+            istanbul_block: Some(0),
+            london_block: Some(34),
+            ..Default::default()
+        };
+
+        // Create a configuration with a specific time (Shanghai) set at a value (233).
+        let rhs_chain_config_incompatible_shanghai = ChainConfig {
+            ethash: Some(EthashConfig {}),
+            chain_id: 10,
+            homestead_block: Some(0),
+            eip150_block: Some(0),
+            eip155_block: Some(0),
+            eip158_block: Some(0),
+            byzantium_block: Some(0),
+            constantinople_block: Some(0),
+            petersburg_block: Some(0),
+            istanbul_block: Some(0),
+            shanghai_time: Some(233),
+            ..Default::default()
+        };
+
+        // Test the compatibility between the lhs and itself, expecting Ok(()) as the result.
+        assert_eq!(lhs_chain_config.are_configs_compatible(&lhs_chain_config, 100, 100), Ok(()));
+
+        // Test compatibility between lhs and a config with London block set at 34 and different
+        // head blocks/timestamps.
+        assert_eq!(
+            lhs_chain_config.are_configs_compatible(&rhs_chain_config_incompatible_london, 22, 200),
+            Ok(())
+        );
+
+        // Test incompatibility due to different London block heights and the resulting error.
+        assert_eq!(
+            lhs_chain_config.are_configs_compatible(
+                &rhs_chain_config_incompatible_london,
+                100,
+                200
+            ),
+            Err(ConfigCompatError::LondonBlockError(None, Some(34), 33))
+        );
+
+        // Test compatibility between lhs and config with Shanghai time set at 233 and different
+        // head blocks/timestamps.
+        assert_eq!(
+            lhs_chain_config.are_configs_compatible(
+                &rhs_chain_config_incompatible_shanghai,
+                100,
+                10
+            ),
+            Ok(())
+        );
+
+        // Test incompatibility due to different Shanghai times and the resulting error.
+        assert_eq!(
+            lhs_chain_config.are_configs_compatible(
+                &rhs_chain_config_incompatible_shanghai,
+                100,
+                300
+            ),
+            Err(ConfigCompatError::ShanghaiTimestampError(None, Some(233), 232))
         );
     }
 }
