@@ -22,11 +22,12 @@ pub mod metrics;
 
 /// Module managing file-based data retrieval and buffering.
 ///
-/// Contains [FileClient] to read block data from files,
+/// Contains [FileClient](file_client::FileClient) to read block data from files,
 /// efficiently buffering headers and bodies for retrieval.
 pub mod file_client;
 
-/// Module with a codec [BlockFileCodec] for reading and encoding block bodies in files.
+/// Module with a codec [BlockFileCodec](file_codec::BlockFileCodec) for reading and encoding block
+/// bodies in files.
 ///
 /// Enables decoding and encoding `Block` types within file contexts.
 pub mod file_codec;
