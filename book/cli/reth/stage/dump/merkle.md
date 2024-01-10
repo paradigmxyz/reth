@@ -2,7 +2,7 @@
 
 Merkle stage
 
-```bash
+```text
 $ reth stage dump merkle --help
 Usage: reth stage dump merkle [OPTIONS] --output-db <OUTPUT_PATH> --from <FROM> --to <TO>
 

@@ -5,13 +5,12 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server,
 };
-use metrics::{describe_gauge, gauge};
+use metrics::describe_gauge;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
 use reth_db::database_metrics::DatabaseMetrics;
 use reth_metrics::metrics::Unit;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
-use tracing::error;
 
 pub(crate) trait Hook: Fn() + Send + Sync {}
 impl<T: Fn() + Send + Sync> Hook for T {}
@@ -112,6 +111,8 @@ where
 #[cfg(all(feature = "jemalloc", unix))]
 fn collect_memory_stats() {
     use jemalloc_ctl::{epoch, stats};
+    use metrics::gauge;
+    use tracing::error;
 
     if epoch::advance().map_err(|error| error!(?error, "Failed to advance jemalloc epoch")).is_err()
     {
@@ -199,6 +200,7 @@ fn describe_memory_stats() {}
 #[cfg(target_os = "linux")]
 fn collect_io_stats() {
     use metrics::absolute_counter;
+    use tracing::error;
 
     let Ok(process) = procfs::process::Process::myself()
         .map_err(|error| error!(?error, "Failed to get currently running process"))
@@ -239,3 +241,27 @@ fn collect_io_stats() {}
 
 #[cfg(not(target_os = "linux"))]
 fn describe_io_stats() {}
+
+#[cfg(test)]
+mod tests {
+    use crate::builder::PROMETHEUS_RECORDER_HANDLE;
+    use std::ops::Deref;
+
+    // Dependencies using different version of the `metrics` crate (to be exact, 0.21 vs 0.22)
+    // may not be able to communicate with each other through the global recorder.
+    //
+    // This test ensures that `metrics-process` dependency plays well with the current
+    // `metrics-exporter-prometheus` dependency version.
+    #[test]
+    fn process_metrics() {
+        // initialize the lazy handle
+        let _ = PROMETHEUS_RECORDER_HANDLE.deref();
+
+        let process = metrics_process::Collector::default();
+        process.describe();
+        process.collect();
+
+        let metrics = PROMETHEUS_RECORDER_HANDLE.render();
+        assert!(metrics.contains("process_cpu_seconds_total"));
+    }
+}

@@ -12,7 +12,8 @@ pub use crate::{
     cursor::{Cursor, Iter, IterDup},
     database::Database,
     environment::{
-        Environment, EnvironmentBuilder, EnvironmentKind, Geometry, Info, PageSize, Stat,
+        Environment, EnvironmentBuilder, EnvironmentKind, Geometry, HandleSlowReadersCallback,
+        HandleSlowReadersReturnCode, Info, PageSize, Stat,
     },
     error::{Error, Result},
     flags::*,

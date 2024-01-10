@@ -87,7 +87,7 @@ pub struct StoredBlockWithdrawals {
 pub type HeaderHash = B256;
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use crate::table::{Compress, Decompress};
 

@@ -283,6 +283,12 @@ impl Discv4 {
         self.lookup_node(Some(node_id)).await
     }
 
+    /// Performs a random lookup for node records.
+    pub async fn lookup_random(&self) -> Result<Vec<NodeRecord>, Discv4Error> {
+        let target = PeerId::random();
+        self.lookup_node(Some(target)).await
+    }
+
     /// Sends a message to the service to lookup the closest nodes
     pub fn send_lookup(&self, node_id: PeerId) {
         let cmd = Discv4Command::Lookup { node_id: Some(node_id), tx: None };
@@ -1605,7 +1611,9 @@ impl Discv4Service {
             // process all incoming datagrams
             while let Poll::Ready(Some(event)) = self.ingress.poll_recv(cx) {
                 match event {
-                    IngressEvent::RecvError(_) => {}
+                    IngressEvent::RecvError(err) => {
+                        debug!(target: "discv4", %err, "failed to read datagram");
+                    }
                     IngressEvent::BadPacket(from, err, data) => {
                         debug!(target: "discv4", ?from, ?err, packet=?hex::encode(&data),   "bad packet");
                     }

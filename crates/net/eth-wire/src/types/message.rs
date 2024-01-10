@@ -435,7 +435,7 @@ where
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::{
         errors::EthStreamError, types::message::RequestPair, EthMessage, EthMessageID, GetNodeData,
         NodeData, ProtocolMessage,

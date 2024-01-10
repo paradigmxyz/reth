@@ -25,6 +25,9 @@ thiserror.workspace = true
 
 ffi = { package = "reth-mdbx-sys", path = "./mdbx-sys" }
 
+[target.'cfg(not(windows))'.dependencies]
+libffi = "3.2.0"
+
 [features]
 default = []
 return-borrowed = []

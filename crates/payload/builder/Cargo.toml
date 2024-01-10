@@ -18,6 +18,9 @@ reth-rpc-types.workspace = true
 reth-transaction-pool.workspace = true
 reth-interfaces.workspace = true
 reth-rpc-types-compat.workspace = true
+reth-provider.workspace = true
+reth-tasks.workspace = true
+reth-node-api.workspace = true
 
 # ethereum
 alloy-rlp.workspace = true
@@ -27,6 +30,7 @@ revm-primitives.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 futures-util.workspace = true
+async-trait.workspace = true
 
 # metrics
 reth-metrics.workspace = true
@@ -36,6 +40,9 @@ metrics.workspace = true
 thiserror.workspace = true
 sha2 = { version = "0.10", default-features = false }
 tracing.workspace = true
+
+# serde, for traits
+serde.workspace = true
 
 [dev-dependencies]
 revm.workspace = true

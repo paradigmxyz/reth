@@ -11,7 +11,10 @@ use crate::{
         db_type::{DatabaseBuilder, DatabaseInstance},
         ext::{RethCliExt, RethNodeCommandConfig},
     },
-    commands::node::{cl_events::ConsensusLayerHealthEvents, events},
+    commands::{
+        debug_cmd::EngineApiStore,
+        node::{cl_events::ConsensusLayerHealthEvents, events},
+    },
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     init::init_genesis,
     prometheus_exporter,
@@ -56,6 +59,11 @@ use reth_interfaces::{
 };
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle, NetworkManager};
 use reth_network_api::{NetworkInfo, PeersInfo};
+#[cfg(not(feature = "optimism"))]
+use reth_node_builder::EthEngineTypes;
+#[cfg(feature = "optimism")]
+use reth_node_builder::OptimismEngineTypes;
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     kzg::KzgSettings,
@@ -70,7 +78,6 @@ use reth_provider::{
 };
 use reth_prune::PrunerBuilder;
 use reth_revm::EvmProcessorFactory;
-use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
 use reth_stages::{
     prelude::*,
@@ -86,6 +93,7 @@ use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, EthTransactionPool, TransactionPool,
     TransactionValidationTaskExecutor,
 };
+use revm_inspectors::stack::Hook;
 use secp256k1::SecretKey;
 use std::{
     net::{SocketAddr, SocketAddrV4},
@@ -441,19 +449,19 @@ impl NodeConfig {
 
     /// Returns the max block that the node should run to, looking it up from the network if
     /// necessary
-    pub async fn max_block<DB, Client>(
+    async fn max_block<Provider, Client>(
         &self,
         network_client: &Client,
-        provider_factory: ProviderFactory<DB>,
+        provider: Provider,
     ) -> eyre::Result<Option<BlockNumber>>
     where
-        DB: Database,
+        Provider: HeaderProvider,
         Client: HeadersClient,
     {
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
         } else if let Some(tip) = self.debug.tip {
-            Some(self.lookup_or_fetch_tip(provider_factory, network_client, tip).await?)
+            Some(self.lookup_or_fetch_tip(provider, network_client, tip).await?)
         } else {
             None
         };
@@ -486,10 +494,7 @@ impl NodeConfig {
         DB: Database + Unpin + Clone + 'static,
     {
         info!(target: "reth::cli", "Connecting to P2P network");
-        let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
-        debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
-        let secret_key = get_secret_key(&network_secret_path)?;
+        let secret_key = self.network_secret(data_dir)?;
         let default_peers_path = data_dir.known_peers_path();
         let network_config = self.load_network_config(
             config,
@@ -757,42 +762,38 @@ impl NodeConfig {
     /// If it doesn't exist, download the header and return the block number.
     ///
     /// NOTE: The download is attempted with infinite retries.
-    async fn lookup_or_fetch_tip<DB, Client>(
+    async fn lookup_or_fetch_tip<Provider, Client>(
         &self,
-        provider_factory: ProviderFactory<DB>,
+        provider: Provider,
         client: Client,
         tip: B256,
     ) -> RethResult<u64>
     where
-        DB: Database,
+        Provider: HeaderProvider,
         Client: HeadersClient,
     {
-        Ok(self.fetch_tip(provider_factory, client, BlockHashOrNumber::Hash(tip)).await?.number)
+        let header = provider.header_by_hash_or_number(tip.into())?;
+
+        // try to look up the header in the database
+        if let Some(header) = header {
+            info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
+            return Ok(header.number)
+        }
+
+        Ok(self.fetch_tip_from_network(client, tip.into()).await?.number)
     }
 
     /// Attempt to look up the block with the given number and return the header.
     ///
     /// NOTE: The download is attempted with infinite retries.
-    async fn fetch_tip<DB, Client>(
+    async fn fetch_tip_from_network<Client>(
         &self,
-        factory: ProviderFactory<DB>,
         client: Client,
         tip: BlockHashOrNumber,
     ) -> RethResult<SealedHeader>
     where
-        DB: Database,
         Client: HeadersClient,
     {
-        let provider = factory.provider()?;
-
-        let header = provider.header_by_hash_or_number(tip)?;
-
-        // try to look up the header in the database
-        if let Some(header) = header {
-            info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.seal_slow())
-        }
-
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
         loop {
             match get_single_header(&client, tip).await {
@@ -869,7 +870,7 @@ impl NodeConfig {
         }
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        use reth_revm_inspectors::stack::InspectorStackConfig;
+        use revm_inspectors::stack::InspectorStackConfig;
         let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
 
         let stack_config = InspectorStackConfig {
@@ -1116,10 +1117,35 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         ext.on_components_initialized(&components)?;
 
         debug!(target: "reth::cli", "Spawning payload builder service");
-        let payload_builder =
-            ext.spawn_payload_builder_service(&self.config.builder, &components)?;
 
-        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
+        // TODO: stateful node builder should handle this in with_payload_builder
+        // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
+        #[cfg(feature = "optimism")]
+        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
+            .set_compute_pending_block(self.config.builder.compute_pending_block);
+
+        #[cfg(feature = "optimism")]
+        let payload_builder: PayloadBuilderHandle<OptimismEngineTypes> =
+            ext.spawn_payload_builder_service(&self.config.builder, &components, payload_builder)?;
+
+        // The default payload builder is implemented on the unit type.
+        #[cfg(not(feature = "optimism"))]
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
+
+        #[cfg(not(feature = "optimism"))]
+        let payload_builder: PayloadBuilderHandle<EthEngineTypes> =
+            ext.spawn_payload_builder_service(&self.config.builder, &components, payload_builder)?;
+
+        let (consensus_engine_tx, mut consensus_engine_rx) = unbounded_channel();
+        if let Some(store_path) = self.config.debug.engine_api_store.clone() {
+            let (engine_intercept_tx, engine_intercept_rx) = unbounded_channel();
+            let engine_api_store = EngineApiStore::new(store_path);
+            executor.spawn_critical(
+                "engine api interceptor",
+                engine_api_store.intercept(consensus_engine_rx, engine_intercept_tx),
+            );
+            consensus_engine_rx = engine_intercept_rx;
+        };
         let max_block = self.config.max_block(&network_client, provider_factory.clone()).await?;
 
         // Configure the pipeline
@@ -1277,7 +1303,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         #[cfg(feature = "optimism")]
         if self.config.chain.is_optimism() && !self.config.rollup.enable_genesis_walkback {
             let client = rpc_server_handles.auth.http_client();
-            reth_rpc_api::EngineApiClient::fork_choice_updated_v2(
+            reth_rpc_api::EngineApiClient::<OptimismEngineTypes>::fork_choice_updated_v2(
                 &client,
                 reth_rpc_types::engine::ForkchoiceState {
                     head_block_hash: head.hash,

@@ -2,7 +2,7 @@
 
 Returns the full database path
 
-```bash
+```text
 $ reth db path --help
 Usage: reth db path [OPTIONS]
 

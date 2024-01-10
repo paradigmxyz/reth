@@ -4,8 +4,9 @@
 
 use crate::{
     beacon::{BlsPublicKey, BlsSignature},
-    engine::{BlobsBundleV1, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3},
-    ExecutionPayload,
+    engine::{
+        BlobsBundleV1, ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    },
 };
 use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};

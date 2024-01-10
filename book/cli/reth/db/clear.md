@@ -2,7 +2,7 @@
 
 Deletes all table entries
 
-```bash
+```text
 $ reth db clear --help
 Usage: reth db clear [OPTIONS] <TABLE>
 

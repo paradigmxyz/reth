@@ -22,13 +22,11 @@ normal = [
 # reth
 reth-config.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
-reth-db = { workspace = true, features = ["mdbx", "test-utils"] }
-# TODO: Temporary use of the test-utils feature
-reth-provider = { workspace = true, features = ["test-utils"] }
+reth-db = { workspace = true, features = ["mdbx"] }
+reth-provider = { workspace = true }
 reth-revm.workspace = true
-reth-revm-inspectors.workspace = true
 reth-stages.workspace = true
-reth-interfaces = { workspace = true, features = ["test-utils", "clap"] }
+reth-interfaces = { workspace = true, features = ["clap"] }
 reth-transaction-pool.workspace = true
 reth-beacon-consensus.workspace = true
 reth-auto-seal-consensus.workspace = true
@@ -56,10 +54,13 @@ reth-prune.workspace = true
 reth-snapshot = { workspace = true, features = ["clap"] }
 reth-trie.workspace = true
 reth-nippy-jar.workspace = true
+reth-node-api.workspace = true
+reth-node-builder.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+revm-inspectors.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -76,7 +77,7 @@ toml = { workspace = true, features = ["display"] }
 # metrics
 metrics-exporter-prometheus = "0.12.1"
 metrics-util = "0.15.0"
-metrics-process = "1.0.9"
+metrics-process = "=1.0.14"
 reth-metrics.workspace = true
 metrics.workspace = true
 once_cell.workspace = true
@@ -113,6 +114,7 @@ const-str = "0.5.6"
 boyer-moore-magiclen = "0.2.16"
 itertools.workspace = true
 rayon.workspace = true
+futures-util.workspace = true
 
 [target.'cfg(not(windows))'.dependencies]
 jemallocator = { version = "0.5.0", optional = true }

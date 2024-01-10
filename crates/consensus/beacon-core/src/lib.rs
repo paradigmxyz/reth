@@ -5,14 +5,6 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(
-    missing_debug_implementations,
-    missing_docs,
-    unused_crate_dependencies,
-    unreachable_pub,
-    rustdoc::all
-)]
-#![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 //! Consensus for ethereum network
@@ -63,9 +55,7 @@ impl Consensus for BeaconConsensus {
     ) -> Result<(), ConsensusError> {
         if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, header.difficulty)
         {
-            // EIP-3675: Upgrade consensus to Proof-of-Stake:
-            // https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0
-            if header.difficulty != U256::ZERO {
+            if !header.is_zero_difficulty() {
                 return Err(ConsensusError::TheMergeDifficultyIsNotZero)
             }
 

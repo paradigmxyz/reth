@@ -2,7 +2,7 @@
 
 P2P Debugging utilities
 
-```bash
+```text
 $ reth p2p --help
 Usage: reth p2p [OPTIONS] <COMMAND>
 
