@@ -34,7 +34,13 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::error::RecvError, watch};
+use tokio::sync::{
+    mpsc,
+    mpsc::{error::TrySendError, UnboundedReceiver},
+    oneshot,
+    oneshot::error::RecvError,
+    watch,
+};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace, warn};
 
@@ -42,7 +48,7 @@ use tracing::{debug, trace, warn};
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
 
 /// Cache limit of transactions waiting for idle peer to be fetched.
-const MAX_CAPACITY_BUFFERED_HASHES: usize = 10000;
+const MAX_CAPACITY_BUFFERED_HASHES: usize = 100 * GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES;
 
 /// Soft limit for NewPooledTransactions
 const NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT: usize = 4096;
@@ -1193,10 +1199,10 @@ struct TransactionFetcher {
     inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
     /// Hashes that are awaiting fetch from an idle peer.
     buffered_hashes: LruCache<TxHash>,
+    /// Queue of hashes that have been evicted from the hash buffer.
+    dropped_hashes_rx: UnboundedReceiver<TxHash>,
     /// Tracks all hashes that are currently being fetched or are buffered, mapping them to
     /// request retries and last recently seen fallback peers (max one request try for any peer).
-    // todo: schnellru with limit max inflight requests + buffered hashes, alt buffered hash cache
-    // with expulsion feedback
     unknown_hashes: HashMap<TxHash, (u8, LruCache<PeerId>)>,
 }
 
@@ -1527,6 +1533,11 @@ impl Future for TransactionFetcher {
         let mut this = self.as_mut().project();
         let res = this.inflight_requests.poll_next_unpin(cx);
 
+        while let Poll::Ready(Some(hash)) = self.dropped_hashes_rx.poll_recv(cx) {
+            // capacity of `buffered_hashes` keeps `unknown_hashes` within bounds.
+            self.unknown_hashes.remove(&hash);
+        }
+
         if let Poll::Ready(Some(response)) = res {
             // update peer activity, requests for buffered hashes can only be made to idle
             // fallback peers
@@ -1567,19 +1578,23 @@ impl Future for TransactionFetcher {
                 }
             }
         }
+
         Poll::Pending
     }
 }
 
 impl Default for TransactionFetcher {
     fn default() -> Self {
+        let (dropped_hashes_tx, dropped_hashes_rx) = mpsc::unbounded_channel();
         Self {
             active_peers: LruMap::new(MAX_CONCURRENT_TX_REQUESTS),
             inflight_requests: Default::default(),
-            buffered_hashes: LruCache::new(
+            buffered_hashes: LruCache::new_with_feedback(
                 NonZeroUsize::new(MAX_CAPACITY_BUFFERED_HASHES)
                     .expect("buffered cache limit should be non-zero"),
+                dropped_hashes_tx,
             ),
+            dropped_hashes_rx,
             unknown_hashes: Default::default(),
         }
     }

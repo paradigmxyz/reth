@@ -8,6 +8,8 @@ use std::{
     hash::Hash,
     num::NonZeroUsize,
 };
+use tokio::sync::mpsc::UnboundedSender;
+use tracing::warn;
 
 /// A minimal LRU cache based on a `LinkedHashSet` with limited capacity.
 ///
@@ -17,12 +19,19 @@ use std::{
 pub struct LruCache<T: Hash + Eq> {
     limit: NonZeroUsize,
     inner: LinkedHashSet<T>,
+    tx: Option<UnboundedSender<T>>,
 }
 
 impl<T: Hash + Eq> LruCache<T> {
-    /// Creates a new `LruCache` using the given limit
+    /// Creates a new [`LruCache`] using the given limit
     pub fn new(limit: NonZeroUsize) -> Self {
-        Self { inner: LinkedHashSet::new(), limit }
+        Self { inner: LinkedHashSet::new(), limit, tx: None }
+    }
+
+    /// Creates a new [`LruCache`] using the given limit and with a channel for sending eviction
+    /// feedback. Note, that it is up to the caller's context to drain the buffer!
+    pub fn new_with_feedback(limit: NonZeroUsize, tx: UnboundedSender<T>) -> Self {
+        Self { inner: LinkedHashSet::new(), limit, tx: Some(tx) }
     }
 
     /// Insert an element into the set.
@@ -46,10 +55,20 @@ impl<T: Hash + Eq> LruCache<T> {
 
     /// Remove the least recently used entry and return it.
     ///
-    /// If the `LruCache` is empty this will return None.
+    /// If the `LruCache` is empty or if the eviction feedback is
+    /// configured, this will return None.
     #[inline]
-    fn remove_lru(&mut self) {
-        self.inner.pop_front();
+    fn remove_lru(&mut self) -> Option<T> {
+        if let Some(item) = self.inner.pop_front() {
+            if let Some(tx) = &self.tx {
+                if let Err(e) = tx.send(item) {
+                    warn!("failed to send eviction feedback, {e}");
+                }
+            } else {
+                return Some(item)
+            }
+        }
+        None
     }
 
     /// Expels the given value. Returns true if the value existed.
