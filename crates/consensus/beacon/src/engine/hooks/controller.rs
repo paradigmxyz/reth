@@ -1,6 +1,6 @@
 use crate::hooks::{
-    EngineContext, EngineHook, EngineHookAction, EngineHookDBAccessLevel, EngineHookError,
-    EngineHookEvent, EngineHooks,
+    EngineContext, EngineHook, EngineHookDBAccessLevel, EngineHookError, EngineHookEvent,
+    EngineHooks,
 };
 use std::{
     collections::VecDeque,
@@ -13,7 +13,6 @@ pub(crate) struct PolledHook {
     #[allow(dead_code)]
     pub(crate) name: &'static str,
     pub(crate) event: EngineHookEvent,
-    pub(crate) action: Option<EngineHookAction>,
     pub(crate) db_access_level: EngineHookDBAccessLevel,
 }
 
@@ -57,11 +56,10 @@ impl EngineHooksController {
         let Some(mut hook) = self.active_db_write_hook.take() else { return Poll::Pending };
 
         match hook.poll(cx, args)? {
-            Poll::Ready((event, action)) => {
+            Poll::Ready(event) => {
                 let result = PolledHook {
                     name: hook.name(),
                     event,
-                    action,
                     db_access_level: hook.db_access_level(),
                 };
 
@@ -143,13 +141,9 @@ impl EngineHooksController {
             return Poll::Pending
         }
 
-        if let Poll::Ready((event, action)) = hook.poll(cx, args)? {
-            let result = PolledHook {
-                name: hook.name(),
-                event,
-                action,
-                db_access_level: hook.db_access_level(),
-            };
+        if let Poll::Ready(event) = hook.poll(cx, args)? {
+            let result =
+                PolledHook { name: hook.name(), event, db_access_level: hook.db_access_level() };
 
             debug!(
                 target: "consensus::engine::hooks",
@@ -173,8 +167,8 @@ impl EngineHooksController {
 #[cfg(test)]
 mod tests {
     use crate::hooks::{
-        EngineContext, EngineHook, EngineHookAction, EngineHookDBAccessLevel, EngineHookEvent,
-        EngineHooks, EngineHooksController,
+        EngineContext, EngineHook, EngineHookDBAccessLevel, EngineHookEvent, EngineHooks,
+        EngineHooksController,
     };
     use futures::poll;
     use reth_interfaces::{RethError, RethResult};
@@ -185,7 +179,7 @@ mod tests {
     };
 
     struct TestHook {
-        results: VecDeque<RethResult<(EngineHookEvent, Option<EngineHookAction>)>>,
+        results: VecDeque<RethResult<EngineHookEvent>>,
         name: &'static str,
         access_level: EngineHookDBAccessLevel,
     }
@@ -206,7 +200,7 @@ mod tests {
             }
         }
 
-        fn add_result(&mut self, result: RethResult<(EngineHookEvent, Option<EngineHookAction>)>) {
+        fn add_result(&mut self, result: RethResult<EngineHookEvent>) {
             self.results.push_back(result);
         }
     }
@@ -220,7 +214,7 @@ mod tests {
             &mut self,
             _cx: &mut Context<'_>,
             _ctx: EngineContext,
-        ) -> Poll<RethResult<(EngineHookEvent, Option<EngineHookAction>)>> {
+        ) -> Poll<RethResult<EngineHookEvent>> {
             self.results.pop_front().map_or(Poll::Pending, Poll::Ready)
         }
 
@@ -249,16 +243,14 @@ mod tests {
         // return `EngineHookEvent::Finished` yet.
         // Currently running hooks with DB write should still be set.
         let mut hook = TestHook::new_rw("read-write");
-        hook.add_result(Ok((EngineHookEvent::Started, None)));
+        hook.add_result(Ok(EngineHookEvent::Started));
         controller.active_db_write_hook = Some(Box::new(hook));
 
         let result = poll!(poll_fn(|cx| controller.poll_active_db_write_hook(cx, context)));
         assert_eq!(
             result.map(|result| {
                 let polled_hook = result.unwrap();
-                polled_hook.event.is_started() &&
-                    polled_hook.action.is_none() &&
-                    polled_hook.db_access_level.is_read_write()
+                polled_hook.event.is_started() && polled_hook.db_access_level.is_read_write()
             }),
             Poll::Ready(true)
         );
@@ -269,16 +261,14 @@ mod tests {
         // `EngineHookEvent::Finished` inside.
         // Currently running hooks with DB write should be moved to collection of hooks.
         let mut hook = TestHook::new_rw("read-write");
-        hook.add_result(Ok((EngineHookEvent::Finished(Ok(())), None)));
+        hook.add_result(Ok(EngineHookEvent::Finished(Ok(()))));
         controller.active_db_write_hook = Some(Box::new(hook));
 
         let result = poll!(poll_fn(|cx| controller.poll_active_db_write_hook(cx, context)));
         assert_eq!(
             result.map(|result| {
                 let polled_hook = result.unwrap();
-                polled_hook.event.is_finished() &&
-                    polled_hook.action.is_none() &&
-                    polled_hook.db_access_level.is_read_write()
+                polled_hook.event.is_finished() && polled_hook.db_access_level.is_read_write()
             }),
             Poll::Ready(true)
         );
@@ -291,11 +281,11 @@ mod tests {
         let context = EngineContext { tip_block_number: 2, finalized_block_number: Some(1) };
 
         let mut hook_rw = TestHook::new_rw("read-write");
-        hook_rw.add_result(Ok((EngineHookEvent::Started, None)));
+        hook_rw.add_result(Ok(EngineHookEvent::Started));
 
         let hook_ro_name = "read-only";
         let mut hook_ro = TestHook::new_ro(hook_ro_name);
-        hook_ro.add_result(Ok((EngineHookEvent::Started, None)));
+        hook_ro.add_result(Ok(EngineHookEvent::Started));
 
         let mut hooks = EngineHooks::new();
         hooks.add(hook_rw);
@@ -314,7 +304,6 @@ mod tests {
                 let polled_hook = result.unwrap();
                 polled_hook.name == hook_ro_name &&
                     polled_hook.event.is_started() &&
-                    polled_hook.action.is_none() &&
                     polled_hook.db_access_level.is_read_only()
             }),
             Poll::Ready(true)
@@ -327,15 +316,15 @@ mod tests {
 
         let hook_rw_1_name = "read-write-1";
         let mut hook_rw_1 = TestHook::new_rw(hook_rw_1_name);
-        hook_rw_1.add_result(Ok((EngineHookEvent::Started, None)));
+        hook_rw_1.add_result(Ok(EngineHookEvent::Started));
 
         let hook_rw_2_name = "read-write-2";
         let mut hook_rw_2 = TestHook::new_rw(hook_rw_2_name);
-        hook_rw_2.add_result(Ok((EngineHookEvent::Started, None)));
+        hook_rw_2.add_result(Ok(EngineHookEvent::Started));
 
         let hook_ro_name = "read-only";
         let mut hook_ro = TestHook::new_ro(hook_ro_name);
-        hook_ro.add_result(Ok((EngineHookEvent::Started, None)));
+        hook_ro.add_result(Ok(EngineHookEvent::Started));
         hook_ro.add_result(Err(RethError::Custom("something went wrong".to_string())));
 
         let mut hooks = EngineHooks::new();
@@ -354,7 +343,6 @@ mod tests {
                 let polled_hook = result.unwrap();
                 polled_hook.name == hook_rw_1_name &&
                     polled_hook.event.is_started() &&
-                    polled_hook.action.is_none() &&
                     polled_hook.db_access_level.is_read_write()
             }),
             Poll::Ready(true)
@@ -377,7 +365,6 @@ mod tests {
                 let polled_hook = result.unwrap();
                 polled_hook.name == hook_ro_name &&
                     polled_hook.event.is_started() &&
-                    polled_hook.action.is_none() &&
                     polled_hook.db_access_level.is_read_only()
             }),
             Poll::Ready(true)
