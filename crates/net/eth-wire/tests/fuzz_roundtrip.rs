@@ -44,7 +44,6 @@ macro_rules! fuzz_type_and_name {
     };
 }
 
-#[allow(non_snake_case)]
 #[cfg(any(test, feature = "bench"))]
 pub mod fuzz_rlp {
     use crate::roundtrip_encoding;
