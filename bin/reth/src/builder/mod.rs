@@ -3,7 +3,7 @@ use super::cli::{components::RethRpcServerHandles, ext::DefaultRethNodeCommandCo
 use crate::{
     args::{
         get_secret_key, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RpcServerArgs, TxPoolArgs,
+        PruningArgs, RpcServerArgs, StaticFilesArgs, TxPoolArgs,
     },
     cli::{
         components::RethNodeComponentsImpl,
@@ -241,7 +241,10 @@ pub struct NodeConfig {
     /// All pruning related arguments
     pub pruning: PruningArgs,
 
-    /// Rollup related arguments
+    /// All static files related arguments
+    pub static_files: StaticFilesArgs,
+
+    /// All rollup related arguments
     #[cfg(feature = "optimism")]
     pub rollup: crate::args::RollupArgs,
 }
@@ -264,6 +267,7 @@ impl NodeConfig {
             db: DatabaseArgs::default(),
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
+            static_files: StaticFilesArgs::default(),
             #[cfg(feature = "optimism")]
             rollup: crate::args::RollupArgs::default(),
         }
@@ -356,6 +360,12 @@ impl NodeConfig {
     /// Set the pruning args for the node
     pub fn with_pruning(mut self, pruning: PruningArgs) -> Self {
         self.pruning = pruning;
+        self
+    }
+
+    /// Set the static files args for the node
+    pub fn with_static_files(mut self, static_files: StaticFilesArgs) -> Self {
+        self.static_files = static_files;
         self
     }
 
@@ -976,6 +986,7 @@ impl Default for NodeConfig {
             db: DatabaseArgs::default(),
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
+            static_files: StaticFilesArgs::default(),
             #[cfg(feature = "optimism")]
             rollup: crate::args::RollupArgs::default(),
         }
@@ -1015,17 +1026,22 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         let mut provider_factory =
             ProviderFactory::new(Arc::clone(&self.db), Arc::clone(&self.config.chain));
 
-        // configure snapshotter
-        let snapshotter = reth_snapshot::Snapshotter::new(
-            provider_factory.clone(),
-            self.data_dir.snapshots_path(),
-            self.config.chain.snapshot_block_interval,
-        )?;
+        let highest_snapshots_tracker = if self.config.static_files.static_files {
+            let snapshotter = reth_snapshot::Snapshotter::new(
+                provider_factory.clone(),
+                self.data_dir.snapshots_path(),
+                self.config.chain.snapshot_block_interval,
+            )?;
 
-        provider_factory = provider_factory.with_snapshots(
-            self.data_dir.snapshots_path(),
-            snapshotter.highest_snapshot_receiver(),
-        )?;
+            provider_factory = provider_factory.with_snapshots(
+                self.data_dir.snapshots_path(),
+                snapshotter.highest_snapshot_receiver(),
+            )?;
+
+            snapshotter.highest_snapshot_receiver()
+        } else {
+            watch::channel(None).1
+        };
 
         self.config.start_metrics_endpoint(prometheus_handle, Arc::clone(&self.db)).await?;
 
@@ -1208,7 +1224,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             let mut pruner = PrunerBuilder::new(prune_config.clone())
                 .max_reorg_depth(tree_config.max_reorg_depth() as usize)
                 .prune_delete_limit(self.config.chain.prune_delete_limit)
-                .build(provider_factory, snapshotter.highest_snapshot_receiver());
+                .build(provider_factory, highest_snapshots_tracker);
 
             let events = pruner.events();
             hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));

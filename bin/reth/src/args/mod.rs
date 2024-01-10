@@ -57,6 +57,10 @@ mod rollup_args;
 #[cfg(feature = "optimism")]
 pub use rollup_args::RollupArgs;
 
+/// StaticFilesArgs for configuring the static files
+mod static_files_args;
+pub use static_files_args::StaticFilesArgs;
+
 pub mod utils;
 
 pub mod types;

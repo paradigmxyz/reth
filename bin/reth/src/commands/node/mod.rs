@@ -6,7 +6,7 @@ use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, parse_socket_address, SUPPORTED_CHAINS},
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
-        RpcServerArgs, TxPoolArgs,
+        RpcServerArgs, StaticFilesArgs, TxPoolArgs,
     },
     builder::NodeConfig,
     cli::{db_type::DatabaseBuilder, ext::RethCliExt},
@@ -112,7 +112,11 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     #[clap(flatten)]
     pub pruning: PruningArgs,
 
-    /// Rollup related arguments
+    /// All static files related arguments
+    #[clap(flatten)]
+    pub static_files: StaticFilesArgs,
+
+    /// All rollup related arguments
     #[cfg(feature = "optimism")]
     #[clap(flatten)]
     pub rollup: crate::args::RollupArgs,
@@ -141,6 +145,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             db,
             dev,
             pruning,
+            static_files,
             #[cfg(feature = "optimism")]
             rollup,
             ..
@@ -160,6 +165,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             db,
             dev,
             pruning,
+            static_files,
             #[cfg(feature = "optimism")]
             rollup,
             ext,
@@ -183,6 +189,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             db,
             dev,
             pruning,
+            static_files,
             #[cfg(feature = "optimism")]
             rollup,
             ext,
@@ -207,6 +214,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             db,
             dev,
             pruning,
+            static_files,
             #[cfg(feature = "optimism")]
             rollup,
         };
