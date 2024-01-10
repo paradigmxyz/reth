@@ -186,7 +186,7 @@ mod tests {
     */
     static TEST_SPEC: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         ChainSpec {
-            chain: Chain::Id(12345),
+            chain: Chain::from_id(12345),
             genesis: serde_json::from_str(include_str!("../testdata/proof-genesis.json"))
                 .expect("Can't deserialize test genesis json"),
             ..Default::default()

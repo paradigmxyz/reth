@@ -11,11 +11,7 @@ use std::{
 
 /// Constructs a string to be used as a path for configuration and db paths.
 pub fn config_path_prefix(chain: Chain) -> String {
-    if let Some(named) = chain.named() {
-        named.to_string()
-    } else {
-        chain.id().to_string()
-    }
+    chain.to_string()
 }
 
 /// Returns the path to the reth data directory.

@@ -215,7 +215,7 @@ mod tests {
     fn parse_common_import_command_chain_args() {
         for chain in SUPPORTED_CHAINS {
             let args: ImportCommand = ImportCommand::parse_from(["reth", "--chain", chain, "."]);
-            assert_eq!(args.chain.chain, chain.parse().unwrap());
+            assert_eq!(args.chain.chain, chain.parse::<alloy_chains::Chain>().unwrap());
         }
     }
 }
