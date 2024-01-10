@@ -198,30 +198,27 @@ impl<T> RngDebugClone for T where T: RngCore + std::fmt::Debug {}
 /// signers to the genesis block.
 ///
 /// # Example
-/// ```no_run
-/// use reth_primitives::genesis::AllocBuilder;
+/// ```
+/// # use reth_primitives::AllocBuilder;
+/// let mut builder = AllocBuilder::default();
 ///
-/// fn custom_genesis() {
-///     let mut builder = AllocBuilder::default();
+/// // This will add a genesis account to the alloc builder, with the provided balance. The
+/// // signer for the account will be returned.
+/// let (_signer, _addr) = builder.new_funded_account(100_000_000_000_000_000u128.into());
 ///
-///     // This will add a genesis account to the alloc builder, with the provided balance. The
-///     // signer for the account will be returned.
-///     let (_signer, _addr) = builder.new_funded_account(100_000_000_000_000_000u128.into());
+/// // You can also provide code for the account.
+/// let code = hex::decode("0x1234").unwrap();
+/// let (_second_signer, _second_addr) =
+///     builder.new_funded_account_with_code(100_000_000_000_000_000u128.into(), code);
 ///
-///     // You can also provide code for the account.
-///     let code = hex::decode("0x1234").unwrap();
-///     let (_second_signer, _second_addr) =
-///         builder.new_funded_account_with_code(100_000_000_000_000_000u128.into(), code);
+/// // You can also add an account with a specific address.
+/// // This will not return a signer, since the address is provided by the user and the signer
+/// // may be unknown.
+/// let addr = "0Ac1dF02185025F65202660F8167210A80dD5086".parse::<Address>().unwrap();
+/// builder.add_funded_account_with_address(addr, 100_000_000_000_000_000u128.into());
 ///
-///     // You can also add an account with a specific address.
-///     // This will not return a signer, since the address is provided by the user and the signer
-///     // may be unknown.
-///     let addr = "0Ac1dF02185025F65202660F8167210A80dD5086".parse::<Address>().unwrap();
-///     builder.add_funded_account_with_address(addr, 100_000_000_000_000_000u128.into());
-///
-///     // Once you're done adding accounts, you can build the alloc.
-///     let alloc = builder.build();
-/// }
+/// // Once you're done adding accounts, you can build the alloc.
+/// let alloc = builder.build();
 /// ```
 #[derive(Debug)]
 pub struct AllocBuilder<'a> {
@@ -232,11 +229,18 @@ pub struct AllocBuilder<'a> {
 }
 
 impl<'a> AllocBuilder<'a> {
-    /// Use the provided rng for generating key pairs.
-    pub fn with_rng<'b, R>(mut self, rng: &'b mut R) -> Self
+    /// Initialize a new alloc builder with the provided rng.
+    pub fn new_with_rng<R>(rng: &'a mut R) -> Self
     where
         R: RngCore + std::fmt::Debug,
-        'b: 'a,
+    {
+        Self { alloc: HashMap::default(), rng: Box::new(rng) }
+    }
+
+    /// Use the provided rng for generating key pairs.
+    pub fn with_rng<R>(mut self, rng: &'a mut R) -> Self
+    where
+        R: RngCore + std::fmt::Debug,
     {
         self.rng = Box::new(rng);
         self
