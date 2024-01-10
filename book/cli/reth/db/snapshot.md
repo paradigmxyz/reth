@@ -2,7 +2,7 @@
 
 Snapshots tables from database
 
-```bash
+```text
 $ reth db snapshot --help
 Usage: reth db snapshot [OPTIONS] [SEGMENTS]...
 

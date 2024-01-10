@@ -1,5 +1,6 @@
 //!  Helper enum functions  for `Transaction`, `TransactionSigned` and
 //! `TransactionSignedEcRecovered`
+
 use crate::{
     Address, Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
     B256,

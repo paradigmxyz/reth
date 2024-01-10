@@ -130,9 +130,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             .unwrap_or_default();
         let db_tx_num = tx_block_cursor.last()?.unwrap_or_default().0;
 
-        dbg!(snapshot_tx_num);
-        dbg!(db_tx_num);
-
         match snapshot_tx_num.cmp(&db_tx_num) {
             Ordering::Greater => {
                 snapshotter.prune_transactions(snapshot_tx_num - db_tx_num, from_block - 1)?
@@ -170,6 +167,12 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                     BlockResponse::Empty(_) => 0,
                 },
             };
+
+            // Increment block on snapshot header.
+            if block_number > 0 {
+                snapshotter.increment_block(SnapshotSegment::Transactions)?;
+            }
+
             match response {
                 BlockResponse::Full(block) => {
                     // write transaction block index
@@ -179,11 +182,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
                     // Write transactions
                     for transaction in block.body {
-                        snapshotter.append_transaction(
-                            block_number,
-                            next_tx_num,
-                            transaction.into(),
-                        )?;
+                        snapshotter.append_transaction(next_tx_num, transaction.into())?;
 
                         // Increment transaction id for each transaction.
                         next_tx_num += 1;
@@ -244,7 +243,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
 
         let mut rev_walker = body_cursor.walk_back(None)?;
-
         while let Some((number, block_meta)) = rev_walker.next().transpose()? {
             if number <= input.unwind_to {
                 break
@@ -281,7 +279,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             .get_highest_snapshot_tx(SnapshotSegment::Transactions)
             .unwrap_or_default();
 
-        // If there are more transactions
+        // If there are more transactions on database, then we are missing snapshot data and we need
+        // to unwind further.
         if db_tx_num > snapshot_tx_num {
             let last_block = snapshot_provider
                 .get_highest_snapshot_block(SnapshotSegment::Transactions)
@@ -449,7 +448,6 @@ mod tests {
 
         // Check that we synced more blocks
         let output = rx.await.unwrap();
-
         assert_matches!(
             output,
             Ok(ExecOutput { checkpoint: StageCheckpoint {
@@ -644,9 +642,7 @@ mod tests {
 
                 let mut rng = generators::rng();
                 let blocks = random_block_range(&mut rng, start..=end, GENESIS_HASH, 0..2);
-
                 self.db.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
-
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
                     {
@@ -658,13 +654,14 @@ mod tests {
                             first_tx_num: 1,
                             tx_count: progress.body.len() as u64,
                         };
+
+                        for _ in 0..progress.number {
+                            snapshotter.increment_block(SnapshotSegment::Transactions)?;
+                        }
+
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx(&mut rng);
-                            snapshotter.append_transaction(
-                                progress.number,
-                                tx_num,
-                                transaction.into(),
-                            )
+                            snapshotter.append_transaction(tx_num, transaction.into())
                         })?;
 
                         if body.tx_count != 0 {
@@ -757,7 +754,6 @@ mod tests {
                     let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
                     let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
-                    // let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
                     let mut tx_block_cursor = tx.cursor_read::<tables::TransactionBlock>()?;
 
                     let first_body_key = match bodies_cursor.first()? {
@@ -796,9 +792,9 @@ mod tests {
 
                         let tx_block_id = tx_block_cursor.seek_exact(body.last_tx_num())?.map(|(_,b)| b);
                         if body.tx_count == 0 {
-                            assert_ne!(tx_block_id,Some(number), "AAA");
+                            assert_ne!(tx_block_id,Some(number));
                         } else {
-                            assert_eq!(tx_block_id, Some(number),"BBB");
+                            assert_eq!(tx_block_id, Some(number));
                         }
 
                         for tx_id in body.tx_num_range() {

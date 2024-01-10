@@ -1,3 +1,4 @@
+#![allow(unreachable_pub)]
 //! Helper extension traits for working with clique providers.
 
 use async_trait::async_trait;

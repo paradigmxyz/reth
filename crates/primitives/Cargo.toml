@@ -8,6 +8,9 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Commonly used types in reth."
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-codecs.workspace = true
@@ -19,8 +22,9 @@ revm-primitives = { workspace = true, features = ["serde"] }
 # ethereum
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
+alloy-trie = { workspace = true, features = ["serde"] }
 ethers-core = { workspace = true, default-features = false, optional = true }
-nybbles = { version = "0.1", features = ["serde", "rlp"] }
+nybbles = { version = "0.1.2", features = ["serde", "rlp"] }
 
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
@@ -49,6 +53,7 @@ sucds = "~0.6"
 tempfile.workspace = true
 thiserror.workspace = true
 zstd = { version = "0.12", features = ["experimental"] }
+ahash.workspace = true
 
 # `test-utils` feature
 hash-db = { version = "~0.15", optional = true }
@@ -67,6 +72,8 @@ proptest.workspace = true
 proptest-derive.workspace = true
 rand.workspace = true
 revm-primitives = { workspace = true, features = ["arbitrary"] }
+nybbles = { workspace = true, features = ["arbitrary"] }
+alloy-trie = { workspace = true, features = ["arbitrary"] }
 serde_json.workspace = true
 test-fuzz = "4"
 toml.workspace = true
@@ -88,6 +95,7 @@ arbitrary = [
     "reth-rpc-types/arbitrary",
     "reth-ethereum-forks/arbitrary",
     "nybbles/arbitrary",
+    "alloy-trie/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-derive",

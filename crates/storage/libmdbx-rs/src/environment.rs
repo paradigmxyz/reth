@@ -48,6 +48,8 @@ impl Environment {
             geometry: None,
             log_level: None,
             kind: Default::default(),
+            #[cfg(not(windows))]
+            handle_slow_readers: None,
         }
     }
 
@@ -291,12 +293,12 @@ impl EnvironmentKind {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct TxnPtr(pub *mut ffi::MDBX_txn);
+pub(crate) struct TxnPtr(pub(crate) *mut ffi::MDBX_txn);
 unsafe impl Send for TxnPtr {}
 unsafe impl Sync for TxnPtr {}
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct EnvPtr(pub *mut ffi::MDBX_env);
+pub(crate) struct EnvPtr(pub(crate) *mut ffi::MDBX_env);
 unsafe impl Send for EnvPtr {}
 unsafe impl Sync for EnvPtr {}
 
@@ -309,6 +311,7 @@ pub(crate) enum TxnManagerMessage {
 /// Environment statistics.
 ///
 /// Contains information about the size and layout of an MDBX environment or database.
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct Stat(ffi::MDBX_stat);
 
@@ -362,6 +365,7 @@ impl Stat {
     }
 }
 
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct GeometryInfo(ffi::MDBX_envinfo__bindgen_ty_1);
 
@@ -374,6 +378,7 @@ impl GeometryInfo {
 /// Environment information.
 ///
 /// Contains environment information about the map size, readers, last txn id etc.
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct Info(ffi::MDBX_envinfo);
 
@@ -491,6 +496,90 @@ impl<R> Default for Geometry<R> {
     }
 }
 
+/// Handle-Slow-Readers callback function to resolve database full/overflow issue due to a reader(s)
+/// which prevents the old data from being recycled.
+///
+/// Read transactions prevent reuse of pages freed by newer write transactions, thus the database
+/// can grow quickly. This callback will be called when there is not enough space in the database
+/// (i.e. before increasing the database size or before `MDBX_MAP_FULL` error) and thus can be
+/// used to resolve issues with a "long-lived" read transacttions.
+///
+/// Depending on the arguments and needs, your implementation may wait,
+/// terminate a process or thread that is performing a long read, or perform
+/// some other action. In doing so it is important that the returned code always
+/// corresponds to the performed action.
+///
+/// # Arguments
+///
+/// * `process_id` – A proceess id of the reader process.
+/// * `thread_id` – A thread id of the reader thread.
+/// * `read_txn_id` – An oldest read transaction number on which stalled.
+/// * `gap` – A lag from the last committed txn.
+/// * `space` – A space that actually become available for reuse after this reader finished. The
+///   callback function can take this value into account to evaluate the impact that a long-running
+///   transaction has.
+/// * `retry` – A retry number starting from 0. If callback has returned 0 at least once, then at
+///   end of current handling loop the callback function will be called additionally with negative
+///   `retry` value to notify about the end of loop. The callback function can use this fact to
+///   implement timeout reset logic while waiting for a readers.
+///
+/// # Returns
+/// A return code that determines the further actions for MDBX and must match the action which
+/// was executed by the callback:
+/// * `-2` or less – An error condition and the reader was not killed.
+/// * `-1` – The callback was unable to solve the problem and agreed on `MDBX_MAP_FULL` error; MDBX
+///   should increase the database size or return `MDBX_MAP_FULL` error.
+/// * `0` – The callback solved the problem or just waited for a while, libmdbx should rescan the
+///   reader lock table and retry. This also includes a situation when corresponding transaction
+///   terminated in normal way by `mdbx_txn_abort()` or `mdbx_txn_reset()`, and may be restarted.
+///   I.e. reader slot isn't needed to be cleaned from transaction.
+/// * `1` – Transaction aborted asynchronous and reader slot should be cleared immediately, i.e.
+///   read transaction will not continue but `mdbx_txn_abort()` nor `mdbx_txn_reset()` will be
+///   called later.
+/// * `2` or greater – The reader process was terminated or killed, and MDBX should entirely reset
+///   reader registration.
+pub type HandleSlowReadersCallback = fn(
+    process_id: u32,
+    thread_id: u32,
+    read_txn_id: u64,
+    gap: usize,
+    space: usize,
+    retry: isize,
+) -> HandleSlowReadersReturnCode;
+
+#[derive(Debug)]
+pub enum HandleSlowReadersReturnCode {
+    /// An error condition and the reader was not killed.
+    Error,
+    /// The callback was unable to solve the problem and agreed on `MDBX_MAP_FULL` error;
+    /// MDBX should increase the database size or return `MDBX_MAP_FULL` error.
+    ProceedWithoutKillingReader,
+    /// The callback solved the problem or just waited for a while, libmdbx should rescan the
+    /// reader lock table and retry. This also includes a situation when corresponding transaction
+    /// terminated in normal way by `mdbx_txn_abort()` or `mdbx_txn_reset()`, and may be restarted.
+    /// I.e. reader slot isn't needed to be cleaned from transaction.
+    Success,
+    /// Transaction aborted asynchronous and reader slot should be cleared immediately, i.e. read
+    /// transaction will not continue but `mdbx_txn_abort()` nor `mdbx_txn_reset()` will be called
+    /// later.
+    ClearReaderSlot,
+    /// The reader process was terminated or killed, and MDBX should entirely reset reader
+    /// registration.
+    ReaderProcessTerminated,
+}
+
+impl From<HandleSlowReadersReturnCode> for i32 {
+    fn from(value: HandleSlowReadersReturnCode) -> Self {
+        match value {
+            HandleSlowReadersReturnCode::Error => -2,
+            HandleSlowReadersReturnCode::ProceedWithoutKillingReader => -1,
+            HandleSlowReadersReturnCode::Success => 0,
+            HandleSlowReadersReturnCode::ClearReaderSlot => 1,
+            HandleSlowReadersReturnCode::ReaderProcessTerminated => 2,
+        }
+    }
+}
+
 /// Options for opening or creating an environment.
 #[derive(Debug, Clone)]
 pub struct EnvironmentBuilder {
@@ -506,6 +595,8 @@ pub struct EnvironmentBuilder {
     geometry: Option<Geometry<(Option<usize>, Option<usize>)>>,
     log_level: Option<ffi::MDBX_log_level_t>,
     kind: EnvironmentKind,
+    #[cfg(not(windows))]
+    handle_slow_readers: Option<HandleSlowReadersCallback>,
 }
 
 impl EnvironmentBuilder {
@@ -583,6 +674,14 @@ impl EnvironmentBuilder {
                         env,
                         ffi::MDBX_opt_max_readers,
                         max_readers,
+                    ))?;
+                }
+
+                #[cfg(not(windows))]
+                if let Some(handle_slow_readers) = self.handle_slow_readers {
+                    mdbx_result(ffi::mdbx_env_set_hsr(
+                        env,
+                        handle_slow_readers_callback(handle_slow_readers),
                     ))?;
                 }
 
@@ -762,8 +861,130 @@ impl EnvironmentBuilder {
         self
     }
 
+    /// Set the Handle-Slow-Readers callback. See [HandleSlowReadersCallback] for more information.
+    #[cfg(not(windows))]
+    pub fn set_handle_slow_readers(&mut self, hsr: HandleSlowReadersCallback) -> &mut Self {
+        self.handle_slow_readers = Some(hsr);
+        self
+    }
+
     pub fn set_log_level(&mut self, log_level: ffi::MDBX_log_level_t) -> &mut Self {
         self.log_level = Some(log_level);
         self
+    }
+}
+
+/// Creates an instance of `MDBX_hsr_func`.
+///
+/// Caution: this leaks the memory for callbacks, so they're alive throughout the program. It's
+/// fine, because we also expect the database environment to be alive during this whole time.
+#[cfg(not(windows))]
+unsafe fn handle_slow_readers_callback(callback: HandleSlowReadersCallback) -> ffi::MDBX_hsr_func {
+    // Move the callback function to heap and intentionally leak it, so it's not dropped and the
+    // MDBX env can use it throughout the whole program.
+    let callback = Box::leak(Box::new(callback));
+
+    // Wrap the callback into an ffi binding. The callback is needed for a nicer UX with Rust types,
+    // and without `env` and `txn` arguments that we don't want to expose to the user. Again,
+    // move the closure to heap and leak.
+    let hsr = Box::leak(Box::new(
+        |_env: *const ffi::MDBX_env,
+         _txn: *const ffi::MDBX_txn,
+         pid: ffi::mdbx_pid_t,
+         tid: ffi::mdbx_tid_t,
+         laggard: u64,
+         gap: ::libc::c_uint,
+         space: usize,
+         retry: ::libc::c_int|
+         -> i32 {
+            callback(pid as u32, tid as u32, laggard, gap as usize, space, retry as isize).into()
+        },
+    ));
+
+    // Create a pointer to the C function from the Rust closure, and forcefully forget the original
+    // closure.
+    let closure = libffi::high::Closure8::new(hsr);
+    let closure_ptr = *closure.code_ptr();
+    std::mem::forget(closure);
+
+    // Cast the closure to FFI `extern fn` type.
+    Some(std::mem::transmute(closure_ptr))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Environment, Error, Geometry, HandleSlowReadersReturnCode, PageSize, WriteFlags};
+    use std::{
+        ops::RangeInclusive,
+        sync::atomic::{AtomicBool, Ordering},
+    };
+
+    #[cfg(not(windows))]
+    #[test]
+    fn test_handle_slow_readers_callback() {
+        static CALLED: AtomicBool = AtomicBool::new(false);
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let env = Environment::builder()
+            .set_geometry(Geometry::<RangeInclusive<usize>> {
+                size: Some(0..=1024 * 1024), // Max 1MB, so we can hit the limit
+                page_size: Some(PageSize::MinimalAcceptable), // To create as many pages as possible
+                ..Default::default()
+            })
+            .set_handle_slow_readers(
+                |_process_id: u32,
+                 _thread_id: u32,
+                 _read_txn_id: u64,
+                 _gap: usize,
+                 _space: usize,
+                 _retry: isize| {
+                    CALLED.store(true, Ordering::Relaxed);
+
+                    HandleSlowReadersReturnCode::ProceedWithoutKillingReader
+                },
+            )
+            .open(tempdir.path())
+            .unwrap();
+
+        // Insert some data in the database, so the read transaction can lock on the snapshot of it
+        {
+            let tx = env.begin_rw_txn().unwrap();
+            let db = tx.open_db(None).unwrap();
+            for i in 0usize..1_000 {
+                tx.put(db.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty()).unwrap()
+            }
+            tx.commit().unwrap();
+        }
+
+        // Create a read transaction
+        let _tx_ro = env.begin_ro_txn().unwrap();
+
+        // Change previously inserted data, so the read transaction would use the previous snapshot
+        {
+            let tx = env.begin_rw_txn().unwrap();
+            let db = tx.open_db(None).unwrap();
+            for i in 0usize..1_000 {
+                tx.put(db.dbi(), i.to_le_bytes(), b"1", WriteFlags::empty()).unwrap();
+            }
+            tx.commit().unwrap();
+        }
+
+        // Insert more data in the database, so we hit the DB size limit error, and MDBX tries to
+        // kick long-lived readers and delete their snapshots
+        {
+            let tx = env.begin_rw_txn().unwrap();
+            let db = tx.open_db(None).unwrap();
+            for i in 1_000usize..1_000_000 {
+                match tx.put(db.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty()) {
+                    Ok(_) => continue,
+                    Err(Error::MapFull) => break,
+                    result @ Err(_) => result.unwrap(),
+                }
+            }
+            tx.commit().unwrap();
+        }
+
+        // Expect the HSR to be called
+        assert!(CALLED.load(Ordering::Relaxed));
     }
 }

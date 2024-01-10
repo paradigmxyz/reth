@@ -50,12 +50,11 @@ impl Deref for LoadedJar {
 /// is positioned. Used for segment filename.
 pub(crate) fn find_fixed_range(interval: u64, block: u64) -> RangeInclusive<u64> {
     let start = (block / interval) * interval;
-    let end = if block % interval == 0 { block } else { start + interval - 1 };
-    start..=end
+    start..=start + interval - 1
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use crate::{test_utils::create_test_provider_factory, HeaderProvider};
     use rand::{self, seq::SliceRandom};

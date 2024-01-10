@@ -237,7 +237,7 @@ where
 
         // Drop non-local transactions with a fee lower than the configured fee for acceptance into
         // the pool.
-        if (!origin.is_local() || self.local_transactions_config.no_local_exemptions()) &&
+        if !self.local_transactions_config.is_local(origin, transaction.sender()) &&
             transaction.is_eip1559() &&
             transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {

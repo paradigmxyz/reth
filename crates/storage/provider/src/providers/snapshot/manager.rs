@@ -129,6 +129,7 @@ impl SnapshotProvider {
 
         // Return cached `LoadedJar` or insert it for the first time, and then, return it.
         if let Some(block_range) = block_range {
+            let block_range = find_fixed_range(BLOCKS_PER_SNAPSHOT, *block_range.end());
             return Ok(Some(self.get_or_create_jar_provider(segment, &block_range)?))
         }
 

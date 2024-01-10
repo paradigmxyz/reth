@@ -1,5 +1,6 @@
 //! An implementation of the eth gas price oracle, used for providing gas price estimates based on
 //! previous blocks.
+
 use crate::eth::{
     cache::EthStateCache,
     error::{EthApiError, EthResult, RpcInvalidTransactionError},

@@ -179,6 +179,7 @@ fn from_block_with_transactions(
         total_difficulty: Some(total_difficulty),
         size: Some(U256::from(block_length)),
         withdrawals,
+        other: Default::default(),
     }
 }
 
@@ -196,5 +197,6 @@ pub fn uncle_block_from_header(header: PrimitiveHeader) -> Block {
         withdrawals: Some(vec![]),
         size,
         total_difficulty: None,
+        other: Default::default(),
     }
 }

@@ -1,4 +1,5 @@
 //! Json U256 serde helpers.
+
 use alloy_primitives::U256;
 use serde::{
     de::{Error, Visitor},
@@ -173,7 +174,7 @@ where
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::JsonU256;
     use alloy_primitives::U256;
     use serde::{Deserialize, Serialize};

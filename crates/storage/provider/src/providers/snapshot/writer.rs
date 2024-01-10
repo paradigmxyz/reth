@@ -34,27 +34,30 @@ impl<'a> SnapshotProviderRW<'a> {
         reader: Arc<SnapshotProvider>,
     ) -> ProviderResult<(NippyJarWriter<'a, SegmentHeader>, PathBuf)> {
         let block_range = find_fixed_range(BLOCKS_PER_SNAPSHOT, block);
-        let (jar, path) = match reader.get_segment_provider_from_block(segment, block, None) {
-            Ok(provider) => (NippyJar::load(provider.data_path())?, provider.data_path().into()),
-            Err(ProviderError::MissingSnapshotBlock(_, _)) => {
-                // TODO(joshie): if its a receipt segment, we can find out the actual range.
-                let tx_range = reader.get_highest_snapshot_tx(segment).map(|tx| tx..=tx);
-                let path = reader.directory().join(segment.filename(&block_range));
-                (
-                    NippyJar::new(
-                        segment.columns(),
-                        &path,
-                        SegmentHeader::new(
-                            *block_range.start()..=*block_range.start(),
-                            tx_range,
-                            segment,
+        let (jar, path) =
+            match reader.get_segment_provider_from_block(segment, *block_range.start(), None) {
+                Ok(provider) => {
+                    (NippyJar::load(provider.data_path())?, provider.data_path().into())
+                }
+                Err(ProviderError::MissingSnapshotBlock(_, _)) => {
+                    // TODO(joshie): if its a receipt segment, we can find out the actual range.
+                    let tx_range = reader.get_highest_snapshot_tx(segment).map(|tx| tx..=tx);
+                    let path = reader.directory().join(segment.filename(&block_range));
+                    (
+                        NippyJar::new(
+                            segment.columns(),
+                            &path,
+                            SegmentHeader::new(
+                                *block_range.start()..=*block_range.start(),
+                                tx_range,
+                                segment,
+                            ),
                         ),
-                    ),
-                    path,
-                )
-            }
-            Err(err) => return Err(err),
-        };
+                        path,
+                    )
+                }
+                Err(err) => return Err(err),
+            };
 
         match NippyJarWriter::from_owned(jar) {
             Ok(writer) => Ok((writer, path)),
@@ -77,44 +80,39 @@ impl<'a> SnapshotProviderRW<'a> {
         Ok(())
     }
 
-    /// Appends a column to disk. It creates and loads a new snapshot file if block goes beyond the
-    /// current block range.
-    ///
-    /// ATTENTION: It **requires** `self.commit` to be called manually
-    fn append<T, F1, F2>(
-        &mut self,
-        block: BlockNumber,
-        segment: SnapshotSegment,
-        column: T,
-        initialize_segment: F1,
-        update_segment: F2,
-    ) -> ProviderResult<()>
-    where
-        T: Compact,
-        F1: Fn(&mut SegmentHeader),
-        F2: Fn(&mut SegmentHeader),
-    {
+    /// Allows to increment the [`SegmentHeader`] end block. It will commit the current snapshot,
+    /// and create the next one if we are past the end range.
+    pub fn increment_block(&mut self, segment: SnapshotSegment) -> ProviderResult<()> {
+        let last_block = self.writer.user_header().block_end();
+        let writer_range_end = *find_fixed_range(BLOCKS_PER_SNAPSHOT, last_block).end();
+
         // We have finished the previous snapshot and must freeze it
-        if block >
-            *find_fixed_range(BLOCKS_PER_SNAPSHOT, self.writer.user_header().block_end()).end()
-        {
+        if last_block + 1 > writer_range_end {
             // Commits offsets and new user_header to disk
             self.writer.commit()?;
 
-            dbg!(&self.writer.user_header());
-
             // Opens the new snapshot
-            let (writer, data_path) = Self::open(segment, block, self.reader.clone())?;
+            let (writer, data_path) = Self::open(segment, last_block + 1, self.reader.clone())?;
             self.writer = writer;
             self.data_path = data_path;
 
-            // Initializes the new segment header
-            initialize_segment(self.writer.user_header_mut());
+            match segment {
+                SnapshotSegment::Headers => todo!(),
+                SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                    let block_start =
+                        *find_fixed_range(BLOCKS_PER_SNAPSHOT, last_block + 1).start();
+                    *self.writer.user_header_mut() =
+                        SegmentHeader::new(block_start..=block_start, None, segment)
+                }
+            }
         } else {
-            update_segment(self.writer.user_header_mut());
+            match segment {
+                SnapshotSegment::Headers => todo!(),
+                SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                    self.writer.user_header_mut().increment_block()
+                }
+            }
         }
-
-        self.append_column(column)?;
 
         Ok(())
     }
@@ -189,7 +187,6 @@ impl<'a> SnapshotProviderRW<'a> {
     fn append_with_tx_number<V: Compact>(
         &mut self,
         segment: SnapshotSegment,
-        block: BlockNumber,
         tx_num: TxNumber,
         value: V,
     ) -> ProviderResult<()> {
@@ -199,42 +196,27 @@ impl<'a> SnapshotProviderRW<'a> {
             return Ok(())
         }
 
-        self.append(
-            block,
-            segment,
-            value,
-            |segment_header| {
-                let block_start = *find_fixed_range(BLOCKS_PER_SNAPSHOT, block).start();
-                *segment_header =
-                    SegmentHeader::new(block_start..=block, Some(tx_num..=tx_num), segment);
-            },
-            |segment_header| {
-                if block > segment_header.block_end() {
-                    segment_header.increment_block()
-                }
-                segment_header.increment_tx()
-            },
-        )
+        if self.writer.user_header().tx_range().is_none() {
+            self.writer.user_header_mut().set_tx_range(tx_num..=tx_num);
+        } else {
+            self.writer.user_header_mut().increment_tx();
+        }
+
+        self.append_column(value)
     }
 
     /// Appends transaction to snapshot file.
     pub fn append_transaction(
         &mut self,
-        block: BlockNumber,
         tx_num: TxNumber,
         tx: TransactionSignedNoHash,
     ) -> ProviderResult<()> {
-        self.append_with_tx_number(SnapshotSegment::Transactions, block, tx_num, tx)
+        self.append_with_tx_number(SnapshotSegment::Transactions, tx_num, tx)
     }
 
     /// Appends receipt to snapshot file.
-    pub fn append_receipt(
-        &mut self,
-        block: BlockNumber,
-        tx_num: TxNumber,
-        receipt: Receipt,
-    ) -> ProviderResult<()> {
-        self.append_with_tx_number(SnapshotSegment::Receipts, block, tx_num, receipt)
+    pub fn append_receipt(&mut self, tx_num: TxNumber, receipt: Receipt) -> ProviderResult<()> {
+        self.append_with_tx_number(SnapshotSegment::Receipts, tx_num, receipt)
     }
 
     /// Prunes `to_delete` number of transactions from snapshots.
@@ -247,12 +229,6 @@ impl<'a> SnapshotProviderRW<'a> {
         debug_assert!(self.writer.user_header().segment() == segment);
 
         self.truncate(segment, to_delete, Some(last_block))
-    }
-}
-
-impl<'a> Drop for SnapshotProviderRW<'a> {
-    fn drop(&mut self) {
-        let _ = self.commit();
     }
 }
 

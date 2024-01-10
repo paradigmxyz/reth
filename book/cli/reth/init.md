@@ -2,7 +2,7 @@
 
 Initialize the database from a genesis file
 
-```bash
+```text
 $ reth init --help
 Usage: reth init [OPTIONS]
 

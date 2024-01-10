@@ -1,4 +1,5 @@
 //! Mock database
+
 use crate::{
     common::{IterPairResult, PairResult, ValueOnlyResult},
     cursor::{
@@ -14,7 +15,7 @@ use core::ops::Bound;
 use std::{collections::BTreeMap, ops::RangeBounds};
 
 /// Mock database used for testing with inner BTreeMap structure
-/// TODO
+// TODO
 #[derive(Clone, Debug, Default)]
 pub struct DatabaseMock {
     /// Main data. TODO (Make it table aware)

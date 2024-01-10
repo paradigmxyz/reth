@@ -2,7 +2,7 @@
 
 StorageHashing stage
 
-```bash
+```text
 $ reth stage dump storage-hashing --help
 Usage: reth stage dump storage-hashing [OPTIONS] --output-db <OUTPUT_PATH> --from <FROM> --to <TO>
 

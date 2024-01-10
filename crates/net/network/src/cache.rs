@@ -29,7 +29,7 @@ impl<T: Hash + Eq> LruCache<T> {
         if self.inner.insert(entry) {
             if self.limit.get() == self.inner.len() {
                 // remove the oldest element in the set
-                self.remove_lru();
+                _ = self.remove_lru();
             }
             return true
         }
@@ -40,8 +40,8 @@ impl<T: Hash + Eq> LruCache<T> {
     ///
     /// If the `LruCache` is empty this will return None.
     #[inline]
-    fn remove_lru(&mut self) {
-        self.inner.pop_front();
+    fn remove_lru(&mut self) -> Option<T> {
+        self.inner.pop_front()
     }
 
     /// Returns `true` if the set contains a value.
@@ -71,7 +71,7 @@ where
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]
