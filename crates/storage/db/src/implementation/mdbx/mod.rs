@@ -32,8 +32,17 @@ const DEFAULT_MAX_READERS: u64 = 32_000;
 /// See [reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers] for more information.
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 
-static PROCESS_ID: Lazy<u32> =
-    Lazy::new(|| if cfg!(unix) { std::os::unix::process::parent_id() } else { std::process::id() });
+static PROCESS_ID: Lazy<u32> = Lazy::new(|| {
+    #[cfg(unix)]
+    {
+        std::os::unix::process::parent_id()
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::process::id()
+    }
+});
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
