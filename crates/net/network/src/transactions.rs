@@ -582,25 +582,21 @@ where
 
             // enforce recommended soft limit, however the peer may enforce an arbitrary limit on
             // the response (2MB)
-            let left_over_hashes = match &mut msg {
-                NewPooledTransactionHashes::Eth66(NewPooledTransactionHashes66(hashes)) => {
-                    TransactionFetcher::pack_hashes_eth66(hashes).collect()
-                }
-                NewPooledTransactionHashes::Eth68(NewPooledTransactionHashes68 {
-                    sizes,
-                    hashes,
-                    ..
-                }) => TransactionFetcher::pack_hashes_eth68(hashes, sizes),
-            };
+            if let Some(left_over_hashes) = self.transaction_fetcher.pack_hashes(&mut msg, peer_id)
+            {
+                self.transaction_fetcher.buffer_hashes(left_over_hashes, Some(peer_id));
+            }
             let hashes = msg.into_hashes();
 
-            self.transaction_fetcher.buffer_hashes(left_over_hashes, Some(peer_id));
-
             // request the missing transactions
-            let request_sent =
-                self.transaction_fetcher.request_transactions_from_peer(hashes, peer);
-            if !request_sent {
-                self.metrics.egress_peer_channel_full.increment(1);
+            let metrics = &self.metrics;
+            if let Some(failed_to_request_hashes) =
+                self.transaction_fetcher.request_transactions_from_peer(hashes, peer, || {
+                    metrics.egress_peer_channel_full.increment(1)
+                })
+            {
+                debug!("buffering tx hashes from failed request to peer, {peer_id}");
+                self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
                 return
             }
 
@@ -621,12 +617,16 @@ where
             };
             // fill the request with other buffered hashes that have been announced by the peer
             if let Some(peer) = self.peers.get(&peer_id) {
-                self.transaction_fetcher.fill_up_request_for_peer(peer, &mut hashes);
+                self.transaction_fetcher.fill_request_for_peer(&mut hashes, peer_id, peer.version);
                 // request the buffered missing transactions
-                let request_sent =
-                    self.transaction_fetcher.request_transactions_from_peer(hashes, peer);
-                if !request_sent {
-                    self.metrics.egress_peer_channel_full.increment(1);
+                let metrics = &self.metrics;
+                if let Some(failed_to_request_hashes) =
+                    self.transaction_fetcher.request_transactions_from_peer(hashes, peer, || {
+                        metrics.egress_peer_channel_full.increment(1)
+                    })
+                {
+                    debug!("buffering tx hashes from failed request to peer, {peer_id}");
+                    self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
                     return
                 }
             }
@@ -1220,7 +1220,7 @@ impl TransactionFetcher {
 
         debug_assert!(
             self.active_peers.get(peer_id).is_some(),
-            "making request inflight should have stored peer id in `active peers`"
+            "broken invariant `active_peers` and `inflight_requests`"
         );
 
         let mut remove = || -> bool {
@@ -1246,40 +1246,48 @@ impl TransactionFetcher {
         false
     }
 
-    /// Stores callback from a [`GetPooledTxRequest`].
-    fn store_request_fut(
+    /// Packages hashes for [`GetPooledTxRequest`] up to limit. Returns left over hashes.
+    fn pack_hashes(
         &mut self,
+        msg: &mut NewPooledTransactionHashes,
         peer_id: PeerId,
-        requested_hashes: Vec<TxHash>,
-        response_rx: oneshot::Receiver<Result<PooledTransactions, RequestError>>,
-    ) {
-        let Some(inflight_count) = self.active_peers.get_or_insert(peer_id, || 0) else {
-            warn!("failed to cache active peer, {peer_id}, couldn't insert homogenous sized entry into schnellru::LruMap");
-            return
-        };
-
-        if *inflight_count >= MAX_CONCURRENT_TX_REQUESTS_PER_PEER {
-            return
+    ) -> Option<Vec<TxHash>> {
+        match msg {
+            NewPooledTransactionHashes::Eth66(NewPooledTransactionHashes66(hashes)) => {
+                self.pack_hashes_eth66(hashes, peer_id).map(|left_over| left_over.collect())
+            }
+            NewPooledTransactionHashes::Eth68(NewPooledTransactionHashes68 {
+                sizes,
+                hashes,
+                ..
+            }) => self.pack_hashes_eth68(hashes, sizes, peer_id),
         }
-
-        *inflight_count += 1;
-
-        self.inflight_requests.push(GetPooledTxRequestFut::new(
-            peer_id,
-            requested_hashes,
-            response_rx,
-        ))
     }
 
-    /// Packages hashes for [`GetPooledTxRequest`] up to limit. Returns left over hashes.
-    fn pack_hashes_eth66(hashes: &mut Vec<TxHash>) -> impl Iterator<Item = TxHash> + '_ {
-        hashes.drain(..GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES)
+    /// Packages hashes for [`GetPooledTxRequest`] up to limit as defined by protocol version 66.
+    /// Returns left over hashes.
+    fn pack_hashes_eth66<'a>(
+        &mut self,
+        hashes: &'a mut Vec<TxHash>,
+        peer_id: PeerId,
+    ) -> Option<impl Iterator<Item = TxHash> + 'a> {
+        if hashes.len() < GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
+            self.fill_request_for_peer(hashes, peer_id, EthVersion::Eth66);
+            return None
+        }
+        Some(hashes.drain(GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES..))
     }
 
-    /// Packages hashes for [`GetPooledTxRequest`] up to limit. Returns left over hashes.
-    fn pack_hashes_eth68(hashes: &mut Vec<TxHash>, sizes: &[usize]) -> Vec<TxHash> {
+    /// Packages hashes for [`GetPooledTxRequest`] up to limit as defined by protocol version 68.
+    /// Returns left over hashes.
+    fn pack_hashes_eth68(
+        &mut self,
+        hashes: &mut Vec<TxHash>,
+        sizes: &[usize],
+        peer_id: PeerId,
+    ) -> Option<Vec<TxHash>> {
         let mut acc_size = 0;
-        let first_left_over_size = sizes.iter().enumerate().find(|(_, size)| {
+        let first_left_over_index = sizes.iter().enumerate().find(|(_, size)| {
             if acc_size < RESPONSE_SIZE_LIMIT_BYTES {
                 acc_size += **size;
                 false
@@ -1290,9 +1298,12 @@ impl TransactionFetcher {
 
         let mut include_indices = vec![];
 
-        // not all hashes included in request
-        let Some((i, _)) = first_left_over_size else {
-            return hashes.drain(..GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES).collect::<Vec<_>>()
+        let Some((i, _)) = first_left_over_index else {
+            // all hashes included in request
+            if acc_size < RESPONSE_SIZE_LIMIT_BYTES {
+                self.fill_request_for_peer(hashes, peer_id, EthVersion::Eth68);
+            }
+            return None;
         };
 
         // some space will be left in response
@@ -1317,7 +1328,7 @@ impl TransactionFetcher {
             hashes.push(hash);
         }
 
-        left_over_hashes
+        Some(left_over_hashes)
     }
 
     fn buffer_hashes_for_retry(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
@@ -1394,8 +1405,9 @@ impl TransactionFetcher {
         })
     }
 
-    /// Requests the missing transactions from the announced hashes of the peer. Returns `true` if
-    /// the request was successfully sent over the channel to the peer's session task.
+    /// Requests the missing transactions from the announced hashes of the peer. Returns the
+    /// requested hashes if concurrency limit is reached or if the request was fails to send over
+    /// the channel to the peer's session task.
     ///
     /// This filters all announced hashes that are already in flight, and requests the missing,
     /// while marking the given peer as an alternative peer for the hashes that are already in
@@ -1404,8 +1416,28 @@ impl TransactionFetcher {
         &mut self,
         new_announced_hashes: Vec<TxHash>,
         peer: &Peer,
-    ) -> bool {
+        metrics_increment_egress_peer_channel_full: impl FnOnce(),
+    ) -> Option<Vec<TxHash>> {
         let peer_id: PeerId = peer.request_tx.peer_id;
+
+        if self.active_peers.len() as u32 >= MAX_CONCURRENT_TX_REQUESTS {
+            debug!(
+                "limit for concurrent `GetPooledTxRequest`s reached, {MAX_CONCURRENT_TX_REQUESTS}"
+            );
+            return Some(new_announced_hashes)
+        }
+
+        let Some(inflight_count) = self.active_peers.get_or_insert(peer_id, || 0) else {
+            warn!("failed to cache active peer, {peer_id}, couldn't insert homogenous sized entry into schnellru::LruMap");
+            return Some(new_announced_hashes)
+        };
+
+        if *inflight_count >= MAX_CONCURRENT_TX_REQUESTS_PER_PEER {
+            debug!("limit for concurrent `GetPooledTxRequest`s per peer reached, {MAX_CONCURRENT_TX_REQUESTS}, {peer_id}");
+            return Some(new_announced_hashes)
+        }
+
+        *inflight_count += 1;
 
         let (response, rx) = oneshot::channel();
         let req: PeerRequest = PeerRequest::GetPooledTransactions {
@@ -1425,7 +1457,8 @@ impl TransactionFetcher {
                     self.remove_from_unknown_hashes(req.0);
                 }
             }
-            return false
+            metrics_increment_egress_peer_channel_full();
+            return Some(new_announced_hashes)
         } else {
             // remove requested hashes from buffered hashes
             debug_assert!(
@@ -1437,22 +1470,39 @@ impl TransactionFetcher {
                     }
                     true
                 }(),
-                "packing request from buffer should remove elements from buffer"
+                "broken invariant `buffered_hashes` and `unknown_hashes`"
             );
 
             // stores a new request future for the request
-            self.store_request_fut(peer_id, new_announced_hashes, rx);
+            self.inflight_requests.push(GetPooledTxRequestFut::new(
+                peer_id,
+                new_announced_hashes,
+                rx,
+            ))
         }
 
-        true
+        None
     }
 
-    fn fill_up_request_for_peer(&mut self, peer: &Peer, hashes: &mut [TxHash]) {
-        let peer_id: PeerId = peer.request_tx.peer_id;
-        let version = peer.version;
+    /// Fills free space in request with hashes from buffer.
+    fn fill_request_for_peer(
+        &mut self,
+        hashes: &mut [TxHash],
+        peer_id: PeerId,
+        version: EthVersion,
+    ) {
         let mut hashes_to_request = vec![];
 
         for hash in self.buffered_hashes.iter() {
+            match version {
+                EthVersion::Eth66 | EthVersion::Eth67 => {
+                    if hashes_to_request.len() >= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
+                        return
+                    }
+                }
+                EthVersion::Eth68 => return, /* todo: store eth68 TxHash with size metadata to
+                                              * pack request */
+            }
             if *hash == hashes[0] {
                 continue;
             }
@@ -1460,14 +1510,6 @@ impl TransactionFetcher {
                 if peers.contains(&peer_id) {
                     hashes_to_request.push(*hash)
                 }
-            }
-            match version {
-                EthVersion::Eth66
-                    if hashes_to_request.len() >= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES =>
-                {
-                    return
-                }
-                _ => (), // todo: store eth68 TxHash with size metadata to pack request
             }
         }
 
