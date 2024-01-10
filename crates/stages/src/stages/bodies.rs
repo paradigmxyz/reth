@@ -130,13 +130,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             .unwrap_or_default();
         let db_tx_num = tx_block_cursor.last()?.unwrap_or_default().0;
 
-        debug_assert_eq!(
-            from_block - 1,
-            snapshot_provider
-                .get_highest_snapshot_block(SnapshotSegment::Transactions)
-                .unwrap_or_default()
-        );
-
         match snapshot_tx_num.cmp(&db_tx_num) {
             Ordering::Greater => {
                 snapshotter.prune_transactions(snapshot_tx_num - db_tx_num, from_block - 1)?
