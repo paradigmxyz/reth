@@ -1,25 +1,14 @@
 //! Support for snapshotting.
 
-use crate::{segments, segments::Segment, SnapshotterError};
-use reth_db::{
-    cursor::DbCursorRO, database::Database, snapshot::iter_snapshots, tables, transaction::DbTx,
-    Tables,
-};
+use crate::SnapshotterError;
+use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::RethResult;
-use reth_primitives::{snapshot::HighestSnapshots, BlockNumber, SnapshotSegment, TxNumber};
+use reth_primitives::{snapshot::HighestSnapshots, BlockNumber, SnapshotSegment};
 use reth_provider::{
     providers::{SnapshotProvider, SnapshotWriter},
-    BlockReader, DatabaseProviderRO, ProviderFactory, ReceiptProvider, TransactionsProvider,
-    TransactionsProviderExt,
+    BlockReader, ProviderFactory,
 };
-use std::{
-    collections::HashMap,
-    ops::RangeInclusive,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
-use tokio::sync::watch;
-use tracing::{warn, Value};
+use std::{ops::RangeInclusive, sync::Arc};
 
 /// Result of [Snapshotter::run] execution.
 pub type SnapshotterResult = Result<SnapshotTargets, SnapshotterError>;
@@ -50,8 +39,8 @@ impl SnapshotTargets {
         self.headers.is_some() || self.receipts.is_some() || self.transactions.is_some()
     }
 
-    // Returns `true` if all targets are either [`None`] or has beginning of the range equal to the
-    // highest snapshot.
+    /// Returns `true` if all targets are either [`None`] or has beginning of the range equal to the
+    /// highest snapshot.
     fn is_contiguous_to_highest_snapshots(&self, snapshots: HighestSnapshots) -> bool {
         [
             (self.headers.as_ref(), snapshots.headers),
@@ -60,9 +49,9 @@ impl SnapshotTargets {
         ]
         .iter()
         .all(|(target, highest)| {
-            target.map_or(true, |block_number| {
-                highest.map_or(*block_number.start() == 0, |previous_block_number| {
-                    *block_number.start() == previous_block_number + 1
+            target.map_or(true, |block_range| {
+                highest.map_or(*block_range.start() == 0, |previous_block_number| {
+                    *block_range.start() == previous_block_number + 1
                 })
             })
         })
@@ -126,10 +115,13 @@ impl<DB: Database> Snapshotter<DB> {
         let highest_snapshots = self.snapshot_provider.get_highest_snapshots();
 
         // Calculate block ranges to snapshot
-        let headers = highest_snapshots.headers.unwrap_or_default()..=finalized_block_number;
-        let receipts = highest_snapshots.receipts.unwrap_or_default()..=finalized_block_number;
+        let headers = highest_snapshots.headers.map_or(0, |block_number| block_number + 1)..=
+            finalized_block_number;
+        let receipts = highest_snapshots.receipts.map_or(0, |block_number| block_number + 1)..=
+            finalized_block_number;
         let transactions =
-            highest_snapshots.transactions.unwrap_or_default()..=finalized_block_number;
+            highest_snapshots.transactions.map_or(0, |block_number| block_number + 1)..=
+                finalized_block_number;
 
         Ok(SnapshotTargets {
             headers: (!headers.is_empty()).then_some(headers),
@@ -142,11 +134,7 @@ impl<DB: Database> Snapshotter<DB> {
 #[cfg(test)]
 mod tests {
     use crate::{snapshotter::SnapshotTargets, Snapshotter};
-    use assert_matches::assert_matches;
-    use reth_interfaces::{
-        test_utils::{generators, generators::random_block_range},
-        RethError,
-    };
+    use reth_interfaces::test_utils::{generators, generators::random_block_range};
     use reth_primitives::{snapshot::HighestSnapshots, B256};
     use reth_stages::test_utils::TestStageDB;
 
@@ -182,7 +170,7 @@ mod tests {
         snapshotter.run(targets).expect("run snapshotter");
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: Some(1), receipts: None, transactions: None }
+            HighestSnapshots { headers: None, receipts: None, transactions: Some(1) }
         );
 
         // Snapshot targets has data per part up to the passed finalized block number
@@ -190,16 +178,16 @@ mod tests {
         assert_eq!(
             targets,
             SnapshotTargets {
-                headers: Some(2..=3),
-                receipts: Some(1..=3),
-                transactions: Some(1..=3)
+                headers: Some(0..=5),
+                receipts: Some(0..=5),
+                transactions: Some(2..=5)
             }
         );
 
         snapshotter.run(targets).expect("run snapshotter");
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: Some(3), receipts: None, transactions: None }
+            HighestSnapshots { headers: None, receipts: None, transactions: Some(3) }
         );
     }
 }
