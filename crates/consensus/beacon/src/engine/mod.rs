@@ -2350,11 +2350,8 @@ mod tests {
 
     mod new_payload {
         use super::*;
-        use reth_interfaces::test_utils::{
-            generators,
-            generators::{generate_keys, random_block},
-        };
-        use reth_primitives::{public_key_to_address, Genesis, GenesisAccount, Hardfork, U256};
+        use reth_interfaces::test_utils::{generators, generators::random_block};
+        use reth_primitives::{AllocBuilder, Genesis, Hardfork, U256};
         use reth_provider::test_utils::blocks::BlockChainTestData;
 
         #[tokio::test]
@@ -2458,14 +2455,15 @@ mod tests {
         #[tokio::test]
         async fn simple_validate_block() {
             let mut rng = generators::rng();
-            let genesis_keys = generate_keys(&mut rng, 16);
+            // let genesis_keys = generate_keys(&mut rng, 16);
             let amount = 1000000000000000000u64;
-            let alloc = genesis_keys.iter().map(|pair| {
-                (
-                    public_key_to_address(pair.public_key()),
-                    GenesisAccount::default().with_balance(U256::from(amount)),
-                )
-            });
+            let mut alloc_builder = AllocBuilder::default().with_rng(&mut rng);
+            for _ in 0..16 {
+                // add 16 new accounts
+                alloc_builder.new_funded_account(U256::from(amount));
+            }
+
+            let alloc = alloc_builder.build();
 
             let genesis = Genesis::default().extend_accounts(alloc);
 

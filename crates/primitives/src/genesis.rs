@@ -1,5 +1,5 @@
 use crate::{
-    keccak256,
+    keccak256, public_key_to_address,
     serde_helper::{
         json_u256::{deserialize_json_ttd_opt, deserialize_json_u256},
         num::{u64_hex_or_decimal, u64_hex_or_decimal_opt},
@@ -7,8 +7,12 @@ use crate::{
     },
     Account, Address, Bytes, B256, U256,
 };
+use secp256k1::{
+    rand::{thread_rng, RngCore},
+    KeyPair, Secp256k1,
+};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 /// The genesis block specification.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -182,6 +186,127 @@ impl From<GenesisAccount> for Account {
             balance: value.balance,
             bytecode_hash: value.code.map(keccak256),
         }
+    }
+}
+
+/// Helper trait that encapsulates [RngCore], and [Debug](std::fmt::Debug) to get around rules for
+/// auto traits (Opt-in built-in traits).
+trait RngDebugClone: RngCore + std::fmt::Debug {}
+impl<T> RngDebugClone for T where T: RngCore + std::fmt::Debug {}
+
+/// This helps create a custom genesis alloc by making it easy to add funded accounts with known
+/// signers to the genesis block.
+///
+/// # Example
+/// ```no_run
+/// use reth_primitives::genesis::AllocBuilder;
+///
+/// fn custom_genesis() {
+///     let mut builder = AllocBuilder::default();
+///
+///     // This will add a genesis account to the alloc builder, with the provided balance. The
+///     // signer for the account will be returned.
+///     let (_signer, _addr) = builder.new_funded_account(100_000_000_000_000_000u128.into());
+///
+///     // You can also provide code for the account.
+///     let code = hex::decode("0x1234").unwrap();
+///     let (_second_signer, _second_addr) =
+///         builder.new_funded_account_with_code(100_000_000_000_000_000u128.into(), code);
+///
+///     // You can also add an account with a specific address.
+///     // This will not return a signer, since the address is provided by the user and the signer
+///     // may be unknown.
+///     let addr = "0Ac1dF02185025F65202660F8167210A80dD5086".parse::<Address>().unwrap();
+///     builder.add_funded_account_with_address(addr, 100_000_000_000_000_000u128.into());
+///
+///     // Once you're done adding accounts, you can build the alloc.
+///     let alloc = builder.build();
+/// }
+/// ```
+#[derive(Debug)]
+pub struct AllocBuilder<'a> {
+    /// The genesis alloc to be built.
+    alloc: HashMap<Address, GenesisAccount>,
+    /// The rng to use for generating key pairs.
+    rng: Box<dyn RngDebugClone + 'a>,
+}
+
+impl<'a> AllocBuilder<'a> {
+    /// Use the provided rng for generating key pairs.
+    pub fn with_rng<'b, R>(mut self, rng: &'b mut R) -> Self
+    where
+        R: RngCore + std::fmt::Debug,
+        'b: 'a,
+    {
+        self.rng = Box::new(rng);
+        self
+    }
+
+    /// Add a funded account to the genesis alloc.
+    ///
+    /// Returns the key pair for the account and the account's address.
+    pub fn new_funded_account(&mut self, balance: U256) -> (KeyPair, Address) {
+        let secp = Secp256k1::new();
+        let pair = KeyPair::new(&secp, &mut self.rng);
+        let address = public_key_to_address(pair.public_key());
+
+        self.alloc.insert(address, GenesisAccount::default().with_balance(balance));
+
+        (pair, address)
+    }
+
+    /// Add a funded account to the genesis alloc with the provided code.
+    ///
+    /// Returns the key pair for the account and the account's address.
+    pub fn new_funded_account_with_code(
+        &mut self,
+        balance: U256,
+        code: Bytes,
+    ) -> (KeyPair, Address) {
+        let secp = Secp256k1::new();
+        let pair = KeyPair::new(&secp, &mut self.rng);
+        let address = public_key_to_address(pair.public_key());
+
+        self.alloc
+            .insert(address, GenesisAccount::default().with_balance(balance).with_code(Some(code)));
+
+        (pair, address)
+    }
+
+    /// Add a funded account to the genesis alloc with the provided address.
+    ///
+    /// Neither the key pair nor the account will be returned, since the address is provided by the
+    /// user and the signer may be unknown.
+    pub fn add_funded_account_with_address(&mut self, address: Address, balance: U256) {
+        self.alloc.insert(address, GenesisAccount::default().with_balance(balance));
+    }
+
+    /// Gets the account for the provided address.
+    ///
+    /// If it does not exist, this returns `None`.
+    pub fn get_account(&self, address: &Address) -> Option<&GenesisAccount> {
+        self.alloc.get(address)
+    }
+
+    /// Gets a mutable version of the account for the provided address, if it exists.
+    pub fn get_account_mut(&mut self, address: &Address) -> Option<&mut GenesisAccount> {
+        self.alloc.get_mut(address)
+    }
+
+    /// Gets an [Entry] for the provided address.
+    pub fn account_entry(&mut self, address: Address) -> Entry<'_, Address, GenesisAccount> {
+        self.alloc.entry(address)
+    }
+
+    /// Build the genesis alloc.
+    pub fn build(self) -> HashMap<Address, GenesisAccount> {
+        self.alloc
+    }
+}
+
+impl Default for AllocBuilder<'_> {
+    fn default() -> Self {
+        Self { alloc: HashMap::default(), rng: Box::new(thread_rng()) }
     }
 }
 
