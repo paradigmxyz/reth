@@ -9,6 +9,7 @@ use crate::{
 };
 use derive_more::{Deref, DerefMut};
 use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt};
+use pin_project::pin_project;
 use reth_eth_wire::{
     EthVersion, GetPooledTransactions, NewPooledTransactionHashes, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, PooledTransactions, Transactions,
@@ -581,7 +582,7 @@ where
             // the response (2MB)
             let (hashes, left_over_hashes) = TransactionFetcher::pack_hashes(msg);
 
-            self.transaction_fetcher.buffer_hashes(left_over_hashes);
+            self.transaction_fetcher.buffer_hashes(left_over_hashes, Some(peer_id));
 
             // request the missing transactions
             let request_sent =
@@ -622,7 +623,7 @@ where
 
     // Returns any idle peer for the given hash.
     fn get_idle_peer_for(&self, hash: TxHash) -> Option<PeerId> {
-        let (_, peers) = self.transaction_fetcher.hash_to_fallback_peers.get(&hash)?;
+        let (_, peers) = self.transaction_fetcher.unknown_hashes.get(&hash)?;
         for peer_id in peers.iter() {
             let peer_id: &PeerId = peer_id;
             if self.peers.get(peer_id).is_some() {
@@ -667,7 +668,7 @@ where
 
                 // mark the transactions as received
                 self.transaction_fetcher.on_received_full_transactions_broadcast(
-                    non_blob_txs.iter().map(|tx| tx.hash()),
+                    non_blob_txs.iter().map(|tx| *tx.hash()),
                 );
 
                 self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
@@ -1182,17 +1183,21 @@ impl Default for BufferedHashes {
 /// This will keep track of unique transaction hashes that are currently being fetched and submits
 /// new requests on announced hashes.
 #[derive(Debug, Default)]
+#[pin_project]
 struct TransactionFetcher {
     /// All peers to which a request for pooled transactions is currently active. Maps 1-1 to
     /// `inflight_requests`.
     active_peers: HashMap<PeerId, u8>,
     /// All currently active requests for pooled transactions.
+    #[pin]
     inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
     /// Hashes that are awaiting fetch from an idle peer.
     buffered_hashes: BufferedHashes,
     /// Tracks all hashes that are currently being fetched or are buffered, mapping them to
     /// request retries and last recently seen fallback peers (max one request try for any peer).
-    hash_to_fallback_peers: HashMap<TxHash, (u8, LruCache<PeerId>)>,
+    // todo: schnellru with limit max inflight requests + buffered hashes, alt buffered hash cache
+    // with expulsion feedback
+    unknown_hashes: HashMap<TxHash, (u8, LruCache<PeerId>)>,
 }
 
 // === impl TransactionFetcher ===
@@ -1200,12 +1205,12 @@ struct TransactionFetcher {
 impl TransactionFetcher {
     /// Removes the specified hashes from inflight tracking.
     #[inline]
-    fn remove_fallback_peers_for<'a, I>(&mut self, hashes: I)
+    fn remove_from_unknown_hashes<I>(&mut self, hashes: I)
     where
-        I: IntoIterator<Item = &'a TxHash>,
+        I: IntoIterator<Item = TxHash>,
     {
-        for &hash in hashes {
-            self.hash_to_fallback_peers.remove(&hash);
+        for hash in hashes {
+            self.unknown_hashes.remove(&hash);
         }
     }
 
@@ -1213,7 +1218,10 @@ impl TransactionFetcher {
     fn update_peer_activity(&mut self, resp: &GetPooledTxResponse) {
         let GetPooledTxResponse { peer_id, .. } = resp;
 
-        debug_assert!(self.active_peers.contains_key(peer_id));
+        debug_assert!(
+            self.active_peers.contains_key(peer_id),
+            "making request inflight should have stored peer id in `active peers`"
+        );
 
         let mut remove = || -> bool {
             if let Some(inflight_count) = self.active_peers.get_mut(peer_id) {
@@ -1323,36 +1331,62 @@ impl TransactionFetcher {
         }
     }
 
-    fn buffer_hashes(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
-        for hash in hashes {
-            debug_assert!(self.hash_to_fallback_peers.get(&hash).is_some());
+    fn buffer_hashes_for_retry(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
+        self.buffer_hashes(hashes, None)
+    }
 
-            if let Some((retries, _)) = self.hash_to_fallback_peers.get_mut(&hash) {
-                *retries += 1;
+    /// Buffers hashes. Only peers that haven't yet tried to request the hashes should be passed
+    /// as `fallback_peer` parameter.
+    fn buffer_hashes(
+        &mut self,
+        hashes: impl IntoIterator<Item = TxHash>,
+        fallback_peer: Option<PeerId>,
+    ) {
+        let mut max_retried_hashes = vec![];
+
+        for hash in hashes {
+            // todo: enforce by adding new type UnknownTxHash
+            debug_assert!(
+                self.unknown_hashes.contains_key(&hash),
+                "only hashes that are confirmed as unknown should be buffered"
+            );
+
+            let Some((retries, peers)) = self.unknown_hashes.get_mut(&hash) else { return };
+
+            if let Some(peer_id) = fallback_peer {
+                // peer has not yet requested hash
+                peers.insert(peer_id);
+            } else {
+                // peer in caller's context has requested hash and is hence not eligible as
+                // fallback peer
                 if *retries >= MAX_REQUEST_RETRIES_PER_TX_HASH {
                     warn!("retried fetching tx max times ({}), discarding hash, {}", retries, hash);
+                    max_retried_hashes.push(hash);
                     continue;
                 }
+                *retries += 1;
             }
             self.buffered_hashes.insert(hash);
         }
+
+        self.remove_from_unknown_hashes(max_retried_hashes);
     }
 
     /// Removes the provided transaction hashes from the inflight requests set.
     ///
     /// This is called when we receive full transactions that are currently scheduled for fetching.
     #[inline]
-    fn on_received_full_transactions_broadcast<'a>(
+    fn on_received_full_transactions_broadcast(
         &mut self,
-        hashes: impl IntoIterator<Item = &'a TxHash>,
+        hashes: impl IntoIterator<Item = TxHash>,
     ) {
-        self.remove_fallback_peers_for(hashes)
+        self.remove_from_unknown_hashes(hashes)
     }
 
     fn filter_new_hashes(&mut self, announced_hashes: &mut Vec<TxHash>, peer_id: PeerId) {
         // 1. filter out inflight hashes, and register the peer as fallback for all inflight hashes
         announced_hashes.retain(|&hash| {
-            match self.hash_to_fallback_peers.entry(hash) {
+            match self.unknown_hashes.entry(hash) {
                 Entry::Vacant(entry) => {
                     if let Some(limit) = NonZeroUsize::new(MAX_ALTERNATIVE_PEERS_PER_TX.into()) {
                         // the hash is not in inflight hashes, insert it and retain in the vector
@@ -1361,8 +1395,6 @@ impl TransactionFetcher {
                     true
                 }
                 Entry::Occupied(mut entry) => {
-                    // the hash is already in inflight, add this peer as a backup if not more than 3
-                    // backups already
                     let (_, backups) = entry.get_mut();
                     // last recently seen peer is most likely to be responsive, so we prefer it
                     // todo: check if session is still active
@@ -1401,9 +1433,7 @@ impl TransactionFetcher {
                     let req = req.into_get_pooled_transactions().expect("is get pooled tx");
 
                     // we know that the peer is the only entry in the map, so we can remove all
-                    for hash in req.0.into_iter() {
-                        self.hash_to_fallback_peers.remove(&hash);
-                    }
+                    self.remove_from_unknown_hashes(req.0);
                 }
             }
             return false
@@ -1424,7 +1454,7 @@ impl TransactionFetcher {
             if *hash == hashes[0] {
                 continue;
             }
-            if let Some((_, peers)) = self.hash_to_fallback_peers.get(hash) {
+            if let Some((_, peers)) = self.unknown_hashes.get(hash) {
                 if peers.contains(&peer_id) {
                     hashes.push(*hash)
                 }
@@ -1441,19 +1471,30 @@ impl Future for TransactionFetcher {
 
     /// Advances all inflight requests and returns the next event.
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if let Poll::Ready(Some(response)) = self.inflight_requests.poll_next_unpin(cx) {
+        let mut this = self.as_mut().project();
+        let res = this.inflight_requests.poll_next_unpin(cx);
+        drop(this);
+
+        if let Poll::Ready(Some(response)) = res {
+            // update peer activity, requests for buffered hashes can only be made to idle
+            // fallback peers
             self.update_peer_activity(&response);
 
-            let GetPooledTxResponse { peer_id, requested_hashes, result } = response;
-
-            self.remove_fallback_peers_for(requested_hashes.iter());
+            let GetPooledTxResponse { peer_id, mut requested_hashes, result } = response;
 
             return match result {
                 Ok(Ok(transactions)) => {
                     // clear received hashes
-                    self.buffered_hashes.extend(requested_hashes.into_iter().filter(
-                        |requested_hash| !transactions.hashes().any(|hash| hash == requested_hash),
-                    ));
+                    requested_hashes.retain(|requested_hash| {
+                        if transactions.hashes().any(|hash| hash == requested_hash) {
+                            // hash is now known, stop tracking
+                            self.unknown_hashes.remove(requested_hash);
+                            return false
+                        }
+                        true
+                    });
+                    // buffer left over hashes
+                    self.buffer_hashes_for_retry(requested_hashes);
 
                     Poll::Ready(FetchEvent::TransactionsFetched {
                         peer_id,
@@ -1461,11 +1502,11 @@ impl Future for TransactionFetcher {
                     })
                 }
                 Ok(Err(req_err)) => {
-                    self.buffered_hashes.extend(requested_hashes);
+                    self.buffer_hashes_for_retry(requested_hashes);
                     Poll::Ready(FetchEvent::FetchError { peer_id, error: req_err })
                 }
                 Err(_) => {
-                    self.buffered_hashes.extend(requested_hashes);
+                    self.buffer_hashes_for_retry(requested_hashes);
                     // request channel closed/dropped
                     Poll::Ready(FetchEvent::FetchError {
                         peer_id,
