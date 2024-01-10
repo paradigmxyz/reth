@@ -12,7 +12,7 @@ use crate::{
     peers::{PeerAction, PeersManager},
     FetchClient,
 };
-use rand::Rng;
+use rand::seq::SliceRandom;
 
 use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
@@ -174,48 +174,42 @@ where
     pub(crate) fn announce_new_block(&mut self, msg: NewBlockMessage) {
         // send a `NewBlock` message to a fraction fo the connected peers (square root of the total
         // number of peers)
-        let reservoir_size = (self.active_peers.len() as f64).sqrt() as u64 + 1;
+        let num_propagate = (self.active_peers.len() as f64).sqrt() as u64 + 1;
 
         let number = msg.block.block.header.number;
         let mut count = 0;
 
-        let mut rng = rand::thread_rng();
-        let mut reservoir: Vec<(&PeerId, &mut ActivePeer)> =
-            Vec::with_capacity(reservoir_size as usize);
+        // Shuffle peers to propagate to a random sample of peers on every block announcement
+        let mut peer_ids: Vec<PeerId> = self.active_peers.keys().cloned().collect();
+        peer_ids.shuffle(&mut rand::thread_rng());
 
-        // Randomly sample from active peers which have not already reported the block.
-        // Implements algorithm R for reservoir sampling (complexity: O(active_peers.len)).
-        // Primarly inspired by `rand::seq::IteratorRandom::choose_multiple_fill()`
-        for (peer_id, peer) in self.active_peers.iter_mut() {
-            if peer.blocks.contains(&msg.hash) {
-                // don't sample peers which already reported the block
-                continue
-            }
+        for peer_id in peer_ids.iter() {
+            if let Some(peer) = self.active_peers.get_mut(peer_id) {
+                if peer.blocks.contains(&msg.hash) {
+                    // skip peers which already reported the block
+                    continue
+                }
 
-            count += 1;
-            if count <= reservoir_size {
-                reservoir.push((peer_id, peer));
-            } else {
-                // replace elements in reservoir with gradually decreasing probability
-                let index = rng.gen_range(0..count);
-                if let Some(slot) = reservoir.get_mut(index as usize) {
-                    *slot = (peer_id, peer);
+                // Queue a `NewBlock` message for the peer
+                if count < num_propagate {
+                    self.queued_messages
+                        .push_back(StateAction::NewBlock { peer_id: *peer_id, block: msg.clone() });
+
+                    // update peer block info
+                    if self.state_fetcher.update_peer_block(peer_id, msg.hash, number) {
+                        peer.best_hash = msg.hash;
+                    }
+
+                    // mark the block as seen by the peer
+                    peer.blocks.insert(msg.hash);
+
+                    count += 1;
+                }
+
+                if count >= num_propagate {
+                    break
                 }
             }
-        }
-
-        // Queue a `NewBlock` message for the peer
-        for (peer_id, peer) in reservoir {
-            self.queued_messages
-                .push_back(StateAction::NewBlock { peer_id: *peer_id, block: msg.clone() });
-
-            // update peer block info
-            if self.state_fetcher.update_peer_block(peer_id, msg.hash, number) {
-                peer.best_hash = msg.hash;
-            }
-
-            // mark the block as seen by the peer
-            peer.blocks.insert(msg.hash);
         }
     }
 
