@@ -16,7 +16,7 @@ use reth_revm::{
     database::StateProviderDatabase,
     state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
 };
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{db::states::bundle_state::BundleRetention, Database, DatabaseCommit, State};
 use std::time::Instant;
 
@@ -99,6 +99,10 @@ impl PendingBlockEnv {
                 // continue
                 best_txs.mark_invalid(&pool_tx);
                 continue
+            }
+            if pool_tx.origin == TransactionOrigin::Private {
+                best_txs.mark_invalid(&pool_tx);
+                continue;
             }
 
             // convert tx to a signed transaction
