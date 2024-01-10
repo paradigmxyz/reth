@@ -48,11 +48,14 @@ impl SnapshotTargets {
             (self.transactions.as_ref(), snapshots.transactions),
         ]
         .iter()
-        .all(|(target, highest)| {
-            target.map_or(true, |block_number| {
-                highest.map_or(*block_number.start() == 0, |previous_block_number| {
-                    *block_number.start() == previous_block_number + 1
-                })
+        .all(|(target_block_range, highest_snapshotted_block)| {
+            target_block_range.map_or(true, |target_block_range| {
+                highest_snapshotted_block.map_or(
+                    *target_block_range.start() == 1,
+                    |highest_snapshotted_block| {
+                        *target_block_range.start() == highest_snapshotted_block + 1
+                    },
+                )
             })
         })
     }
@@ -115,10 +118,10 @@ impl<DB: Database> Snapshotter<DB> {
         let highest_snapshots = self.snapshot_provider.get_highest_snapshots();
 
         // Calculate block ranges to snapshot
-        let headers = highest_snapshots.headers.unwrap_or_default()..=finalized_block_number;
-        let receipts = highest_snapshots.receipts.unwrap_or_default()..=finalized_block_number;
+        let headers = highest_snapshots.headers.unwrap_or_default() + 1..=finalized_block_number;
+        let receipts = highest_snapshots.receipts.unwrap_or_default() + 1..=finalized_block_number;
         let transactions =
-            highest_snapshots.transactions.unwrap_or_default()..=finalized_block_number;
+            highest_snapshots.transactions.unwrap_or_default() + 1..=finalized_block_number;
 
         Ok(SnapshotTargets {
             headers: (!headers.is_empty()).then_some(headers),
@@ -158,16 +161,16 @@ mod tests {
         assert_eq!(
             targets,
             SnapshotTargets {
-                headers: Some(0..=1),
-                receipts: Some(0..=1),
-                transactions: Some(0..=1)
+                headers: Some(1..=1),
+                receipts: Some(1..=1),
+                transactions: Some(1..=1)
             }
         );
 
         snapshotter.run(targets).expect("run snapshotter");
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: Some(1), receipts: None, transactions: None }
+            HighestSnapshots { headers: None, receipts: None, transactions: Some(1) }
         );
 
         // Snapshot targets has data per part up to the passed finalized block number
@@ -175,16 +178,16 @@ mod tests {
         assert_eq!(
             targets,
             SnapshotTargets {
-                headers: Some(2..=3),
-                receipts: Some(1..=3),
-                transactions: Some(1..=3)
+                headers: Some(1..=5),
+                receipts: Some(1..=5),
+                transactions: Some(2..=5)
             }
         );
 
         snapshotter.run(targets).expect("run snapshotter");
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: Some(3), receipts: None, transactions: None }
+            HighestSnapshots { headers: None, receipts: None, transactions: Some(3) }
         );
     }
 }

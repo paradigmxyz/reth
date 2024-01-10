@@ -206,7 +206,7 @@ impl<'a> SnapshotProviderRW<'a> {
             |segment_header| {
                 let block_start = *find_fixed_range(BLOCKS_PER_SNAPSHOT, block).start();
                 *segment_header =
-                    SegmentHeader::new(block_start..=block_start, Some(tx_num..=tx_num), segment);
+                    SegmentHeader::new(block_start..=block, Some(tx_num..=tx_num), segment);
             },
             |segment_header| {
                 if block > segment_header.block_end() {
