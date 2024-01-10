@@ -130,8 +130,12 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             .unwrap_or_default();
         let db_tx_num = tx_block_cursor.last()?.unwrap_or_default().0;
 
-        dbg!(snapshot_tx_num);
-        dbg!(db_tx_num);
+        debug_assert_eq!(
+            from_block - 1,
+            snapshot_provider
+                .get_highest_snapshot_block(SnapshotSegment::Transactions)
+                .unwrap_or_default()
+        );
 
         match snapshot_tx_num.cmp(&db_tx_num) {
             Ordering::Greater => {

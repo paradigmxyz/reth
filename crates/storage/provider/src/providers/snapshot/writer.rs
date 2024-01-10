@@ -34,27 +34,30 @@ impl<'a> SnapshotProviderRW<'a> {
         reader: Arc<SnapshotProvider>,
     ) -> ProviderResult<(NippyJarWriter<'a, SegmentHeader>, PathBuf)> {
         let block_range = find_fixed_range(BLOCKS_PER_SNAPSHOT, block);
-        let (jar, path) = match reader.get_segment_provider_from_block(segment, block, None) {
-            Ok(provider) => (NippyJar::load(provider.data_path())?, provider.data_path().into()),
-            Err(ProviderError::MissingSnapshotBlock(_, _)) => {
-                // TODO(joshie): if its a receipt segment, we can find out the actual range.
-                let tx_range = reader.get_highest_snapshot_tx(segment).map(|tx| tx..=tx);
-                let path = reader.directory().join(segment.filename(&block_range));
-                (
-                    NippyJar::new(
-                        segment.columns(),
-                        &path,
-                        SegmentHeader::new(
-                            *block_range.start()..=*block_range.start(),
-                            tx_range,
-                            segment,
+        let (jar, path) =
+            match reader.get_segment_provider_from_block(segment, *block_range.start(), None) {
+                Ok(provider) => {
+                    (NippyJar::load(provider.data_path())?, provider.data_path().into())
+                }
+                Err(ProviderError::MissingSnapshotBlock(_, _)) => {
+                    // TODO(joshie): if its a receipt segment, we can find out the actual range.
+                    let tx_range = reader.get_highest_snapshot_tx(segment).map(|tx| tx..=tx);
+                    let path = reader.directory().join(segment.filename(&block_range));
+                    (
+                        NippyJar::new(
+                            segment.columns(),
+                            &path,
+                            SegmentHeader::new(
+                                *block_range.start()..=*block_range.start(),
+                                tx_range,
+                                segment,
+                            ),
                         ),
-                    ),
-                    path,
-                )
-            }
-            Err(err) => return Err(err),
-        };
+                        path,
+                    )
+                }
+                Err(err) => return Err(err),
+            };
 
         match NippyJarWriter::from_owned(jar) {
             Ok(writer) => Ok((writer, path)),
@@ -227,12 +230,6 @@ impl<'a> SnapshotProviderRW<'a> {
         debug_assert!(self.writer.user_header().segment() == segment);
 
         self.truncate(segment, to_delete, Some(last_block))
-    }
-}
-
-impl<'a> Drop for SnapshotProviderRW<'a> {
-    fn drop(&mut self) {
-        let _ = self.commit();
     }
 }
 
