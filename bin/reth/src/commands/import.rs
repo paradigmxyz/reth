@@ -17,8 +17,8 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::{database::Database, init_db};
 use reth_downloaders::{
-    bodies::bodies::BodiesDownloaderBuilder,
-    headers::reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::FileClient,
+    bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
+    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::consensus::Consensus;
 use reth_primitives::{stage::StageId, ChainSpec, B256};
