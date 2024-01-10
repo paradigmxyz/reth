@@ -98,7 +98,7 @@ impl<DB: Database> Pruner<DB> {
         let delete_limit = self.delete_limit * blocks_since_last_run;
 
         let provider = self.provider_factory.provider_rw()?;
-        let (stats, delete_limit, done) =
+        let (stats, delete_limit, progress) =
             self.prune_segments(&provider, tip_block_number, delete_limit)?;
         provider.commit()?;
 
@@ -112,26 +112,27 @@ impl<DB: Database> Pruner<DB> {
             %tip_block_number,
             ?elapsed,
             %delete_limit,
-            %done,
+            ?progress,
             ?stats,
             "Pruner finished"
         );
 
         self.listeners.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
 
-        Ok(PruneProgress::from_done(done))
+        Ok(progress)
     }
 
     /// Prunes the segments that the [Pruner] was initialized with, and the segments that needs to
     /// be pruned according to the highest snapshots.
     ///
-    /// Returns [PrunerStats], `delete_limit` that remained after pruning all segments, and `done`.
+    /// Returns [PrunerStats], `delete_limit` that remained after pruning all segments, and
+    /// [PruneProgress].
     fn prune_segments(
         &mut self,
         provider: &DatabaseProviderRW<DB>,
         tip_block_number: BlockNumber,
         mut delete_limit: usize,
-    ) -> Result<(PrunerStats, usize, bool), PrunerError> {
+    ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
         let snapshot_segments = self.snapshot_segments();
         let segments = snapshot_segments.iter().chain(self.segments.iter());
 
@@ -181,7 +182,7 @@ impl<DB: Database> Pruner<DB> {
             }
         }
 
-        Ok((stats, delete_limit, done))
+        Ok((stats, delete_limit, PruneProgress::from_done(done)))
     }
 
     /// Returns pre-configured segments that needs to be pruned according to the highest snapshots
