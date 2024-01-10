@@ -2,7 +2,7 @@
 
 Dumps a stage from a range into a new database
 
-```bash
+```text
 $ reth stage dump --help
 Usage: reth stage dump [OPTIONS] <COMMAND>
 

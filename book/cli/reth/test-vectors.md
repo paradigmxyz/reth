@@ -2,7 +2,7 @@
 
 Generate Test Vectors
 
-```bash
+```text
 $ reth test-vectors --help
 Usage: reth test-vectors [OPTIONS] <COMMAND>
 

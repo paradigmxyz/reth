@@ -1,9 +1,12 @@
+#![allow(unreachable_pub)]
 //! Standalone http tests
+
 use crate::utils::{launch_http, launch_http_ws, launch_ws};
 use jsonrpsee::{
     core::{
         client::{ClientT, SubscriptionClientT},
         error::Error,
+        params::ArrayParams,
     },
     types::error::ErrorCode,
 };
@@ -18,7 +21,7 @@ use reth_rpc_api::{
 };
 use reth_rpc_builder::RethRpcModule;
 use reth_rpc_types::{
-    trace::filter::TraceFilter, CallRequest, Filter, Index, PendingTransactionFilterKind,
+    trace::filter::TraceFilter, CallRequest, Filter, Index, Log, PendingTransactionFilterKind,
     TransactionRequest,
 };
 use serde::{Deserialize, Serialize};
@@ -36,43 +39,37 @@ fn is_unimplemented(err: Error) -> bool {
 }
 
 /// Represents a builder for creating JSON-RPC requests.
-#[derive(Serialize, Deserialize)]
-struct RawRpcBuilder {
-    endpoint: String,
+#[derive(Clone, Serialize, Deserialize)]
+pub struct RawRpcParamsBuilder {
     method: Option<String>,
     params: Vec<Value>,
-    id: Option<i32>,
+    id: i32,
 }
 
-impl RawRpcBuilder {
-    /// Creates a new `RawRpcBuilder` with a given endpoint.
-    fn new(endpoint: impl Into<String>) -> Self {
-        Self { endpoint: endpoint.into(), method: None, params: Vec::new(), id: None }
-    }
-
+impl RawRpcParamsBuilder {
     /// Sets the method name for the JSON-RPC request.
-    fn method(mut self, method: impl Into<String>) -> Self {
+    pub fn method(mut self, method: impl Into<String>) -> Self {
         self.method = Some(method.into());
         self
     }
 
     /// Adds a parameter to the JSON-RPC request.
-    fn add_param<S: Serialize>(mut self, param: S) -> Self {
+    pub fn add_param<S: Serialize>(mut self, param: S) -> Self {
         self.params.push(serde_json::to_value(param).expect("Failed to serialize parameter"));
         self
     }
 
     /// Sets the ID for the JSON-RPC request.
-    fn set_id(mut self, id: i32) -> Self {
-        self.id = Some(id);
+    pub fn set_id(mut self, id: i32) -> Self {
+        self.id = id;
         self
     }
 
     /// Constructs the JSON-RPC request string based on the provided configurations.
-    fn build(self) -> String {
-        let method = self.method.unwrap_or_else(|| panic!("JSON-RPC method not set"));
-        let id = self.id.unwrap_or_else(|| panic!("JSON-RPC id not set"));
-        let params: Vec<String> = self.params.into_iter().map(|p| p.to_string()).collect();
+    pub fn build(self) -> String {
+        let Self { method, params, id } = self;
+        let method = method.unwrap_or_else(|| panic!("JSON-RPC method not set"));
+        let params: Vec<String> = params.into_iter().map(|p| p.to_string()).collect();
 
         format!(
             r#"{{"jsonrpc":"2.0","id":{},"method":"{}","params":[{}]}}"#,
@@ -80,6 +77,12 @@ impl RawRpcBuilder {
             method,
             params.join(",")
         )
+    }
+}
+
+impl Default for RawRpcParamsBuilder {
+    fn default() -> Self {
+        Self { method: None, params: Vec::new(), id: 1 }
     }
 }
 
@@ -507,13 +510,28 @@ async fn test_call_otterscan_functions_http_and_ws() {
     let client = handle.http_client().unwrap();
     test_basic_otterscan_calls(&client).await;
 }
+
+// <https://github.com/paradigmxyz/reth/issues/5830>
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_logs_args() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_http_ws(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    let mut params = ArrayParams::default();
+    params.insert( serde_json::json!({"blockHash":"0x58dc57ab582b282c143424bd01e8d923cddfdcda9455bad02a29522f6274a948"})).unwrap();
+
+    let _resp = client.request::<Vec<Log>, _>("eth_getLogs", params).await.unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_rpc_builder_basic() {
-        let rpc_string = RawRpcBuilder::new("http://localhost:8545")
+        let rpc_string = RawRpcParamsBuilder::default()
             .method("eth_getBalance")
             .add_param("0xaa00000000000000000000000000000000000000")
             .add_param("0x898753d8fdd8d92c1907ca21e68c7970abd290c647a202091181deec3f30a0b2")

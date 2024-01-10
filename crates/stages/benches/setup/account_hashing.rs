@@ -1,3 +1,4 @@
+#![allow(unreachable_pub)]
 use super::{constants, StageRange};
 use reth_db::{
     cursor::DbCursorRO, database::Database, tables, transaction::DbTx, DatabaseError as DbError,

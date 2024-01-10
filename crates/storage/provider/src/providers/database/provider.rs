@@ -11,6 +11,7 @@ use crate::{
     PruneCheckpointWriter, StageCheckpointReader, StorageReader, TransactionVariant,
     TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
+use ahash::{AHashMap, AHashSet};
 use itertools::{izip, Itertools};
 use reth_db::{
     common::KeyValue,
@@ -49,7 +50,7 @@ use reth_trie::{
 };
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
 use std::{
-    collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{hash_map, BTreeMap, BTreeSet, HashMap},
     fmt::Debug,
     ops::{Bound, Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
@@ -105,7 +106,7 @@ pub struct DatabaseProvider<TX> {
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Snapshot provider
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub snapshot_provider: Option<Arc<SnapshotProvider>>,
 }
 
@@ -1350,7 +1351,14 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
             })
             .collect();
 
-        Ok(Some(Block { header, body, ommers, withdrawals }.with_senders(senders)))
+        let block = Block { header, body, ommers, withdrawals };
+        let block = block
+            // Note: we're using unchecked here because we know the block contains valid txs wrt to
+            // its height and can ignore the s value check so pre EIP-2 txs are allowed
+            .try_with_senders_unchecked(senders)
+            .map_err(|_| ProviderError::SenderRecoveryError)?;
+
+        Ok(Some(block))
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
@@ -2040,8 +2048,8 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
     ) -> ProviderResult<()> {
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSetMut::default();
-        let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
-        let mut destroyed_accounts = HashSet::default();
+        let mut storage_prefix_set: AHashMap<B256, PrefixSetMut> = AHashMap::default();
+        let mut destroyed_accounts = AHashSet::default();
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 
@@ -2080,7 +2088,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
         {
             // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
             // are pre-loaded.
-            let (state_root, trie_updates) = StateRoot::new(&self.tx)
+            let (state_root, trie_updates) = StateRoot::from_tx(&self.tx)
                 .with_changed_account_prefixes(account_prefix_set.freeze())
                 .with_changed_storage_prefixes(
                     storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
@@ -2230,8 +2238,8 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
 
             // Initialize prefix sets.
             let mut account_prefix_set = PrefixSetMut::default();
-            let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
-            let mut destroyed_accounts = HashSet::default();
+            let mut storage_prefix_set: AHashMap<B256, PrefixSetMut> = AHashMap::default();
+            let mut destroyed_accounts = AHashSet::default();
 
             // Unwind account hashes. Add changed accounts to account prefix set.
             let hashed_addresses = self.unwind_account_hashing(range.clone())?;
@@ -2264,7 +2272,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
             // Calculate the reverted merkle root.
             // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
             // are pre-loaded.
-            let (new_state_root, trie_updates) = StateRoot::new(&self.tx)
+            let (new_state_root, trie_updates) = StateRoot::from_tx(&self.tx)
                 .with_changed_account_prefixes(account_prefix_set.freeze())
                 .with_changed_storage_prefixes(
                     storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
@@ -2312,7 +2320,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
             }
         }
 
-        Ok(Chain::new(blocks, execution_state))
+        Ok(Chain::new(blocks, execution_state, None))
     }
 }
 

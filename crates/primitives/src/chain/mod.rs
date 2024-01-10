@@ -19,7 +19,7 @@ pub use spec::{
 };
 
 #[cfg(feature = "optimism")]
-pub use spec::{BASE_GOERLI, BASE_MAINNET, OP_GOERLI};
+pub use spec::{BASE_GOERLI, BASE_MAINNET, BASE_SEPOLIA, OP_GOERLI};
 
 // The chain info module.
 mod info;
@@ -47,36 +47,55 @@ pub use info::ChainInfo;
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 #[repr(u64)]
-#[allow(missing_docs)]
 pub enum NamedChain {
+    /// Ethereum Mainnet.
     Mainnet = 1,
+    /// Morden Testnet.
     Morden = 2,
+    /// Ropsten Testnet.
     Ropsten = 3,
+    /// Rinkeby Testnet.
     Rinkeby = 4,
+    /// Goerli Testnet.
     Goerli = 5,
+    /// Kovan Testnet.
     Kovan = 42,
+    /// Holesky Testnet.
     Holesky = 17000,
+    /// Sepolia Testnet.
     Sepolia = 11155111,
 
+    /// Optimism Mainnet.
     Optimism = 10,
+    /// Optimism Kovan Testnet.
     OptimismKovan = 69,
+    /// Optimism Goerli Testnet.
     OptimismGoerli = 420,
 
+    /// Base chain.
     Base = 8453,
+    /// Base Goerli Testnet.
     BaseGoerli = 84531,
+    /// Base Sepolia Testnet.
+    BaseSepolia = 84532,
 
+    /// Arbitrum Mainnet.
     Arbitrum = 42161,
+    /// Arbitrum Testnet.
     ArbitrumTestnet = 421611,
+    /// Arbitrum Goerli Testnet.
     ArbitrumGoerli = 421613,
+    /// Arbitrum Nova.
     ArbitrumNova = 42170,
 
+    /// Binance Smart Chain Mainnet.
     #[serde(alias = "bsc")]
-    #[strum(to_string = "bsc")]
     BinanceSmartChain = 56,
+    /// Binance Smart Chain Testnet.
     #[serde(alias = "bsc_testnet")]
-    #[strum(to_string = "bsc_testnet")]
     BinanceSmartChainTestnet = 97,
 
+    /// Development Testnet.
     Dev = 1337,
 }
 
@@ -138,6 +157,11 @@ impl Chain {
         Chain::Named(NamedChain::BaseGoerli)
     }
 
+    /// Returns the base sepolia chain.
+    pub const fn base_sepolia() -> Self {
+        Chain::Named(NamedChain::BaseSepolia)
+    }
+
     /// Returns the base mainnet chain.
     pub const fn base_mainnet() -> Self {
         Chain::Named(NamedChain::Base)
@@ -157,7 +181,8 @@ impl Chain {
                     NamedChain::OptimismGoerli |
                     NamedChain::OptimismKovan |
                     NamedChain::Base |
-                    NamedChain::BaseGoerli
+                    NamedChain::BaseGoerli |
+                    NamedChain::BaseSepolia
             )
         })
     }
@@ -187,7 +212,7 @@ impl Chain {
 
         let named: NamedChain = self.try_into().ok()?;
 
-        if matches!(named, C::Mainnet | C::Goerli | C::Sepolia | C::Ropsten | C::Rinkeby) {
+        if matches!(named, C::Mainnet | C::Goerli | C::Sepolia | C::Holesky) {
             return Some(format!("{DNS_PREFIX}all.{}.ethdisco.net", named.as_ref().to_lowercase()))
         }
         None
@@ -446,9 +471,16 @@ mod tests {
     }
 
     #[test]
-    fn test_dns_network() {
+    fn test_dns_main_network() {
         let s = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.mainnet.ethdisco.net";
         let chain: Chain = NamedChain::Mainnet.into();
+        assert_eq!(s, chain.public_dns_network_protocol().unwrap().as_str());
+    }
+
+    #[test]
+    fn test_dns_holesky_network() {
+        let s = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.holesky.ethdisco.net";
+        let chain: Chain = NamedChain::Holesky.into();
         assert_eq!(s, chain.public_dns_network_protocol().unwrap().as_str());
     }
 }

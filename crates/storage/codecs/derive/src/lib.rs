@@ -5,9 +5,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-// TODO(danipopes): add these warnings
-// #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
+#![allow(unreachable_pub, missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use proc_macro::{self, TokenStream, TokenTree};
@@ -32,14 +30,14 @@ pub fn derive_zstd(input: TokenStream) -> TokenStream {
 /// This code implements the main codec. If the codec supports it, it will also provide the [derive_arbitrary()] function, which automatically implements arbitrary traits and roundtrip fuzz tests.
 ///
 /// If you prefer to manually implement the arbitrary traits, you can still use the [add_arbitrary_tests()] function to add arbitrary fuzz tests.
-/// 
+///
 /// Example usage:
 /// * `#[main_codec(rlp)]`: will implement `derive_arbitrary(rlp)` or `derive_arbitrary(compact, rlp)`, if `compact` is the `main_codec`.
 /// * `#[main_codec(no_arbitrary)]`: will skip `derive_arbitrary` (both trait implementations and tests)
 #[proc_macro_attribute]
 #[rustfmt::skip]
 #[allow(unreachable_code)]
-pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {    
+pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
     #[cfg(feature = "compact")]
     return use_compact(args, input);
 

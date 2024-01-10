@@ -2,7 +2,7 @@
 
 Write config to stdout
 
-```bash
+```text
 $ reth config --help
 Usage: reth config [OPTIONS]
 

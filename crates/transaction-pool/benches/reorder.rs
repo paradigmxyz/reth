@@ -124,7 +124,7 @@ mod implementations {
 
     /// This implementation appends the transactions and uses [Vec::sort_by] function for sorting.
     #[derive(Default)]
-    pub struct VecTxPoolSortStable {
+    pub(crate) struct VecTxPoolSortStable {
         inner: Vec<MockTransaction>,
     }
 
@@ -145,7 +145,7 @@ mod implementations {
     /// This implementation appends the transactions and uses [Vec::sort_unstable_by] function for
     /// sorting.
     #[derive(Default)]
-    pub struct VecTxPoolSortUnstable {
+    pub(crate) struct VecTxPoolSortUnstable {
         inner: Vec<MockTransaction>,
     }
 
@@ -190,7 +190,7 @@ mod implementations {
 
     /// This implementation uses BinaryHeap which is drained and reconstructed on each reordering.
     #[derive(Default)]
-    pub struct BinaryHeapTxPool {
+    pub(crate) struct BinaryHeapTxPool {
         inner: BinaryHeap<MockTransactionWithPriority>,
         base_fee: Option<u64>,
     }

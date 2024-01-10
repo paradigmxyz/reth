@@ -357,7 +357,7 @@ block_interval = 5
 
 [prune.parts]
 # Sender Recovery pruning configuration
-sender_recovery = { distance = 100_000 } # Prune all transaction senders before the block `head-128`, i.e. keep transaction senders for the last 129 blocks
+sender_recovery = { distance = 100_000 } # Prune all transaction senders before the block `head-100000`, i.e. keep transaction senders for the last 100001 blocks
 
 # Transaction Lookup pruning configuration
 transaction_lookup = "full" # Prune all TxNumber => TxHash mappings
@@ -366,10 +366,10 @@ transaction_lookup = "full" # Prune all TxNumber => TxHash mappings
 receipts = { before = 1920000 } # Prune all receipts from transactions before the block 1920000, i.e. keep receipts from the block 1920000
 
 # Account History pruning configuration
-account_history = { distance = 100_000 } # Prune all historical account states before the block `head-128`
+account_history = { distance = 100_000 } # Prune all historical account states before the block `head-100000`
 
 # Storage History pruning configuration
-storage_history = { distance = 100_000 } # Prune all historical storage states before the block `head-128`
+storage_history = { distance = 100_000 } # Prune all historical storage states before the block `head-100000`
 ```
 
 We can also prune receipts more granular, using the logs filtering:

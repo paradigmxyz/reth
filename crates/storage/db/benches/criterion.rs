@@ -1,14 +1,14 @@
-#![allow(dead_code, unused_imports, non_snake_case)]
-
+#![allow(missing_docs)]
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use pprof::criterion::{Output, PProfProfiler};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    table::{Decode, Decompress, DupSort},
     tables::*,
+    transaction::DbTx,
 };
-use std::time::Instant;
 
 criterion_group! {
     name = benches;
@@ -52,7 +52,7 @@ pub fn serialization(c: &mut Criterion) {
 }
 
 /// Measures `Encode`, `Decode`, `Compress` and `Decompress`.
-fn measure_table_serialization<T>(group: &mut BenchmarkGroup<WallTime>)
+fn measure_table_serialization<T>(group: &mut BenchmarkGroup<'_, WallTime>)
 where
     T: Table + Default,
     T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
@@ -117,7 +117,7 @@ where
 }
 
 /// Measures `SeqWrite`, `RandomWrite`, `SeqRead` and `RandomRead` using `cursor` and `tx.put`.
-fn measure_table_db<T>(group: &mut BenchmarkGroup<WallTime>)
+fn measure_table_db<T>(group: &mut BenchmarkGroup<'_, WallTime>)
 where
     T: Table + Default,
     T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
@@ -213,7 +213,7 @@ where
 }
 
 /// Measures `SeqWrite`, `RandomWrite` and `SeqRead`  using `cursor_dup` and `tx.put`.
-fn measure_dupsort_db<T>(group: &mut BenchmarkGroup<WallTime>)
+fn measure_dupsort_db<T>(group: &mut BenchmarkGroup<'_, WallTime>)
 where
     T: Table + Default + DupSort,
     T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,

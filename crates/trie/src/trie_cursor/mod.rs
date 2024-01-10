@@ -1,17 +1,37 @@
 use crate::updates::TrieKey;
 use reth_db::DatabaseError;
-use reth_primitives::trie::BranchNodeCompact;
-
-mod account_cursor;
-mod storage_cursor;
-mod subnode;
-
-pub use self::{
-    account_cursor::AccountTrieCursor, storage_cursor::StorageTrieCursor, subnode::CursorSubNode,
+use reth_primitives::{
+    trie::{BranchNodeCompact, StoredNibbles, StoredNibblesSubKey},
+    B256,
 };
 
+mod database_cursors;
+mod subnode;
+
+/// Noop trie cursor implementations.
+pub mod noop;
+
+pub use self::{
+    database_cursors::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
+    subnode::CursorSubNode,
+};
+
+/// Factory for creating trie cursors.
+pub trait TrieCursorFactory {
+    /// Create an account trie cursor.
+    fn account_trie_cursor(
+        &self,
+    ) -> Result<Box<dyn TrieCursor<Key = StoredNibbles> + '_>, DatabaseError>;
+
+    /// Create a storage tries cursor.
+    fn storage_tries_cursor(
+        &self,
+        hashed_address: B256,
+    ) -> Result<Box<dyn TrieCursor<Key = StoredNibblesSubKey> + '_>, DatabaseError>;
+}
+
 /// A cursor for navigating a trie that works with both Tables and DupSort tables.
-#[auto_impl::auto_impl(&mut)]
+#[auto_impl::auto_impl(&mut, Box)]
 pub trait TrieCursor {
     /// The key type of the cursor.
     type Key: From<Vec<u8>>;

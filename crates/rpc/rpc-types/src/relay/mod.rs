@@ -1,10 +1,12 @@
+//! Relay API bindings: <https://flashbots.github.io/relay-specs/>
+
 #![allow(missing_docs)]
-//! Relay API bindings <https://flashbots.github.io/relay-specs/>
 
 use crate::{
     beacon::{BlsPublicKey, BlsSignature},
-    engine::{BlobsBundleV1, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3},
-    ExecutionPayload,
+    engine::{
+        BlobsBundleV1, ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    },
 };
 use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
@@ -318,7 +320,8 @@ mod tests {
     fn capella_bid_submission_ssz() {
         use ssz::{Decode, Encode};
 
-        let bytes = include_bytes!("../test_data/relay/signed_bid_submission_capella.ssz").to_vec();
+        let bytes =
+            include_bytes!("../../test_data/relay/signed_bid_submission_capella.ssz").to_vec();
         let bid = SignedBidSubmissionV2::from_ssz_bytes(&bytes).unwrap();
         assert_eq!(bytes, bid.as_ssz_bytes());
     }

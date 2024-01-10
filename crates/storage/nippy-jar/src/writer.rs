@@ -1,6 +1,7 @@
 use crate::{compression::Compression, ColumnResult, NippyJar, NippyJarError, NippyJarHeader};
 use std::{
     cmp::Ordering,
+    fmt,
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     ops::{Deref, DerefMut},
@@ -67,6 +68,12 @@ pub struct NippyJarWriter<'a, H: NippyJarHeader = ()> {
     offsets: Vec<u64>,
     /// Column where writer is going to write next.
     column: usize,
+}
+
+impl<H> fmt::Debug for NippyJarWriter<'_, H> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NippyJarWriter").finish_non_exhaustive()
+    }
 }
 
 impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {

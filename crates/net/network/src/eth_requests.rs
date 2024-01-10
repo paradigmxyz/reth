@@ -59,8 +59,8 @@ pub struct EthRequestHandler<C> {
     /// The client type that can interact with the chain.
     client: C,
     /// Used for reporting peers.
-    #[allow(unused)]
     // TODO use to report spammers
+    #[allow(dead_code)]
     peers: PeersHandle,
     /// Incoming request from the [NetworkManager](crate::NetworkManager).
     incoming_requests: ReceiverStream<IncomingEthRequest>,
@@ -272,7 +272,6 @@ where
 /// This is the key type for spam detection cache. The counter is ignored during `PartialEq` and
 /// `Hash`.
 #[derive(Debug, PartialEq, Hash)]
-#[allow(unused)]
 struct RespondedGetBlockHeaders {
     req: (PeerId, GetBlockHeaders),
 }

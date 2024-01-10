@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "Ethereum fork types used in reth."
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-codecs.workspace = true

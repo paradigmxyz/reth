@@ -2,7 +2,7 @@
 
 Scripts for node recovery
 
-```bash
+```text
 $ reth recover --help
 Usage: reth recover [OPTIONS] <COMMAND>
 

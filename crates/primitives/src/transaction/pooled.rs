@@ -1,5 +1,6 @@
 //! Defines the types for blob transactions, legacy, and other EIP-2718 transactions included in a
 //! response to `GetPooledTransactions`.
+
 #![cfg(feature = "c-kzg")]
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
@@ -320,17 +321,27 @@ impl PooledTransactionsElement {
 
 impl Encodable for PooledTransactionsElement {
     /// Encodes an enveloped post EIP-4844 [PooledTransactionsElement].
+    ///
+    /// For legacy transactions, this encodes the transaction as `rlp(tx-data)`.
+    ///
+    /// For EIP-2718 transactions, this encodes the transaction as `rlp(tx_type || rlp(tx-data)))`.
     fn encode(&self, out: &mut dyn bytes::BufMut) {
+        // The encoding of `tx-data` depends on the transaction type. Refer to these docs for more
+        // information on the exact format:
+        // - Legacy: TxLegacy::encode_with_signature
+        // - EIP-2930: TxEip2930::encode_with_signature
+        // - EIP-1559: TxEip1559::encode_with_signature
+        // - EIP-4844: BlobTransaction::encode_with_type_inner
         match self {
             Self::Legacy { transaction, signature, .. } => {
                 transaction.encode_with_signature(signature, out)
             }
             Self::Eip2930 { transaction, signature, .. } => {
-                // encodes with header
+                // encodes with string header
                 transaction.encode_with_signature(signature, out, true)
             }
             Self::Eip1559 { transaction, signature, .. } => {
-                // encodes with header
+                // encodes with string header
                 transaction.encode_with_signature(signature, out, true)
             }
             Self::BlobTransaction(blob_tx) => {
@@ -376,7 +387,7 @@ impl Encodable for PooledTransactionsElement {
 impl Decodable for PooledTransactionsElement {
     /// Decodes an enveloped post EIP-4844 [PooledTransactionsElement].
     ///
-    /// CAUTION: this expects that `buf` is `[id, rlp(tx)]`
+    /// CAUTION: this expects that `buf` is `rlp(tx_type || rlp(tx-data))`
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         // From the EIP-4844 spec:
         // Blob transactions have two network representations. During transaction gossip responses

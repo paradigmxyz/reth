@@ -69,6 +69,7 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
+//! use reth_node_api::EngineTypes;
 //! use reth_provider::{
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -82,7 +83,7 @@
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //! use tokio::try_join;
-//! pub async fn launch<Provider, Pool, Network, Events, EngineApi>(
+//! pub async fn launch<Provider, Pool, Network, Events, EngineApi, EngineT>(
 //!     provider: Provider,
 //!     pool: Pool,
 //!     network: Network,
@@ -101,7 +102,8 @@
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
-//!     EngineApi: EngineApiServer,
+//!     EngineApi: EngineApiServer<EngineT>,
+//!     EngineT: EngineTypes,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -132,8 +134,6 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use std::{
@@ -150,8 +150,9 @@ use jsonrpsee::{
     server::{IdProvider, Server, ServerHandle},
     Methods, RpcModule,
 };
+use reth_node_api::EngineTypes;
 use serde::{Deserialize, Serialize, Serializer};
-use strum::{AsRefStr, EnumVariantNames, ParseError, VariantNames};
+use strum::{AsRefStr, EnumIter, EnumVariantNames, IntoStaticStr, ParseError, VariantNames};
 use tower::layer::util::{Identity, Stack};
 use tower_http::cors::CorsLayer;
 use tracing::{instrument, trace};
@@ -381,7 +382,7 @@ where
     ///
     /// This behaves exactly as [RpcModuleBuilder::build] for the [TransportRpcModules], but also
     /// configures the auth (engine api) server, which exposes a subset of the `eth_` namespace.
-    pub fn build_with_auth_server<EngineApi>(
+    pub fn build_with_auth_server<EngineApi, EngineT: EngineTypes>(
         self,
         module_config: TransportRpcModuleConfig,
         engine: EngineApi,
@@ -391,7 +392,7 @@ where
         RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
     )
     where
-        EngineApi: EngineApiServer,
+        EngineApi: EngineApiServer<EngineT>,
     {
         let mut modules = TransportRpcModules::default();
 
@@ -739,7 +740,19 @@ impl fmt::Display for RpcModuleSelection {
 }
 
 /// Represents RPC modules that are supported by reth
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, AsRefStr, EnumVariantNames, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Eq,
+    PartialEq,
+    Hash,
+    AsRefStr,
+    IntoStaticStr,
+    EnumVariantNames,
+    EnumIter,
+    Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "kebab-case")]
 pub enum RethRpcModule {
@@ -776,6 +789,18 @@ impl RethRpcModule {
     /// Returns all variants of the enum
     pub const fn all_variants() -> &'static [&'static str] {
         Self::VARIANTS
+    }
+
+    /// Returns all variants of the enum
+    pub fn modules() -> impl IntoIterator<Item = RethRpcModule> {
+        use strum::IntoEnumIterator;
+        Self::iter()
+    }
+
+    /// Returns the string representation of the module.
+    #[inline]
+    pub fn as_str(&self) -> &'static str {
+        self.into()
     }
 }
 
@@ -998,9 +1023,10 @@ where
     ///   * `api_` namespace
     ///
     /// Note: This does _not_ register the `engine_` in this registry.
-    pub fn create_auth_module<EngineApi>(&mut self, engine_api: EngineApi) -> AuthRpcModule
+    pub fn create_auth_module<EngineApi, EngineT>(&mut self, engine_api: EngineApi) -> AuthRpcModule
     where
-        EngineApi: EngineApiServer,
+        EngineT: EngineTypes,
+        EngineApi: EngineApiServer<EngineT>,
     {
         let eth_handlers = self.eth_handlers();
         let mut module = RpcModule::new(());
@@ -1758,11 +1784,11 @@ impl TransportRpcModules {
         &self.config
     }
 
-    /// Merge the given Methods in the configured http methods.
+    /// Merge the given [Methods] in the configured http methods.
     ///
     /// Fails if any of the methods in other is present already.
     ///
-    /// Returns Ok(false) if no http transport is configured.
+    /// Returns [Ok(false)] if no http transport is configured.
     pub fn merge_http(
         &mut self,
         other: impl Into<Methods>,
@@ -1773,11 +1799,11 @@ impl TransportRpcModules {
         Ok(false)
     }
 
-    /// Merge the given Methods in the configured ws methods.
+    /// Merge the given [Methods] in the configured ws methods.
     ///
     /// Fails if any of the methods in other is present already.
     ///
-    /// Returns Ok(false) if no http transport is configured.
+    /// Returns [Ok(false)] if no ws transport is configured.
     pub fn merge_ws(
         &mut self,
         other: impl Into<Methods>,
@@ -1788,11 +1814,11 @@ impl TransportRpcModules {
         Ok(false)
     }
 
-    /// Merge the given Methods in the configured ipc methods.
+    /// Merge the given [Methods] in the configured ipc methods.
     ///
     /// Fails if any of the methods in other is present already.
     ///
-    /// Returns Ok(false) if no ipc transport is configured.
+    /// Returns [Ok(false)] if no ipc transport is configured.
     pub fn merge_ipc(
         &mut self,
         other: impl Into<Methods>,
@@ -1803,7 +1829,7 @@ impl TransportRpcModules {
         Ok(false)
     }
 
-    /// Merge the given Methods in all configured methods.
+    /// Merge the given [Methods] in all configured methods.
     ///
     /// Fails if any of the methods in other is present already.
     pub fn merge_configured(
