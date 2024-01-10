@@ -93,9 +93,12 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
     }
 
     /// Creates a [`NippyJarWriter`] from [`JarHolder`].
-    fn new(jar: JarHolder<'a, H>) -> Result<Self, NippyJarError> {
+    fn new(mut jar: JarHolder<'a, H>) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
+
+        // Makes sure we don't have dangling data and offset files
+        jar.freeze_config()?;
 
         let mut writer = Self {
             jar,

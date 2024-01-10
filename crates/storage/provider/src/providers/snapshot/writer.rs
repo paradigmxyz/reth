@@ -40,12 +40,15 @@ impl<'a> SnapshotProviderRW<'a> {
                 // TODO(joshie): if its a receipt segment, we can find out the actual range.
                 let tx_range = reader.get_highest_snapshot_tx(segment).map(|tx| tx..=tx);
                 let path = reader.directory().join(segment.filename(&block_range));
-
                 (
                     NippyJar::new(
                         segment.columns(),
                         &path,
-                        SegmentHeader::new(block_range, tx_range, segment),
+                        SegmentHeader::new(
+                            *block_range.start()..=*block_range.start(),
+                            tx_range,
+                            segment,
+                        ),
                     ),
                     path,
                 )
@@ -97,6 +100,8 @@ impl<'a> SnapshotProviderRW<'a> {
         {
             // Commits offsets and new user_header to disk
             self.writer.commit()?;
+
+            dbg!(&self.writer.user_header());
 
             // Opens the new snapshot
             let (writer, data_path) = Self::open(segment, block, self.reader.clone())?;
