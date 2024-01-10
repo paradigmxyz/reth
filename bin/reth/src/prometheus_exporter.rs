@@ -5,13 +5,12 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server,
 };
-use metrics::{describe_gauge, gauge};
+use metrics::describe_gauge;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
 use reth_db::database_metrics::DatabaseMetrics;
 use reth_metrics::metrics::Unit;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
-use tracing::error;
 
 pub(crate) trait Hook: Fn() + Send + Sync {}
 impl<T: Fn() + Send + Sync> Hook for T {}
@@ -112,6 +111,8 @@ where
 #[cfg(all(feature = "jemalloc", unix))]
 fn collect_memory_stats() {
     use jemalloc_ctl::{epoch, stats};
+    use metrics::gauge;
+    use tracing::error;
 
     if epoch::advance().map_err(|error| error!(?error, "Failed to advance jemalloc epoch")).is_err()
     {
@@ -199,6 +200,7 @@ fn describe_memory_stats() {}
 #[cfg(target_os = "linux")]
 fn collect_io_stats() {
     use metrics::absolute_counter;
+    use tracing::error;
 
     let Ok(process) = procfs::process::Process::myself()
         .map_err(|error| error!(?error, "Failed to get currently running process"))
