@@ -6,10 +6,10 @@ use crate::{
     Metrics, PrunerError, PrunerEvent,
 };
 use reth_db::database::Database;
-use reth_primitives::{BlockNumber, PruneMode, PruneProgress, PruneSegment, SnapshotSegment};
+use reth_primitives::{BlockNumber, PruneMode, PruneProgress, SnapshotSegment};
 use reth_provider::{ProviderFactory, PruneCheckpointReader};
 use reth_tokio_util::EventListeners;
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, time::Instant};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, trace};
 
@@ -23,7 +23,7 @@ pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 #[derive(Debug)]
 pub struct Pruner<DB> {
     provider_factory: ProviderFactory<DB>,
-    segments: Vec<Arc<dyn Segment<DB>>>,
+    segments: Vec<Box<dyn Segment<DB>>>,
     /// Minimum pruning interval measured in blocks. All prune segments are checked and, if needed,
     /// pruned, when the chain advances by the specified number of blocks.
     min_block_interval: usize,
@@ -44,7 +44,7 @@ impl<DB: Database> Pruner<DB> {
     /// Creates a new [Pruner].
     pub fn new(
         provider_factory: ProviderFactory<DB>,
-        segments: Vec<Arc<dyn Segment<DB>>>,
+        segments: Vec<Box<dyn Segment<DB>>>,
         min_block_interval: usize,
         delete_limit: usize,
         prune_max_blocks_per_run: usize,
@@ -100,7 +100,33 @@ impl<DB: Database> Pruner<DB> {
             .min(self.prune_max_blocks_per_run);
         let mut delete_limit = self.delete_limit * blocks_since_last_run;
 
-        for segment in &self.segments {
+        let mut snapshot_segments = Vec::<Box<dyn Segment<DB>>>::new();
+        if let Some(snapshot_provider) = self.provider_factory.snapshot_provider() {
+            if let Some(to_block) =
+                snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Headers)
+            {
+                snapshot_segments
+                    .push(Box::new(segments::Headers::new(PruneMode::Before(to_block + 1))))
+            }
+
+            if let Some(to_block) =
+                snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Transactions)
+            {
+                snapshot_segments
+                    .push(Box::new(segments::Transactions::new(PruneMode::Before(to_block + 1))))
+            }
+
+            if let Some(to_block) =
+                snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Receipts)
+            {
+                snapshot_segments
+                    .push(Box::new(segments::Receipts::new(PruneMode::Before(to_block + 1))))
+            }
+        }
+
+        let segments = snapshot_segments.iter().chain(self.segments.iter());
+
+        for segment in segments {
             if delete_limit == 0 {
                 break
             }
@@ -140,78 +166,6 @@ impl<DB: Database> Pruner<DB> {
                 );
             } else {
                 trace!(target: "pruner", segment = ?segment.segment(), "No target block to prune");
-            }
-        }
-
-        if let Some(snapshot_provider) = self.provider_factory.snapshot_provider() {
-            if let (Some(to_block), true) = (
-                snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Headers),
-                delete_limit > 0,
-            ) {
-                let prune_mode = PruneMode::Before(to_block + 1);
-                trace!(
-                    target: "pruner",
-                    prune_segment = ?PruneSegment::Headers,
-                    %to_block,
-                    ?prune_mode,
-                    "Got target block to prune"
-                );
-
-                let segment_start = Instant::now();
-                let segment = segments::Headers::new(prune_mode);
-                let previous_checkpoint = provider.get_prune_checkpoint(PruneSegment::Headers)?;
-                let output = segment
-                    .prune(&provider, PruneInput { previous_checkpoint, to_block, delete_limit })?;
-                if let Some(checkpoint) = output.checkpoint {
-                    segment
-                        .save_checkpoint(&provider, checkpoint.as_prune_checkpoint(prune_mode))?;
-                }
-                self.metrics
-                    .get_prune_segment_metrics(PruneSegment::Headers)
-                    .duration_seconds
-                    .record(segment_start.elapsed());
-
-                done = done && output.done;
-                delete_limit = delete_limit.saturating_sub(output.pruned);
-                stats.insert(
-                    PruneSegment::Headers,
-                    (PruneProgress::from_done(output.done), output.pruned),
-                );
-            }
-
-            if let (Some(to_block), true) = (
-                snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Transactions),
-                delete_limit > 0,
-            ) {
-                let prune_mode = PruneMode::Before(to_block + 1);
-                trace!(
-                    target: "pruner",
-                    prune_segment = ?PruneSegment::Transactions,
-                    %to_block,
-                    ?prune_mode,
-                    "Got target block to prune"
-                );
-
-                let segment_start = Instant::now();
-                let segment = segments::Transactions::new(prune_mode);
-                let previous_checkpoint = provider.get_prune_checkpoint(PruneSegment::Headers)?;
-                let output = segment
-                    .prune(&provider, PruneInput { previous_checkpoint, to_block, delete_limit })?;
-                if let Some(checkpoint) = output.checkpoint {
-                    segment
-                        .save_checkpoint(&provider, checkpoint.as_prune_checkpoint(prune_mode))?;
-                }
-                self.metrics
-                    .get_prune_segment_metrics(PruneSegment::Transactions)
-                    .duration_seconds
-                    .record(segment_start.elapsed());
-
-                done = done && output.done;
-                delete_limit = delete_limit.saturating_sub(output.pruned);
-                stats.insert(
-                    PruneSegment::Transactions,
-                    (PruneProgress::from_done(output.done), output.pruned),
-                );
             }
         }
 
