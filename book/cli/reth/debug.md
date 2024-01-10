@@ -2,7 +2,7 @@
 
 Various debug routines
 
-```bash
+```text
 $ reth debug --help
 Usage: reth debug [OPTIONS] <COMMAND>
 

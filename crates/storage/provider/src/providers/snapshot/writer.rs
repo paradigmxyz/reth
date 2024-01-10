@@ -98,13 +98,12 @@ impl<'a> SnapshotProviderRW<'a> {
 
             match segment {
                 SnapshotSegment::Headers => todo!(),
-                SnapshotSegment::Transactions => {
+                SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
                     let block_start =
                         *find_fixed_range(BLOCKS_PER_SNAPSHOT, last_block + 1).start();
                     *self.writer.user_header_mut() =
                         SegmentHeader::new(block_start..=block_start, None, segment)
                 }
-                SnapshotSegment::Receipts => todo!(),
             }
         } else {
             match segment {

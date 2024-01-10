@@ -2,7 +2,7 @@
 
 AccountHashing stage
 
-```bash
+```text
 $ reth stage dump account-hashing --help
 Usage: reth stage dump account-hashing [OPTIONS] --output-db <OUTPUT_PATH> --from <FROM> --to <TO>
 

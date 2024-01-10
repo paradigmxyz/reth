@@ -2,7 +2,7 @@
 
 Unwinds the given number of blocks from the database
 
-```bash
+```text
 $ reth stage unwind num-blocks --help
 Usage: reth stage unwind num-blocks [OPTIONS] <AMOUNT>
 

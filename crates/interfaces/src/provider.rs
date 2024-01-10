@@ -1,6 +1,6 @@
 use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, SnapshotSegment,
-    TxHashOrNumber, TxNumber, B256,
+    TxHashOrNumber, TxNumber, B256, U256,
 };
 use std::path::PathBuf;
 use thiserror::Error;
@@ -125,6 +125,9 @@ pub enum ProviderError {
     /// Snapshot is finalized and cannot be written to.
     #[error("not able to write to finalized snapshot {0} #{1}")]
     FinalizedSnapshot(SnapshotSegment, BlockNumber),
+    /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
+    #[error("failed to convert block number U256 to u64: {0}")]
+    BlockNumberOverflow(U256),
 }
 
 impl From<reth_nippy_jar::NippyJarError> for ProviderError {

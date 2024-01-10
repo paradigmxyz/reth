@@ -77,7 +77,7 @@ pub enum StageError {
     #[error("invalid download response: {0}")]
     Download(#[from] DownloadError),
     /// Database is ahead of snapshot data.
-    #[error("missing snapshot data in block number: {number}", number = block.number)]
+    #[error("missing snapshot data from block number: {number}", number = block.number)]
     MissingSnapshotData {
         /// Starting block with  missing data.
         block: Box<SealedHeader>,
@@ -129,7 +129,7 @@ pub enum PipelineError {
     Provider(#[from] ProviderError),
     /// The pipeline encountered an error while trying to send an event.
     #[error("pipeline encountered an error while trying to send an event")]
-    Channel(#[from] SendError<PipelineEvent>),
+    Channel(#[from] Box<SendError<PipelineEvent>>),
     /// The stage encountered an internal error.
     #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),

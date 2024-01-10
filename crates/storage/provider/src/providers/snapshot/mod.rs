@@ -54,7 +54,7 @@ pub(crate) fn find_fixed_range(interval: u64, block: u64) -> RangeInclusive<u64>
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use crate::{test_utils::create_test_provider_factory, HeaderProvider};
     use rand::{self, seq::SliceRandom};

@@ -60,7 +60,7 @@ const TIMEOUT_SCALING: u32 = 3;
 ///    - incoming _internal_ requests/broadcasts via the request/command channel
 ///    - incoming requests/broadcasts _from remote_ via the connection
 ///    - responses for handled ETH requests received from the remote peer.
-#[allow(unused)]
+#[allow(dead_code)]
 pub(crate) struct ActiveSession {
     /// Keeps track of request ids.
     pub(crate) next_id: u64,
@@ -662,7 +662,7 @@ pub(crate) struct ReceivedRequest {
     /// Receiver half of the channel that's supposed to receive the proper response.
     rx: PeerResponse,
     /// Timestamp when we read this msg from the wire.
-    #[allow(unused)]
+    #[allow(dead_code)]
     received: Instant,
 }
 

@@ -20,6 +20,10 @@ pub use debug_args::DebugArgs;
 mod database_args;
 pub use database_args::DatabaseArgs;
 
+/// LogArgs struct for configuring the logger
+mod log_args;
+pub use log_args::{ColorMode, LogArgs};
+
 mod secret_key;
 pub use secret_key::{get_secret_key, SecretKeyError};
 

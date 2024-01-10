@@ -2,7 +2,7 @@
 
 Database debugging utilities
 
-```bash
+```text
 $ reth db --help
 Usage: reth db [OPTIONS] <COMMAND>
 

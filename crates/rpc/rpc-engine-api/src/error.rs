@@ -2,6 +2,7 @@ use jsonrpsee_types::error::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
 };
 use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
+use reth_node_api::AttributesValidationError;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{B256, U256};
 use thiserror::Error;
@@ -43,27 +44,6 @@ pub enum EngineApiError {
         /// Requested number of items
         count: u64,
     },
-    /// Thrown if `PayloadAttributes` provided in engine_forkchoiceUpdated before V3 contains a
-    /// parent beacon block root
-    #[error("parent beacon block root not supported before V3")]
-    ParentBeaconBlockRootNotSupportedBeforeV3,
-    /// Thrown if engine_forkchoiceUpdatedV1 contains withdrawals
-    #[error("withdrawals not supported in V1")]
-    WithdrawalsNotSupportedInV1,
-    /// Thrown if engine_forkchoiceUpdated contains no withdrawals after Shanghai
-    #[error("no withdrawals post-Shanghai")]
-    NoWithdrawalsPostShanghai,
-    /// Thrown if engine_forkchoiceUpdated contains withdrawals before Shanghai
-    #[error("withdrawals pre-Shanghai")]
-    HasWithdrawalsPreShanghai,
-    /// Thrown if the `PayloadAttributes` provided in engine_forkchoiceUpdated contains no parent
-    /// beacon block root after Cancun
-    #[error("no parent beacon block root post-cancun")]
-    NoParentBeaconBlockRootPostCancun,
-    /// Thrown if `PayloadAttributes` were provided with a timestamp, but the version of the engine
-    /// method called is meant for a fork that occurs after the provided timestamp.
-    #[error("Unsupported fork")]
-    UnsupportedFork,
     /// Terminal total difficulty mismatch during transition configuration exchange.
     #[error(
         "invalid transition terminal total difficulty: \
@@ -98,6 +78,9 @@ pub enum EngineApiError {
     /// Fetching the payload failed
     #[error(transparent)]
     GetPayloadError(#[from] PayloadBuilderError),
+    /// The payload or attributes are known to be malformed before processing.
+    #[error(transparent)]
+    AttributesValidationError(#[from] AttributesValidationError),
     /// If the optimism feature flag is enabled, the payload attributes must have a present
     /// gas limit for the forkchoice updated method.
     #[cfg(feature = "optimism")]
@@ -123,11 +106,24 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: EngineApiError) -> Self {
         match error {
             EngineApiError::InvalidBodiesRange { .. } |
-            EngineApiError::WithdrawalsNotSupportedInV1 |
-            EngineApiError::ParentBeaconBlockRootNotSupportedBeforeV3 |
-            EngineApiError::NoParentBeaconBlockRootPostCancun |
-            EngineApiError::NoWithdrawalsPostShanghai |
-            EngineApiError::HasWithdrawalsPreShanghai => {
+            EngineApiError::AttributesValidationError(
+                AttributesValidationError::WithdrawalsNotSupportedInV1,
+            ) |
+            EngineApiError::AttributesValidationError(
+                AttributesValidationError::ParentBeaconBlockRootNotSupportedBeforeV3,
+            ) |
+            EngineApiError::AttributesValidationError(
+                AttributesValidationError::NoParentBeaconBlockRootPostCancun,
+            ) |
+            EngineApiError::AttributesValidationError(
+                AttributesValidationError::NoWithdrawalsPostShanghai,
+            ) |
+            EngineApiError::AttributesValidationError(
+                AttributesValidationError::HasWithdrawalsPreShanghai,
+            ) |
+            EngineApiError::AttributesValidationError(
+                AttributesValidationError::InvalidParams(_),
+            ) => {
                 // Note: the data field is not required by the spec, but is also included by other
                 // clients
                 jsonrpsee_types::error::ErrorObject::owned(
@@ -148,7 +144,9 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     Some(ErrorData::new(error)),
                 )
             }
-            EngineApiError::UnsupportedFork => jsonrpsee_types::error::ErrorObject::owned(
+            EngineApiError::AttributesValidationError(
+                AttributesValidationError::UnsupportedFork,
+            ) => jsonrpsee_types::error::ErrorObject::owned(
                 UNSUPPORTED_FORK_CODE,
                 error.to_string(),
                 None::<()>,
@@ -238,7 +236,7 @@ mod tests {
         ensure_engine_rpc_error(
             UNSUPPORTED_FORK_CODE,
             "Unsupported fork",
-            EngineApiError::UnsupportedFork,
+            EngineApiError::AttributesValidationError(AttributesValidationError::UnsupportedFork),
         );
 
         ensure_engine_rpc_error(

@@ -193,7 +193,7 @@ struct EthBundleInner<Eth> {
     /// Access to commonly used code of the `eth` namespace
     eth_api: Eth,
     // restrict the number of concurrent tracing calls.
-    #[allow(unused)]
+    #[allow(dead_code)]
     blocking_task_guard: BlockingTaskGuard,
 }
 

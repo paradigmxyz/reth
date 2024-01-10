@@ -2,7 +2,7 @@
 
 Download block body
 
-```bash
+```text
 $ reth p2p body --help
 Usage: reth p2p body [OPTIONS] <ID>
 

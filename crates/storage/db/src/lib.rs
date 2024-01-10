@@ -60,8 +60,6 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 /// Traits defining the database abstractions, such as cursors and transactions.
@@ -230,17 +228,24 @@ pub mod test_utils {
 
     /// Create snapshots path for testing
     pub fn create_test_snapshots_dir() -> PathBuf {
-        let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
+        let path = tempdir_path();
         let emsg = format!("{}: {:?}", ERROR_SNAPSHOTS_CREATION, path);
 
         std::fs::create_dir_all(path.clone()).expect(&emsg);
         path
     }
 
+    /// Get a temporary directory path to use for the database
+    pub fn tempdir_path() -> PathBuf {
+        let builder = tempfile::Builder::new().prefix("reth-test-").rand_bytes(8).tempdir();
+        builder.expect(ERROR_TEMPDIR).into_path()
+    }
+
     /// Create read/write database for testing
     pub fn create_test_rw_db() -> Arc<TempDatabase<DatabaseEnv>> {
-        let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
+        let path = tempdir_path();
         let emsg = format!("{}: {:?}", ERROR_DB_CREATION, path);
+
         let db = init_db(&path, None).expect(&emsg);
 
         Arc::new(TempDatabase { db: Some(db), path })
@@ -255,7 +260,7 @@ pub mod test_utils {
 
     /// Create read only database for testing
     pub fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnv>> {
-        let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
+        let path = tempdir_path();
         {
             init_db(path.as_path(), None).expect(ERROR_DB_CREATION);
         }

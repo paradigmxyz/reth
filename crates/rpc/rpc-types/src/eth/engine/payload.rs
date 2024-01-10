@@ -66,7 +66,7 @@ pub struct ExecutionPayloadInputV2 {
     #[serde(flatten)]
     pub execution_payload: ExecutionPayloadV1,
     /// The payload withdrawals
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
@@ -220,12 +220,6 @@ impl ssz::Encode for ExecutionPayloadV2 {
         false
     }
 
-    fn ssz_bytes_len(&self) -> usize {
-        <ExecutionPayloadV1 as ssz::Encode>::ssz_bytes_len(&self.payload_inner) +
-            ssz::BYTES_PER_LENGTH_OFFSET +
-            self.withdrawals.ssz_bytes_len()
-    }
-
     fn ssz_append(&self, buf: &mut Vec<u8>) {
         let offset = <B256 as ssz::Encode>::ssz_fixed_len() * 5 +
             <Address as ssz::Encode>::ssz_fixed_len() +
@@ -253,6 +247,12 @@ impl ssz::Encode for ExecutionPayloadV2 {
         encoder.append(&self.withdrawals);
 
         encoder.finalize();
+    }
+
+    fn ssz_bytes_len(&self) -> usize {
+        <ExecutionPayloadV1 as ssz::Encode>::ssz_bytes_len(&self.payload_inner) +
+            ssz::BYTES_PER_LENGTH_OFFSET +
+            self.withdrawals.ssz_bytes_len()
     }
 }
 
@@ -349,11 +349,6 @@ impl ssz::Encode for ExecutionPayloadV3 {
         false
     }
 
-    fn ssz_bytes_len(&self) -> usize {
-        <ExecutionPayloadV2 as ssz::Encode>::ssz_bytes_len(&self.payload_inner) +
-            <u64 as ssz::Encode>::ssz_fixed_len() * 2
-    }
-
     fn ssz_append(&self, buf: &mut Vec<u8>) {
         let offset = <B256 as ssz::Encode>::ssz_fixed_len() * 5 +
             <Address as ssz::Encode>::ssz_fixed_len() +
@@ -383,6 +378,11 @@ impl ssz::Encode for ExecutionPayloadV3 {
         encoder.append(&self.excess_blob_gas);
 
         encoder.finalize();
+    }
+
+    fn ssz_bytes_len(&self) -> usize {
+        <ExecutionPayloadV2 as ssz::Encode>::ssz_bytes_len(&self.payload_inner) +
+            <u64 as ssz::Encode>::ssz_fixed_len() * 2
     }
 }
 
@@ -616,38 +616,13 @@ pub struct PayloadAttributes {
     pub suggested_fee_recipient: Address,
     /// Array of [`Withdrawal`] enabled with V2
     /// See <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#payloadattributesv2>
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub withdrawals: Option<Vec<Withdrawal>>,
     /// Root of the parent beacon block enabled with V3.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3>
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_beacon_block_root: Option<B256>,
-    /// Optimism Payload Attributes
-    #[cfg(feature = "optimism")]
-    #[serde(flatten)]
-    pub optimism_payload_attributes: OptimismPayloadAttributes,
-}
-
-/// Optimism Payload Attributes
-#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[cfg(feature = "optimism")]
-pub struct OptimismPayloadAttributes {
-    /// Transactions is a field for rollups: the transactions list is forced into the block
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub transactions: Option<Vec<Bytes>>,
-    /// If true, the no transactions are taken out of the tx-pool, only transactions from the above
-    /// Transactions list will be included.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub no_tx_pool: Option<bool>,
-    /// If set, this sets the exact gas limit the block produced with.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::serde_helpers::u64_hex_opt::deserialize"
-    )]
-    pub gas_limit: Option<u64>,
 }
 
 /// This structure contains the result of processing a payload or fork choice update.

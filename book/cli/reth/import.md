@@ -2,7 +2,7 @@
 
 This syncs RLP encoded blocks from a file
 
-```bash
+```text
 $ reth import --help
 Usage: reth import [OPTIONS] <IMPORT_PATH>
 

@@ -2,7 +2,7 @@
 
 Unwinds a certain block range, deleting it from the database
 
-```bash
+```text
 $ reth stage unwind --help
 Usage: reth stage unwind [OPTIONS] <COMMAND>
 

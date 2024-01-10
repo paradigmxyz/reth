@@ -24,7 +24,7 @@ use std::ops::Deref;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxEip4844 {
     /// Added as EIP-pub 155: Simple replay attack protection
-    pub chain_id: u64,
+    pub chain_id: ChainId,
     /// A scalar value equal to the number of transactions sent by the sender; formally Tn.
     pub nonce: u64,
     /// A scalar value equal to the maximum
@@ -295,6 +295,12 @@ impl TxEip4844 {
     }
 
     /// Encodes the legacy transaction in RLP for signing.
+    ///
+    /// This encodes the transaction as:
+    /// `tx_type || rlp(chain_id, nonce, max_priority_fee_per_gas, max_fee_per_gas, gas_limit, to,
+    /// value, input, access_list, max_fee_per_blob_gas, blob_versioned_hashes)`
+    ///
+    /// Note that there is no rlp header before the transaction type byte.
     pub(crate) fn encode_for_signing(&self, out: &mut dyn bytes::BufMut) {
         out.put_u8(self.tx_type() as u8);
         Header { list: true, payload_length: self.fields_len() }.encode(out);
