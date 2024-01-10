@@ -21,7 +21,7 @@ normal = [
 [dependencies]
 # reth
 reth-config.workspace = true
-reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
+reth-primitives = { workspace = true, features = ["arbitrary", "clap", "asm-keccak"] }
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-provider = { workspace = true }
 reth-revm.workspace = true

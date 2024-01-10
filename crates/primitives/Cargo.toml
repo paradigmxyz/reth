@@ -20,7 +20,7 @@ revm.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
-alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
+alloy-primitives = { workspace = true, features = ["rand", "rlp", "asm-keccak"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie = { version = "0.1", features = ["serde"] }
 ethers-core = { workspace = true, default-features = false, optional = true }
