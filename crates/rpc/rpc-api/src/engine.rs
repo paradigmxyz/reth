@@ -1,18 +1,19 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_node_api::EngineTypes;
 use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64};
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
         ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState,
-        ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration,
+        ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
     BlockOverrides, CallRequest, Filter, Log, RichBlock, SyncStatus,
 };
 
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "engine"))]
-pub trait EngineApi {
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "engine", client_bounds(Engine::PayloadAttributes: jsonrpsee::core::Serialize + Clone), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned)))]
+pub trait EngineApi<Engine: EngineTypes> {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
     #[method(name = "newPayloadV1")]
@@ -40,13 +41,13 @@ pub trait EngineApi {
     async fn fork_choice_updated_v1(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<PayloadAttributes>,
+        payload_attributes: Option<Engine::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
     /// Post Shanghai forkchoice update handler
     ///
     /// This is the same as `forkchoiceUpdatedV1`, but expects an additional `withdrawals` field in
-    /// the [PayloadAttributes], if payload attributes are provided.
+    /// the `payloadAttributes`, if payload attributes are provided.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
     ///
@@ -56,21 +57,21 @@ pub trait EngineApi {
     async fn fork_choice_updated_v2(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<PayloadAttributes>,
+        payload_attributes: Option<Engine::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
     /// Post Cancun forkchoice update handler
     ///
     /// This is the same as `forkchoiceUpdatedV2`, but expects an additional
-    /// `parentBeaconBlockRoot` field in the the [PayloadAttributes], if payload attributes are
-    /// provided.
+    /// `parentBeaconBlockRoot` field in the the `payloadAttributes`, if payload attributes
+    /// are provided.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
     #[method(name = "forkchoiceUpdatedV3")]
     async fn fork_choice_updated_v3(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<PayloadAttributes>,
+        payload_attributes: Option<Engine::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1>
@@ -146,6 +147,13 @@ pub trait EngineApi {
     #[method(name = "exchangeCapabilities")]
     async fn exchange_capabilities(&self, capabilities: Vec<String>) -> RpcResult<Vec<String>>;
 }
+
+// NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
+// generic here. It would be nice if the rpc macro would understand which types need to have serde.
+// By default, if the trait has a generic, the rpc macro will add e.g. `Engine: DeserializeOwned` to
+// the trait bounds, which is not what we want, because `Types` is not used directly in any of the
+// trait methods. Instead, we have to add the bounds manually. This would be disastrous if we had
+// more than one associated type used in the trait methods.
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 ///

@@ -1,12 +1,11 @@
 [package]
-name = "reth-rpc-api"
+name = "reth-node-builder"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Reth RPC interfaces"
 
 [lints]
 workspace = true
@@ -14,13 +13,9 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-rpc-types.workspace = true
 reth-payload-builder.workspace = true
+reth-rpc-types.workspace = true
 reth-node-api.workspace = true
 
-# misc
-jsonrpsee = { workspace = true, features = ["server", "macros"] }
-serde_json.workspace = true
-
-[features]
-client = ["jsonrpsee/client", "jsonrpsee/async-client"]
+# io
+serde.workspace = true
