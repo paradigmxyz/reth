@@ -1,5 +1,13 @@
+use derive_more::{Deref, DerefMut};
 use linked_hash_set::LinkedHashSet;
-use std::{borrow::Borrow, hash::Hash, num::NonZeroUsize};
+use schnellru::{self, ByLength};
+use std::{
+    borrow::Borrow,
+    fmt::{self, Write},
+    hash,
+    hash::Hash,
+    num::NonZeroUsize,
+};
 
 /// A minimal LRU cache based on a `LinkedHashSet` with limited capacity.
 ///
@@ -72,6 +80,46 @@ where
         for item in iter.into_iter() {
             self.insert(item);
         }
+    }
+}
+
+/// Wrapper of [`schnellru::LruMap`] that implements [`fmt::Debug`].
+#[derive(Deref, DerefMut)]
+pub struct LruMap<K, V>(schnellru::LruMap<K, V>)
+where
+    K: hash::Hash + PartialEq;
+
+impl<K, V> fmt::Debug for LruMap<K, V>
+where
+    K: hash::Hash + PartialEq + fmt::Display,
+    V: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug_struct = f.debug_struct("LruMap");
+        for (k, v) in self.0.iter() {
+            let mut key_str = String::new();
+            write!(&mut key_str, "{k}")?;
+            debug_struct.field(&key_str, &v);
+        }
+        debug_struct.finish()
+    }
+}
+
+impl<K, V> LruMap<K, V>
+where
+    K: hash::Hash + PartialEq,
+{
+    pub fn new(max_length: u32) -> Self {
+        Self(schnellru::LruMap::new(ByLength::new(max_length)))
+    }
+}
+
+impl<K, V> From<LruMap<K, V>> for schnellru::LruMap<K, V>
+where
+    K: hash::Hash + PartialEq,
+{
+    fn from(value: LruMap<K, V>) -> Self {
+        value.0
     }
 }
 

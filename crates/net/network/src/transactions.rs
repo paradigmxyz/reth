@@ -1,13 +1,12 @@
 //! Transactions management for the p2p network.
 
 use crate::{
-    cache::LruCache,
+    cache::{LruCache, LruMap},
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     NetworkEvents, NetworkHandle,
 };
-use derive_more::{Deref, DerefMut};
 use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{
@@ -43,7 +42,7 @@ use tracing::{debug, trace, warn};
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
 
 /// Cache limit of transactions waiting for idle peer to be fetched.
-const MAX_CAPACITY_BUFFERED_HASHES: usize = 100 * 1024;
+const MAX_CAPACITY_BUFFERED_HASHES: usize = 10000;
 
 /// Soft limit for NewPooledTransactions
 const NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT: usize = 4096;
@@ -67,7 +66,10 @@ const GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE: GetPooledTransactionLimit =
 const MAX_ALTERNATIVE_PEERS_PER_TX: u8 = MAX_REQUEST_RETRIES_PER_TX_HASH + 1;
 
 /// Maximum concurrent [`GetPooledTxRequest`]s to allow per peer.
-const MAX_INFLIGHT_GET_POOLED_TX_REQUESTS_PER_PEER: u8 = 1;
+const MAX_CONCURRENT_TX_REQUESTS_PER_PEER: u8 = 1;
+
+/// Maximum concurrent [`GetPooledTxRequest`]s.
+const MAX_CONCURRENT_TX_REQUESTS: u32 = 10000;
 
 /// Maximum request retires per [`TxHash`]. Note, this is reset should the [`TxHash`] re-appear in
 /// an announcement after it has been ejected from the hash buffer.
@@ -1176,33 +1178,21 @@ struct Peer {
     client_version: Arc<str>,
 }
 
-#[derive(Debug, Deref, DerefMut)]
-struct BufferedHashes(LruCache<TxHash>);
-
-impl Default for BufferedHashes {
-    fn default() -> Self {
-        Self(LruCache::new(
-            NonZeroUsize::new(MAX_CAPACITY_BUFFERED_HASHES)
-                .expect("buffered cache limit should be non-zero"),
-        ))
-    }
-}
-
 /// The type responsible for fetching missing transactions from peers.
 ///
 /// This will keep track of unique transaction hashes that are currently being fetched and submits
 /// new requests on announced hashes.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[pin_project]
 struct TransactionFetcher {
     /// All peers to which a request for pooled transactions is currently active. Maps 1-1 to
     /// `inflight_requests`.
-    active_peers: HashMap<PeerId, u8>,
+    active_peers: LruMap<PeerId, u8>,
     /// All currently active requests for pooled transactions.
     #[pin]
     inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
     /// Hashes that are awaiting fetch from an idle peer.
-    buffered_hashes: BufferedHashes,
+    buffered_hashes: LruCache<TxHash>,
     /// Tracks all hashes that are currently being fetched or are buffered, mapping them to
     /// request retries and last recently seen fallback peers (max one request try for any peer).
     // todo: schnellru with limit max inflight requests + buffered hashes, alt buffered hash cache
@@ -1229,12 +1219,12 @@ impl TransactionFetcher {
         let GetPooledTxResponse { peer_id, .. } = resp;
 
         debug_assert!(
-            self.active_peers.contains_key(peer_id),
+            self.active_peers.get(peer_id).is_some(),
             "making request inflight should have stored peer id in `active peers`"
         );
 
         let mut remove = || -> bool {
-            if let Some(inflight_count) = self.active_peers.get_mut(peer_id) {
+            if let Some(inflight_count) = self.active_peers.get(peer_id) {
                 if *inflight_count <= 1 {
                     return true
                 }
@@ -1249,8 +1239,8 @@ impl TransactionFetcher {
 
     /// Returns `true` if peer is idle.
     fn is_idle(&self, peer_id: PeerId) -> bool {
-        let Some(inflight_count) = self.active_peers.get(&peer_id) else { return true };
-        if *inflight_count < MAX_INFLIGHT_GET_POOLED_TX_REQUESTS_PER_PEER {
+        let Some(inflight_count) = self.active_peers.peek(&peer_id) else { return true };
+        if *inflight_count < MAX_CONCURRENT_TX_REQUESTS_PER_PEER {
             return true
         }
         false
@@ -1263,8 +1253,12 @@ impl TransactionFetcher {
         requested_hashes: Vec<TxHash>,
         response_rx: oneshot::Receiver<Result<PooledTransactions, RequestError>>,
     ) {
-        let inflight_count = self.active_peers.entry(peer_id).or_default();
-        if *inflight_count >= MAX_INFLIGHT_GET_POOLED_TX_REQUESTS_PER_PEER {
+        let Some(inflight_count) = self.active_peers.get_or_insert(peer_id, || 0) else {
+            warn!("failed to cache active peer, {peer_id}, couldn't insert homogenous sized entry into schnellru::LruMap");
+            return
+        };
+
+        if *inflight_count >= MAX_CONCURRENT_TX_REQUESTS_PER_PEER {
             return
         }
 
@@ -1532,6 +1526,20 @@ impl Future for TransactionFetcher {
             }
         }
         Poll::Pending
+    }
+}
+
+impl Default for TransactionFetcher {
+    fn default() -> Self {
+        Self {
+            active_peers: LruMap::new(MAX_CONCURRENT_TX_REQUESTS),
+            inflight_requests: Default::default(),
+            buffered_hashes: LruCache::new(
+                NonZeroUsize::new(MAX_CAPACITY_BUFFERED_HASHES)
+                    .expect("buffered cache limit should be non-zero"),
+            ),
+            unknown_hashes: Default::default(),
+        }
     }
 }
 
