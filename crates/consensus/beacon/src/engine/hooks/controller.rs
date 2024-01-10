@@ -40,8 +40,7 @@ impl EngineHooksController {
     /// Polls currently running hook with DB write access, if any.
     ///
     /// Returns [`Poll::Ready`] if currently running hook with DB write access returned
-    /// an [event][`crate::hooks::EngineHookEvent`] that resulted in [action][`EngineHookAction`] or
-    /// error.
+    /// an [event][`crate::hooks::EngineHookEvent`].
     ///
     /// Returns [`Poll::Pending`] in all other cases:
     /// 1. No hook with DB write access is running.
@@ -88,8 +87,7 @@ impl EngineHooksController {
 
     /// Polls next engine from the collection.
     ///
-    /// Returns [`Poll::Ready`] if next hook returned an [event][`crate::hooks::EngineHookEvent`]
-    /// that resulted in [action][`EngineHookAction`].
+    /// Returns [`Poll::Ready`] if next hook returned an [event][`crate::hooks::EngineHookEvent`].
     ///
     /// Returns [`Poll::Pending`] in all other cases:
     /// 1. Next hook is [`Option::None`], i.e. taken, meaning it's currently running and has a DB

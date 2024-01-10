@@ -44,8 +44,7 @@ pub trait EngineHook: Send + Sync + 'static {
     /// Returns a human-readable name for the hook.
     fn name(&self) -> &'static str;
 
-    /// Advances the hook execution, emitting an [event][`EngineHookEvent`] and an optional
-    /// [action][`EngineHookAction`].
+    /// Advances the hook execution, emitting an [event][`EngineHookEvent`].
     fn poll(
         &mut self,
         cx: &mut Context<'_>,
