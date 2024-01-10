@@ -580,7 +580,17 @@ where
 
             // enforce recommended soft limit, however the peer may enforce an arbitrary limit on
             // the response (2MB)
-            let (hashes, left_over_hashes) = TransactionFetcher::pack_hashes(msg);
+            let left_over_hashes = match &mut msg {
+                NewPooledTransactionHashes::Eth66(NewPooledTransactionHashes66(hashes)) => {
+                    TransactionFetcher::pack_hashes_eth66(hashes).collect()
+                }
+                NewPooledTransactionHashes::Eth68(NewPooledTransactionHashes68 {
+                    sizes,
+                    hashes,
+                    ..
+                }) => TransactionFetcher::pack_hashes_eth68(hashes, sizes),
+            };
+            let hashes = msg.into_hashes();
 
             self.transaction_fetcher.buffer_hashes(left_over_hashes, Some(peer_id));
 
@@ -609,7 +619,7 @@ where
             };
             // fill the request with other buffered hashes that have been announced by the peer
             if let Some(peer) = self.peers.get(&peer_id) {
-                self.transaction_fetcher.fill_up_request_for_peer(peer_id, &mut hashes);
+                self.transaction_fetcher.fill_up_request_for_peer(peer, &mut hashes);
                 // request the buffered missing transactions
                 let request_sent =
                     self.transaction_fetcher.request_transactions_from_peer(hashes, peer);
@@ -1267,68 +1277,53 @@ impl TransactionFetcher {
         ))
     }
 
-    /// Packages hashes for [`GetPooledTxRequest`] up to limit. Returns `(hashes-to-include,
-    /// left-over-hashes)`.
-    fn pack_hashes(msg: NewPooledTransactionHashes) -> (Vec<TxHash>, Vec<TxHash>) {
-        match msg {
-            NewPooledTransactionHashes::Eth66(NewPooledTransactionHashes66(mut hashes)) => {
-                let left_over = hashes
-                    .drain(..GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES)
-                    .collect::<Vec<_>>();
+    /// Packages hashes for [`GetPooledTxRequest`] up to limit. Returns left over hashes.
+    fn pack_hashes_eth66(hashes: &mut Vec<TxHash>) -> impl Iterator<Item = TxHash> + '_ {
+        hashes.drain(..GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES)
+    }
 
-                (hashes, left_over)
+    /// Packages hashes for [`GetPooledTxRequest`] up to limit. Returns left over hashes.
+    fn pack_hashes_eth68(hashes: &mut Vec<TxHash>, sizes: &[usize]) -> Vec<TxHash> {
+        let mut acc_size = 0;
+        let first_left_over_size = sizes.iter().enumerate().find(|(_, size)| {
+            if acc_size < RESPONSE_SIZE_LIMIT_BYTES {
+                acc_size += **size;
+                false
+            } else {
+                true
             }
-            NewPooledTransactionHashes::Eth68(NewPooledTransactionHashes68 {
-                sizes,
-                mut hashes,
-                ..
-            }) => {
-                let mut acc = 0;
-                let first_left_over_size = sizes.iter().enumerate().find(|(_, size)| {
-                    if acc < RESPONSE_SIZE_LIMIT_BYTES {
-                        acc += **size;
-                        false
-                    } else {
-                        true
-                    }
-                });
+        });
 
-                let mut include_indices = vec![];
+        let mut include_indices = vec![];
 
-                // not all hashes included in request
-                let Some((i, _)) = first_left_over_size else {
-                    let left_over = hashes
-                        .drain(..GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES)
-                        .collect::<Vec<_>>();
+        // not all hashes included in request
+        let Some((i, _)) = first_left_over_size else {
+            return hashes.drain(..GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES).collect::<Vec<_>>()
+        };
 
-                    return (hashes, left_over)
-                };
-
-                // some space will be left in response
-                if acc < RESPONSE_SIZE_LIMIT_BYTES {
-                    for (j, size) in sizes[i..].iter().enumerate() {
-                        if *size <= RESPONSE_SIZE_LIMIT_BYTES - acc {
-                            // tx will fit into response, include hash in request
-                            include_indices.push(j);
-                            acc += *size;
-                        }
-                    }
+        // some space will be left in response
+        if acc_size < RESPONSE_SIZE_LIMIT_BYTES {
+            for (j, size) in sizes[i..].iter().enumerate() {
+                if *size <= RESPONSE_SIZE_LIMIT_BYTES - acc_size {
+                    // tx will fit into response, include hash in request
+                    include_indices.push(j);
+                    acc_size += *size;
                 }
-
-                let mut left_over_hashes = hashes.drain(..i).collect::<Vec<_>>();
-                let len_hashes = hashes.len();
-
-                // re-insert hashes to include
-                for (j, h) in include_indices.into_iter().enumerate() {
-                    // elements in left over hashes budge on every iteration due to remove
-                    let n = h + 1;
-                    let hash = left_over_hashes.remove(j - len_hashes - n);
-                    hashes.push(hash);
-                }
-
-                (hashes, left_over_hashes)
             }
         }
+
+        let mut left_over_hashes = hashes.drain(..i).collect::<Vec<_>>();
+        let len_hashes = hashes.len();
+
+        // re-insert hashes to include
+        for (j, h) in include_indices.into_iter().enumerate() {
+            // elements in left over hashes budge on every iteration due to remove
+            let n = h + 1;
+            let hash = left_over_hashes.remove(j - len_hashes - n);
+            hashes.push(hash);
+        }
+
+        left_over_hashes
     }
 
     fn buffer_hashes_for_retry(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
@@ -1439,9 +1434,18 @@ impl TransactionFetcher {
             return false
         } else {
             // remove requested hashes from buffered hashes
-            for hash in &new_announced_hashes {
-                self.buffered_hashes.remove(hash);
-            }
+            debug_assert!(
+                || -> bool {
+                    for hash in &new_announced_hashes {
+                        if self.buffered_hashes.contains(hash) {
+                            return false
+                        }
+                    }
+                    true
+                }(),
+                "packing request from buffer should remove elements from buffer"
+            );
+
             // stores a new request future for the request
             self.store_request_fut(peer_id, new_announced_hashes, rx);
         }
@@ -1449,19 +1453,32 @@ impl TransactionFetcher {
         true
     }
 
-    fn fill_up_request_for_peer(&self, peer_id: PeerId, hashes: &mut Vec<TxHash>) {
+    fn fill_up_request_for_peer(&mut self, peer: &Peer, hashes: &mut [TxHash]) {
+        let peer_id: PeerId = peer.request_tx.peer_id;
+        let version = peer.version;
+        let mut hashes_to_request = vec![];
+
         for hash in self.buffered_hashes.iter() {
             if *hash == hashes[0] {
                 continue;
             }
             if let Some((_, peers)) = self.unknown_hashes.get(hash) {
                 if peers.contains(&peer_id) {
-                    hashes.push(*hash)
+                    hashes_to_request.push(*hash)
                 }
             }
-            if hashes.len() >= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
-                return
+            match version {
+                EthVersion::Eth66
+                    if hashes_to_request.len() >= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES =>
+                {
+                    return
+                }
+                _ => (), // todo: store eth68 TxHash with size metadata to pack request
             }
+        }
+
+        for hash in hashes_to_request {
+            self.buffered_hashes.remove(&hash);
         }
     }
 }
@@ -1473,7 +1490,6 @@ impl Future for TransactionFetcher {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.as_mut().project();
         let res = this.inflight_requests.poll_next_unpin(cx);
-        drop(this);
 
         if let Poll::Ready(Some(response)) = res {
             // update peer activity, requests for buffered hashes can only be made to idle
