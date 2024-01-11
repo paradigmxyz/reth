@@ -80,12 +80,28 @@ impl BuiltPayload {
 }
 
 impl BuiltPayloadTrait for BuiltPayload {
+    fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self {
+        Self::new(id, block, fees)
+    }
+
     fn block(&self) -> &SealedBlock {
         &self.block
     }
 
     fn fees(&self) -> U256 {
         self.fees
+    }
+
+    fn into_v1_payload(self) -> ExecutionPayloadV1 {
+        self.into()
+    }
+
+    fn into_v2_payload(self) -> ExecutionPayloadEnvelopeV2 {
+        self.into()
+    }
+
+    fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3 {
+        self.into()
     }
 }
 

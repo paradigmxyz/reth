@@ -72,17 +72,18 @@ mod builder {
         Pool: TransactionPool,
     {
         type Attributes = OptimismPayloadBuilderAttributes;
+        type BuiltPayload = BuiltPayload;
 
         fn try_build(
             &self,
-            args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes>,
-        ) -> Result<BuildOutcome, PayloadBuilderError> {
+            args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, BuiltPayload>,
+        ) -> Result<BuildOutcome<BuiltPayload>, PayloadBuilderError> {
             optimism_payload_builder(args, self.compute_pending_block)
         }
 
         fn on_missing_payload(
             &self,
-            args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes>,
+            args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, BuiltPayload>,
         ) -> Option<Arc<BuiltPayload>> {
             // In Optimism, the PayloadAttributes can specify a `no_tx_pool` option that implies we
             // should not pull transactions from the tx pool. In this case, we build the payload
@@ -110,9 +111,9 @@ mod builder {
     /// a result indicating success with the payload or an error in case of failure.
     #[inline]
     pub(crate) fn optimism_payload_builder<Pool, Client>(
-        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes>,
+        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, BuiltPayload>,
         _compute_pending_block: bool,
-    ) -> Result<BuildOutcome, PayloadBuilderError>
+    ) -> Result<BuildOutcome<BuiltPayload>, PayloadBuilderError>
     where
         Client: StateProviderFactory,
         Pool: TransactionPool,

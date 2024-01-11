@@ -48,11 +48,12 @@ mod builder {
         Pool: TransactionPool,
     {
         type Attributes = EthPayloadBuilderAttributes;
+        type BuiltPayload = BuiltPayload;
 
         fn try_build(
             &self,
-            args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes>,
-        ) -> Result<BuildOutcome, PayloadBuilderError> {
+            args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, BuiltPayload>,
+        ) -> Result<BuildOutcome<BuiltPayload>, PayloadBuilderError> {
             default_ethereum_payload_builder(args)
         }
     }
@@ -64,8 +65,8 @@ mod builder {
     /// a result indicating success with the payload or an error in case of failure.
     #[inline]
     pub fn default_ethereum_payload_builder<Pool, Client>(
-        args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes>,
-    ) -> Result<BuildOutcome, PayloadBuilderError>
+        args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, BuiltPayload>,
+    ) -> Result<BuildOutcome<BuiltPayload>, PayloadBuilderError>
     where
         Client: StateProviderFactory,
         Pool: TransactionPool,
