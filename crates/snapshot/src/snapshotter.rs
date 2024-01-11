@@ -102,6 +102,7 @@ impl<DB: Database> Snapshotter<DB> {
 
                     snapshot_writer.append_transaction(tx_number, transaction)?;
                 }
+                snapshot_writer.increment_block(SnapshotSegment::Transactions)?;
             }
         }
 
