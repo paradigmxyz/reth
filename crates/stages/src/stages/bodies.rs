@@ -170,7 +170,18 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
             // Increment block on snapshot header.
             if block_number > 0 {
-                snapshotter.increment_block(SnapshotSegment::Transactions)?;
+                let appended_block_number =
+                    snapshotter.increment_block(SnapshotSegment::Transactions)?;
+
+                if appended_block_number != block_number {
+                    // This scenario indicates a critical error in the logic of adding new
+                    // items. It should be treated as an `expect()` failure.
+                    return Err(StageError::InconsistentBlockNumber {
+                        segment: SnapshotSegment::Transactions,
+                        database: block_number,
+                        static_file: appended_block_number,
+                    });
+                }
             }
 
             match response {
@@ -182,7 +193,18 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
                     // Write transactions
                     for transaction in block.body {
-                        snapshotter.append_transaction(next_tx_num, transaction.into())?;
+                        let appended_tx_number =
+                            snapshotter.append_transaction(next_tx_num, transaction.into())?;
+
+                        if appended_tx_number != next_tx_num {
+                            // This scenario indicates a critical error in the logic of adding new
+                            // items. It should be treated as an `expect()` failure.
+                            return Err(StageError::InconsistentTxNumber {
+                                segment: SnapshotSegment::Transactions,
+                                database: next_tx_num,
+                                static_file: appended_tx_number,
+                            });
+                        }
 
                         // Increment transaction id for each transaction.
                         next_tx_num += 1;
@@ -661,7 +683,7 @@ mod tests {
 
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx(&mut rng);
-                            snapshotter.append_transaction(tx_num, transaction.into())
+                            snapshotter.append_transaction(tx_num, transaction.into()).map(|_| ())
                         })?;
 
                         if body.tx_count != 0 {

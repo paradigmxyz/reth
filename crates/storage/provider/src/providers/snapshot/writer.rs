@@ -82,7 +82,9 @@ impl<'a> SnapshotProviderRW<'a> {
 
     /// Allows to increment the [`SegmentHeader`] end block. It will commit the current snapshot,
     /// and create the next one if we are past the end range.
-    pub fn increment_block(&mut self, segment: SnapshotSegment) -> ProviderResult<()> {
+    ///
+    /// Returns the current [`BlockNumber`] as seen in the static file.
+    pub fn increment_block(&mut self, segment: SnapshotSegment) -> ProviderResult<BlockNumber> {
         let last_block = self.writer.user_header().block_end();
         let writer_range_end = *find_fixed_range(BLOCKS_PER_SNAPSHOT, last_block).end();
 
@@ -114,7 +116,7 @@ impl<'a> SnapshotProviderRW<'a> {
             }
         }
 
-        Ok(())
+        Ok(self.writer.user_header().block_end())
     }
 
     /// Truncates a number of rows from disk. It delets and loads an older snapshot file if block
@@ -184,17 +186,15 @@ impl<'a> SnapshotProviderRW<'a> {
     }
 
     /// Appends to tx number-based snapshot file.
+    ///
+    /// Returns the current [`TxNumber`] as seen in the static file.
     fn append_with_tx_number<V: Compact>(
         &mut self,
         segment: SnapshotSegment,
         tx_num: TxNumber,
         value: V,
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<TxNumber> {
         debug_assert!(self.writer.user_header().segment() == segment);
-
-        if self.writer.user_header().tx_range().is_some_and(|range| range.contains(&tx_num)) {
-            return Ok(())
-        }
 
         if self.writer.user_header().tx_range().is_none() {
             self.writer.user_header_mut().set_tx_range(tx_num..=tx_num);
@@ -202,20 +202,30 @@ impl<'a> SnapshotProviderRW<'a> {
             self.writer.user_header_mut().increment_tx();
         }
 
-        self.append_column(value)
+        self.append_column(value)?;
+
+        Ok(self.writer.user_header().tx_end())
     }
 
     /// Appends transaction to snapshot file.
+    ///
+    /// Returns the current [`TxNumber`] as seen in the static file.
     pub fn append_transaction(
         &mut self,
         tx_num: TxNumber,
         tx: TransactionSignedNoHash,
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<TxNumber> {
         self.append_with_tx_number(SnapshotSegment::Transactions, tx_num, tx)
     }
 
     /// Appends receipt to snapshot file.
-    pub fn append_receipt(&mut self, tx_num: TxNumber, receipt: Receipt) -> ProviderResult<()> {
+    ///
+    /// Returns the current [`TxNumber`] as seen in the static file.
+    pub fn append_receipt(
+        &mut self,
+        tx_num: TxNumber,
+        receipt: Receipt,
+    ) -> ProviderResult<TxNumber> {
         self.append_with_tx_number(SnapshotSegment::Receipts, tx_num, receipt)
     }
 

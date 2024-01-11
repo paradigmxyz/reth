@@ -183,6 +183,11 @@ impl SegmentHeader {
         *self.tx_range.as_ref().expect("should exist").start()
     }
 
+    /// Returns the last transaction number of the segment.
+    pub fn tx_end(&self) -> TxNumber {
+        *self.tx_range.as_ref().expect("should exist").end()
+    }
+
     /// Number of transactions.
     pub fn tx_len(&self) -> u64 {
         self.tx_range.as_ref().expect("should exist").end() + 1 -
