@@ -2,11 +2,7 @@
 
 use alloy_rlp::Encodable;
 use reth_node_api::PayloadBuilderAttributes;
-use reth_primitives::{
-    revm::config::revm_spec_by_timestamp_after_merge,
-    revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId},
-    Address, BlobTransactionSidecar, ChainSpec, Header, SealedBlock, Withdrawal, B256, U256,
-};
+use reth_primitives::{Address, BlobTransactionSidecar, SealedBlock, Withdrawal, B256, U256};
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
     PayloadId,
@@ -143,65 +139,6 @@ pub struct EthPayloadBuilderAttributes {
 // === impl EthPayloadBuilderAttributes ===
 
 impl EthPayloadBuilderAttributes {
-    /// Returns the configured [CfgEnv] and [BlockEnv] for the targeted payload (that has the
-    /// `parent` as its parent).
-    ///
-    /// The `chain_spec` is used to determine the correct chain id and hardfork for the payload
-    /// based on its timestamp.
-    ///
-    /// Block related settings are derived from the `parent` block and the configured attributes.
-    ///
-    /// NOTE: This is only intended for beacon consensus (after merge).
-    pub fn cfg_and_block_env(&self, chain_spec: &ChainSpec, parent: &Header) -> (CfgEnv, BlockEnv) {
-        // configure evm env based on parent block
-        let mut cfg = CfgEnv::default();
-        cfg.chain_id = chain_spec.chain().id();
-
-        #[cfg(feature = "optimism")]
-        {
-            cfg.optimism = chain_spec.is_optimism();
-        }
-
-        // ensure we're not missing any timestamp based hardforks
-        cfg.spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp);
-
-        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
-        // cancun now, we need to set the excess blob gas to the default value
-        let blob_excess_gas_and_price = parent
-            .next_block_excess_blob_gas()
-            .map_or_else(
-                || {
-                    if cfg.spec_id == SpecId::CANCUN {
-                        // default excess blob gas is zero
-                        Some(0)
-                    } else {
-                        None
-                    }
-                },
-                Some,
-            )
-            .map(BlobExcessGasAndPrice::new);
-
-        let block_env = BlockEnv {
-            number: U256::from(parent.number + 1),
-            coinbase: self.suggested_fee_recipient,
-            timestamp: U256::from(self.timestamp),
-            difficulty: U256::ZERO,
-            prevrandao: Some(self.prev_randao),
-            gas_limit: U256::from(parent.gas_limit),
-            // calculate basefee based on parent block's gas usage
-            basefee: U256::from(
-                parent
-                    .next_block_base_fee(chain_spec.base_fee_params(self.timestamp))
-                    .unwrap_or_default(),
-            ),
-            // calculate excess gas based on parent block's blob gas usage
-            blob_excess_gas_and_price,
-        };
-
-        (cfg, block_env)
-    }
-
     /// Returns the identifier of the payload.
     pub fn payload_id(&self) -> PayloadId {
         self.id
