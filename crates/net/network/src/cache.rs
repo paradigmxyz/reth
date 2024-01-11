@@ -184,6 +184,7 @@ mod test {
     }
 
     #[test]
+    #[allow(dead_code)]
     fn test_debug_impl_lru_map() {
         use derive_more::Display;
 
