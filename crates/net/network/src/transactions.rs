@@ -578,7 +578,7 @@ where
             // todo: choose idle status based on total inflight requests too?
             //let inflight_requests_count = *peer.inflight_requests_semaphore_rx.borrow();
 
-            if self.transaction_fetcher.is_idle(peer_id) {
+            if !self.transaction_fetcher.is_idle(peer_id) {
                 // since all hashes new at this point, no idle peer can exist that announced them
                 for hash in hashes {
                     self.transaction_fetcher.buffered_hashes.insert(*hash);
