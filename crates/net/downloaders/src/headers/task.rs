@@ -184,7 +184,6 @@ mod tests {
         reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::child_header,
     };
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
-
     use std::sync::Arc;
 
     #[tokio::test(flavor = "multi_thread")]

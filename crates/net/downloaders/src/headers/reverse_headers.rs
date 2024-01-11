@@ -1225,7 +1225,6 @@ mod tests {
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
     use reth_primitives::SealedHeader;
 
-
     /// Tests that `replace_number` works the same way as Option::replace
     #[test]
     fn test_replace_number_semantics() {

@@ -263,8 +263,6 @@ async fn resolve_external_ip() -> Option<IpAddr> {
 
 #[cfg(test)]
 mod tests {
-
-
     use super::*;
     use std::net::Ipv4Addr;
 

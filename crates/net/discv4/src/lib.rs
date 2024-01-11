@@ -2135,7 +2135,6 @@ mod tests {
     use alloy_rlp::{Decodable, Encodable};
     use rand::{thread_rng, Rng};
     use reth_primitives::{hex, mainnet_nodes, ForkHash};
-
     use std::{future::poll_fn, net::Ipv4Addr};
 
     #[tokio::test]

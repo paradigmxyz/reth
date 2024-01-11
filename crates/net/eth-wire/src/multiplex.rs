@@ -645,7 +645,6 @@ mod tests {
         },
         UnauthedEthStream, UnauthedP2PStream,
     };
-
     use tokio::{net::TcpListener, sync::oneshot};
     use tokio_util::codec::Decoder;
 

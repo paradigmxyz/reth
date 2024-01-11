@@ -412,7 +412,6 @@ mod tests {
     use alloy_rlp::Encodable;
     use enr::{EnrBuilder, EnrKey};
     use reth_primitives::{Chain, Hardfork, MAINNET};
-
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
     use tokio_stream::StreamExt;

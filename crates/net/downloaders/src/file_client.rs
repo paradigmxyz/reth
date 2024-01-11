@@ -251,7 +251,6 @@ mod tests {
     };
     use reth_primitives::{SealedHeader, MAINNET};
     use reth_provider::ProviderFactory;
-
     use std::sync::Arc;
 
     #[tokio::test]

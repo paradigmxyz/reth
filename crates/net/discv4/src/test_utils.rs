@@ -281,8 +281,6 @@ pub fn rng_message(rng: &mut impl RngCore) -> Message {
 
 #[cfg(test)]
 mod tests {
-
-
     use super::*;
     use crate::Discv4Event;
     use std::net::{IpAddr, Ipv4Addr};
