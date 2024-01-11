@@ -25,13 +25,13 @@ use std::{ops::Range, sync::Arc, time::Instant};
 
 /// A transaction pool implementation using [MockOrdering] for transaction ordering.
 ///
-/// This type is an alias for [TxPool<MockOrdering>].
+/// This type is an alias for [`TxPool<MockOrdering>`].
 pub type MockTxPool = TxPool<MockOrdering>;
 
 /// A validated transaction in the transaction pool, using [MockTransaction] as the transaction
 /// type.
 ///
-/// This type is an alias for [ValidPoolTransaction<MockTransaction>].
+/// This type is an alias for [`ValidPoolTransaction<MockTransaction>`].
 pub type MockValidTx = ValidPoolTransaction<MockTransaction>;
 
 #[cfg(feature = "optimism")]
@@ -1126,7 +1126,7 @@ impl MockTransactionFactory {
         self.validated_with_origin(TransactionOrigin::External, transaction)
     }
 
-    /// Validates a [MockTransaction] and returns a shared [Arc<MockValidTx>].
+    /// Validates a [MockTransaction] and returns a shared [`Arc<MockValidTx>`].
     pub fn validated_arc(&mut self, transaction: MockTransaction) -> Arc<MockValidTx> {
         Arc::new(self.validated(transaction))
     }
