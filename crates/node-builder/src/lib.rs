@@ -11,3 +11,6 @@
 /// trait.
 pub mod engine;
 pub use engine::{EthEngineTypes, OptimismEngineTypes};
+
+/// Node event hooks.
+pub mod hooks;

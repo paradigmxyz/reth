@@ -6303,6 +6303,7 @@ version = "0.1.0-alpha.14"
 dependencies = [
  "reth-payload-builder",
  "reth-primitives",
+ "reth-provider",
  "reth-rpc-types",
  "serde",
  "thiserror",

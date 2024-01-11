@@ -1,56 +1,10 @@
 //! Traits for the builder process.
 
-use crate::cli::components::FullProvider;
-use reth_transaction_pool::TransactionPool;
 use std::marker::PhantomData;
 
-/// Type configuration for the engine.
-pub trait EngineConfig {
-    /// The execution payload type the CL node emits via the engine API.
-    // TODO make this a trait
-    type Payload: serde::de::DeserializeOwned
-        + serde::Serialize
-        + std::fmt::Debug
-        + Clone
-        + Send
-        + Sync
-        + 'static;
-
-    /// The execution payload attribute type the CL node emits via the engine API.
-    ///
-    /// This type is emitted as part of the fork choice update call
-    // TODO make this a trait
-    type PayloadAttribute: serde::de::DeserializeOwned
-        + serde::Serialize
-        + std::fmt::Debug
-        + Clone
-        + Send
-        + Sync
-        + 'static;
-}
-
-/// Configures all the primitive types of the node.
-pub trait NodePrimitives {}
-
-/// Configures all the EVM types of the node.
-pub trait EvmConfig {}
-
-/// The type that configures the entire node.
-///
-/// TODO naming
-pub trait NodeTypes {
-    type Primitives: NodePrimitives;
-    type Engine: EngineConfig;
-    type Evm: EvmConfig;
-}
-
-// TODO add generic helpers NodeTypes
-
-/// A helper type that also provides access to the builtin provider type of the node.
-// TODO naming
-pub trait FullNodeTypes: NodeTypes {
-    type Provider: FullProvider;
-}
+use crate::cli::components::FullProvider;
+use reth_node_api::{evm::EvmConfig, primitives::NodePrimitives, EngineTypes};
+use reth_transaction_pool::TransactionPool;
 
 /// An adapter type that adds the builtin provider type to the user configured node types.
 #[derive(Debug)]
@@ -83,6 +37,8 @@ where
 }
 
 /// A type that configures all the customizable components of the node and knows how to build them.
+///
+/// This type is stateful and is responsible for instantiating the node's components.
 #[async_trait::async_trait]
 pub trait NodeComponentsBuilder<Node: FullNodeTypes> {
     /// The transaction pool to use.

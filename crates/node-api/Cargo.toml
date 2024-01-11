@@ -14,9 +14,10 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
+reth-provider.workspace = true
 thiserror.workspace = true
 
-# io
+# misc
 serde.workspace = true
 
 [dev-dependencies]
