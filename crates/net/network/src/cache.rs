@@ -89,6 +89,16 @@ impl<T: Hash + Eq> LruCache<T> {
     pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
         self.inner.iter()
     }
+
+    /// Returns number of elements currently in cache.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Returns `true` if there are currently no elements in the cache.
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
 }
 
 impl<T> Extend<T> for LruCache<T>

@@ -1394,15 +1394,23 @@ impl TransactionFetcher {
         announced_hashes.retain(|&hash| {
             match self.unknown_hashes.entry(hash) {
                 Entry::Vacant(entry) => {
+                    trace!(
+                        "new hash seen in announcement by peer, hash: {hash}, peer_id: {peer_id}"
+                    );
+                    // todo: allow `MAX_ALTERNATIVE_PEERS_PER_TX` to be zero by Option<LruCache>
+                    // for backups
                     if let Some(limit) = NonZeroUsize::new(MAX_ALTERNATIVE_PEERS_PER_TX.into()) {
-                        // the hash is not in inflight hashes, insert it and retain in the vector
                         entry.insert((0, LruCache::new(limit)));
                     }
                     true
                 }
                 Entry::Occupied(mut entry) => {
                     let (_, backups) = entry.get_mut();
-                    // last recently seen peer is most likely to be responsive, so we prefer it
+                    // hash has been seen but is not inflight
+                    if self.buffered_hashes.remove(&hash) {
+                        return true
+                    }
+                    // hash has been seen and is in flight. store peer as fallback peer.
                     // todo: check if session is still active
                     backups.insert(peer_id);
                     false
@@ -2039,5 +2047,11 @@ mod tests {
                 panic!("error: {:?}", e);
             }
         }
+    }
+
+    #[tokio::test]
+    async fn retry_buffered_request() {
+        // buffered request will get picked up when peer is idle again
+        // or buffered request will get picked up when another peer announces it
     }
 }
