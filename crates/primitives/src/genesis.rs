@@ -278,12 +278,78 @@ impl<'a> GenesisAllocator<'a> {
         (pair, address)
     }
 
+    /// Adds a funded account to the genesis alloc with the provided storage.
+    ///
+    /// Returns the key pair for the account and the account's address.
+    pub fn new_funded_account_with_storage(
+        &mut self,
+        balance: U256,
+        storage: HashMap<B256, B256>,
+    ) -> (KeyPair, Address) {
+        let secp = Secp256k1::new();
+        let pair = KeyPair::new(&secp, &mut self.rng);
+        let address = public_key_to_address(pair.public_key());
+
+        self.alloc.insert(
+            address,
+            GenesisAccount::default().with_balance(balance).with_storage(Some(storage)),
+        );
+
+        (pair, address)
+    }
+
+    /// Adds an account with code and storage to the genesis alloc.
+    ///
+    /// Returns the key pair for the account and the account's address.
+    pub fn new_account_with_code_and_storage(
+        &mut self,
+        code: Bytes,
+        storage: HashMap<B256, B256>,
+    ) -> (KeyPair, Address) {
+        let secp = Secp256k1::new();
+        let pair = KeyPair::new(&secp, &mut self.rng);
+        let address = public_key_to_address(pair.public_key());
+
+        self.alloc.insert(
+            address,
+            GenesisAccount::default().with_code(Some(code)).with_storage(Some(storage)),
+        );
+
+        (pair, address)
+    }
+
+    /// Adds an account with code to the genesis alloc.
+    ///
+    /// Returns the key pair for the account and the account's address.
+    pub fn new_account_with_code(&mut self, code: Bytes) -> (KeyPair, Address) {
+        let secp = Secp256k1::new();
+        let pair = KeyPair::new(&secp, &mut self.rng);
+        let address = public_key_to_address(pair.public_key());
+
+        self.alloc.insert(address, GenesisAccount::default().with_code(Some(code)));
+
+        (pair, address)
+    }
+
     /// Add a funded account to the genesis alloc with the provided address.
     ///
     /// Neither the key pair nor the account will be returned, since the address is provided by the
     /// user and the signer may be unknown.
     pub fn add_funded_account_with_address(&mut self, address: Address, balance: U256) {
         self.alloc.insert(address, GenesisAccount::default().with_balance(balance));
+    }
+
+    /// Adds the given [GenesisAccount] to the genesis alloc.
+    ///
+    /// Returns the key pair for the account and the account's address.
+    pub fn add_account(&mut self, account: GenesisAccount) -> Address {
+        let secp = Secp256k1::new();
+        let pair = KeyPair::new(&secp, &mut self.rng);
+        let address = public_key_to_address(pair.public_key());
+
+        self.alloc.insert(address, account);
+
+        address
     }
 
     /// Gets the account for the provided address.
