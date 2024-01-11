@@ -79,7 +79,9 @@ mod tests {
         // Data sources
         let factory = create_test_provider_factory();
         let snap_path = tempfile::tempdir().unwrap();
-        let snap_file = snap_path.path().join(SnapshotSegment::Headers.filename(&range));
+        let snap_file = snap_path.path().join(
+            SnapshotSegment::Headers.filename(&find_fixed_range(BLOCKS_PER_SNAPSHOT, *range.end())),
+        );
 
         // Setup data
         let mut headers = random_header_range(

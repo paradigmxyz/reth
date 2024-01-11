@@ -104,13 +104,15 @@ impl SnapshotProvider {
     }
 
     /// Gets the [`SnapshotJarProvider`] of the requested segment and block or transaction.
+    ///
+    /// `fn_range` should make sure the range goes through `find_fixed_range`.
     pub fn get_segment_provider(
         &self,
         segment: SnapshotSegment,
         fn_range: impl Fn() -> Option<RangeInclusive<BlockNumber>>,
         path: Option<&Path>,
     ) -> ProviderResult<Option<SnapshotJarProvider<'_>>> {
-        // If we have a path, then get the block range and transaction range from its name.
+        // If we have a path, then get the block range from its name.
         // Otherwise, check `self.available_snapshots`
         let block_range = match path {
             Some(path) => {
@@ -129,38 +131,39 @@ impl SnapshotProvider {
 
         // Return cached `LoadedJar` or insert it for the first time, and then, return it.
         if let Some(block_range) = block_range {
-            let block_range = find_fixed_range(BLOCKS_PER_SNAPSHOT, *block_range.end());
             return Ok(Some(self.get_or_create_jar_provider(segment, &block_range)?))
         }
 
         Ok(None)
     }
 
-    /// Given a segment, block range and transaction range it returns a cached
-    /// [`SnapshotJarProvider`]. TODO: we should check the size and pop N if there's too many.
+    /// Given a segment and block range it returns a cached
+    /// [`SnapshotJarProvider`]. TODO(joshie): we should check the size and pop N if there's too
+    /// many.
     fn get_or_create_jar_provider(
         &self,
         segment: SnapshotSegment,
-        block_range: &RangeInclusive<u64>,
+        fixed_block_range: &RangeInclusive<u64>,
     ) -> ProviderResult<SnapshotJarProvider<'_>> {
-        let key = (*block_range.end(), segment);
+        let key = (*fixed_block_range.end(), segment);
         if let Some(jar) = self.map.get(&key) {
             Ok(jar.into())
         } else {
-            let jar =
-                NippyJar::load(&self.path.join(segment.filename(block_range))).map(|jar| {
+            let jar = NippyJar::load(&self.path.join(segment.filename(&fixed_block_range))).map(
+                |jar| {
                     if self.load_filters {
                         return jar.load_filters()
                     }
                     Ok(jar)
-                })??;
+                },
+            )??;
 
             self.map.insert(key, LoadedJar::new(jar)?);
             Ok(self.map.get(&key).expect("qed").into())
         }
     }
 
-    /// Gets a snapshot segment's block range and transaction range from the provider inner block
+    /// Gets a snapshot segment's block range from the provider inner block
     /// index.
     fn get_segment_ranges_from_block(
         &self,
@@ -175,7 +178,7 @@ impl SnapshotProvider {
             .map(|block| find_fixed_range(BLOCKS_PER_SNAPSHOT, *block))
     }
 
-    /// Gets a snapshot segment's block range and transaction range from the provider inner
+    /// Gets a snapshot segment's fixed block range from the provider inner
     /// transaction index.
     fn get_segment_ranges_from_transaction(
         &self,
@@ -196,7 +199,7 @@ impl SnapshotProvider {
             }
             let tx_start = snapshots_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
             if tx_start <= tx {
-                return Some(block_range.clone())
+                return Some(find_fixed_range(BLOCKS_PER_SNAPSHOT, *block_range.end()))
             }
         }
         None
