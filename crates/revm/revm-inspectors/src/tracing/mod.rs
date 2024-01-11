@@ -45,6 +45,7 @@ pub mod js;
 /// functions, such as [Inspector::call] or [Inspector::call_end].
 ///
 /// The [TracingInspector] keeps track of everything by:
+///
 ///   1. start tracking steps/calls on [Inspector::step] and [Inspector::call]
 ///   2. complete steps/calls on [Inspector::step_end] and [Inspector::call_end]
 #[derive(Debug, Clone)]
