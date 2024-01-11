@@ -13,12 +13,15 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-rpc-types.workspace = true
 reth-provider.workspace = true
-thiserror.workspace = true
+reth-rpc-types.workspace = true
+reth-transaction-pool.workspace = true
 
 # misc
+async-trait.workspace = true
+eyre.workspace = true
 serde.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 # for examples

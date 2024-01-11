@@ -1,15 +1,13 @@
 //! Customizable node builder service
 
-use crate::builder::{
-    traits::{FullNodeTypesAdapter, NodeComponentsBuilder},
-    NodeConfig, NodeHandle,
-};
+use crate::builder::{NodeConfig, NodeHandle};
 use reth_blockchain_tree::ShareableBlockchainTree;
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
-use reth_node_api::node::NodeTypes;
+use reth_node_api::{components::NodeComponentsBuilder, node::NodeTypes};
+use reth_node_builder::node::FullNodeTypesAdapter;
 use reth_provider::providers::BlockchainProvider;
 use reth_revm::EvmProcessorFactory;
 use reth_tasks::TaskExecutor;

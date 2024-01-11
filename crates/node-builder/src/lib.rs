@@ -14,3 +14,9 @@ pub use engine::{EthEngineTypes, OptimismEngineTypes};
 
 /// Node event hooks.
 pub mod hooks;
+
+/// Support for configuring the higher level node types.
+pub mod node;
+
+/// Support for configuring the components of a node.
+pub mod components;

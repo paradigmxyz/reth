@@ -6301,10 +6301,13 @@ dependencies = [
 name = "reth-node-api"
 version = "0.1.0-alpha.14"
 dependencies = [
+ "async-trait",
+ "eyre",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
  "reth-rpc-types",
+ "reth-transaction-pool",
  "serde",
  "thiserror",
 ]
