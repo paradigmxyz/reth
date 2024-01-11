@@ -1115,7 +1115,7 @@ pub struct MockTransactionFactory {
 // === impl MockTransactionFactory ===
 
 impl MockTransactionFactory {
-    /// Generates a [TransactionId] for the given [MockTransaction].
+    /// Generates a transaction ID for the given [MockTransaction].
     pub fn tx_id(&mut self, tx: &MockTransaction) -> TransactionId {
         let sender = self.ids.sender_id_or_create(tx.get_sender());
         TransactionId::new(sender, tx.get_nonce())
