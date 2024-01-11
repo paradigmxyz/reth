@@ -4,7 +4,6 @@ use rand::thread_rng;
 use reth_network::test_utils::Testnet;
 use reth_primitives::U256;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-use reth_tracing::{TestTracer, Tracer};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tx_gossip() {

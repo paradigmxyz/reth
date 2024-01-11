@@ -14,7 +14,6 @@ use reth_network_api::Direction;
 use reth_primitives::BytesMut;
 use reth_provider::test_utils::MockEthProvider;
 use reth_rpc_types::PeerId;
-use reth_tracing::{TestTracer, Tracer};
 use std::{
     net::SocketAddr,
     pin::Pin,

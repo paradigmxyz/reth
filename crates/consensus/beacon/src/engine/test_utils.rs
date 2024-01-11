@@ -10,7 +10,6 @@ use reth_db::{
     test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv as DE,
 };
-use reth_tracing::{TestTracer, Tracer};
 type DatabaseEnv = TempDatabase<DE>;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,

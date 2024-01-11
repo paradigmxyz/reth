@@ -24,7 +24,6 @@ use reth_rpc_types::{
     trace::filter::TraceFilter, CallRequest, Filter, Index, Log, PendingTransactionFilterKind,
     TransactionRequest,
 };
-use reth_tracing::{TestTracer, Tracer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;

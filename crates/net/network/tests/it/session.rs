@@ -8,7 +8,6 @@ use reth_network::{
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::test_utils::NoopProvider;
-use reth_tracing::{TestTracer, Tracer};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_session_established_with_highest_version() {

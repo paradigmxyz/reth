@@ -7,7 +7,6 @@ use reth_network::{
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::{Signature, TransactionSigned, B256};
 use reth_provider::test_utils::MockEthProvider;
-use reth_tracing::{TestTracer, Tracer};
 use reth_transaction_pool::{
     test_utils::{testing_pool, MockTransaction},
     TransactionPool,

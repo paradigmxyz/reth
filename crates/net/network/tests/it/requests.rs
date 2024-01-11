@@ -16,7 +16,6 @@ use reth_primitives::{
     TransactionSigned, TxEip2930, U256,
 };
 use reth_provider::test_utils::MockEthProvider;
-use reth_tracing::{TestTracer, Tracer};
 use std::sync::Arc;
 
 /// Returns a new [`TransactionSigned`] with some random parameters
