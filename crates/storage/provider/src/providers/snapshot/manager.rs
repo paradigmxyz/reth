@@ -162,7 +162,7 @@ impl SnapshotProvider {
         if let Some(jar) = self.map.get(&key) {
             Ok(jar.into())
         } else {
-            let jar = NippyJar::load(&self.path.join(segment.filename(&fixed_block_range))).map(
+            let jar = NippyJar::load(&self.path.join(segment.filename(fixed_block_range))).map(
                 |jar| {
                     if self.load_filters {
                         return jar.load_filters()
