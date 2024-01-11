@@ -4,6 +4,8 @@ mod compression;
 mod filters;
 mod segment;
 
+use std::ops::RangeInclusive;
+
 use alloy_primitives::BlockNumber;
 pub use compression::Compression;
 pub use filters::{Filters, InclusionFilter, PerfectHashingFunction};
@@ -44,4 +46,11 @@ impl HighestSnapshots {
             SnapshotSegment::Receipts => &mut self.receipts,
         }
     }
+}
+
+/// Each snapshot has a fixed number of blocks. This gives out the range where the requested block
+/// is positioned. Used for segment filename.
+pub fn find_fixed_range(interval: u64, block: BlockNumber) -> RangeInclusive<BlockNumber> {
+    let start = (block / interval) * interval;
+    start..=start + interval - 1
 }

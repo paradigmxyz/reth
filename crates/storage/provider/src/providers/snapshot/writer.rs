@@ -1,10 +1,10 @@
-use super::{find_fixed_range, SnapshotProvider, BLOCKS_PER_SNAPSHOT};
+use super::{SnapshotProvider, BLOCKS_PER_SNAPSHOT};
 use reth_codecs::Compact;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
-    snapshot::SegmentHeader, BlockNumber, Receipt, SnapshotSegment, TransactionSignedNoHash,
-    TxNumber,
+    snapshot::{find_fixed_range, SegmentHeader},
+    BlockNumber, Receipt, SnapshotSegment, TransactionSignedNoHash, TxNumber,
 };
 use std::{ops::Deref, path::PathBuf, sync::Arc};
 
