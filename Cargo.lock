@@ -6373,6 +6373,7 @@ dependencies = [
  "reth-payload-builder",
  "reth-primitives",
  "reth-rpc-types",
+ "revm-primitives",
  "serde",
  "thiserror",
 ]
