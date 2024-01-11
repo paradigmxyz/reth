@@ -226,5 +226,5 @@ impl Tracer for RethTracer {
 ///
 ///  The subscriber will silently fail if it could not be installed.
 pub fn init_test_tracing() {
-   let _ = TestTracer::default().init();
+    let _ = TestTracer::default().init();
 }
