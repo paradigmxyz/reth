@@ -2455,12 +2455,11 @@ mod tests {
         #[tokio::test]
         async fn simple_validate_block() {
             let mut rng = generators::rng();
-            // let genesis_keys = generate_keys(&mut rng, 16);
-            let amount = 1000000000000000000u64;
+            let amount = U256::from(1000000000000000000u64);
             let mut allocator = GenesisAllocator::default().with_rng(&mut rng);
             for _ in 0..16 {
                 // add 16 new accounts
-                allocator.new_funded_account(U256::from(amount));
+                allocator.new_funded_account(amount);
             }
 
             let alloc = allocator.build();
