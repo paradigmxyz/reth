@@ -445,7 +445,7 @@ where
 
     /// Builds the test consensus engine into a `TestConsensusEngine` and `TestEnv`.
     pub fn build(self) -> (TestBeaconConsensusEngine<Client>, TestEnv<Arc<DatabaseEnv>>) {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
         let db = create_test_rw_db();
         let provider_factory =
             ProviderFactory::new(db.clone(), self.base_config.chain_spec.clone());

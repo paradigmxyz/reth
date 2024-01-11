@@ -24,7 +24,7 @@ use std::{collections::HashSet, net::SocketAddr, time::Duration};
 use tokio::task;
 #[tokio::test(flavor = "multi_thread")]
 async fn test_establish_connections() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     for _ in 0..3 {
         let net = Testnet::create(3).await;
@@ -84,7 +84,7 @@ async fn test_establish_connections() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_already_connected() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
     let mut net = Testnet::default();
 
     let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -128,7 +128,7 @@ async fn test_already_connected() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_peer() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let mut net = Testnet::default();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -162,7 +162,7 @@ async fn test_get_peer() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_peer_by_id() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
     let mut net = Testnet::default();
 
     let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -197,7 +197,7 @@ async fn test_get_peer_by_id() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_connect_with_boot_nodes() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
@@ -218,7 +218,7 @@ async fn test_connect_with_boot_nodes() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_connect_with_builder() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
@@ -255,7 +255,7 @@ async fn test_connect_with_builder() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_connect_to_trusted_peer() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let discv4 = Discv4Config::builder();
 
@@ -310,7 +310,7 @@ async fn test_connect_to_trusted_peer() {
 #[serial_test::serial]
 #[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_incoming_node_id_blacklist() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
@@ -362,7 +362,7 @@ async fn test_incoming_node_id_blacklist() {
 #[serial_test::serial]
 #[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_incoming_connect_with_single_geth() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
@@ -405,7 +405,7 @@ async fn test_incoming_connect_with_single_geth() {
 #[serial_test::serial]
 #[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_outgoing_connect_with_single_geth() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
@@ -450,7 +450,7 @@ async fn test_outgoing_connect_with_single_geth() {
 #[serial_test::serial]
 #[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_geth_disconnect() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
@@ -509,7 +509,7 @@ async fn test_geth_disconnect() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_shutdown() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
     let net = Testnet::create(3).await;
 
     let mut handles = net.handles();

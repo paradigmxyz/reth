@@ -178,7 +178,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn download_one_by_one_on_task() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
 
         let db = create_test_rw_db();
         let (headers, mut bodies) = generate_bodies(0..=19);
@@ -207,7 +207,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[allow(clippy::reversed_empty_ranges)]
     async fn set_download_range_error_returned() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
 
         let db = create_test_rw_db();
         let downloader = BodiesDownloaderBuilder::default().build(

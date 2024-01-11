@@ -2216,7 +2216,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_lookup() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
         let fork_id = ForkId { hash: ForkHash(hex!("743f3d89")), next: 16191202 };
 
         let all_nodes = mainnet_nodes();
@@ -2251,7 +2251,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mapped_ipv4() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
         let mut rng = thread_rng();
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
@@ -2283,7 +2283,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_respect_ping_expiration() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
         let mut rng = thread_rng();
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
@@ -2311,7 +2311,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_lookups() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config.clone()).await;
@@ -2343,7 +2343,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_on_neighbours_recursive_lookup() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config.clone()).await;
@@ -2399,7 +2399,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_no_local_in_closest() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
@@ -2432,7 +2432,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_random_lookup() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
@@ -2466,7 +2466,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_service_commands() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
         let (discv4, mut service) = create_discv4_with_config(config).await;
@@ -2481,7 +2481,7 @@ mod tests {
     // sends a PING packet with wrong 'to' field and expects a PONG response.
     #[tokio::test(flavor = "multi_thread")]
     async fn test_check_wrong_to() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().external_ip_resolver(None).build();
         let (_discv4, mut service_1) = create_discv4_with_config(config.clone()).await;
@@ -2519,7 +2519,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_check_ping_pong() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().external_ip_resolver(None).build();
         let (_discv4, mut service_1) = create_discv4_with_config(config.clone()).await;

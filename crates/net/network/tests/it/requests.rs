@@ -38,7 +38,7 @@ pub fn rng_transaction(rng: &mut impl rand::RngCore) -> TransactionSigned {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_body() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
     let mut rng = rand::thread_rng();
     let mock_provider = Arc::new(MockEthProvider::default());
 
@@ -82,7 +82,7 @@ async fn test_get_body() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_header() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
     let mut rng = rand::thread_rng();
     let mock_provider = Arc::new(MockEthProvider::default());
 

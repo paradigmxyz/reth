@@ -17,7 +17,7 @@ use std::{net::SocketAddr, sync::Arc};
 #[tokio::test(flavor = "multi_thread")]
 #[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn can_peer_with_geth() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let (clique, chainspec) = init_geth().await;
     let geth_p2p_port = clique.instance.p2p_port().unwrap();

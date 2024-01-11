@@ -17,7 +17,7 @@ use tokio::sync::oneshot;
 // peer1: `GetPooledTransactions` responder
 #[tokio::test(flavor = "multi_thread")]
 async fn test_large_tx_req() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     // create 2000 fake txs
     let txs: Vec<MockTransaction> = (0..2000)

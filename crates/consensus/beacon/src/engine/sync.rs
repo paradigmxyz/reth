@@ -451,7 +451,7 @@ mod tests {
 
         /// Builds the pipeline.
         fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<TempDatabase<DatabaseEnv>>> {
-            TestTracer.init().unwrap();
+            reth_tracing::init_test_tracing();
 
             let executor_factory = TestExecutorFactory::new(chain_spec.clone());
             executor_factory.extend(self.executor_results);

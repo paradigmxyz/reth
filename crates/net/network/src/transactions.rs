@@ -1299,7 +1299,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ignored_tx_broadcasts_while_initially_syncing() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
         let net = Testnet::create(3).await;
 
         let mut handles = net.handles();
@@ -1381,7 +1381,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_tx_broadcasts_through_two_syncs() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
         let net = Testnet::create(3).await;
 
         let mut handles = net.handles();
@@ -1468,7 +1468,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_handle_incoming_transactions() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
         let net = Testnet::create(3).await;
 
         let mut handles = net.handles();
@@ -1557,7 +1557,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_on_get_pooled_transactions_network() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
         let net = Testnet::create(2).await;
 
         let mut handles = net.handles();

@@ -8,7 +8,7 @@ use reth_tracing::{TestTracer, Tracer};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tx_gossip() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let provider = MockEthProvider::default();
     let net = Testnet::create_with(2, provider.clone()).await;

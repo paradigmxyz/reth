@@ -1400,7 +1400,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_at_fork_head() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
 
         let client = Arc::new(TestHeadersClient::default());
 
@@ -1434,7 +1434,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_one_by_one() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
         let p3 = SealedHeader::default();
         let p2 = child_header(&p3);
         let p1 = child_header(&p2);
@@ -1477,7 +1477,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_one_by_one_larger_request_limit() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
         let p3 = SealedHeader::default();
         let p2 = child_header(&p3);
         let p1 = child_header(&p2);

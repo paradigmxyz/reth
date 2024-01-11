@@ -316,7 +316,7 @@ where
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_filter_functions_http() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_http(vec![RethRpcModule::Eth]).await;
     let client = handle.http_client().unwrap();
@@ -325,7 +325,7 @@ async fn test_call_filter_functions_http() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_admin_functions_http() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_http(vec![RethRpcModule::Admin]).await;
     let client = handle.http_client().unwrap();
@@ -334,7 +334,7 @@ async fn test_call_admin_functions_http() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_admin_functions_ws() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_ws(vec![RethRpcModule::Admin]).await;
     let client = handle.ws_client().await.unwrap();
@@ -343,7 +343,7 @@ async fn test_call_admin_functions_ws() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_admin_functions_http_and_ws() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_http_ws(vec![RethRpcModule::Admin]).await;
     let client = handle.http_client().unwrap();
@@ -352,7 +352,7 @@ async fn test_call_admin_functions_http_and_ws() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_eth_functions_http() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_http(vec![RethRpcModule::Eth]).await;
     let client = handle.http_client().unwrap();
@@ -361,7 +361,7 @@ async fn test_call_eth_functions_http() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_eth_functions_ws() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_ws(vec![RethRpcModule::Eth]).await;
     let client = handle.ws_client().await.unwrap();
@@ -370,7 +370,7 @@ async fn test_call_eth_functions_ws() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_eth_functions_http_and_ws() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_http_ws(vec![RethRpcModule::Eth]).await;
     let client = handle.http_client().unwrap();
@@ -379,7 +379,7 @@ async fn test_call_eth_functions_http_and_ws() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_debug_functions_http() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_http(vec![RethRpcModule::Debug]).await;
     let client = handle.http_client().unwrap();
@@ -388,7 +388,7 @@ async fn test_call_debug_functions_http() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_debug_functions_ws() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_ws(vec![RethRpcModule::Debug]).await;
     let client = handle.ws_client().await.unwrap();
@@ -397,7 +397,7 @@ async fn test_call_debug_functions_ws() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_debug_functions_http_and_ws() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_http_ws(vec![RethRpcModule::Debug]).await;
     let client = handle.http_client().unwrap();
@@ -406,7 +406,7 @@ async fn test_call_debug_functions_http_and_ws() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_net_functions_http() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_http(vec![RethRpcModule::Net]).await;
     let client = handle.http_client().unwrap();
@@ -415,7 +415,7 @@ async fn test_call_net_functions_http() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_net_functions_ws() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_ws(vec![RethRpcModule::Net]).await;
     let client = handle.ws_client().await.unwrap();
@@ -424,7 +424,7 @@ async fn test_call_net_functions_ws() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_net_functions_http_and_ws() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_http_ws(vec![RethRpcModule::Net]).await;
     let client = handle.http_client().unwrap();
@@ -433,7 +433,7 @@ async fn test_call_net_functions_http_and_ws() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_trace_functions_http() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_http(vec![RethRpcModule::Trace]).await;
     let client = handle.http_client().unwrap();
@@ -442,7 +442,7 @@ async fn test_call_trace_functions_http() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_trace_functions_ws() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_ws(vec![RethRpcModule::Trace]).await;
     let client = handle.ws_client().await.unwrap();
@@ -451,7 +451,7 @@ async fn test_call_trace_functions_ws() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_trace_functions_http_and_ws() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_http_ws(vec![RethRpcModule::Trace]).await;
     let client = handle.http_client().unwrap();
@@ -460,7 +460,7 @@ async fn test_call_trace_functions_http_and_ws() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_web3_functions_http() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_http(vec![RethRpcModule::Web3]).await;
     let client = handle.http_client().unwrap();
@@ -469,7 +469,7 @@ async fn test_call_web3_functions_http() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_web3_functions_ws() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_ws(vec![RethRpcModule::Web3]).await;
     let client = handle.ws_client().await.unwrap();
@@ -478,7 +478,7 @@ async fn test_call_web3_functions_ws() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_web3_functions_http_and_ws() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_http_ws(vec![RethRpcModule::Web3]).await;
     let client = handle.http_client().unwrap();
@@ -487,7 +487,7 @@ async fn test_call_web3_functions_http_and_ws() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_otterscan_functions_http() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_http(vec![RethRpcModule::Ots]).await;
     let client = handle.http_client().unwrap();
@@ -496,7 +496,7 @@ async fn test_call_otterscan_functions_http() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_otterscan_functions_ws() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_ws(vec![RethRpcModule::Ots]).await;
     let client = handle.ws_client().await.unwrap();
@@ -505,7 +505,7 @@ async fn test_call_otterscan_functions_ws() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_otterscan_functions_http_and_ws() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_http_ws(vec![RethRpcModule::Ots]).await;
     let client = handle.http_client().unwrap();
@@ -515,7 +515,7 @@ async fn test_call_otterscan_functions_http_and_ws() {
 // <https://github.com/paradigmxyz/reth/issues/5830>
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_logs_args() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let handle = launch_http_ws(vec![RethRpcModule::Eth]).await;
     let client = handle.http_client().unwrap();

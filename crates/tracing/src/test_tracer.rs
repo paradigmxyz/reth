@@ -10,7 +10,8 @@ use crate::Tracer;
 ///  # Note
 ///
 ///  The subscriber will silently fail if it could not be installed.
-#[derive(Debug)]
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct TestTracer;
 
 impl Tracer for TestTracer {

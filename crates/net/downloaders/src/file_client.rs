@@ -282,7 +282,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_headers_at_fork_head() {
-        TestTracer.init().unwrap();
+        reth_tracing::init_test_tracing();
 
         let p3 = SealedHeader::default();
         let p2 = child_header(&p3);

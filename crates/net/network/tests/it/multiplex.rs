@@ -282,7 +282,7 @@ impl Stream for PingPongProtoConnection {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_proto_multiplex() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
     let provider = MockEthProvider::default();
     let mut net = Testnet::create_with(2, provider.clone()).await;
 

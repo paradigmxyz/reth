@@ -32,7 +32,7 @@ where
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_auth_endpoints_http() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
     let secret = JwtSecret::random();
     let handle = launch_auth(secret).await;
     let client = handle.http_client();
@@ -41,7 +41,7 @@ async fn test_auth_endpoints_http() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_auth_endpoints_ws() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
     let secret = JwtSecret::random();
     let handle = launch_auth(secret).await;
     let client = handle.ws_client().await;

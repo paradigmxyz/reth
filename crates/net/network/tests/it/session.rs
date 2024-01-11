@@ -12,7 +12,7 @@ use reth_tracing::{TestTracer, Tracer};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_session_established_with_highest_version() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let net = Testnet::create(2).await;
     net.for_each(|peer| assert_eq!(0, peer.num_peers()));
@@ -46,7 +46,7 @@ async fn test_session_established_with_highest_version() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_session_established_with_different_capability() {
-    TestTracer.init().unwrap();
+    reth_tracing::init_test_tracing();
 
     let mut net = Testnet::create(1).await;
 
