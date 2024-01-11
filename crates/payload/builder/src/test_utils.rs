@@ -25,7 +25,10 @@ pub fn test_payload_service<Engine>() -> (
     PayloadBuilderHandle<Engine>,
 )
 where
-    Engine: EngineTypes<PayloadBuilderAttributes = EthPayloadBuilderAttributes>,
+    Engine: EngineTypes<
+        PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+        BuiltPayload = BuiltPayload,
+    >,
 {
     PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
 }
@@ -33,7 +36,10 @@ where
 /// Creates a new [PayloadBuilderService] for testing purposes and spawns it in the background.
 pub fn spawn_test_payload_service<Engine>() -> PayloadBuilderHandle<Engine>
 where
-    Engine: EngineTypes<PayloadBuilderAttributes = EthPayloadBuilderAttributes> + 'static,
+    Engine: EngineTypes<
+            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+            BuiltPayload = BuiltPayload,
+        > + 'static,
 {
     let (service, handle) = test_payload_service();
     tokio::spawn(service);
@@ -74,6 +80,7 @@ impl PayloadJob for TestPayloadJob {
     type PayloadAttributes = EthPayloadBuilderAttributes;
     type ResolvePayloadFuture =
         futures_util::future::Ready<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
+    type BuiltPayload = BuiltPayload;
 
     fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
         Ok(Arc::new(BuiltPayload::new(

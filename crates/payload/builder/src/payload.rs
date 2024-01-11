@@ -1,7 +1,7 @@
 //! Contains types required for building a payload.
 
 use alloy_rlp::Encodable;
-use reth_node_api::PayloadBuilderAttributes;
+use reth_node_api::{BuiltPayload as BuiltPayloadTrait, PayloadBuilderAttributes};
 use reth_primitives::{Address, BlobTransactionSidecar, SealedBlock, Withdrawal, B256, U256};
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
@@ -72,6 +72,16 @@ impl BuiltPayload {
     /// Converts the type into the response expected by `engine_getPayloadV2`
     pub fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3 {
         self.into()
+    }
+}
+
+impl BuiltPayloadTrait for BuiltPayload {
+    fn block(&self) -> &SealedBlock {
+        &self.block
+    }
+
+    fn fees(&self) -> U256 {
+        self.fees
     }
 }
 

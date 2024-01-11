@@ -457,10 +457,11 @@ where
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
-    <Builder as PayloadBuilder<Pool, Client>>::Attributes: PayloadBuilderAttributes + Unpin + Clone,
+    <Builder as PayloadBuilder<Pool, Client>>::Attributes: Unpin + Clone,
 {
     type PayloadAttributes = Builder::Attributes;
     type ResolvePayloadFuture = ResolveBestPayload;
+    type BuiltPayload = BuiltPayload;
 
     fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
         if let Some(ref payload) = self.best_payload {
