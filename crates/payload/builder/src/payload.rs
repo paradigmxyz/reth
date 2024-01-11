@@ -1,7 +1,7 @@
 //! Contains types required for building a payload.
 
 use alloy_rlp::Encodable;
-use reth_node_api::{BuiltPayload as BuiltPayloadTrait, PayloadBuilderAttributes};
+use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge,
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId},
@@ -23,7 +23,7 @@ use std::convert::Infallible;
 /// Therefore, the empty-block here is always available and full-block will be set/updated
 /// afterwards.
 #[derive(Debug, Clone)]
-pub struct BuiltPayload {
+pub struct EthBuiltPayload {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
     /// The built block
@@ -37,7 +37,7 @@ pub struct BuiltPayload {
 
 // === impl BuiltPayload ===
 
-impl BuiltPayload {
+impl EthBuiltPayload {
     /// Initializes the payload with the given initial block.
     pub fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self {
         Self { id, block, fees, sidecars: Vec::new() }
@@ -79,7 +79,7 @@ impl BuiltPayload {
     }
 }
 
-impl BuiltPayloadTrait for BuiltPayload {
+impl BuiltPayload for EthBuiltPayload {
     fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self {
         Self::new(id, block, fees)
     }
@@ -106,16 +106,16 @@ impl BuiltPayloadTrait for BuiltPayload {
 }
 
 // V1 engine_getPayloadV1 response
-impl From<BuiltPayload> for ExecutionPayloadV1 {
-    fn from(value: BuiltPayload) -> Self {
+impl From<EthBuiltPayload> for ExecutionPayloadV1 {
+    fn from(value: EthBuiltPayload) -> Self {
         try_block_to_payload_v1(value.block)
     }
 }
 
 // V2 engine_getPayloadV2 response
-impl From<BuiltPayload> for ExecutionPayloadEnvelopeV2 {
-    fn from(value: BuiltPayload) -> Self {
-        let BuiltPayload { block, fees, .. } = value;
+impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV2 {
+    fn from(value: EthBuiltPayload) -> Self {
+        let EthBuiltPayload { block, fees, .. } = value;
 
         ExecutionPayloadEnvelopeV2 {
             block_value: fees,
@@ -124,9 +124,9 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelopeV2 {
     }
 }
 
-impl From<BuiltPayload> for ExecutionPayloadEnvelopeV3 {
-    fn from(value: BuiltPayload) -> Self {
-        let BuiltPayload { block, fees, sidecars, .. } = value;
+impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
+    fn from(value: EthBuiltPayload) -> Self {
+        let EthBuiltPayload { block, fees, sidecars, .. } = value;
 
         ExecutionPayloadEnvelopeV3 {
             execution_payload: block_to_payload_v3(block),

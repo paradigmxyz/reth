@@ -18,7 +18,7 @@
 //! # use reth_rpc_types::engine::{PayloadAttributes as EthPayloadAttributes, PayloadId, Withdrawal};
 //! # use reth_primitives::{B256, ChainSpec, Address};
 //! # use reth_node_api::{EngineTypes, EngineApiMessageVersion, validate_version_specific_fields, AttributesValidationError, PayloadAttributes, PayloadBuilderAttributes};
-//! # use reth_payload_builder::{EthPayloadBuilderAttributes, BuiltPayload};
+//! # use reth_payload_builder::{EthPayloadBuilderAttributes, EthBuiltPayload};
 //! # use serde::{Deserialize, Serialize};
 //! # use thiserror::Error;
 //! # use std::convert::Infallible;
@@ -121,7 +121,7 @@
 //! impl EngineTypes for CustomEngineTypes {
 //!    type PayloadAttributes = CustomPayloadAttributes;
 //!    type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
-//!    type BuiltPayload = BuiltPayload;
+//!    type BuiltPayload = EthBuiltPayload;
 //! }
 //! ```
 

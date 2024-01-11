@@ -12,9 +12,9 @@ use alloy_rlp::Encodable;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_interfaces::RethResult;
-use reth_node_api::{BuiltPayload as BuiltPayloadTrait, PayloadBuilderAttributes};
+use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
 use reth_payload_builder::{
-    database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
+    database::CachedReads, error::PayloadBuilderError, EthBuiltPayload, KeepPayloadJobAlive,
     PayloadId, PayloadJob, PayloadJobGenerator,
 };
 use reth_primitives::{
@@ -750,7 +750,7 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
     /// The payload attributes type to accept for building.
     type Attributes: PayloadBuilderAttributes;
     /// The type of the built payload.
-    type BuiltPayload: BuiltPayloadTrait;
+    type BuiltPayload: BuiltPayload;
 
     /// Tries to build a transaction payload using provided arguments.
     ///
@@ -791,7 +791,7 @@ fn build_empty_payload<Client, Attributes, Payload>(
 where
     Client: StateProviderFactory,
     Attributes: PayloadBuilderAttributes,
-    Payload: BuiltPayloadTrait,
+    Payload: BuiltPayload,
 {
     let extra_data = config.extra_data();
     let PayloadConfig {
@@ -981,7 +981,7 @@ where
 ///
 /// This compares the total fees of the blocks, higher is better.
 #[inline(always)]
-pub fn is_better_payload(best_payload: Option<&BuiltPayload>, new_fees: U256) -> bool {
+pub fn is_better_payload(best_payload: Option<&EthBuiltPayload>, new_fees: U256) -> bool {
     if let Some(best_payload) = best_payload {
         new_fees > best_payload.fees()
     } else {

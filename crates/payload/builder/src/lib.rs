@@ -28,7 +28,7 @@
 //! use std::pin::Pin;
 //! use std::sync::Arc;
 //! use std::task::{Context, Poll};
-//! use reth_payload_builder::{BuiltPayload, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator};
+//! use reth_payload_builder::{EthBuiltPayload, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator};
 //! use reth_payload_builder::error::PayloadBuilderError;
 //! use reth_primitives::{Block, Header, U256};
 //!
@@ -52,9 +52,10 @@
 //!
 //! impl PayloadJob for EmptyBlockPayloadJob {
 //!    type PayloadAttributes = EthPayloadBuilderAttributes;
-//!    type ResolvePayloadFuture = futures_util::future::Ready<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
+//!    type ResolvePayloadFuture = futures_util::future::Ready<Result<Arc<EthBuiltPayload>, PayloadBuilderError>>;
+//!    type BuiltPayload = EthBuiltPayload;
 //!
-//! fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
+//! fn best_payload(&self) -> Result<Arc<EthBuiltPayload>, PayloadBuilderError> {
 //!     // NOTE: some fields are omitted here for brevity
 //!     let payload = Block {
 //!         header: Header {
@@ -65,7 +66,7 @@
 //!         },
 //!         ..Default::default()
 //!     };
-//!     let payload = BuiltPayload::new(self.attributes.id, payload.seal_slow(), U256::ZERO);
+//!     let payload = EthBuiltPayload::new(self.attributes.id, payload.seal_slow(), U256::ZERO);
 //!     Ok(Arc::new(payload))
 //! }
 //!
@@ -114,7 +115,7 @@ pub mod noop;
 pub mod test_utils;
 
 pub use optimism::OptimismPayloadBuilderAttributes;
-pub use payload::{BuiltPayload, EthPayloadBuilderAttributes};
+pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 pub use reth_rpc_types::engine::PayloadId;
 pub use service::{PayloadBuilderHandle, PayloadBuilderService, PayloadStore};
 pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};

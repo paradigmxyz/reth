@@ -1,7 +1,7 @@
 //! Utils for testing purposes.
 
 use crate::{
-    error::PayloadBuilderError, traits::KeepPayloadJobAlive, BuiltPayload,
+    error::PayloadBuilderError, traits::KeepPayloadJobAlive, EthBuiltPayload,
     EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
     PayloadJobGenerator,
 };
@@ -27,7 +27,7 @@ pub fn test_payload_service<Engine>() -> (
 where
     Engine: EngineTypes<
         PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-        BuiltPayload = BuiltPayload,
+        BuiltPayload = EthBuiltPayload,
     >,
 {
     PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
@@ -38,7 +38,7 @@ pub fn spawn_test_payload_service<Engine>() -> PayloadBuilderHandle<Engine>
 where
     Engine: EngineTypes<
             PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-            BuiltPayload = BuiltPayload,
+            BuiltPayload = EthBuiltPayload,
         > + 'static,
 {
     let (service, handle) = test_payload_service();
@@ -79,11 +79,11 @@ impl Future for TestPayloadJob {
 impl PayloadJob for TestPayloadJob {
     type PayloadAttributes = EthPayloadBuilderAttributes;
     type ResolvePayloadFuture =
-        futures_util::future::Ready<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
-    type BuiltPayload = BuiltPayload;
+        futures_util::future::Ready<Result<Arc<EthBuiltPayload>, PayloadBuilderError>>;
+    type BuiltPayload = EthBuiltPayload;
 
-    fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
-        Ok(Arc::new(BuiltPayload::new(
+    fn best_payload(&self) -> Result<Arc<EthBuiltPayload>, PayloadBuilderError> {
+        Ok(Arc::new(EthBuiltPayload::new(
             self.attr.payload_id(),
             Block::default().seal_slow(),
             U256::ZERO,
