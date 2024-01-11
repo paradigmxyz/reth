@@ -1,5 +1,6 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
+
 use reth_primitives::{
     constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     proofs::{self},
@@ -64,11 +65,8 @@ pub fn try_payload_v2_to_block(payload: ExecutionPayloadV2) -> Result<Block, Pay
     // this performs the same conversion as the underlying V1 payload, but calculates the
     // withdrawals root and adds withdrawals
     let mut base_sealed_block = try_payload_v1_to_block(payload.payload_inner)?;
-    let withdrawals: Vec<_> = payload
-        .withdrawals
-        .iter()
-        .map(|w| convert_standalone_withdraw_to_withdrawal(w.clone()))
-        .collect();
+    let withdrawals: Vec<_> =
+        payload.withdrawals.iter().map(|w| convert_standalone_withdraw_to_withdrawal(*w)).collect();
     let withdrawals_root = proofs::calculate_withdrawals_root(&withdrawals);
     base_sealed_block.withdrawals = Some(withdrawals);
     base_sealed_block.header.withdrawals_root = Some(withdrawals_root);
@@ -304,6 +302,7 @@ pub fn try_into_sealed_block(
 ///
 /// If the provided block hash does not match the block hash computed from the provided block, this
 /// returns [PayloadError::BlockHash].
+#[inline]
 pub fn validate_block_hash(
     expected_block_hash: B256,
     block: Block,

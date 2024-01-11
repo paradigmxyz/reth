@@ -1,5 +1,5 @@
 use crate::{ruint::UintTryFrom, U256};
-use alloy_rlp::{Decodable, Encodable, Error};
+use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs::{add_arbitrary_tests, Compact};
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +8,19 @@ use serde::{Deserialize, Serialize};
 /// While the field is 256 bits, for many chains it's not possible for the field to use
 /// this full precision, hence we use a wrapper type to allow for overriding of encoding.
 #[add_arbitrary_tests(compact, rlp)]
-#[derive(Default, Debug, Copy, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Default,
+    Debug,
+    Copy,
+    Clone,
+    Hash,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+)]
 pub struct TxValue(U256);
 
 impl From<TxValue> for U256 {
@@ -26,32 +38,6 @@ where
     #[track_caller]
     fn from(value: T) -> Self {
         Self(U256::uint_try_from(value).unwrap())
-    }
-}
-
-impl Encodable for TxValue {
-    #[inline]
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        self.0.encode(out)
-    }
-
-    #[inline]
-    fn length(&self) -> usize {
-        self.0.length()
-    }
-}
-
-impl Decodable for TxValue {
-    #[inline]
-    fn decode(buf: &mut &[u8]) -> Result<Self, Error> {
-        #[cfg(feature = "optimism")]
-        {
-            U256::decode(buf).map(Self)
-        }
-        #[cfg(not(feature = "optimism"))]
-        {
-            u128::decode(buf).map(Self::from)
-        }
     }
 }
 

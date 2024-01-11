@@ -101,7 +101,7 @@ impl<C: TrieCursor> TrieWalker<C> {
             if !self.can_skip_current_node && self.children_are_in_trie() {
                 // If we can't skip the current node and the children are in the trie,
                 // either consume the next node or move to the next sibling.
-                match last.nibble {
+                match last.nibble() {
                     -1 => self.move_to_next_sibling(true)?,
                     _ => self.consume_node()?,
                 }
@@ -115,7 +115,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         }
 
         // Return the current key.
-        Ok(self.key())
+        Ok(self.key().cloned())
     }
 
     /// Retrieves the current root node from the DB, seeking either the exact node or the next one.
@@ -146,12 +146,12 @@ impl<C: TrieCursor> TrieWalker<C> {
         // We need to sync the stack with the trie structure when consuming a new node. This is
         // necessary for proper traversal and accurately representing the trie in the stack.
         if !key.is_empty() && !self.stack.is_empty() {
-            self.stack[0].nibble = key[0] as i8;
+            self.stack[0].set_nibble(key[0] as i8);
         }
 
         // Create a new CursorSubNode and push it to the stack.
         let subnode = CursorSubNode::new(key, Some(node));
-        let nibble = subnode.nibble;
+        let nibble = subnode.nibble();
         self.stack.push(subnode);
         self.update_skip_node();
 
@@ -175,24 +175,24 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Check if the walker needs to backtrack to the previous level in the trie during its
         // traversal.
-        if subnode.nibble >= 15 || (subnode.nibble < 0 && !allow_root_to_child_nibble) {
+        if subnode.nibble() >= 15 || (subnode.nibble() < 0 && !allow_root_to_child_nibble) {
             self.stack.pop();
             self.move_to_next_sibling(false)?;
             return Ok(())
         }
 
-        subnode.nibble += 1;
+        subnode.inc_nibble();
 
         if subnode.node.is_none() {
             return self.consume_node()
         }
 
         // Find the next sibling with state.
-        while subnode.nibble < 16 {
+        while subnode.nibble() < 16 {
             if subnode.state_flag() {
                 return Ok(())
             }
-            subnode.nibble += 1;
+            subnode.inc_nibble();
         }
 
         // Pop the current node and move to the next sibling.
@@ -203,7 +203,7 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     /// Returns the current key in the trie.
-    pub fn key(&self) -> Option<Nibbles> {
+    pub fn key(&self) -> Option<&Nibbles> {
         self.stack.last().map(|n| n.full_key())
     }
 
@@ -220,7 +220,6 @@ impl<C: TrieCursor> TrieWalker<C> {
     /// Returns the next unprocessed key in the trie.
     pub fn next_unprocessed_key(&self) -> Option<B256> {
         self.key()
-            .as_ref()
             .and_then(|key| {
                 if self.can_skip_current_node {
                     key.increment().map(|inc| inc.pack())
@@ -234,11 +233,10 @@ impl<C: TrieCursor> TrieWalker<C> {
             })
     }
 
+    /// Updates the skip node flag based on the walker's current state.
     fn update_skip_node(&mut self) {
-        self.can_skip_current_node = if let Some(key) = self.key() {
-            let contains_prefix = self.changes.contains(key);
-            let hash_flag = self.stack.last().unwrap().hash_flag();
-            !contains_prefix && hash_flag
+        self.can_skip_current_node = if let Some(node) = self.stack.last() {
+            !self.changes.contains(node.full_key()) && node.hash_flag()
         } else {
             false
         };
@@ -250,10 +248,10 @@ mod tests {
     use super::*;
     use crate::{
         prefix_set::PrefixSetMut,
-        trie_cursor::{AccountTrieCursor, StorageTrieCursor},
+        trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
     };
     use reth_db::{cursor::DbCursorRW, tables, transaction::DbTxMut};
-    use reth_primitives::trie::StorageTrieEntry;
+    use reth_primitives::trie::{StorageTrieEntry, StoredBranchNode};
     use reth_provider::test_utils::create_test_provider_factory;
 
     #[test]
@@ -284,9 +282,9 @@ mod tests {
 
         let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
         for (k, v) in &inputs {
-            account_cursor.upsert(k.clone().into(), v.clone()).unwrap();
+            account_cursor.upsert(k.clone().into(), StoredBranchNode(v.clone())).unwrap();
         }
-        let account_trie = AccountTrieCursor::new(account_cursor);
+        let account_trie = DatabaseAccountTrieCursor::new(account_cursor);
         test_cursor(account_trie, &expected);
 
         let hashed_address = B256::random();
@@ -299,7 +297,7 @@ mod tests {
                 )
                 .unwrap();
         }
-        let storage_trie = StorageTrieCursor::new(storage_cursor, hashed_address);
+        let storage_trie = DatabaseStorageTrieCursor::new(storage_cursor, hashed_address);
         test_cursor(storage_trie, &expected);
     }
 
@@ -357,14 +355,14 @@ mod tests {
             cursor.upsert(hashed_address, StorageTrieEntry { nibbles: k.into(), node: v }).unwrap();
         }
 
-        let mut trie = StorageTrieCursor::new(cursor, hashed_address);
+        let mut trie = DatabaseStorageTrieCursor::new(cursor, hashed_address);
 
         // No changes
         let mut cursor = TrieWalker::new(&mut trie, Default::default());
-        assert_eq!(cursor.key(), Some(Nibbles::from_nibbles_unchecked([]))); // root
+        assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles_unchecked([]))); // root
         assert!(cursor.can_skip_current_node); // due to root_hash
         cursor.advance().unwrap(); // skips to the end of trie
-        assert_eq!(cursor.key(), None);
+        assert_eq!(cursor.key().cloned(), None);
 
         // We insert something that's not part of the existing trie/prefix.
         let mut changed = PrefixSetMut::default();
@@ -372,17 +370,17 @@ mod tests {
         let mut cursor = TrieWalker::new(&mut trie, changed.freeze());
 
         // Root node
-        assert_eq!(cursor.key(), Some(Nibbles::from_nibbles_unchecked([])));
+        assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles_unchecked([])));
         // Should not be able to skip state due to the changed values
         assert!(!cursor.can_skip_current_node);
         cursor.advance().unwrap();
-        assert_eq!(cursor.key(), Some(Nibbles::from_nibbles_unchecked([0x2])));
+        assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles_unchecked([0x2])));
         cursor.advance().unwrap();
-        assert_eq!(cursor.key(), Some(Nibbles::from_nibbles_unchecked([0x2, 0x1])));
+        assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles_unchecked([0x2, 0x1])));
         cursor.advance().unwrap();
-        assert_eq!(cursor.key(), Some(Nibbles::from_nibbles_unchecked([0x4])));
+        assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles_unchecked([0x4])));
 
         cursor.advance().unwrap();
-        assert_eq!(cursor.key(), None); // the end of trie
+        assert_eq!(cursor.key().cloned(), None); // the end of trie
     }
 }

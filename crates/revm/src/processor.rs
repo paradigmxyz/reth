@@ -7,9 +7,9 @@ use crate::{
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     revm::env::{fill_cfg_and_block_env, fill_tx_env},
-    Address, Block, BlockNumber, Bloom, ChainSpec, GotExpected, Hardfork, Header, PruneMode,
-    PruneModes, PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
-    MINIMUM_PRUNING_DISTANCE, U256,
+    Address, Block, BlockNumber, BlockWithSenders, Bloom, ChainSpec, GotExpected, Hardfork, Header,
+    PruneMode, PruneModes, PruneSegmentError, Receipt, ReceiptWithBloom, Receipts,
+    TransactionSigned, B256, MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_provider::{
     BlockExecutor, BlockExecutorStats, ProviderError, PrunableBlockExecutor, StateProvider,
@@ -149,26 +149,6 @@ impl<'a> EVMProcessor<'a> {
         self.evm.db().expect("Database inside EVM is always set")
     }
 
-    pub(crate) fn recover_senders(
-        &mut self,
-        body: &[TransactionSigned],
-        senders: Option<Vec<Address>>,
-    ) -> Result<Vec<Address>, BlockExecutionError> {
-        if let Some(senders) = senders {
-            if body.len() == senders.len() {
-                Ok(senders)
-            } else {
-                Err(BlockValidationError::SenderRecoveryError.into())
-            }
-        } else {
-            let time = Instant::now();
-            let ret = TransactionSigned::recover_signers(body, body.len())
-                .ok_or(BlockValidationError::SenderRecoveryError.into());
-            self.stats.sender_recovery_duration += time.elapsed();
-            ret
-        }
-    }
-
     /// Initializes the config and block env.
     pub(crate) fn init_env(&mut self, header: &Header, total_difficulty: U256) {
         // Set state clear flag.
@@ -283,14 +263,12 @@ impl<'a> EVMProcessor<'a> {
     /// Execute the block, verify gas usage and apply post-block state changes.
     pub(crate) fn execute_inner(
         &mut self,
-        block: &Block,
+        block: &BlockWithSenders,
         total_difficulty: U256,
-        senders: Option<Vec<Address>>,
     ) -> Result<Vec<Receipt>, BlockExecutionError> {
         self.init_env(&block.header, total_difficulty);
         self.apply_beacon_root_contract_call(block)?;
-        let (receipts, cumulative_gas_used) =
-            self.execute_transactions(block, total_difficulty, senders)?;
+        let (receipts, cumulative_gas_used) = self.execute_transactions(block, total_difficulty)?;
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
@@ -299,7 +277,7 @@ impl<'a> EVMProcessor<'a> {
                 gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
                 gas_spent_by_tx: receipts.gas_spent_by_tx()?,
             }
-            .into())
+            .into());
         }
         let time = Instant::now();
         self.apply_post_execution_state_change(block, total_difficulty)?;
@@ -358,7 +336,7 @@ impl<'a> EVMProcessor<'a> {
             self.prune_modes.receipts.map_or(false, |mode| mode.should_prune(block_number, tip))
         {
             receipts.clear();
-            return Ok(())
+            return Ok(());
         }
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
@@ -366,7 +344,7 @@ impl<'a> EVMProcessor<'a> {
         let prunable_receipts =
             PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(block_number, tip);
         if !prunable_receipts {
-            return Ok(())
+            return Ok(());
         }
 
         let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
@@ -399,22 +377,20 @@ impl<'a> EVMProcessor<'a> {
 impl<'a> BlockExecutor for EVMProcessor<'a> {
     fn execute(
         &mut self,
-        block: &Block,
+        block: &BlockWithSenders,
         total_difficulty: U256,
-        senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError> {
-        let receipts = self.execute_inner(block, total_difficulty, senders)?;
+        let receipts = self.execute_inner(block, total_difficulty)?;
         self.save_receipts(receipts)
     }
 
     fn execute_and_verify_receipt(
         &mut self,
-        block: &Block,
+        block: &BlockWithSenders,
         total_difficulty: U256,
-        senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError> {
         // execute block
-        let receipts = self.execute_inner(block, total_difficulty, senders)?;
+        let receipts = self.execute_inner(block, total_difficulty)?;
 
         // TODO Before Byzantium, receipts contained state root that would mean that expensive
         // operation as hashing that is needed for state root got calculated in every
@@ -426,7 +402,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                 verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
             {
                 debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
-                return Err(error)
+                return Err(error);
             };
             self.stats.receipt_root_duration += time.elapsed();
         }
@@ -436,22 +412,19 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
 
     fn execute_transactions(
         &mut self,
-        block: &Block,
+        block: &BlockWithSenders,
         total_difficulty: U256,
-        senders: Option<Vec<Address>>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
         self.init_env(&block.header, total_difficulty);
 
         // perf: do not execute empty blocks
         if block.body.is_empty() {
-            return Ok((Vec::new(), 0))
+            return Ok((Vec::new(), 0));
         }
-
-        let senders = self.recover_senders(&block.body, senders)?;
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
-        for (transaction, sender) in block.body.iter().zip(senders) {
+        for (sender, transaction) in block.transactions_with_sender() {
             let time = Instant::now();
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
@@ -461,10 +434,10 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into())
+                .into());
             }
             // Execute transaction.
-            let ResultAndState { result, state } = self.transact(transaction, sender)?;
+            let ResultAndState { result, state } = self.transact(transaction, *sender)?;
             trace!(
                 target: "evm",
                 ?transaction, ?result, ?state,
@@ -489,8 +462,6 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                 cumulative_gas_used,
                 // convert to reth log
                 logs: result.into_logs().into_iter().map(into_reth_log).collect(),
-                #[cfg(feature = "optimism")]
-                deposit_nonce: None,
             });
         }
 
@@ -546,7 +517,7 @@ pub fn verify_receipt<'a>(
         return Err(BlockValidationError::ReceiptRootDiff(
             GotExpected { got: receipts_root, expected: expected_receipts_root }.into(),
         )
-        .into())
+        .into());
     }
 
     // Create header log bloom.
@@ -555,7 +526,7 @@ pub fn verify_receipt<'a>(
         return Err(BlockValidationError::BloomLogDiff(
             GotExpected { got: logs_bloom, expected: expected_logs_bloom }.into(),
         )
-        .into())
+        .into());
     }
 
     Ok(())
@@ -698,9 +669,16 @@ mod tests {
         // attempt to execute a block without parent beacon block root, expect err
         let err = executor
             .execute_and_verify_receipt(
-                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                &BlockWithSenders {
+                    block: Block {
+                        header: header.clone(),
+                        body: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                    },
+                    senders: vec![],
+                },
                 U256::ZERO,
-                None,
             )
             .expect_err(
                 "Executing cancun block without parent beacon block root field should fail",
@@ -716,9 +694,16 @@ mod tests {
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
             .execute(
-                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                &BlockWithSenders {
+                    block: Block {
+                        header: header.clone(),
+                        body: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                    },
+                    senders: vec![],
+                },
                 U256::ZERO,
-                None,
             )
             .unwrap();
 
@@ -776,9 +761,16 @@ mod tests {
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
             .execute_and_verify_receipt(
-                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                &BlockWithSenders {
+                    block: Block {
+                        header: header.clone(),
+                        body: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                    },
+                    senders: vec![],
+                },
                 U256::ZERO,
-                None,
             )
             .expect(
                 "Executing a block with no transactions while cancun is active should not fail",
@@ -833,9 +825,16 @@ mod tests {
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
             .execute_and_verify_receipt(
-                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                &BlockWithSenders {
+                    block: Block {
+                        header: header.clone(),
+                        body: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                    },
+                    senders: vec![],
+                },
                 U256::ZERO,
-                None,
             )
             .expect(
                 "Executing a block with no transactions while cancun is active should not fail",
@@ -880,9 +879,16 @@ mod tests {
         header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
         let _err = executor
             .execute_and_verify_receipt(
-                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                &BlockWithSenders {
+                    block: Block {
+                        header: header.clone(),
+                        body: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                    },
+                    senders: vec![],
+                },
                 U256::ZERO,
-                None,
             )
             .expect_err(
                 "Executing genesis cancun block with non-zero parent beacon block root field should fail",
@@ -895,9 +901,16 @@ mod tests {
         // call does not occur
         executor
             .execute(
-                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                &BlockWithSenders {
+                    block: Block {
+                        header: header.clone(),
+                        body: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                    },
+                    senders: vec![],
+                },
                 U256::ZERO,
-                None,
             )
             .unwrap();
 
@@ -958,9 +971,16 @@ mod tests {
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
             .execute(
-                &Block { header: header.clone(), body: vec![], ommers: vec![], withdrawals: None },
+                &BlockWithSenders {
+                    block: Block {
+                        header: header.clone(),
+                        body: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                    },
+                    senders: vec![],
+                },
                 U256::ZERO,
-                None,
             )
             .unwrap();
 

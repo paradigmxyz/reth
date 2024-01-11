@@ -1,6 +1,6 @@
 //! Mock discovery support
 
-#![allow(missing_docs, unused)]
+#![allow(missing_docs)]
 
 use crate::{
     proto::{FindNode, Message, Neighbours, NodeEndpoint, Packet, Ping, Pong},
@@ -26,7 +26,7 @@ use tokio::{
     task::{JoinHandle, JoinSet},
 };
 use tokio_stream::{Stream, StreamExt};
-use tracing::{debug, error};
+use tracing::debug;
 
 /// Mock discovery node
 #[derive(Debug)]
@@ -34,7 +34,7 @@ pub struct MockDiscovery {
     local_addr: SocketAddr,
     local_enr: NodeRecord,
     secret_key: SecretKey,
-    udp: Arc<UdpSocket>,
+    _udp: Arc<UdpSocket>,
     _tasks: JoinSet<()>,
     /// Receiver for incoming messages
     ingress: IngressReceiver,
@@ -79,7 +79,7 @@ impl MockDiscovery {
             local_addr,
             local_enr,
             secret_key,
-            udp: socket,
+            _udp: socket,
             pending_pongs: Default::default(),
             pending_neighbours: Default::default(),
             command_rx,
@@ -88,7 +88,7 @@ impl MockDiscovery {
     }
 
     /// Spawn and consume the stream.
-    pub fn spawn(mut self) -> JoinHandle<()> {
+    pub fn spawn(self) -> JoinHandle<()> {
         tokio::task::spawn(async move {
             let _: Vec<_> = self.collect().await;
         })
@@ -282,8 +282,7 @@ pub fn rng_message(rng: &mut impl RngCore) -> Message {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Discv4Event, PingReason};
-    use reth_primitives::{hex_literal::hex, ForkHash, ForkId};
+    use crate::Discv4Event;
     use std::net::{IpAddr, Ipv4Addr};
 
     /// This test creates two local UDP sockets. The mocked discovery service responds to specific
@@ -294,10 +293,9 @@ mod tests {
 
         let mut rng = thread_rng();
         let (_, mut service) = create_discv4().await;
-        let (mut mockv4, mut cmd) = MockDiscovery::new().await.unwrap();
+        let (mut mockv4, _cmd) = MockDiscovery::new().await.unwrap();
 
         let mock_enr = mockv4.local_enr();
-        let mock_addr = mockv4.local_addr();
 
         // we only want to test internally
         service.local_enr_mut().address = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
@@ -314,7 +312,7 @@ mod tests {
         // process the mock pong
         let event = mockv4.next().await.unwrap();
         match event {
-            MockEvent::Pong { ping, pong, to } => {
+            MockEvent::Pong { ping: _, pong: _, to } => {
                 assert_eq!(to, SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), discv_addr.port()));
             }
             MockEvent::Neighbours { .. } => {

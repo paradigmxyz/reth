@@ -97,6 +97,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(10_790_000) },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1678832736)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(1705473120)),
         ]),
         // https://goerli.etherscan.io/tx/0xa3c07dc59bfdb1bfc2d50920fed2ef2c1c4e0a09fe2325dbc14e07702f965a78
         deposit_contract: Some(DepositContract::new(
@@ -144,6 +145,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1677557088)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(1706655072)),
         ]),
         // https://sepolia.etherscan.io/tx/0x025ecbf81a2f1220da6285d1701dc89fb5a956b62562ee922e1a9efd73eb4b14
         deposit_contract: Some(DepositContract::new(
@@ -187,6 +189,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1696000704)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(1707305664)),
         ]),
         deposit_contract: Some(DepositContract::new(
             address!("4242424242424242424242424242424242424242"),
@@ -338,6 +341,55 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     .into()
 });
 
+/// The Base Sepolia spec
+#[cfg(feature = "optimism")]
+pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: Chain::base_sepolia(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia_base.json"))
+            .expect("Can't deserialize Base Sepolia genesis json"),
+        genesis_hash: Some(b256!(
+            "0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4"
+        )),
+        fork_timestamps: ForkTimestamps::default().shanghai(1699981200).canyon(1699981200),
+        paris_block_and_final_difficulty: Some((0, U256::from(0))),
+        hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
+            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
+            ),
+            (Hardfork::Bedrock, ForkCondition::Block(0)),
+            (Hardfork::Regolith, ForkCondition::Timestamp(0)),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
+            (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
+        ]),
+        base_fee_params: BaseFeeParamsKind::Variable(
+            vec![
+                (Hardfork::London, BaseFeeParams::optimism_sepolia()),
+                (Hardfork::Canyon, BaseFeeParams::optimism_sepolia_canyon()),
+            ]
+            .into(),
+        ),
+        prune_delete_limit: 1700,
+        snapshot_block_interval: 1_000_000,
+        ..Default::default()
+    }
+    .into()
+});
+
 /// The Base mainnet spec
 #[cfg(feature = "optimism")]
 pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -457,6 +509,28 @@ impl BaseFeeParams {
                 crate::constants::OP_GOERLI_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
             elasticity_multiplier:
                 crate::constants::OP_GOERLI_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+        }
+    }
+
+    /// Get the base fee parameters for optimism sepolia
+    #[cfg(feature = "optimism")]
+    pub const fn optimism_sepolia() -> BaseFeeParams {
+        BaseFeeParams {
+            max_change_denominator:
+                crate::constants::OP_SEPOLIA_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
+            elasticity_multiplier:
+                crate::constants::OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+        }
+    }
+
+    /// Get the base fee parameters for optimism goerli (post Canyon)
+    #[cfg(feature = "optimism")]
+    pub const fn optimism_sepolia_canyon() -> BaseFeeParams {
+        BaseFeeParams {
+            max_change_denominator:
+                crate::constants::OP_SEPOLIA_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
+            elasticity_multiplier:
+                crate::constants::OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
         }
     }
 
@@ -666,6 +740,11 @@ impl ChainSpec {
         self.genesis.timestamp
     }
 
+    /// Returns the final total difficulty if the Paris hardfork is known.
+    pub fn get_final_paris_total_difficulty(&self) -> Option<U256> {
+        self.paris_block_and_final_difficulty.map(|(_, final_difficulty)| final_difficulty)
+    }
+
     /// Returns the final total difficulty if the given block number is after the Paris hardfork.
     ///
     /// Note: technically this would also be valid for the block before the paris upgrade, but this
@@ -747,6 +826,12 @@ impl ChainSpec {
             .cancun
             .map(|cancun| timestamp >= cancun)
             .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Cancun, timestamp))
+    }
+
+    /// Convenience method to check if [Hardfork::Homestead] is active at a given block number.
+    #[inline]
+    pub fn is_homestead_active_at_block(&self, block_number: u64) -> bool {
+        self.fork(Hardfork::Homestead).active_at_block(block_number)
     }
 
     /// Creates a [`ForkFilter`] for the block described by [Head].
@@ -1624,14 +1709,12 @@ Post-merge hard forks (timestamp based):
     // Tests that all predefined timestamps are correctly set up in the chainspecs
     #[test]
     fn test_predefined_chain_spec_fork_timestamps() {
-        fn ensure_timestamp_fork_conditions(spec: &ChainSpec) {
+        fn ensure_timestamp_fork_conditions(spec: &ChainSpec, known_timestamp_based_forks: usize) {
             // This is a sanity test that ensures we always set all currently known fork timestamps,
             // this will fail if a new timestamp based fork condition has added to the hardforks but
             // no corresponding entry in the ForkTimestamp types, See also
             // [ForkTimestamps::from_hardforks]
 
-            // currently there are only 1 timestamps known: shanghai
-            let known_timestamp_based_forks = 1;
             let num_timestamp_based_forks =
                 spec.hardforks.values().copied().filter(ForkCondition::is_timestamp).count();
             assert_eq!(num_timestamp_based_forks, known_timestamp_based_forks);
@@ -1640,9 +1723,11 @@ Post-merge hard forks (timestamp based):
             assert!(spec.fork_timestamps.shanghai.is_some());
         }
 
-        for spec in [&*MAINNET, &*SEPOLIA] {
-            ensure_timestamp_fork_conditions(spec);
-        }
+        // currently there is only 1 timestamp fork known for mainnet: shanghai
+        ensure_timestamp_fork_conditions(&MAINNET, 1);
+
+        // currently there are 2 timestamp forks known for sepolia: shanghai, cancun
+        ensure_timestamp_fork_conditions(&SEPOLIA, 2);
     }
 
     // Tests that we skip any fork blocks in block #0 (the genesis ruleset)
@@ -1911,7 +1996,11 @@ Post-merge hard forks (timestamp based):
                     Hardfork::London,
                     ForkId { hash: ForkHash([0xb8, 0xc6, 0x29, 0x9d]), next: 1678832736 },
                 ),
-                (Hardfork::Shanghai, ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 0 }),
+                (
+                    Hardfork::Shanghai,
+                    ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 1705473120 },
+                ),
+                (Hardfork::Cancun, ForkId { hash: ForkHash([0x70, 0xcc, 0x14, 0xe2]), next: 0 }),
             ],
         );
     }
@@ -1965,7 +2054,11 @@ Post-merge hard forks (timestamp based):
                     Hardfork::Paris,
                     ForkId { hash: ForkHash([0xb9, 0x6c, 0xbd, 0x13]), next: 1677557088 },
                 ),
-                (Hardfork::Shanghai, ForkId { hash: ForkHash([0xf7, 0xf9, 0xbc, 0x08]), next: 0 }),
+                (
+                    Hardfork::Shanghai,
+                    ForkId { hash: ForkHash([0xf7, 0xf9, 0xbc, 0x08]), next: 1706655072 },
+                ),
+                (Hardfork::Cancun, ForkId { hash: ForkHash([0x88, 0xcf, 0x81, 0xd9]), next: 0 }),
             ],
         );
     }
@@ -2042,6 +2135,44 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
+    fn holesky_forkids() {
+        test_fork_ids(
+            &HOLESKY,
+            &[
+                (
+                    Head { number: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc6, 0x1a, 0x60, 0x98]), next: 1696000704 },
+                ),
+                // First MergeNetsplit block
+                (
+                    Head { number: 123, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc6, 0x1a, 0x60, 0x98]), next: 1696000704 },
+                ),
+                // Last MergeNetsplit block
+                (
+                    Head { number: 123, timestamp: 1696000703, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc6, 0x1a, 0x60, 0x98]), next: 1696000704 },
+                ),
+                // First Shanghai block
+                (
+                    Head { number: 123, timestamp: 1696000704, ..Default::default() },
+                    ForkId { hash: ForkHash([0xfd, 0x4f, 0x01, 0x6b]), next: 1707305664 },
+                ),
+                // Last Shanghai block
+                (
+                    Head { number: 123, timestamp: 1707305663, ..Default::default() },
+                    ForkId { hash: ForkHash([0xfd, 0x4f, 0x01, 0x6b]), next: 1707305664 },
+                ),
+                // First Cancun block
+                (
+                    Head { number: 123, timestamp: 1707305664, ..Default::default() },
+                    ForkId { hash: ForkHash([0x9b, 0x19, 0x2a, 0xd0]), next: 0 },
+                ),
+            ],
+        )
+    }
+
+    #[test]
     fn goerli_forkids() {
         test_fork_ids(
             &GOERLI,
@@ -2077,12 +2208,22 @@ Post-merge hard forks (timestamp based):
                 // First Shanghai block
                 (
                     Head { number: 6000001, timestamp: 1678832736, ..Default::default() },
-                    ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 0 },
+                    ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 1705473120 },
                 ),
                 // Future Shanghai block
                 (
-                    Head { number: 6500000, timestamp: 1678832736, ..Default::default() },
-                    ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 0 },
+                    Head { number: 6500002, timestamp: 1678832736, ..Default::default() },
+                    ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 1705473120 },
+                ),
+                // First Cancun block
+                (
+                    Head { number: 6500003, timestamp: 1705473120, ..Default::default() },
+                    ForkId { hash: ForkHash([0x70, 0xcc, 0x14, 0xe2]), next: 0 },
+                ),
+                // Future Cancun block
+                (
+                    Head { number: 6500003, timestamp: 2705473120, ..Default::default() },
+                    ForkId { hash: ForkHash([0x70, 0xcc, 0x14, 0xe2]), next: 0 },
                 ),
             ],
         );
@@ -2109,9 +2250,20 @@ Post-merge hard forks (timestamp based):
                     Head { number: 1735372, timestamp: 1677557087, ..Default::default() },
                     ForkId { hash: ForkHash([0xb9, 0x6c, 0xbd, 0x13]), next: 1677557088 },
                 ),
+                // First Shanghai block
                 (
                     Head { number: 1735372, timestamp: 1677557088, ..Default::default() },
-                    ForkId { hash: ForkHash([0xf7, 0xf9, 0xbc, 0x08]), next: 0 },
+                    ForkId { hash: ForkHash([0xf7, 0xf9, 0xbc, 0x08]), next: 1706655072 },
+                ),
+                // Last Shanghai block
+                (
+                    Head { number: 1735372, timestamp: 1706655071, ..Default::default() },
+                    ForkId { hash: ForkHash([0xf7, 0xf9, 0xbc, 0x08]), next: 1706655072 },
+                ),
+                // First Cancun block
+                (
+                    Head { number: 1735372, timestamp: 1706655072, ..Default::default() },
+                    ForkId { hash: ForkHash([0x88, 0xcf, 0x81, 0xd9]), next: 0 },
                 ),
             ],
         );
@@ -2797,5 +2949,21 @@ Post-merge hard forks (timestamp based):
         };
 
         assert_eq!(spec.hardfork_fork_filter(Hardfork::Shanghai), None);
+    }
+
+    #[test]
+    #[cfg(feature = "optimism")]
+    fn base_sepolia_genesis() {
+        let genesis = BASE_SEPOLIA.genesis_header();
+        assert_eq!(
+            genesis.hash_slow(),
+            "0x0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4"
+                .parse::<B256>()
+                .unwrap()
+        );
+        let base_fee =
+            genesis.next_block_base_fee(BASE_SEPOLIA.base_fee_params(genesis.timestamp)).unwrap();
+        // <https://base-sepolia.blockscout.com/block/1>
+        assert_eq!(base_fee, 980000000);
     }
 }

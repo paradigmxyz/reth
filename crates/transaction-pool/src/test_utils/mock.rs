@@ -1,4 +1,6 @@
-//! Mock Types
+//! Mock types.
+
+#![allow(dead_code, unused_macros)]
 
 use crate::{
     identifier::{SenderIdentifiers, TransactionId},
@@ -13,11 +15,11 @@ use rand::{
 };
 use reth_primitives::{
     constants::{eip4844::DATA_GAS_PER_BLOB, MIN_PROTOCOL_BASE_FEE},
-    hex, AccessList, Address, BlobTransactionSidecar, Bytes, FromRecoveredPooledTransaction,
+    AccessList, Address, BlobTransactionSidecar, Bytes, FromRecoveredPooledTransaction,
     FromRecoveredTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
     Signature, Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered,
-    TxEip1559, TxEip2930, TxEip4844, TxHash, TxLegacy, TxType, TxValue, B256, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U128, U256,
+    TxEip1559, TxEip2930, TxEip4844, TxHash, TxLegacy, TxType, B256, EIP1559_TX_TYPE_ID,
+    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant};
 
@@ -88,6 +90,7 @@ macro_rules! set_value {
                 *$field = new_value;
             }
             #[cfg(feature = "optimism")]
+            #[allow(unused_variables)]
             MockTransaction::Deposit(ref mut tx) => {
                 op_set_value!(tx, $this, new_value);
             }
@@ -104,6 +107,7 @@ macro_rules! get_value {
             MockTransaction::Eip4844 { $field, .. } => $field.clone(),
             MockTransaction::Eip2930 { $field, .. } => $field.clone(),
             #[cfg(feature = "optimism")]
+            #[allow(unused_variables)]
             MockTransaction::Deposit(tx) => {
                 op_get_value!(tx, $field)
             }
@@ -311,8 +315,8 @@ impl MockTransaction {
 
     /// Sets the priority fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub fn set_priority_fee(&mut self, val: u128) -> &mut Self {
-        if let (MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } |
-        MockTransaction::Eip4844 { max_priority_fee_per_gas, .. }) = self
+        if let MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } |
+        MockTransaction::Eip4844 { max_priority_fee_per_gas, .. } = self
         {
             *max_priority_fee_per_gas = val;
         }
@@ -325,8 +329,8 @@ impl MockTransaction {
     }
 
     pub fn get_priority_fee(&self) -> Option<u128> {
-        if let (MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } |
-        MockTransaction::Eip4844 { max_priority_fee_per_gas, .. }) = self
+        if let MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } |
+        MockTransaction::Eip4844 { max_priority_fee_per_gas, .. } = self
         {
             Some(*max_priority_fee_per_gas)
         } else {
@@ -335,8 +339,8 @@ impl MockTransaction {
     }
 
     pub fn set_max_fee(&mut self, val: u128) -> &mut Self {
-        if let (MockTransaction::Eip1559 { max_fee_per_gas, .. } |
-        MockTransaction::Eip4844 { max_fee_per_gas, .. }) = self
+        if let MockTransaction::Eip1559 { max_fee_per_gas, .. } |
+        MockTransaction::Eip4844 { max_fee_per_gas, .. } = self
         {
             *max_fee_per_gas = val;
         }
@@ -349,8 +353,8 @@ impl MockTransaction {
     }
 
     pub fn get_max_fee(&self) -> Option<u128> {
-        if let (MockTransaction::Eip1559 { max_fee_per_gas, .. } |
-        MockTransaction::Eip4844 { max_fee_per_gas, .. }) = self
+        if let MockTransaction::Eip1559 { max_fee_per_gas, .. } |
+        MockTransaction::Eip4844 { max_fee_per_gas, .. } = self
         {
             Some(*max_fee_per_gas)
         } else {
@@ -439,30 +443,30 @@ impl MockTransaction {
 
     /// Returns a clone with a decreased nonce
     pub fn prev(&self) -> Self {
-        let mut next = self.clone().with_hash(B256::random());
+        let next = self.clone().with_hash(B256::random());
         next.with_nonce(self.get_nonce() - 1)
     }
 
     /// Returns a clone with an increased nonce
     pub fn next(&self) -> Self {
-        let mut next = self.clone().with_hash(B256::random());
+        let next = self.clone().with_hash(B256::random());
         next.with_nonce(self.get_nonce() + 1)
     }
 
     /// Returns a clone with an increased nonce
     pub fn skip(&self, skip: u64) -> Self {
-        let mut next = self.clone().with_hash(B256::random());
+        let next = self.clone().with_hash(B256::random());
         next.with_nonce(self.get_nonce() + skip + 1)
     }
 
     /// Returns a clone with incremented nonce
-    pub fn inc_nonce(mut self) -> Self {
+    pub fn inc_nonce(self) -> Self {
         let nonce = self.get_nonce() + 1;
         self.with_nonce(nonce)
     }
 
     /// Sets a new random hash
-    pub fn rng_hash(mut self) -> Self {
+    pub fn rng_hash(self) -> Self {
         self.with_hash(B256::random())
     }
 
@@ -473,7 +477,7 @@ impl MockTransaction {
 
     /// Returns a new transaction with a higher gas price
     pub fn inc_price_by(&self, value: u128) -> Self {
-        let mut next = self.clone();
+        let next = self.clone();
         let gas = self.get_gas_price().checked_add(value).unwrap();
         next.with_gas_price(gas)
     }
@@ -485,21 +489,21 @@ impl MockTransaction {
 
     /// Returns a new transaction with a lower gas price
     pub fn decr_price_by(&self, value: u128) -> Self {
-        let mut next = self.clone();
+        let next = self.clone();
         let gas = self.get_gas_price().checked_sub(value).unwrap();
         next.with_gas_price(gas)
     }
 
     /// Returns a new transaction with a higher value
     pub fn inc_value(&self) -> Self {
-        let mut next = self.clone();
+        let next = self.clone();
         let val = self.get_value().checked_add(U256::from(1)).unwrap();
         next.with_value(val)
     }
 
     /// Returns a new transaction with a higher gas limit
     pub fn inc_limit(&self) -> Self {
-        let mut next = self.clone();
+        let next = self.clone();
         let gas = self.get_gas_limit() + 1;
         next.with_gas_limit(gas)
     }
@@ -850,8 +854,8 @@ impl From<MockTransaction> for Transaction {
     fn from(mock: MockTransaction) -> Self {
         match mock {
             MockTransaction::Legacy {
-                hash,
-                sender,
+                hash: _,
+                sender: _,
                 nonce,
                 gas_price,
                 gas_limit,
@@ -868,8 +872,8 @@ impl From<MockTransaction> for Transaction {
                 input: input.clone(),
             }),
             MockTransaction::Eip1559 {
-                hash,
-                sender,
+                hash: _,
+                sender: _,
                 nonce,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
@@ -891,7 +895,7 @@ impl From<MockTransaction> for Transaction {
             }),
             MockTransaction::Eip4844 {
                 hash,
-                sender,
+                sender: _,
                 nonce,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
@@ -901,7 +905,7 @@ impl From<MockTransaction> for Transaction {
                 value,
                 accesslist,
                 input,
-                sidecar,
+                sidecar: _,
             } => Self::Eip4844(TxEip4844 {
                 chain_id: 1,
                 nonce,
@@ -916,8 +920,8 @@ impl From<MockTransaction> for Transaction {
                 input,
             }),
             MockTransaction::Eip2930 {
-                hash,
-                sender,
+                hash: _,
+                sender: _,
                 nonce,
                 to,
                 gas_limit,
@@ -1025,6 +1029,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     // performance just use a default sidecar
                     sidecar: BlobTransactionSidecar::default(),
                 },
+                #[allow(unreachable_patterns)]
                 _ => unimplemented!(),
             })
             .boxed()
@@ -1145,18 +1150,34 @@ impl MockTransactionSet {
         Self { transactions }
     }
 
-    /// Create a list of dependent transactions with a common sender. The transactions start at the
-    /// given nonce, and the sender is incremented by the given tx_count.
+    /// Creates a series of dependent transactions for a given sender and nonce.
+    ///
+    /// This method generates a sequence of transactions starting from the provided nonce
+    /// for the given sender.
+    ///
+    /// The number of transactions created is determined by `tx_count`.
     pub fn dependent(sender: Address, from_nonce: u64, tx_count: usize, tx_type: TxType) -> Self {
         let mut txs = Vec::with_capacity(tx_count);
         let mut curr_tx = MockTransaction::new_from_type(tx_type).with_nonce(from_nonce);
         for i in 0..tx_count {
-            let nonce = from_nonce + i as u64;
+            let _nonce = from_nonce + i as u64;
             curr_tx = curr_tx.next().with_sender(sender);
             txs.push(curr_tx.clone());
         }
 
-        MockTransactionSet::new(txs)
+        Self::new(txs)
+    }
+
+    /// Creates a chain of transactions for a given sender with a specified count.
+    ///
+    /// This method generates a sequence of transactions starting from the specified sender
+    /// and creates a chain of transactions based on the `tx_count`.
+    pub fn sequential_transactions_by_sender(
+        sender: Address,
+        tx_count: usize,
+        tx_type: TxType,
+    ) -> Self {
+        Self::dependent(sender, 0, tx_count, tx_type)
     }
 
     /// Add transactions to the [MockTransactionSet]

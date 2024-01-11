@@ -1,3 +1,4 @@
+#![allow(missing_docs, unreachable_pub)]
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use proptest::{
     prelude::*,

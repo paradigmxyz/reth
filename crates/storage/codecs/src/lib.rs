@@ -5,16 +5,12 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(
-    missing_debug_implementations,
-    missing_docs,
-    unused_crate_dependencies,
-    unreachable_pub,
-    rustdoc::all
-)]
-#![deny(unused_must_use, rust_2018_idioms)]
+#![warn(unused_crate_dependencies)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-#![allow(clippy::non_canonical_clone_impl)]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+use alloc::vec::Vec;
 
 pub use codecs_derive::*;
 
@@ -78,7 +74,7 @@ macro_rules! impl_uint_compact {
                 {
                     let leading = self.leading_zeros() as usize / 8;
                     buf.put_slice(&self.to_be_bytes()[leading..]);
-                    std::mem::size_of::<$name>() - leading
+                    core::mem::size_of::<$name>() - leading
                 }
 
                 #[inline]
@@ -87,8 +83,8 @@ macro_rules! impl_uint_compact {
                         return (0, buf);
                     }
 
-                    let mut arr = [0; std::mem::size_of::<$name>()];
-                    arr[std::mem::size_of::<$name>() - len..].copy_from_slice(&buf[..len]);
+                    let mut arr = [0; core::mem::size_of::<$name>()];
+                    arr[core::mem::size_of::<$name>() - len..].copy_from_slice(&buf[..len]);
                     buf.advance(len);
                     ($name::from_be_bytes(arr), buf)
                 }
@@ -317,7 +313,7 @@ macro_rules! impl_compact_for_bytes {
 
                 #[inline]
                 fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-                    let (v, buf) = <[u8; std::mem::size_of::<$name>()]>::from_compact(buf, len);
+                    let (v, buf) = <[u8; core::mem::size_of::<$name>()]>::from_compact(buf, len);
                     (Self::from(v), buf)
                 }
             }

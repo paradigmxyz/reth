@@ -54,8 +54,7 @@ pub struct NetworkArgs {
     #[arg(long, verbatim_doc_comment)]
     pub no_persist_peers: bool,
 
-    #[allow(rustdoc::invalid_html_tags)]
-    /// NAT resolution method (any|none|upnp|publicip|extip:<IP>)
+    /// NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
     #[arg(long, default_value = "any")]
     pub nat: NatResolver,
 

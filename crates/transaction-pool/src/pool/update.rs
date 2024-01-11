@@ -1,4 +1,5 @@
 //! Support types for updating the pool.
+
 use crate::{identifier::TransactionId, pool::state::SubPool};
 use reth_primitives::TxHash;
 

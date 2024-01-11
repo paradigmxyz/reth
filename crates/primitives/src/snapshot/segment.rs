@@ -5,7 +5,7 @@ use crate::{
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use std::{ffi::OsStr, ops::RangeInclusive, str::FromStr};
-use strum::{AsRefStr, EnumString};
+use strum::{AsRefStr, EnumIter, EnumString};
 
 #[derive(
     Debug,
@@ -19,6 +19,7 @@ use strum::{AsRefStr, EnumString};
     Deserialize,
     Serialize,
     EnumString,
+    EnumIter,
     AsRefStr,
     Display,
 )]
@@ -151,6 +152,16 @@ impl SegmentHeader {
         segment: SnapshotSegment,
     ) -> Self {
         Self { block_range, tx_range, segment }
+    }
+
+    /// Returns the transaction range.
+    pub fn tx_range(&self) -> &RangeInclusive<TxNumber> {
+        &self.tx_range
+    }
+
+    /// Returns the block range.
+    pub fn block_range(&self) -> &RangeInclusive<BlockNumber> {
+        &self.block_range
     }
 
     /// Returns the first block number of the segment.

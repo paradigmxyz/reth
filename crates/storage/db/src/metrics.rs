@@ -1,17 +1,20 @@
 use metrics::{Gauge, Histogram};
+use reth_libmdbx::CommitLatency;
 use reth_metrics::{metrics::Counter, Metrics};
 use std::time::{Duration, Instant};
 
 const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 
+/// Transaction mode for the database, either read-only or read-write.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-#[allow(missing_docs)]
 pub(crate) enum TransactionMode {
+    /// Read-only transaction mode.
     ReadOnly,
+    /// Read-write transaction mode.
     ReadWrite,
 }
-
 impl TransactionMode {
+    /// Returns the transaction mode as a string.
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {
             TransactionMode::ReadOnly => "read-only",
@@ -25,15 +28,19 @@ impl TransactionMode {
     }
 }
 
+/// Transaction outcome after a database operation - commit, abort, or drop.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-#[allow(missing_docs)]
 pub(crate) enum TransactionOutcome {
+    /// Successful commit of the transaction.
     Commit,
+    /// Aborted transaction.
     Abort,
+    /// Dropped transaction.
     Drop,
 }
 
 impl TransactionOutcome {
+    /// Returns the transaction outcome as a string.
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {
             TransactionOutcome::Commit => "commit",
@@ -43,21 +50,31 @@ impl TransactionOutcome {
     }
 }
 
+/// Types of operations conducted on the database: get, put, delete, and various cursor operations.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-#[allow(missing_docs)]
 pub(crate) enum Operation {
+    /// Database get operation.
     Get,
+    /// Database put operation.
     Put,
+    /// Database delete operation.
     Delete,
+    /// Database cursor upsert operation.
     CursorUpsert,
+    /// Database cursor insert operation.
     CursorInsert,
+    /// Database cursor append operation.
     CursorAppend,
+    /// Database cursor append duplicates operation.
     CursorAppendDup,
+    /// Database cursor delete current operation.
     CursorDeleteCurrent,
+    /// Database cursor delete current duplicates operation.
     CursorDeleteCurrentDuplicates,
 }
 
 impl Operation {
+    /// Returns the operation as a string.
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {
             Operation::Get => "get",
@@ -73,14 +90,20 @@ impl Operation {
     }
 }
 
+/// Enum defining labels for various aspects used in metrics.
 enum Labels {
+    /// Label representing a table.
     Table,
+    /// Label representing a transaction mode.
     TransactionMode,
+    /// Label representing a transaction outcome.
     TransactionOutcome,
+    /// Label representing a database operation.
     Operation,
 }
 
 impl Labels {
+    /// Converts each label variant into its corresponding string representation.
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Labels::Table => "table",
@@ -100,6 +123,23 @@ pub(crate) struct TransactionMetrics {
     open_duration_seconds: Histogram,
     /// The time it took to close a database transaction
     close_duration_seconds: Histogram,
+    /// The time it took to prepare a transaction commit
+    commit_preparation_duration_seconds: Histogram,
+    /// Duration of GC update during transaction commit by wall clock
+    commit_gc_wallclock_duration_seconds: Histogram,
+    /// The time it took to conduct audit of a transaction commit
+    commit_audit_duration_seconds: Histogram,
+    /// The time it took to write dirty/modified data pages to a filesystem during transaction
+    /// commit
+    commit_write_duration_seconds: Histogram,
+    /// The time it took to sync written data to the disk/storage during transaction commit
+    commit_sync_duration_seconds: Histogram,
+    /// The time it took to release resources during transaction commit
+    commit_ending_duration_seconds: Histogram,
+    /// The total duration of a transaction commit
+    commit_whole_duration_seconds: Histogram,
+    /// User-mode CPU time spent on GC update during transaction commit
+    commit_gc_cputime_duration_seconds: Histogram,
 }
 
 impl TransactionMetrics {
@@ -116,6 +156,7 @@ impl TransactionMetrics {
         outcome: TransactionOutcome,
         open_duration: Duration,
         close_duration: Option<Duration>,
+        commit_latency: Option<CommitLatency>,
     ) {
         let metrics = Self::new_with_labels(&[(Labels::TransactionMode.as_str(), mode.as_str())]);
         metrics.open_total.decrement(1.0);
@@ -128,6 +169,17 @@ impl TransactionMetrics {
 
         if let Some(close_duration) = close_duration {
             metrics.close_duration_seconds.record(close_duration)
+        }
+
+        if let Some(commit_latency) = commit_latency {
+            metrics.commit_preparation_duration_seconds.record(commit_latency.preparation());
+            metrics.commit_gc_wallclock_duration_seconds.record(commit_latency.gc_wallclock());
+            metrics.commit_audit_duration_seconds.record(commit_latency.audit());
+            metrics.commit_write_duration_seconds.record(commit_latency.write());
+            metrics.commit_sync_duration_seconds.record(commit_latency.sync());
+            metrics.commit_ending_duration_seconds.record(commit_latency.ending());
+            metrics.commit_whole_duration_seconds.record(commit_latency.whole());
+            metrics.commit_gc_cputime_duration_seconds.record(commit_latency.gc_cputime());
         }
     }
 }

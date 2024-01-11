@@ -18,6 +18,7 @@ use clap::{
 };
 use futures::TryFutureExt;
 use reth_network_api::{NetworkInfo, Peers};
+use reth_node_api::EngineTypes;
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, StateProviderFactory,
@@ -179,13 +180,52 @@ pub struct RpcServerArgs {
 }
 
 impl RpcServerArgs {
+    /// Enables the HTTP-RPC server.
+    pub fn with_http(mut self) -> Self {
+        self.http = true;
+        self
+    }
+
+    /// Enables the WS-RPC server.
+    pub fn with_ws(mut self) -> Self {
+        self.ws = true;
+        self
+    }
+
+    /// Change rpc port numbers based on the instance number.
+    /// * The `auth_port` is scaled by a factor of `instance * 100`
+    /// * The `http_port` is scaled by a factor of `-instance`
+    /// * The `ws_port` is scaled by a factor of `instance * 2`
+    /// * The `ipcpath` is appended with the instance number: `/tmp/reth.ipc-<instance>`
+    ///
+    /// # Panics
+    /// Warning: if `instance` is zero in debug mode, this will panic.
+    ///
+    /// This will also panic in debug mode if either:
+    /// * `instance` is greater than `655` (scaling would overflow `u16`)
+    /// * `self.auth_port / 100 + (instance - 1)` would overflow `u16`
+    ///
+    /// In release mode, this will silently wrap around.
+    pub fn adjust_instance_ports(&mut self, instance: u16) {
+        debug_assert_ne!(instance, 0, "instance must be non-zero");
+        // auth port is scaled by a factor of instance * 100
+        self.auth_port += instance * 100 - 100;
+        // http port is scaled by a factor of -instance
+        self.http_port -= instance - 1;
+        // ws port is scaled by a factor of instance * 2
+        self.ws_port += instance * 2 - 2;
+
+        // also adjust the ipc path by appending the instance number to the path used for the
+        // endpoint
+        self.ipcpath = format!("{}-{}", self.ipcpath, instance);
+    }
+
     /// Configures and launches _all_ servers.
     ///
     /// Returns the handles for the launched regular RPC server(s) (if any) and the server handle
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn start_servers<Reth, Engine, Conf>(
+    pub async fn start_servers<Reth, Engine, Conf, EngineT: EngineTypes>(
         &self,
         components: &Reth,
         engine_api: Engine,
@@ -194,7 +234,7 @@ impl RpcServerArgs {
     ) -> eyre::Result<RethRpcServerHandles>
     where
         Reth: RethNodeComponents,
-        Engine: EngineApiServer,
+        Engine: EngineApiServer<EngineT>,
         Conf: RethNodeCommandConfig,
     {
         let auth_config = self.auth_server_config(jwt_secret)?;
@@ -283,13 +323,13 @@ impl RpcServerArgs {
     }
 
     /// Create Engine API server.
-    pub async fn start_auth_server<Provider, Pool, Network, Tasks>(
+    pub async fn start_auth_server<Provider, Pool, Network, Tasks, EngineT>(
         &self,
         provider: Provider,
         pool: Pool,
         network: Network,
         executor: Tasks,
-        engine_api: EngineApi<Provider>,
+        engine_api: EngineApi<Provider, EngineT>,
         jwt_secret: JwtSecret,
     ) -> Result<AuthServerHandle, RpcError>
     where
@@ -304,6 +344,7 @@ impl RpcServerArgs {
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
+        EngineT: EngineTypes + 'static,
     {
         let socket_address = SocketAddr::new(self.auth_addr, self.auth_port);
 
@@ -358,12 +399,7 @@ impl RethRpcConfig for RpcServerArgs {
     }
 
     fn gas_price_oracle_config(&self) -> GasPriceOracleConfig {
-        GasPriceOracleConfig::new(
-            self.gas_price_oracle.blocks,
-            self.gas_price_oracle.ignore_price,
-            self.gas_price_oracle.max_price,
-            self.gas_price_oracle.percentile,
-        )
+        self.gas_price_oracle.gas_price_oracle_config()
     }
 
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig {

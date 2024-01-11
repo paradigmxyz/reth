@@ -4,9 +4,9 @@ use boyer_moore_magiclen::BMByte;
 use eyre::Result;
 use reth_consensus_common::validation::validate_block_standalone;
 use reth_db::{
-    cursor::DbCursorRO,
+    cursor::{DbCursorRO, DbDupCursorRO},
     database::Database,
-    table::{Decode, Decompress, Table, TableRow},
+    table::{Decode, Decompress, DupSort, Table, TableRow},
     transaction::{DbTx, DbTxMut},
     DatabaseError, RawTable, TableRawRow,
 };
@@ -15,9 +15,11 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
+use reth_network::NetworkManager;
 use reth_primitives::{
     fs, BlockHashOrNumber, ChainSpec, HeadersDirection, SealedBlock, SealedHeader,
 };
+use reth_provider::BlockReader;
 use reth_rpc::{JwtError, JwtSecret};
 use std::{
     env::VarError,
@@ -25,7 +27,7 @@ use std::{
     rc::Rc,
     sync::Arc,
 };
-use tracing::{debug, info};
+use tracing::{debug, info, trace, warn};
 
 /// Exposing `open_db_read_only` function
 pub mod db {
@@ -194,6 +196,13 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         self.db.view(|tx| tx.get::<T>(key))?.map_err(|e| eyre::eyre!(e))
     }
 
+    /// Grabs the content of the DupSort table for the given key and subkey
+    pub fn get_dup<T: DupSort>(&self, key: T::Key, subkey: T::SubKey) -> Result<Option<T::Value>> {
+        self.db
+            .view(|tx| tx.cursor_dup_read::<T>()?.seek_by_key_subkey(key, subkey))?
+            .map_err(|e| eyre::eyre!(e))
+    }
+
     /// Drops the database at the given path.
     pub fn drop(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
@@ -248,8 +257,8 @@ impl ListFilter {
         self.len = len;
     }
 }
-/// Attempts to retrieve or create a JWT secret from the specified path.
 
+/// Attempts to retrieve or create a JWT secret from the specified path.
 pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtError> {
     if path.exists() {
         debug!(target: "reth::cli", ?path, "Reading JWT auth secret file");
@@ -257,5 +266,28 @@ pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtE
     } else {
         info!(target: "reth::cli", ?path, "Creating JWT auth secret file");
         JwtSecret::try_create(path)
+    }
+}
+
+/// Collect the peers from the [NetworkManager] and write them to the given `persistent_peers_file`,
+/// if configured.
+pub fn write_peers_to_file<C>(network: &NetworkManager<C>, persistent_peers_file: Option<PathBuf>)
+where
+    C: BlockReader + Unpin,
+{
+    if let Some(file_path) = persistent_peers_file {
+        let known_peers = network.all_peers().collect::<Vec<_>>();
+        if let Ok(known_peers) = serde_json::to_string_pretty(&known_peers) {
+            trace!(target: "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
+            let parent_dir = file_path.parent().map(fs::create_dir_all).transpose();
+            match parent_dir.and_then(|_| fs::write(&file_path, known_peers)) {
+                Ok(_) => {
+                    info!(target: "reth::cli", peers_file=?file_path, "Wrote network peers to file");
+                }
+                Err(err) => {
+                    warn!(target: "reth::cli", ?err, peers_file=?file_path, "Failed to write network peers to file");
+                }
+            }
+        }
     }
 }

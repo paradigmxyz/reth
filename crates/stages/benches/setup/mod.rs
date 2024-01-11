@@ -1,3 +1,4 @@
+#![allow(unreachable_pub)]
 use itertools::concat;
 use reth_db::{
     cursor::DbCursorRO,
@@ -13,7 +14,7 @@ use reth_interfaces::test_utils::{
         random_eoa_account_range,
     },
 };
-use reth_primitives::{Account, Address, SealedBlock, B256, U256};
+use reth_primitives::{fs, Account, Address, SealedBlock, B256, U256};
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
     test_utils::TestStageDB,
@@ -102,7 +103,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
 
     if !path.exists() {
         // create the dirs
-        std::fs::create_dir_all(&path).unwrap();
+        fs::create_dir_all(&path).unwrap();
         println!("Transactions testdata not found, generating to {:?}", path.display());
         let db = TestStageDB::new(&path);
 
@@ -126,8 +127,9 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         db.insert_accounts_and_storages(start_state.clone()).unwrap();
 
         // make first block after genesis have valid state root
-        let (root, updates) =
-            StateRoot::new(db.factory.provider_rw().unwrap().tx_ref()).root_with_updates().unwrap();
+        let (root, updates) = StateRoot::from_tx(db.factory.provider_rw().unwrap().tx_ref())
+            .root_with_updates()
+            .unwrap();
         let second_block = blocks.get_mut(1).unwrap();
         let cloned_second = second_block.clone();
         let mut updated_header = cloned_second.header.unseal();
@@ -154,7 +156,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         // make last block have valid state root
         let root = {
             let tx_mut = db.factory.provider_rw().unwrap();
-            let root = StateRoot::new(tx_mut.tx_ref()).root().unwrap();
+            let root = StateRoot::from_tx(tx_mut.tx_ref()).root().unwrap();
             tx_mut.commit().unwrap();
             root
         };

@@ -9,9 +9,11 @@ pub struct CursorSubNode {
     /// The key of the current node.
     pub key: Nibbles,
     /// The index of the next child to visit.
-    pub nibble: i8,
+    nibble: i8,
     /// The node itself.
     pub node: Option<BranchNodeCompact>,
+    /// Full key
+    full_key: Nibbles,
 }
 
 impl Default for CursorSubNode {
@@ -33,13 +35,20 @@ impl std::fmt::Debug for CursorSubNode {
     }
 }
 
+/// Implements conversion from `StoredSubNode` to `CursorSubNode`.
 impl From<StoredSubNode> for CursorSubNode {
+    /// Converts a `StoredSubNode` into a `CursorSubNode`.
+    ///
+    /// Extracts necessary values from the `StoredSubNode` and constructs
+    /// a corresponding `CursorSubNode`.
     fn from(value: StoredSubNode) -> Self {
         let nibble = match value.nibble {
             Some(n) => n as i8,
             None => -1,
         };
-        Self { key: Nibbles::from_nibbles_unchecked(value.key), nibble, node: value.node }
+        let key = Nibbles::from_nibbles_unchecked(value.key);
+        let full_key = full_key(key.clone(), nibble);
+        Self { key, nibble, node: value.node, full_key }
     }
 }
 
@@ -60,16 +69,13 @@ impl CursorSubNode {
             }
             _ => -1,
         };
-        CursorSubNode { key, node, nibble }
+        let full_key = full_key(key.clone(), nibble);
+        CursorSubNode { key, node, nibble, full_key }
     }
 
     /// Returns the full key of the current node.
-    pub fn full_key(&self) -> Nibbles {
-        let mut out = self.key.clone();
-        if self.nibble >= 0 {
-            out.push(self.nibble as u8);
-        }
-        out
+    pub fn full_key(&self) -> &Nibbles {
+        &self.full_key
     }
 
     /// Returns `true` if the state flag is set for the current nibble.
@@ -116,5 +122,50 @@ impl CursorSubNode {
         } else {
             None
         }
+    }
+
+    /// Returns the next child index to visit.
+    #[inline]
+    pub fn nibble(&self) -> i8 {
+        self.nibble
+    }
+
+    /// Increments the nibble index.
+    #[inline]
+    pub fn inc_nibble(&mut self) {
+        self.nibble += 1;
+        update_full_key(&mut self.full_key, self.nibble - 1, self.nibble);
+    }
+
+    /// Sets the nibble index.
+    #[inline]
+    pub fn set_nibble(&mut self, nibble: i8) {
+        let old_nibble = self.nibble;
+        self.nibble = nibble;
+        update_full_key(&mut self.full_key, old_nibble, self.nibble);
+    }
+}
+
+/// Constructs a full key from the given `Nibbles` and `nibble`.
+#[inline]
+fn full_key(mut key: Nibbles, nibble: i8) -> Nibbles {
+    if nibble >= 0 {
+        key.push(nibble as u8);
+    }
+    key
+}
+
+/// Updates the key by replacing or appending a nibble based on the old and new nibble values.
+#[inline]
+fn update_full_key(key: &mut Nibbles, old_nibble: i8, new_nibble: i8) {
+    if new_nibble >= 0 {
+        if old_nibble >= 0 {
+            let last_index = key.len() - 1;
+            key.set_at(last_index, new_nibble as u8);
+        } else {
+            key.push(new_nibble as u8);
+        }
+    } else if old_nibble >= 0 {
+        key.pop();
     }
 }

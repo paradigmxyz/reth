@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use criterion::{
     async_executor::FuturesExecutor, criterion_group, criterion_main, measurement::WallTime,
     BenchmarkGroup, Criterion,
@@ -115,7 +116,7 @@ fn merkle(c: &mut Criterion) {
 
 fn measure_stage_with_path<F, S>(
     path: PathBuf,
-    group: &mut BenchmarkGroup<WallTime>,
+    group: &mut BenchmarkGroup<'_, WallTime>,
     setup: F,
     stage: S,
     stage_range: StageRange,
@@ -148,7 +149,7 @@ fn measure_stage_with_path<F, S>(
 }
 
 fn measure_stage<F, S>(
-    group: &mut BenchmarkGroup<WallTime>,
+    group: &mut BenchmarkGroup<'_, WallTime>,
     setup: F,
     stage: S,
     block_interval: std::ops::Range<u64>,
