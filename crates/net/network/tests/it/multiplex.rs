@@ -190,7 +190,7 @@ struct PingPongConnectionHandler {
 }
 
 impl ConnectionHandler for PingPongConnectionHandler {
-    type Connection = PingPongProtoConnection;
+    type AppConnection = PingPongProtoConnection;
 
     fn protocol(&self) -> Protocol {
         PingPongProtoMessage::protocol()
@@ -210,7 +210,7 @@ impl ConnectionHandler for PingPongConnectionHandler {
         direction: Direction,
         _peer_id: PeerId,
         conn: ProtocolConnection,
-    ) -> Self::Connection {
+    ) -> Self::AppConnection {
         let (tx, rx) = mpsc::unbounded_channel();
         self.state
             .events

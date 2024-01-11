@@ -52,7 +52,7 @@ pub struct MuxDemuxer<S> {
     // receive muxed p2p inputs from stream clones
     mux: mpsc::UnboundedReceiver<Bytes>,
     // send demuxed p2p outputs to app
-    demux: HashMap<SharedCapability, mpsc::UnboundedSender<BytesMut>>,
+    demux: HashMap<SharedCapability, mpsc::UnboundedSender<Result<BytesMut, MuxDemuxError>>>,
     // sender to mux stored to make new stream clones
     mux_tx: mpsc::UnboundedSender<Bytes>,
     // capabilities supported by underlying p2p stream (makes testing easier to store here too).
@@ -137,7 +137,7 @@ impl<S> MuxDemuxStream<S> {
     fn reg_new_ingress_buffer(
         &mut self,
         cap: &SharedCapability,
-    ) -> Result<mpsc::UnboundedReceiver<BytesMut>, MuxDemuxError> {
+    ) -> Result<mpsc::UnboundedReceiver<Result<BytesMut, MuxDemuxError>>, MuxDemuxError> {
         if let Some(tx) = self.demux.get(cap) {
             if !tx.is_closed() {
                 return Err(StreamAlreadyExists)
@@ -245,7 +245,7 @@ where
 
             // delegate message for stream clone
             let tx = self.demux.get(cap).ok_or(CapabilityNotConfigured)?;
-            tx.send(bytes).map_err(|_| SendIngressBytesFailed)?;
+            tx.send(Ok(bytes)).map_err(|_| SendIngressBytesFailed)?;
         }
     }
 }
@@ -299,7 +299,7 @@ where
 #[derive(Debug)]
 pub struct StreamClone {
     // receive bytes from de-/muxer
-    stream: mpsc::UnboundedReceiver<BytesMut>,
+    stream: mpsc::UnboundedReceiver<Result<BytesMut, MuxDemuxError>>,
     // send bytes to de-/muxer
     sink: mpsc::UnboundedSender<Bytes>,
     // message id offset for capability holding this clone
@@ -307,7 +307,8 @@ pub struct StreamClone {
 }
 
 impl StreamClone {
-    fn mask_msg_id(&self, msg: Bytes) -> Bytes {
+    /// Masks the message ID with the shared capability offset.
+    pub fn mask_msg_id(&self, msg: Bytes) -> Bytes {
         let mut masked_bytes = BytesMut::with_capacity(msg.len());
         masked_bytes.extend_from_slice(&msg);
         masked_bytes[0] += self.cap.relative_message_id_offset();
@@ -316,7 +317,7 @@ impl StreamClone {
 }
 
 impl Stream for StreamClone {
-    type Item = BytesMut;
+    type Item = Result<BytesMut, MuxDemuxError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.stream.poll_recv(cx)
@@ -370,6 +371,7 @@ mod tests {
 
     use crate::{
         capability::{Capability, SharedCapabilities},
+        errors::MuxDemuxError,
         muxdemux::MuxDemuxStream,
         protocol::Protocol,
         EthVersion, HelloMessageWithProtocols, Status, StatusBuilder, StreamClone,
@@ -430,14 +432,23 @@ mod tests {
             self,
             f_local: F,
             f_remote: G,
-        ) -> (JoinHandle<BytesMut>, JoinHandle<BytesMut>)
+        ) -> (
+            JoinHandle<Result<BytesMut, MuxDemuxError>>,
+            JoinHandle<Result<BytesMut, MuxDemuxError>>,
+        )
         where
-            F: FnOnce(StreamClone) -> Pin<Box<(dyn Future<Output = BytesMut> + Send)>>
+            F: FnOnce(
+                    StreamClone,
+                )
+                    -> Pin<Box<(dyn Future<Output = Result<BytesMut, MuxDemuxError>> + Send)>>
                 + Send
                 + Sync
                 + Send
                 + 'static,
-            G: FnOnce(StreamClone) -> Pin<Box<(dyn Future<Output = BytesMut> + Send)>>
+            G: FnOnce(
+                    StreamClone,
+                )
+                    -> Pin<Box<(dyn Future<Output = Result<BytesMut, MuxDemuxError>> + Send)>>
                 + Send
                 + Sync
                 + Send
@@ -582,8 +593,8 @@ mod tests {
         let (local_res, remote_res) = tokio::join!(local_handle, remote_handle);
 
         // remote address receives request
-        assert_eq!(expected_request, remote_res.unwrap().freeze());
+        assert_eq!(expected_request, remote_res.unwrap().unwrap().freeze());
         // local address receives response
-        assert_eq!(expected_response, local_res.unwrap().freeze());
+        assert_eq!(expected_response, local_res.unwrap().unwrap().freeze());
     }
 }

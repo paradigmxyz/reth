@@ -6,14 +6,21 @@ use derive_more::Deref;
 use futures::{Sink, Stream};
 use reth_eth_wire::{
     capability::{SharedCapabilities, SharedCapability},
-    multiplex::ProtocolStream,
+    errors::MuxDemuxError,
+    muxdemux::StreamClone,
     protocol::Protocol,
     CanDisconnect,
 };
 use reth_network_api::Direction;
 use reth_primitives::bytes::{Bytes, BytesMut};
 use reth_rpc_types::PeerId;
-use std::{error, fmt, io, net::SocketAddr, pin::Pin};
+use std::{
+    error, fmt,
+    net::SocketAddr,
+    ops::{Deref, DerefMut},
+    pin::Pin,
+    sync::Arc,
+};
 
 /// A trait that allows to offer additional RLPx-based application-level protocols when establishing
 /// a peer-to-peer connection.
@@ -25,7 +32,7 @@ pub trait ProtocolHandler: fmt::Debug + Send + Sync + 'static {
     ///
     /// If protocols for this outgoing should be announced to the remote, return a connection
     /// handler.
-    fn on_incoming(&self, socket_addr: SocketAddr) -> Option<Box<Self::ConnectionHandler>>;
+    fn on_incoming(&self, socket_addr: SocketAddr) -> Option<Self::ConnectionHandler>;
 
     /// Invoked when a new outgoing connection to the remote is requested.
     ///
@@ -35,14 +42,14 @@ pub trait ProtocolHandler: fmt::Debug + Send + Sync + 'static {
         &self,
         socket_addr: SocketAddr,
         peer_id: PeerId,
-    ) -> Option<Box<Self::ConnectionHandler>>;
+    ) -> Option<Self::ConnectionHandler>;
 }
 
 /// A trait that allows to authenticate a protocol after the RLPx connection was established.
 pub trait ConnectionHandler: Send + Sync + 'static {
     /// The connection that yields messages to send to the remote.
     ///
-    /// The connection will be closed when this stream resolves.
+    /// The connection will be closed when this stream resolves.  
     type Connection: Connection;
 
     /// The connection that transfers messages to and from the remote.
@@ -53,26 +60,40 @@ pub trait ConnectionHandler: Send + Sync + 'static {
     /// Returns the protocol to announce when the p2p connection will be established.
     ///
     /// This will be used to negotiate capability message id offsets with the remote peer.
-    fn protocol(&self) -> Protocol;
+    fn protocol(&self) -> Protocol {
+        panic!("template impl")
+    }
 
     /// Invoked when the RLPx connection has been established by the peer does not share the
     /// protocol.
     fn on_unsupported_by_peer(
-        self,
+        &mut self,
         supported: &SharedCapabilities,
         direction: Direction,
         peer_id: PeerId,
-    ) -> OnNotSupported;
+    ) -> OnNotSupported {
+        panic!("template impl")
+    }
 
     /// Invoked when the RLPx connection was established.
     ///
     /// The returned future should resolve when the connection should disconnect.
     fn into_connection(
-        self,
+        &mut self,
         direction: Direction,
         peer_id: PeerId,
         conn: Self::P2PConnection,
-    ) -> Option<Pin<Box<Self::Connection>>>;
+    ) -> Option<Pin<Box<Self::Connection>>> {
+        panic!("template impl")
+    }
+}
+
+impl<T> ConnectionHandler for T
+where
+    T: Send + Sync + 'static,
+{
+    type P2PConnection = StreamClone;
+    type Connection = Box<dyn Connection>;
 }
 
 /// What to do when a protocol is not supported by the remote.
@@ -87,10 +108,10 @@ pub enum OnNotSupported {
 
 /// An established rlpx sub protocol connection as returned by [`ConnectionHandler`].
 pub trait Connection<
-    StreamedType = dyn fmt::Debug,
-    SunkType = Box<dyn fmt::Debug>,
-    E = dyn error::Error,
->: Stream<Item = StreamedType> + Sink<SunkType, Error = E> + Send + 'static where
+    StreamedType = Arc<dyn fmt::Debug>,
+    SunkType = Arc<dyn fmt::Debug>,
+    E = Arc<dyn error::Error>,
+>: Stream<Item = StreamedType> + Sink<SunkType, Error = E> + Send + Unpin + 'static where
     StreamedType: fmt::Debug + ?Sized,
     SunkType: fmt::Debug + Sized,
     E: error::Error + ?Sized,
@@ -99,7 +120,7 @@ pub trait Connection<
 
 impl<T, StreamedType, SunkType, E> Connection<StreamedType, SunkType, E> for T
 where
-    T: Stream<Item = StreamedType> + Sink<SunkType, Error = E> + Send + 'static,
+    T: Stream<Item = StreamedType> + Sink<SunkType, Error = E> + Send + Unpin + 'static,
     StreamedType: fmt::Debug + ?Sized,
     SunkType: fmt::Debug + Sized,
     E: error::Error + ?Sized,
@@ -108,8 +129,12 @@ where
 
 /// An established connection to the p2p connection. Passed to [`ConnectionHandler`] to
 /// establish a rlpx subprotocol [`Connection`].
-pub trait P2PConnection<E = io::Error>:
-    Connection<BytesMut, Bytes, E> + CanDisconnect<Bytes> + ProxyProtocol + Send + 'static
+pub trait P2PConnection<E = MuxDemuxError>:
+    Connection<Result<BytesMut, MuxDemuxError>, Bytes, E>
+    + CanDisconnect<Bytes>
+    + ProxyProtocol
+    + Send
+    + 'static
 where
     E: error::Error,
 {
@@ -117,7 +142,7 @@ where
 
 impl<T, E> P2PConnection<E> for T
 where
-    T: Connection<BytesMut, Bytes, E>
+    T: Connection<Result<BytesMut, MuxDemuxError>, Bytes, E>
         + CanDisconnect<Bytes>
         + ProxyProtocol
         + Send
@@ -126,7 +151,8 @@ where
     E: error::Error,
 {
 }
-/// Act as intermediary between p2p connection and protocol connection.
+
+/// Connection metadata needed to interface with p2p connection.
 pub trait ProxyProtocol {
     /// Shared capability assigned to proxy.
     fn shared_capability(&self) -> &SharedCapability;
@@ -136,25 +162,25 @@ pub trait ProxyProtocol {
     /// Mask the message ID of outgoing messages relative to suffix used for capability message
     /// IDs. [`reth_eth_wire::P2PStream`] further masks the message ID relative to the reserved
     /// p2p prefix. (todo: mask ID completely at this layer or sink BytesMut)
-    fn relative_mask_msg_id(&self, msg: BytesMut) -> Bytes;
+    fn relative_mask_msg_id(&self, msg: Bytes) -> Bytes;
 }
 
-impl ProxyProtocol for ProtocolStream {
+impl ProxyProtocol for StreamClone {
     fn shared_capability(&self) -> &SharedCapability {
-        self.cap()
+        self.shared_capability()
     }
 
-    fn relative_mask_msg_id(&self, msg: BytesMut) -> Bytes {
+    fn relative_mask_msg_id(&self, msg: Bytes) -> Bytes {
         self.mask_msg_id(msg)
     }
 }
 
 /// Convenience type setting associated type for [`ProtocolHandler`].
-pub type DynProtocolHandler = dyn ProtocolHandler<ConnectionHandler = DynConnectionHandler>;
+pub type DynProtocolHandler = dyn ProtocolHandler<ConnectionHandler = Box<DynConnectionHandler>>;
 
-/// Convenience type setting associated types for [`ConnectionHandler`].
+/// Convenience type setting associated type for [`ProtocolHandler`].
 pub type DynConnectionHandler =
-    dyn ConnectionHandler<Connection = dyn Connection, P2PConnection = ProtocolStream>;
+    dyn ConnectionHandler<Connection = Box<dyn Connection>, P2PConnection = StreamClone>;
 
 /// A wrapper type for a RLPx sub-protocol.
 #[derive(Debug, Deref)]
@@ -168,7 +194,7 @@ pub trait IntoRlpxSubProtocol {
 
 impl<T> IntoRlpxSubProtocol for T
 where
-    T: ProtocolHandler<ConnectionHandler = DynConnectionHandler> + Send + Sync + 'static,
+    T: ProtocolHandler<ConnectionHandler = Box<DynConnectionHandler>> + Send + Sync + 'static,
 {
     fn into_rlpx_sub_protocol(self) -> RlpxSubProtocol {
         RlpxSubProtocol(Box::new(self))
@@ -200,7 +226,7 @@ impl RlpxSubProtocols {
         RlpxSubProtocolHandlers(
             self.protocols
                 .iter()
-                .filter_map(|protocol| protocol.0.on_incoming(socket_addr))
+                .filter_map(|protocol| (protocol.0).on_incoming(socket_addr))
                 .collect(),
         )
     }
@@ -223,17 +249,17 @@ impl RlpxSubProtocols {
 
 /// A set of additional RLPx-based sub-protocol connection handlers.
 #[derive(Default)]
-pub(crate) struct RlpxSubProtocolHandlers(Vec<Box<dyn DynConnectionHandler>>);
+pub(crate) struct RlpxSubProtocolHandlers(Vec<Box<DynConnectionHandler>>);
 
 impl RlpxSubProtocolHandlers {
     /// Returns all handlers.
-    pub(crate) fn into_iter(self) -> impl Iterator<Item = Box<dyn DynConnectionHandler>> {
+    pub(crate) fn into_iter(self) -> impl Iterator<Item = Box<DynConnectionHandler>> {
         self.0.into_iter()
     }
 }
 
 impl Deref for RlpxSubProtocolHandlers {
-    type Target = Vec<Box<dyn DynConnectionHandler>>;
+    type Target = Vec<Box<DynConnectionHandler>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

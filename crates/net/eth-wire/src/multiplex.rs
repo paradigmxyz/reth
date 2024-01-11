@@ -26,11 +26,7 @@ use crate::{
     errors::{EthStreamError, P2PStreamError},
     CanDisconnect, DisconnectReason, EthStream, P2PStream, Status, UnauthedEthStream,
 };
-use bytes::{Bytes, BytesMut};
-use futures::{pin_mut, Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
 use reth_primitives::ForkFilter;
-use tokio::sync::{mpsc, mpsc::UnboundedSender};
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A Stream and Sink type that wraps a raw rlpx stream [P2PStream] and handles message ID
 /// multiplexing.
@@ -298,7 +294,7 @@ pub struct ProtocolProxy {
 impl ProtocolProxy {
     /// Shared capability assigned to proxy.
     pub fn cap(&self) -> &SharedCapability {
-        &self.cap
+        &self.shared_cap
     }
 
     /// Sends a _non-empty_ message on the wire.
@@ -316,7 +312,7 @@ impl ProtocolProxy {
     ///
     /// If the message is empty.
     #[inline]
-    fn mask_msg_id(&self, msg: Bytes) -> Bytes {
+    pub fn mask_msg_id(&self, msg: Bytes) -> Bytes {
         let mut masked_bytes = BytesMut::zeroed(msg.len());
         masked_bytes[0] = msg[0] + self.shared_cap.relative_message_id_offset();
         masked_bytes[1..].copy_from_slice(&msg[1..]);
@@ -593,7 +589,7 @@ where
 }
 
 /// Wraps a RLPx subprotocol and handles message ID multiplexing.
-struct ProtocolStream {
+pub struct ProtocolStream {
     shared_cap: SharedCapability,
     /// the channel shared with the satellite stream
     to_satellite: UnboundedSender<BytesMut>,
@@ -603,7 +599,7 @@ struct ProtocolStream {
 impl ProtocolStream {
     /// Shared capability assigned to proxy.
     pub fn cap(&self) -> &SharedCapability {
-        &self.cap
+        &self.shared_cap
     }
 
     /// Masks the message ID of a message to be sent on the wire.
