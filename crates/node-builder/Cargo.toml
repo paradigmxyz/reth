@@ -12,10 +12,14 @@ workspace = true
 
 [dependencies]
 # reth
+reth-node-api.workspace = true
+reth-network.workspace = true
 reth-primitives.workspace = true
 reth-payload-builder.workspace = true
 reth-rpc-types.workspace = true
-reth-node-api.workspace = true
+reth-transaction-pool.workspace = true
 
-# io
+# misc
+async-trait.workspace = true
+eyre.workspace = true
 serde.workspace = true
