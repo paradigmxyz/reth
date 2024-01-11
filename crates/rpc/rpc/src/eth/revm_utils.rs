@@ -274,6 +274,33 @@ pub(crate) fn build_call_evm_env(
     Ok(Env { cfg, block, tx })
 }
 
+/// Represents a [CallRequest] along with the constructed [CallFees].
+pub(crate) struct CallRequestWithFees {
+    /// The [CallRequest] to execute.
+    request: CallRequest,
+    /// The [CallFees] to use for the [CallRequest].
+    fees: CallFees,
+}
+
+impl CallRequestWithFees {
+    /// Creates a new instance with the given [CallRequest] and [BlockEnv].
+    ///
+    /// The base fee and blob gas price are extracted from the [BlockEnv] and used to construct the
+    /// [CallFees], using [ensure_fees](CallRequest::ensure_fees).
+    pub(crate) fn new(request: CallRequest, block_env: &BlockEnv) -> EthResult<Self> {
+        let fees = CallFees::ensure_fees(
+            request.gas_price,
+            request.max_fee_per_gas,
+            request.max_priority_fee_per_gas,
+            block_env.basefee,
+            request.blob_versioned_hashes.as_deref(),
+            request.max_fee_per_blob_gas,
+            block_env.get_blob_gasprice().map(U256::from),
+        )?;
+        Ok(Self { request, fees })
+    }
+}
+
 /// Configures a new [TxEnv]  for the [CallRequest]
 ///
 /// All [TxEnv] fields are derived from the given [CallRequest], if fields are `None`, they fall
@@ -284,33 +311,22 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
     }
 
-    let CallRequest {
-        from,
-        to,
-        gas_price,
-        max_fee_per_gas,
-        max_priority_fee_per_gas,
-        gas,
-        value,
-        input,
-        nonce,
-        access_list,
-        chain_id,
-        blob_versioned_hashes,
-        max_fee_per_blob_gas,
-        ..
-    } = request;
-
-    let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
-        CallFees::ensure_fees(
-            gas_price,
-            max_fee_per_gas,
-            max_priority_fee_per_gas,
-            block_env.basefee,
-            blob_versioned_hashes.as_deref(),
-            max_fee_per_blob_gas,
-            block_env.get_blob_gasprice().map(U256::from),
-        )?;
+    let CallRequestWithFees {
+        request:
+            CallRequest {
+                from,
+                to,
+                gas,
+                value,
+                input,
+                nonce,
+                access_list,
+                chain_id,
+                blob_versioned_hashes,
+                ..
+            },
+        fees: CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas },
+    } = CallRequestWithFees::new(request, block_env)?;
 
     let gas_limit = gas.unwrap_or(block_env.gas_limit.min(U256::from(u64::MAX)));
     let env = TxEnv {
