@@ -4,18 +4,34 @@ use reth_primitives::{
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId},
     Address, ChainSpec, Header, SealedBlock, B256, U256,
 };
-use reth_rpc_types::engine::{
-    OptimismPayloadAttributes, PayloadAttributes as EthPayloadAttributes, PayloadId, Withdrawal,
+use reth_rpc_types::{
+    engine::{
+        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, OptimismPayloadAttributes,
+        PayloadAttributes as EthPayloadAttributes, PayloadId, Withdrawal,
+    },
+    ExecutionPayloadV1,
 };
 
 // TODO: docs
 /// The built payload type
 pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
+    /// Initializes the payload with the given initial block.
+    fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self;
+
     /// Returns the built block (sealed)
     fn block(&self) -> &SealedBlock;
 
     /// Returns the fees collected for the built block
     fn fees(&self) -> U256;
+
+    /// Converts the type into the response expected by `engine_getPayloadV1`
+    fn into_v1_payload(self) -> ExecutionPayloadV1;
+
+    /// Converts the type into the response expected by `engine_getPayloadV2`
+    fn into_v2_payload(self) -> ExecutionPayloadEnvelopeV2;
+
+    /// Converts the type into the response expected by `engine_getPayloadV2`
+    fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3;
 }
 
 /// This can be implemented by types that describe a currently running payload job.
