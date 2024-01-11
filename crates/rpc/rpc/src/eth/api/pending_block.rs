@@ -16,7 +16,7 @@ use reth_revm::{
     database::StateProviderDatabase,
     state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
 };
-use reth_transaction_pool::{TransactionOrigin, TransactionPool};
+use reth_transaction_pool::TransactionPool;
 use revm::{db::states::bundle_state::BundleRetention, Database, DatabaseCommit, State};
 use std::time::Instant;
 
@@ -100,7 +100,11 @@ impl PendingBlockEnv {
                 best_txs.mark_invalid(&pool_tx);
                 continue
             }
-            if pool_tx.origin == TransactionOrigin::Private {
+
+            if pool_tx.origin.is_private() {
+                // we don't want to leak any state changes made by private transactions, so we mark
+                // them as invalid here which removes all dependent transactions from the iterator
+                // before we can continue
                 best_txs.mark_invalid(&pool_tx);
                 continue;
             }
