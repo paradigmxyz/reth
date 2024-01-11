@@ -182,4 +182,25 @@ mod test {
             assert!(cache.contains(e));
         }
     }
+
+    #[test]
+    fn test_debug_impl_lru_map() {
+        use derive_more::Display;
+
+        #[derive(Debug, Hash, PartialEq, Eq, Display)]
+        struct Key(i8);
+
+        #[derive(Debug)]
+        struct Value(i8);
+
+        let mut cache = LruMap::new(2);
+        let key_1 = Key(1);
+        let value_1 = Value(11);
+        cache.insert(key_1, value_1);
+        let key_2 = Key(2);
+        let value_2 = Value(22);
+        cache.insert(key_2, value_2);
+
+        assert_eq!("LruMap { 2: Value(22), 1: Value(11) }", format!("{cache:?}"))
+    }
 }
