@@ -1,7 +1,7 @@
 //! Trait abstractions used by the payload crate.
 
-use crate::{error::PayloadBuilderError, BuiltPayload};
-use reth_node_api::PayloadBuilderAttributes;
+use crate::error::PayloadBuilderError;
+use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
 use reth_provider::CanonStateNotification;
 use std::{future::Future, sync::Arc};
 
@@ -20,15 +20,17 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     /// Represents the payload attributes type that is used to spawn this payload job.
     type PayloadAttributes: PayloadBuilderAttributes + std::fmt::Debug;
     /// Represents the future that resolves the block that's returned to the CL.
-    type ResolvePayloadFuture: Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>>
+    type ResolvePayloadFuture: Future<Output = Result<Arc<Self::BuiltPayload>, PayloadBuilderError>>
         + Send
         + Sync
         + 'static;
+    /// Represents the built payload type that is returned to the CL.
+    type BuiltPayload: BuiltPayload + std::fmt::Debug;
 
     /// Returns the best payload that has been built so far.
     ///
     /// Note: This is never called by the CL.
-    fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError>;
+    fn best_payload(&self) -> Result<Arc<Self::BuiltPayload>, PayloadBuilderError>;
 
     /// Returns the payload attributes for the payload being built.
     fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError>;

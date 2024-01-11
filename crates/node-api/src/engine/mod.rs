@@ -129,7 +129,7 @@ use reth_primitives::{ChainSpec, Hardfork};
 /// Contains traits to abstract over payload attributes types and default implementations of the
 /// [PayloadAttributes] trait for ethereum mainnet and optimism types.
 pub mod traits;
-pub use traits::{PayloadAttributes, PayloadBuilderAttributes};
+pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
 
 /// Contains error types used in the traits defined in this crate.
 pub mod error;
@@ -149,7 +149,8 @@ pub trait EngineTypes: Send + Sync {
         + Clone
         + Unpin;
 
-    // TODO: payload type
+    /// The built payload type.
+    type BuiltPayload: BuiltPayload + Clone + Unpin;
 }
 
 /// Validates the timestamp depending on the version called:

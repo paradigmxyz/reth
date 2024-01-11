@@ -2,11 +2,21 @@ use crate::{validate_version_specific_fields, AttributesValidationError, EngineA
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge,
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId},
-    Address, ChainSpec, Header, B256, U256,
+    Address, ChainSpec, Header, SealedBlock, B256, U256,
 };
 use reth_rpc_types::engine::{
     OptimismPayloadAttributes, PayloadAttributes as EthPayloadAttributes, PayloadId, Withdrawal,
 };
+
+// TODO: docs
+/// The built payload type
+pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
+    /// Returns the built block (sealed)
+    fn block(&self) -> &SealedBlock;
+
+    /// Returns the fees collected for the built block
+    fn fees(&self) -> U256;
+}
 
 /// This can be implemented by types that describe a currently running payload job.
 ///

@@ -1,7 +1,7 @@
 //! Contains types required for building a payload.
 
 use alloy_rlp::Encodable;
-use reth_node_api::PayloadBuilderAttributes;
+use reth_node_api::{BuiltPayload as BuiltPayloadTrait, PayloadBuilderAttributes};
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge,
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId},
@@ -76,6 +76,16 @@ impl BuiltPayload {
     /// Converts the type into the response expected by `engine_getPayloadV2`
     pub fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3 {
         self.into()
+    }
+}
+
+impl BuiltPayloadTrait for BuiltPayload {
+    fn block(&self) -> &SealedBlock {
+        &self.block
+    }
+
+    fn fees(&self) -> U256 {
+        self.fees
     }
 }
 
