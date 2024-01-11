@@ -18,7 +18,7 @@ mod builder {
     use reth_basic_payload_builder::*;
     use reth_node_api::PayloadBuilderAttributes;
     use reth_payload_builder::{
-        error::PayloadBuilderError, BuiltPayload, OptimismPayloadBuilderAttributes,
+        error::PayloadBuilderError, EthBuiltPayload, OptimismPayloadBuilderAttributes,
     };
     use reth_primitives::{
         constants::BEACON_NONCE,
@@ -72,19 +72,19 @@ mod builder {
         Pool: TransactionPool,
     {
         type Attributes = OptimismPayloadBuilderAttributes;
-        type BuiltPayload = BuiltPayload;
+        type BuiltPayload = EthBuiltPayload;
 
         fn try_build(
             &self,
-            args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, BuiltPayload>,
-        ) -> Result<BuildOutcome<BuiltPayload>, PayloadBuilderError> {
+            args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, EthBuiltPayload>,
+        ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
             optimism_payload_builder(args, self.compute_pending_block)
         }
 
         fn on_missing_payload(
             &self,
-            args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, BuiltPayload>,
-        ) -> Option<Arc<BuiltPayload>> {
+            args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, EthBuiltPayload>,
+        ) -> Option<Arc<EthBuiltPayload>> {
             // In Optimism, the PayloadAttributes can specify a `no_tx_pool` option that implies we
             // should not pull transactions from the tx pool. In this case, we build the payload
             // upfront with the list of transactions sent in the attributes without caring about
@@ -111,9 +111,9 @@ mod builder {
     /// a result indicating success with the payload or an error in case of failure.
     #[inline]
     pub(crate) fn optimism_payload_builder<Pool, Client>(
-        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, BuiltPayload>,
+        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, EthBuiltPayload>,
         _compute_pending_block: bool,
-    ) -> Result<BuildOutcome<BuiltPayload>, PayloadBuilderError>
+    ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
     where
         Client: StateProviderFactory,
         Pool: TransactionPool,
@@ -402,7 +402,7 @@ mod builder {
         let sealed_block = block.seal_slow();
         debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
-        let mut payload = BuiltPayload::new(attributes.payload_id(), sealed_block, total_fees);
+        let mut payload = EthBuiltPayload::new(attributes.payload_id(), sealed_block, total_fees);
 
         // extend the payload with the blob sidecars from the executed txs
         payload.extend_sidecars(blob_sidecars);
