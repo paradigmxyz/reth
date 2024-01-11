@@ -28,7 +28,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::{
-    hooks::{EngineHooks, PruneHook},
+    hooks::{EngineHooks, PruneHook, SnapshotHook},
     BeaconConsensus, BeaconConsensusEngine, BeaconConsensusEngineError,
     MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
@@ -1198,7 +1198,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             let mut pruner = PrunerBuilder::new(prune_config.clone())
                 .max_reorg_depth(tree_config.max_reorg_depth() as usize)
                 .prune_delete_limit(self.config.chain.prune_delete_limit)
-                .build(provider_factory);
+                .build(provider_factory.clone());
 
             let events = pruner.events();
             hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));
@@ -1214,8 +1214,8 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             provider_factory
                 .snapshot_provider()
                 .expect("snapshot provider initialized via provider factory"),
-        )?;
-        hooks.add(SnapshotHook::nw(snapshotter, Box::new(executor.clone())));
+        );
+        hooks.add(SnapshotHook::new(snapshotter, Box::new(executor.clone())));
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
