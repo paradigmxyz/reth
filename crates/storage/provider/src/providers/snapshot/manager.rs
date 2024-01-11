@@ -1,6 +1,4 @@
-use super::{
-    find_fixed_range, LoadedJar, SnapshotJarProvider, SnapshotProviderRW, BLOCKS_PER_SNAPSHOT,
-};
+use super::{LoadedJar, SnapshotJarProvider, SnapshotProviderRW, BLOCKS_PER_SNAPSHOT};
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
     ReceiptProvider, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
@@ -16,10 +14,10 @@ use reth_db::{
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::HighestSnapshots, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber,
-    BlockWithSenders, ChainInfo, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
-    TxHash, TxNumber, Withdrawal, B256, U256,
+    snapshot::{find_fixed_range, HighestSnapshots},
+    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo, Header,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment, TransactionMeta,
+    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
 };
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
@@ -149,7 +147,7 @@ impl SnapshotProvider {
         if let Some(jar) = self.map.get(&key) {
             Ok(jar.into())
         } else {
-            let jar = NippyJar::load(&self.path.join(segment.filename(&fixed_block_range))).map(
+            let jar = NippyJar::load(&self.path.join(segment.filename(fixed_block_range))).map(
                 |jar| {
                     if self.load_filters {
                         return jar.load_filters()

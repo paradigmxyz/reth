@@ -10,10 +10,7 @@ pub use writer::SnapshotProviderRW;
 use reth_interfaces::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{snapshot::SegmentHeader, SnapshotSegment};
-use std::{
-    ops::{Deref, RangeInclusive},
-    sync::Arc,
-};
+use std::{ops::Deref, sync::Arc};
 
 const BLOCKS_PER_SNAPSHOT: u64 = 500_000;
 
@@ -46,13 +43,6 @@ impl Deref for LoadedJar {
     }
 }
 
-/// Each snapshot has a fixed number of blocks. This gives out the range where the requested block
-/// is positioned. Used for segment filename.
-pub(crate) fn find_fixed_range(interval: u64, block: u64) -> RangeInclusive<u64> {
-    let start = (block / interval) * interval;
-    start..=start + interval - 1
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,7 +56,7 @@ mod tests {
     };
     use reth_interfaces::test_utils::generators::{self, random_header_range};
     use reth_nippy_jar::NippyJar;
-    use reth_primitives::{BlockNumber, B256, U256};
+    use reth_primitives::{snapshot::find_fixed_range, BlockNumber, B256, U256};
 
     #[test]
     fn test_snap() {
