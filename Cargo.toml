@@ -189,6 +189,7 @@ aquamarine = "0.4"
 bytes = "1.5"
 bitflags = "2.4"
 clap = "4"
+derive_more = { version = "0.99.17", default-features = false, features = ["deref", "deref_mut"] }
 eyre = "0.6"
 tracing = "0.1.0"
 tracing-appender = "0.2"
