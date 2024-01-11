@@ -191,8 +191,8 @@ impl From<GenesisAccount> for Account {
 
 /// Helper trait that encapsulates [RngCore], and [Debug](std::fmt::Debug) to get around rules for
 /// auto traits (Opt-in built-in traits).
-trait RngDebugClone: RngCore + std::fmt::Debug {}
-impl<T> RngDebugClone for T where T: RngCore + std::fmt::Debug {}
+trait RngDebug: RngCore + std::fmt::Debug {}
+impl<T> RngDebug for T where T: RngCore + std::fmt::Debug {}
 
 /// This helps create a custom genesis alloc by making it easy to add funded accounts with known
 /// signers to the genesis block.
@@ -226,7 +226,7 @@ pub struct GenesisAllocator<'a> {
     /// The genesis alloc to be built.
     alloc: HashMap<Address, GenesisAccount>,
     /// The rng to use for generating key pairs.
-    rng: Box<dyn RngDebugClone + 'a>,
+    rng: Box<dyn RngDebug + 'a>,
 }
 
 impl<'a> GenesisAllocator<'a> {
