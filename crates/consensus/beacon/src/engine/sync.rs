@@ -406,6 +406,7 @@ mod tests {
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
     use reth_tasks::TokioTaskExecutor;
+    use reth_tracing::{TestTracer, Tracer};
     use std::{collections::VecDeque, future::poll_fn, sync::Arc};
     use tokio::sync::watch;
 
@@ -450,7 +451,7 @@ mod tests {
 
         /// Builds the pipeline.
         fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<TempDatabase<DatabaseEnv>>> {
-            reth_tracing::init_test_tracing();
+            TestTracer.init().unwrap();
 
             let executor_factory = TestExecutorFactory::new(chain_spec.clone());
             executor_factory.extend(self.executor_results);

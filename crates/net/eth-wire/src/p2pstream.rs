@@ -805,12 +805,13 @@ mod tests {
     use crate::{
         capability::SharedCapability, test_utils::eth_hello, DisconnectReason, EthVersion,
     };
+    use reth_tracing::{TestTracer, Tracer};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
 
     #[tokio::test]
     async fn test_can_disconnect() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
 

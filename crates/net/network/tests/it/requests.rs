@@ -16,6 +16,7 @@ use reth_primitives::{
     TransactionSigned, TxEip2930, U256,
 };
 use reth_provider::test_utils::MockEthProvider;
+use reth_tracing::{TestTracer, Tracer};
 use std::sync::Arc;
 
 /// Returns a new [`TransactionSigned`] with some random parameters
@@ -37,7 +38,7 @@ pub fn rng_transaction(rng: &mut impl rand::RngCore) -> TransactionSigned {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_body() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
     let mut rng = rand::thread_rng();
     let mock_provider = Arc::new(MockEthProvider::default());
 
@@ -81,7 +82,7 @@ async fn test_get_body() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_header() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
     let mut rng = rand::thread_rng();
     let mock_provider = Arc::new(MockEthProvider::default());
 

@@ -10,6 +10,7 @@ use reth_db::{
     test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv as DE,
 };
+use reth_tracing::{TestTracer, Tracer};
 type DatabaseEnv = TempDatabase<DE>;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
@@ -444,7 +445,7 @@ where
 
     /// Builds the test consensus engine into a `TestConsensusEngine` and `TestEnv`.
     pub fn build(self) -> (TestBeaconConsensusEngine<Client>, TestEnv<Arc<DatabaseEnv>>) {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
         let db = create_test_rw_db();
         let provider_factory =
             ProviderFactory::new(db.clone(), self.base_config.chain_spec.clone());

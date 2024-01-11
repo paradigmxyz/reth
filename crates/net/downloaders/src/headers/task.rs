@@ -184,11 +184,12 @@ mod tests {
         reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::child_header,
     };
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
+    use reth_tracing::{TestTracer, Tracer};
     use std::sync::Arc;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn download_one_by_one_on_task() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
 
         let p3 = SealedHeader::default();
         let p2 = child_header(&p3);

@@ -8,10 +8,11 @@ use reth_network::{
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::test_utils::NoopProvider;
+use reth_tracing::{TestTracer, Tracer};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_session_established_with_highest_version() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
 
     let net = Testnet::create(2).await;
     net.for_each(|peer| assert_eq!(0, peer.num_peers()));
@@ -45,7 +46,7 @@ async fn test_session_established_with_highest_version() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_session_established_with_different_capability() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
 
     let mut net = Testnet::create(1).await;
 

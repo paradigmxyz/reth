@@ -12,7 +12,6 @@ use crate::{
 use core::sync::atomic::Ordering;
 use fnv::FnvHashMap;
 use futures::{stream::Fuse, SinkExt, StreamExt};
-
 use reth_eth_wire::{
     capability::Capabilities,
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
@@ -773,6 +772,7 @@ mod tests {
     };
     use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
+    use reth_tracing::{TestTracer, Tracer};
     use secp256k1::{SecretKey, SECP256K1};
     use std::time::Duration;
     use tokio::{
@@ -987,7 +987,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_send_many_messages() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
         let mut builder = SessionBuilder::default();
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1021,7 +1021,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_request_timeout() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
 
         let mut builder = SessionBuilder::default();
 

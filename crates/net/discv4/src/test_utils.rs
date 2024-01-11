@@ -281,6 +281,8 @@ pub fn rng_message(rng: &mut impl RngCore) -> Message {
 
 #[cfg(test)]
 mod tests {
+    use reth_tracing::{TestTracer, Tracer};
+
     use super::*;
     use crate::Discv4Event;
     use std::net::{IpAddr, Ipv4Addr};
@@ -289,7 +291,7 @@ mod tests {
     /// messages and we check the actual service receives answers
     #[tokio::test]
     async fn can_mock_discovery() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
 
         let mut rng = thread_rng();
         let (_, mut service) = create_discv4().await;

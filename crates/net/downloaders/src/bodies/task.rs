@@ -173,11 +173,12 @@ mod tests {
     use reth_interfaces::{p2p::error::DownloadError, test_utils::TestConsensus};
     use reth_primitives::MAINNET;
     use reth_provider::ProviderFactory;
+    use reth_tracing::{TestTracer, Tracer};
     use std::sync::Arc;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn download_one_by_one_on_task() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
 
         let db = create_test_rw_db();
         let (headers, mut bodies) = generate_bodies(0..=19);
@@ -206,7 +207,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[allow(clippy::reversed_empty_ranges)]
     async fn set_download_range_error_returned() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
 
         let db = create_test_rw_db();
         let downloader = BodiesDownloaderBuilder::default().build(

@@ -1224,6 +1224,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
     use reth_primitives::SealedHeader;
+    use reth_tracing::{TestTracer, Tracer};
 
     /// Tests that `replace_number` works the same way as Option::replace
     #[test]
@@ -1399,7 +1400,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_at_fork_head() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
 
         let client = Arc::new(TestHeadersClient::default());
 
@@ -1433,7 +1434,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_one_by_one() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
         let p3 = SealedHeader::default();
         let p2 = child_header(&p3);
         let p1 = child_header(&p2);
@@ -1476,7 +1477,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_one_by_one_larger_request_limit() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
         let p3 = SealedHeader::default();
         let p2 = child_header(&p3);
         let p1 = child_header(&p2);

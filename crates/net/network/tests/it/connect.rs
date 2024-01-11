@@ -17,14 +17,14 @@ use reth_network::{
 use reth_network_api::{NetworkInfo, Peers, PeersInfo};
 use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord, PeerId};
 use reth_provider::test_utils::NoopProvider;
+use reth_tracing::{TestTracer, Tracer};
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
 use std::{collections::HashSet, net::SocketAddr, time::Duration};
 use tokio::task;
-
 #[tokio::test(flavor = "multi_thread")]
 async fn test_establish_connections() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
 
     for _ in 0..3 {
         let net = Testnet::create(3).await;
@@ -84,7 +84,7 @@ async fn test_establish_connections() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_already_connected() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
     let mut net = Testnet::default();
 
     let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -128,7 +128,7 @@ async fn test_already_connected() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_peer() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
 
     let mut net = Testnet::default();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -162,7 +162,7 @@ async fn test_get_peer() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_peer_by_id() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
     let mut net = Testnet::default();
 
     let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -197,7 +197,7 @@ async fn test_get_peer_by_id() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_connect_with_boot_nodes() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
@@ -218,7 +218,7 @@ async fn test_connect_with_boot_nodes() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_connect_with_builder() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
@@ -255,7 +255,7 @@ async fn test_connect_with_builder() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_connect_to_trusted_peer() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let discv4 = Discv4Config::builder();
 
@@ -310,7 +310,7 @@ async fn test_connect_to_trusted_peer() {
 #[serial_test::serial]
 #[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_incoming_node_id_blacklist() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
@@ -362,7 +362,7 @@ async fn test_incoming_node_id_blacklist() {
 #[serial_test::serial]
 #[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_incoming_connect_with_single_geth() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
@@ -405,7 +405,7 @@ async fn test_incoming_connect_with_single_geth() {
 #[serial_test::serial]
 #[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_outgoing_connect_with_single_geth() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
@@ -450,7 +450,7 @@ async fn test_outgoing_connect_with_single_geth() {
 #[serial_test::serial]
 #[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_geth_disconnect() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
@@ -509,7 +509,7 @@ async fn test_geth_disconnect() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_shutdown() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
     let net = Testnet::create(3).await;
 
     let mut handles = net.handles();

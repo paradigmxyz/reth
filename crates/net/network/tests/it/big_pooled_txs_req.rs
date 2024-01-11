@@ -7,17 +7,17 @@ use reth_network::{
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::{Signature, TransactionSigned, B256};
 use reth_provider::test_utils::MockEthProvider;
+use reth_tracing::{TestTracer, Tracer};
 use reth_transaction_pool::{
     test_utils::{testing_pool, MockTransaction},
     TransactionPool,
 };
 use tokio::sync::oneshot;
-
 // peer0: `GetPooledTransactions` requestor
 // peer1: `GetPooledTransactions` responder
 #[tokio::test(flavor = "multi_thread")]
 async fn test_large_tx_req() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
 
     // create 2000 fake txs
     let txs: Vec<MockTransaction> = (0..2000)

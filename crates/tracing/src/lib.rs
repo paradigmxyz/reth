@@ -52,8 +52,11 @@ pub use tracing_subscriber;
 pub use formatter::LogFormat;
 pub use layers::{FileInfo, FileWorkerGuard};
 
+pub use test_tracer::TestTracer;
+
 mod formatter;
 mod layers;
+mod test_tracer;
 
 use crate::layers::Layers;
 use tracing::level_filters::LevelFilter;

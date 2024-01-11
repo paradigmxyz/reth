@@ -10,6 +10,7 @@ use reth_rpc_types::engine::{ForkchoiceState, PayloadId, TransitionConfiguration
 use reth_rpc_types_compat::engine::payload::{
     convert_block_to_payload_input_v2, try_block_to_payload_v1,
 };
+use reth_tracing::{TestTracer, Tracer};
 #[allow(unused_must_use)]
 async fn test_basic_engine_calls<C>(client: &C)
 where
@@ -31,7 +32,7 @@ where
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_auth_endpoints_http() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
     let secret = JwtSecret::random();
     let handle = launch_auth(secret).await;
     let client = handle.http_client();
@@ -40,7 +41,7 @@ async fn test_auth_endpoints_http() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_auth_endpoints_ws() {
-    reth_tracing::init_test_tracing();
+    TestTracer.init().unwrap();
     let secret = JwtSecret::random();
     let handle = launch_auth(secret).await;
     let client = handle.ws_client().await;

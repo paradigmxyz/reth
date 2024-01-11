@@ -251,6 +251,7 @@ mod tests {
     };
     use reth_primitives::{SealedHeader, MAINNET};
     use reth_provider::ProviderFactory;
+    use reth_tracing::{TestTracer, Tracer};
     use std::sync::Arc;
 
     #[tokio::test]
@@ -281,7 +282,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_headers_at_fork_head() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
 
         let p3 = SealedHeader::default();
         let p2 = child_header(&p3);

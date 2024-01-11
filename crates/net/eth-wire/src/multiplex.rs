@@ -645,12 +645,13 @@ mod tests {
         },
         UnauthedEthStream, UnauthedP2PStream,
     };
+    use reth_tracing::{TestTracer, Tracer};
     use tokio::{net::TcpListener, sync::oneshot};
     use tokio_util::codec::Decoder;
 
     #[tokio::test]
     async fn eth_satellite() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
         let (status, fork_filter) = eth_handshake();
@@ -689,7 +690,7 @@ mod tests {
     /// A test that install a satellite stream eth+test protocol and sends messages between them.
     #[tokio::test(flavor = "multi_thread")]
     async fn eth_test_protocol_satellite() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
         let (status, fork_filter) = eth_handshake();

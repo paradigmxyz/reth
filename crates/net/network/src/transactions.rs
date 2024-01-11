@@ -1292,13 +1292,14 @@ mod tests {
     use reth_network_api::NetworkInfo;
     use reth_primitives::hex;
     use reth_provider::test_utils::NoopProvider;
+    use reth_tracing::{TestTracer, Tracer};
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use secp256k1::SecretKey;
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ignored_tx_broadcasts_while_initially_syncing() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
         let net = Testnet::create(3).await;
 
         let mut handles = net.handles();
@@ -1380,7 +1381,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_tx_broadcasts_through_two_syncs() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
         let net = Testnet::create(3).await;
 
         let mut handles = net.handles();
@@ -1467,7 +1468,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_handle_incoming_transactions() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
         let net = Testnet::create(3).await;
 
         let mut handles = net.handles();
@@ -1556,7 +1557,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_on_get_pooled_transactions_network() {
-        reth_tracing::init_test_tracing();
+        TestTracer.init().unwrap();
         let net = Testnet::create(2).await;
 
         let mut handles = net.handles();
