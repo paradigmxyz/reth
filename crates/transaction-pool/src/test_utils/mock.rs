@@ -23,8 +23,15 @@ use reth_primitives::{
 };
 use std::{ops::Range, sync::Arc, time::Instant};
 
+/// A transaction pool implementation using [MockOrdering] for transaction ordering.
+///
+/// This type is an alias for [TxPool<MockOrdering>].
 pub type MockTxPool = TxPool<MockOrdering>;
 
+/// A validated transaction in the transaction pool, using [MockTransaction] as the transaction
+/// type.
+///
+/// This type is an alias for [ValidPoolTransaction<MockTransaction>].
 pub type MockValidTx = ValidPoolTransaction<MockTransaction>;
 
 #[cfg(feature = "optimism")]
@@ -119,16 +126,19 @@ macro_rules! get_value {
 macro_rules! make_setters_getters {
     ($($name:ident => $t:ty);*) => {
         paste! {$(
+            /// Sets the value of the specified field.
             pub fn [<set_ $name>](&mut self, $name: $t) -> &mut Self {
                 set_value!(self => $name);
                 self
             }
 
+            /// Sets the value of the specified field using a fluent interface.
             pub fn [<with_ $name>](mut self, $name: $t) -> Self {
                 set_value!(self => $name);
                 self
             }
 
+            /// Gets the value of the specified field.
             pub fn [<get_ $name>](&self) -> $t {
                 get_value!(self => $name)
             }
@@ -139,54 +149,98 @@ macro_rules! make_setters_getters {
 /// A Bare transaction type used for testing.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum MockTransaction {
+    /// Legacy transaction type.
     Legacy {
+        /// The hash of the transaction.
         hash: B256,
+        /// The sender's address.
         sender: Address,
+        /// The transaction nonce.
         nonce: u64,
+        /// The gas price for the transaction.
         gas_price: u128,
+        /// The gas limit for the transaction.
         gas_limit: u64,
+        /// The transaction's destination.
         to: TransactionKind,
+        /// The value of the transaction.
         value: U256,
+        /// The transaction input data.
         input: Bytes,
     },
+    /// EIP-1559 transaction type.
     Eip1559 {
+        /// The hash of the transaction.
         hash: B256,
+        /// The sender's address.
         sender: Address,
+        /// The transaction nonce.
         nonce: u64,
+        /// The maximum fee per gas for the transaction.
         max_fee_per_gas: u128,
+        /// The maximum priority fee per gas for the transaction.
         max_priority_fee_per_gas: u128,
+        /// The gas limit for the transaction.
         gas_limit: u64,
+        /// The transaction's destination.
         to: TransactionKind,
+        /// The value of the transaction.
         value: U256,
+        /// The access list associated with the transaction.
         accesslist: AccessList,
+        /// The transaction input data.
         input: Bytes,
     },
+    /// EIP-4844 transaction type.
     Eip4844 {
+        /// The hash of the transaction.
         hash: B256,
+        /// The sender's address.
         sender: Address,
+        /// The transaction nonce.
         nonce: u64,
+        /// The maximum fee per gas for the transaction.
         max_fee_per_gas: u128,
+        /// The maximum priority fee per gas for the transaction.
         max_priority_fee_per_gas: u128,
+        /// The maximum fee per blob gas for the transaction.
         max_fee_per_blob_gas: u128,
+        /// The gas limit for the transaction.
         gas_limit: u64,
+        /// The transaction's destination.
         to: TransactionKind,
+        /// The value of the transaction.
         value: U256,
+        /// The access list associated with the transaction.
         accesslist: AccessList,
+        /// The transaction input data.
         input: Bytes,
+        /// The sidecar information for the transaction.
         sidecar: BlobTransactionSidecar,
     },
+    /// EIP-2930 transaction type.
     Eip2930 {
+        /// The hash of the transaction.
         hash: B256,
+        /// The sender's address.
         sender: Address,
+        /// The transaction nonce.
         nonce: u64,
+        /// The transaction's destination.
         to: TransactionKind,
+        /// The gas limit for the transaction.
         gas_limit: u64,
+        /// The transaction input data.
         input: Bytes,
+        /// The value of the transaction.
         value: U256,
+        /// The gas price for the transaction.
         gas_price: u128,
+        /// The access list associated with the transaction.
         accesslist: AccessList,
     },
     #[cfg(feature = "optimism")]
+    /// Deposit transaction type (Optimism feature).
     Deposit(TxDeposit),
 }
 
@@ -323,11 +377,13 @@ impl MockTransaction {
         self
     }
 
+    /// Sets the priority fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub fn with_priority_fee(mut self, val: u128) -> Self {
         self.set_priority_fee(val);
         self
     }
 
+    /// Gets the priority fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub fn get_priority_fee(&self) -> Option<u128> {
         if let MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } |
         MockTransaction::Eip4844 { max_priority_fee_per_gas, .. } = self
@@ -338,6 +394,7 @@ impl MockTransaction {
         }
     }
 
+    /// Sets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub fn set_max_fee(&mut self, val: u128) -> &mut Self {
         if let MockTransaction::Eip1559 { max_fee_per_gas, .. } |
         MockTransaction::Eip4844 { max_fee_per_gas, .. } = self
@@ -347,11 +404,13 @@ impl MockTransaction {
         self
     }
 
+    /// Sets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub fn with_max_fee(mut self, val: u128) -> Self {
         self.set_max_fee(val);
         self
     }
 
+    /// Gets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub fn get_max_fee(&self) -> Option<u128> {
         if let MockTransaction::Eip1559 { max_fee_per_gas, .. } |
         MockTransaction::Eip4844 { max_fee_per_gas, .. } = self
@@ -362,6 +421,7 @@ impl MockTransaction {
         }
     }
 
+    /// Sets the access list for transactions supporting EIP-1559, EIP-4844, and EIP-2930.
     pub fn set_accesslist(&mut self, list: AccessList) -> &mut Self {
         match self {
             MockTransaction::Legacy { .. } => {}
@@ -380,6 +440,7 @@ impl MockTransaction {
         self
     }
 
+    /// Sets the gas price for the transaction.
     pub fn set_gas_price(&mut self, val: u128) -> &mut Self {
         match self {
             MockTransaction::Legacy { gas_price, .. } => {
@@ -400,6 +461,7 @@ impl MockTransaction {
         self
     }
 
+    /// Sets the gas price for the transaction.
     pub fn with_gas_price(mut self, val: u128) -> Self {
         match self {
             MockTransaction::Legacy { ref mut gas_price, .. } => {
@@ -430,6 +492,7 @@ impl MockTransaction {
         self
     }
 
+    /// Gets the gas price for the transaction.
     pub fn get_gas_price(&self) -> u128 {
         match self {
             MockTransaction::Legacy { gas_price, .. } |
@@ -508,6 +571,7 @@ impl MockTransaction {
         next.with_gas_limit(gas)
     }
 
+    /// Returns the transaction type identifier associated with the current [MockTransaction].
     pub fn tx_type(&self) -> u8 {
         match self {
             Self::Legacy { .. } => LEGACY_TX_TYPE_ID,
@@ -519,18 +583,22 @@ impl MockTransaction {
         }
     }
 
+    /// Checks if the transaction is of the legacy type.
     pub fn is_legacy(&self) -> bool {
         matches!(self, MockTransaction::Legacy { .. })
     }
 
+    /// Checks if the transaction is of the EIP-1559 type.
     pub fn is_eip1559(&self) -> bool {
         matches!(self, MockTransaction::Eip1559 { .. })
     }
 
+    /// Checks if the transaction is of the EIP-4844 type.
     pub fn is_eip4844(&self) -> bool {
         matches!(self, MockTransaction::Eip4844 { .. })
     }
 
+    /// Checks if the transaction is of the EIP-2930 type.
     pub fn is_eip2930(&self) -> bool {
         matches!(self, MockTransaction::Eip2930 { .. })
     }
@@ -1038,6 +1106,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
     type Strategy = proptest::strategy::BoxedStrategy<MockTransaction>;
 }
 
+/// A factory for creating and managing various types of mock transactions.
 #[derive(Default)]
 pub struct MockTransactionFactory {
     pub(crate) ids: SenderIdentifiers,
@@ -1046,20 +1115,23 @@ pub struct MockTransactionFactory {
 // === impl MockTransactionFactory ===
 
 impl MockTransactionFactory {
+    /// Generates a [TransactionId] for the given [MockTransaction].
     pub fn tx_id(&mut self, tx: &MockTransaction) -> TransactionId {
         let sender = self.ids.sender_id_or_create(tx.get_sender());
         TransactionId::new(sender, tx.get_nonce())
     }
 
+    /// Validates a [MockTransaction] and returns a [MockValidTx].
     pub fn validated(&mut self, transaction: MockTransaction) -> MockValidTx {
         self.validated_with_origin(TransactionOrigin::External, transaction)
     }
 
+    /// Validates a [MockTransaction] and returns a shared [Arc<MockValidTx>].
     pub fn validated_arc(&mut self, transaction: MockTransaction) -> Arc<MockValidTx> {
         Arc::new(self.validated(transaction))
     }
 
-    /// Converts the transaction into a validated transaction
+    /// Converts the transaction into a validated transaction with a specified origin.
     pub fn validated_with_origin(
         &mut self,
         origin: TransactionOrigin,
@@ -1075,19 +1147,24 @@ impl MockTransactionFactory {
         }
     }
 
+    /// Creates a validated legacy [MockTransaction].
     pub fn create_legacy(&mut self) -> MockValidTx {
         self.validated(MockTransaction::legacy())
     }
 
+    /// Creates a validated EIP-1559 [MockTransaction].
     pub fn create_eip1559(&mut self) -> MockValidTx {
         self.validated(MockTransaction::eip1559())
     }
 
+    /// Creates a validated EIP-4844 [MockTransaction].
     pub fn create_eip4844(&mut self) -> MockValidTx {
         self.validated(MockTransaction::eip4844())
     }
 }
 
+/// Used to define a specific ordering for transactions, providing a priority value
+/// based on the effective tip per gas and base fee of the given [MockTransaction].
 #[derive(Clone, Default, Debug)]
 #[non_exhaustive]
 pub struct MockOrdering;
