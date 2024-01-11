@@ -8,8 +8,6 @@ use std::{
     hash::Hash,
     num::NonZeroUsize,
 };
-use tokio::sync::mpsc::UnboundedSender;
-use tracing::warn;
 
 /// A minimal LRU cache based on a `LinkedHashSet` with limited capacity.
 ///
@@ -19,19 +17,12 @@ use tracing::warn;
 pub struct LruCache<T: Hash + Eq> {
     limit: NonZeroUsize,
     inner: LinkedHashSet<T>,
-    tx: Option<UnboundedSender<T>>,
 }
 
 impl<T: Hash + Eq> LruCache<T> {
     /// Creates a new [`LruCache`] using the given limit
     pub fn new(limit: NonZeroUsize) -> Self {
-        Self { inner: LinkedHashSet::new(), limit, tx: None }
-    }
-
-    /// Creates a new [`LruCache`] using the given limit and with a channel for sending eviction
-    /// feedback. Note, that it is up to the caller's context to drain the buffer!
-    pub fn new_with_feedback(limit: NonZeroUsize, tx: UnboundedSender<T>) -> Self {
-        Self { inner: LinkedHashSet::new(), limit, tx: Some(tx) }
+        Self { inner: LinkedHashSet::new(), limit }
     }
 
     /// Insert an element into the set.
@@ -46,11 +37,24 @@ impl<T: Hash + Eq> LruCache<T> {
         if self.inner.insert(entry) {
             if self.limit.get() == self.inner.len() {
                 // remove the oldest element in the set
-                self.remove_lru();
+                _ = self.remove_lru();
             }
             return true
         }
         false
+    }
+
+    /// Same as [`Self::insert`] but returns a tuple, where the second index is the evicted value,
+    /// if one was evicted.
+    pub fn _insert_with_eviction_feedback(&mut self, entry: T) -> (bool, Option<T>) {
+        if self.inner.insert(entry) {
+            if self.limit.get() == self.inner.len() {
+                // remove the oldest element in the set
+                return (true, self.remove_lru())
+            }
+            return (true, None)
+        }
+        (false, None)
     }
 
     /// Remove the least recently used entry and return it.
@@ -59,20 +63,11 @@ impl<T: Hash + Eq> LruCache<T> {
     /// configured, this will return None.
     #[inline]
     fn remove_lru(&mut self) -> Option<T> {
-        if let Some(item) = self.inner.pop_front() {
-            if let Some(tx) = &self.tx {
-                if let Err(e) = tx.send(item) {
-                    warn!("failed to send eviction feedback, {e}");
-                }
-            } else {
-                return Some(item)
-            }
-        }
-        None
+        self.inner.pop_front()
     }
 
     /// Expels the given value. Returns true if the value existed.
-    pub fn remove(&mut self, value: &T) -> bool {
+    pub fn _remove(&mut self, value: &T) -> bool {
         self.inner.remove(value)
     }
 
