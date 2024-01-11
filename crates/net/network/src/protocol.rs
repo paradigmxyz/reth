@@ -189,11 +189,6 @@ pub struct RlpxSubProtocols {
 }
 
 impl RlpxSubProtocols {
-    /// Creates a new list for extra protocols.
-    pub fn new() -> Self {
-        RlpxSubProtocols { protocols: Vec::new() }
-    }
-
     /// Adds a new protocol.
     pub fn push(&mut self, protocol: impl IntoRlpxSubProtocol) {
         self.protocols.push(protocol.into_rlpx_sub_protocol());
