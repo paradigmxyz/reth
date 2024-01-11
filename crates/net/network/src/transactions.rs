@@ -1520,8 +1520,8 @@ impl TransactionFetcher {
             if *hash == hashes[0] {
                 continue;
             }
-            if let Some((_, peers)) = self.unknown_hashes.get(hash) {
-                if peers.contains(&peer_id) {
+            if let Some((_, peers)) = self.unknown_hashes.get_mut(hash) {
+                if peers.remove(&peer_id) {
                     hashes_to_request.push(*hash)
                 }
             }
