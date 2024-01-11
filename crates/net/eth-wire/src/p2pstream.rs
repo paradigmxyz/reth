@@ -805,7 +805,7 @@ mod tests {
     use crate::{
         capability::SharedCapability, test_utils::eth_hello, DisconnectReason, EthVersion,
     };
-    use reth_tracing::{TestTracer, Tracer};
+
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
 

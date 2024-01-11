@@ -173,7 +173,7 @@ mod tests {
     use reth_interfaces::{p2p::error::DownloadError, test_utils::TestConsensus};
     use reth_primitives::MAINNET;
     use reth_provider::ProviderFactory;
-    use reth_tracing::{TestTracer, Tracer};
+
     use std::sync::Arc;
 
     #[tokio::test(flavor = "multi_thread")]

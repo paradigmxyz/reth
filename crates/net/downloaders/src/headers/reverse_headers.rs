@@ -1224,7 +1224,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
     use reth_primitives::SealedHeader;
-    use reth_tracing::{TestTracer, Tracer};
+
 
     /// Tests that `replace_number` works the same way as Option::replace
     #[test]

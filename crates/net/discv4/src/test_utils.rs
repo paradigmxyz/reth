@@ -281,7 +281,7 @@ pub fn rng_message(rng: &mut impl RngCore) -> Message {
 
 #[cfg(test)]
 mod tests {
-    use reth_tracing::{TestTracer, Tracer};
+
 
     use super::*;
     use crate::Discv4Event;

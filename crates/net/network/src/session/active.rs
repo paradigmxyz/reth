@@ -772,7 +772,7 @@ mod tests {
     };
     use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
-    use reth_tracing::{TestTracer, Tracer};
+
     use secp256k1::{SecretKey, SECP256K1};
     use std::time::Duration;
     use tokio::{

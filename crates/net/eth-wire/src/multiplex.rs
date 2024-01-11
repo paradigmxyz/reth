@@ -645,7 +645,7 @@ mod tests {
         },
         UnauthedEthStream, UnauthedP2PStream,
     };
-    use reth_tracing::{TestTracer, Tracer};
+
     use tokio::{net::TcpListener, sync::oneshot};
     use tokio_util::codec::Decoder;
 

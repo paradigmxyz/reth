@@ -263,7 +263,7 @@ async fn resolve_external_ip() -> Option<IpAddr> {
 
 #[cfg(test)]
 mod tests {
-    use reth_tracing::{TestTracer, Tracer};
+
 
     use super::*;
     use std::net::Ipv4Addr;

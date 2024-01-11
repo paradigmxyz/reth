@@ -406,7 +406,7 @@ mod tests {
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
     use reth_tasks::TokioTaskExecutor;
-    use reth_tracing::{TestTracer, Tracer};
+
     use std::{collections::VecDeque, future::poll_fn, sync::Arc};
     use tokio::sync::watch;
 
