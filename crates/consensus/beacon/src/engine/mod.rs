@@ -976,7 +976,6 @@ where
             return invalid_ancestor;
         }
 
-        #[allow(clippy::single_match)]
         match &error {
             RethError::Canonical(
                 error @ CanonicalError::Validation(BlockValidationError::BlockPreMerge { .. }),
@@ -1699,10 +1698,6 @@ where
     }
 
     fn on_hook_result(&self, result: PolledHook) -> Result<(), BeaconConsensusEngineError> {
-        if let Some(action) = result.action {
-            match action {}
-        }
-
         if result.db_access_level.is_read_write() {
             match result.event {
                 EngineHookEvent::NotReady => {}
