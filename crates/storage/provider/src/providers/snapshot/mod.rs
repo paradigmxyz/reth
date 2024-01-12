@@ -39,7 +39,7 @@ impl Deref for LoadedJar {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use crate::{test_utils::create_test_provider_factory, HeaderProvider};
     use rand::{self, seq::SliceRandom};

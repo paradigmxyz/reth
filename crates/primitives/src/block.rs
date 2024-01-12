@@ -496,7 +496,7 @@ impl BlockBody {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::{BlockId, BlockNumberOrTag::*, *};
     use crate::hex_literal::hex;
     use alloy_rlp::{Decodable, Encodable};

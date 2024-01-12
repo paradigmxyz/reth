@@ -239,3 +239,27 @@ fn collect_io_stats() {}
 
 #[cfg(not(target_os = "linux"))]
 fn describe_io_stats() {}
+
+#[cfg(test)]
+mod tests {
+    use crate::builder::PROMETHEUS_RECORDER_HANDLE;
+    use std::ops::Deref;
+
+    // Dependencies using different version of the `metrics` crate (to be exact, 0.21 vs 0.22)
+    // may not be able to communicate with each other through the global recorder.
+    //
+    // This test ensures that `metrics-process` dependency plays well with the current
+    // `metrics-exporter-prometheus` dependency version.
+    #[test]
+    fn process_metrics() {
+        // initialize the lazy handle
+        let _ = PROMETHEUS_RECORDER_HANDLE.deref();
+
+        let process = metrics_process::Collector::default();
+        process.describe();
+        process.collect();
+
+        let metrics = PROMETHEUS_RECORDER_HANDLE.render();
+        assert!(metrics.contains("process_cpu_seconds_total"));
+    }
+}

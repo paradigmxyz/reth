@@ -90,7 +90,7 @@ impl From<Vec<BlockBody>> for BlockBodies {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::types::{
         message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
     };

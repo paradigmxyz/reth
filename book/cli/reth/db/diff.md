@@ -2,7 +2,7 @@
 
 Create a diff between two database tables or two entire databases
 
-```bash
+```text
 $ reth db diff --help
 Usage: reth db diff [OPTIONS] --secondary-datadir <SECONDARY_DATADIR> --output <OUTPUT>
 

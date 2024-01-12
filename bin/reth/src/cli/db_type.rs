@@ -54,7 +54,7 @@ impl DatabaseBuilder {
                 let db_path = data_dir.db_path();
 
                 tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-                let db = Arc::new(init_db(db_path.clone(), log_level)?);
+                let db = Arc::new(init_db(db_path.clone(), log_level)?.with_metrics());
                 Ok(DatabaseInstance::Real { db, data_dir })
             }
         }

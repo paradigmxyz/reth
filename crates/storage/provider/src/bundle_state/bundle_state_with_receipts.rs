@@ -16,7 +16,10 @@ use reth_trie::{
     updates::TrieUpdates,
     StateRoot, StateRootError,
 };
-use revm::{db::states::BundleState, primitives::AccountInfo};
+use revm::{
+    db::{states::BundleState, BundleAccount},
+    primitives::AccountInfo,
+};
 use std::collections::HashMap;
 
 pub use revm::db::states::OriginalValuesKnown;
@@ -108,6 +111,11 @@ impl BundleStateWithReceipts {
     /// Return iterator over all accounts
     pub fn accounts_iter(&self) -> impl Iterator<Item = (Address, Option<&AccountInfo>)> {
         self.bundle.state().iter().map(|(a, acc)| (*a, acc.info.as_ref()))
+    }
+
+    /// Return iterator over all [BundleAccount]s in the bundle
+    pub fn bundle_accounts_iter(&self) -> impl Iterator<Item = (Address, &BundleAccount)> {
+        self.bundle.state().iter().map(|(a, acc)| (*a, acc))
     }
 
     /// Get account if account is known.

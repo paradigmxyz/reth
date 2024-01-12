@@ -46,7 +46,7 @@ impl<T: Hash + Eq> LruCache<T> {
         if self.inner.insert(entry) {
             if self.limit.get() == self.inner.len() {
                 // remove the oldest element in the set
-                self.remove_lru();
+                _ = self.remove_lru();
             }
             return true
         }
@@ -59,21 +59,7 @@ impl<T: Hash + Eq> LruCache<T> {
     /// configured, this will return None.
     #[inline]
     fn remove_lru(&mut self) -> Option<T> {
-        if let Some(item) = self.inner.pop_front() {
-            if let Some(tx) = &self.tx {
-                if let Err(e) = tx.send(item) {
-                    warn!("failed to send eviction feedback, {e}");
-                }
-            } else {
-                return Some(item)
-            }
-        }
-        None
-    }
-
-    /// Expels the given value. Returns true if the value existed.
-    pub fn remove(&mut self, value: &T) -> bool {
-        self.inner.remove(value)
+        self.inner.pop_front()
     }
 
     /// Returns `true` if the set contains a value.
@@ -153,7 +139,7 @@ where
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

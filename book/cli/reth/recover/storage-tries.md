@@ -2,7 +2,7 @@
 
 Recover the node by deleting dangling storage tries
 
-```bash
+```text
 $ reth recover storage-tries --help
 Usage: reth recover storage-tries [OPTIONS]
 
