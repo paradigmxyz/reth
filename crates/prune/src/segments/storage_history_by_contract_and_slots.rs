@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::{
     segments::{history::prune_history_indices, PruneInput, PruneOutput, Segment},
     PrunerError,
@@ -64,8 +66,8 @@ impl<DB: Database> Segment<DB> for StorageHistoryByContractAndSlots {
         // filter address and slot list and will check it while going through the table
         //
         // Example:
-        // For an `address_filter` such as:
-        // { block9: [(a1, []), (a2, [])], block20: [(a3, [s1]), (a4, []), (a5, [s1, s2])] }
+        // For an `address_slots_filter` such as:
+        // `{ block9: { {a1: []}, {a2: []} }, block20: { {a3: [s1]}, {a4: []}, {a5: [s1, s2} } }`
         //
         // The following structures will be created in the exact order as showed:
         // `block_ranges`: [
@@ -73,7 +75,7 @@ impl<DB: Database> Segment<DB> for StorageHistoryByContractAndSlots {
         //    (block9, block19, 2 addresses),
         //    (block20, to_block, 5 addresses)
         //  ]
-        // `filtered_address_slots`: [(a1, []), (a2, []), (a3, [s1]), (a4, []), (a5, [s1, s2])]
+        // `filtered_address_slots`: { {a1: []}, {a2: []}, {a3: [s1]}, {a4: []}, {a5: [s1, s2]} }
         //
         // The first range will delete all storage history between block0 - block8
         // The second range will delete all storage history between block9 - 19, except the ones
@@ -83,10 +85,10 @@ impl<DB: Database> Segment<DB> for StorageHistoryByContractAndSlots {
         // and slot2]
         let mut block_ranges = vec![];
         let mut blocks_iter = address_slots_filter.iter().peekable();
-        let mut filtered_address_slots = vec![];
+        let mut filtered_address_slots = BTreeMap::new();
 
         while let Some((start_block, addresses_and_slots)) = blocks_iter.next() {
-            filtered_address_slots.extend_from_slice(addresses_and_slots);
+            filtered_address_slots.extend(addresses_and_slots.iter());
 
             // This will clear all storage history before the first appearance of a contract address
             // or since the block after the last pruned one.
@@ -126,11 +128,11 @@ impl<DB: Database> Segment<DB> for StorageHistoryByContractAndSlots {
                 limit,
                 |(block_num_address, storage_entry)| {
                     let mut skip = num_addresses > 0;
-                    if let Some(&address_slots) = filtered_address_slots[..num_addresses]
+                    if let Some((_address, &slots)) = filtered_address_slots
                         .iter()
-                        .find(|&address_slot| address_slot.address == block_num_address.address())
+                        .take(num_addresses)
+                        .find(|(&address, _slots)| *address == block_num_address.address())
                     {
-                        let slots = &address_slots.slots;
                         if slots.is_empty() {
                             // if slots is empty, save all slots
                             skip &= true;
@@ -170,11 +172,11 @@ impl<DB: Database> Segment<DB> for StorageHistoryByContractAndSlots {
                 |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
                 |key| StorageShardedKey::last(key.address, key.sharded_key.key),
                 |storage_sharded_key| {
-                    if let Some(&address_slots) = filtered_address_slots[..num_addresses]
+                    if let Some((_address, &slots)) = filtered_address_slots
                         .iter()
-                        .find(|&address_slots| address_slots.address == storage_sharded_key.address)
+                        .take(num_addresses)
+                        .find(|(&address, _slots)| *address == storage_sharded_key.address)
                     {
-                        let slots = &address_slots.slots;
                         if slots.is_empty() {
                             // if slots is empty, save all slots
                             true
@@ -233,15 +235,15 @@ mod tests {
         generators::{random_block_range, random_changeset_range, random_eoa_account_range},
     };
     use reth_primitives::{
-        AddressAndSlots, PruneMode, PruneSegment, StorageHistoryPruneConfig, B256,
-        MINIMUM_PRUNING_DISTANCE,
+        PruneMode, PruneSegment, StorageHistoryPruneAddressConfig, StorageHistoryPruneConfig,
+        StorageKey, B256, MINIMUM_PRUNING_DISTANCE,
     };
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::TestStageDB;
     use std::{collections::BTreeMap, ops::AddAssign};
 
     #[test]
-    fn prune() {
+    fn prune_except_all_slots() {
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
@@ -286,7 +288,13 @@ mod tests {
 
             let result =
                 StorageHistoryByContractAndSlots::new(StorageHistoryPruneConfig(BTreeMap::from([
-                    (AddressAndSlots { address: address1, slots: vec![] }, prune_mode),
+                    (
+                        address1,
+                        StorageHistoryPruneAddressConfig {
+                            mode: Some(prune_mode),
+                            slots: BTreeMap::default(),
+                        },
+                    ),
                 ])))
                 .prune(
                     &provider,
@@ -324,6 +332,108 @@ mod tests {
             // changes set by `tip - MINIMUM_PRUNING_DISTANCE`
             assert!(
                 block_num_address.address() == address1 ||
+                    block_num_address.block_number() > tip - MINIMUM_PRUNING_DISTANCE,
+            );
+        }
+    }
+
+    #[test]
+    fn prune_except_one_slot() {
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+
+        let tip = 20000;
+        let blocks = random_block_range(&mut rng, 0..=tip, B256::ZERO, 0..1);
+        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
+
+        let accounts =
+            random_eoa_account_range(&mut rng, 1..3).into_iter().collect::<BTreeMap<_, _>>();
+
+        let address1 = *accounts.iter().next().map(|(addr, _)| addr).unwrap();
+
+        let (changesets, _) = random_changeset_range(
+            &mut rng,
+            blocks.iter(),
+            accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+            1..4,
+            1..4,
+        );
+        db.insert_changesets(changesets.clone(), None).expect("insert changesets");
+        db.insert_history(changesets.clone(), None).expect("insert history");
+
+        let slot0 = StorageKey::ZERO;
+        let mut slot1 = [0u8; 32];
+        slot1[0] = 1;
+        let slot1 = StorageKey::from(slot1);
+
+        let storage_occurences = db.table::<tables::StorageHistory>().unwrap().into_iter().fold(
+            BTreeMap::<_, usize>::new(),
+            |mut map, (key, _)| {
+                map.entry((key.address, key.sharded_key.key)).or_default().add_assign(1);
+                map
+            },
+        );
+        assert!(storage_occurences.into_iter().any(|(_, occurrences)| occurrences > 1));
+
+        assert_eq!(
+            db.table::<tables::StorageChangeSet>().unwrap().len(),
+            changesets.iter().flatten().flat_map(|(_, _, entries)| entries).count()
+        );
+
+        let run_prune = || {
+            let provider = db.factory.provider_rw().unwrap();
+
+            let prune_before_block: usize = 2300;
+            let prune_mode = PruneMode::Before(prune_before_block as u64);
+
+            let result =
+                StorageHistoryByContractAndSlots::new(StorageHistoryPruneConfig(BTreeMap::from([
+                    (
+                        address1,
+                        StorageHistoryPruneAddressConfig {
+                            mode: None,
+                            slots: BTreeMap::from([(slot1, prune_mode)]),
+                        },
+                    ),
+                ])))
+                .prune(
+                    &provider,
+                    PruneInput {
+                        previous_checkpoint: db
+                            .factory
+                            .provider()
+                            .unwrap()
+                            .get_prune_checkpoint(
+                                PruneSegment::StorageHistoryFilteredByContractAndSlots,
+                            )
+                            .unwrap(),
+                        to_block: tip,
+                        delete_limit: 2000,
+                    },
+                );
+            provider.commit().expect("commit");
+
+            assert_matches!(result, Ok(_));
+            let output = result.unwrap();
+
+            output.done
+        };
+
+        while !run_prune() {}
+
+        let provider = db.factory.provider().unwrap();
+        let mut cursor = provider.tx_ref().cursor_read::<tables::StorageChangeSet>().unwrap();
+        let walker = cursor.walk(None).unwrap();
+
+        for storage_change_set in walker {
+            let (block_num_address, storage_entry) = storage_change_set.unwrap();
+
+            // Either we only find our contract and slots, or the changes are part of the unprunable
+            // changes set by `tip - MINIMUM_PRUNING_DISTANCE`
+            assert!(
+                block_num_address.address() == address1 &&
+                    storage_entry.key == slot1 &&
+                    storage_entry.key != slot0 ||
                     block_num_address.block_number() > tip - MINIMUM_PRUNING_DISTANCE,
             );
         }

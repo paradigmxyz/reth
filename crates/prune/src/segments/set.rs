@@ -6,6 +6,8 @@ use reth_db::database::Database;
 use reth_primitives::PruneModes;
 use std::sync::Arc;
 
+use super::StorageHistoryByContractAndSlots;
+
 /// Collection of [Segment]. Thread-safe, allocated on the heap.
 #[derive(Debug)]
 pub struct SegmentSet<DB: Database> {
@@ -46,6 +48,7 @@ impl<DB: Database> SegmentSet<DB> {
             account_history,
             storage_history,
             receipts_log_filter,
+            storage_history_filter,
         } = prune_modes;
 
         SegmentSet::default()
@@ -64,6 +67,11 @@ impl<DB: Database> SegmentSet<DB> {
             .segment_opt(account_history.map(AccountHistory::new))
             // Storage history
             .segment_opt(storage_history.map(StorageHistory::new))
+            // Storage history by contract and slots
+            .segment_opt(
+                (!storage_history_filter.is_empty())
+                    .then(|| StorageHistoryByContractAndSlots::new(storage_history_filter.clone())),
+            )
     }
 }
 
