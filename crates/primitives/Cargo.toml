@@ -20,12 +20,11 @@ revm.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
-alloy-primitives = { workspace = true, features = ["rand", "rlp", "asm-keccak"] }
+alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie = { version = "0.1", features = ["serde"] }
 ethers-core = { workspace = true, default-features = false, optional = true }
 nybbles = { version = "0.1.2", features = ["serde", "rlp"] }
-
 
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
@@ -91,6 +90,7 @@ secp256k1.workspace = true
 
 [features]
 default = ["c-kzg"]
+asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
     "revm-primitives/arbitrary",
     "reth-rpc-types/arbitrary",
@@ -110,7 +110,6 @@ optimism = [
     "revm/optimism",
 ]
 test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
-asm-keccak = ["alloy-primitives/asm-keccak"]
 
 [[bench]]
 name = "recover_ecdsa_crit"

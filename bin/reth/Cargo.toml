@@ -21,7 +21,7 @@ normal = [
 [dependencies]
 # reth
 reth-config.workspace = true
-reth-primitives = { workspace = true, features = ["arbitrary", "clap", "asm-keccak"] }
+reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-provider = { workspace = true }
 reth-revm.workspace = true
@@ -122,13 +122,18 @@ procfs = { version = "0.16.0" }
 
 [features]
 default = ["jemalloc"]
+
+asm-keccak = ["reth-primitives/asm-keccak"]
+
 jemalloc = ["dep:jemallocator", "dep:jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "jemallocator?/profiling"]
+
 min-error-logs = ["tracing/release_max_level_error"]
 min-warn-logs = ["tracing/release_max_level_warn"]
 min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
+
 optimism = [
     "reth-primitives/optimism",
     "reth-revm/optimism",
@@ -146,7 +151,7 @@ optimism = [
     "reth-optimism-payload-builder/optimism",
     "reth-ethereum-payload-builder/optimism",
 ]
-asm-keccak = ["reth-primitives/asm-keccak"]
+
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
 
