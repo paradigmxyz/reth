@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "Reth storage provider."
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-primitives.workspace = true
@@ -35,6 +38,8 @@ itertools.workspace = true
 pin-project.workspace = true
 parking_lot.workspace = true
 dashmap = { version = "5.5", features = ["inline"] }
+strum.workspace = true
+ahash.workspace = true
 
 # test-utils
 alloy-rlp = { workspace = true, optional = true }

@@ -7,6 +7,7 @@
 //! ```
 //!
 //! If no recipients are specified, all transactions will be traced.
+
 use clap::Parser;
 use futures_util::StreamExt;
 use reth::{

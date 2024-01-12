@@ -7,12 +7,14 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-network.workspace = true
 reth-net-nat.workspace = true
 reth-discv4.workspace = true
-reth-downloaders.workspace = true
 reth-primitives.workspace = true
 
 # io

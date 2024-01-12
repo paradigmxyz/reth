@@ -1,0 +1,18 @@
+[package]
+name = "reth-payload-validator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Payload validation support"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives.workspace = true
+reth-rpc-types.workspace = true
+reth-rpc-types-compat.workspace = true

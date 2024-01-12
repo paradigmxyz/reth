@@ -4,6 +4,7 @@ use crate::{
     builder::ETH_REQUEST_CHANNEL_CAPACITY,
     error::NetworkError,
     eth_requests::EthRequestHandler,
+    protocol::IntoRlpxSubProtocol,
     transactions::{TransactionsHandle, TransactionsManager},
     NetworkConfig, NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkHandle,
     NetworkManager,
@@ -94,6 +95,14 @@ where
     /// Return a slice of all peers.
     pub fn peers(&self) -> &[Peer<C, Pool>] {
         &self.peers
+    }
+
+    /// Remove a peer from the [`Testnet`] and return it.
+    ///
+    /// # Panics
+    /// If the index is out of bounds.
+    pub fn remove_peer(&mut self, index: usize) -> Peer<C, Pool> {
+        self.peers.remove(index)
     }
 
     /// Return a mutable iterator over all peers.
@@ -332,6 +341,11 @@ where
         self.network.num_connected_peers()
     }
 
+    /// Adds an additional protocol handler to the peer.
+    pub fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
+        self.network.add_rlpx_sub_protocol(protocol);
+    }
+
     /// Returns a handle to the peer's network.
     pub fn peer_handle(&self) -> PeerHandle<Pool> {
         PeerHandle {
@@ -344,6 +358,16 @@ where
     /// The address that listens for incoming connections.
     pub fn local_addr(&self) -> SocketAddr {
         self.network.local_addr()
+    }
+
+    /// The [PeerId] of this peer.
+    pub fn peer_id(&self) -> PeerId {
+        *self.network.peer_id()
+    }
+
+    /// Returns mutable access to the network.
+    pub fn network_mut(&mut self) -> &mut NetworkManager<C> {
+        &mut self.network
     }
 
     /// Returns the [`NetworkHandle`] of this peer.

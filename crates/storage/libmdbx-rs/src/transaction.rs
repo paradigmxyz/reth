@@ -15,6 +15,7 @@ use std::{
     mem::size_of,
     ptr, slice,
     sync::{atomic::AtomicBool, mpsc::sync_channel, Arc},
+    time::Duration,
 };
 
 mod private {
@@ -166,8 +167,8 @@ where
     /// Commits the transaction.
     ///
     /// Any pending operations will be saved.
-    pub fn commit(self) -> Result<bool> {
-        self.commit_and_rebind_open_dbs().map(|v| v.0)
+    pub fn commit(self) -> Result<(bool, CommitLatency)> {
+        self.commit_and_rebind_open_dbs().map(|v| (v.0, v.1))
     }
 
     pub fn prime_for_permaopen(&self, db: Database) {
@@ -175,11 +176,15 @@ where
     }
 
     /// Commits the transaction and returns table handles permanently open until dropped.
-    pub fn commit_and_rebind_open_dbs(self) -> Result<(bool, Vec<Database>)> {
+    pub fn commit_and_rebind_open_dbs(self) -> Result<(bool, CommitLatency, Vec<Database>)> {
         let result = {
             let result = self.txn_execute(|txn| {
                 if K::ONLY_CLEAN {
-                    mdbx_result(unsafe { ffi::mdbx_txn_commit_ex(txn, ptr::null_mut()) })
+                    let mut latency = CommitLatency::new();
+                    mdbx_result(unsafe {
+                        ffi::mdbx_txn_commit_ex(txn, latency.mdb_commit_latency())
+                    })
+                    .map(|v| (v, latency))
                 } else {
                     let (sender, rx) = sync_channel(0);
                     self.env()
@@ -193,9 +198,10 @@ where
             self.inner.set_committed();
             result
         };
-        result.map(|v| {
+        result.map(|(v, latency)| {
             (
                 v,
+                latency,
                 self.inner
                     .primed_dbis
                     .lock()
@@ -532,6 +538,84 @@ impl TransactionPtr {
     {
         let _lck = self.lock.lock();
         (f)(self.txn)
+    }
+}
+
+/// Commit latencies info.
+///
+/// Contains information about latency of commit stages.
+/// Inner struct stores this info in 1/65536 of seconds units.
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct CommitLatency(ffi::MDBX_commit_latency);
+
+impl CommitLatency {
+    /// Create a new CommitLatency with zero'd inner struct `ffi::MDBX_commit_latency`.
+    pub(crate) fn new() -> Self {
+        unsafe { Self(std::mem::zeroed()) }
+    }
+
+    /// Returns a mut pointer to `ffi::MDBX_commit_latency`.
+    pub(crate) fn mdb_commit_latency(&mut self) -> *mut ffi::MDBX_commit_latency {
+        &mut self.0
+    }
+}
+
+impl CommitLatency {
+    /// Duration of preparation (commit child transactions, update
+    /// sub-databases records and cursors destroying).
+    #[inline]
+    pub fn preparation(&self) -> Duration {
+        Self::time_to_duration(self.0.preparation)
+    }
+
+    /// Duration of GC update by wall clock.
+    #[inline]
+    pub fn gc_wallclock(&self) -> Duration {
+        Self::time_to_duration(self.0.gc_wallclock)
+    }
+
+    /// Duration of internal audit if enabled.
+    #[inline]
+    pub fn audit(&self) -> Duration {
+        Self::time_to_duration(self.0.audit)
+    }
+
+    /// Duration of writing dirty/modified data pages to a filesystem,
+    /// i.e. the summary duration of a `write()` syscalls during commit.
+    #[inline]
+    pub fn write(&self) -> Duration {
+        Self::time_to_duration(self.0.write)
+    }
+
+    /// Duration of syncing written data to the disk/storage, i.e.
+    /// the duration of a `fdatasync()` or a `msync()` syscall during commit.
+    #[inline]
+    pub fn sync(&self) -> Duration {
+        Self::time_to_duration(self.0.sync)
+    }
+
+    /// Duration of transaction ending (releasing resources).
+    #[inline]
+    pub fn ending(&self) -> Duration {
+        Self::time_to_duration(self.0.ending)
+    }
+
+    /// The total duration of a commit.
+    #[inline]
+    pub fn whole(&self) -> Duration {
+        Self::time_to_duration(self.0.whole)
+    }
+
+    /// User-mode CPU time spent on GC update.
+    #[inline]
+    pub fn gc_cputime(&self) -> Duration {
+        Self::time_to_duration(self.0.gc_cputime)
+    }
+
+    #[inline]
+    fn time_to_duration(time: u32) -> Duration {
+        Duration::from_nanos(time as u64 * (1_000_000_000 / 65_536))
     }
 }
 

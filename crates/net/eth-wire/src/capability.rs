@@ -317,6 +317,14 @@ impl SharedCapability {
         }
     }
 
+    /// Returns the eth version if it's the `eth` capability.
+    pub fn eth_version(&self) -> Option<EthVersion> {
+        match self {
+            SharedCapability::Eth { version, .. } => Some(*version),
+            _ => None,
+        }
+    }
+
     /// Returns the message ID offset of the current capability.
     ///
     /// This represents the message ID offset for the first message of the eth capability in the
@@ -375,8 +383,8 @@ impl SharedCapabilities {
 
     /// Returns the negotiated eth version if it is shared.
     #[inline]
-    pub fn eth_version(&self) -> Result<u8, P2PStreamError> {
-        self.eth().map(|cap| cap.version())
+    pub fn eth_version(&self) -> Result<EthVersion, P2PStreamError> {
+        self.eth().map(|cap| cap.eth_version().expect("is eth; qed"))
     }
 
     /// Returns true if the shared capabilities contain the given capability.
@@ -438,6 +446,18 @@ impl SharedCapabilities {
     ) -> Result<&SharedCapability, UnsupportedCapabilityError> {
         self.find(cap).ok_or_else(|| UnsupportedCapabilityError { capability: cap.clone() })
     }
+
+    /// Returns the number of shared capabilities.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Returns true if there are no shared capabilities.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 /// Determines the offsets for each shared capability between the input list of peer
@@ -479,12 +499,9 @@ pub fn shared_capability_offsets(
         if let Some(messages) = our_capabilities.get(&peer_capability).copied() {
             // If multiple versions are shared of the same (equal name) capability, the numerically
             // highest wins, others are ignored
-
-            let version = shared_capabilities.get(&peer_capability.name).map(|v| v.version);
-
-            // TODO(mattsse): simplify
-            if version.is_none() ||
-                (version.is_some() && peer_capability.version > version.expect("is some; qed"))
+            if shared_capabilities
+                .get(&peer_capability.name)
+                .map_or(true, |v| peer_capability.version > v.version)
             {
                 shared_capabilities.insert(
                     peer_capability.name.clone(),
@@ -610,6 +627,18 @@ mod tests {
         assert!(capabilities.supports_eth_v66());
         assert!(capabilities.supports_eth_v67());
         assert!(capabilities.supports_eth_v68());
+    }
+
+    #[test]
+    fn test_peer_capability_version_zero() {
+        let cap = Capability::new_static("TestName", 0);
+        let local_capabilities: Vec<Protocol> =
+            vec![Protocol::new(cap.clone(), 0), EthVersion::Eth67.into(), EthVersion::Eth68.into()];
+        let peer_capabilities = vec![cap.clone()];
+
+        let shared = shared_capability_offsets(local_capabilities, peer_capabilities).unwrap();
+        assert_eq!(shared.len(), 1);
+        assert_eq!(shared[0], SharedCapability::UnknownCapability { cap, offset: 16, messages: 0 })
     }
 
     #[test]

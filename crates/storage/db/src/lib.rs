@@ -60,8 +60,6 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 /// Traits defining the database abstractions, such as cursors and transactions.
@@ -153,7 +151,11 @@ pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<Databas
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::*;
-    use crate::database::Database;
+    use crate::{
+        database::Database,
+        database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    };
+    use reth_primitives::fs;
     use std::{path::PathBuf, sync::Arc};
 
     /// Error during database open
@@ -176,7 +178,7 @@ pub mod test_utils {
         fn drop(&mut self) {
             if let Some(db) = self.db.take() {
                 drop(db);
-                let _ = std::fs::remove_dir_all(&self.path);
+                let _ = fs::remove_dir_all(&self.path);
             }
         }
     }
@@ -210,9 +212,27 @@ pub mod test_utils {
         }
     }
 
+    impl<DB: DatabaseMetrics> DatabaseMetrics for TempDatabase<DB> {
+        fn report_metrics(&self) {
+            self.db().report_metrics()
+        }
+    }
+
+    impl<DB: DatabaseMetadata> DatabaseMetadata for TempDatabase<DB> {
+        fn metadata(&self) -> DatabaseMetadataValue {
+            self.db().metadata()
+        }
+    }
+
+    /// Get a temporary directory path to use for the database
+    pub fn tempdir_path() -> PathBuf {
+        let builder = tempfile::Builder::new().prefix("reth-test-").rand_bytes(8).tempdir();
+        builder.expect(ERROR_TEMPDIR).into_path()
+    }
+
     /// Create read/write database for testing
     pub fn create_test_rw_db() -> Arc<TempDatabase<DatabaseEnv>> {
-        let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
+        let path = tempdir_path();
         let emsg = format!("{}: {:?}", ERROR_DB_CREATION, path);
 
         let db = init_db(&path, None).expect(&emsg);
@@ -229,7 +249,7 @@ pub mod test_utils {
 
     /// Create read only database for testing
     pub fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnv>> {
-        let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
+        let path = tempdir_path();
         {
             init_db(path.as_path(), None).expect(ERROR_DB_CREATION);
         }
@@ -245,6 +265,7 @@ mod tests {
         version::{db_version_file_path, DatabaseVersionError},
     };
     use assert_matches::assert_matches;
+    use reth_primitives::fs;
     use tempfile::tempdir;
 
     #[test]
@@ -265,8 +286,7 @@ mod tests {
 
         // Database is not empty, version file is malformed
         {
-            std::fs::write(path.path().join(db_version_file_path(&path)), "invalid-version")
-                .unwrap();
+            fs::write(path.path().join(db_version_file_path(&path)), "invalid-version").unwrap();
             let db = init_db(&path, None);
             assert!(db.is_err());
             assert_matches!(
@@ -277,7 +297,7 @@ mod tests {
 
         // Database is not empty, version file contains not matching version
         {
-            std::fs::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
+            fs::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
             let db = init_db(&path, None);
             assert!(db.is_err());
             assert_matches!(

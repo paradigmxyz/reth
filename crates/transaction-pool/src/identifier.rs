@@ -18,7 +18,7 @@ pub(crate) struct SenderIdentifiers {
 
 impl SenderIdentifiers {
     /// Returns the address for the given identifier.
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub(crate) fn address(&self, id: &SenderId) -> Option<&Address> {
         self.sender_to_address.get(id)
     }

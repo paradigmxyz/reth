@@ -1,4 +1,5 @@
 //! clap [Args](clap::Args) for Dev testnet configuration
+
 use std::time::Duration;
 
 use clap::Args;
@@ -29,7 +30,7 @@ pub struct DevArgs {
     /// Interval between blocks.
     ///
     /// Parses strings using [humantime::parse_duration]
-    /// --dev.block_time 12s
+    /// --dev.block-time 12s
     #[arg(
         long = "dev.block-time",
         help_heading = "Dev testnet",

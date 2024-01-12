@@ -1,4 +1,5 @@
 //! Reth genesis initialization utility functions.
+
 use reth_db::{
     cursor::DbCursorRO,
     database::Database,
@@ -45,7 +46,6 @@ impl From<DatabaseError> for InitDatabaseError {
 }
 
 /// Write the genesis block if it has not already been written
-#[allow(clippy::field_reassign_with_default)]
 pub fn init_genesis<DB: Database>(
     db: Arc<DB>,
     chain: Arc<ChainSpec>,
@@ -234,7 +234,6 @@ mod tests {
     };
     use std::collections::HashMap;
 
-    #[allow(clippy::type_complexity)]
     fn collect_table_entries<DB, T>(
         tx: &<DB as Database>::TX,
     ) -> Result<Vec<TableRow<T>>, InitDatabaseError>
@@ -295,7 +294,7 @@ mod tests {
         let address_with_storage = Address::with_last_byte(2);
         let storage_key = B256::with_last_byte(1);
         let chain_spec = Arc::new(ChainSpec {
-            chain: Chain::Id(1),
+            chain: Chain::from_id(1),
             genesis: Genesis {
                 alloc: HashMap::from([
                     (

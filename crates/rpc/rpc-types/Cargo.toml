@@ -8,10 +8,15 @@ homepage.workspace = true
 repository.workspace = true
 description = "Reth RPC types"
 
+[lints]
+workspace = true
+
 [dependencies]
 # ethereum
 alloy-rlp = { workspace = true, features = ["arrayvec", "derive"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp", "serde"] }
+alloy-rpc-types.workspace = true
+alloy-rpc-trace-types.workspace = true
 ethereum_ssz_derive = { version = "0.5", optional = true }
 ethereum_ssz = { version = "0.5", optional = true }
 
@@ -35,8 +40,8 @@ proptest-derive = { workspace = true, optional = true }
 
 [features]
 default = ["jsonrpsee-types"]
-arbitrary = ["dep:arbitrary", "dep:proptest-derive", "dep:proptest", "alloy-primitives/arbitrary"]
-ssz = ["dep:ethereum_ssz" ,"dep:ethereum_ssz_derive", "alloy-primitives/ssz"]
+arbitrary = ["dep:arbitrary", "dep:proptest-derive", "dep:proptest", "alloy-primitives/arbitrary", "alloy-rpc-types/arbitrary"]
+ssz = ["dep:ethereum_ssz" ,"dep:ethereum_ssz_derive", "alloy-primitives/ssz", "alloy-rpc-types/ssz"]
 optimism = []
 
 

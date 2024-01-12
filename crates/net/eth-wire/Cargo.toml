@@ -8,12 +8,16 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-codecs.workspace = true
 reth-primitives.workspace = true
 reth-ecies.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
+alloy-chains = {workspace = true, features = ["serde", "rlp", "arbitrary"] }
 reth-discv4.workspace = true
 
 # metrics
@@ -53,6 +57,7 @@ secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recov
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-derive.workspace = true
+async-stream = "0.3"
 
 [features]
 default = ["serde"]

@@ -49,6 +49,7 @@ impl HelloMessageWithProtocols {
     }
 
     /// Returns the raw [HelloMessage] without the additional protocol information.
+    #[inline]
     pub fn message(&self) -> HelloMessage {
         HelloMessage {
             protocol_version: self.protocol_version,
@@ -67,6 +68,25 @@ impl HelloMessageWithProtocols {
             capabilities: self.protocols.into_iter().map(|p| p.cap).collect(),
             port: self.port,
             id: self.id,
+        }
+    }
+
+    /// Returns true if the set of protocols contains the given protocol.
+    #[inline]
+    pub fn contains_protocol(&self, protocol: &Protocol) -> bool {
+        self.protocols.iter().any(|p| p.cap == protocol.cap)
+    }
+
+    /// Adds a new protocol to the set.
+    ///
+    /// Returns an error if the protocol already exists.
+    #[inline]
+    pub fn try_add_protocol(&mut self, protocol: Protocol) -> Result<(), Protocol> {
+        if self.contains_protocol(&protocol) {
+            Err(protocol)
+        } else {
+            self.protocols.push(protocol);
+            Ok(())
         }
     }
 }

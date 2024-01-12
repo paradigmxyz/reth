@@ -1,10 +1,12 @@
 //! Error handling for (`EthStream`)[crate::EthStream]
+
 use crate::{
     errors::{MuxDemuxError, P2PStreamError},
     version::ParseVersionError,
     DisconnectReason, EthMessageID, EthVersion,
 };
-use reth_primitives::{Chain, GotExpected, GotExpectedBoxed, ValidationError, B256};
+use alloy_chains::Chain;
+use reth_primitives::{GotExpected, GotExpectedBoxed, ValidationError, B256};
 use std::io;
 
 /// Errors when sending/receiving messages
