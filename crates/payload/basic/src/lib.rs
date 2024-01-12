@@ -466,9 +466,9 @@ where
     type ResolvePayloadFuture = ResolveBestPayload<Self::BuiltPayload>;
     type BuiltPayload = Builder::BuiltPayload;
 
-    fn best_payload(&self) -> Result<Arc<Self::BuiltPayload>, PayloadBuilderError> {
+    fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         if let Some(ref payload) = self.best_payload {
-            return Ok(Arc::new(payload.clone()))
+            return Ok(payload.clone())
         }
         // No payload has been built yet, but we need to return something that the CL then can
         // deliver, so we need to return an empty payload.
@@ -477,7 +477,7 @@ where
         // away and the first full block should have been built by the time CL is requesting the
         // payload.
         self.metrics.inc_requested_empty_payload();
-        build_empty_payload(&self.client, self.config.clone()).map(Arc::new)
+        build_empty_payload(&self.client, self.config.clone())
     }
 
     fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError> {

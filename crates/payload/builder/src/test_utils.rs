@@ -11,7 +11,6 @@ use reth_provider::CanonStateNotification;
 use std::{
     future::Future,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -68,12 +67,6 @@ pub struct TestPayloadJob {
     attr: EthPayloadBuilderAttributes,
 }
 
-impl TestPayloadJob {
-    fn take_best_payload(&self) -> EthBuiltPayload {
-        EthBuiltPayload::new(self.attr.payload_id(), Block::default().seal_slow(), U256::ZERO)
-    }
-}
-
 impl Future for TestPayloadJob {
     type Output = Result<(), PayloadBuilderError>;
 
@@ -88,8 +81,8 @@ impl PayloadJob for TestPayloadJob {
         futures_util::future::Ready<Result<EthBuiltPayload, PayloadBuilderError>>;
     type BuiltPayload = EthBuiltPayload;
 
-    fn best_payload(&self) -> Result<Arc<EthBuiltPayload>, PayloadBuilderError> {
-        Ok(Arc::new(self.take_best_payload()))
+    fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
+        Ok(EthBuiltPayload::new(self.attr.payload_id(), Block::default().seal_slow(), U256::ZERO))
     }
 
     fn payload_attributes(&self) -> Result<EthPayloadBuilderAttributes, PayloadBuilderError> {
@@ -97,7 +90,7 @@ impl PayloadJob for TestPayloadJob {
     }
 
     fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
-        let fut = futures_util::future::ready(Ok(self.take_best_payload()));
+        let fut = futures_util::future::ready(self.best_payload());
         (fut, KeepPayloadJobAlive::No)
     }
 }

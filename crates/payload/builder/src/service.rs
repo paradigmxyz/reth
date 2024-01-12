@@ -15,7 +15,6 @@ use std::{
     fmt,
     future::Future,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::sync::{mpsc, oneshot};
@@ -51,7 +50,7 @@ where
     pub async fn best_payload(
         &self,
         id: PayloadId,
-    ) -> Option<Result<Arc<Engine::BuiltPayload>, PayloadBuilderError>> {
+    ) -> Option<Result<Engine::BuiltPayload, PayloadBuilderError>> {
         self.inner.best_payload(id).await
     }
 
@@ -118,7 +117,7 @@ where
     async fn best_payload(
         &self,
         id: PayloadId,
-    ) -> Option<Result<Arc<Engine::BuiltPayload>, PayloadBuilderError>> {
+    ) -> Option<Result<Engine::BuiltPayload, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
         self.to_service.send(PayloadServiceCommand::BestPayload(id, tx)).ok()?;
         rx.await.ok()?
@@ -235,12 +234,12 @@ where
     fn best_payload(
         &self,
         id: PayloadId,
-    ) -> Option<Result<Arc<<Gen::Job as PayloadJob>::BuiltPayload>, PayloadBuilderError>> {
+    ) -> Option<Result<Engine::BuiltPayload, PayloadBuilderError>> {
         let res = self
             .payload_jobs
             .iter()
             .find(|(_, job_id)| *job_id == id)
-            .map(|(j, _)| j.best_payload());
+            .map(|(j, _)| j.best_payload().map(|p| p.into()));
         if let Some(Ok(ref best)) = res {
             self.metrics.set_best_revenue(best.block().number, f64::from(best.fees()));
         }
@@ -250,10 +249,7 @@ where
 
     /// Returns the best payload for the given identifier that has been built so far and terminates
     /// the job if requested.
-    fn resolve(
-        &mut self,
-        id: PayloadId,
-    ) -> Option<PayloadFuture<<Gen::Job as PayloadJob>::BuiltPayload>> {
+    fn resolve(&mut self, id: PayloadId) -> Option<PayloadFuture<Engine::BuiltPayload>> {
         trace!(%id, "resolving payload job");
 
         let job = self.payload_jobs.iter().position(|(_, job_id)| *job_id == id)?;
@@ -273,7 +269,7 @@ where
                 resolved_metrics
                     .set_resolved_revenue(payload.block().number, f64::from(payload.fees()));
             }
-            res
+            res.map(|p| p.into())
         };
 
         Some(Box::pin(fut))
@@ -312,10 +308,8 @@ where
     Gen: PayloadJobGenerator + Unpin + 'static,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
-    Gen::Job: PayloadJob<
-        PayloadAttributes = Engine::PayloadBuilderAttributes,
-        BuiltPayload = Engine::BuiltPayload,
-    >,
+    Gen::Job: PayloadJob<PayloadAttributes = Engine::PayloadBuilderAttributes>,
+    <Gen::Job as PayloadJob>::BuiltPayload: Into<Engine::BuiltPayload>,
 {
     type Output = ();
 
@@ -416,7 +410,7 @@ pub enum PayloadServiceCommand<Engine: EngineTypes> {
     /// Get the best payload so far
     BestPayload(
         PayloadId,
-        oneshot::Sender<Option<Result<Arc<Engine::BuiltPayload>, PayloadBuilderError>>>,
+        oneshot::Sender<Option<Result<Engine::BuiltPayload, PayloadBuilderError>>>,
     ),
     /// Get the payload attributes for the given payload
     PayloadAttributes(

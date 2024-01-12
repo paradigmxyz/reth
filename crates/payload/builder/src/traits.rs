@@ -3,7 +3,7 @@
 use crate::error::PayloadBuilderError;
 use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
 use reth_provider::CanonStateNotification;
-use std::{future::Future, sync::Arc};
+use std::future::Future;
 
 /// A type that can build a payload.
 ///
@@ -30,7 +30,7 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     /// Returns the best payload that has been built so far.
     ///
     /// Note: This is never called by the CL.
-    fn best_payload(&self) -> Result<Arc<Self::BuiltPayload>, PayloadBuilderError>;
+    fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError>;
 
     /// Returns the payload attributes for the payload being built.
     fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError>;
