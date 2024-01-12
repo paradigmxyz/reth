@@ -215,7 +215,11 @@ mod tests {
     fn parse_common_import_command_chain_args() {
         for chain in SUPPORTED_CHAINS {
             let args: ImportCommand = ImportCommand::parse_from(["reth", "--chain", chain, "."]);
-            assert_eq!(args.chain.chain, chain.parse::<reth_primitives::Chain>().unwrap());
+            assert_eq!(
+                Ok(args.chain.chain),
+                chain.parse::<reth_primitives::Chain>(),
+                "failed to parse chain {chain}"
+            );
         }
     }
 }
