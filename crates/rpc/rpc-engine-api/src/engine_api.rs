@@ -4,9 +4,8 @@ use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_node_api::{
-    validate_payload_timestamp, validate_version_specific_fields, BuiltPayload,
-    EngineApiMessageVersion, EngineTypes, PayloadAttributes, PayloadBuilderAttributes,
-    PayloadOrAttributes,
+    validate_payload_timestamp, BuiltPayload, EngineApiMessageVersion, EngineTypes,
+    PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
 };
 use reth_payload_builder::PayloadStore;
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
@@ -100,7 +99,7 @@ where
             PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
                 &payload, None,
             );
-        validate_version_specific_fields(
+        EngineT::validate_version_specific_fields(
             &self.inner.chain_spec,
             EngineApiMessageVersion::V1,
             &payload_or_attrs,
@@ -118,7 +117,7 @@ where
             PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
                 &payload, None,
             );
-        validate_version_specific_fields(
+        EngineT::validate_version_specific_fields(
             &self.inner.chain_spec,
             EngineApiMessageVersion::V2,
             &payload_or_attrs,
@@ -139,7 +138,7 @@ where
                 &payload,
                 Some(parent_beacon_block_root),
             );
-        validate_version_specific_fields(
+        EngineT::validate_version_specific_fields(
             &self.inner.chain_spec,
             EngineApiMessageVersion::V3,
             &payload_or_attrs,
