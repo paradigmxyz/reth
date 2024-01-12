@@ -963,10 +963,10 @@ impl ChainSpec {
         ChainSpecBuilder::default()
     }
 
-    /// Returns bootnodes for the given chain.
+    /// Returns the known bootnode records for the given chain.
     pub fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
-        let chain = self.chain;
         use NamedChain as C;
+        let chain = self.chain;
         match chain.try_into().ok()? {
             C::Mainnet => Some(mainnet_nodes()),
             C::Goerli => Some(goerli_nodes()),
