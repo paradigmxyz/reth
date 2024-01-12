@@ -81,9 +81,7 @@ where
 #[derive(Debug, Clone)]
 pub struct PayloadBuilderHandle<Engine: EngineTypes> {
     /// Sender half of the message channel to the [PayloadBuilderService].
-    to_service: mpsc::UnboundedSender<
-        PayloadServiceCommand<Engine::PayloadBuilderAttributes, Engine::BuiltPayload>,
-    >,
+    to_service: mpsc::UnboundedSender<PayloadServiceCommand<Engine>>,
 }
 
 // === impl PayloadBuilderHandle ===
@@ -96,11 +94,7 @@ where
     ///
     /// Note: this is only used internally by the [PayloadBuilderService] to manage the payload
     /// building flow See [PayloadBuilderService::poll] for implementation details.
-    pub fn new(
-        to_service: mpsc::UnboundedSender<
-            PayloadServiceCommand<Engine::PayloadBuilderAttributes, Engine::BuiltPayload>,
-        >,
-    ) -> Self {
+    pub fn new(to_service: mpsc::UnboundedSender<PayloadServiceCommand<Engine>>) -> Self {
         Self { to_service }
     }
 
@@ -189,13 +183,9 @@ where
     /// All active payload jobs.
     payload_jobs: Vec<(Gen::Job, PayloadId)>,
     /// Copy of the sender half, so new [`PayloadBuilderHandle`] can be created on demand.
-    service_tx: mpsc::UnboundedSender<
-        PayloadServiceCommand<Engine::PayloadBuilderAttributes, Engine::BuiltPayload>,
-    >,
+    service_tx: mpsc::UnboundedSender<PayloadServiceCommand<Engine>>,
     /// Receiver half of the command channel.
-    command_rx: UnboundedReceiverStream<
-        PayloadServiceCommand<Engine::PayloadBuilderAttributes, Engine::BuiltPayload>,
-    >,
+    command_rx: UnboundedReceiverStream<PayloadServiceCommand<Engine>>,
     /// Metrics for the payload builder service
     metrics: PayloadBuilderServiceMetrics,
     /// Chain events notification stream
@@ -417,21 +407,29 @@ where
 type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
 
 /// Message type for the [PayloadBuilderService].
-pub enum PayloadServiceCommand<A, P> {
+pub enum PayloadServiceCommand<Engine: EngineTypes> {
     /// Start building a new payload.
-    BuildNewPayload(A, oneshot::Sender<Result<PayloadId, PayloadBuilderError>>),
+    BuildNewPayload(
+        Engine::PayloadBuilderAttributes,
+        oneshot::Sender<Result<PayloadId, PayloadBuilderError>>,
+    ),
     /// Get the best payload so far
-    BestPayload(PayloadId, oneshot::Sender<Option<Result<Arc<P>, PayloadBuilderError>>>),
+    BestPayload(
+        PayloadId,
+        oneshot::Sender<Option<Result<Arc<Engine::BuiltPayload>, PayloadBuilderError>>>,
+    ),
     /// Get the payload attributes for the given payload
-    PayloadAttributes(PayloadId, oneshot::Sender<Option<Result<A, PayloadBuilderError>>>),
+    PayloadAttributes(
+        PayloadId,
+        oneshot::Sender<Option<Result<Engine::PayloadBuilderAttributes, PayloadBuilderError>>>,
+    ),
     /// Resolve the payload and return the payload
-    Resolve(PayloadId, oneshot::Sender<Option<PayloadFuture<P>>>),
+    Resolve(PayloadId, oneshot::Sender<Option<PayloadFuture<Engine::BuiltPayload>>>),
 }
 
-impl<A, P> fmt::Debug for PayloadServiceCommand<A, P>
+impl<Engine> fmt::Debug for PayloadServiceCommand<Engine>
 where
-    A: fmt::Debug,
-    P: fmt::Debug,
+    Engine: EngineTypes,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
