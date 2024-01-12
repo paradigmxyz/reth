@@ -4223,7 +4223,6 @@ dependencies = [
 name = "manual-p2p"
 version = "0.0.0"
 dependencies = [
- "alloy-chains",
  "eyre",
  "futures",
  "once_cell",
