@@ -2,7 +2,7 @@
 
 Manipulate individual stages
 
-```bash
+```text
 $ reth stage --help
 Usage: reth stage [OPTIONS] <COMMAND>
 

@@ -929,7 +929,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Returns the internal transaction with additional metadata
-    #[cfg(test)]
     pub(crate) fn get(&self, id: &TransactionId) -> Option<&PoolInternalTransaction<T>> {
         self.txs.get(id)
     }
@@ -1254,7 +1253,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         &self,
         transaction: ValidPoolTransaction<T>,
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
-        if !transaction.origin.is_local() || self.local_transactions_config.no_local_exemptions() {
+        if !self.local_transactions_config.is_local(transaction.origin, transaction.sender()) {
             let current_txs =
                 self.tx_counter.get(&transaction.sender_id()).copied().unwrap_or_default();
             if current_txs >= self.max_account_slots {
@@ -1622,8 +1621,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
 }
 
 #[cfg(test)]
-#[allow(missing_docs)]
 impl<T: PoolTransaction> AllTransactions<T> {
+    /// This function retrieves the number of transactions stored in the pool for a specific sender.
+    ///
+    /// If there are no transactions for the given sender, it returns zero by default.
     pub(crate) fn tx_count(&self, sender: SenderId) -> usize {
         self.tx_counter.get(&sender).copied().unwrap_or_default()
     }

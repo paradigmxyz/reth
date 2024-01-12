@@ -1,3 +1,4 @@
+#![allow(unreachable_pub)]
 //! Tests for eth related requests
 
 use rand::Rng;

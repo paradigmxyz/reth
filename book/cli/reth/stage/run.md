@@ -2,7 +2,7 @@
 
 Run a single stage.
 
-```bash
+```text
 $ reth stage run --help
 Usage: reth stage run [OPTIONS] --from <FROM> --to <TO> <STAGE>
 
@@ -109,7 +109,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
           
-          [default: reth/v0.1.0-alpha.13-<SHA>/aarch64-apple-darwin]
+          [default: reth/<VERSION>-<SHA>/<ARCH>]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.

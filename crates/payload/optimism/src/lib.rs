@@ -5,19 +5,20 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 #[cfg(feature = "optimism")]
 pub use builder::*;
 
+pub mod error;
+
 #[cfg(feature = "optimism")]
 mod builder {
+    use crate::error::OptimismPayloadBuilderError;
     use reth_basic_payload_builder::*;
+    use reth_node_api::PayloadBuilderAttributes;
     use reth_payload_builder::{
-        error::{OptimismPayloadBuilderError, PayloadBuilderError},
-        BuiltPayload,
+        error::PayloadBuilderError, BuiltPayload, OptimismPayloadBuilderAttributes,
     };
     use reth_primitives::{
         constants::BEACON_NONCE,
@@ -70,22 +71,24 @@ mod builder {
         Client: StateProviderFactory,
         Pool: TransactionPool,
     {
+        type Attributes = OptimismPayloadBuilderAttributes;
+
         fn try_build(
             &self,
-            args: BuildArguments<Pool, Client>,
+            args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes>,
         ) -> Result<BuildOutcome, PayloadBuilderError> {
             optimism_payload_builder(args, self.compute_pending_block)
         }
 
         fn on_missing_payload(
             &self,
-            args: BuildArguments<Pool, Client>,
+            args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes>,
         ) -> Option<Arc<BuiltPayload>> {
             // In Optimism, the PayloadAttributes can specify a `no_tx_pool` option that implies we
             // should not pull transactions from the tx pool. In this case, we build the payload
             // upfront with the list of transactions sent in the attributes without caring about
             // the results of the polling job, if a best payload has not already been built.
-            if args.config.attributes.optimism_payload_attributes.no_tx_pool {
+            if args.config.attributes.no_tx_pool {
                 if let Ok(BuildOutcome::Better { payload, .. }) = self.try_build(args) {
                     trace!(target: "payload_builder", "[OPTIMISM] Forced best payload");
                     let payload = Arc::new(payload);
@@ -107,7 +110,7 @@ mod builder {
     /// a result indicating success with the payload or an error in case of failure.
     #[inline]
     pub(crate) fn optimism_payload_builder<Pool, Client>(
-        args: BuildArguments<Pool, Client>,
+        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes>,
         _compute_pending_block: bool,
     ) -> Result<BuildOutcome, PayloadBuilderError>
     where
@@ -132,10 +135,9 @@ mod builder {
             ..
         } = config;
 
-        debug!(target: "payload_builder", id=%attributes.id, parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building new payload");
+        debug!(target: "payload_builder", id=%attributes.payload_id(), parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building new payload");
         let mut cumulative_gas_used = 0;
         let block_gas_limit: u64 = attributes
-            .optimism_payload_attributes
             .gas_limit
             .unwrap_or(initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX));
         let base_fee = initialized_block_env.basefee.to::<u64>();
@@ -148,7 +150,7 @@ mod builder {
         let block_number = initialized_block_env.number.to::<u64>();
 
         let is_regolith =
-            chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp);
+            chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp());
 
         // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
         // blocks will always have at least a single transaction in them (the L1 info transaction),
@@ -156,15 +158,15 @@ mod builder {
         // the above check for empty blocks will never be hit on OP chains.
         reth_revm::optimism::ensure_create2_deployer(
             chain_spec.clone(),
-            attributes.timestamp,
+            attributes.timestamp(),
             &mut db,
         )
         .map_err(|_| {
-            PayloadBuilderError::Optimism(OptimismPayloadBuilderError::ForceCreate2DeployerFail)
+            PayloadBuilderError::other(OptimismPayloadBuilderError::ForceCreate2DeployerFail)
         })?;
 
         let mut receipts = Vec::new();
-        for sequencer_tx in attributes.optimism_payload_attributes.transactions {
+        for sequencer_tx in &attributes.transactions {
             // Check if the job was cancelled, if so we can exit early.
             if cancel.is_cancelled() {
                 return Ok(BuildOutcome::Cancelled)
@@ -175,9 +177,7 @@ mod builder {
             // Deposit transactions do not have signatures, so if the tx is a deposit, this
             // will just pull in its `from` address.
             let sequencer_tx = sequencer_tx.clone().try_into_ecrecovered().map_err(|_| {
-                PayloadBuilderError::Optimism(
-                    OptimismPayloadBuilderError::TransactionEcRecoverFailed,
-                )
+                PayloadBuilderError::other(OptimismPayloadBuilderError::TransactionEcRecoverFailed)
             })?;
 
             // Cache the depositor account prior to the state transition for the deposit nonce.
@@ -192,7 +192,7 @@ mod builder {
                 })
                 .transpose()
                 .map_err(|_| {
-                    PayloadBuilderError::Optimism(OptimismPayloadBuilderError::AccountLoadFailed(
+                    PayloadBuilderError::other(OptimismPayloadBuilderError::AccountLoadFailed(
                         sequencer_tx.signer(),
                     ))
                 })?;
@@ -242,7 +242,7 @@ mod builder {
                 // receipt hashes should be computed when set. The state transition process
                 // ensures this is only set for post-Canyon deposit transactions.
                 deposit_receipt_version: chain_spec
-                    .is_fork_active_at_timestamp(Hardfork::Canyon, attributes.timestamp)
+                    .is_fork_active_at_timestamp(Hardfork::Canyon, attributes.timestamp())
                     .then_some(1),
             }));
 
@@ -250,7 +250,7 @@ mod builder {
             executed_txs.push(sequencer_tx.into_signed());
         }
 
-        if !attributes.optimism_payload_attributes.no_tx_pool {
+        if !attributes.no_tx_pool {
             while let Some(pool_tx) = best_txs.next() {
                 // ensure we still have capacity for this transaction
                 if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
@@ -340,8 +340,12 @@ mod builder {
             return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
         }
 
-        let WithdrawalsOutcome { withdrawals_root, withdrawals } =
-            commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
+        let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
+            &mut db,
+            &chain_spec,
+            attributes.timestamp(),
+            attributes.withdrawals().clone(),
+        )?;
 
         // merge all transitions into bundle state, this would apply the withdrawal balance changes
         // and 4788 contract call
@@ -353,7 +357,7 @@ mod builder {
             block_number,
         );
         let receipts_root = bundle
-            .receipts_root_slow(block_number, chain_spec.as_ref(), attributes.timestamp)
+            .receipts_root_slow(block_number, chain_spec.as_ref(), attributes.timestamp())
             .expect("Number is in range");
         let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
 
@@ -377,8 +381,8 @@ mod builder {
             receipts_root,
             withdrawals_root,
             logs_bloom,
-            timestamp: attributes.timestamp,
-            mix_hash: attributes.prev_randao,
+            timestamp: attributes.timestamp(),
+            mix_hash: attributes.prev_randao(),
             nonce: BEACON_NONCE,
             base_fee_per_gas: Some(base_fee),
             number: parent_block.number + 1,
@@ -386,7 +390,7 @@ mod builder {
             difficulty: U256::ZERO,
             gas_used: cumulative_gas_used,
             extra_data,
-            parent_beacon_block_root: attributes.parent_beacon_block_root,
+            parent_beacon_block_root: attributes.parent_beacon_block_root(),
             blob_gas_used,
             excess_blob_gas,
         };
@@ -397,7 +401,7 @@ mod builder {
         let sealed_block = block.seal_slow();
         debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
-        let mut payload = BuiltPayload::new(attributes.id, sealed_block, total_fees);
+        let mut payload = BuiltPayload::new(attributes.payload_id(), sealed_block, total_fees);
 
         // extend the payload with the blob sidecars from the executed txs
         payload.extend_sidecars(blob_sidecars);

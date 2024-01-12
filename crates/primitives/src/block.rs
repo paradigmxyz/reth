@@ -64,16 +64,37 @@ impl Block {
     ///
     /// If the number of senders does not match the number of transactions in the block
     /// and the signer recovery for one of the transactions fails.
+    ///
+    /// Note: this is expected to be called with blocks read from disk.
     #[track_caller]
-    pub fn with_senders(self, senders: Vec<Address>) -> BlockWithSenders {
+    pub fn with_senders_unchecked(self, senders: Vec<Address>) -> BlockWithSenders {
+        self.try_with_senders_unchecked(senders).expect("stored block is valid")
+    }
+
+    /// Transform into a [`BlockWithSenders`] using the given senders.
+    ///
+    /// If the number of senders does not match the number of transactions in the block, this falls
+    /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
+    /// See also [TransactionSigned::recover_signer_unchecked]
+    ///
+    /// Returns an error if a signature is invalid.
+    #[track_caller]
+    pub fn try_with_senders_unchecked(
+        self,
+        senders: Vec<Address>,
+    ) -> Result<BlockWithSenders, Self> {
         let senders = if self.body.len() == senders.len() {
             senders
         } else {
-            TransactionSigned::recover_signers(&self.body, self.body.len())
-                .expect("stored block is valid")
+            let Some(senders) =
+                TransactionSigned::recover_signers_unchecked(&self.body, self.body.len())
+            else {
+                return Err(self);
+            };
+            senders
         };
 
-        BlockWithSenders { block: self, senders }
+        Ok(BlockWithSenders { block: self, senders })
     }
 
     /// **Expensive**. Transform into a [`BlockWithSenders`] by recovering senders in the contained
@@ -475,7 +496,7 @@ impl BlockBody {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::{BlockId, BlockNumberOrTag::*, *};
     use crate::hex_literal::hex;
     use alloy_rlp::{Decodable, Encodable};

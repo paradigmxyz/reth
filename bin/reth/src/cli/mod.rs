@@ -12,13 +12,9 @@ use crate::{
     runner::CliRunner,
     version::{LONG_VERSION, SHORT_VERSION},
 };
-use clap::{value_parser, ArgAction, Args, Parser, Subcommand};
+use clap::{value_parser, Parser, Subcommand};
 use reth_primitives::ChainSpec;
-use reth_tracing::{
-    tracing::{metadata::LevelFilter, Level},
-    tracing_subscriber::filter::Directive,
-    FileWorkerGuard,
-};
+use reth_tracing::FileWorkerGuard;
 use std::sync::Arc;
 
 pub mod components;
@@ -67,9 +63,6 @@ pub struct Cli<Ext: RethCliExt = ()> {
 
     #[clap(flatten)]
     logs: LogArgs,
-
-    #[clap(flatten)]
-    verbosity: Verbosity,
 }
 
 impl<Ext: RethCliExt> Cli<Ext> {
@@ -101,13 +94,7 @@ impl<Ext: RethCliExt> Cli<Ext> {
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        let mut layers =
-            vec![reth_tracing::stdout(self.verbosity.directive(), &self.logs.color.to_string())];
-
-        let (additional_layers, guard) = self.logs.layers()?;
-        layers.extend(additional_layers);
-
-        reth_tracing::init(layers);
+        let guard = self.logs.init_tracing()?;
         Ok(guard)
     }
 
@@ -169,45 +156,6 @@ impl<Ext: RethCliExt> Commands<Ext> {
     pub fn set_node_extension(&mut self, ext: Ext::Node) {
         if let Commands::Node(command) = self {
             command.ext = ext
-        }
-    }
-}
-
-/// The verbosity settings for the cli.
-#[derive(Debug, Copy, Clone, Args)]
-#[command(next_help_heading = "Display")]
-pub struct Verbosity {
-    /// Set the minimum log level.
-    ///
-    /// -v      Errors
-    /// -vv     Warnings
-    /// -vvv    Info
-    /// -vvvv   Debug
-    /// -vvvvv  Traces (warning: very verbose!)
-    #[clap(short, long, action = ArgAction::Count, global = true, default_value_t = 3, verbatim_doc_comment, help_heading = "Display")]
-    verbosity: u8,
-
-    /// Silence all log output.
-    #[clap(long, alias = "silent", short = 'q', global = true, help_heading = "Display")]
-    quiet: bool,
-}
-
-impl Verbosity {
-    /// Get the corresponding [Directive] for the given verbosity, or none if the verbosity
-    /// corresponds to silent.
-    pub fn directive(&self) -> Directive {
-        if self.quiet {
-            LevelFilter::OFF.into()
-        } else {
-            let level = match self.verbosity - 1 {
-                0 => Level::ERROR,
-                1 => Level::WARN,
-                2 => Level::INFO,
-                3 => Level::DEBUG,
-                _ => Level::TRACE,
-            };
-
-            format!("{level}").parse().unwrap()
         }
     }
 }

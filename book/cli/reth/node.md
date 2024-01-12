@@ -2,7 +2,7 @@
 
 Start the node
 
-```bash
+```text
 $ reth node --help
 Usage: reth node [OPTIONS]
 
@@ -93,7 +93,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
 
-          [default: reth/v0.1.0-alpha.13-<SHA>/aarch64-apple-darwin]
+          [default: reth/<VERSION>-<SHA>/<ARCH>]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
@@ -333,7 +333,7 @@ Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder
 
-          [default: reth/v0.1.0-alpha.13/macos]
+          [default: reth/<VERSION>/<OS>]
 
       --builder.gaslimit <GAS_LIMIT>
           Target gas ceiling for built blocks

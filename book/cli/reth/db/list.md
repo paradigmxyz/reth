@@ -2,7 +2,7 @@
 
 Lists the contents of a table
 
-```bash
+```text
 $ reth db list --help
 Usage: reth db list [OPTIONS] <TABLE>
 

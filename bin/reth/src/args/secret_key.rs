@@ -9,14 +9,23 @@ use thiserror::Error;
 
 /// Errors returned by loading a [`SecretKey`], including IO errors.
 #[derive(Error, Debug)]
-#[allow(missing_docs)]
 pub enum SecretKeyError {
+    /// Error encountered during decoding of the secret key.
     #[error(transparent)]
     SecretKeyDecodeError(#[from] SecretKeyBaseError),
+
+    /// Error related to file system path operations.
     #[error(transparent)]
     SecretKeyFsPathError(#[from] FsPathError),
+
+    /// Represents an error when failed to access the key file.
     #[error("failed to access key file {secret_file:?}: {error}")]
-    FailedToAccessKeyFile { error: io::Error, secret_file: PathBuf },
+    FailedToAccessKeyFile {
+        /// The encountered IO error.
+        error: io::Error,
+        /// Path to the secret key file.
+        secret_file: PathBuf,
+    },
 }
 
 /// Attempts to load a [`SecretKey`] from a specified path. If no file exists there, then it

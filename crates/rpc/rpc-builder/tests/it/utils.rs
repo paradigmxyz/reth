@@ -1,5 +1,6 @@
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_network_api::noop::NoopNetwork;
+use reth_node_builder::EthEngineTypes;
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::MAINNET;
 use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
@@ -24,7 +25,7 @@ pub fn test_address() -> SocketAddr {
 pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
     let config = AuthServerConfig::builder(secret).socket_addr(test_address()).build();
     let (tx, _rx) = unbounded_channel();
-    let beacon_engine_handle = BeaconConsensusEngineHandle::new(tx);
+    let beacon_engine_handle = BeaconConsensusEngineHandle::<EthEngineTypes>::new(tx);
     let engine_api = EngineApi::new(
         NoopProvider::default(),
         MAINNET.clone(),
