@@ -31,6 +31,7 @@ thiserror.workspace = true
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
+alloy-chains.workspace = true
 
 [dev-dependencies]
 rand.workspace = true
