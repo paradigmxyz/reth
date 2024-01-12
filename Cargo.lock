@@ -139,6 +139,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0942ffc6dcaadf03badf6e6a2d0228460359d5e34b57ccdc720b7382dfbd5ec5"
 
 [[package]]
+name = "alloy-chains"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59a5f61137c31916542bb63cd70d0e0dd7a76f76b7f962f4337bc438612d45b2"
+dependencies = [
+ "alloy-rlp",
+ "arbitrary",
+ "num_enum 0.7.2",
+ "proptest",
+ "serde",
+ "strum",
+]
+
+[[package]]
 name = "alloy-dyn-abi"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4637,7 +4651,7 @@ version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "681030a937600a36906c185595136d26abfebb4aa9c65701cefcaf8578bb982b"
 dependencies = [
- "proc-macro-crate 3.0.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.48",
@@ -5221,15 +5235,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "proc-macro-crate"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b2685dd208a3771337d8d386a89840f0f43cd68be8dae90a5f8c2384effc9cd"
-dependencies = [
- "toml_edit 0.21.0",
-]
-
-[[package]]
 name = "proc-macro-error"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5640,6 +5645,7 @@ dependencies = [
 name = "reth"
 version = "0.1.0-alpha.14"
 dependencies = [
+ "alloy-chains",
  "alloy-rlp",
  "aquamarine",
  "backon",
@@ -5870,6 +5876,7 @@ dependencies = [
 name = "reth-consensus-common"
 version = "0.1.0-alpha.14"
 dependencies = [
+ "alloy-chains",
  "assert_matches",
  "cfg-if",
  "mockall",
@@ -5951,6 +5958,7 @@ dependencies = [
 name = "reth-dns-discovery"
 version = "0.1.0-alpha.14"
 dependencies = [
+ "alloy-chains",
  "alloy-rlp",
  "async-trait",
  "data-encoding",
@@ -6033,6 +6041,7 @@ dependencies = [
 name = "reth-eth-wire"
 version = "0.1.0-alpha.14"
 dependencies = [
+ "alloy-chains",
  "alloy-rlp",
  "arbitrary",
  "async-stream",
@@ -6266,6 +6275,7 @@ dependencies = [
 name = "reth-network-api"
 version = "0.1.0-alpha.14"
 dependencies = [
+ "alloy-chains",
  "async-trait",
  "reth-discv4",
  "reth-eth-wire",
@@ -6375,6 +6385,7 @@ name = "reth-primitives"
 version = "0.1.0-alpha.14"
 dependencies = [
  "ahash",
+ "alloy-chains",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
@@ -6799,6 +6810,7 @@ name = "reth-trie"
 version = "0.1.0-alpha.14"
 dependencies = [
  "ahash",
+ "alloy-chains",
  "alloy-rlp",
  "auto_impl",
  "criterion",
