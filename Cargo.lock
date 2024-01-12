@@ -387,7 +387,7 @@ checksum = "080e9890a082662b09c1ad45f567faeeb47f22b5fb23895fbe1e651e718e25ca"
 [[package]]
 name = "aquamarine"
 version = "0.4.0"
-source = "git+https://github.com/rjected/aquamarine#80f1a09da8f42279e3133aa1fa9f5ca8372ddd1c"
+source = "git+https://github.com/rjected/aquamarine#d931aa3a74aea35b63b953d1dbbaee0168460d70"
 dependencies = [
  "include_dir",
  "itertools 0.10.5",
