@@ -35,7 +35,6 @@ mod builder {
         primitives::{EVMError, Env, InvalidTransaction, ResultAndState},
         DatabaseCommit, State,
     };
-    use std::sync::Arc;
     use tracing::{debug, trace};
 
     /// Optimism's payload builder
@@ -84,7 +83,7 @@ mod builder {
         fn on_missing_payload(
             &self,
             args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, EthBuiltPayload>,
-        ) -> Option<Arc<EthBuiltPayload>> {
+        ) -> Option<EthBuiltPayload> {
             // In Optimism, the PayloadAttributes can specify a `no_tx_pool` option that implies we
             // should not pull transactions from the tx pool. In this case, we build the payload
             // upfront with the list of transactions sent in the attributes without caring about
@@ -92,7 +91,6 @@ mod builder {
             if args.config.attributes.no_tx_pool {
                 if let Ok(BuildOutcome::Better { payload, .. }) = self.try_build(args) {
                     trace!(target: "payload_builder", "[OPTIMISM] Forced best payload");
-                    let payload = Arc::new(payload);
                     return Some(payload)
                 }
             }
