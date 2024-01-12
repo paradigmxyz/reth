@@ -178,9 +178,7 @@ where
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let Some(element) = self else {
-            return 0;
-        };
+        let Some(element) = self else { return 0 };
 
         // We don't know the length of the element until we compact it.
         let mut tmp = Vec::with_capacity(64);
@@ -248,7 +246,7 @@ impl Compact for U256 {
     #[inline]
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         if len == 0 {
-            return (U256::ZERO, buf);
+            return (U256::ZERO, buf)
         }
 
         let mut arr = [0; 32];
@@ -358,7 +356,7 @@ fn decode_varuint(buf: &[u8]) -> (usize, &[u8]) {
         let byte = buf[i];
         value |= usize::from(byte & 0x7F) << (i * 7);
         if byte < 0x80 {
-            return (value, &buf[i + 1..]);
+            return (value, &buf[i + 1..])
         }
     }
 
