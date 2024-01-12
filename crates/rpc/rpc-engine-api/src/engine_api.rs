@@ -210,7 +210,7 @@ where
             .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| (*payload).clone().into_v1_payload())?)
+            .map(|payload| payload.clone().into_v1_payload())?)
     }
 
     /// Returns the most recent version of the payload that is available in the corresponding
@@ -241,7 +241,7 @@ where
             .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| (*payload).clone().into_v2_payload())?)
+            .map(|payload| payload.clone().into_v2_payload())?)
     }
 
     /// Returns the most recent version of the payload that is available in the corresponding
@@ -272,7 +272,7 @@ where
             .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| (*payload).clone().into_v3_payload())?)
+            .map(|payload| payload.clone().into_v3_payload())?)
     }
 
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`

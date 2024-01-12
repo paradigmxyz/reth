@@ -20,7 +20,7 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     /// Represents the payload attributes type that is used to spawn this payload job.
     type PayloadAttributes: PayloadBuilderAttributes + std::fmt::Debug;
     /// Represents the future that resolves the block that's returned to the CL.
-    type ResolvePayloadFuture: Future<Output = Result<Arc<Self::BuiltPayload>, PayloadBuilderError>>
+    type ResolvePayloadFuture: Future<Output = Result<Self::BuiltPayload, PayloadBuilderError>>
         + Send
         + Sync
         + 'static;

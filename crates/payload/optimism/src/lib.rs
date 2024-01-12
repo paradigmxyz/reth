@@ -336,7 +336,7 @@ mod builder {
         }
 
         // check if we have a better block
-        if !is_better_payload(best_payload.as_deref(), total_fees) {
+        if !is_better_payload(best_payload.as_ref(), total_fees) {
             // can skip building the block
             return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
         }

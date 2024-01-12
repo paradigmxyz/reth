@@ -154,6 +154,7 @@ where
     Tasks: TaskSpawner + Clone + Unpin + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
     <Builder as PayloadBuilder<Pool, Client>>::Attributes: Unpin + Clone,
+    <Builder as PayloadBuilder<Pool, Client>>::BuiltPayload: Unpin + Clone,
 {
     type Job = BasicPayloadJob<Client, Pool, Tasks, Builder>;
 
@@ -343,7 +344,7 @@ where
     /// The interval at which the job should build a new payload after the last.
     interval: Interval,
     /// The best payload so far.
-    best_payload: Option<Arc<Builder::BuiltPayload>>,
+    best_payload: Option<Builder::BuiltPayload>,
     /// Receiver for the block that is currently being built.
     pending_block: Option<PendingPayload<Builder::BuiltPayload>>,
     /// Restricts how many generator tasks can be executed at once.
@@ -368,6 +369,7 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
     <Builder as PayloadBuilder<Pool, Client>>::Attributes: Unpin + Clone,
+    <Builder as PayloadBuilder<Pool, Client>>::BuiltPayload: Unpin + Clone,
 {
     type Output = Result<(), PayloadBuilderError>;
 
@@ -424,7 +426,7 @@ where
                         BuildOutcome::Better { payload, cached_reads } => {
                             this.cached_reads = Some(cached_reads);
                             debug!(target: "payload_builder", value = %payload.fees(), "built better payload");
-                            let payload = Arc::new(payload);
+                            let payload = payload;
                             this.best_payload = Some(payload);
                         }
                         BuildOutcome::Aborted { fees, cached_reads } => {
@@ -458,6 +460,7 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
     <Builder as PayloadBuilder<Pool, Client>>::Attributes: Unpin + Clone,
+    <Builder as PayloadBuilder<Pool, Client>>::BuiltPayload: Unpin + Clone,
 {
     type PayloadAttributes = Builder::Attributes;
     type ResolvePayloadFuture = ResolveBestPayload<Self::BuiltPayload>;
@@ -465,7 +468,7 @@ where
 
     fn best_payload(&self) -> Result<Arc<Self::BuiltPayload>, PayloadBuilderError> {
         if let Some(ref payload) = self.best_payload {
-            return Ok(payload.clone())
+            return Ok(Arc::new(payload.clone()))
         }
         // No payload has been built yet, but we need to return something that the CL then can
         // deliver, so we need to return an empty payload.
@@ -540,15 +543,18 @@ where
 #[derive(Debug)]
 pub struct ResolveBestPayload<Payload> {
     /// Best payload so far.
-    best_payload: Option<Arc<Payload>>,
+    best_payload: Option<Payload>,
     /// Regular payload job that's currently running that might produce a better payload.
     maybe_better: Option<PendingPayload<Payload>>,
     /// The empty payload building job in progress.
     empty_payload: Option<oneshot::Receiver<Result<Payload, PayloadBuilderError>>>,
 }
 
-impl<Payload> Future for ResolveBestPayload<Payload> {
-    type Output = Result<Arc<Payload>, PayloadBuilderError>;
+impl<Payload> Future for ResolveBestPayload<Payload>
+where
+    Payload: Unpin,
+{
+    type Output = Result<Payload, PayloadBuilderError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -559,7 +565,7 @@ impl<Payload> Future for ResolveBestPayload<Payload> {
                 this.maybe_better = None;
                 if let Ok(BuildOutcome::Better { payload, .. }) = res {
                     debug!(target: "payload_builder", "resolving better payload");
-                    return Poll::Ready(Ok(Arc::new(payload)))
+                    return Poll::Ready(Ok(payload))
                 }
             }
         }
@@ -577,7 +583,7 @@ impl<Payload> Future for ResolveBestPayload<Payload> {
                 } else {
                     debug!(target: "payload_builder", "resolving empty payload");
                 }
-                Poll::Ready(res.map(Arc::new))
+                Poll::Ready(res)
             }
             Poll::Ready(Err(err)) => Poll::Ready(Err(err.into())),
             Poll::Pending => {
@@ -721,7 +727,7 @@ pub struct BuildArguments<Pool, Client, Attributes, Payload> {
     /// A marker that can be used to cancel the job.
     pub cancel: Cancelled,
     /// The best payload achieved so far.
-    pub best_payload: Option<Arc<Payload>>,
+    pub best_payload: Option<Payload>,
 }
 
 impl<Pool, Client, Attributes, Payload> BuildArguments<Pool, Client, Attributes, Payload> {
@@ -732,7 +738,7 @@ impl<Pool, Client, Attributes, Payload> BuildArguments<Pool, Client, Attributes,
         cached_reads: CachedReads,
         config: PayloadConfig<Attributes>,
         cancel: Cancelled,
-        best_payload: Option<Arc<Payload>>,
+        best_payload: Option<Payload>,
     ) -> Self {
         Self { client, pool, cached_reads, config, cancel, best_payload }
     }
@@ -777,7 +783,7 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
     fn on_missing_payload(
         &self,
         args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
-    ) -> Option<Arc<Self::BuiltPayload>> {
+    ) -> Option<Self::BuiltPayload> {
         let _args = args;
         None
     }

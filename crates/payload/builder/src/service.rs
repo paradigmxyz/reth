@@ -41,7 +41,7 @@ where
     pub async fn resolve(
         &self,
         id: PayloadId,
-    ) -> Option<Result<Arc<Engine::BuiltPayload>, PayloadBuilderError>> {
+    ) -> Option<Result<Engine::BuiltPayload, PayloadBuilderError>> {
         self.inner.resolve(id).await
     }
 
@@ -111,7 +111,7 @@ where
     async fn resolve(
         &self,
         id: PayloadId,
-    ) -> Option<Result<Arc<Engine::BuiltPayload>, PayloadBuilderError>> {
+    ) -> Option<Result<Engine::BuiltPayload, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
         self.to_service.send(PayloadServiceCommand::Resolve(id, tx)).ok()?;
         match rx.await.transpose()? {
@@ -262,7 +262,7 @@ where
 
     /// Returns the best payload for the given identifier that has been built so far and terminates
     /// the job if requested.
-    fn resolve(&mut self, id: PayloadId) -> Option<PayloadFuture<Arc<Engine::BuiltPayload>>> {
+    fn resolve(&mut self, id: PayloadId) -> Option<PayloadFuture<Engine::BuiltPayload>> {
         trace!(%id, "resolving payload job");
 
         let job = self.payload_jobs.iter().position(|(_, job_id)| *job_id == id)?;
@@ -426,7 +426,7 @@ pub enum PayloadServiceCommand<A, P> {
     /// Get the payload attributes for the given payload
     PayloadAttributes(PayloadId, oneshot::Sender<Option<Result<A, PayloadBuilderError>>>),
     /// Resolve the payload and return the payload
-    Resolve(PayloadId, oneshot::Sender<Option<PayloadFuture<Arc<P>>>>),
+    Resolve(PayloadId, oneshot::Sender<Option<PayloadFuture<P>>>),
 }
 
 impl<A, P> fmt::Debug for PayloadServiceCommand<A, P>
