@@ -422,6 +422,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Bedrock, ForkCondition::Block(0)),
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
+            (Hardfork::Canyon, ForkCondition::Timestamp(1704992401)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
