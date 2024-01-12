@@ -146,7 +146,7 @@ checksum = "aa1873637aa7f20369eae38b312cf7550c266d13ebc60f176fd5c82c5127810b"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
- "num_enum 0.7.1",
+ "num_enum 0.7.2",
  "proptest",
  "serde",
  "strum",
@@ -5788,7 +5788,6 @@ dependencies = [
 name = "reth-beacon-consensus"
 version = "0.1.0-alpha.14"
 dependencies = [
- "alloy-chains",
  "assert_matches",
  "cfg-if",
  "futures",

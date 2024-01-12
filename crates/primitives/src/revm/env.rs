@@ -3,10 +3,9 @@ use crate::{
     recover_signer_unchecked,
     revm::config::revm_spec,
     revm_primitives::{AnalysisKind, BlockEnv, CfgEnv, Env, SpecId, TransactTo, TxEnv},
-    Address, Bytes, ChainSpec, Head, Header, Transaction, TransactionKind,
+    Address, Bytes, Chain, ChainSpec, Head, Header, Transaction, TransactionKind,
     TransactionSignedEcRecovered, B256, U256,
 };
-use crate::Chain;
 
 #[cfg(feature = "optimism")]
 use revm_primitives::OptimismFields;

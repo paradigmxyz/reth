@@ -253,7 +253,7 @@ mod tests {
     fn parse_common_node_command_chain_args() {
         for chain in SUPPORTED_CHAINS {
             let args: NodeCommand = NodeCommand::<()>::parse_from(["reth", "--chain", chain]);
-            assert_eq!(args.chain.chain, chain.parse::<alloy_chains::Chain>().unwrap());
+            assert_eq!(args.chain.chain, chain.parse::<reth_primitives::Chain>().unwrap());
         }
     }
 

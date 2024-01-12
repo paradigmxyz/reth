@@ -1,10 +1,8 @@
 use crate::{EthVersion, StatusBuilder};
+use alloy_chains::{Chain, NamedChain};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
-use alloy_chains::{Chain, NamedChain};
-use reth_primitives::{
-    hex, ChainSpec, ForkId, Genesis, Hardfork, Head, B256, MAINNET, U256,
-};
+use reth_primitives::{hex, ChainSpec, ForkId, Genesis, Hardfork, Head, B256, MAINNET, U256};
 use std::fmt::{Debug, Display};
 
 #[cfg(feature = "serde")]
@@ -153,12 +151,11 @@ impl Default for Status {
 #[cfg(test)]
 mod tests {
     use crate::types::{EthVersion, Status};
+    use alloy_chains::{Chain, NamedChain};
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
-    use alloy_chains::{Chain, NamedChain};
     use reth_primitives::{
-        hex, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head,
-         B256, U256,
+        hex, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, B256, U256,
     };
     use std::str::FromStr;
 

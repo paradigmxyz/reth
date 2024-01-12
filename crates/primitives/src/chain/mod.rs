@@ -1,4 +1,3 @@
-
 pub use alloy_chains::{Chain, NamedChain};
 pub use info::ChainInfo;
 pub use spec::{
@@ -9,7 +8,6 @@ pub use spec::{
 #[cfg(feature = "optimism")]
 pub use spec::{BASE_GOERLI, BASE_MAINNET, BASE_SEPOLIA, OP_GOERLI};
 
-
 // The chain spec module.
 mod spec;
 // The chain info module.
@@ -18,9 +16,9 @@ mod info;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::str::FromStr;
+    use crate::U256;
     use alloy_rlp::Encodable;
-    use crate::{U256};
+    use std::str::FromStr;
 
     #[test]
     fn test_id() {

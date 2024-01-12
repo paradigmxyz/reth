@@ -229,10 +229,9 @@ mod tests {
         DatabaseEnv,
     };
     use reth_primitives::{
-        Address, ForkTimestamps, Genesis, GenesisAccount, IntegerList, GOERLI,
+        Address, Chain, ForkTimestamps, Genesis, GenesisAccount, IntegerList, GOERLI,
         GOERLI_GENESIS_HASH, MAINNET, MAINNET_GENESIS_HASH, SEPOLIA, SEPOLIA_GENESIS_HASH,
     };
-    use alloy_chains::Chain;
     use std::collections::HashMap;
 
     fn collect_table_entries<DB, T>(
