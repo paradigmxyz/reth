@@ -86,12 +86,14 @@ impl<T: Hash + Eq> LruCache<T> {
     }
 
     /// Returns number of elements currently in cache.
-    pub fn _len(&self) -> usize {
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
         self.inner.len()
     }
 
     /// Returns `true` if there are currently no elements in the cache.
-    pub fn _is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 }
