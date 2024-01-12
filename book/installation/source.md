@@ -102,13 +102,18 @@ RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf
 
 **Features**
 
-Finally, some features may improve performance on your system, most notably `jemalloc`, which replaces the default memory allocator used by reth.
+Finally, some optional features are present that may improve performance, but may not very portable,
+and as such might not compile on your particular system. These are currently:
+- `jemalloc`: replaces the default system memory allocator with [`jemalloc`](https://jemalloc.net/); this feature is unstable on Windows
+- `asm-keccak`: replaces the default, pure-Rust implementation of Keccak256 with one implemented in assembly; see [the `keccak-asm` crate](https://github.com/DaniPopes/keccak-asm) for more details and supported targets
+- `min-LEVEL-logs`, where `LEVEL` is one of `error`, `warn`, `info`, `debug`, `trace`: disables compilation of logs of lower level than the given one; this in general isn't that significant, and is not recommended due to the loss of debugging that the logs would provide
 
-You can enable features by passing them to the `--features` Cargo flag.
+You can activate features by passing them to the `--features` or `-F` Cargo flag;
+multiple features can be activated with a space- or comma-separated list to the flag:
 
-> **Note**
-> 
-> The `jemalloc` feature is unstable on Windows due to jemallocator itself.
+```bash
+RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak
+```
 
 ## Troubleshooting
 

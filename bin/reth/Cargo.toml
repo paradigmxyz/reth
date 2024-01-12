@@ -125,13 +125,18 @@ procfs = { version = "0.16.0" }
 
 [features]
 default = ["jemalloc"]
+
+asm-keccak = ["reth-primitives/asm-keccak"]
+
 jemalloc = ["dep:jemallocator", "dep:jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "jemallocator?/profiling"]
+
 min-error-logs = ["tracing/release_max_level_error"]
 min-warn-logs = ["tracing/release_max_level_warn"]
 min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
+
 optimism = [
     "reth-primitives/optimism",
     "reth-revm/optimism",
@@ -149,6 +154,7 @@ optimism = [
     "reth-optimism-payload-builder/optimism",
     "reth-ethereum-payload-builder/optimism",
 ]
+
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
 
