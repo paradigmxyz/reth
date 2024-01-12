@@ -1189,7 +1189,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                             block_number: tip.number,
                             block_hash: tip.hash,
                         },
-                    ))));
+                    ))))
                 }
                 self.metrics.trie_updates_insert_recomputed.increment(1);
                 trie_updates

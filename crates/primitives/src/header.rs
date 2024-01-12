@@ -146,7 +146,7 @@ impl Header {
     /// Returns an error if the extradata size is larger than 100 KB.
     pub fn ensure_extradata_valid(&self) -> Result<(), HeaderError> {
         if self.extra_data.len() > 100 * 1024 {
-            return Err(HeaderError::LargeExtraData);
+            return Err(HeaderError::LargeExtraData)
         }
         Ok(())
     }
@@ -158,7 +158,7 @@ impl Header {
     /// Returns an error if the block difficulty exceeds 80 bits.
     pub fn ensure_difficulty_valid(&self) -> Result<(), HeaderError> {
         if self.difficulty.bit_len() > 80 {
-            return Err(HeaderError::LargeDifficulty);
+            return Err(HeaderError::LargeDifficulty)
         }
         Ok(())
     }
