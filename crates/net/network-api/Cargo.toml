@@ -17,7 +17,7 @@ reth-primitives.workspace = true
 reth-eth-wire.workspace = true
 reth-rpc-types.workspace = true
 reth-discv4.workspace = true
-
+alloy-chains.workspace = true
 # io
 serde = { workspace = true, features = ["derive"], optional = true }
 

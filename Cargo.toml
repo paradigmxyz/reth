@@ -164,6 +164,7 @@ revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_fr
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors" }
 
 # eth
+alloy-chains = {version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
 alloy-primitives = "0.6"
 alloy-dyn-abi = "0.6"
 alloy-sol-types = "0.6"
