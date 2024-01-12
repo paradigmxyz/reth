@@ -208,10 +208,8 @@ impl<Gen, St, Engine> PayloadBuilderService<Gen, St, Engine>
 where
     Engine: EngineTypes,
     Gen: PayloadJobGenerator,
-    Gen::Job: PayloadJob<
-        PayloadAttributes = Engine::PayloadBuilderAttributes,
-        BuiltPayload = Engine::BuiltPayload,
-    >,
+    Gen::Job: PayloadJob<PayloadAttributes = Engine::PayloadBuilderAttributes>,
+    <Gen::Job as PayloadJob>::BuiltPayload: Into<Engine::BuiltPayload>,
 {
     /// Creates a new payload builder service and returns the [PayloadBuilderHandle] to interact
     /// with it.
@@ -247,7 +245,7 @@ where
     fn best_payload(
         &self,
         id: PayloadId,
-    ) -> Option<Result<Arc<Engine::BuiltPayload>, PayloadBuilderError>> {
+    ) -> Option<Result<Arc<<Gen::Job as PayloadJob>::BuiltPayload>, PayloadBuilderError>> {
         let res = self
             .payload_jobs
             .iter()
@@ -262,7 +260,10 @@ where
 
     /// Returns the best payload for the given identifier that has been built so far and terminates
     /// the job if requested.
-    fn resolve(&mut self, id: PayloadId) -> Option<PayloadFuture<Engine::BuiltPayload>> {
+    fn resolve(
+        &mut self,
+        id: PayloadId,
+    ) -> Option<PayloadFuture<<Gen::Job as PayloadJob>::BuiltPayload>> {
         trace!(%id, "resolving payload job");
 
         let job = self.payload_jobs.iter().position(|(_, job_id)| *job_id == id)?;
@@ -293,10 +294,8 @@ impl<Gen, St, Engine> PayloadBuilderService<Gen, St, Engine>
 where
     Engine: EngineTypes,
     Gen: PayloadJobGenerator,
-    Gen::Job: PayloadJob<
-        PayloadAttributes = Engine::PayloadBuilderAttributes,
-        BuiltPayload = Engine::BuiltPayload,
-    >,
+    Gen::Job: PayloadJob<PayloadAttributes = Engine::PayloadBuilderAttributes>,
+    <Gen::Job as PayloadJob>::BuiltPayload: Into<Engine::BuiltPayload>,
 {
     /// Returns the payload attributes for the given payload.
     fn payload_attributes(
