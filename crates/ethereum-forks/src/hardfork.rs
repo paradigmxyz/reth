@@ -1,4 +1,4 @@
-use alloy_chains::NamedChain;
+use alloy_chains::{Chain, NamedChain};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, str::FromStr};
 
@@ -53,9 +53,9 @@ pub enum Hardfork {
 
 impl Hardfork {
     /// Retrieves the activation block for the specified hardfork on the Ethereum mainnet.
-    pub fn mainnet_activation_block(&self, chain: NamedChain) -> Option<u64> {
-        match chain {
-            NamedChain::Mainnet => match self {
+    pub fn mainnet_activation_block(&self, chain: Chain) -> Option<u64> {
+        match chain.named() {
+            Some(NamedChain::Mainnet) => match self {
                 Hardfork::Frontier => Some(0),
                 Hardfork::Homestead => Some(1150000),
                 Hardfork::Dao => Some(1920000),
