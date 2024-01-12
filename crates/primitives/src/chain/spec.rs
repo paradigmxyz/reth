@@ -1,15 +1,16 @@
 use crate::{
-    holesky_nodes,
-    net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
     constants::{
         EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR, EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
         EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
     },
+    holesky_nodes,
+    net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
     proofs::state_root_ref_unhashed,
     revm_primitives::{address, b256},
-    Address, BlockNumber, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis, Hardfork,
-    Head, Header, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256, NodeRecord
+    Address, BlockNumber, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis, Hardfork, Head,
+    Header, NodeRecord, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
+use alloy_chains::{Chain, NamedChain};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -17,7 +18,6 @@ use std::{
     fmt::{Display, Formatter},
     sync::Arc,
 };
-use alloy_chains::{Chain, NamedChain};
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -1618,16 +1618,16 @@ impl DepositContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "optimism")]
+    use crate::OP_GOERLI;
     use crate::{
-        b256, hex, trie::TrieAccount, ChainConfig, GenesisAccount, B256, DEV, GOERLI,
-        HOLESKY, MAINNET, SEPOLIA, U256,
+        b256, hex, trie::TrieAccount, ChainConfig, GenesisAccount, B256, DEV, GOERLI, HOLESKY,
+        MAINNET, SEPOLIA, U256,
     };
+    use alloy_chains::NamedChain;
     use alloy_rlp::Encodable;
     use bytes::BytesMut;
     use std::{collections::HashMap, str::FromStr};
-    use alloy_chains::NamedChain;
-    #[cfg(feature = "optimism")]
-    use crate::OP_GOERLI;
 
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {

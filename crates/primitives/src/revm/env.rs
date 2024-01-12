@@ -6,7 +6,7 @@ use crate::{
     Address, Bytes, ChainSpec, Head, Header, Transaction, TransactionKind,
     TransactionSignedEcRecovered, B256, U256,
 };
-use alloy_chains::Chain;
+use crate::Chain;
 
 #[cfg(feature = "optimism")]
 use revm_primitives::OptimismFields;
