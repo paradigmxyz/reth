@@ -21,7 +21,12 @@ use reth_db::{init_db, DatabaseEnv};
 use reth_interfaces::consensus::Consensus;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_payload_builder::PayloadBuilderService;
+use reth_node_api::EngineTypes;
+#[cfg(not(feature = "optimism"))]
+use reth_node_builder::EthEngineTypes;
+#[cfg(feature = "optimism")]
+use reth_node_builder::OptimismEngineTypes;
+use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{
     fs::{self},
     ChainSpec,
@@ -29,7 +34,7 @@ use reth_primitives::{
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory};
 use reth_revm::EvmProcessorFactory;
 use reth_rpc_types::{
-    engine::{CancunPayloadFields, ForkchoiceState, PayloadAttributes},
+    engine::{CancunPayloadFields, ForkchoiceState},
     ExecutionPayload,
 };
 use reth_stages::Pipeline;
@@ -175,8 +180,17 @@ impl Command {
             self.chain.clone(),
             payload_builder,
         );
-        let (payload_service, payload_builder) =
+
+        #[cfg(feature = "optimism")]
+        let (payload_service, payload_builder): (
+            _,
+            PayloadBuilderHandle<OptimismEngineTypes>,
+        ) = PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
+
+        #[cfg(not(feature = "optimism"))]
+        let (payload_service, payload_builder): (_, PayloadBuilderHandle<EthEngineTypes>) =
             PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
+
         ctx.task_executor.spawn_critical("payload builder service", Box::pin(payload_service));
 
         // Configure the consensus engine
@@ -245,8 +259,8 @@ impl Command {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-enum StoredEngineApiMessage {
-    ForkchoiceUpdated { state: ForkchoiceState, payload_attrs: Option<PayloadAttributes> },
+enum StoredEngineApiMessage<Attributes> {
+    ForkchoiceUpdated { state: ForkchoiceState, payload_attrs: Option<Attributes> },
     NewPayload { payload: ExecutionPayload, cancun_fields: Option<CancunPayloadFields> },
 }
 
@@ -260,7 +274,14 @@ impl EngineApiStore {
         Self { path }
     }
 
-    fn on_message(&self, msg: &BeaconEngineMessage, received_at: SystemTime) -> eyre::Result<()> {
+    fn on_message<Engine>(
+        &self,
+        msg: &BeaconEngineMessage<Engine>,
+        received_at: SystemTime,
+    ) -> eyre::Result<()>
+    where
+        Engine: EngineTypes,
+    {
         fs::create_dir_all(&self.path)?; // ensure that store path had been created
         let timestamp = received_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
         match msg {
@@ -278,10 +299,12 @@ impl EngineApiStore {
                 let filename = format!("{}-new_payload-{}.json", timestamp, payload.block_hash());
                 fs::write(
                     self.path.join(filename),
-                    serde_json::to_vec(&StoredEngineApiMessage::NewPayload {
-                        payload: payload.clone(),
-                        cancun_fields: cancun_fields.clone(),
-                    })?,
+                    serde_json::to_vec(
+                        &StoredEngineApiMessage::<Engine::PayloadAttributes>::NewPayload {
+                            payload: payload.clone(),
+                            cancun_fields: cancun_fields.clone(),
+                        },
+                    )?,
                 )?;
             }
             // noop
@@ -310,11 +333,14 @@ impl EngineApiStore {
         Ok(filenames_by_ts.into_iter().flat_map(|(_, paths)| paths))
     }
 
-    pub(crate) async fn intercept(
+    pub(crate) async fn intercept<Engine>(
         self,
-        mut rx: UnboundedReceiver<BeaconEngineMessage>,
-        to_engine: UnboundedSender<BeaconEngineMessage>,
-    ) {
+        mut rx: UnboundedReceiver<BeaconEngineMessage<Engine>>,
+        to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
+    ) where
+        Engine: EngineTypes,
+        BeaconEngineMessage<Engine>: std::fmt::Debug,
+    {
         loop {
             let Some(msg) = rx.recv().await else { break };
             if let Err(error) = self.on_message(&msg, SystemTime::now()) {

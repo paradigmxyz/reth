@@ -40,7 +40,7 @@ reth-rpc-types-compat.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-api.workspace = true
-reth-downloaders = { workspace = true, features = ["test-utils"] }
+reth-downloaders.workspace = true
 reth-tracing.workspace = true
 reth-tasks.workspace = true
 reth-net-nat.workspace = true
@@ -54,6 +54,8 @@ reth-prune.workspace = true
 reth-snapshot = { workspace = true, features = ["clap"] }
 reth-trie.workspace = true
 reth-nippy-jar.workspace = true
+reth-node-api.workspace = true
+reth-node-builder.workspace = true
 
 # crypto
 alloy-rlp.workspace = true

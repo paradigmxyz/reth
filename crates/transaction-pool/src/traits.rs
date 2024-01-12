@@ -523,8 +523,17 @@ pub enum TransactionOrigin {
 
 impl TransactionOrigin {
     /// Whether the transaction originates from a local source.
-    pub fn is_local(&self) -> bool {
+    pub const fn is_local(&self) -> bool {
         matches!(self, TransactionOrigin::Local)
+    }
+
+    /// Whether the transaction originates from an external source.
+    pub const fn is_external(&self) -> bool {
+        matches!(self, TransactionOrigin::External)
+    }
+    /// Whether the transaction originates from a private source.
+    pub const fn is_private(&self) -> bool {
+        matches!(self, TransactionOrigin::Private)
     }
 }
 

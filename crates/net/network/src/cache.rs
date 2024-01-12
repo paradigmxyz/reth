@@ -8,8 +8,6 @@ use std::{
     hash::Hash,
     num::NonZeroUsize,
 };
-use tokio::sync::mpsc::UnboundedSender;
-use tracing::warn;
 
 /// A minimal LRU cache based on a `LinkedHashSet` with limited capacity.
 ///
@@ -19,19 +17,12 @@ use tracing::warn;
 pub struct LruCache<T: Hash + Eq> {
     limit: NonZeroUsize,
     inner: LinkedHashSet<T>,
-    tx: Option<UnboundedSender<T>>,
 }
 
 impl<T: Hash + Eq> LruCache<T> {
     /// Creates a new [`LruCache`] using the given limit
     pub fn new(limit: NonZeroUsize) -> Self {
-        Self { inner: LinkedHashSet::new(), limit, tx: None }
-    }
-
-    /// Creates a new [`LruCache`] using the given limit and with a channel for sending eviction
-    /// feedback. Note, that it is up to the caller's context to drain the buffer!
-    pub fn new_with_feedback(limit: NonZeroUsize, tx: UnboundedSender<T>) -> Self {
-        Self { inner: LinkedHashSet::new(), limit, tx: Some(tx) }
+        Self { inner: LinkedHashSet::new(), limit }
     }
 
     /// Insert an element into the set.
@@ -53,6 +44,19 @@ impl<T: Hash + Eq> LruCache<T> {
         false
     }
 
+    /// Same as [`Self::insert`] but returns a tuple, where the second index is the evicted value,
+    /// if one was evicted.
+    pub fn insert_with_eviction_feedback(&mut self, entry: T) -> (bool, Option<T>) {
+        if self.inner.insert(entry) {
+            if self.limit.get() == self.inner.len() {
+                // remove the oldest element in the set
+                return (true, self.remove_lru())
+            }
+            return (true, None)
+        }
+        (false, None)
+    }
+
     /// Remove the least recently used entry and return it.
     ///
     /// If the `LruCache` is empty or if the eviction feedback is
@@ -60,6 +64,11 @@ impl<T: Hash + Eq> LruCache<T> {
     #[inline]
     fn remove_lru(&mut self) -> Option<T> {
         self.inner.pop_front()
+    }
+
+    /// Expels the given value. Returns true if the value existed.
+    pub fn remove(&mut self, value: &T) -> bool {
+        self.inner.remove(value)
     }
 
     /// Returns `true` if the set contains a value.
@@ -77,12 +86,12 @@ impl<T: Hash + Eq> LruCache<T> {
     }
 
     /// Returns number of elements currently in cache.
-    pub fn len(&self) -> usize {
+    pub fn _len(&self) -> usize {
         self.inner.len()
     }
 
     /// Returns `true` if there are currently no elements in the cache.
-    pub fn is_empty(&self) -> bool {
+    pub fn _is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 }
@@ -139,7 +148,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use super::*;
 
     #[test]
@@ -182,5 +191,27 @@ mod tests {
         for e in entries {
             assert!(cache.contains(e));
         }
+    }
+
+    #[test]
+    #[allow(dead_code)]
+    fn test_debug_impl_lru_map() {
+        use derive_more::Display;
+
+        #[derive(Debug, Hash, PartialEq, Eq, Display)]
+        struct Key(i8);
+
+        #[derive(Debug)]
+        struct Value(i8);
+
+        let mut cache = LruMap::new(2);
+        let key_1 = Key(1);
+        let value_1 = Value(11);
+        cache.insert(key_1, value_1);
+        let key_2 = Key(2);
+        let value_2 = Value(22);
+        cache.insert(key_2, value_2);
+
+        assert_eq!("LruMap { 2: Value(22), 1: Value(11) }", format!("{cache:?}"))
     }
 }

@@ -12,10 +12,9 @@ use metrics::{gauge, Label};
 use once_cell::sync::Lazy;
 use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
-    DatabaseFlags, Environment, EnvironmentFlags, Geometry, HandleSlowReadersReturnCode, Mode,
-    PageSize, SyncMode, RO, RW,
+    DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, PageSize, SyncMode, RO, RW,
 };
-use reth_tracing::tracing::{error, warn};
+use reth_tracing::tracing::error;
 use std::{ops::Deref, path::Path};
 use tx::Tx;
 
@@ -30,10 +29,21 @@ const DEFAULT_MAX_READERS: u64 = 32_000;
 
 /// Space that a read-only transaction can occupy until the warning is emitted.
 /// See [reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers] for more information.
+#[cfg(not(windows))]
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 
-static PROCESS_ID: Lazy<u32> =
-    Lazy::new(|| if cfg!(unix) { std::os::unix::process::parent_id() } else { std::process::id() });
+#[cfg(not(windows))]
+static PROCESS_ID: Lazy<u32> = Lazy::new(|| {
+    #[cfg(unix)]
+    {
+        std::os::unix::process::parent_id()
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::process::id()
+    }
+});
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
@@ -177,7 +187,8 @@ impl DatabaseEnv {
             shrink_threshold: None,
             page_size: Some(PageSize::Set(default_page_size())),
         });
-        if cfg!(not(windows)) {
+        #[cfg(not(windows))]
+        {
             let _ = *PROCESS_ID; // Initialize the process ID at the time of environment opening
             inner_env.set_handle_slow_readers(
                 |process_id: u32, thread_id: u32, read_txn_id: u64, gap: usize, space: usize, retry: isize| {
@@ -187,19 +198,19 @@ impl DatabaseEnv {
                         } else {
                             "External process has a long-lived database transaction that grows the database file. Use shorter-lived read transactions or shut down the node."
                         };
-                        warn!(
-                    target: "storage::db::mdbx",
-                    ?process_id,
-                    ?thread_id,
-                    ?read_txn_id,
-                    ?gap,
-                    ?space,
-                    ?retry,
-                    message
-                )
+                        reth_tracing::tracing::warn!(
+                            target: "storage::db::mdbx",
+                            ?process_id,
+                            ?thread_id,
+                            ?read_txn_id,
+                            ?gap,
+                            ?space,
+                            ?retry,
+                            message
+                        )
                     }
 
-                    HandleSlowReadersReturnCode::ProceedWithoutKillingReader
+                    reth_libmdbx::HandleSlowReadersReturnCode::ProceedWithoutKillingReader
                 });
         }
         inner_env.set_flags(EnvironmentFlags {

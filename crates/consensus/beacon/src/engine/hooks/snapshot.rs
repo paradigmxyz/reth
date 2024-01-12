@@ -1,9 +1,7 @@
 //! Snapshot hook for the engine implementation.
 
 use crate::{
-    engine::hooks::{
-        EngineContext, EngineHook, EngineHookAction, EngineHookError, EngineHookEvent,
-    },
+    engine::hooks::{EngineContext, EngineHook, EngineHookError, EngineHookEvent},
     hooks::EngineHookDBAccessLevel,
 };
 use futures::FutureExt;
@@ -35,10 +33,7 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
     /// Advances the snapshotter state.
     ///
     /// This checks for the result in the channel, or returns pending if the snapshotter is idle.
-    fn poll_snapshotter(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<RethResult<(EngineHookEvent, Option<EngineHookAction>)>> {
+    fn poll_snapshotter(&mut self, cx: &mut Context<'_>) -> Poll<RethResult<EngineHookEvent>> {
         let result = match self.state {
             SnapshotterState::Idle(_) => return Poll::Pending,
             SnapshotterState::Running(ref mut fut) => {
@@ -61,7 +56,7 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
             }
         };
 
-        Poll::Ready(Ok((event, None)))
+        Poll::Ready(Ok(event))
     }
 
     /// This will try to spawn the snapshotter if it is idle:
@@ -77,7 +72,7 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
     fn try_spawn_snapshotter(
         &mut self,
         finalized_block_number: BlockNumber,
-    ) -> RethResult<Option<(EngineHookEvent, Option<EngineHookAction>)>> {
+    ) -> RethResult<Option<EngineHookEvent>> {
         Ok(match &mut self.state {
             SnapshotterState::Idle(snapshotter) => {
                 let Some(mut snapshotter) = snapshotter.take() else { return Ok(None) };
@@ -96,10 +91,10 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
                     );
                     self.state = SnapshotterState::Running(rx);
 
-                    Some((EngineHookEvent::Started, None))
+                    Some(EngineHookEvent::Started)
                 } else {
                     self.state = SnapshotterState::Idle(Some(snapshotter));
-                    Some((EngineHookEvent::NotReady, None))
+                    Some(EngineHookEvent::NotReady)
                 }
             }
             SnapshotterState::Running(_) => None,
@@ -116,15 +111,15 @@ impl<DB: Database + 'static> EngineHook for SnapshotHook<DB> {
         &mut self,
         cx: &mut Context<'_>,
         ctx: EngineContext,
-    ) -> Poll<RethResult<(EngineHookEvent, Option<EngineHookAction>)>> {
+    ) -> Poll<RethResult<EngineHookEvent>> {
         let Some(finalized_block_number) = ctx.finalized_block_number else {
-            return Poll::Ready(Ok((EngineHookEvent::NotReady, None)))
+            return Poll::Ready(Ok(EngineHookEvent::NotReady))
         };
 
         // Try to spawn a snapshotter
         match self.try_spawn_snapshotter(finalized_block_number)? {
-            Some((EngineHookEvent::NotReady, _)) => return Poll::Pending,
-            Some((event, action)) => return Poll::Ready(Ok((event, action))),
+            Some(EngineHookEvent::NotReady) => return Poll::Pending,
+            Some(event) => return Poll::Ready(Ok(event)),
             None => (),
         }
 
