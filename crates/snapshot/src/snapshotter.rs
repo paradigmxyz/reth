@@ -9,6 +9,7 @@ use reth_provider::{
     BlockReader, ProviderFactory,
 };
 use std::{ops::RangeInclusive, sync::Arc};
+use tracing::trace;
 
 /// Result of [Snapshotter::run] execution.
 pub type SnapshotterResult = Result<SnapshotTargets, SnapshotterError>;
@@ -36,7 +37,10 @@ pub struct SnapshotTargets {
 impl SnapshotTargets {
     /// Returns `true` if any of the targets are [Some].
     pub fn any(&self) -> bool {
-        self.headers.is_some() || self.receipts.is_some() || self.transactions.is_some()
+        // TODO(alexey): headers and receipts snapshotting isn't implemented yet, see
+        //  `Snapshotter::run`
+        // self.headers.is_some() || self.receipts.is_some() ||
+        self.transactions.is_some()
     }
 
     // Returns `true` if all targets are either [`None`] or has beginning of the range equal to the
@@ -79,6 +83,7 @@ impl<DB: Database> Snapshotter<DB> {
         );
 
         if let Some(block_range) = targets.transactions.clone() {
+            trace!(target: "snapshot", ?block_range, "Snapshotting transactions");
             let mut snapshot_writer =
                 snapshot_provider.writer(*block_range.start(), SnapshotSegment::Transactions)?;
 
