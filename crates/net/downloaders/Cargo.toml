@@ -38,9 +38,9 @@ thiserror.workspace = true
 
 # optional deps for the test-utils feature
 reth-db = { workspace = true, optional = true }
-alloy-rlp = { workspace = true, optional = true }
+alloy-rlp.workspace = true
 tempfile = { workspace = true, optional = true }
-itertools = { workspace = true, optional = true }
+itertools.workspace = true
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
@@ -55,4 +55,5 @@ itertools.workspace = true
 tempfile.workspace = true
 
 [features]
-test-utils = ["dep:alloy-rlp", "dep:tempfile", "dep:itertools", "reth-db/test-utils", "reth-interfaces/test-utils"]
+test-utils = ["dep:tempfile", "reth-db/test-utils", "reth-interfaces/test-utils"]
+

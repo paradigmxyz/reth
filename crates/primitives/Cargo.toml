@@ -20,9 +20,10 @@ revm.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
+alloy-chains = { workspace = true, features = ["serde", "rlp"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
-alloy-trie = { version = "0.1", features = ["serde"] }
+alloy-trie = { workspace = true, features = ["serde"] }
 ethers-core = { workspace = true, default-features = false, optional = true }
 nybbles = { version = "0.1.2", features = ["serde", "rlp"] }
 
@@ -72,8 +73,8 @@ proptest.workspace = true
 proptest-derive.workspace = true
 rand.workspace = true
 revm-primitives = { workspace = true, features = ["arbitrary"] }
-nybbles = { version = "0.1", features = ["arbitrary"] }
-alloy-trie = { version = "0.1", features = ["arbitrary"] }
+nybbles = { workspace = true, features = ["arbitrary"] }
+alloy-trie = { workspace = true, features = ["arbitrary"] }
 serde_json.workspace = true
 test-fuzz = "4"
 toml.workspace = true
@@ -97,6 +98,7 @@ arbitrary = [
     "reth-ethereum-forks/arbitrary",
     "nybbles/arbitrary",
     "alloy-trie/arbitrary",
+    "alloy-chains/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-derive",

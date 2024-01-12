@@ -59,6 +59,11 @@ use reth_interfaces::{
 };
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle, NetworkManager};
 use reth_network_api::{NetworkInfo, PeersInfo};
+#[cfg(not(feature = "optimism"))]
+use reth_node_builder::EthEngineTypes;
+#[cfg(feature = "optimism")]
+use reth_node_builder::OptimismEngineTypes;
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     kzg::KzgSettings,
@@ -1109,8 +1114,24 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         ext.on_components_initialized(&components)?;
 
         debug!(target: "reth::cli", "Spawning payload builder service");
-        let payload_builder =
-            ext.spawn_payload_builder_service(&self.config.builder, &components)?;
+
+        // TODO: stateful node builder should handle this in with_payload_builder
+        // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
+        #[cfg(feature = "optimism")]
+        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
+            .set_compute_pending_block(self.config.builder.compute_pending_block);
+
+        #[cfg(feature = "optimism")]
+        let payload_builder: PayloadBuilderHandle<OptimismEngineTypes> =
+            ext.spawn_payload_builder_service(&self.config.builder, &components, payload_builder)?;
+
+        // The default payload builder is implemented on the unit type.
+        #[cfg(not(feature = "optimism"))]
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
+
+        #[cfg(not(feature = "optimism"))]
+        let payload_builder: PayloadBuilderHandle<EthEngineTypes> =
+            ext.spawn_payload_builder_service(&self.config.builder, &components, payload_builder)?;
 
         let (consensus_engine_tx, mut consensus_engine_rx) = unbounded_channel();
         if let Some(store_path) = self.config.debug.engine_api_store.clone() {
@@ -1279,7 +1300,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         #[cfg(feature = "optimism")]
         if self.config.chain.is_optimism() && !self.config.rollup.enable_genesis_walkback {
             let client = rpc_server_handles.auth.http_client();
-            reth_rpc_api::EngineApiClient::fork_choice_updated_v2(
+            reth_rpc_api::EngineApiClient::<OptimismEngineTypes>::fork_choice_updated_v2(
                 &client,
                 reth_rpc_types::engine::ForkchoiceState {
                     head_block_hash: head.hash,
@@ -1431,6 +1452,7 @@ mod tests {
         // spawn_test_node takes roughly 1 second per node, so this test takes ~4 seconds
         let num_nodes = 4;
 
+        // this reserves instances 3-6
         let starting_instance = 3;
         let mut handles = Vec::new();
         for i in 0..num_nodes {

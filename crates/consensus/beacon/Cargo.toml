@@ -25,6 +25,7 @@ reth-payload-validator.workspace = true
 reth-prune.workspace = true
 reth-snapshot.workspace = true
 reth-tokio-util.workspace = true
+reth-node-api.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -53,6 +54,7 @@ reth-rpc-types-compat.workspace = true
 reth-tracing.workspace = true
 reth-revm.workspace = true
 reth-downloaders.workspace = true
+reth-node-builder.workspace = true
 
 assert_matches.workspace = true
 

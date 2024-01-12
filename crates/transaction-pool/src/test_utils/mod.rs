@@ -1,6 +1,6 @@
 //! Internal helpers for testing.
 
-#![allow(missing_docs, missing_debug_implementations)]
+#![allow(missing_debug_implementations)]
 
 use crate::{blobstore::InMemoryBlobStore, noop::MockTransactionValidator, Pool};
 

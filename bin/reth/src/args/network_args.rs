@@ -88,7 +88,7 @@ impl NetworkArgs {
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
-        let chain_bootnodes = chain_spec.chain.bootnodes().unwrap_or_else(mainnet_nodes);
+        let chain_bootnodes = chain_spec.bootnodes().unwrap_or_else(mainnet_nodes);
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections

@@ -11,10 +11,7 @@ use std::{
 
 /// Constructs a string to be used as a path for configuration and db paths.
 pub fn config_path_prefix(chain: Chain) -> String {
-    match chain {
-        Chain::Named(name) => name.to_string(),
-        Chain::Id(id) => id.to_string(),
-    }
+    chain.to_string()
 }
 
 /// Returns the path to the reth data directory.

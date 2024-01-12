@@ -43,7 +43,7 @@ impl<T> FullProvider for T where
 
 /// The trait that is implemented for the Node command.
 pub trait RethNodeComponents: Clone + Send + Sync + 'static {
-    /// The Provider type that is provided by the not itself
+    /// The Provider type that is provided by the node itself
     type Provider: FullProvider;
     /// The transaction pool type
     type Pool: TransactionPool + Clone + Unpin + 'static;
