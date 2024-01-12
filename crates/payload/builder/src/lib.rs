@@ -26,7 +26,6 @@
 //! ```
 //! use std::future::Future;
 //! use std::pin::Pin;
-//! use std::sync::Arc;
 //! use std::task::{Context, Poll};
 //! use reth_payload_builder::{EthBuiltPayload, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator};
 //! use reth_payload_builder::error::PayloadBuilderError;
@@ -52,10 +51,10 @@
 //!
 //! impl PayloadJob for EmptyBlockPayloadJob {
 //!    type PayloadAttributes = EthPayloadBuilderAttributes;
-//!    type ResolvePayloadFuture = futures_util::future::Ready<Result<Arc<EthBuiltPayload>, PayloadBuilderError>>;
+//!    type ResolvePayloadFuture = futures_util::future::Ready<Result<EthBuiltPayload, PayloadBuilderError>>;
 //!    type BuiltPayload = EthBuiltPayload;
 //!
-//! fn best_payload(&self) -> Result<Arc<EthBuiltPayload>, PayloadBuilderError> {
+//! fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
 //!     // NOTE: some fields are omitted here for brevity
 //!     let payload = Block {
 //!         header: Header {
@@ -67,7 +66,7 @@
 //!         ..Default::default()
 //!     };
 //!     let payload = EthBuiltPayload::new(self.attributes.id, payload.seal_slow(), U256::ZERO);
-//!     Ok(Arc::new(payload))
+//!     Ok(payload)
 //! }
 //!
 //! fn payload_attributes(&self) -> Result<EthPayloadBuilderAttributes, PayloadBuilderError> {
