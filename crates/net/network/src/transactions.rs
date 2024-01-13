@@ -578,7 +578,7 @@ where
 
         debug!(target: "net::tx",
             peer_id=abbrev_hex(peer_id.as_ref()),
-            hashes=abbrev_hex_hash_list(&hashes),
+            hashes=abbrev_hex_hash_list(hashes),
             "received previously unseen hashes in announcement from peer"
         );
 
@@ -589,7 +589,7 @@ where
             // since all hashes new at this point, no idle peer can exist that announced them
             trace!(target: "net::tx",
                 peer_id=abbrev_hex(peer_id.as_ref()),
-                hashes=abbrev_hex_hash_list(&hashes),
+                hashes=abbrev_hex_hash_list(hashes),
                 "buffering hashes announced by busy peer"
             );
             let hashes = msg.into_hashes();
@@ -727,7 +727,7 @@ where
             }
         };
 
-        let Some(peer_id) = &idle_peer else { return None };
+        let peer_id = &idle_peer?;
 
         let (_, peers) = self.transaction_fetcher.unknown_hashes.get_mut(&hashes[0])?;
         // pop peer from fallback peers
@@ -1620,7 +1620,7 @@ impl TransactionFetcher {
         }
 
         for hash in hashes {
-            self.buffered_hashes.remove(&hash);
+            self.buffered_hashes.remove(hash);
         }
     }
 }
