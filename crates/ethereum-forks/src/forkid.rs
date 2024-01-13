@@ -6,7 +6,6 @@ use crate::Head;
 use alloy_primitives::{hex, BlockNumber, B256};
 use alloy_rlp::*;
 use crc::*;
-use reth_codecs::derive_arbitrary;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
@@ -15,11 +14,15 @@ use std::{
     ops::{Add, AddAssign},
 };
 use thiserror::Error;
+#[cfg(any(test, feature = "arbitrary"))]
+use arbitrary::Arbitrary;
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest_derive::Arbitrary as PropTestArbitrary;
 
 const CRC_32_IEEE: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 
 /// `CRC32` hash of all previous forks starting from genesis block.
-#[derive_arbitrary(rlp)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(PropTestArbitrary, Arbitrary))]
 #[derive(
     Clone,
     Copy,
@@ -108,7 +111,7 @@ impl From<ForkFilterKey> for u64 {
 
 /// A fork identifier as defined by EIP-2124.
 /// Serves as the chain compatibility identifier.
-#[derive_arbitrary(rlp)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(PropTestArbitrary, Arbitrary))]
 #[derive(
     Clone,
     Copy,
