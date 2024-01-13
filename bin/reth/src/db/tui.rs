@@ -315,16 +315,20 @@ where
     }
 
     match event {
-        Event::Key(key) => match key.code {
-            KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(true),
-            KeyCode::Down => app.next(),
-            KeyCode::Up => app.previous(),
-            KeyCode::Right => app.next_page(),
-            KeyCode::Left => app.previous_page(),
-            KeyCode::Char('G') => {
-                app.mode = ViewMode::GoToPage;
+        Event::Key(key) => {
+            if key.kind == event::KeyEventKind::Press {
+                match key.code {
+                    KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(true),
+                    KeyCode::Down => app.next(),
+                    KeyCode::Up => app.previous(),
+                    KeyCode::Right => app.next_page(),
+                    KeyCode::Left => app.previous_page(),
+                    KeyCode::Char('G') => {
+                        app.mode = ViewMode::GoToPage;
+                    }
+                    _ => {}
+                }
             }
-            _ => {}
         },
         Event::Mouse(e) => match e.kind {
             MouseEventKind::ScrollDown => app.next(),
