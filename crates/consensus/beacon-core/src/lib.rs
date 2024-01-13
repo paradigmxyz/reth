@@ -16,7 +16,6 @@ use reth_primitives::{
     Chain, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use std::{sync::Arc, time::SystemTime};
-
 /// Ethereum beacon consensus
 ///
 /// This consensus engine does basic checks as outlined in the execution specs.

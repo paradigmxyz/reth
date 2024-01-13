@@ -3,11 +3,14 @@ use crate::{
         EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR, EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
         EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
     },
+    holesky_nodes,
+    net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
     proofs::state_root_ref_unhashed,
     revm_primitives::{address, b256},
-    Address, BlockNumber, Chain, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis, Hardfork,
-    Head, Header, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Address, BlockNumber, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis, Hardfork, Head,
+    Header, NodeRecord, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
+use alloy_chains::{Chain, NamedChain};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -400,7 +403,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis_hash: Some(b256!(
             "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"
         )),
-        fork_timestamps: ForkTimestamps::default(),
+        fork_timestamps: ForkTimestamps::default().shanghai(1704992401).canyon(1704992401),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
@@ -422,6 +425,8 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Bedrock, ForkCondition::Block(0)),
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(1704992401)),
+            (Hardfork::Canyon, ForkCondition::Timestamp(1704992401)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
@@ -957,6 +962,19 @@ impl ChainSpec {
     /// Build a chainspec using [`ChainSpecBuilder`]
     pub fn builder() -> ChainSpecBuilder {
         ChainSpecBuilder::default()
+    }
+
+    /// Returns the known bootnode records for the given chain.
+    pub fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
+        use NamedChain as C;
+        let chain = self.chain;
+        match chain.try_into().ok()? {
+            C::Mainnet => Some(mainnet_nodes()),
+            C::Goerli => Some(goerli_nodes()),
+            C::Sepolia => Some(sepolia_nodes()),
+            C::Holesky => Some(holesky_nodes()),
+            _ => None,
+        }
     }
 }
 
@@ -1601,16 +1619,16 @@ impl DepositContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "optimism")]
+    use crate::OP_GOERLI;
     use crate::{
-        b256, hex, trie::TrieAccount, ChainConfig, GenesisAccount, NamedChain, B256, DEV, GOERLI,
-        HOLESKY, MAINNET, SEPOLIA, U256,
+        b256, hex, trie::TrieAccount, ChainConfig, GenesisAccount, B256, DEV, GOERLI, HOLESKY,
+        MAINNET, SEPOLIA, U256,
     };
+    use alloy_chains::NamedChain;
     use alloy_rlp::Encodable;
     use bytes::BytesMut;
     use std::{collections::HashMap, str::FromStr};
-
-    #[cfg(feature = "optimism")]
-    use crate::OP_GOERLI;
 
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
@@ -2492,7 +2510,7 @@ Post-merge hard forks (timestamp based):
     fn test_timestamp_fork_in_genesis() {
         let timestamp = 1690475657u64;
         let default_spec_builder = ChainSpecBuilder::default()
-            .chain(Chain::Id(1337))
+            .chain(Chain::from_id(1337))
             .genesis(Genesis::default().with_timestamp(timestamp))
             .paris_activated();
 
@@ -2753,7 +2771,7 @@ Post-merge hard forks (timestamp based):
         let genesis = serde_json::from_str::<AllGenesisFormats>(hive_json).unwrap();
         let chainspec: ChainSpec = genesis.into();
         assert_eq!(chainspec.genesis_hash, None);
-        assert_eq!(chainspec.chain, Chain::Named(NamedChain::Optimism));
+        assert_eq!(chainspec.chain, Chain::from_named(NamedChain::Optimism));
         let expected_state_root: B256 =
             hex!("9a6049ac535e3dc7436c189eaa81c73f35abd7f282ab67c32944ff0301d63360").into();
         assert_eq!(chainspec.genesis_header().state_root, expected_state_root);
@@ -2825,7 +2843,7 @@ Post-merge hard forks (timestamp based):
         // set the gas limit from the hive test genesis according to the hash
         let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
         let default_chainspec = ChainSpecBuilder::default()
-            .chain(Chain::Id(1337))
+            .chain(Chain::from_id(1337))
             .genesis(genesis)
             .cancun_activated()
             .build();

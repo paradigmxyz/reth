@@ -1,7 +1,8 @@
 //! Builder structs for messages.
 
 use crate::Status;
-use reth_primitives::{Chain, ForkId, B256, U256};
+use alloy_chains::Chain;
+use reth_primitives::{ForkId, B256, U256};
 
 /// Builder for [`Status`] messages.
 ///
