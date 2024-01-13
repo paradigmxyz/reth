@@ -20,6 +20,7 @@ impl<Types, Provider> Default for FullNodeTypesAdapter<Types, Provider> {
 impl<Types, Provider> NodeTypes for FullNodeTypesAdapter<Types, Provider>
 where
     Types: NodeTypes,
+    Provider: Send + Sync + 'static,
 {
     type Primitives = Types::Primitives;
     type Engine = Types::Engine;

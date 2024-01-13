@@ -8,8 +8,9 @@
 //! Components depend on a fully type configured node: [FullNodeTypes].
 
 use reth_network::NetworkHandle;
-use reth_node_api::{node::FullNodeTypes, EngineTypes};
+use reth_node_api::node::FullNodeTypes;
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_primitives::Head;
 use reth_transaction_pool::TransactionPool;
 use std::marker::PhantomData;
 
@@ -24,45 +25,104 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes> {
     /// Builds the components of the node.
     async fn build_components(
         self,
-        partial: PartialComponents<Node>,
+        context: BuilderContext<Node>,
     ) -> eyre::Result<NodeComponents<Node, Self::Pool>>;
+}
+
+/// Captures the necessary context for building the components of the node.
+#[derive(Debug, Clone)]
+pub struct BuilderContext<Node: FullNodeTypes> {
+    /// The current head of the blockchain at launch.
+    head: Head,
+    /// The configured provider to interact with the blockchain.
+    provider: Node::Provider,
+
+    task_manager: (),
+
+    // TODO maybe combine this with provider
+    events: (),
+
+    /// The data dir of the node.
+    data_dir: (),
+    /// The config of the node
+    config: (),
+}
+
+impl<Node: FullNodeTypes> BuilderContext<Node> {
+    pub fn provider(&self) -> &Node::Provider {
+        &self.provider
+    }
+
+    /// Returns the current head of the blockchain at launch.
+    pub fn head(&self) -> Head {
+        self.head
+    }
+
+    /// Returns the data dir of the node.
+    pub fn data_dir(&self) -> &() {
+        &self.data_dir
+    }
 }
 
 /// A generic, customizable [`NodeComponentsBuilder`].
 ///
 /// This type is stateful and captures the configuration of the node's components.
 ///
-/// TODO should this also be a state machine?
+/// ## Component dependencies:
+///
+/// The components of the node depend on each other:
+/// - The payload builder service depends on the transaction pool.
+/// - The network depends on the transaction pool.
+///
+/// We distinguish between different kind of components:
+/// - Components that are standalone, such as the transaction pool.
+/// - Components that are spawned as a service, such as the payload builder service or the network.
+///
+/// ## Builder lifecycle:
+///
+/// First all standalone components are built. Then the service components are spawned.
+/// All component builders are captured in the builder state and will be consumed once the node is
+/// launched.
 #[derive(Debug)]
-pub struct ComponentsBuilder<Node: FullNodeTypes, PoolB, PayloadB, NetworkB> {
+pub struct ComponentsBuilder<Node, PoolB, PayloadB, NetworkB> {
     pool_builder: PoolB,
     payload_builder: PayloadB,
     network_builder: NetworkB,
     _marker: PhantomData<Node>,
 }
 
+// TODO add default impl for ethereum/optimism
+
 impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB>
 where
     Node: FullNodeTypes,
     PoolB: PoolBuilder,
-    NetworkB: NetworkBuilder,
-    PayloadB: PayloadServiceBuilder<Node::Engine>,
 {
 }
 
+impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB>
+where
+    Node: FullNodeTypes,
+    PoolB: PoolBuilder,
+    NetworkB: NetworkBuilder<Node, PoolB::Pool>,
+    PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
+{
+}
+
+#[async_trait::async_trait]
 impl<Node, PoolB, PayloadB, NetworkB> NodeComponentsBuilder<Node>
     for ComponentsBuilder<Node, PoolB, PayloadB, NetworkB>
 where
     Node: FullNodeTypes,
     PoolB: PoolBuilder,
-    NetworkB: NetworkBuilder,
-    PayloadB: PayloadServiceBuilder<Node::Engine>,
+    NetworkB: NetworkBuilder<Node, PoolB::Pool>,
+    PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
 {
     type Pool = PoolB::Pool;
 
     async fn build_components(
         self,
-        partial: PartialComponents<Node>,
+        context: BuilderContext<Node>,
     ) -> eyre::Result<NodeComponents<Node, Self::Pool>> {
         let Self { pool_builder, payload_builder, network_builder, _marker } = self;
 
@@ -74,18 +134,6 @@ where
     }
 }
 
-// TODO we need Builder implementations that can be modified see
-// `RethNodeCommandConfig::configure_network`
-
-/// Represents the state of a component during the building process.
-///
-/// TODO: This could solve the problem of components depending on each other.
-#[derive(Debug)]
-enum ComponentState<Builder, Value> {
-    Pending(Builder),
-    Built(Value),
-}
-
 /// This captures the
 pub struct ComponentsContext<Node: FullNodeTypes> {
     _marker: PhantomData<Node>,
@@ -94,13 +142,13 @@ pub struct ComponentsContext<Node: FullNodeTypes> {
 /// A type that knows how to build the network implementation.
 // TODO: problem: components can depend on each other
 #[async_trait::async_trait]
-pub trait NetworkBuilder {
+pub trait NetworkBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Send {
     async fn build_network(self) -> eyre::Result<NetworkHandle>;
 }
 
 /// A type that knows how to build the transaction pool.
 #[async_trait::async_trait]
-pub trait PoolBuilder {
+pub trait PoolBuilder: Send {
     /// The transaction pool to build.
     type Pool: TransactionPool;
 
@@ -109,35 +157,21 @@ pub trait PoolBuilder {
 
 /// A type that knows how to spawn the payload service.
 #[async_trait::async_trait]
-pub trait PayloadServiceBuilder<Engine: EngineTypes> {
+pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Send {
     /// Spawns the payload service and returns the handle to it.
-    async fn spawn_payload_service(self) -> eyre::Result<PayloadBuilderHandle<Engine>>;
+    async fn spawn_payload_service(self) -> eyre::Result<PayloadBuilderHandle<Node::Engine>>;
 }
 
-#[async_trait::async_trait]
-impl<F, Engine> PayloadServiceBuilder<Engine> for F
-where
-    Engine: EngineTypes,
-    F: FnOnce() -> eyre::Result<PayloadBuilderHandle<Engine>> + Send,
-{
-    async fn spawn_payload_service(self) -> eyre::Result<PayloadBuilderHandle<Engine>> {
-        self()
-    }
-}
-
-/// A subset of the components of the node.
-#[derive(Debug)]
-pub struct PartialComponents<Node: FullNodeTypes> {
-    provider: Node::Provider,
-    // TODO we need executor + events here
-}
-
-impl<Node: FullNodeTypes> PartialComponents<Node> {
-    /// Returns the provider to interact with the blockchain.
-    pub fn provider(&self) -> Node::Provider {
-        self.provider.clone()
-    }
-}
+// #[async_trait::async_trait]
+// impl<F, Engine> PayloadServiceBuilder<Engine> for F
+// where
+//     Engine: EngineTypes,
+//     F: FnOnce() -> eyre::Result<PayloadBuilderHandle<Engine>> + Send,
+// {
+//     async fn spawn_payload_service(self) -> eyre::Result<PayloadBuilderHandle<Engine>> {
+//         self()
+//     }
+// }
 
 /// All the components of the node.
 ///

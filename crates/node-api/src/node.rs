@@ -1,7 +1,7 @@
 use crate::{evm::EvmConfig, primitives::NodePrimitives, provider::FullProvider, EngineTypes};
 
 /// The type that configures the entire node.
-pub trait NodeTypes {
+pub trait NodeTypes: Send + Sync + 'static {
     /// The node's primitive types.
     type Primitives: NodePrimitives;
     /// The node's engine types.
@@ -12,7 +12,7 @@ pub trait NodeTypes {
 
 /// A helper type that also provides access to the builtin provider type of the node.
 // TODO naming
-pub trait FullNodeTypes: NodeTypes {
+pub trait FullNodeTypes: NodeTypes + 'static {
     /// The provider type used to interact with the node.
     type Provider: FullProvider;
 }
