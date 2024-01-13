@@ -577,7 +577,7 @@ where
         }
 
         debug!(target: "net::tx",
-            peer_id=%peer_id,
+            peer_id=abbrev_hex(peer_id.as_ref()),
             hashes=abbrev_hex_hash_list(&hashes),
             "received previously unseen hashes in announcement from peer"
         );
@@ -588,7 +588,7 @@ where
         if !self.transaction_fetcher.is_idle(peer_id) {
             // since all hashes new at this point, no idle peer can exist that announced them
             trace!(target: "net::tx",
-                peer_id=%peer_id,
+                peer_id=abbrev_hex(peer_id.as_ref()),
                 hashes=abbrev_hex_hash_list(&hashes),
                 "buffering hashes announced by busy peer"
             );
@@ -601,7 +601,7 @@ where
         // the response (2MB)
         if let Some(left_over_hashes) = self.transaction_fetcher.pack_hashes(&mut msg, peer_id) {
             trace!(target: "net::tx",
-                peer_id=%peer_id,
+                peer_id=abbrev_hex(peer_id.as_ref()),
                 hashes=abbrev_hex_hash_list(&left_over_hashes),
                 "some hashes in announcement from peer didn't fit in `GetPooledTransactions` request"
             );
@@ -610,7 +610,7 @@ where
         let hashes = msg.into_hashes();
 
         trace!(target: "net::tx",
-            peer_id=%peer_id,
+            peer_id=abbrev_hex(peer_id.as_ref()),
             hashes=abbrev_hex_hash_list(&hashes),
             "sending hashes in `GetPooledTransactions` request to peer's session"
         );
@@ -623,7 +623,7 @@ where
             })
         {
             debug!(target: "net::tx",
-                peer_id=%peer_id,
+                peer_id=abbrev_hex(peer_id.as_ref()),
                 hashes=%abbrev_hex_hash_list(&failed_to_request_hashes),
                 "sending `GetPooledTransactions` request to peer's session failed, buffering hashes"
             );
@@ -657,7 +657,7 @@ where
 
                 trace!(
                     target: "net::tx",
-                    peer_id=%peer_id,
+                    peer_id=abbrev_hex(peer_id.as_ref()),
                     hashes=abbrev_hex_hash_list(&hashes),
                     "requesting buffered hashes from idle peer"
                 );
@@ -670,7 +670,7 @@ where
                     })
                 {
                     debug!(target: "net::tx",
-                        peer_id=%peer_id,
+                        peer_id=abbrev_hex(peer_id.as_ref()),
                         hashes=%abbrev_hex_hash_list(&failed_to_request_hashes),
                         "failed sending request to peer's session, buffering hashes"
                     );
@@ -1473,7 +1473,7 @@ impl TransactionFetcher {
                 Entry::Vacant(entry) => {
                     trace!(
                         target: "net::tx",
-                        peer_id=%peer_id,
+                        peer_id=abbrev_hex(peer_id.as_ref()),
                         hashes=abbrev_hex(hash.as_ref()),
                         "new hash seen in announcement by peer"
                     );
@@ -1516,7 +1516,7 @@ impl TransactionFetcher {
 
         if self.active_peers.len() as u32 >= MAX_CONCURRENT_TX_REQUESTS {
             debug!(target: "net::tx",
-                peer_id=%peer_id,
+                peer_id=abbrev_hex(peer_id.as_ref()),
                 hashes=abbrev_hex_hash_list(&new_announced_hashes),
                 limit=MAX_CONCURRENT_TX_REQUESTS,
                 "limit for concurrent `GetPooledTransactions` requests reached, dropping request for hashes to peer"
@@ -1526,7 +1526,7 @@ impl TransactionFetcher {
 
         let Some(inflight_count) = self.active_peers.get_or_insert(peer_id, || 0) else {
             warn!(target: "net::tx",
-                peer_id=%peer_id,
+                peer_id=abbrev_hex(peer_id.as_ref()),
                 hashes=abbrev_hex_hash_list(&new_announced_hashes),
                 "failed to cache active peer in schnellru::LruMap, dropping request to peer"
             );
@@ -1535,7 +1535,7 @@ impl TransactionFetcher {
 
         if *inflight_count >= MAX_CONCURRENT_TX_REQUESTS_PER_PEER {
             debug!(target: "net::tx",
-                peer_id=%peer_id,
+                peer_id=abbrev_hex(peer_id.as_ref()),
                 hashes=abbrev_hex_hash_list(&new_announced_hashes),
                 limit=MAX_CONCURRENT_TX_REQUESTS_PER_PEER,
                 "limit for concurrent `GetPooledTransactions` requests per peer reached"
