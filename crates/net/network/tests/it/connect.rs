@@ -21,7 +21,6 @@ use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
 use std::{collections::HashSet, net::SocketAddr, time::Duration};
 use tokio::task;
-
 #[tokio::test(flavor = "multi_thread")]
 async fn test_establish_connections() {
     reth_tracing::init_test_tracing();
