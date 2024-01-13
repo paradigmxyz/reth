@@ -1,10 +1,10 @@
+use core::hash::BuildHasher;
 use derive_more::{Deref, DerefMut};
 use linked_hash_set::LinkedHashSet;
-use schnellru::{self, ByLength};
+use schnellru::{self, ByLength, Limiter, RandomState, Unlimited};
 use std::{
     borrow::Borrow,
     fmt::{self, Write},
-    hash,
     hash::Hash,
     num::NonZeroUsize,
 };
@@ -111,14 +111,18 @@ where
 
 /// Wrapper of [`schnellru::LruMap`] that implements [`fmt::Debug`].
 #[derive(Deref, DerefMut)]
-pub struct LruMap<K, V>(schnellru::LruMap<K, V>)
+pub struct LruMap<K, V, L = ByLength, S = RandomState>(schnellru::LruMap<K, V, L, S>)
 where
-    K: hash::Hash + PartialEq;
+    K: Hash + PartialEq,
+    L: Limiter<K, V>,
+    S: BuildHasher;
 
-impl<K, V> fmt::Debug for LruMap<K, V>
+impl<K, V, L, S> fmt::Debug for LruMap<K, V, L, S>
 where
-    K: hash::Hash + PartialEq + fmt::Display,
+    K: Hash + PartialEq + fmt::Display,
     V: fmt::Debug,
+    L: Limiter<K, V>,
+    S: BuildHasher,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("LruMap");
@@ -133,19 +137,21 @@ where
 
 impl<K, V> LruMap<K, V>
 where
-    K: hash::Hash + PartialEq,
+    K: Hash + PartialEq,
 {
+    /// Returns a new cache with default limiter and hash builder.
     pub fn new(max_length: u32) -> Self {
-        Self(schnellru::LruMap::new(ByLength::new(max_length)))
+        LruMap(schnellru::LruMap::new(ByLength::new(max_length)))
     }
 }
 
-impl<K, V> From<LruMap<K, V>> for schnellru::LruMap<K, V>
+impl<K, V> LruMap<K, V, Unlimited>
 where
-    K: hash::Hash + PartialEq,
+    K: Hash + PartialEq,
 {
-    fn from(value: LruMap<K, V>) -> Self {
-        value.0
+    /// Returns a new cache with [`Unlimited`] limiter and default hash builder.
+    pub fn new_unlimited() -> Self {
+        LruMap(schnellru::LruMap::new(Unlimited))
     }
 }
 
