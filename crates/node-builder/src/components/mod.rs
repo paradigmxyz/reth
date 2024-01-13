@@ -14,7 +14,22 @@ use reth_primitives::Head;
 use reth_transaction_pool::TransactionPool;
 use std::marker::PhantomData;
 
+mod network;
+mod payload;
+mod pool;
+
+pub use network::*;
+pub use payload::*;
+pub use pool::*;
+
 /// A type that configures all the customizable components of the node and knows how to build them.
+///
+/// Implementors of this trait are responsible for building all the components of the node: See
+/// [NodeComponents].
+///
+/// The [ComponentsBuilder] is a generic implementation of this trait that can be used to customize
+/// certain components of the node using the builder pattern and defaults, e.g. Ethereum and
+/// Optimism.
 #[async_trait::async_trait]
 pub trait NodeComponentsBuilder<Node: FullNodeTypes> {
     /// The transaction pool to use.
@@ -62,6 +77,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     pub fn data_dir(&self) -> &() {
         &self.data_dir
     }
+
+    // TODO read only helper methods to access the config traits (cli args)
 }
 
 /// A generic, customizable [`NodeComponentsBuilder`].
@@ -96,14 +113,27 @@ pub struct ComponentsBuilder<Node, PoolB, PayloadB, NetworkB> {
 impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB>
 where
     Node: FullNodeTypes,
-    PoolB: PoolBuilder,
+{
+    /// Configures the pool builder.
+    pub fn pool<PB>(self, _pool: PB) -> ComponentsBuilder<Node, PB, PayloadB, NetworkB>
+    where
+        PB: PoolBuilder<Node>,
+    {
+        todo!()
+    }
+}
+
+impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB>
+where
+    Node: FullNodeTypes,
+    PoolB: PoolBuilder<Node>,
 {
 }
 
 impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB>
 where
     Node: FullNodeTypes,
-    PoolB: PoolBuilder,
+    PoolB: PoolBuilder<Node>,
     NetworkB: NetworkBuilder<Node, PoolB::Pool>,
     PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
 {
@@ -114,7 +144,7 @@ impl<Node, PoolB, PayloadB, NetworkB> NodeComponentsBuilder<Node>
     for ComponentsBuilder<Node, PoolB, PayloadB, NetworkB>
 where
     Node: FullNodeTypes,
-    PoolB: PoolBuilder,
+    PoolB: PoolBuilder<Node>,
     NetworkB: NetworkBuilder<Node, PoolB::Pool>,
     PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
 {
@@ -122,9 +152,9 @@ where
 
     async fn build_components(
         self,
-        context: BuilderContext<Node>,
+        _context: BuilderContext<Node>,
     ) -> eyre::Result<NodeComponents<Node, Self::Pool>> {
-        let Self { pool_builder, payload_builder, network_builder, _marker } = self;
+        let Self { pool_builder: _, payload_builder: _, network_builder: _, _marker } = self;
 
         todo!()
         // let pool = self.pool_builder.build_pool().await?;
@@ -134,44 +164,7 @@ where
     }
 }
 
-/// This captures the
-pub struct ComponentsContext<Node: FullNodeTypes> {
-    _marker: PhantomData<Node>,
-}
-
-/// A type that knows how to build the network implementation.
-// TODO: problem: components can depend on each other
-#[async_trait::async_trait]
-pub trait NetworkBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Send {
-    async fn build_network(self) -> eyre::Result<NetworkHandle>;
-}
-
-/// A type that knows how to build the transaction pool.
-#[async_trait::async_trait]
-pub trait PoolBuilder: Send {
-    /// The transaction pool to build.
-    type Pool: TransactionPool;
-
-    async fn build_pool(self) -> eyre::Result<Self::Pool>;
-}
-
-/// A type that knows how to spawn the payload service.
-#[async_trait::async_trait]
-pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Send {
-    /// Spawns the payload service and returns the handle to it.
-    async fn spawn_payload_service(self) -> eyre::Result<PayloadBuilderHandle<Node::Engine>>;
-}
-
-// #[async_trait::async_trait]
-// impl<F, Engine> PayloadServiceBuilder<Engine> for F
-// where
-//     Engine: EngineTypes,
-//     F: FnOnce() -> eyre::Result<PayloadBuilderHandle<Engine>> + Send,
-// {
-//     async fn spawn_payload_service(self) -> eyre::Result<PayloadBuilderHandle<Engine>> {
-//         self()
-//     }
-// }
+// TODO add default impl for ethereum/optimism
 
 /// All the components of the node.
 ///
