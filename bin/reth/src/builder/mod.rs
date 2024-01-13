@@ -1429,11 +1429,11 @@ mod tests {
         let handle =
             spawn_node(NodeConfig::test().with_rpc(rpc_args).with_instance(1)).await.unwrap();
 
-        // call a function on the node
+        // // call a function on the node
         let client = handle.rpc_server_handles().rpc.http_client().unwrap();
         let block_number = client.block_number().await.unwrap();
 
-        // it should be zero, since this is an ephemeral test node
+        // // it should be zero, since this is an ephemeral test node
         assert_eq!(block_number, U256::ZERO);
     }
 
