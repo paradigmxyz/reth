@@ -35,7 +35,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     /// Returns the parent block hash for the running payload job.
     fn parent(&self) -> B256;
 
-    /// Returns the timestmap for the running payload job.
+    /// Returns the timestamp for the running payload job.
     fn timestamp(&self) -> u64;
 
     /// Returns the parent beacon block root for the running payload job, if it exists.
