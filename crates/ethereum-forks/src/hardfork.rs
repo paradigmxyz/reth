@@ -1,4 +1,4 @@
-use alloy_chains::{Chain, NamedChain};
+use alloy_chains::Chain;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, str::FromStr};
 
@@ -54,33 +54,37 @@ pub enum Hardfork {
 impl Hardfork {
     /// Retrieves the activation block for the specified hardfork on the Ethereum mainnet.
     pub fn mainnet_activation_block(&self, chain: Chain) -> Option<u64> {
-        match chain.named() {
-            Some(NamedChain::Mainnet) => match self {
-                Hardfork::Frontier => Some(0),
-                Hardfork::Homestead => Some(1150000),
-                Hardfork::Dao => Some(1920000),
-                Hardfork::Tangerine => Some(2463000),
-                Hardfork::SpuriousDragon => Some(2675000),
-                Hardfork::Byzantium => Some(4370000),
-                Hardfork::Constantinople => Some(7280000),
-                Hardfork::Petersburg => Some(7280000),
-                Hardfork::Istanbul => Some(9069000),
-                Hardfork::MuirGlacier => Some(9200000),
-                Hardfork::Berlin => Some(12244000),
-                Hardfork::London => Some(12965000),
-                Hardfork::ArrowGlacier => Some(13773000),
-                Hardfork::GrayGlacier => Some(15050000),
-                Hardfork::Paris => Some(15537394),
-                #[cfg(feature = "optimism")]
-                Hardfork::Bedrock => None,
-                #[cfg(feature = "optimism")]
-                Hardfork::Regolith => None,
-                Hardfork::Shanghai => Some(17034870),
-                #[cfg(feature = "optimism")]
-                Hardfork::Canyon => None,
-                Hardfork::Cancun => None,
-            },
-            _ => todo!(),
+        if chain != Chain::mainnet() {
+            return None;
+        }
+        match self {
+            Hardfork::Frontier => Some(0),
+            Hardfork::Homestead => Some(1150000),
+            Hardfork::Dao => Some(1920000),
+            Hardfork::Tangerine => Some(2463000),
+            Hardfork::SpuriousDragon => Some(2675000),
+            Hardfork::Byzantium => Some(4370000),
+            Hardfork::Constantinople => Some(7280000),
+            Hardfork::Petersburg => Some(7280000),
+            Hardfork::Istanbul => Some(9069000),
+            Hardfork::MuirGlacier => Some(9200000),
+            Hardfork::Berlin => Some(12244000),
+            Hardfork::London => Some(12965000),
+            Hardfork::ArrowGlacier => Some(13773000),
+            Hardfork::GrayGlacier => Some(15050000),
+            Hardfork::Paris => Some(15537394),
+            Hardfork::Shanghai => Some(17034870),
+
+            // upcoming hardforks
+            Hardfork::Cancun => None,
+
+            // optimism hardforks
+            #[cfg(feature = "optimism")]
+            Hardfork::Bedrock => None,
+            #[cfg(feature = "optimism")]
+            Hardfork::Regolith => None,
+            #[cfg(feature = "optimism")]
+            Hardfork::Canyon => None,
         }
     }
 }
