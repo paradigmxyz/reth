@@ -1722,7 +1722,7 @@ pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
     pub(crate) transaction: Arc<ValidPoolTransaction<T>>,
     /// The `SubPool` that currently contains this transaction.
     pub(crate) subpool: SubPool,
-    /// Keeps track of the current state of the transaction and therefor in which subpool it should
+    /// Keeps track of the current state of the transaction and therefore in which subpool it should
     /// reside
     pub(crate) state: TxState,
     /// The total cost all transactions before this transaction.

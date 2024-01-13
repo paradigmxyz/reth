@@ -445,7 +445,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Truncates the pool to the given [SubPoolLimit], removing transactions until the subpool
     /// limits are met.
     ///
-    /// This attempts to remove transactions by rougly the same amount for each sender. For more
+    /// This attempts to remove transactions by roughly the same amount for each sender. For more
     /// information on this exact process see docs for
     /// [remove_to_limit](PendingPool::remove_to_limit).
     ///
