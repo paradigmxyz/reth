@@ -6114,6 +6114,7 @@ dependencies = [
 name = "reth-ethereum-forks"
 version = "0.1.0-alpha.14"
 dependencies = [
+ "alloy-chains",
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
