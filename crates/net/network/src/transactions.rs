@@ -1438,7 +1438,7 @@ impl TransactionFetcher {
                     warn!(target: "net::tx",
                         hash=abbrev_hex(hash.as_ref()),
                         retries=retries,
-                        "retry limit for `GetPooledTransactions` reached for hash, dropping hash"
+                        "retry limit for `GetPooledTransactions` requests reached for hash, dropping hash"
                     );
                     max_retried_hashes.push(hash);
                     continue;
