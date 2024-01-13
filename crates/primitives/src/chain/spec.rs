@@ -855,7 +855,7 @@ impl ChainSpec {
         ForkFilter::new(head, self.genesis_hash(), self.genesis_timestamp(), forks)
     }
 
-    /// Compute the [`ForkId`] for the given [`Head`] folowing eip-6122 spec
+    /// Compute the [`ForkId`] for the given [`Head`] following eip-6122 spec
     pub fn fork_id(&self, head: &Head) -> ForkId {
         let mut forkhash = ForkHash::from(self.genesis_hash());
         let mut current_applied = 0;
@@ -1056,7 +1056,7 @@ pub struct ForkTimestamps {
 }
 
 impl ForkTimestamps {
-    /// Creates a new [`ForkTimestamps`] from the given hardforks by extracing the timestamps
+    /// Creates a new [`ForkTimestamps`] from the given hardforks by extracting the timestamps
     fn from_hardforks(forks: &BTreeMap<Hardfork, ForkCondition>) -> Self {
         let mut timestamps = ForkTimestamps::default();
         if let Some(shanghai) = forks.get(&Hardfork::Shanghai).and_then(|f| f.as_timestamp()) {
