@@ -195,7 +195,7 @@ where
             ListenerEvent::Incoming { stream, remote_addr } => {
                 // Reject incoming connection if node is shutting down.
                 if self.is_shutting_down() {
-                    return None;
+                    return None
                 }
                 // ensure we can handle an incoming connection from this address
                 if let Err(err) =
@@ -213,13 +213,13 @@ where
                             );
                         }
                     }
-                    return None;
+                    return None
                 }
 
                 match self.sessions.on_incoming(stream, remote_addr) {
                     Ok(session_id) => {
                         trace!(target: "net", ?remote_addr, "Incoming connection");
-                        return Some(SwarmEvent::IncomingTcpConnection { session_id, remote_addr });
+                        return Some(SwarmEvent::IncomingTcpConnection { session_id, remote_addr })
                     }
                     Err(err) => {
                         trace!(target: "net", ?err, "Incoming connection rejected, capacity already reached.");
@@ -238,7 +238,7 @@ where
         match event {
             StateAction::Connect { remote_addr, peer_id } => {
                 self.dial_outbound(remote_addr, peer_id);
-                return Some(SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id });
+                return Some(SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id })
             }
             StateAction::Disconnect { peer_id, reason } => {
                 self.sessions.disconnect(peer_id, reason);
@@ -256,7 +256,7 @@ where
             StateAction::DiscoveredNode { peer_id, socket_addr, fork_id } => {
                 // Don't try to connect to peer if node is shutting down
                 if self.is_shutting_down() {
-                    return None;
+                    return None
                 }
                 // Insert peer only if no fork id or a valid fork id
                 if fork_id.map_or_else(|| true, |f| self.sessions.is_valid_fork_id(f)) {
@@ -305,7 +305,7 @@ where
         loop {
             while let Poll::Ready(action) = this.state.poll(cx) {
                 if let Some(event) = this.on_state_action(action) {
-                    return Poll::Ready(Some(event));
+                    return Poll::Ready(Some(event))
                 }
             }
 
@@ -314,9 +314,9 @@ where
                 Poll::Pending => {}
                 Poll::Ready(event) => {
                     if let Some(event) = this.on_session_event(event) {
-                        return Poll::Ready(Some(event));
+                        return Poll::Ready(Some(event))
                     }
-                    continue;
+                    continue
                 }
             }
 
@@ -325,13 +325,13 @@ where
                 Poll::Pending => {}
                 Poll::Ready(event) => {
                     if let Some(event) = this.on_connection(event) {
-                        return Poll::Ready(Some(event));
+                        return Poll::Ready(Some(event))
                     }
-                    continue;
+                    continue
                 }
             }
 
-            return Poll::Pending;
+            return Poll::Pending
         }
     }
 }

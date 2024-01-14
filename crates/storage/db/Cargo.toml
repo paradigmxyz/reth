@@ -87,7 +87,7 @@ paste = "1.0"
 assert_matches.workspace = true
 
 [build-dependencies]
-vergen = { version = "8.0.0", features = ["git", "gitcl"] }
+vergen = { version = "8", features = ["git", "git2"] }
 
 [features]
 default = ["mdbx"]

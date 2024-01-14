@@ -18,6 +18,7 @@ reth-net-common.workspace = true
 
 # ethereum
 alloy-rlp.workspace = true
+alloy-chains.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
 

@@ -16,6 +16,7 @@ workspace = true
 reth-codecs.workspace = true
 
 # ethereum
+alloy-chains.workspace = true
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 

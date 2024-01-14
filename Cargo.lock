@@ -139,6 +139,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0942ffc6dcaadf03badf6e6a2d0228460359d5e34b57ccdc720b7382dfbd5ec5"
 
 [[package]]
+name = "alloy-chains"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59a5f61137c31916542bb63cd70d0e0dd7a76f76b7f962f4337bc438612d45b2"
+dependencies = [
+ "alloy-rlp",
+ "arbitrary",
+ "num_enum 0.7.2",
+ "proptest",
+ "serde",
+ "strum",
+]
+
+[[package]]
 name = "alloy-dyn-abi"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -386,9 +400,9 @@ checksum = "080e9890a082662b09c1ad45f567faeeb47f22b5fb23895fbe1e651e718e25ca"
 
 [[package]]
 name = "aquamarine"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "074b80d14d0240b6ce94d68f059a2d26a5d77280ae142662365a21ef6e2594ef"
+checksum = "21cc1548309245035eb18aa7f0967da6bc65587005170c56e6ef2788a4cf3f4e"
 dependencies = [
  "include_dir",
  "itertools 0.10.5",
@@ -3009,6 +3023,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4271d37baee1b8c7e4b708028c57d816cf9d2434acb33a549475f78c181f6253"
 
 [[package]]
+name = "git2"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fbf97ba92db08df386e10c8ede66a2a0369bd277090afd8710e19e38de9ec0cd"
+dependencies = [
+ "bitflags 2.4.1",
+ "libc",
+ "libgit2-sys",
+ "log",
+ "url",
+]
+
+[[package]]
 name = "glob"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4083,6 +4110,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "libgit2-sys"
+version = "0.16.1+1.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2a2bb3680b094add03bb3732ec520ece34da31a8cd2d633d1389d0f0fb60d0c"
+dependencies = [
+ "cc",
+ "libc",
+ "libz-sys",
+ "pkg-config",
+]
+
+[[package]]
 name = "libloading"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4118,6 +4157,18 @@ dependencies = [
  "bitflags 2.4.1",
  "libc",
  "redox_syscall 0.4.1",
+]
+
+[[package]]
+name = "libz-sys"
+version = "1.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "295c17e837573c8c821dbaeb3cceb3d745ad082f7572191409e69cbc1b3fd050"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
+ "vcpkg",
 ]
 
 [[package]]
@@ -4637,7 +4688,7 @@ version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "681030a937600a36906c185595136d26abfebb4aa9c65701cefcaf8578bb982b"
 dependencies = [
- "proc-macro-crate 3.0.0",
+ "proc-macro-crate 2.0.0",
  "proc-macro2",
  "quote",
  "syn 2.0.48",
@@ -5221,15 +5272,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "proc-macro-crate"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b2685dd208a3771337d8d386a89840f0f43cd68be8dae90a5f8c2384effc9cd"
-dependencies = [
- "toml_edit 0.21.0",
-]
-
-[[package]]
 name = "proc-macro-error"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5640,6 +5682,7 @@ dependencies = [
 name = "reth"
 version = "0.1.0-alpha.14"
 dependencies = [
+ "alloy-chains",
  "alloy-rlp",
  "aquamarine",
  "backon",
@@ -5870,6 +5913,7 @@ dependencies = [
 name = "reth-consensus-common"
 version = "0.1.0-alpha.14"
 dependencies = [
+ "alloy-chains",
  "assert_matches",
  "cfg-if",
  "mockall",
@@ -5951,6 +5995,7 @@ dependencies = [
 name = "reth-dns-discovery"
 version = "0.1.0-alpha.14"
 dependencies = [
+ "alloy-chains",
  "alloy-rlp",
  "async-trait",
  "data-encoding",
@@ -6033,6 +6078,7 @@ dependencies = [
 name = "reth-eth-wire"
 version = "0.1.0-alpha.14"
 dependencies = [
+ "alloy-chains",
  "alloy-rlp",
  "arbitrary",
  "async-stream",
@@ -6068,6 +6114,7 @@ dependencies = [
 name = "reth-ethereum-forks"
 version = "0.1.0-alpha.14"
 dependencies = [
+ "alloy-chains",
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
@@ -6268,6 +6315,7 @@ dependencies = [
 name = "reth-network-api"
 version = "0.1.0-alpha.14"
 dependencies = [
+ "alloy-chains",
  "async-trait",
  "reth-discv4",
  "reth-eth-wire",
@@ -6377,6 +6425,7 @@ name = "reth-primitives"
 version = "0.1.0-alpha.14"
 dependencies = [
  "ahash",
+ "alloy-chains",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
@@ -6801,6 +6850,7 @@ name = "reth-trie"
 version = "0.1.0-alpha.14"
 dependencies = [
  "ahash",
+ "alloy-chains",
  "alloy-rlp",
  "auto_impl",
  "criterion",
@@ -8801,12 +8851,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
 
 [[package]]
+name = "vcpkg"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
+
+[[package]]
 name = "vergen"
 version = "8.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1290fd64cc4e7d3c9b07d7f333ce0ce0007253e32870e632624835cc80b83939"
 dependencies = [
  "anyhow",
+ "git2",
  "rustversion",
  "time",
 ]

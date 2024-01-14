@@ -42,7 +42,7 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use tracing_subscriber::{filter::Directive, EnvFilter};
+use tracing_subscriber::filter::Directive;
 
 // Re-export tracing crates
 pub use tracing;
@@ -52,8 +52,11 @@ pub use tracing_subscriber;
 pub use formatter::LogFormat;
 pub use layers::{FileInfo, FileWorkerGuard};
 
+pub use test_tracer::TestTracer;
+
 mod formatter;
 mod layers;
+mod test_tracer;
 
 use crate::layers::Layers;
 use tracing::level_filters::LevelFilter;
@@ -223,8 +226,5 @@ impl Tracer for RethTracer {
 ///
 ///  The subscriber will silently fail if it could not be installed.
 pub fn init_test_tracing() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_writer(std::io::stderr)
-        .try_init();
+    let _ = TestTracer::default().init();
 }

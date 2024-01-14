@@ -1452,6 +1452,7 @@ mod tests {
         // spawn_test_node takes roughly 1 second per node, so this test takes ~4 seconds
         let num_nodes = 4;
 
+        // this reserves instances 3-6
         let starting_instance = 3;
         let mut handles = Vec::new();
         for i in 0..num_nodes {
