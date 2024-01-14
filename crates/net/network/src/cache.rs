@@ -59,8 +59,7 @@ impl<T: Hash + Eq> LruCache<T> {
 
     /// Remove the least recently used entry and return it.
     ///
-    /// If the `LruCache` is empty or if the eviction feedback is
-    /// configured, this will return None.
+    /// If the `LruCache` is empty this will return None.
     #[inline]
     fn remove_lru(&mut self) -> Option<T> {
         self.inner.pop_front()
