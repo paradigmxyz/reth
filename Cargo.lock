@@ -240,7 +240,6 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types",
  "itertools 0.12.0",
- "jsonrpsee-types",
  "serde",
  "serde_json",
  "thiserror",
