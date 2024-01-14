@@ -728,7 +728,7 @@ where
 
             let idle_peer = self.get_idle_peer_for(hash, &mut ended_sessions);
             for peer_id in ended_sessions.drain(..) {
-                let (_, peers) = self.transaction_fetcher.unknown_hashes.get(&hash)?;
+                let (_, peers) = self.transaction_fetcher.unknown_hashes.peek_mut(&hash)?;
                 _ = peers.remove(&peer_id);
             }
             if idle_peer.is_some() {
@@ -1464,7 +1464,7 @@ impl TransactionFetcher {
         // 1. filter out inflight hashes, and register the peer as fallback for all inflight hashes
         new_announced_hashes.retain(|hash| {
             // occupied entry
-            if let Some((_retries, backups)) = self.unknown_hashes.get(hash) {
+            if let Some((_retries, backups)) = self.unknown_hashes.peek_mut(hash) {
                 // hash has been seen but is not inflight
                 if self.buffered_hashes.remove(hash) {
                     return true
