@@ -181,11 +181,11 @@ impl<DB: Database> Snapshotter<DB> {
         debug_assert!(targets.is_contiguous_to_highest_snapshots(self.highest_snapshots));
 
         self.run_segment::<segments::Receipts>(
-            targets.receipts.as_ref().map(|(range, _)| range.clone()),
+            targets.receipts.clone().map(|(range, _)| range.clone()),
         )?;
 
         self.run_segment::<segments::Transactions>(
-            targets.transactions.as_ref().map(|(range, _)| range.clone()),
+            targets.transactions.clone().map(|(range, _)| range.clone()),
         )?;
 
         self.run_segment::<segments::Headers>(targets.headers.clone())?;
