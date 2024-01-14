@@ -212,7 +212,7 @@ mod builder {
                 Err(err) => {
                     match err {
                         EVMError::Transaction(err) => {
-                            trace!(target: "optimism_payload_builder", ?err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
+                            trace!(target: "payload_builder", ?err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
                             continue
                         }
                         err => {
