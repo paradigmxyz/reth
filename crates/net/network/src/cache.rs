@@ -34,13 +34,13 @@ impl<T: Hash + Eq> LruCache<T> {
     /// If the set did not have this value present, true is returned.
     /// If the set did have this value present, false is returned.
     pub fn insert(&mut self, entry: T) -> bool {
-        let (new_entry, evicted_val) = self.insert_with_eviction_feedback(entry);
+        let (new_entry, evicted_val) = self.insert_and_get_evicted(entry);
         new_entry
     }
 
     /// Same as [`Self::insert`] but returns a tuple, where the second index is the evicted value,
     /// if one was evicted.
-    pub fn insert_with_eviction_feedback(&mut self, entry: T) -> (bool, Option<T>) {
+    pub fn insert_and_get_evicted(&mut self, entry: T) -> (bool, Option<T>) {
         if self.inner.insert(entry) {
             if self.limit.get() == self.inner.len() {
                 // remove the oldest element in the set
