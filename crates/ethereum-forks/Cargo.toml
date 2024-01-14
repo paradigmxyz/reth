@@ -12,7 +12,7 @@ description = "Ethereum fork types used in reth."
 workspace = true
 
 [dependencies]
-
+# reth-codecs.workspace = true
 # ethereum
 alloy-chains.workspace = true
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
@@ -40,3 +40,4 @@ proptest-derive.workspace = true
 
 [features]
 arbitrary = ["dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
+optimism = []

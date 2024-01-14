@@ -109,6 +109,7 @@ optimism = [
     "reth-codecs/optimism",
     "revm-primitives/optimism",
     "revm/optimism",
+    "reth-ethereum-forks/optimism",
 ]
 test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
 
