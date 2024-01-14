@@ -22,7 +22,7 @@ use tracing::*;
 
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
-/// in [`TxSenders`][reth_db::tables::TxSenders] table.
+/// in [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
 #[derive(Clone, Debug)]
 pub struct SenderRecoveryStage {
     /// The size of inserted items after which the control
@@ -53,7 +53,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// [`BlockBodyIndices`][reth_db::tables::BlockBodyIndices],
     /// collect transactions within that range,
     /// recover signer for each transaction and store entries in
-    /// the [`TxSenders`][reth_db::tables::TxSenders] table.
+    /// the [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
     fn execute(
         &mut self,
         provider: &DatabaseProviderRW<DB>,
@@ -80,7 +80,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         let tx = provider.tx_ref();
 
         // Acquire the cursor for inserting elements
-        let mut senders_cursor = tx.cursor_write::<tables::TxSenders>()?;
+        let mut senders_cursor = tx.cursor_write::<tables::TransactionSenders>()?;
 
         // Acquire the cursor over the transactions
         let mut tx_cursor = tx.cursor_read::<RawTable<tables::Transactions>>()?;
@@ -135,7 +135,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                             SenderRecoveryStageError::FailedRecovery(err) => {
                                 // get the block number for the bad transaction
                                 let block_number = tx
-                                    .get::<tables::TransactionBlock>(err.tx)?
+                                    .get::<tables::TransactionBlocks>(err.tx)?
                                     .ok_or(ProviderError::BlockNumberForTransactionIndexNotFound)?;
 
                                 // fetch the sealed header so we can use it in the sender recovery
@@ -178,7 +178,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             .block_body_indices(unwind_to)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?
             .last_tx_num();
-        provider.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
+        provider.unwind_table_by_num::<tables::TransactionSenders>(latest_tx_id)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
@@ -219,10 +219,11 @@ fn stage_checkpoint<DB: Database>(
         .and_then(|checkpoint| checkpoint.tx_number)
         .unwrap_or_default();
     Ok(EntitiesCheckpoint {
-        // If `TxSenders` table was pruned, we will have a number of entries in it not matching
-        // the actual number of processed transactions. To fix that, we add the number of pruned
-        // `TxSenders` entries.
-        processed: provider.tx_ref().entries::<tables::TxSenders>()? as u64 + pruned_entries,
+        // If `TransactionSenders` table was pruned, we will have a number of entries in it not
+        // matching the actual number of processed transactions. To fix that, we add the
+        // number of pruned `TransactionSenders` entries.
+        processed: provider.tx_ref().entries::<tables::TransactionSenders>()? as u64 +
+            pruned_entries,
         total: provider.tx_ref().entries::<tables::Transactions>()? as u64,
     })
 }
@@ -353,7 +354,8 @@ mod tests {
             ExecOutput {
                 checkpoint: StageCheckpoint::new(expected_progress).with_entities_stage_checkpoint(
                     EntitiesCheckpoint {
-                        processed: runner.db.table::<tables::TxSenders>().unwrap().len() as u64,
+                        processed: runner.db.table::<tables::TransactionSenders>().unwrap().len()
+                            as u64,
                         total: total_transactions
                     }
                 ),
@@ -455,10 +457,11 @@ mod tests {
 
         /// # Panics
         ///
-        /// 1. If there are any entries in the [tables::TxSenders] table above a given block number.
+        /// 1. If there are any entries in the [tables::TransactionSenders] table above a given
+        ///    block number.
         ///
-        /// 2. If the is no requested block entry in the bodies table, but [tables::TxSenders] is
-        ///    not empty.
+        /// 2. If the is no requested block entry in the bodies table, but
+        ///    [tables::TransactionSenders] is not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
                 .db
@@ -467,11 +470,12 @@ mod tests {
                 .block_body_indices(block)?
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(block));
             match body_result {
-                Ok(body) => self
-                    .db
-                    .ensure_no_entry_above::<tables::TxSenders, _>(body.last_tx_num(), |key| key)?,
+                Ok(body) => self.db.ensure_no_entry_above::<tables::TransactionSenders, _>(
+                    body.last_tx_num(),
+                    |key| key,
+                )?,
                 Err(_) => {
-                    assert!(self.db.table_is_empty::<tables::TxSenders>()?);
+                    assert!(self.db.table_is_empty::<tables::TransactionSenders>()?);
                 }
             };
 

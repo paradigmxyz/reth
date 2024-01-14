@@ -44,11 +44,11 @@ pub enum StageEnum {
     /// The account history stage within the pipeline.
     ///
     /// Manages historical data related to accounts.
-    AccountHistory,
+    AccountsHistory,
     /// The storage history stage within the pipeline.
     ///
     /// Manages historical data related to storage.
-    StorageHistory,
+    StoragesHistory,
     /// The total difficulty stage within the pipeline.
     ///
     /// Handles computations and data related to total difficulty.

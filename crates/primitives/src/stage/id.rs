@@ -24,9 +24,9 @@ pub enum StageId {
     /// Transaction lookup stage in the process.
     TransactionLookup,
     /// Index storage history stage in the process.
-    IndexStorageHistory,
+    IndexStoragesHistory,
     /// Index account history stage in the process.
-    IndexAccountHistory,
+    IndexAccountsHistory,
     /// Finish stage in the process.
     Finish,
     /// Other custom stage with a provided string identifier.
@@ -46,8 +46,8 @@ impl StageId {
         StageId::StorageHashing,
         StageId::MerkleExecute,
         StageId::TransactionLookup,
-        StageId::IndexStorageHistory,
-        StageId::IndexAccountHistory,
+        StageId::IndexStoragesHistory,
+        StageId::IndexAccountsHistory,
         StageId::Finish,
     ];
 
@@ -64,8 +64,8 @@ impl StageId {
             StageId::StorageHashing => "StorageHashing",
             StageId::MerkleExecute => "MerkleExecute",
             StageId::TransactionLookup => "TransactionLookup",
-            StageId::IndexAccountHistory => "IndexAccountHistory",
-            StageId::IndexStorageHistory => "IndexStorageHistory",
+            StageId::IndexAccountsHistory => "IndexAccountsHistory",
+            StageId::IndexStoragesHistory => "IndexStoragesHistory",
             StageId::Finish => "Finish",
             StageId::Other(s) => s,
         }
@@ -103,8 +103,8 @@ mod tests {
         assert_eq!(StageId::AccountHashing.to_string(), "AccountHashing");
         assert_eq!(StageId::StorageHashing.to_string(), "StorageHashing");
         assert_eq!(StageId::MerkleExecute.to_string(), "MerkleExecute");
-        assert_eq!(StageId::IndexAccountHistory.to_string(), "IndexAccountHistory");
-        assert_eq!(StageId::IndexStorageHistory.to_string(), "IndexStorageHistory");
+        assert_eq!(StageId::IndexAccountsHistory.to_string(), "IndexAccountsHistory");
+        assert_eq!(StageId::IndexStoragesHistory.to_string(), "IndexStoragesHistory");
         assert_eq!(StageId::TransactionLookup.to_string(), "TransactionLookup");
         assert_eq!(StageId::Finish.to_string(), "Finish");
 

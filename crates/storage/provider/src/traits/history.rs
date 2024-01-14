@@ -18,7 +18,7 @@ pub trait HistoryWriter: Send + Sync {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<usize>;
 
-    /// Insert account change index to database. Used inside AccountHistoryIndex stage
+    /// Insert account change index to database. Used inside AccountsHistoryIndex stage
     fn insert_account_history_index(
         &self,
         account_transitions: BTreeMap<Address, Vec<u64>>,
@@ -32,7 +32,7 @@ pub trait HistoryWriter: Send + Sync {
         range: Range<BlockNumberAddress>,
     ) -> ProviderResult<usize>;
 
-    /// Insert storage change index to database. Used inside StorageHistoryIndex stage
+    /// Insert storage change index to database. Used inside StoragesHistoryIndex stage
     fn insert_storage_history_index(
         &self,
         storage_transitions: BTreeMap<(Address, B256), Vec<u64>>,

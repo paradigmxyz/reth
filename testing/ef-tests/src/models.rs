@@ -161,7 +161,7 @@ impl State {
                 bytecode_hash: code_hash,
             };
             tx.put::<tables::PlainAccountState>(address, reth_account)?;
-            tx.put::<tables::HashedAccount>(hashed_address, reth_account)?;
+            tx.put::<tables::HashedAccounts>(hashed_address, reth_account)?;
             if let Some(code_hash) = code_hash {
                 tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(account.code.clone()))?;
             }
@@ -171,7 +171,7 @@ impl State {
                     address,
                     StorageEntry { key: storage_key, value: v.0 },
                 )?;
-                tx.put::<tables::HashedStorage>(
+                tx.put::<tables::HashedStorages>(
                     hashed_address,
                     StorageEntry { key: keccak256(storage_key), value: v.0 },
                 )

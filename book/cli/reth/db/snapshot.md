@@ -11,7 +11,7 @@ Arguments:
           Snapshot segments to generate
 
           Possible values:
-          - headers:      Snapshot segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables
+          - headers:      Snapshot segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTerminalDifficulties` tables
           - transactions: Snapshot segment responsible for the `Transactions` table
           - receipts:     Snapshot segment responsible for the `Receipts` table
 

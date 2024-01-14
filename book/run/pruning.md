@@ -98,7 +98,7 @@ is completed, so the disk space is reclaimed slowly.
 
 Given the aforementioned segment sizes, we get the following full node size:
 ```text
-Archive Node - Receipts - AccountHistory - StorageHistory = Full Node
+Archive Node - Receipts - AccountsHistory - StoragesHistory = Full Node
 ```
 ```text
 2.14TB - 250GB - 240GB - 700GB = 950GB

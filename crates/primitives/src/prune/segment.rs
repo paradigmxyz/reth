@@ -7,19 +7,20 @@ use thiserror::Error;
 #[main_codec]
 #[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum PruneSegment {
-    /// Prune segment responsible for the `TxSenders` table.
+    /// Prune segment responsible for the `TransactionSenders` table.
     SenderRecovery,
-    /// Prune segment responsible for the `TxHashNumber` table.
+    /// Prune segment responsible for the `TransactionHashNumbers` table.
     TransactionLookup,
     /// Prune segment responsible for all rows in `Receipts` table.
     Receipts,
     /// Prune segment responsible for some rows in `Receipts` table filtered by logs.
     ContractLogs,
-    /// Prune segment responsible for the `AccountChangeSet` and `AccountHistory` tables.
-    AccountHistory,
-    /// Prune segment responsible for the `StorageChangeSet` and `StorageHistory` tables.
-    StorageHistory,
-    /// Prune segment responsible for the `CanonicalHeaders`, `Headers` and `HeaderTD` tables.
+    /// Prune segment responsible for the `AccountChangeSes` and `AccountsHistory` tables.
+    AccountsHistory,
+    /// Prune segment responsible for the `StorageChangeSets` and `StoragesHistory` tables.
+    StoragesHistory,
+    /// Prune segment responsible for the `CanonicalHeaders`, `Headers` and
+    /// `HeaderTerminalDifficulties` tables.
     Headers,
     /// Prune segment responsible for the `Transactions` table.
     Transactions,
@@ -32,7 +33,7 @@ impl PruneSegment {
             Self::SenderRecovery | Self::TransactionLookup | Self::Headers | Self::Transactions => {
                 0
             }
-            Self::Receipts | Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
+            Self::Receipts | Self::ContractLogs | Self::AccountsHistory | Self::StoragesHistory => {
                 MINIMUM_PRUNING_DISTANCE
             }
         }

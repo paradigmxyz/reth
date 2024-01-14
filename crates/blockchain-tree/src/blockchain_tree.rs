@@ -1189,7 +1189,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                             block_number: tip.number,
                             block_hash: tip.hash,
                         },
-                    ))));
+                    ))))
                 }
                 self.metrics.trie_updates_insert_recomputed.increment(1);
                 trie_updates
@@ -1362,7 +1362,7 @@ mod tests {
         }
         provider
             .tx_ref()
-            .put::<tables::SyncStage>("Finish".to_string(), StageCheckpoint::new(10))
+            .put::<tables::StageCheckpoints>("Finish".to_string(), StageCheckpoint::new(10))
             .unwrap();
         provider.commit().unwrap();
     }
@@ -1475,7 +1475,7 @@ mod tests {
                 .unwrap();
             let account = Account { balance: initial_signer_balance, ..Default::default() };
             provider_rw.tx_ref().put::<tables::PlainAccountState>(signer, account).unwrap();
-            provider_rw.tx_ref().put::<tables::HashedAccount>(keccak256(signer), account).unwrap();
+            provider_rw.tx_ref().put::<tables::HashedAccounts>(keccak256(signer), account).unwrap();
             provider_rw.commit().unwrap();
         }
 

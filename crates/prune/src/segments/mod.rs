@@ -9,14 +9,14 @@ mod storage_history;
 mod transaction_lookup;
 mod transactions;
 
-pub use account_history::AccountHistory;
+pub use account_history::AccountsHistory;
 pub use headers::Headers;
 pub use receipts::Receipts;
 pub use receipts_by_logs::ReceiptsByLogs;
 pub use sender_recovery::SenderRecovery;
 pub use set::SegmentSet;
 use std::fmt::Debug;
-pub use storage_history::StorageHistory;
+pub use storage_history::StoragesHistory;
 pub use transaction_lookup::TransactionLookup;
 pub use transactions::Transactions;
 

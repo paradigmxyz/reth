@@ -1,5 +1,5 @@
 use crate::{
-    hashed_cursor::{HashedAccountCursor, HashedStorageCursor},
+    hashed_cursor::{HashedAccountsCursor, HashedStoragesCursor},
     trie_cursor::TrieCursor,
     walker::TrieWalker,
     StateRootError, StorageRootError,
@@ -82,7 +82,7 @@ impl<C, H> AccountNodeIter<C, H> {
 impl<C, H> AccountNodeIter<C, H>
 where
     C: TrieCursor,
-    H: HashedAccountCursor,
+    H: HashedAccountsCursor,
 {
     /// Return the next account trie node to be added to the hash builder.
     ///
@@ -186,7 +186,7 @@ impl<C, H> StorageNodeIter<C, H> {
 impl<C, H> StorageNodeIter<C, H>
 where
     C: TrieCursor,
-    H: HashedStorageCursor,
+    H: HashedStoragesCursor,
 {
     /// Return the next storage trie node to be added to the hash builder.
     ///

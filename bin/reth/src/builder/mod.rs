@@ -75,8 +75,8 @@ use reth_rpc_engine_api::EngineApi;
 use reth_stages::{
     prelude::*,
     stages::{
-        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, IndexAccountHistoryStage,
-        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
+        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, IndexAccountsHistoryStage,
+        IndexStoragesHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
         TotalDifficultyStage, TransactionLookupStage,
     },
     MetricEvent,
@@ -930,11 +930,11 @@ impl NodeConfig {
                     stage_config.transaction_lookup.commit_threshold,
                     prune_modes.transaction_lookup,
                 ))
-                .set(IndexAccountHistoryStage::new(
+                .set(IndexAccountsHistoryStage::new(
                     stage_config.index_account_history.commit_threshold,
                     prune_modes.account_history,
                 ))
-                .set(IndexStorageHistoryStage::new(
+                .set(IndexStoragesHistoryStage::new(
                     stage_config.index_storage_history.commit_threshold,
                     prune_modes.storage_history,
                 )),

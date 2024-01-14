@@ -144,16 +144,16 @@ impl<DB: Database> ProviderFactory<DB> {
         if block_number == provider.best_block_number().unwrap_or_default() &&
             block_number == provider.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProvider::new(provider.into_tx())));
+            return Ok(Box::new(LatestStateProvider::new(provider.into_tx())))
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
         block_number += 1;
 
         let account_history_prune_checkpoint =
-            provider.get_prune_checkpoint(PruneSegment::AccountHistory)?;
+            provider.get_prune_checkpoint(PruneSegment::AccountsHistory)?;
         let storage_history_prune_checkpoint =
-            provider.get_prune_checkpoint(PruneSegment::StorageHistory)?;
+            provider.get_prune_checkpoint(PruneSegment::StoragesHistory)?;
 
         let mut state_provider = HistoricalStateProvider::new(provider.into_tx(), block_number);
 
@@ -621,7 +621,7 @@ mod tests {
                 Ok(_)
             );
 
-            let senders = provider.get_or_take::<tables::TxSenders, true>(range.clone());
+            let senders = provider.get_or_take::<tables::TransactionSenders, true>(range.clone());
             assert_eq!(
                 senders,
                 Ok(range

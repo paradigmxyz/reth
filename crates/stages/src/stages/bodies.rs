@@ -35,7 +35,7 @@ use tracing::*;
 /// - [`BlockOmmers`][reth_db::tables::BlockOmmers]
 /// - [`BlockBodies`][reth_db::tables::BlockBodyIndices]
 /// - [`Transactions`][reth_db::tables::Transactions]
-/// - [`TransactionBlock`][reth_db::tables::TransactionBlock]
+/// - [`TransactionBlocks`][reth_db::tables::TransactionBlocks]
 ///
 /// # Genesis
 ///
@@ -110,7 +110,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let tx = provider.tx_ref();
         let mut block_indices_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
-        let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
+        let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlocks>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
 
@@ -197,7 +197,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
         // Cursors to unwind transitions
-        let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
+        let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlocks>()?;
 
         let mut rev_walker = body_cursor.walk_back(None)?;
         while let Some((number, block_meta)) = rev_walker.next().transpose()? {
@@ -588,7 +588,7 @@ mod tests {
                         })?;
 
                         if body.tx_count != 0 {
-                            tx.put::<tables::TransactionBlock>(
+                            tx.put::<tables::TransactionBlocks>(
                                 body.first_tx_num(),
                                 progress.number,
                             )?;
@@ -634,7 +634,7 @@ mod tests {
                 if let Some(last_tx_id) = self.get_last_tx_id()? {
                     self.db
                         .ensure_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)?;
-                    self.db.ensure_no_entry_above::<tables::TransactionBlock, _>(
+                    self.db.ensure_no_entry_above::<tables::TransactionBlocks, _>(
                         last_tx_id,
                         |key| key,
                     )?;
@@ -670,7 +670,7 @@ mod tests {
                     let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
                     let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
-                    let mut tx_block_cursor = tx.cursor_read::<tables::TransactionBlock>()?;
+                    let mut tx_block_cursor = tx.cursor_read::<tables::TransactionBlocks>()?;
 
                     let first_body_key = match bodies_cursor.first()? {
                         Some((key, _)) => key,

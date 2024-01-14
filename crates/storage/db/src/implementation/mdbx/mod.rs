@@ -262,7 +262,7 @@ impl DatabaseEnv {
                     LogLevel::Extra => 7,
                 });
             } else {
-                return Err(DatabaseError::LogLevelUnavailable(log_level));
+                return Err(DatabaseError::LogLevelUnavailable(log_level))
             }
         }
 
@@ -316,10 +316,12 @@ mod tests {
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
         database::Database,
         models::{AccountBeforeTx, ShardedKey},
-        tables::{AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState},
+        tables::{
+            AccountsHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
+        },
         test_utils::*,
         transaction::{DbTx, DbTxMut},
-        AccountChangeSet,
+        AccountChangeSets,
     };
     use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};
@@ -473,24 +475,24 @@ mod tests {
         let address2 = Address::with_last_byte(2);
 
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        tx.put::<AccountChangeSet>(0, AccountBeforeTx { address: address0, info: None })
+        tx.put::<AccountChangeSets>(0, AccountBeforeTx { address: address0, info: None })
             .expect(ERROR_PUT);
-        tx.put::<AccountChangeSet>(0, AccountBeforeTx { address: address1, info: None })
+        tx.put::<AccountChangeSets>(0, AccountBeforeTx { address: address1, info: None })
             .expect(ERROR_PUT);
-        tx.put::<AccountChangeSet>(0, AccountBeforeTx { address: address2, info: None })
+        tx.put::<AccountChangeSets>(0, AccountBeforeTx { address: address2, info: None })
             .expect(ERROR_PUT);
-        tx.put::<AccountChangeSet>(1, AccountBeforeTx { address: address0, info: None })
+        tx.put::<AccountChangeSets>(1, AccountBeforeTx { address: address0, info: None })
             .expect(ERROR_PUT);
-        tx.put::<AccountChangeSet>(1, AccountBeforeTx { address: address1, info: None })
+        tx.put::<AccountChangeSets>(1, AccountBeforeTx { address: address1, info: None })
             .expect(ERROR_PUT);
-        tx.put::<AccountChangeSet>(1, AccountBeforeTx { address: address2, info: None })
+        tx.put::<AccountChangeSets>(1, AccountBeforeTx { address: address2, info: None })
             .expect(ERROR_PUT);
-        tx.put::<AccountChangeSet>(2, AccountBeforeTx { address: address0, info: None }) // <- should not be returned by the walker
+        tx.put::<AccountChangeSets>(2, AccountBeforeTx { address: address0, info: None }) // <- should not be returned by the walker
             .expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
         let tx = db.tx().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_read::<AccountChangeSet>().unwrap();
+        let mut cursor = tx.cursor_read::<AccountChangeSets>().unwrap();
 
         let entries = cursor.walk_range(..).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
         assert_eq!(entries.len(), 7);
@@ -887,7 +889,7 @@ mod tests {
         let transition_id = 2;
 
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_write::<AccountChangeSet>().unwrap();
+        let mut cursor = tx.cursor_write::<AccountChangeSets>().unwrap();
         vec![0, 1, 3, 4, 5]
             .into_iter()
             .try_for_each(|val| {
@@ -902,7 +904,7 @@ mod tests {
         // APPEND DUP & APPEND
         let subkey_to_append = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_write::<AccountChangeSet>().unwrap();
+        let mut cursor = tx.cursor_write::<AccountChangeSets>().unwrap();
         assert_eq!(
             cursor.append_dup(
                 transition_id,
@@ -911,7 +913,7 @@ mod tests {
             Err(DatabaseWriteError {
                 code: -30418,
                 operation: DatabaseWriteOperation::CursorAppendDup,
-                table_name: AccountChangeSet::NAME,
+                table_name: AccountChangeSets::NAME,
                 key: transition_id.encode().into(),
             }
             .into())
@@ -924,7 +926,7 @@ mod tests {
             Err(DatabaseWriteError {
                 code: -30418,
                 operation: DatabaseWriteOperation::CursorAppend,
-                table_name: AccountChangeSet::NAME,
+                table_name: AccountChangeSets::NAME,
                 key: (transition_id - 1).encode().into(),
             }
             .into())
@@ -1112,13 +1114,14 @@ mod tests {
             let key = ShardedKey::new(real_key, i * 100);
             let list: IntegerList = vec![i * 100u64].into();
 
-            db.update(|tx| tx.put::<AccountHistory>(key.clone(), list.clone()).expect("")).unwrap();
+            db.update(|tx| tx.put::<AccountsHistory>(key.clone(), list.clone()).expect(""))
+                .unwrap();
         }
 
         // Seek value with non existing key.
         {
             let tx = db.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_read::<AccountHistory>().unwrap();
+            let mut cursor = tx.cursor_read::<AccountsHistory>().unwrap();
 
             // It will seek the one greater or equal to the query. Since we have `Address | 100`,
             // `Address | 200` in the database and we're querying `Address | 150` it will return us
@@ -1136,7 +1139,7 @@ mod tests {
         // Seek greatest index
         {
             let tx = db.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_read::<AccountHistory>().unwrap();
+            let mut cursor = tx.cursor_read::<AccountsHistory>().unwrap();
 
             // It will seek the MAX value of transition index and try to use prev to get first
             // biggers.

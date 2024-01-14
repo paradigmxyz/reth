@@ -79,12 +79,12 @@ macro_rules! impl_iai {
 
 impl_iai!(
     CanonicalHeaders,
-    HeaderTD,
+    HeaderTerminalDifficulties,
     HeaderNumbers,
     Headers,
     BlockBodyIndices,
     BlockOmmers,
-    TxHashNumber,
+    TransactionHashNumbers,
     Transactions,
     PlainStorageState,
     PlainAccountState

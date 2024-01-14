@@ -20,7 +20,10 @@ pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<DB>, g: 
 
     assert_eq!(tx.table::<tables::HeaderNumbers>().unwrap(), vec![(h, n)]);
     assert_eq!(tx.table::<tables::CanonicalHeaders>().unwrap(), vec![(n, h)]);
-    assert_eq!(tx.table::<tables::HeaderTD>().unwrap(), vec![(n, g.difficulty.into())]);
+    assert_eq!(
+        tx.table::<tables::HeaderTerminalDifficulties>().unwrap(),
+        vec![(n, g.difficulty.into())]
+    );
     assert_eq!(
         tx.table::<tables::BlockBodyIndices>().unwrap(),
         vec![(0, StoredBlockBodyIndices::default())]
@@ -28,23 +31,23 @@ pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<DB>, g: 
     assert_eq!(tx.table::<tables::BlockOmmers>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::BlockWithdrawals>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::Transactions>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::TransactionBlock>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::TxHashNumber>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::TransactionBlocks>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::TransactionHashNumbers>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::Receipts>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::PlainAccountState>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::PlainStorageState>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::AccountHistory>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::StorageHistory>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::AccountsHistory>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::StoragesHistory>().unwrap(), vec![]);
     // TODO check after this gets done: https://github.com/paradigmxyz/reth/issues/1588
     // Bytecodes are not reverted assert_eq!(tx.table::<tables::Bytecodes>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::AccountChangeSet>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::StorageChangeSet>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::HashedAccount>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::HashedStorage>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::AccountChangeSets>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::StorageChangeSets>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::HashedAccounts>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::HashedStorages>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::AccountsTrie>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::StoragesTrie>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::TxSenders>().unwrap(), vec![]);
-    // SyncStage is not updated in tests
+    assert_eq!(tx.table::<tables::TransactionSenders>().unwrap(), vec![]);
+    // StageCheckpoints is not updated in tests
 }
 
 /// Test chain with genesis, blocks, execution results

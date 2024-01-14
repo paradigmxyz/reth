@@ -16,11 +16,12 @@ use clap::Parser;
 
 use reth_db::{
     cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
-    AccountChangeSet, AccountHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
-    BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnv, HashedAccount, HashedStorage,
-    HeaderNumbers, HeaderTD, Headers, PlainAccountState, PlainStorageState, PruneCheckpoints,
-    Receipts, StorageChangeSet, StorageHistory, StoragesTrie, SyncStage, SyncStageProgress, Tables,
-    TransactionBlock, Transactions, TxHashNumber, TxSenders,
+    AccountChangeSets, AccountsHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
+    BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnv, HashedAccounts, HashedStorages,
+    HeaderNumbers, HeaderTerminalDifficulties, Headers, PlainAccountState, PlainStorageState,
+    PruneCheckpoints, Receipts, StageCheckpoints, StorageChangeSets, StoragesHistory, StoragesTrie,
+    SyncStageProgress, Tables, TransactionBlocks, TransactionHashNumbers, TransactionSenders,
+    Transactions,
 };
 use tracing::info;
 
@@ -77,7 +78,9 @@ impl Command {
                 Tables::CanonicalHeaders => {
                     find_diffs::<CanonicalHeaders>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::HeaderTD => find_diffs::<HeaderTD>(primary_tx, secondary_tx, output_dir)?,
+                Tables::HeaderTerminalDifficulties => {
+                    find_diffs::<HeaderTerminalDifficulties>(primary_tx, secondary_tx, output_dir)?
+                }
                 Tables::HeaderNumbers => {
                     find_diffs::<HeaderNumbers>(primary_tx, secondary_tx, output_dir)?
                 }
@@ -91,14 +94,14 @@ impl Command {
                 Tables::BlockWithdrawals => {
                     find_diffs::<BlockWithdrawals>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::TransactionBlock => {
-                    find_diffs::<TransactionBlock>(primary_tx, secondary_tx, output_dir)?
+                Tables::TransactionBlocks => {
+                    find_diffs::<TransactionBlocks>(primary_tx, secondary_tx, output_dir)?
                 }
                 Tables::Transactions => {
                     find_diffs::<Transactions>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::TxHashNumber => {
-                    find_diffs::<TxHashNumber>(primary_tx, secondary_tx, output_dir)?
+                Tables::TransactionHashNumbers => {
+                    find_diffs::<TransactionHashNumbers>(primary_tx, secondary_tx, output_dir)?
                 }
                 Tables::Receipts => find_diffs::<Receipts>(primary_tx, secondary_tx, output_dir)?,
                 Tables::PlainAccountState => {
@@ -108,23 +111,23 @@ impl Command {
                     find_diffs::<PlainStorageState>(primary_tx, secondary_tx, output_dir)?
                 }
                 Tables::Bytecodes => find_diffs::<Bytecodes>(primary_tx, secondary_tx, output_dir)?,
-                Tables::AccountHistory => {
-                    find_diffs::<AccountHistory>(primary_tx, secondary_tx, output_dir)?
+                Tables::AccountsHistory => {
+                    find_diffs::<AccountsHistory>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::StorageHistory => {
-                    find_diffs::<StorageHistory>(primary_tx, secondary_tx, output_dir)?
+                Tables::StoragesHistory => {
+                    find_diffs::<StoragesHistory>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::AccountChangeSet => {
-                    find_diffs::<AccountChangeSet>(primary_tx, secondary_tx, output_dir)?
+                Tables::AccountChangeSets => {
+                    find_diffs::<AccountChangeSets>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::StorageChangeSet => {
-                    find_diffs::<StorageChangeSet>(primary_tx, secondary_tx, output_dir)?
+                Tables::StorageChangeSets => {
+                    find_diffs::<StorageChangeSets>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::HashedAccount => {
-                    find_diffs::<HashedAccount>(primary_tx, secondary_tx, output_dir)?
+                Tables::HashedAccounts => {
+                    find_diffs::<HashedAccounts>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::HashedStorage => {
-                    find_diffs::<HashedStorage>(primary_tx, secondary_tx, output_dir)?
+                Tables::HashedStorages => {
+                    find_diffs::<HashedStorages>(primary_tx, secondary_tx, output_dir)?
                 }
                 Tables::AccountsTrie => {
                     find_diffs::<AccountsTrie>(primary_tx, secondary_tx, output_dir)?
@@ -132,8 +135,12 @@ impl Command {
                 Tables::StoragesTrie => {
                     find_diffs::<StoragesTrie>(primary_tx, secondary_tx, output_dir)?
                 }
-                Tables::TxSenders => find_diffs::<TxSenders>(primary_tx, secondary_tx, output_dir)?,
-                Tables::SyncStage => find_diffs::<SyncStage>(primary_tx, secondary_tx, output_dir)?,
+                Tables::TransactionSenders => {
+                    find_diffs::<TransactionSenders>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::StageCheckpoints => {
+                    find_diffs::<StageCheckpoints>(primary_tx, secondary_tx, output_dir)?
+                }
                 Tables::SyncStageProgress => {
                     find_diffs::<SyncStageProgress>(primary_tx, secondary_tx, output_dir)?
                 }

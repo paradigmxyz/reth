@@ -178,7 +178,7 @@ impl Command {
                 Ok(senders) => senders,
                 Err(err) => {
                     warn!(target: "reth::cli", "Error sealing block with senders: {err:?}. Skipping...");
-                    continue;
+                    continue
                 }
             };
             provider_rw.insert_block(sealed_block, None)?;
@@ -278,7 +278,7 @@ impl Command {
                     let clean_result = merkle_stage.execute(&provider_rw, clean_input);
                     assert!(clean_result.is_ok(), "Clean state root calculation failed");
                     if clean_result.unwrap().done {
-                        break;
+                        break
                     }
                 }
 
@@ -344,7 +344,7 @@ impl Command {
                                 clean.1.nibbles.len() > self.skip_node_depth.unwrap_or_default()
                             {
                                 first_mismatched_storage = Some((incremental, clean));
-                                break;
+                                break
                             }
                         }
                         (Some(incremental), None) => {

@@ -22,7 +22,7 @@ impl HashedStateChanges {
         }
 
         // Write hashed account updates.
-        let mut hashed_accounts_cursor = tx.cursor_write::<tables::HashedAccount>()?;
+        let mut hashed_accounts_cursor = tx.cursor_write::<tables::HashedAccounts>()?;
         for (hashed_address, account) in hashed_accounts {
             if let Some(account) = account {
                 hashed_accounts_cursor.upsert(hashed_address, account)?;
@@ -42,7 +42,7 @@ impl HashedStateChanges {
         }
 
         // Write hashed storage changes.
-        let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorage>()?;
+        let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
         for (hashed_address, (wiped, storage)) in hashed_storages {
             if wiped && hashed_storage_cursor.seek_exact(hashed_address)?.is_some() {
                 hashed_storage_cursor.delete_current_duplicates()?;
@@ -73,7 +73,7 @@ mod tests {
     use super::*;
     use crate::test_utils::create_test_provider_factory;
     use reth_primitives::{keccak256, Address};
-    use reth_trie::hashed_cursor::HashedStorage;
+    use reth_trie::hashed_cursor::HashedStorages;
 
     #[test]
     fn wiped_entries_are_removed() {
@@ -87,9 +87,9 @@ mod tests {
         {
             let provider_rw = provider_factory.provider_rw().unwrap();
             let mut accounts_cursor =
-                provider_rw.tx_ref().cursor_write::<tables::HashedAccount>().unwrap();
+                provider_rw.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
             let mut storage_cursor =
-                provider_rw.tx_ref().cursor_write::<tables::HashedStorage>().unwrap();
+                provider_rw.tx_ref().cursor_write::<tables::HashedStorages>().unwrap();
 
             for address in addresses {
                 let hashed_address = keccak256(address);
@@ -105,7 +105,7 @@ mod tests {
 
         let mut hashed_state = HashedPostState::default();
         hashed_state.insert_destroyed_account(destroyed_address_hashed);
-        hashed_state.insert_hashed_storage(destroyed_address_hashed, HashedStorage::new(true));
+        hashed_state.insert_hashed_storage(destroyed_address_hashed, HashedStorages::new(true));
 
         let provider_rw = provider_factory.provider_rw().unwrap();
         assert_eq!(HashedStateChanges(hashed_state).write_to_db(provider_rw.tx_ref()), Ok(()));
@@ -113,13 +113,13 @@ mod tests {
 
         let provider = provider_factory.provider().unwrap();
         assert_eq!(
-            provider.tx_ref().get::<tables::HashedAccount>(destroyed_address_hashed),
+            provider.tx_ref().get::<tables::HashedAccounts>(destroyed_address_hashed),
             Ok(None)
         );
         assert_eq!(
             provider
                 .tx_ref()
-                .cursor_read::<tables::HashedStorage>()
+                .cursor_read::<tables::HashedStorages>()
                 .unwrap()
                 .seek_by_key_subkey(destroyed_address_hashed, hashed_slot),
             Ok(None)

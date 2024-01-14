@@ -35,29 +35,29 @@ The `Table` trait has two generic values, `Key` and `Value`, which need to imple
 There are many tables within the node, all used to store different types of data from `Headers` to `Transactions` and more. Below is a list of all of the tables. You can follow [this link](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/storage/db/src/tables/mod.rs#L161-L188) if you would like to see the table definitions for any of the tables below.
 
 - CanonicalHeaders
-- HeaderTD
+- HeaderTerminalDifficulties
 - HeaderNumbers
 - Headers
 - BlockBodyIndices
 - BlockOmmers
 - BlockWithdrawals
-- TransactionBlock
+- TransactionBlocks
 - Transactions
-- TxHashNumber
+- TransactionHashNumbers
 - Receipts
 - PlainAccountState
 - PlainStorageState
 - Bytecodes
-- AccountHistory
-- StorageHistory
-- AccountChangeSet
-- StorageChangeSet
-- HashedAccount
-- HashedStorage
+- AccountsHistory
+- StoragesHistory
+- AccountChangeSets
+- StorageChangeSets
+- HashedAccounts
+- HashedStorages
 - AccountsTrie
 - StoragesTrie
-- TxSenders
-- SyncStage
+- TransactionSenders
+- StageCheckpoints
 - SyncStageProgress
 - PruneCheckpoints
 
@@ -261,7 +261,7 @@ This next example uses the `DbTx::cursor()` method to get a `Cursor`. The `Curso
     // Get transaction of the block that we are executing.
     let mut tx = db_tx.cursor_read::<tables::Transactions>()?;
     // Skip sender recovery and load signer from database.
-    let mut tx_sender = db_tx.cursor_read::<tables::TxSenders>()?;
+    let mut tx_sender = db_tx.cursor_read::<tables::TransactionSenders>()?;
 
 ```
 

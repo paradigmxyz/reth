@@ -190,7 +190,7 @@ impl Command {
 
         if in_memory_state_root == block.state_root {
             info!(target: "reth::cli", state_root = ?in_memory_state_root, "Computed in-memory state root matches");
-            return Ok(());
+            return Ok(())
         }
 
         let provider_rw = factory.provider_rw()?;

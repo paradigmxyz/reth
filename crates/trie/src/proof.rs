@@ -1,5 +1,5 @@
 use crate::{
-    hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
+    hashed_cursor::{HashedCursorFactory, HashedStoragesCursor},
     node_iter::{AccountNode, AccountNodeIter, StorageNode, StorageNodeIter},
     prefix_set::PrefixSetMut,
     trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},

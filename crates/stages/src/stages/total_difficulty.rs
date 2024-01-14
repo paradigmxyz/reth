@@ -18,8 +18,8 @@ use tracing::*;
 /// The total difficulty stage.
 ///
 /// This stage walks over inserted headers and computes total difficulty
-/// at each block. The entries are inserted into [`HeaderTD`][reth_db::tables::HeaderTD]
-/// table.
+/// at each block. The entries are inserted into
+/// [`HeaderTerminalDifficulties`][reth_db::tables::HeaderTerminalDifficulties] table.
 #[derive(Debug, Clone)]
 pub struct TotalDifficultyStage {
     /// Consensus client implementation
@@ -64,7 +64,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         debug!(target: "sync::stages::total_difficulty", start_block, end_block, "Commencing sync");
 
         // Acquire cursor over total difficulty and headers tables
-        let mut cursor_td = tx.cursor_write::<tables::HeaderTD>()?;
+        let mut cursor_td = tx.cursor_write::<tables::HeaderTerminalDifficulties>()?;
         let mut cursor_headers = tx.cursor_read::<tables::Headers>()?;
 
         // Get latest total difficulty
@@ -105,7 +105,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        provider.unwind_table_by_num::<tables::HeaderTD>(unwind_to)?;
+        provider.unwind_table_by_num::<tables::HeaderTerminalDifficulties>(unwind_to)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
@@ -118,7 +118,7 @@ fn stage_checkpoint<DB: Database>(
     provider: &DatabaseProviderRW<DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
-        processed: provider.tx_ref().entries::<tables::HeaderTD>()? as u64,
+        processed: provider.tx_ref().entries::<tables::HeaderTerminalDifficulties>()? as u64,
         total: provider.tx_ref().entries::<tables::Headers>()? as u64,
     })
 }
@@ -237,12 +237,15 @@ mod tests {
             self.db.insert_headers(std::iter::once(&head))?;
             self.db.commit(|tx| {
                 let td: U256 = tx
-                    .cursor_read::<tables::HeaderTD>()?
+                    .cursor_read::<tables::HeaderTerminalDifficulties>()?
                     .last()?
                     .map(|(_, v)| v)
                     .unwrap_or_default()
                     .into();
-                tx.put::<tables::HeaderTD>(head.number, (td + head.difficulty).into())?;
+                tx.put::<tables::HeaderTerminalDifficulties>(
+                    head.number,
+                    (td + head.difficulty).into(),
+                )?;
                 Ok(())
             })?;
 
@@ -302,7 +305,8 @@ mod tests {
 
     impl TotalDifficultyTestRunner {
         fn check_no_td_above(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            self.db.ensure_no_entry_above::<tables::HeaderTD, _>(block, |num| num)?;
+            self.db
+                .ensure_no_entry_above::<tables::HeaderTerminalDifficulties, _>(block, |num| num)?;
             Ok(())
         }
 

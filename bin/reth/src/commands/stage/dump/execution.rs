@@ -45,7 +45,11 @@ fn import_tables_with_range<DB: Database>(
         tx.import_table_with_range::<tables::CanonicalHeaders, _>(&db_tool.db.tx()?, Some(from), to)
     })??;
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::HeaderTD, _>(&db_tool.db.tx()?, Some(from), to)
+        tx.import_table_with_range::<tables::HeaderTerminalDifficulties, _>(
+            &db_tool.db.tx()?,
+            Some(from),
+            to,
+        )
     })??;
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::Headers, _>(&db_tool.db.tx()?, Some(from), to)
@@ -80,7 +84,11 @@ fn import_tables_with_range<DB: Database>(
     })??;
 
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::TxSenders, _>(&db_tool.db.tx()?, Some(from_tx), to_tx)
+        tx.import_table_with_range::<tables::TransactionSenders, _>(
+            &db_tool.db.tx()?,
+            Some(from_tx),
+            to_tx,
+        )
     })??;
 
     Ok(())

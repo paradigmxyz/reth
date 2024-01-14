@@ -1,5 +1,5 @@
 use crate::{
-    hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
+    hashed_cursor::{HashedCursorFactory, HashedStoragesCursor},
     node_iter::{AccountNode, AccountNodeIter, StorageNode, StorageNodeIter},
     prefix_set::{PrefixSet, PrefixSetLoader, PrefixSetMut},
     progress::{IntermediateStateRootState, StateRootProgress},
@@ -531,13 +531,13 @@ mod tests {
         storage: &BTreeMap<B256, U256>,
     ) {
         let hashed_address = keccak256(address);
-        tx.put::<tables::HashedAccount>(hashed_address, account).unwrap();
+        tx.put::<tables::HashedAccounts>(hashed_address, account).unwrap();
         insert_storage(tx, hashed_address, storage);
     }
 
     fn insert_storage(tx: &impl DbTxMut, hashed_address: B256, storage: &BTreeMap<B256, U256>) {
         for (k, v) in storage {
-            tx.put::<tables::HashedStorage>(
+            tx.put::<tables::HashedStorages>(
                 hashed_address,
                 StorageEntry { key: keccak256(k), value: *v },
             )
@@ -551,7 +551,7 @@ mod tests {
         let hashed_address = B256::with_last_byte(1);
 
         let mut hashed_storage_cursor =
-            tx.tx_ref().cursor_dup_write::<tables::HashedStorage>().unwrap();
+            tx.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
         let data = inputs.iter().map(|x| B256::from_str(x).unwrap());
         let value = U256::from(0);
         for key in data {
@@ -614,7 +614,7 @@ mod tests {
             let factory = create_test_provider_factory();
             let tx = factory.provider_rw().unwrap();
             for (key, value) in &storage {
-                tx.tx_ref().put::<tables::HashedStorage>(
+                tx.tx_ref().put::<tables::HashedStorages>(
                     hashed_address,
                     StorageEntry { key: keccak256(key), value: *value },
                 )
@@ -810,7 +810,7 @@ mod tests {
         );
 
         let mut hashed_storage_cursor =
-            tx.tx_ref().cursor_dup_write::<tables::HashedStorage>().unwrap();
+            tx.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
         for (hashed_slot, value) in storage.clone() {
             hashed_storage_cursor.upsert(key3, StorageEntry { key: hashed_slot, value }).unwrap();
         }
@@ -839,9 +839,9 @@ mod tests {
         let tx = factory.provider_rw().unwrap();
 
         let mut hashed_account_cursor =
-            tx.tx_ref().cursor_write::<tables::HashedAccount>().unwrap();
+            tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
         let mut hashed_storage_cursor =
-            tx.tx_ref().cursor_dup_write::<tables::HashedStorage>().unwrap();
+            tx.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
 
         let mut hash_builder = HashBuilder::default();
 
@@ -1032,7 +1032,7 @@ mod tests {
 
         {
             let mut hashed_account_cursor =
-                tx.tx_ref().cursor_write::<tables::HashedAccount>().unwrap();
+                tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
 
             let account = hashed_account_cursor.seek_exact(key2).unwrap().unwrap();
             hashed_account_cursor.delete_current().unwrap();
@@ -1086,7 +1086,7 @@ mod tests {
         let tx = factory.provider_rw().unwrap();
         {
             let mut hashed_account_cursor =
-                tx.tx_ref().cursor_write::<tables::HashedAccount>().unwrap();
+                tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
 
             let account2 = hashed_account_cursor.seek_exact(key2).unwrap().unwrap();
             hashed_account_cursor.delete_current().unwrap();
@@ -1197,7 +1197,7 @@ mod tests {
             tokio::runtime::Runtime::new().unwrap().block_on(async {
                 let factory = create_test_provider_factory();
                 let tx = factory.provider_rw().unwrap();
-                let mut hashed_account_cursor = tx.tx_ref().cursor_write::<tables::HashedAccount>().unwrap();
+                let mut hashed_account_cursor = tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
 
                 let mut state = BTreeMap::default();
                 for accounts in account_changes {
@@ -1259,7 +1259,7 @@ mod tests {
     ) -> (B256, HashMap<Nibbles, BranchNodeCompact>) {
         let value = U256::from(1);
 
-        let mut hashed_storage = tx.tx_ref().cursor_write::<tables::HashedStorage>().unwrap();
+        let mut hashed_storage = tx.tx_ref().cursor_write::<tables::HashedStorages>().unwrap();
 
         let mut hb = HashBuilder::default().with_updates(true);
 
@@ -1287,7 +1287,7 @@ mod tests {
             Account { nonce: 0, balance: U256::from(1u64), bytecode_hash: Some(B256::random()) };
         let val = encode_account(a, None);
 
-        let mut hashed_accounts = tx.tx_ref().cursor_write::<tables::HashedAccount>().unwrap();
+        let mut hashed_accounts = tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
         let mut hb = HashBuilder::default();
 
         for key in [

@@ -77,7 +77,7 @@ impl AccountHashingStage {
     /// at the target block, with `txs_range` transactions in each block.
     ///
     /// Proceeds to go to the `BlockTransitionIndex` end, go back `transitions` and change the
-    /// account state in the `AccountChangeSet` table.
+    /// account state in the `AccountChangeSets` table.
     pub fn seed<DB: Database>(
         provider: &DatabaseProviderRW<DB>,
         opts: SeedOpts,
@@ -108,7 +108,7 @@ impl AccountHashingStage {
             }
 
             let mut acc_changeset_cursor =
-                provider.tx_ref().cursor_write::<tables::AccountChangeSet>()?;
+                provider.tx_ref().cursor_write::<tables::AccountChangeSets>()?;
             for (t, (addr, acc)) in (opts.blocks).zip(&accounts) {
                 let Account { nonce, balance, .. } = acc;
                 let prev_acc = Account {
@@ -138,7 +138,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()));
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         let (from_block, to_block) = input.next_block_range().into_inner();
@@ -166,7 +166,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 }
                 _ => {
                     // clear table, load all accounts and hash it
-                    tx.clear::<tables::HashedAccount>()?;
+                    tx.clear::<tables::HashedAccounts>()?;
 
                     None
                 }
@@ -213,7 +213,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 hashed_batch.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
                 let mut hashed_account_cursor =
-                    tx.cursor_write::<RawTable<tables::HashedAccount>>()?;
+                    tx.cursor_write::<RawTable<tables::HashedAccounts>>()?;
 
                 // iterate and put presorted hashed accounts
                 if start_address.is_none() {
@@ -238,7 +238,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                     },
                 );
 
-                return Ok(ExecOutput { checkpoint, done: false });
+                return Ok(ExecOutput { checkpoint, done: false })
             }
         } else {
             // Aggregate all transition changesets and make a list of accounts that have been
@@ -291,7 +291,7 @@ fn stage_checkpoint_progress<DB: Database>(
     provider: &DatabaseProviderRW<DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
-        processed: provider.tx_ref().entries::<tables::HashedAccount>()? as u64,
+        processed: provider.tx_ref().entries::<tables::HashedAccounts>()? as u64,
         total: provider.tx_ref().entries::<tables::PlainAccountState>()? as u64,
     })
 }
@@ -400,7 +400,7 @@ mod tests {
             }) if address == fifth_address &&
                 total == runner.db.table::<tables::PlainAccountState>().unwrap().len() as u64
         );
-        assert_eq!(runner.db.table::<tables::HashedAccount>().unwrap().len(), 5);
+        assert_eq!(runner.db.table::<tables::HashedAccounts>().unwrap().len(), 5);
 
         // second run, hash next five accounts.
         input.checkpoint = Some(result.unwrap().checkpoint);
@@ -427,7 +427,7 @@ mod tests {
             }) if processed == total &&
                 total == runner.db.table::<tables::PlainAccountState>().unwrap().len() as u64
         );
-        assert_eq!(runner.db.table::<tables::HashedAccount>().unwrap().len(), 10);
+        assert_eq!(runner.db.table::<tables::HashedAccounts>().unwrap().len(), 10);
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
@@ -460,11 +460,11 @@ mod tests {
             }
 
             /// Iterates over PlainAccount table and checks that the accounts match the ones
-            /// in the HashedAccount table
+            /// in the HashedAccounts table
             pub(crate) fn check_hashed_accounts(&self) -> Result<(), TestRunnerError> {
                 self.db.query(|tx| {
                     let mut acc_cursor = tx.cursor_read::<tables::PlainAccountState>()?;
-                    let mut hashed_acc_cursor = tx.cursor_read::<tables::HashedAccount>()?;
+                    let mut hashed_acc_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
 
                     while let Some((address, account)) = acc_cursor.next()? {
                         let hashed_addr = keccak256(address);
@@ -483,7 +483,7 @@ mod tests {
             pub(crate) fn check_old_hashed_accounts(&self) -> Result<(), TestRunnerError> {
                 self.db.query(|tx| {
                     let mut acc_cursor = tx.cursor_read::<tables::PlainAccountState>()?;
-                    let mut hashed_acc_cursor = tx.cursor_read::<tables::HashedAccount>()?;
+                    let mut hashed_acc_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
 
                     while let Some((address, account)) = acc_cursor.next()? {
                         let Account { nonce, balance, .. } = account;
@@ -549,7 +549,7 @@ mod tests {
                     let start_block = input.next_block();
                     let end_block = output.checkpoint.block_number;
                     if start_block > end_block {
-                        return Ok(());
+                        return Ok(())
                     }
                 }
                 self.check_hashed_accounts()

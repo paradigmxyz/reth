@@ -58,11 +58,11 @@ Transactions {
     u64 TxNumber "PK"
     TransactionSignedNoHash Data
 }
-TxHashNumber {
+TransactionHashNumbers {
     B256 TxHash "PK"
     u64 TxNumber
 }
-TransactionBlock {
+TransactionBlocks {
     u64 MaxTxNumber "PK"
     u64 BlockNumber
 }
@@ -83,33 +83,33 @@ PlainStorageState {
     B256 StorageKey "PK"
     U256 StorageValue
 }
-AccountHistory {
+AccountsHistory {
     B256 Account "PK"
     BlockNumberList BlockNumberList "List of transitions where account was changed"
 }
-StorageHistory {
+StoragesHistory {
     B256 Account "PK"
     B256 StorageKey "PK"
     BlockNumberList BlockNumberList "List of transitions where account storage entry was changed"
 }
-AccountChangeSet {
+AccountChangeSets {
     u64 BlockNumber "PK"
     B256 Account "PK"
-    ChangeSet AccountChangeSet "Account before transition"
+    ChangeSet AccountChangeSets "Account before transition"
 }
-StorageChangeSet {
+StorageChangeSets {
     u64 BlockNumber "PK"
     B256 Account "PK"
     B256 StorageKey "PK"
-    ChangeSet StorageChangeSet "Storage entry before transition"
+    ChangeSet StorageChangeSets "Storage entry before transition"
 }
-HashedAccount {
+HashedAccounts {
     B256 HashedAddress "PK"
     Account Data
 }
-HashedStorage {
+HashedStorages {
     B256 HashedAddress "PK"
-    B256 HashedStorageKey "PK"
+    B256 HashedStoragesKey "PK"
     U256 StorageValue
 }
 AccountsTrie {
@@ -121,17 +121,17 @@ StoragesTrie {
     StoredNibblesSubKey NibblesSubKey "PK"
     StorageTrieEntry Node
 }
-TxSenders {
+TransactionSenders {
     u64 TxNumber "PK"
     Address Sender
 }
-TxHashNumber ||--|| Transactions : "hash -> tx id"
-TransactionBlock ||--|{ Transactions : "tx id -> block number"
+TransactionHashNumbers ||--|| Transactions : "hash -> tx id"
+TransactionBlocks ||--|{ Transactions : "tx id -> block number"
 BlockBodyIndices ||--o{ Transactions : "block number -> tx ids"
-Headers ||--o{ AccountChangeSet : "each block has zero or more changesets"
-Headers ||--o{ StorageChangeSet : "each block has zero or more changesets"
-AccountHistory }|--|{ AccountChangeSet : index
-StorageHistory }|--|{ StorageChangeSet : index
+Headers ||--o{ AccountChangeSets : "each block has zero or more changesets"
+Headers ||--o{ StorageChangeSets : "each block has zero or more changesets"
+AccountsHistory }|--|{ AccountChangeSets : index
+StoragesHistory }|--|{ StorageChangeSets : index
 Headers ||--o| BlockOmmers : "each block has 0 or more ommers"
 BlockBodyIndices ||--|| Headers : "index"
 HeaderNumbers |o--|| Headers : "block hash -> block number"
@@ -139,8 +139,8 @@ CanonicalHeaders |o--|| Headers : "canonical chain block number -> block hash"
 Transactions ||--|| Receipts : "each tx has a receipt"
 PlainAccountState }o--o| Bytecodes : "an account can have a bytecode"
 PlainAccountState ||--o{ PlainStorageState : "an account has 0 or more storage slots"
-Transactions ||--|| TxSenders : "a tx has exactly 1 sender"
+Transactions ||--|| TransactionSenders : "a tx has exactly 1 sender"
 
-PlainAccountState ||--|| HashedAccount : "hashed representation"
-PlainStorageState ||--|| HashedStorage : "hashed representation"
+PlainAccountState ||--|| HashedAccounts : "hashed representation"
+PlainStorageState ||--|| HashedStorages : "hashed representation"
 ```

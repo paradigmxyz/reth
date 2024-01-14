@@ -58,7 +58,11 @@ impl<DB: Database> Segment<DB> for Headers {
                 delete_limit,
             )?,
             self.prune_table::<DB, tables::Headers>(provider, block_range.clone(), delete_limit)?,
-            self.prune_table::<DB, tables::HeaderTD>(provider, block_range, delete_limit)?,
+            self.prune_table::<DB, tables::HeaderTerminalDifficulties>(
+                provider,
+                block_range,
+                delete_limit,
+            )?,
         ];
 
         if !results.iter().map(|(_, _, last_pruned_block)| last_pruned_block).all_equal() {
@@ -128,7 +132,7 @@ mod tests {
 
         assert_eq!(db.table::<tables::CanonicalHeaders>().unwrap().len(), headers.len());
         assert_eq!(db.table::<tables::Headers>().unwrap().len(), headers.len());
-        assert_eq!(db.table::<tables::HeaderTD>().unwrap().len(), headers.len());
+        assert_eq!(db.table::<tables::HeaderTerminalDifficulties>().unwrap().len(), headers.len());
 
         let test_prune = |to_block: BlockNumber, expected_result: (bool, usize)| {
             let prune_mode = PruneMode::Before(to_block);
@@ -181,7 +185,7 @@ mod tests {
                 headers.len() - (last_pruned_block_number + 1) as usize
             );
             assert_eq!(
-                db.table::<tables::HeaderTD>().unwrap().len(),
+                db.table::<tables::HeaderTerminalDifficulties>().unwrap().len(),
                 headers.len() - (last_pruned_block_number + 1) as usize
             );
             assert_eq!(

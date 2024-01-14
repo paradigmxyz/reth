@@ -33,7 +33,7 @@ use tracing::*;
 /// Input tables:
 /// - [tables::CanonicalHeaders] get next block to execute.
 /// - [tables::Headers] get for revm environment variables.
-/// - [tables::HeaderTD]
+/// - [tables::HeaderTerminalDifficulties]
 /// - [tables::BlockBodyIndices] to get tx number
 /// - [tables::Transactions] to execute
 ///
@@ -47,13 +47,14 @@ use tracing::*;
 /// - [tables::PlainAccountState]
 /// - [tables::PlainStorageState]
 /// - [tables::Bytecodes]
-/// - [tables::AccountChangeSet]
-/// - [tables::StorageChangeSet]
+/// - [tables::AccountChangeSets]
+/// - [tables::StorageChangeSets]
 ///
 /// For unwinds we are accessing:
 /// - [tables::BlockBodyIndices] get tx index to know what needs to be unwinded
-/// - [tables::AccountHistory] to remove change set and apply old values to
-/// - [tables::PlainAccountState] [tables::StorageHistory] to remove change set and apply old values
+/// - [tables::AccountsHistory] to remove change set and apply old values to
+/// - [tables::PlainAccountState] [tables::StoragesHistory] to remove change set and apply old
+///   values
 /// to [tables::PlainStorageState]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
@@ -114,7 +115,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()));
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         let start_block = input.next_block();
@@ -183,7 +184,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 bundle_size_hint,
                 cumulative_gas,
             ) {
-                break;
+                break
             }
         }
         let time = Instant::now();
@@ -351,8 +352,8 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
         // Acquire changeset cursors
-        let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
-        let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
+        let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
+        let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
 
         let (range, unwind_to, _) =
             input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
@@ -360,7 +361,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         if range.is_empty() {
             return Ok(UnwindOutput {
                 checkpoint: input.checkpoint.with_block_number(input.unwind_to),
-            });
+            })
         }
 
         // get all batches for account change
@@ -398,12 +399,12 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         }
 
         // Discard unwinded changesets
-        provider.unwind_table_by_num::<tables::AccountChangeSet>(unwind_to)?;
+        provider.unwind_table_by_num::<tables::AccountChangeSets>(unwind_to)?;
 
         let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
         while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
             if key.block_number() < *range.start() {
-                break;
+                break
             }
             // delete all changesets
             rev_storage_changeset_walker.delete_current()?;
@@ -423,7 +424,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 
         while let Some(Ok((tx_number, receipt))) = reverse_walker.next() {
             if tx_number < first_tx_num {
-                break;
+                break
             }
             reverse_walker.delete_current()?;
 
@@ -930,8 +931,8 @@ mod tests {
         );
         assert!(plain_storage.is_empty());
 
-        let account_changesets = test_db.table::<tables::AccountChangeSet>().unwrap();
-        let storage_changesets = test_db.table::<tables::StorageChangeSet>().unwrap();
+        let account_changesets = test_db.table::<tables::AccountChangeSets>().unwrap();
+        let storage_changesets = test_db.table::<tables::StorageChangeSets>().unwrap();
 
         assert_eq!(
             account_changesets,

@@ -196,31 +196,31 @@ tables!([
         TableType::Table,
         [
             CanonicalHeaders,
-            HeaderTD,
+            HeaderTerminalDifficulties,
             HeaderNumbers,
             Headers,
             BlockBodyIndices,
             BlockOmmers,
             BlockWithdrawals,
-            TransactionBlock,
+            TransactionBlocks,
             Transactions,
-            TxHashNumber,
+            TransactionHashNumbers,
             Receipts,
             PlainAccountState,
             Bytecodes,
-            AccountHistory,
-            StorageHistory,
-            HashedAccount,
+            AccountsHistory,
+            StoragesHistory,
+            HashedAccounts,
             AccountsTrie,
-            TxSenders,
-            SyncStage,
+            TransactionSenders,
+            StageCheckpoints,
             SyncStageProgress,
             PruneCheckpoints
         ]
     ),
     (
         TableType::DupSort,
-        [PlainStorageState, AccountChangeSet, StorageChangeSet, HashedStorage, StoragesTrie]
+        [PlainStorageState, AccountChangeSets, StorageChangeSets, HashedStorages, StoragesTrie]
     )
 ]);
 
@@ -275,7 +275,7 @@ table!(
 
 table!(
     /// Stores the total difficulty from a block header.
-    ( HeaderTD ) BlockNumber | CompactU256
+    ( HeaderTerminalDifficulties ) BlockNumber | CompactU256
 );
 
 table!(
@@ -312,14 +312,14 @@ table!(
 
 table!(
     /// Stores the mapping of the transaction hash to the transaction number.
-    ( TxHashNumber ) TxHash | TxNumber
+    ( TransactionHashNumbers ) TxHash | TxNumber
 );
 
 table!(
     /// Stores the mapping of transaction number to the blocks number.
     ///
     /// The key is the highest transaction ID in the block.
-    ( TransactionBlock ) TxNumber | BlockNumber
+    ( TransactionBlocks ) TxNumber | BlockNumber
 );
 
 table!(
@@ -364,7 +364,7 @@ table!(
     /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
-    ( AccountHistory ) ShardedKey<Address> | BlockNumberList
+    ( AccountsHistory ) ShardedKey<Address> | BlockNumberList
 );
 
 table!(
@@ -386,21 +386,21 @@ table!(
     /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
-    ( StorageHistory ) StorageShardedKey | BlockNumberList
+    ( StoragesHistory ) StorageShardedKey | BlockNumberList
 );
 
 dupsort!(
     /// Stores the state of an account before a certain transaction changed it.
     /// Change on state can be: account is created, selfdestructed, touched while empty
     /// or changed (balance,nonce).
-    ( AccountChangeSet ) BlockNumber | [Address] AccountBeforeTx
+    ( AccountChangeSets ) BlockNumber | [Address] AccountBeforeTx
 );
 
 dupsort!(
     /// Stores the state of a storage key before a certain transaction changed it.
     /// If [`StorageEntry::value`] is zero, this means storage was not existing
     /// and needs to be removed.
-    ( StorageChangeSet ) BlockNumberAddress | [B256] StorageEntry
+    ( StorageChangeSets ) BlockNumberAddress | [B256] StorageEntry
 );
 
 table!(
@@ -408,7 +408,7 @@ table!(
     /// This table is in preparation for merkelization and calculation of state root.
     /// We are saving whole account data as it is needed for partial update when
     /// part of storage is changed. Benefit for merkelization is that hashed addresses are sorted.
-    ( HashedAccount ) B256 | Account
+    ( HashedAccounts ) B256 | Account
 );
 
 dupsort!(
@@ -416,7 +416,7 @@ dupsort!(
     /// hash of storage key `keccak256(key)`.
     /// This table is in preparation for merkelization and calculation of state root.
     /// Benefit for merklization is that hashed addresses/keys are sorted.
-    ( HashedStorage ) B256 | [B256] StorageEntry
+    ( HashedStorages ) B256 | [B256] StorageEntry
 );
 
 table!(
@@ -433,12 +433,12 @@ table!(
     /// Stores the transaction sender for each canonical transaction.
     /// It is needed to speed up execution stage and allows fetching signer without doing
     /// transaction signed recovery
-    ( TxSenders ) TxNumber | Address
+    ( TransactionSenders ) TxNumber | Address
 );
 
 table!(
     /// Stores the highest synced block number and stage-specific checkpoint of each stage.
-    ( SyncStage ) StageId | StageCheckpoint
+    ( StageCheckpoints ) StageId | StageCheckpoint
 );
 
 table!(
@@ -465,30 +465,30 @@ mod tests {
 
     const TABLES: [(TableType, &str); NUM_TABLES] = [
         (TableType::Table, CanonicalHeaders::NAME),
-        (TableType::Table, HeaderTD::NAME),
+        (TableType::Table, HeaderTerminalDifficulties::NAME),
         (TableType::Table, HeaderNumbers::NAME),
         (TableType::Table, Headers::NAME),
         (TableType::Table, BlockBodyIndices::NAME),
         (TableType::Table, BlockOmmers::NAME),
         (TableType::Table, BlockWithdrawals::NAME),
-        (TableType::Table, TransactionBlock::NAME),
+        (TableType::Table, TransactionBlocks::NAME),
         (TableType::Table, Transactions::NAME),
-        (TableType::Table, TxHashNumber::NAME),
+        (TableType::Table, TransactionHashNumbers::NAME),
         (TableType::Table, Receipts::NAME),
         (TableType::Table, PlainAccountState::NAME),
         (TableType::Table, Bytecodes::NAME),
-        (TableType::Table, AccountHistory::NAME),
-        (TableType::Table, StorageHistory::NAME),
-        (TableType::Table, HashedAccount::NAME),
+        (TableType::Table, AccountsHistory::NAME),
+        (TableType::Table, StoragesHistory::NAME),
+        (TableType::Table, HashedAccounts::NAME),
         (TableType::Table, AccountsTrie::NAME),
-        (TableType::Table, TxSenders::NAME),
-        (TableType::Table, SyncStage::NAME),
+        (TableType::Table, TransactionSenders::NAME),
+        (TableType::Table, StageCheckpoints::NAME),
         (TableType::Table, SyncStageProgress::NAME),
         (TableType::Table, PruneCheckpoints::NAME),
         (TableType::DupSort, PlainStorageState::NAME),
-        (TableType::DupSort, AccountChangeSet::NAME),
-        (TableType::DupSort, StorageChangeSet::NAME),
-        (TableType::DupSort, HashedStorage::NAME),
+        (TableType::DupSort, AccountChangeSets::NAME),
+        (TableType::DupSort, StorageChangeSets::NAME),
+        (TableType::DupSort, HashedStorages::NAME),
         (TableType::DupSort, StoragesTrie::NAME),
     ];
 

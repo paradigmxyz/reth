@@ -12,7 +12,7 @@ use reth_primitives::{
     U256,
 };
 use reth_trie::{
-    hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
+    hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorages},
     updates::TrieUpdates,
     StateRoot, StateRootError,
 };
@@ -144,7 +144,7 @@ impl BundleStateWithReceipts {
             }
 
             // insert storage.
-            let mut hashed_storage = HashedStorage::new(account.status.was_destroyed());
+            let mut hashed_storage = HashedStorages::new(account.status.was_destroyed());
 
             for (key, value) in account.storage.iter() {
                 let hashed_key = keccak256(B256::new(key.to_be_bytes()));
@@ -524,7 +524,7 @@ mod tests {
         // Check change set
         let mut changeset_cursor = provider
             .tx_ref()
-            .cursor_dup_read::<tables::AccountChangeSet>()
+            .cursor_dup_read::<tables::AccountChangeSets>()
             .expect("Could not open changeset cursor");
         assert_eq!(
             changeset_cursor.seek_exact(1).expect("Could not read account change set"),
@@ -692,7 +692,7 @@ mod tests {
         // Check change set
         let mut changeset_cursor = provider
             .tx_ref()
-            .cursor_dup_read::<tables::StorageChangeSet>()
+            .cursor_dup_read::<tables::StorageChangeSets>()
             .expect("Could not open storage changeset cursor");
         assert_eq!(
             changeset_cursor.seek_exact(BlockNumberAddress((1, address_a))).unwrap(),
@@ -959,7 +959,7 @@ mod tests {
 
         let mut storage_changeset_cursor = provider
             .tx_ref()
-            .cursor_dup_read::<tables::StorageChangeSet>()
+            .cursor_dup_read::<tables::StorageChangeSets>()
             .expect("Could not open plain storage state cursor");
         let mut storage_changes = storage_changeset_cursor.walk_range(..).unwrap();
 
@@ -1167,7 +1167,7 @@ mod tests {
 
         let mut storage_changeset_cursor = provider
             .tx_ref()
-            .cursor_dup_read::<tables::StorageChangeSet>()
+            .cursor_dup_read::<tables::StorageChangeSets>()
             .expect("Could not open plain storage state cursor");
         let range = BlockNumberAddress::range(1..=1);
         let mut storage_changes = storage_changeset_cursor.walk_range(range).unwrap();
@@ -1236,9 +1236,9 @@ mod tests {
         db.update(|tx| {
             for (address, (account, storage)) in prestate.iter() {
                 let hashed_address = keccak256(address);
-                tx.put::<tables::HashedAccount>(hashed_address, *account).unwrap();
+                tx.put::<tables::HashedAccounts>(hashed_address, *account).unwrap();
                 for (slot, value) in storage {
-                    tx.put::<tables::HashedStorage>(
+                    tx.put::<tables::HashedStorages>(
                         hashed_address,
                         StorageEntry { key: keccak256(slot), value: *value },
                     )

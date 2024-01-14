@@ -10,19 +10,19 @@ use reth_provider::DatabaseProviderRW;
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
-pub struct AccountHistory {
+pub struct AccountsHistory {
     mode: PruneMode,
 }
 
-impl AccountHistory {
+impl AccountsHistory {
     pub fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
 }
 
-impl<DB: Database> Segment<DB> for AccountHistory {
+impl<DB: Database> Segment<DB> for AccountsHistory {
     fn segment(&self) -> PruneSegment {
-        PruneSegment::AccountHistory
+        PruneSegment::AccountsHistory
     }
 
     fn mode(&self) -> Option<PruneMode> {
@@ -46,7 +46,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
 
         let mut last_changeset_pruned_block = None;
         let (pruned_changesets, done) = provider
-            .prune_table_with_range::<tables::AccountChangeSet>(
+            .prune_table_with_range::<tables::AccountChangeSets>(
                 range,
                 input.delete_limit / 2,
                 |_| false,
@@ -60,7 +60,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
             .unwrap_or(range_end);
 
-        let (processed, pruned_indices) = prune_history_indices::<DB, tables::AccountHistory, _>(
+        let (processed, pruned_indices) = prune_history_indices::<DB, tables::AccountsHistory, _>(
             provider,
             last_changeset_pruned_block,
             |a, b| a.key == b.key,
@@ -81,7 +81,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{AccountHistory, PruneInput, PruneOutput, Segment};
+    use crate::segments::{AccountsHistory, PruneInput, PruneOutput, Segment};
     use assert_matches::assert_matches;
     use reth_db::{tables, BlockNumberList};
     use reth_interfaces::test_utils::{
@@ -114,7 +114,7 @@ mod tests {
         db.insert_changesets(changesets.clone(), None).expect("insert changesets");
         db.insert_history(changesets.clone(), None).expect("insert history");
 
-        let account_occurrences = db.table::<tables::AccountHistory>().unwrap().into_iter().fold(
+        let account_occurrences = db.table::<tables::AccountsHistory>().unwrap().into_iter().fold(
             BTreeMap::<_, usize>::new(),
             |mut map, (key, _)| {
                 map.entry(key.key).or_default().add_assign(1);
@@ -124,11 +124,11 @@ mod tests {
         assert!(account_occurrences.into_iter().any(|(_, occurrences)| occurrences > 1));
 
         assert_eq!(
-            db.table::<tables::AccountChangeSet>().unwrap().len(),
+            db.table::<tables::AccountChangeSets>().unwrap().len(),
             changesets.iter().flatten().count()
         );
 
-        let original_shards = db.table::<tables::AccountHistory>().unwrap();
+        let original_shards = db.table::<tables::AccountsHistory>().unwrap();
 
         let test_prune = |to_block: BlockNumber, run: usize, expected_result: (bool, usize)| {
             let prune_mode = PruneMode::Before(to_block);
@@ -137,12 +137,12 @@ mod tests {
                     .factory
                     .provider()
                     .unwrap()
-                    .get_prune_checkpoint(PruneSegment::AccountHistory)
+                    .get_prune_checkpoint(PruneSegment::AccountsHistory)
                     .unwrap(),
                 to_block,
                 delete_limit: 2000,
             };
-            let segment = AccountHistory::new(prune_mode);
+            let segment = AccountsHistory::new(prune_mode);
 
             let provider = db.factory.provider_rw().unwrap();
             let result = segment.prune(&provider, input).unwrap();
@@ -202,11 +202,11 @@ mod tests {
             );
 
             assert_eq!(
-                db.table::<tables::AccountChangeSet>().unwrap().len(),
+                db.table::<tables::AccountChangeSets>().unwrap().len(),
                 pruned_changesets.values().flatten().count()
             );
 
-            let actual_shards = db.table::<tables::AccountHistory>().unwrap();
+            let actual_shards = db.table::<tables::AccountsHistory>().unwrap();
 
             let expected_shards = original_shards
                 .iter()
@@ -226,7 +226,7 @@ mod tests {
                 db.factory
                     .provider()
                     .unwrap()
-                    .get_prune_checkpoint(PruneSegment::AccountHistory)
+                    .get_prune_checkpoint(PruneSegment::AccountsHistory)
                     .unwrap(),
                 Some(PruneCheckpoint {
                     block_number: Some(last_pruned_block_number),
