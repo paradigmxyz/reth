@@ -33,7 +33,7 @@ use std::{
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
-    sync::{mpsc, oneshot, watch},
+    sync::{mpsc, oneshot},
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
@@ -457,8 +457,6 @@ impl SessionManager {
                 let (to_session_tx, messages_rx) = mpsc::channel(self.session_command_buffer);
 
                 let messages = PeerRequestSender::new(peer_id, to_session_tx);
-                let (inflight_requests_semaphore_tx, inflight_requests_semaphore_rx) =
-                    watch::channel(0);
 
                 let timeout = Arc::new(AtomicU64::new(
                     self.initial_internal_request_timeout.as_millis() as u64,
@@ -478,7 +476,6 @@ impl SessionManager {
                     pending_message_to_session: None,
                     internal_request_tx: ReceiverStream::new(messages_rx).fuse(),
                     inflight_requests: Default::default(),
-                    inflight_requests_semaphore_tx,
                     conn,
                     queued_outgoing: Default::default(),
                     received_requests_from_remote: Default::default(),
@@ -522,7 +519,6 @@ impl SessionManager {
                     capabilities,
                     status,
                     messages,
-                    inflight_requests_semaphore_rx,
                     direction,
                     timeout,
                 })
@@ -649,9 +645,6 @@ pub enum SessionEvent {
         status: Arc<Status>,
         /// The channel for sending messages to the peer with the session
         messages: PeerRequestSender,
-        /// Counting semaphore for inflight requests read by
-        /// [`crate::transactions::TransactionsManager`].
-        inflight_requests_semaphore_rx: watch::Receiver<usize>,
         /// The direction of the session, either `Inbound` or `Outgoing`
         direction: Direction,
         /// The maximum time that the session waits for a response from the peer before timing out

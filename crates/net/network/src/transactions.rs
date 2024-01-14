@@ -586,9 +586,6 @@ where
             "received previously unseen hashes in announcement from peer"
         );
 
-        // todo: choose idle status based on total inflight requests too?
-        //let inflight_requests_count = *peer.inflight_requests_semaphore_rx.borrow();
-
         // only send request for hashes to idle peer, otherwise buffer hashes storing peer as
         // fallback
         if !self.transaction_fetcher.is_idle(peer_id) {
@@ -702,9 +699,6 @@ where
         let (_, peers) = self.transaction_fetcher.unknown_hashes.peek(&hash)?;
 
         for &peer_id in peers.iter() {
-            // todo: check if session still active
-            // todo: choose idle status based on total inflight requests too?
-            // let inflight_requests_count = *peer.inflight_requests_semaphore_rx.borrow();
             if self.transaction_fetcher.is_idle(peer_id) {
                 if self.peers.contains_key(&peer_id) {
                     return Some(peer_id)
@@ -829,12 +823,7 @@ where
                 self.peers.remove(&peer_id);
             }
             NetworkEvent::SessionEstablished {
-                peer_id,
-                client_version,
-                messages,
-                inflight_requests_semaphore_rx: _inflight_requests_semaphore_rx,
-                version,
-                ..
+                peer_id, client_version, messages, version, ..
             } => {
                 // insert a new peer into the peerset
                 self.peers.insert(
@@ -844,7 +833,6 @@ where
                             NonZeroUsize::new(PEER_TRANSACTION_CACHE_LIMIT).unwrap(),
                         ),
                         request_tx: messages,
-                        //_inflight_requests_semaphore_rx,
                         version,
                         client_version,
                     },
@@ -1257,8 +1245,6 @@ struct Peer {
     transactions: LruCache<B256>,
     /// A communication channel directly to the peer's session task.
     request_tx: PeerRequestSender,
-    /// Counting semaphore for inflight requests.
-    //_inflight_requests_semaphore_rx: watch::Receiver<usize>,
     /// negotiated version of the session.
     version: EthVersion,
     /// The peer's client version.
@@ -1866,7 +1852,6 @@ mod tests {
             Peer {
                 transactions: default_cache(),
                 request_tx: PeerRequestSender::new(peer_id, to_mock_session_tx),
-                //_inflight_requests_semaphore_rx,
                 version,
                 client_version: Arc::from(""),
             },
@@ -1920,7 +1905,6 @@ mod tests {
                     client_version,
                     capabilities,
                     messages,
-                    inflight_requests_semaphore_rx,
                     status,
                     version,
                 } => {
@@ -1931,7 +1915,6 @@ mod tests {
                         client_version,
                         capabilities,
                         messages,
-                        inflight_requests_semaphore_rx,
                         status,
                         version,
                     })
@@ -2007,7 +1990,6 @@ mod tests {
                     client_version,
                     capabilities,
                     messages,
-                    inflight_requests_semaphore_rx,
                     status,
                     version,
                 } => {
@@ -2018,7 +2000,6 @@ mod tests {
                         client_version,
                         capabilities,
                         messages,
-                        inflight_requests_semaphore_rx,
                         status,
                         version,
                     })
@@ -2092,7 +2073,6 @@ mod tests {
                     client_version,
                     capabilities,
                     messages,
-                    inflight_requests_semaphore_rx,
                     status,
                     version,
                 } => {
@@ -2103,7 +2083,6 @@ mod tests {
                         client_version,
                         capabilities,
                         messages,
-                        inflight_requests_semaphore_rx,
                         status,
                         version,
                     })
@@ -2183,7 +2162,6 @@ mod tests {
                     client_version,
                     capabilities,
                     messages,
-                    inflight_requests_semaphore_rx,
                     status,
                     version,
                 } => transactions.on_network_event(NetworkEvent::SessionEstablished {
@@ -2192,7 +2170,6 @@ mod tests {
                     client_version,
                     capabilities,
                     messages,
-                    inflight_requests_semaphore_rx,
                     status,
                     version,
                 }),
