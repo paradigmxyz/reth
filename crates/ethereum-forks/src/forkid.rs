@@ -17,7 +17,6 @@ use std::{
 use thiserror::Error;
 const CRC_32_IEEE: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
-use arbitrary;
 use proptest::arbitrary::Arbitrary;
 /// `CRC32` hash of all previous forks starting from genesis block.
 #[derive(
@@ -39,7 +38,7 @@ impl Arbitrary for ForkHash {
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        any::<[u8; 4]>().prop_map(|bytes| ForkHash(bytes)).boxed()
+        any::<[u8; 4]>().prop_map(ForkHash).boxed()
     }
 }
 
