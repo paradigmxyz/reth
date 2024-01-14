@@ -2,7 +2,7 @@
 
 Drop a stage's tables from the database
 
-```bash
+```text
 $ reth stage drop --help
 Usage: reth stage drop [OPTIONS] <STAGE>
 

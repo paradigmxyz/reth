@@ -22,6 +22,7 @@ use reth_interfaces::{
     sync::NoopSyncStateUpdater,
     test_utils::{NoopFullBlockClient, TestConsensus},
 };
+use reth_node_builder::EthEngineTypes;
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, PruneModes, Receipt, B256, U256};
 use reth_provider::{
@@ -49,6 +50,7 @@ type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
         >,
     >,
     Arc<EitherDownloader<Client, NoopFullBlockClient>>,
+    EthEngineTypes,
 >;
 
 #[derive(Debug)]
@@ -57,14 +59,14 @@ pub struct TestEnv<DB> {
     // Keep the tip receiver around, so it's not dropped.
     #[allow(dead_code)]
     tip_rx: watch::Receiver<B256>,
-    engine_handle: BeaconConsensusEngineHandle,
+    engine_handle: BeaconConsensusEngineHandle<EthEngineTypes>,
 }
 
 impl<DB> TestEnv<DB> {
     fn new(
         db: DB,
         tip_rx: watch::Receiver<B256>,
-        engine_handle: BeaconConsensusEngineHandle,
+        engine_handle: BeaconConsensusEngineHandle<EthEngineTypes>,
     ) -> Self {
         Self { db, tip_rx, engine_handle }
     }
@@ -88,7 +90,7 @@ impl<DB> TestEnv<DB> {
         loop {
             let result = self.send_new_payload(payload.clone(), cancun_fields.clone()).await?;
             if !result.is_syncing() {
-                return Ok(result);
+                return Ok(result)
             }
         }
     }
@@ -109,7 +111,7 @@ impl<DB> TestEnv<DB> {
         loop {
             let result = self.engine_handle.fork_choice_updated(state, None).await?;
             if !result.is_syncing() {
-                return Ok(result);
+                return Ok(result)
             }
         }
     }
@@ -453,7 +455,7 @@ where
             }
             TestConsensusConfig::Test => Arc::new(TestConsensus::default()),
         };
-        let payload_builder = spawn_test_payload_service();
+        let payload_builder = spawn_test_payload_service::<EthEngineTypes>();
 
         // use either noop client or a user provided client (for example TestFullBlockClient)
         let client = Arc::new(
@@ -552,9 +554,12 @@ where
     }
 }
 
-pub fn spawn_consensus_engine<Client: HeadersClient + BodiesClient + 'static>(
+pub fn spawn_consensus_engine<Client>(
     engine: TestBeaconConsensusEngine<Client>,
-) -> oneshot::Receiver<Result<(), BeaconConsensusEngineError>> {
+) -> oneshot::Receiver<Result<(), BeaconConsensusEngineError>>
+where
+    Client: HeadersClient + BodiesClient + 'static,
+{
     let (tx, rx) = oneshot::channel();
     tokio::spawn(async move {
         let result = engine.await;

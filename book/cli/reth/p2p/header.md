@@ -2,7 +2,7 @@
 
 Download block header
 
-```bash
+```text
 $ reth p2p header --help
 Usage: reth p2p header [OPTIONS] <ID>
 

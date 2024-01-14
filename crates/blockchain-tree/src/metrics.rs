@@ -19,6 +19,10 @@ pub struct TreeMetrics {
     pub latest_reorg_depth: Gauge,
     /// Longest sidechain height
     pub longest_sidechain_height: Gauge,
+    /// The number of times cached trie updates were used for insert.
+    pub trie_updates_insert_cached: Counter,
+    /// The number of times trie updates were recomputed for insert.
+    pub trie_updates_insert_recomputed: Counter,
 }
 
 /// Metrics for the blockchain tree block buffer
@@ -73,6 +77,8 @@ pub(crate) enum MakeCanonicalAction {
     MergeAllChains,
     /// Updating the canonical index during canonicalization.
     UpdateCanonicalIndex,
+    /// Retrieving (cached or recomputed) state trie updates
+    RetrieveStateTrieUpdates,
     /// Committing the canonical chain to the database.
     CommitCanonicalChainToDatabase,
     /// Reverting the canonical chain from the database.
@@ -90,6 +96,7 @@ impl MakeCanonicalAction {
             MakeCanonicalAction::SplitChainForks => "split chain forks",
             MakeCanonicalAction::MergeAllChains => "merge all chains",
             MakeCanonicalAction::UpdateCanonicalIndex => "update canonical index",
+            MakeCanonicalAction::RetrieveStateTrieUpdates => "retrieve state trie updates",
             MakeCanonicalAction::CommitCanonicalChainToDatabase => {
                 "commit canonical chain to database"
             }

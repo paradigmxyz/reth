@@ -33,7 +33,7 @@ use crate::{
     transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
-use futures::{Future, StreamExt};
+use futures::{pin_mut, Future, StreamExt};
 use parking_lot::Mutex;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
@@ -45,6 +45,7 @@ use reth_network_api::ReputationChangeKind;
 use reth_primitives::{ForkId, NodeRecord, PeerId, B256};
 use reth_provider::{BlockNumReader, BlockReader};
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
+use reth_tasks::shutdown::GracefulShutdown;
 use reth_tokio_util::EventListeners;
 use secp256k1::SecretKey;
 use std::{
@@ -523,7 +524,7 @@ where
                 if self.handle.mode().is_stake() {
                     // See [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
                     warn!(target: "net", "Peer performed block propagation, but it is not supported in proof of stake (EIP-3675)");
-                    return;
+                    return
                 }
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
                 self.swarm.state_mut().announce_new_block(msg);
@@ -596,6 +597,34 @@ where
     }
 }
 
+impl<C> NetworkManager<C>
+where
+    C: BlockReader + Unpin,
+{
+    /// Drives the [NetworkManager] future until a [GracefulShutdown] signal is received.
+    ///
+    /// This also run the given function `shutdown_hook` afterwards.
+    pub async fn run_until_graceful_shutdown(
+        self,
+        shutdown: GracefulShutdown,
+        shutdown_hook: impl FnOnce(&mut Self),
+    ) {
+        let network = self;
+        pin_mut!(network, shutdown);
+
+        let mut graceful_guard = None;
+        tokio::select! {
+            _ = &mut network => {},
+            guard = shutdown => {
+                graceful_guard = Some(guard);
+            },
+        }
+
+        shutdown_hook(&mut network);
+        drop(graceful_guard);
+    }
+}
+
 impl<C> Future for NetworkManager<C>
 where
     C: BlockReader + Unpin,
@@ -618,7 +647,7 @@ where
                     // This is only possible if the channel was deliberately closed since we always
                     // have an instance of `NetworkHandle`
                     error!("Network message channel closed.");
-                    return Poll::Ready(());
+                    return Poll::Ready(())
                 }
                 Poll::Ready(Some(msg)) => this.on_handle_message(msg),
             };
@@ -889,7 +918,7 @@ where
             if budget == 0 {
                 // make sure we're woken up again
                 cx.waker().wake_by_ref();
-                break;
+                break
             }
         }
 

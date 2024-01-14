@@ -22,44 +22,49 @@ pub type EthResult<T> = Result<T, EthApiError>;
 
 /// Errors that can occur when interacting with the `eth_` namespace
 #[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
 pub enum EthApiError {
     /// When a raw transaction is empty
     #[error("empty transaction data")]
     EmptyRawTransactionData,
+    /// When decoding a signed transaction fails
     #[error("failed to decode signed transaction")]
     FailedToDecodeSignedTransaction,
+    /// When the transaction signature is invalid
     #[error("invalid transaction signature")]
     InvalidTransactionSignature,
+    /// Errors related to the transaction pool
     #[error(transparent)]
     PoolError(RpcPoolError),
+    /// When an unknown block number is encountered
     #[error("unknown block number")]
     UnknownBlockNumber,
     /// Thrown when querying for `finalized` or `safe` block before the merge transition is
     /// finalized, <https://github.com/ethereum/execution-apis/blob/6d17705a875e52c26826124c2a8a15ed542aeca2/src/schemas/block.yaml#L109>
     #[error("unknown block")]
     UnknownSafeOrFinalizedBlock,
+    /// Thrown when an unknown block or transaction index is encountered
     #[error("unknown block or tx index")]
     UnknownBlockOrTxIndex,
+    /// When an invalid block range is provided
     #[error("invalid block range")]
     InvalidBlockRange,
     /// An internal error where prevrandao is not set in the evm's environment
     #[error("prevrandao not in the EVM's environment after merge")]
     PrevrandaoNotSet,
-    /// Excess_blob_gas is not set for Cancun and above.
-    #[error("excess blob gas missing the EVM's environment after Cancun")]
+    /// `excess_blob_gas` is not set for Cancun and above
+    #[error("excess blob gas missing in the EVM's environment after Cancun")]
     ExcessBlobGasNotSet,
     /// Thrown when a call or transaction request (`eth_call`, `eth_estimateGas`,
     /// `eth_sendTransaction`) contains conflicting fields (legacy, EIP-1559)
     #[error("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")]
     ConflictingFeeFieldsInRequest,
+    /// Errors related to invalid transactions
     #[error(transparent)]
     InvalidTransaction(#[from] RpcInvalidTransactionError),
-    /// Thrown when constructing an RPC block from a primitive block data failed.
+    /// Thrown when constructing an RPC block from primitive block data fails
     #[error(transparent)]
     InvalidBlockData(#[from] BlockError),
-    /// Thrown when a [AccountOverride](reth_rpc_types::state::AccountOverride) contains
-    /// conflicting `state` and `stateDiff` fields
+    /// Thrown when an `AccountOverride` contains conflicting `state` and `stateDiff` fields
     #[error("account {0:?} has both 'state' and 'stateDiff'")]
     BothStateAndStateDiffInOverride(Address),
     /// Other internal error
@@ -68,7 +73,7 @@ pub enum EthApiError {
     /// Error related to signing
     #[error(transparent)]
     Signing(#[from] SignError),
-    /// Thrown when a transaction was requested but not matching transaction exists
+    /// Thrown when a requested transaction is not found
     #[error("transaction not found")]
     TransactionNotFound,
     /// Some feature is unsupported
@@ -77,10 +82,10 @@ pub enum EthApiError {
     /// General purpose error for invalid params
     #[error("{0}")]
     InvalidParams(String),
-    /// When tracer config does not match the tracer
+    /// When the tracer config does not match the tracer
     #[error("invalid tracer config")]
     InvalidTracerConfig,
-    /// Percentile array is invalid
+    /// When the percentile array is invalid
     #[error("invalid reward percentiles")]
     InvalidRewardPercentiles,
     /// Error thrown when a spawned blocking task failed to deliver an anticipated response.
@@ -89,16 +94,17 @@ pub enum EthApiError {
     /// response back to the request handler.
     #[error("internal blocking task error")]
     InternalBlockingTaskError,
-    /// Error thrown when a spawned blocking task failed to deliver an anticipated response.
+    /// Error thrown when a spawned blocking task failed to deliver an anticipated response
     #[error("internal eth error")]
     InternalEthError,
-    /// Error thrown when a (tracing) call exceeded the configured timeout.
+    /// Error thrown when a (tracing) call exceeds the configured timeout
     #[error("execution aborted (timeout = {0:?})")]
     ExecutionTimedOut(Duration),
     /// Internal Error thrown by the javascript tracer
     #[error("{0}")]
     InternalJsTracerError(String),
     #[error(transparent)]
+    /// Call Input error when both `data` and `input` fields are set and not equal.
     CallInputError(#[from] CallInputError),
     /// Optimism related error
     #[error(transparent)]
@@ -113,9 +119,18 @@ pub enum OptimismEthApiError {
     /// Wrapper around a [hyper::Error].
     #[error(transparent)]
     HyperError(#[from] hyper::Error),
-    /// Wrapper around an [http::Error].
+    /// Wrapper around an [reqwest::Error].
     #[error(transparent)]
-    HttpError(#[from] http::Error),
+    HttpError(#[from] reqwest::Error),
+    /// Thrown when serializing transaction to forward to sequencer
+    #[error("invalid sequencer transaction")]
+    InvalidSequencerTransaction,
+    /// Thrown when calculating L1 gas fee
+    #[error("failed to calculate l1 gas fee")]
+    L1BlockFeeError,
+    /// Thrown when calculating L1 gas used
+    #[error("failed to calculate l1 gas used")]
+    L1BlockGasError,
 }
 
 impl From<EthApiError> for ErrorObject<'static> {
@@ -156,6 +171,9 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::Optimism(err) => match err {
                 OptimismEthApiError::HyperError(err) => internal_rpc_err(err.to_string()),
                 OptimismEthApiError::HttpError(err) => internal_rpc_err(err.to_string()),
+                OptimismEthApiError::InvalidSequencerTransaction |
+                OptimismEthApiError::L1BlockFeeError |
+                OptimismEthApiError::L1BlockGasError => internal_rpc_err(err.to_string()),
             },
         }
     }
@@ -551,26 +569,35 @@ impl std::error::Error for RevertError {}
 
 /// A helper error type that's mainly used to mirror `geth` Txpool's error messages
 #[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
 pub enum RpcPoolError {
+    /// When the transaction is already known
     #[error("already known")]
     AlreadyKnown,
+    /// When the sender is invalid
     #[error("invalid sender")]
     InvalidSender,
+    /// When the transaction is underpriced
     #[error("transaction underpriced")]
     Underpriced,
+    /// When the transaction pool is full
     #[error("txpool is full")]
     TxPoolOverflow,
+    /// When the replacement transaction is underpriced
     #[error("replacement transaction underpriced")]
     ReplaceUnderpriced,
+    /// When the transaction exceeds the block gas limit
     #[error("exceeds block gas limit")]
     ExceedsGasLimit,
+    /// When a negative value is encountered
     #[error("negative value")]
     NegativeValue,
+    /// When oversized data is encountered
     #[error("oversized data")]
     OversizedData,
+    /// When the max initcode size is exceeded
     #[error("max initcode size exceeded")]
     ExceedsMaxInitCodeSize,
+    /// Errors related to invalid transactions
     #[error(transparent)]
     Invalid(#[from] RpcInvalidTransactionError),
     /// Custom pool error
@@ -585,6 +612,7 @@ pub enum RpcPoolError {
     /// constraint (blob vs normal tx)
     #[error("address already reserved")]
     AddressAlreadyReserved,
+    /// Other unspecified error
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
 }

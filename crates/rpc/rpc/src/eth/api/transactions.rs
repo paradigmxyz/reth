@@ -1,4 +1,5 @@
 //! Contains RPC handler implementations specific to transactions
+
 use crate::{
     eth::{
         api::pending_block::PendingBlockEnv,
@@ -44,7 +45,11 @@ use revm::{
 #[cfg(feature = "optimism")]
 use crate::eth::api::optimism::OptimismTxMeta;
 #[cfg(feature = "optimism")]
+use crate::eth::error::OptimismEthApiError;
+#[cfg(feature = "optimism")]
 use reth_revm::optimism::RethL1BlockInfo;
+#[cfg(feature = "optimism")]
+use reth_rpc_types::OptimismTransactionReceiptFields;
 #[cfg(feature = "optimism")]
 use revm::L1BlockInfo;
 #[cfg(feature = "optimism")]
@@ -950,45 +955,32 @@ where
         l1_block_info: Option<L1BlockInfo>,
         block_timestamp: u64,
     ) -> EthResult<OptimismTxMeta> {
-        if let Some(l1_block_info) = l1_block_info {
-            let envelope_buf: Bytes = {
-                let mut envelope_buf = bytes::BytesMut::default();
-                tx.encode_enveloped(&mut envelope_buf);
-                envelope_buf.freeze().into()
-            };
+        let Some(l1_block_info) = l1_block_info else { return Ok(OptimismTxMeta::default()) };
 
-            let (l1_fee, l1_data_gas) = match (!tx.is_deposit())
-                .then(|| {
-                    let inner_l1_fee = match l1_block_info.l1_tx_data_fee(
-                        &self.inner.provider.chain_spec(),
-                        block_timestamp,
-                        &envelope_buf,
-                        tx.is_deposit(),
-                    ) {
-                        Ok(inner_l1_fee) => inner_l1_fee,
-                        Err(e) => return Err(e),
-                    };
-                    let inner_l1_data_gas = match l1_block_info.l1_data_gas(
-                        &self.inner.provider.chain_spec(),
-                        block_timestamp,
-                        &envelope_buf,
-                    ) {
-                        Ok(inner_l1_data_gas) => inner_l1_data_gas,
-                        Err(e) => return Err(e),
-                    };
-                    Ok((inner_l1_fee, inner_l1_data_gas))
-                })
-                .transpose()
-                .map_err(|_| EthApiError::InternalEthError)?
-            {
-                Some((l1_fee, l1_data_gas)) => (Some(l1_fee), Some(l1_data_gas)),
-                None => (None, None),
-            };
+        let envelope_buf: Bytes = {
+            let mut envelope_buf = bytes::BytesMut::new();
+            tx.encode_enveloped(&mut envelope_buf);
+            envelope_buf.freeze().into()
+        };
 
-            Ok(OptimismTxMeta::new(Some(l1_block_info), l1_fee, l1_data_gas))
+        let (l1_fee, l1_data_gas) = if tx.is_deposit() {
+            let inner_l1_fee = l1_block_info
+                .l1_tx_data_fee(
+                    &self.inner.provider.chain_spec(),
+                    block_timestamp,
+                    &envelope_buf,
+                    tx.is_deposit(),
+                )
+                .map_err(|_| EthApiError::Optimism(OptimismEthApiError::L1BlockFeeError))?;
+            let inner_l1_data_gas = l1_block_info
+                .l1_data_gas(&self.inner.provider.chain_spec(), block_timestamp, &envelope_buf)
+                .map_err(|_| EthApiError::Optimism(OptimismEthApiError::L1BlockGasError))?;
+            (Some(inner_l1_fee), Some(inner_l1_data_gas))
         } else {
-            Ok(OptimismTxMeta::default())
-        }
+            (None, None)
+        };
+
+        Ok(OptimismTxMeta::new(Some(l1_block_info), l1_fee, l1_data_gas))
     }
 
     /// Helper function for `eth_sendRawTransaction` for Optimism.
@@ -1009,7 +1001,7 @@ where
                     target = "rpc::eth",
                     "Failed to serialize transaction for forwarding to sequencer"
                 );
-                EthApiError::InternalEthError
+                EthApiError::Optimism(OptimismEthApiError::InvalidSequencerTransaction)
             })?;
 
             self.inner
@@ -1019,7 +1011,7 @@ where
                 .body(body)
                 .send()
                 .await
-                .map_err(|_| EthApiError::InternalEthError)?;
+                .map_err(|err| EthApiError::Optimism(OptimismEthApiError::HttpError(err)))?;
         }
         Ok(())
     }
@@ -1211,22 +1203,28 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         // EIP-4844 fields
         blob_gas_price: meta.excess_blob_gas.map(calc_blob_gasprice).map(U128::from),
         blob_gas_used: transaction.transaction.blob_gas_used().map(U128::from),
-        // Optimism fields
-        #[cfg(feature = "optimism")]
-        deposit_nonce: receipt.deposit_nonce.map(U64::from),
         ..Default::default()
     };
 
     #[cfg(feature = "optimism")]
-    if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
-        if !transaction.is_deposit() {
-            res_receipt.l1_fee = optimism_tx_meta.l1_fee;
-            res_receipt.l1_gas_used =
-                optimism_tx_meta.l1_data_gas.map(|dg| dg + l1_block_info.l1_fee_overhead);
-            res_receipt.l1_fee_scalar =
-                Some(l1_block_info.l1_fee_scalar.div(U256::from(1_000_000)));
-            res_receipt.l1_gas_price = Some(l1_block_info.l1_base_fee);
+    {
+        let mut op_fields = OptimismTransactionReceiptFields {
+            deposit_nonce: receipt.deposit_nonce.map(U64::from),
+            ..Default::default()
+        };
+
+        if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
+            if !transaction.is_deposit() {
+                op_fields.l1_fee = optimism_tx_meta.l1_fee;
+                op_fields.l1_gas_used =
+                    optimism_tx_meta.l1_data_gas.map(|dg| dg + l1_block_info.l1_fee_overhead);
+                op_fields.l1_fee_scalar =
+                    Some(l1_block_info.l1_fee_scalar.div(U256::from(1_000_000)));
+                op_fields.l1_gas_price = Some(l1_block_info.l1_base_fee);
+            }
         }
+
+        res_receipt.other = op_fields.into();
     }
 
     match transaction.transaction.kind() {

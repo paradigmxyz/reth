@@ -16,7 +16,10 @@ use reth_trie::{
     updates::TrieUpdates,
     StateRoot, StateRootError,
 };
-use revm::{db::states::BundleState, primitives::AccountInfo};
+use revm::{
+    db::{states::BundleState, BundleAccount},
+    primitives::AccountInfo,
+};
 use std::collections::HashMap;
 
 pub use revm::db::states::OriginalValuesKnown;
@@ -95,6 +98,11 @@ impl BundleStateWithReceipts {
         &self.bundle
     }
 
+    /// Returns mutable revm bundle state.
+    pub fn state_mut(&mut self) -> &mut BundleState {
+        &mut self.bundle
+    }
+
     /// Set first block.
     pub fn set_first_block(&mut self, first_block: BlockNumber) {
         self.first_block = first_block;
@@ -103,6 +111,11 @@ impl BundleStateWithReceipts {
     /// Return iterator over all accounts
     pub fn accounts_iter(&self) -> impl Iterator<Item = (Address, Option<&AccountInfo>)> {
         self.bundle.state().iter().map(|(a, acc)| (*a, acc.info.as_ref()))
+    }
+
+    /// Return iterator over all [BundleAccount]s in the bundle
+    pub fn bundle_accounts_iter(&self) -> impl Iterator<Item = (Address, &BundleAccount)> {
+        self.bundle.state().iter().map(|(a, acc)| (*a, acc))
     }
 
     /// Get account if account is known.
@@ -159,10 +172,10 @@ impl BundleStateWithReceipts {
         &self,
         tx: &'a TX,
         hashed_post_state: &'b HashedPostState,
-    ) -> StateRoot<'a, TX, HashedPostStateCursorFactory<'a, 'b, TX>> {
+    ) -> StateRoot<&'a TX, HashedPostStateCursorFactory<'a, 'b, TX>> {
         let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, hashed_post_state);
-        StateRoot::new(tx)
+        StateRoot::from_tx(tx)
             .with_hashed_cursor_factory(hashed_cursor_factory)
             .with_changed_account_prefixes(account_prefix_set)
             .with_changed_storage_prefixes(storage_prefix_set)
@@ -268,9 +281,14 @@ impl BundleStateWithReceipts {
         self.receipts.root_slow(self.block_number_to_index(block_number)?, chain_spec, timestamp)
     }
 
-    /// Return reference to receipts.
+    /// Returns reference to receipts.
     pub fn receipts(&self) -> &Receipts {
         &self.receipts
+    }
+
+    /// Returns mutable reference to receipts.
+    pub fn receipts_mut(&mut self) -> &mut Receipts {
+        &mut self.receipts
     }
 
     /// Return all block receipts
@@ -1236,7 +1254,7 @@ mod tests {
                 }
             }
 
-            let (_, updates) = StateRoot::new(tx).root_with_updates().unwrap();
+            let (_, updates) = StateRoot::from_tx(tx).root_with_updates().unwrap();
             updates.flush(tx).unwrap();
         })
         .unwrap();

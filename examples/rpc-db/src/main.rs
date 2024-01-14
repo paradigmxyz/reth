@@ -11,6 +11,7 @@
 //! ```sh
 //! cast rpc myrpcExt_customMethod
 //! ```
+
 use reth::{
     primitives::ChainSpecBuilder,
     providers::{providers::BlockchainProvider, ProviderFactory},

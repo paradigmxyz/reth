@@ -2,7 +2,7 @@
 
 Unwinds the database until the given block number (range is inclusive)
 
-```bash
+```text
 $ reth stage unwind to-block --help
 Usage: reth stage unwind to-block [OPTIONS] <TARGET>
 

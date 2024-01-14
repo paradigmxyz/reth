@@ -8,11 +8,15 @@ homepage.workspace = true
 repository.workspace = true
 description = "Ethereum fork types used in reth."
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-codecs.workspace = true
 
 # ethereum
+alloy-chains.workspace = true
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 

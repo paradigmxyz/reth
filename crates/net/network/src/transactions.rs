@@ -1067,7 +1067,6 @@ struct Peer {
     /// negotiated version of the session.
     version: EthVersion,
     /// The peer's client version.
-    #[allow(unused)]
     client_version: Arc<str>,
 }
 
@@ -1256,18 +1255,30 @@ enum TransactionsCommand {
 
 /// All events related to transactions emitted by the network.
 #[derive(Debug)]
-#[allow(missing_docs)]
 pub enum NetworkTransactionEvent {
-    /// Received list of transactions from the given peer.
+    /// Represents the event of receiving a list of transactions from a peer.
     ///
-    /// This represents transactions that were broadcasted to use from the peer.
-    IncomingTransactions { peer_id: PeerId, msg: Transactions },
-    /// Received list of transactions hashes to the given peer.
-    IncomingPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes },
-    /// Incoming `GetPooledTransactions` request from a peer.
-    GetPooledTransactions {
+    /// This indicates transactions that were broadcasted to us from the peer.
+    IncomingTransactions {
+        /// The ID of the peer from which the transactions were received.
         peer_id: PeerId,
+        /// The received transactions.
+        msg: Transactions,
+    },
+    /// Represents the event of receiving a list of transaction hashes from a peer.
+    IncomingPooledTransactionHashes {
+        /// The ID of the peer from which the transaction hashes were received.
+        peer_id: PeerId,
+        /// The received new pooled transaction hashes.
+        msg: NewPooledTransactionHashes,
+    },
+    /// Represents the event of receiving a `GetPooledTransactions` request from a peer.
+    GetPooledTransactions {
+        /// The ID of the peer from which the request was received.
+        peer_id: PeerId,
+        /// The received `GetPooledTransactions` request.
         request: GetPooledTransactions,
+        /// The sender for responding to the request with a result of `PooledTransactions`.
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     },
 }
@@ -1281,12 +1292,11 @@ mod tests {
     use reth_network_api::NetworkInfo;
     use reth_primitives::hex;
     use reth_provider::test_utils::NoopProvider;
+
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use secp256k1::SecretKey;
     use std::future::poll_fn;
-
     #[tokio::test(flavor = "multi_thread")]
-    #[cfg_attr(not(feature = "geth-tests"), ignore)]
     async fn test_ignored_tx_broadcasts_while_initially_syncing() {
         reth_tracing::init_test_tracing();
         let net = Testnet::create(3).await;
@@ -1369,7 +1379,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[cfg_attr(not(feature = "geth-tests"), ignore)]
     async fn test_tx_broadcasts_through_two_syncs() {
         reth_tracing::init_test_tracing();
         let net = Testnet::create(3).await;

@@ -6,9 +6,9 @@ use crate::{
 };
 use futures::TryFutureExt;
 use reth_interfaces::RethResult;
+use reth_node_api::EngineTypes;
 use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes,
-    PayloadStatus,
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -17,16 +17,31 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// engine task.
 ///
 /// See also [`BeaconConsensusEngine`](crate::engine::BeaconConsensusEngine).
-#[derive(Clone, Debug)]
-pub struct BeaconConsensusEngineHandle {
-    pub(crate) to_engine: UnboundedSender<BeaconEngineMessage>,
+#[derive(Debug)]
+pub struct BeaconConsensusEngineHandle<Engine>
+where
+    Engine: EngineTypes,
+{
+    pub(crate) to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
+}
+
+impl<Engine> Clone for BeaconConsensusEngineHandle<Engine>
+where
+    Engine: EngineTypes,
+{
+    fn clone(&self) -> Self {
+        Self { to_engine: self.to_engine.clone() }
+    }
 }
 
 // === impl BeaconConsensusEngineHandle ===
 
-impl BeaconConsensusEngineHandle {
+impl<Engine> BeaconConsensusEngineHandle<Engine>
+where
+    Engine: EngineTypes,
+{
     /// Creates a new beacon consensus engine handle.
-    pub fn new(to_engine: UnboundedSender<BeaconEngineMessage>) -> Self {
+    pub fn new(to_engine: UnboundedSender<BeaconEngineMessage<Engine>>) -> Self {
         Self { to_engine }
     }
 
@@ -49,7 +64,7 @@ impl BeaconConsensusEngineHandle {
     pub async fn fork_choice_updated(
         &self,
         state: ForkchoiceState,
-        payload_attrs: Option<PayloadAttributes>,
+        payload_attrs: Option<Engine::PayloadAttributes>,
     ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
         Ok(self
             .send_fork_choice_updated(state, payload_attrs)
@@ -63,7 +78,7 @@ impl BeaconConsensusEngineHandle {
     fn send_fork_choice_updated(
         &self,
         state: ForkchoiceState,
-        payload_attrs: Option<PayloadAttributes>,
+        payload_attrs: Option<Engine::PayloadAttributes>,
     ) -> oneshot::Receiver<RethResult<OnForkChoiceUpdated>> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {

@@ -81,7 +81,7 @@ use crate::{
     CanonicalStateUpdate, ChangedAccount, PoolConfig, TransactionOrdering, TransactionValidator,
 };
 use best::BestTransactions;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use reth_primitives::{
     Address, BlobTransaction, BlobTransactionSidecar, IntoRecoveredTransaction,
     PooledTransactionsElement, TransactionSigned, TxHash, B256,
@@ -182,12 +182,12 @@ where
 
     /// Returns stats about the size of the pool.
     pub(crate) fn size(&self) -> PoolSize {
-        self.pool.read().size()
+        self.get_pool_data().size()
     }
 
     /// Returns the currently tracked block
     pub(crate) fn block_info(&self) -> BlockInfo {
-        self.pool.read().block_info()
+        self.get_pool_data().block_info()
     }
     /// Returns the currently tracked block
     pub(crate) fn set_block_info(&self, info: BlockInfo) {
@@ -201,7 +201,7 @@ where
 
     /// Returns all senders in the pool
     pub(crate) fn unique_senders(&self) -> HashSet<Address> {
-        self.pool.read().unique_senders()
+        self.get_pool_data().unique_senders()
     }
 
     /// Converts the changed accounts to a map of sender ids to sender info (internal identifier
@@ -264,12 +264,9 @@ where
         &self,
         tx_hash: TxHash,
     ) -> Option<TransactionEvents> {
-        let pool = self.pool.read();
-        if pool.contains(&tx_hash) {
-            Some(self.event_listener.write().subscribe(tx_hash))
-        } else {
-            None
-        }
+        self.get_pool_data()
+            .contains(&tx_hash)
+            .then(|| self.event_listener.write().subscribe(tx_hash))
     }
 
     /// Adds a listener for all transaction events.
@@ -279,16 +276,24 @@ where
         self.event_listener.write().subscribe_all()
     }
 
+    /// Returns a read lock to the pool's data.
+    pub(crate) fn get_pool_data(&self) -> RwLockReadGuard<'_, TxPool<T>> {
+        self.pool.read()
+    }
+
     /// Returns hashes of _all_ transactions in the pool.
     pub(crate) fn pooled_transactions_hashes(&self) -> Vec<TxHash> {
-        let pool = self.pool.read();
-        pool.all().transactions_iter().filter(|tx| tx.propagate).map(|tx| *tx.hash()).collect()
+        self.get_pool_data()
+            .all()
+            .transactions_iter()
+            .filter(|tx| tx.propagate)
+            .map(|tx| *tx.hash())
+            .collect()
     }
 
     /// Returns _all_ transactions in the pool.
     pub(crate) fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let pool = self.pool.read();
-        pool.all().transactions_iter().filter(|tx| tx.propagate).collect()
+        self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).collect()
     }
 
     /// Returns the [BlobTransaction] for the given transaction if the sidecar exists.
@@ -612,7 +617,7 @@ where
 
     /// Returns an iterator that yields transactions that are ready to be included in the block.
     pub(crate) fn best_transactions(&self) -> BestTransactions<T> {
-        self.pool.read().best_transactions()
+        self.get_pool_data().best_transactions()
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block with
@@ -622,7 +627,7 @@ where
         base_fee: u64,
     ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
     {
-        self.pool.read().best_transactions_with_base_fee(base_fee)
+        self.get_pool_data().best_transactions_with_base_fee(base_fee)
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block with
@@ -632,22 +637,22 @@ where
         best_transactions_attributes: BestTransactionsAttributes,
     ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
     {
-        self.pool.read().best_transactions_with_attributes(best_transactions_attributes)
+        self.get_pool_data().best_transactions_with_attributes(best_transactions_attributes)
     }
 
     /// Returns all transactions from the pending sub-pool
     pub(crate) fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.pool.read().pending_transactions()
+        self.get_pool_data().pending_transactions()
     }
 
     /// Returns all transactions from parked pools
     pub(crate) fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.pool.read().queued_transactions()
+        self.get_pool_data().queued_transactions()
     }
 
     /// Returns all transactions in the pool
     pub(crate) fn all_transactions(&self) -> AllPoolTransactions<T::Transaction> {
-        let pool = self.pool.read();
+        let pool = self.get_pool_data();
         AllPoolTransactions {
             pending: pool.pending_transactions(),
             queued: pool.queued_transactions(),
@@ -676,7 +681,7 @@ where
         if hashes.is_empty() {
             return
         }
-        let pool = self.pool.read();
+        let pool = self.get_pool_data();
         hashes.retain(|tx| !pool.contains(tx))
     }
 
@@ -685,7 +690,7 @@ where
         &self,
         tx_hash: &TxHash,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.pool.read().get(tx_hash)
+        self.get_pool_data().get(tx_hash)
     }
 
     /// Returns all transactions of the address
@@ -694,7 +699,7 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let sender_id = self.get_sender_id(sender);
-        self.pool.read().get_transactions_by_sender(sender_id)
+        self.get_pool_data().get_transactions_by_sender(sender_id)
     }
 
     /// Returns all transactions that where submitted with the given [TransactionOrigin]
@@ -702,7 +707,7 @@ where
         &self,
         origin: TransactionOrigin,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.pool.read().all().transactions_iter().filter(|tx| tx.origin == origin).collect()
+        self.get_pool_data().all().transactions_iter().filter(|tx| tx.origin == origin).collect()
     }
 
     /// Returns all the transactions belonging to the hashes.
@@ -715,7 +720,7 @@ where
         if txs.is_empty() {
             return Vec::new()
         }
-        self.pool.read().get_all(txs).collect()
+        self.get_pool_data().get_all(txs).collect()
     }
 
     /// Notify about propagated transactions.
@@ -730,12 +735,12 @@ where
 
     /// Number of transactions in the entire pool
     pub(crate) fn len(&self) -> usize {
-        self.pool.read().len()
+        self.get_pool_data().len()
     }
 
     /// Whether the pool is empty
     pub(crate) fn is_empty(&self) -> bool {
-        self.pool.read().is_empty()
+        self.get_pool_data().is_empty()
     }
 
     /// Enforces the size limits of pool and returns the discarded transactions if violated.

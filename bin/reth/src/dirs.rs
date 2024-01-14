@@ -1,4 +1,5 @@
 //! reth data directories.
+
 use crate::utils::parse_path;
 use reth_primitives::Chain;
 use std::{
@@ -10,10 +11,7 @@ use std::{
 
 /// Constructs a string to be used as a path for configuration and db paths.
 pub fn config_path_prefix(chain: Chain) -> String {
-    match chain {
-        Chain::Named(name) => name.to_string(),
-        Chain::Id(id) => id.to_string(),
-    }
+    chain.to_string()
 }
 
 /// Returns the path to the reth data directory.
@@ -190,6 +188,11 @@ impl<D: XdgPath> MaybePlatformPath<D> {
         )
     }
 
+    /// Returns the default platform path for the specified [Chain].
+    pub fn chain_default(chain: Chain) -> ChainPath<D> {
+        PlatformPath::default().with_chain(chain)
+    }
+
     /// Returns true if a custom path is set
     pub fn is_some(&self) -> bool {
         self.0.is_some()
@@ -241,6 +244,12 @@ impl<D> FromStr for MaybePlatformPath<D> {
     }
 }
 
+impl<D> From<PathBuf> for MaybePlatformPath<D> {
+    fn from(path: PathBuf) -> Self {
+        Self(Some(PlatformPath(path, std::marker::PhantomData)))
+    }
+}
+
 /// Wrapper type around PlatformPath that includes a `Chain`, used for separating reth data for
 /// different networks.
 ///
@@ -257,6 +266,13 @@ impl<D> ChainPath<D> {
     /// Returns a new `ChainPath` given a `PlatformPath` and a `Chain`.
     pub fn new(path: PlatformPath<D>, chain: Chain) -> Self {
         Self(path, chain)
+    }
+
+    /// Returns the path to the reth data directory for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>`
+    pub fn data_dir_path(&self) -> PathBuf {
+        self.0.as_ref().into()
     }
 
     /// Returns the path to the db directory for this chain.
@@ -291,6 +307,13 @@ impl<D> ChainPath<D> {
     /// `<DIR>/<CHAIN_ID>/blobstore`
     pub fn blobstore_path(&self) -> PathBuf {
         self.0.join("blobstore").into()
+    }
+
+    /// Returns the path to the local transactions backup file
+    ///
+    /// `<DIR>/<CHAIN_ID>/txpool-transactions-backup.rlp`
+    pub fn txpool_transactions_path(&self) -> PathBuf {
+        self.0.join("txpool-transactions-backup.rlp").into()
     }
 
     /// Returns the path to the config file for this chain.
