@@ -64,12 +64,12 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
         })
     }
 
-    fn parent(&self) -> B256 {
-        self.payload_attributes.parent
-    }
-
     fn payload_id(&self) -> PayloadId {
         self.payload_attributes.id
+    }
+
+    fn parent(&self) -> B256 {
+        self.payload_attributes.parent
     }
 
     fn timestamp(&self) -> u64 {

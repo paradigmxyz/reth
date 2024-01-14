@@ -117,6 +117,11 @@ mod builder {
         Client: StateProviderFactory,
         Pool: TransactionPool,
     {
+        debug_assert!(
+            args.config.initialized_cfg.optimism,
+            "optimism payload builder called on non-optimism chain"
+        );
+
         let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
         let state_provider = client.state_by_block_hash(config.parent_block.hash)?;
@@ -212,7 +217,7 @@ mod builder {
                 Err(err) => {
                     match err {
                         EVMError::Transaction(err) => {
-                            trace!(target: "optimism_payload_builder", ?err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
+                            trace!(target: "payload_builder", ?err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
                             continue
                         }
                         err => {
