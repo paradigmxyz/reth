@@ -6,6 +6,7 @@ use crate::Head;
 use alloy_primitives::{hex, BlockNumber, B256};
 use alloy_rlp::*;
 use crc::*;
+use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
@@ -14,10 +15,10 @@ use std::{
     ops::{Add, AddAssign},
 };
 use thiserror::Error;
-use proptest::prelude::*;
 const CRC_32_IEEE: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
-use proptest::arbitrary::Arbitrary;
+use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use arbitrary;
+use proptest::arbitrary::Arbitrary;
 /// `CRC32` hash of all previous forks starting from genesis block.
 #[derive(
     Clone,
@@ -26,38 +27,19 @@ use arbitrary;
     Eq,
     Hash,
     RlpMaxEncodedLen,
+    RlpDecodableWrapper,
+    RlpEncodableWrapper,
     Serialize,
     Deserialize,
 )]
 pub struct ForkHash(pub [u8; 4]);
-
-impl alloy_rlp::Encodable for ForkHash{
-    fn encode(&self, out: &mut dyn BufMut) {
-        out.put_slice(&self.0);
-    }
-
-}
-
-impl alloy_rlp::Decodable for ForkHash {
-    fn decode(buf: &mut &[u8]) -> Result<Self, Error> {
-        if buf.remaining() < 4 {
-            return Err(Error::Custom("Not enough data to decode ForkHash"));
-        }
-
-        let mut array = [0u8; 4];
-        buf.copy_to_slice(&mut array);
-        Ok(ForkHash(array))
-    }
-}
 
 impl Arbitrary for ForkHash {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        any::<[u8; 4]>()
-            .prop_map(|bytes| ForkHash(bytes))
-            .boxed()
+        any::<[u8; 4]>().prop_map(|bytes| ForkHash(bytes)).boxed()
     }
 }
 
@@ -67,8 +49,6 @@ impl<'a> arbitrary::Arbitrary<'a> for ForkHash {
         Ok(ForkHash(bytes))
     }
 }
-
-
 
 impl fmt::Debug for ForkHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -152,6 +132,8 @@ impl From<ForkFilterKey> for u64 {
     Eq,
     Hash,
     RlpMaxEncodedLen,
+    RlpEncodable,
+    RlpDecodable,
     Serialize,
     Deserialize,
 )]
@@ -162,29 +144,12 @@ pub struct ForkId {
     pub next: u64,
 }
 
-impl alloy_rlp::Encodable for ForkId {
-    fn encode(&self, out: &mut dyn BufMut) {
-        self.hash.encode(out);
-        self.next.encode(out);
-    }
-}
-
-impl alloy_rlp::Decodable for ForkId {
-    fn decode(buf: &mut &[u8]) -> Result<Self, Error> {
-        let hash = ForkHash::decode(buf)?;
-        let next = u64::decode(buf)?;
-        Ok(ForkId { hash, next })
-    }
-}
-
 impl Arbitrary for ForkId {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (any::<ForkHash>(), any::<u64>())
-            .prop_map(|(hash, next)| ForkId { hash, next })
-            .boxed()
+        (any::<ForkHash>(), any::<u64>()).prop_map(|(hash, next)| ForkId { hash, next }).boxed()
     }
 }
 
