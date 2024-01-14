@@ -497,8 +497,6 @@ where
                 best_payload: None,
             };
 
-            println!("{:?}", args.config.attributes);
-
             // TODO: create optimism payload job, that wraps this type, that implements PayloadJob
             // with this branch. remove this branch from the non-op code. remove
             // `on_missing_payload` requirement from builder trait
@@ -509,8 +507,6 @@ where
                     KeepPayloadJobAlive::Yes,
                 )
             }
-
-            println!("returning empty payload");
 
             // if no payload has been built yet
             self.metrics.inc_requested_empty_payload();
