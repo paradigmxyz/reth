@@ -34,7 +34,7 @@ impl<T: Hash + Eq> LruCache<T> {
     /// If the set did not have this value present, true is returned.
     /// If the set did have this value present, false is returned.
     pub fn insert(&mut self, entry: T) -> bool {
-        let (new_entry, evicted_val) = self.insert_and_get_evicted(entry);
+        let (new_entry, _evicted_val) = self.insert_and_get_evicted(entry);
         new_entry
     }
 
@@ -59,6 +59,7 @@ impl<T: Hash + Eq> LruCache<T> {
         self.inner.pop_front()
     }
 
+    #[allow(dead_code)]
     /// Expels the given value. Returns true if the value existed.
     pub fn remove(&mut self, value: &T) -> bool {
         self.inner.remove(value)
@@ -80,12 +81,14 @@ impl<T: Hash + Eq> LruCache<T> {
 
     /// Returns number of elements currently in cache.
     #[cfg(test)]
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
     /// Returns `true` if there are currently no elements in the cache.
     #[cfg(test)]
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -133,6 +136,7 @@ where
     K: Hash + PartialEq,
 {
     /// Returns a new cache with default limiter and hash builder.
+    #[allow(dead_code)]
     pub fn new(max_length: u32) -> Self {
         LruMap(schnellru::LruMap::new(ByLength::new(max_length)))
     }
@@ -143,6 +147,7 @@ where
     K: Hash + PartialEq,
 {
     /// Returns a new cache with [`Unlimited`] limiter and default hash builder.
+    #[allow(dead_code)]
     pub fn new_unlimited() -> Self {
         LruMap(schnellru::LruMap::new(Unlimited))
     }
