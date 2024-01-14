@@ -329,7 +329,7 @@ where
                     _ => {}
                 }
             }
-        },
+        }
         Event::Mouse(e) => match e.kind {
             MouseEventKind::ScrollDown => app.next(),
             MouseEventKind::ScrollUp => app.previous(),
