@@ -12,8 +12,6 @@ description = "Ethereum fork types used in reth."
 workspace = true
 
 [dependencies]
-# reth
-reth-codecs.workspace = true
 
 # ethereum
 alloy-chains.workspace = true
@@ -42,4 +40,3 @@ proptest-derive.workspace = true
 
 [features]
 arbitrary = ["dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
-optimism = ["reth-codecs/optimism"]

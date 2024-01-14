@@ -108,7 +108,6 @@ clap = ["dep:clap"]
 optimism = [
     "reth-codecs/optimism",
     "revm-primitives/optimism",
-    "reth-ethereum-forks/optimism",
     "revm/optimism",
 ]
 test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
