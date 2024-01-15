@@ -1465,9 +1465,7 @@ impl TransactionFetcher {
                 }
                 *retries += 1;
             }
-            if let (_, Some(evicted_hash)) =
-                self.buffered_hashes.insert_and_get_evicted(hash)
-            {
+            if let (_, Some(evicted_hash)) = self.buffered_hashes.insert_and_get_evicted(hash) {
                 _ = self.unknown_hashes.remove(&evicted_hash);
                 _ = self.eth68_meta.remove(&evicted_hash);
             }
