@@ -53,6 +53,16 @@ impl HashedStorage {
         }
     }
 
+    /// Insert storage entry.
+    #[inline]
+    pub fn insert_storage(&mut self, slot: B256, value: U256) {
+        if value.is_zero() {
+            self.insert_zero_valued_slot(slot)
+        } else {
+            self.insert_non_zero_valued_storage(slot, value)
+        }
+    }
+    
     /// Insert non zero-valued storage entry.
     #[inline]
     fn insert_non_zero_valued_storage(&mut self, slot: B256, value: U256) {
@@ -65,16 +75,6 @@ impl HashedStorage {
     #[inline]
     fn insert_zero_valued_slot(&mut self, slot: B256) {
         self.zero_valued_slots.insert(slot);
-    }
-
-    /// Insert storage entry.
-    #[inline]
-    pub fn insert_storage(&mut self, slot: B256, value: U256) {
-        if value.is_zero() {
-            self.insert_zero_valued_slot(slot)
-        } else {
-            self.insert_non_zero_valued_storage(slot, value)
-        }
     }
 }
 
