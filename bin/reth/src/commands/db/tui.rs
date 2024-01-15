@@ -409,9 +409,7 @@ where
                         }
                     };
                     maybe_serialized.map(|ser| {
-                        ser.unwrap_or_else(|error| {
-                            format!("Error serializing value: {}", error.to_string())
-                        })
+                        ser.unwrap_or_else(|error| format!("Error serializing value: {error}"))
                     })
                 })
                 .unwrap_or_else(|| "No value selected".to_string()),
