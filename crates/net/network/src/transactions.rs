@@ -1644,6 +1644,8 @@ impl TransactionFetcher {
                         // tx will fit into response, include hash in request
                         acc_size += *size;
                     }
+                } else {
+                    break
                 }
             } else if hashes.len() >= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
                 break
