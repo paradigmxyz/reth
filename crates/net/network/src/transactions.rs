@@ -1645,7 +1645,7 @@ impl TransactionFetcher {
         acc_eth68_size: Option<usize>,
     ) {
         debug_assert!(
-            {
+            acc_eth68_size.is_none() || {
                 let mut acc_size = 0;
                 for &hash in hashes.iter() {
                     _ = self.include_eth68_hash(&mut acc_size, hash);
