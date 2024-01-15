@@ -545,8 +545,15 @@ where
             return
         }
 
-        // get handle to peer's session
-        let Some(peer) = self.peers.get_mut(&peer_id) else { return };
+        // get handle to peer's session, if the session is still active
+        let Some(peer) = self.peers.get_mut(&peer_id) else {
+            debug!(
+                peer_id=abbrev_hex(peer_id.as_ref()),
+                msg=?msg,
+                "discarding announcement from inactive peer"
+            );
+            return
+        };
 
         // message version decides how hashes are packed
         let is_valid_for_version_eth68 = msg.is_valid_for_version(EthVersion::Eth68);
@@ -574,7 +581,9 @@ where
             return
         }
         // filter out already seen unknown hashes, for those hashes add the peer as fallback
-        self.transaction_fetcher.filter_unseen_hashes(&mut hashes, peer_id);
+        let peers = &self.peers;
+        self.transaction_fetcher
+            .filter_unseen_hashes(&mut hashes, peer_id, |peer_id| peers.contains_key(&peer_id));
         if hashes.is_empty() {
             // nothing to request
             return
@@ -618,6 +627,9 @@ where
         );
 
         // request the missing transactions
+        //
+        // get handle to peer's session again, at this point we know it exists
+        let Some(peer) = self.peers.get_mut(&peer_id) else { return };
         let metrics = &self.metrics;
         if let Some(failed_to_request_hashes) =
             self.transaction_fetcher.request_transactions_from_peer(hashes, peer, || {
@@ -1447,17 +1459,32 @@ impl TransactionFetcher {
         self.remove_from_unknown_hashes(hashes)
     }
 
-    fn filter_unseen_hashes(&mut self, new_announced_hashes: &mut Vec<TxHash>, peer_id: PeerId) {
+    fn filter_unseen_hashes(
+        &mut self,
+        new_announced_hashes: &mut Vec<TxHash>,
+        peer_id: PeerId,
+        is_session_active: impl Fn(PeerId) -> bool,
+    ) {
         // 1. filter out inflight hashes, and register the peer as fallback for all inflight hashes
         new_announced_hashes.retain(|hash| {
             // occupied entry
-            if let Some((_retries, backups)) = self.unknown_hashes.peek_mut(hash) {
+            if let Some((_retries, ref mut backups)) = self.unknown_hashes.peek_mut(hash) {
                 // hash has been seen but is not inflight
                 if self.buffered_hashes.remove(hash) {
                     return true
                 }
                 // hash has been seen and is in flight. store peer as fallback peer.
-                // todo: check if session is still active
+                //
+                // remove any ended sessions
+                let mut ended_sessions = vec!();
+                for &peer_id in backups.iter() {
+                    if is_session_active(peer_id) {
+                        ended_sessions.push(peer_id);
+                    }
+                }
+                for peer_id in ended_sessions {
+                    backups.remove(&peer_id);
+                }
                 backups.insert(peer_id);
                 return false
             }
