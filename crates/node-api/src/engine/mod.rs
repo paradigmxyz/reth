@@ -165,13 +165,11 @@ pub trait EngineTypes: Send + Sync {
 
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
     /// and the message version.
-    fn validate_version_specific_fields<Type>(
+    fn validate_version_specific_fields(
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
-        payload_or_attrs: &PayloadOrAttributes<'_, Type>,
-    ) -> Result<(), AttributesValidationError>
-    where
-        Type: PayloadAttributes;
+        payload_or_attrs: PayloadOrAttributes<'_, Self::PayloadAttributes>,
+    ) -> Result<(), AttributesValidationError>;
 }
 
 /// Validates the timestamp depending on the version called:
@@ -344,7 +342,7 @@ pub fn validate_parent_beacon_block_root_presence(
 pub fn validate_version_specific_fields<Type>(
     chain_spec: &ChainSpec,
     version: EngineApiMessageVersion,
-    payload_or_attrs: &PayloadOrAttributes<'_, Type>,
+    payload_or_attrs: PayloadOrAttributes<'_, Type>,
 ) -> Result<(), AttributesValidationError>
 where
     Type: PayloadAttributes,

@@ -102,7 +102,7 @@ where
         EngineT::validate_version_specific_fields(
             &self.inner.chain_spec,
             EngineApiMessageVersion::V1,
-            &payload_or_attrs,
+            payload_or_attrs,
         )?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
@@ -120,7 +120,7 @@ where
         EngineT::validate_version_specific_fields(
             &self.inner.chain_spec,
             EngineApiMessageVersion::V2,
-            &payload_or_attrs,
+            payload_or_attrs,
         )?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
@@ -141,7 +141,7 @@ where
         EngineT::validate_version_specific_fields(
             &self.inner.chain_spec,
             EngineApiMessageVersion::V3,
-            &payload_or_attrs,
+            payload_or_attrs,
         )?;
 
         let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };

@@ -2,7 +2,7 @@
 use reth_node_api::optimism_validate_version_specific_fields;
 use reth_node_api::{
     validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion,
-    EngineTypes, PayloadAttributes, PayloadOrAttributes,
+    EngineTypes, PayloadOrAttributes,
 };
 #[cfg(feature = "optimism")]
 use reth_payload_builder::OptimismPayloadBuilderAttributes;
@@ -22,14 +22,11 @@ impl EngineTypes for EthEngineTypes {
     type PayloadBuilderAttributes = EthPayloadBuilderAttributes;
     type BuiltPayload = EthBuiltPayload;
 
-    fn validate_version_specific_fields<Type>(
+    fn validate_version_specific_fields(
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
-        payload_or_attrs: &PayloadOrAttributes<'_, Type>,
-    ) -> Result<(), AttributesValidationError>
-    where
-        Type: PayloadAttributes,
-    {
+        payload_or_attrs: PayloadOrAttributes<'_, EthPayloadAttributes>,
+    ) -> Result<(), AttributesValidationError> {
         validate_version_specific_fields(chain_spec, version, payload_or_attrs)
     }
 }
@@ -47,14 +44,11 @@ impl EngineTypes for OptimismEngineTypes {
     type PayloadBuilderAttributes = OptimismPayloadBuilderAttributes;
     type BuiltPayload = EthBuiltPayload;
 
-    fn validate_version_specific_fields<Type>(
+    fn validate_version_specific_fields(
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
-        payload_or_attrs: &PayloadOrAttributes<'_, Type>,
-    ) -> Result<(), AttributesValidationError>
-    where
-        Type: PayloadAttributes,
-    {
+        payload_or_attrs: &PayloadOrAttributes<'_, OptimismPayloadAttributes>,
+    ) -> Result<(), AttributesValidationError> {
         optimism_validate_version_specific_fields(chain_spec, version, payload_or_attrs)
     }
 }
