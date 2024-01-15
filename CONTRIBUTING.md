@@ -111,15 +111,19 @@ and use the following VSCode user settings:
 "editor.formatOnSave": true,
 "rust-analyzer.rustfmt.extraArgs": ["+nightly"],
 "rust-analyzer.check.overrideCommand": [
-"cargo",
-"+nightly",
-"clippy",
-"--all",
-"--all-features",
-"--message-format=json"
+  "cargo",
+  "+nightly",
+  "clippy",
+  "--all",
+  "--all-features",
+  "--lib",
+  "--tests",
+  "--benches",
+  "--examples",
+  "--message-format=json"
 ],
 "[rust]": {
-"editor.defaultFormatter": "rust-lang.rust-analyzer"
+  "editor.defaultFormatter": "rust-lang.rust-analyzer"
 }
 ```
 
