@@ -54,6 +54,7 @@ impl HashedStorage {
     }
 
     /// Insert non zero-valued storage entry.
+    #[inline]
     pub fn insert_non_zero_valued_storage(&mut self, slot: B256, value: U256) {
         debug_assert!(value != U256::ZERO, "value cannot be zero");
         self.non_zero_valued_storage.push((slot, value));
@@ -61,8 +62,19 @@ impl HashedStorage {
     }
 
     /// Insert zero-valued storage slot.
+    #[inline]
     pub fn insert_zero_valued_slot(&mut self, slot: B256) {
         self.zero_valued_slots.insert(slot);
+    }
+
+    /// Insert storage entry.
+    #[inline]
+    pub fn insert_storage(&mut self, slot: B256, value: U256) {
+        if value.is_zero() {
+            self.insert_zero_valued_slot(slot)
+        } else {
+            self.insert_non_zero_valued_storage(slot, value)
+        }
     }
 }
 
@@ -916,11 +928,7 @@ mod tests {
         let wiped = false;
         let mut hashed_storage = HashedStorage::new(wiped);
         for (slot, value) in post_state_storage.iter() {
-            if value.is_zero() {
-                hashed_storage.insert_zero_valued_slot(*slot);
-            } else {
-                hashed_storage.insert_non_zero_valued_storage(*slot, *value);
-            }
+            hashed_storage.insert_storage(*slot, *value);
         }
 
         let mut hashed_post_state = HashedPostState::default();
@@ -1030,11 +1038,7 @@ mod tests {
             for (address, (wiped, storage)) in &post_state_storages {
                 let mut hashed_storage = HashedStorage::new(*wiped);
                 for (slot, value) in storage {
-                    if value.is_zero() {
-                        hashed_storage.insert_zero_valued_slot(*slot);
-                    } else {
-                        hashed_storage.insert_non_zero_valued_storage(*slot, *value);
-                    }
+                    hashed_storage.insert_storage(*slot, *value);
                 }
                 hashed_post_state.insert_hashed_storage(*address, hashed_storage);
             }
