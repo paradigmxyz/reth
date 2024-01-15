@@ -57,11 +57,7 @@ impl HashedPostState {
 
             for (key, value) in account.storage.iter() {
                 let hashed_key = keccak256(B256::new(key.to_be_bytes()));
-                if value.present_value.is_zero() {
-                    hashed_storage.insert_zero_valued_slot(hashed_key);
-                } else {
-                    hashed_storage.insert_non_zero_valued_storage(hashed_key, value.present_value);
-                }
+                hashed_storage.insert_storage(hashed_key, value.present_value);
             }
             hashed_state.insert_hashed_storage(hashed_address, hashed_storage)
         }
@@ -258,15 +254,15 @@ impl HashedStorage {
         }
     }
 
-    /// Insert non zero-valued storage entry.
-    pub fn insert_non_zero_valued_storage(&mut self, slot: B256, value: U256) {
-        debug_assert!(value != U256::ZERO, "value cannot be zero");
-        self.non_zero_valued_storage.push((slot, value));
-        self.sorted = false;
-    }
-
-    /// Insert zero-valued storage slot.
-    pub fn insert_zero_valued_slot(&mut self, slot: B256) {
-        self.zero_valued_slots.insert(slot);
+    /// Insert storage entry.
+    #[inline]
+    pub fn insert_storage(&mut self, slot: B256, value: U256) {
+        if value.is_zero() {
+            self.zero_valued_slots.insert(slot);
+        } else {
+            debug_assert!(value != U256::ZERO, "value cannot be zero");
+            self.non_zero_valued_storage.push((slot, value));
+            self.sorted = false;
+        }
     }
 }
