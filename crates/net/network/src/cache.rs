@@ -34,14 +34,21 @@ impl<T: Hash + Eq> LruCache<T> {
     /// If the set did not have this value present, true is returned.
     /// If the set did have this value present, false is returned.
     pub fn insert(&mut self, entry: T) -> bool {
+        let (new_entry, _evicted_val) = self.insert_and_get_evicted(entry);
+        new_entry
+    }
+
+    /// Same as [`Self::insert`] but returns a tuple, where the second index is the evicted value,
+    /// if one was evicted.
+    pub fn insert_and_get_evicted(&mut self, entry: T) -> (bool, Option<T>) {
         if self.inner.insert(entry) {
             if self.limit.get() == self.inner.len() {
                 // remove the oldest element in the set
-                _ = self.remove_lru();
+                return (true, self.remove_lru())
             }
-            return true
+            return (true, None)
         }
-        false
+        (false, None)
     }
 
     /// Same as [`Self::insert`] but returns a tuple, where the second index is the evicted value,
@@ -86,13 +93,13 @@ impl<T: Hash + Eq> LruCache<T> {
     }
 
     /// Returns number of elements currently in cache.
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
     /// Returns `true` if there are currently no elements in the cache.
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
