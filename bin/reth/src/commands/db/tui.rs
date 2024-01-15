@@ -408,10 +408,13 @@ where
                             entries.get(selected).map(|(_, v)| serde_json::to_string_pretty(v))
                         }
                     };
-                    maybe_serialized
-                        .map(|ser| ser.unwrap_or(String::from("Error serializing value")))
+                    maybe_serialized.map(|ser| {
+                        ser.unwrap_or_else(|error| {
+                            format!("Error serializing value: {}", error.to_string())
+                        })
+                    })
                 })
-                .unwrap_or("No value selected".to_string()),
+                .unwrap_or_else(|| "No value selected".to_string()),
         )
         .block(Block::default().borders(Borders::ALL).title("Value (JSON)"))
         .wrap(Wrap { trim: false })
