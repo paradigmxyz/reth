@@ -123,7 +123,7 @@ impl<'a> SnapshotProviderRW<'a> {
     /// goes beyond the start of the current block range.
     ///
     /// **last_block** should be passed only with transaction based segments.
-    /// 
+    ///
     /// # Note
     /// Commits to the configuration file at the end.
     fn truncate(
@@ -234,7 +234,7 @@ impl<'a> SnapshotProviderRW<'a> {
     }
 
     /// Prunes `to_delete` number of transactions from snapshots.
-    /// 
+    ///
     /// # Note
     /// Commits to the configuration file at the end.
     pub fn prune_transactions(
@@ -246,6 +246,12 @@ impl<'a> SnapshotProviderRW<'a> {
         debug_assert!(self.writer.user_header().segment() == segment);
 
         self.truncate(segment, to_delete, Some(last_block))
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    /// Helper function to override block range for testing.
+    pub fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
+        self.writer.user_header_mut().set_block_range(block_range)
     }
 }
 

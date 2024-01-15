@@ -673,9 +673,7 @@ mod tests {
                             tx_count: progress.body.len() as u64,
                         };
 
-                        for _ in 0..progress.number {
-                            snapshotter.increment_block(SnapshotSegment::Transactions)?;
-                        }
+                        snapshotter.set_block_range(0..=progress.number);
 
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx(&mut rng);
