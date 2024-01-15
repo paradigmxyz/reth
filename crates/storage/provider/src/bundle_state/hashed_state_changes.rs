@@ -5,7 +5,7 @@ use reth_db::{
     DatabaseError,
 };
 use reth_primitives::{Account, StorageEntry, B256, U256};
-use reth_trie::hashed_cursor::HashedPostState;
+use reth_trie::HashedPostState;
 use std::collections::BTreeMap;
 
 /// Changes to the hashed state.
@@ -73,7 +73,7 @@ mod tests {
     use super::*;
     use crate::test_utils::create_test_provider_factory;
     use reth_primitives::{keccak256, Address};
-    use reth_trie::hashed_cursor::HashedStorage;
+    use reth_trie::HashedStorage;
 
     #[test]
     fn wiped_entries_are_removed() {
