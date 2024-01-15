@@ -148,6 +148,15 @@ impl SnapshotProvider {
         Ok(None)
     }
 
+    /// Given a segment and block range it removes the cached provider from the map.
+    pub fn remove_cached_provider(
+        &self,
+        segment: SnapshotSegment,
+        fixed_block_range_end: BlockNumber,
+    ) {
+        self.map.remove(&(fixed_block_range_end, segment));
+    }
+
     /// Given a segment and block range it returns a cached
     /// [`SnapshotJarProvider`]. TODO(joshie): we should check the size and pop N if there's too
     /// many.

@@ -77,6 +77,12 @@ impl<'a> SnapshotProviderRW<'a> {
         // TODO(joshie): update the index without re-iterating all snapshots
         self.reader.update_index()?;
 
+        // Reader needs to reload the static file again to have the new changes.
+        self.reader.remove_cached_provider(
+            self.writer.user_header().segment(),
+            *find_fixed_range(BLOCKS_PER_SNAPSHOT, self.writer.user_header().block_start()).end(),
+        );
+
         Ok(())
     }
 
@@ -91,7 +97,7 @@ impl<'a> SnapshotProviderRW<'a> {
         // We have finished the previous snapshot and must freeze it
         if last_block + 1 > writer_range_end {
             // Commits offsets and new user_header to disk
-            self.writer.commit()?;
+            self.commit()?;
 
             // Opens the new snapshot
             let (writer, data_path) = Self::open(segment, last_block + 1, self.reader.clone())?;
@@ -144,8 +150,9 @@ impl<'a> SnapshotProviderRW<'a> {
                 // If there's more rows to delete than this snapshot contains, then just
                 // delete the whole file and go to the next snapshot
                 let previous_snap = self.data_path.clone();
+                let block_start = self.writer.user_header().block_start();
 
-                if self.writer.user_header().block_start() != 0 {
+                if block_start != 0 {
                     let (writer, data_path) = Self::open(
                         segment,
                         self.writer.user_header().block_start() - 1,
@@ -156,6 +163,10 @@ impl<'a> SnapshotProviderRW<'a> {
                 }
 
                 NippyJar::<SegmentHeader>::load(&previous_snap)?.delete()?;
+                self.reader.remove_cached_provider(
+                    segment,
+                    *find_fixed_range(BLOCKS_PER_SNAPSHOT, block_start).end(),
+                );
 
                 num_rows -= len;
             } else {
@@ -175,7 +186,7 @@ impl<'a> SnapshotProviderRW<'a> {
         }
 
         // Commits new changes to disk.
-        self.writer.commit()?;
+        self.commit()?;
 
         Ok(())
     }
