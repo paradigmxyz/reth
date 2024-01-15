@@ -319,9 +319,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         snapshotter
             .prune_transactions(snapshot_tx_num.saturating_sub(db_tx_num), input.unwind_to)?;
 
-        // Committing static file.
-        snapshotter.commit()?;
-
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(input.unwind_to)
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
@@ -532,7 +529,6 @@ mod tests {
             let mut snapshotter =
                 snapshot_provider.latest_writer(SnapshotSegment::Transactions).unwrap();
             snapshotter.prune_transactions(1, checkpoint.block_number).unwrap();
-            snapshotter.commit().unwrap();
         }
         // Unwind all of it
         let unwind_to = 1;

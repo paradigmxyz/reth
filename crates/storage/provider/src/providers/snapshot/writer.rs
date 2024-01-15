@@ -123,6 +123,9 @@ impl<'a> SnapshotProviderRW<'a> {
     /// goes beyond the start of the current block range.
     ///
     /// **last_block** should be passed only with transaction based segments.
+    /// 
+    /// # Note
+    /// Commits to the configuration file at the end.
     fn truncate(
         &mut self,
         segment: SnapshotSegment,
@@ -231,6 +234,9 @@ impl<'a> SnapshotProviderRW<'a> {
     }
 
     /// Prunes `to_delete` number of transactions from snapshots.
+    /// 
+    /// # Note
+    /// Commits to the configuration file at the end.
     pub fn prune_transactions(
         &mut self,
         to_delete: u64,
