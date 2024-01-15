@@ -6,10 +6,11 @@ use crate::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
-    Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
-    HeaderSyncMode, HistoryWriter, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, StageCheckpointReader, StorageReader, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
+    Chain, ConsensusNumberReader, ConsensusNumberWriter, EvmEnvProvider, HashingWriter,
+    HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode, HistoryWriter,
+    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter,
+    StageCheckpointReader, StorageReader, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt, WithdrawalsProvider,
 };
 use ahash::{AHashMap, AHashSet};
 use itertools::{izip, Itertools};
@@ -1169,7 +1170,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
                         .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
                     let sealed = header.seal(hash);
                     if !predicate(&sealed) {
-                        break
+                        break;
                     }
                     headers.push(sealed);
                 }
@@ -1584,7 +1585,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                             .map(Into::into)
                             .collect(),
                     ))
-                }
+                };
             }
         }
         Ok(None)
@@ -1662,7 +1663,7 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
                     Ok(Some(Vec::new()))
                 } else {
                     self.receipts_by_tx_range(tx_range).map(Some)
-                }
+                };
             }
         }
         Ok(None)
@@ -2160,8 +2161,8 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
                 StorageShardedKey::last(address, storage_key),
                 rem_index,
                 |storage_sharded_key| {
-                    storage_sharded_key.address == address &&
-                        storage_sharded_key.sharded_key.key == storage_key
+                    storage_sharded_key.address == address
+                        && storage_sharded_key.sharded_key.key == storage_key
                 },
             )?;
 
@@ -2513,6 +2514,23 @@ impl<TX: DbTxMut> PruneCheckpointWriter for DatabaseProvider<TX> {
         checkpoint: PruneCheckpoint,
     ) -> ProviderResult<()> {
         Ok(self.tx.put::<tables::PruneCheckpoints>(segment, checkpoint)?)
+    }
+}
+
+impl<TX: DbTx> ConsensusNumberReader for DatabaseProvider<TX> {
+    fn last_consensus_number(&self) -> ProviderResult<BlockNumber> {
+        Ok(self.tx.cursor_read::<tables::ConsensusNumber>()?.last()?.unwrap_or_default().1)
+    }
+
+    fn consensus_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
+        Ok(self.tx.get::<tables::ConsensusNumber>(hash)?)
+    }
+}
+
+impl<TX: DbTxMut> ConsensusNumberWriter for DatabaseProvider<TX> {
+    /// Save stage checkpoint.
+    fn save_consensus_number(&self, hash: B256, num: BlockNumber) -> ProviderResult<()> {
+        Ok(self.tx.put::<tables::ConsensusNumber>(hash, num)?)
     }
 }
 
