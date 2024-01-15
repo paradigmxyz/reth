@@ -74,8 +74,10 @@ impl<'a> SnapshotProviderRW<'a> {
         // Commits offsets and new user_header to disk
         self.writer.commit()?;
 
-        // TODO(joshie): update the index without re-iterating all snapshots
-        self.reader.update_index()?;
+        self.reader.update_index(
+            self.writer.user_header().segment(),
+            Some(self.writer.user_header().block_end()),
+        )?;
 
         Ok(())
     }
@@ -91,7 +93,7 @@ impl<'a> SnapshotProviderRW<'a> {
         // We have finished the previous snapshot and must freeze it
         if last_block + 1 > writer_range_end {
             // Commits offsets and new user_header to disk
-            self.writer.commit()?;
+            self.commit()?;
 
             // Opens the new snapshot
             let (writer, data_path) = Self::open(segment, last_block + 1, self.reader.clone())?;
@@ -119,12 +121,13 @@ impl<'a> SnapshotProviderRW<'a> {
         Ok(self.writer.user_header().block_end())
     }
 
-    /// Truncates a number of rows from disk. It delets and loads an older snapshot file if block
+    /// Truncates a number of rows from disk. It deletes and loads an older snapshot file if block
     /// goes beyond the start of the current block range.
     ///
     /// **last_block** should be passed only with transaction based segments.
     ///
-    /// ATTENTION: It **requires** `self.commit` to be called manually
+    /// # Note
+    /// Commits to the configuration file at the end.
     fn truncate(
         &mut self,
         segment: SnapshotSegment,
@@ -143,8 +146,9 @@ impl<'a> SnapshotProviderRW<'a> {
                 // If there's more rows to delete than this snapshot contains, then just
                 // delete the whole file and go to the next snapshot
                 let previous_snap = self.data_path.clone();
+                let block_start = self.writer.user_header().block_start();
 
-                if self.writer.user_header().block_start() != 0 {
+                if block_start != 0 {
                     let (writer, data_path) = Self::open(
                         segment,
                         self.writer.user_header().block_start() - 1,
@@ -172,6 +176,9 @@ impl<'a> SnapshotProviderRW<'a> {
                 num_rows = 0;
             }
         }
+
+        // Commits new changes to disk.
+        self.commit()?;
 
         Ok(())
     }
@@ -230,6 +237,9 @@ impl<'a> SnapshotProviderRW<'a> {
     }
 
     /// Prunes `to_delete` number of transactions from snapshots.
+    ///
+    /// # Note
+    /// Commits to the configuration file at the end.
     pub fn prune_transactions(
         &mut self,
         to_delete: u64,
@@ -239,6 +249,12 @@ impl<'a> SnapshotProviderRW<'a> {
         debug_assert!(self.writer.user_header().segment() == segment);
 
         self.truncate(segment, to_delete, Some(last_block))
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    /// Helper function to override block range for testing.
+    pub fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
+        self.writer.user_header_mut().set_block_range(block_range)
     }
 }
 

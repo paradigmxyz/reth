@@ -101,14 +101,13 @@ impl SnapshotSegment {
     /// ranges.
     ///
     /// The filename is expected to follow the format:
-    /// "snapshot_{segment}_{block_start}_{block_end}_{tx_start}_{tx_end}". This function checks
+    /// "snapshot_{segment}_{block_start}_{block_end}". This function checks
     /// for the correct prefix ("snapshot"), and then parses the segment and the inclusive
-    /// ranges for blocks and transactions. It ensures that the start of each range is less than the
+    /// ranges for blocks. It ensures that the start of each range is less than the
     /// end.
     ///
     /// # Returns
-    /// - `Some((segment, block_range, tx_range))` if parsing is successful and all conditions are
-    ///   met.
+    /// - `Some((segment, block_range))` if parsing is successful and all conditions are met.
     /// - `None` if any condition fails, such as an incorrect prefix, parsing error, or invalid
     ///   range.
     ///
@@ -178,17 +177,29 @@ impl SegmentHeader {
         *self.block_range.end()
     }
 
-    /// Returns the first transaction number of the segment.
+    /// Returns the first transaction number of the segment.  
+    ///  
+    /// ### Panics
+    ///
+    /// This method panics if `self.tx_range` is `None`.
     pub fn tx_start(&self) -> TxNumber {
         *self.tx_range.as_ref().expect("should exist").start()
     }
 
-    /// Returns the last transaction number of the segment.
+    /// Returns the last transaction number of the segment.   
+    ///
+    /// ### Panics
+    ///
+    /// This method panics if `self.tx_range` is `None`.
     pub fn tx_end(&self) -> TxNumber {
         *self.tx_range.as_ref().expect("should exist").end()
     }
 
-    /// Number of transactions.
+    /// Number of transactions.  
+    ///
+    /// ### Panics
+    ///
+    /// This method panics if `self.tx_range` is `None`.
     pub fn tx_len(&self) -> u64 {
         self.tx_range.as_ref().expect("should exist").end() + 1 -
             self.tx_range.as_ref().expect("should exist").start()
@@ -219,7 +230,7 @@ impl SegmentHeader {
         }
     }
 
-    /// Removes `num` elements from end of tx range.
+    /// Removes `num` elements from end of tx or block range.
     pub fn prune(&mut self, num: u64) {
         match self.segment {
             SnapshotSegment::Headers => {

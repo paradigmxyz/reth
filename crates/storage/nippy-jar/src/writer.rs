@@ -12,27 +12,27 @@ const OFFSET_SIZE_BYTES: u64 = 8;
 
 /// Holds a reference or an owned [`NippyJar`].
 #[derive(Debug)]
-enum JarHolder<'a, H: NippyJarHeader = ()> {
+enum CowJar<'a, H: NippyJarHeader = ()> {
     MutRef(&'a mut NippyJar<H>),
     Owned(Box<NippyJar<H>>),
 }
 
-impl<'a, H: NippyJarHeader> Deref for JarHolder<'a, H> {
+impl<'a, H: NippyJarHeader> Deref for CowJar<'a, H> {
     type Target = NippyJar<H>;
 
     fn deref(&self) -> &Self::Target {
         match self {
-            JarHolder::MutRef(jar) => jar,
-            JarHolder::Owned(jar) => jar,
+            CowJar::MutRef(jar) => jar,
+            CowJar::Owned(jar) => jar,
         }
     }
 }
 
-impl<'a, H: NippyJarHeader> DerefMut for JarHolder<'a, H> {
+impl<'a, H: NippyJarHeader> DerefMut for CowJar<'a, H> {
     fn deref_mut(&mut self) -> &mut NippyJar<H> {
         match self {
-            JarHolder::MutRef(jar) => jar,
-            JarHolder::Owned(jar) => jar,
+            CowJar::MutRef(jar) => jar,
+            CowJar::Owned(jar) => jar,
         }
     }
 }
@@ -54,7 +54,7 @@ impl<'a, H: NippyJarHeader> DerefMut for JarHolder<'a, H> {
 pub struct NippyJarWriter<'a, H: NippyJarHeader = ()> {
     /// Reference to the associated [`NippyJar`], containing all necessary configurations for data
     /// handling.
-    jar: JarHolder<'a, H>,
+    jar: CowJar<'a, H>,
     /// File handle to where the data is stored.
     data_file: File,
     /// File handle to where the offsets are stored.
@@ -73,13 +73,13 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
     /// Creates a [`NippyJarWriter`] from mutable refence of [`NippyJar`]. It also does consistency
     /// checks and self heals.
     pub fn from_mut(jar: &'a mut NippyJar<H>) -> Result<Self, NippyJarError> {
-        Self::new(JarHolder::MutRef(jar))
+        Self::new(CowJar::MutRef(jar))
     }
 
     /// Creates a [`NippyJarWriter`] from an owned [`NippyJar`]. It also does consistency checks and
     /// self heals.
     pub fn from_owned(jar: NippyJar<H>) -> Result<Self, NippyJarError> {
-        Self::new(JarHolder::Owned(Box::new(jar)))
+        Self::new(CowJar::Owned(Box::new(jar)))
     }
 
     /// Returns a reference to `H` of [`NippyJar`]
@@ -93,7 +93,7 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
     }
 
     /// Creates a [`NippyJarWriter`] from [`JarHolder`].
-    fn new(mut jar: JarHolder<'a, H>) -> Result<Self, NippyJarError> {
+    fn new(mut jar: CowJar<'a, H>) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
 

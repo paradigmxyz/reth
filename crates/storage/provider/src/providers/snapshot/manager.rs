@@ -14,7 +14,7 @@ use reth_db::{
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::{find_fixed_range, HighestSnapshots},
+    snapshot::{find_fixed_range, HighestSnapshots, SegmentHeader},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo, Header,
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
@@ -61,7 +61,7 @@ impl SnapshotProvider {
             load_filters: false,
         };
 
-        provider.update_index()?;
+        provider.initialize_index()?;
         Ok(provider)
     }
 
@@ -135,6 +135,15 @@ impl SnapshotProvider {
         Ok(None)
     }
 
+    /// Given a segment and block range it removes the cached provider from the map.
+    pub fn remove_cached_provider(
+        &self,
+        segment: SnapshotSegment,
+        fixed_block_range_end: BlockNumber,
+    ) {
+        self.map.remove(&(fixed_block_range_end, segment));
+    }
+
     /// Given a segment and block range it returns a cached
     /// [`SnapshotJarProvider`]. TODO(joshie): we should check the size and pop N if there's too
     /// many.
@@ -203,12 +212,62 @@ impl SnapshotProvider {
         None
     }
 
-    /// Updates the inner transaction and block index
-    pub fn update_index(&self) -> ProviderResult<()> {
+    /// Updates the inner transaction and block index alongside the internal `self.map`.
+    ///
+    /// Any entry higher than `segment_max_block` will be deleted from the previous structures.
+    pub fn update_index(
+        &self,
+        segment: SnapshotSegment,
+        segment_max_block: Option<BlockNumber>,
+    ) -> ProviderResult<()> {
         let mut max_block = self.snapshots_max_block.write();
         let mut tx_index = self.snapshots_tx_index.write();
 
-        // Makes sure unwinds are properly taken care of
+        match segment_max_block {
+            Some(segment_max_block) => {
+                // Update the max block for the segment
+                max_block.insert(segment, segment_max_block);
+                let fixed_range = find_fixed_range(BLOCKS_PER_SNAPSHOT, segment_max_block);
+
+                let jar = NippyJar::<SegmentHeader>::load(
+                    &self.path.join(segment.filename(&fixed_range)),
+                )?;
+
+                // Updates the tx index by first removing all entries which have a higher
+                // block_start than our current static file.
+                if let Some(tx_range) = jar.user_header().tx_range() {
+                    let tx_end = *tx_range.end();
+                    let block_range = jar.user_header().block_range().clone();
+
+                    tx_index
+                        .entry(segment)
+                        .and_modify(|index| {
+                            index.retain(|_, range| range.start() < fixed_range.start());
+                            index.insert(tx_end, block_range.clone());
+                        })
+                        .or_insert_with(|| BTreeMap::from([(tx_end, block_range)]));
+                }
+
+                // Update the cached provider.
+                self.map.insert((*fixed_range.end(), segment), LoadedJar::new(jar)?);
+
+                // Delete any cached provider that no longer has an associated jar.
+                self.map.retain(|(end, seg), _| !(*seg == segment && *end > *fixed_range.end()));
+            }
+            None => {
+                tx_index.remove(&segment);
+                max_block.remove(&segment);
+            }
+        };
+
+        Ok(())
+    }
+
+    /// Initializes the inner transaction and block index
+    pub fn initialize_index(&self) -> ProviderResult<()> {
+        let mut max_block = self.snapshots_max_block.write();
+        let mut tx_index = self.snapshots_tx_index.write();
+
         tx_index.clear();
 
         for (segment, ranges) in iter_snapshots(&self.path)? {
