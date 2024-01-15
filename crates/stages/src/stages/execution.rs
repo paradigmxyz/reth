@@ -135,11 +135,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let mut fetch_block_duration = Duration::default();
         let mut execution_duration = Duration::default();
         debug!(target: "sync::stages::execution", start = start_block, end = max_block, "Executing range");
-        // Execute block range
 
+        // Execute block range
+        let range_size = (start_block..=max_block).count();
         let mut cumulative_gas = 0;
 
-        for block_number in start_block..=max_block {
+        for (i, block_number) in (start_block..=max_block).enumerate() {
             let time = Instant::now();
             let td = provider
                 .header_td_by_number(block_number)?
@@ -184,6 +185,18 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 cumulative_gas,
             ) {
                 break
+            }
+
+            // Log the execution progress every 1% of block range
+            let blocks_per_percent = range_size / 100;
+            if blocks_per_percent > 0 && i % blocks_per_percent == 0 {
+                debug!(
+                    target: "sync::stages::execution",
+                    ?block_number,
+                    percentage = %format!("{:.2}%", 100.0 * i as f64 / range_size as f64),
+                    range = ?start_block..=max_block,
+                    "Execution progress"
+                );
             }
         }
         let time = Instant::now();
