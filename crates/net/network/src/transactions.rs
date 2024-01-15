@@ -1297,7 +1297,7 @@ impl TransactionFetcher {
             "broken invariant `active_peers` and `inflight_requests`"
         );
 
-        let mut remove = || -> bool {
+        let remove = || -> bool {
             if let Some(inflight_count) = self.active_peers.get(peer_id) {
                 if *inflight_count <= 1 {
                     return true
@@ -1305,8 +1305,9 @@ impl TransactionFetcher {
                 *inflight_count -= 1;
             }
             false
-        };
-        if remove() {
+        }();
+
+        if remove {
             self.active_peers.remove(peer_id);
         }
     }
