@@ -703,28 +703,6 @@ where
         }
     }
 
-    /// Returns any idle peer for the given hash. Writes peer IDs of any ended sessions to buffer
-    /// passed as parameter.
-    fn get_idle_peer_for(
-        &self,
-        hash: TxHash,
-        ended_sessions_buf: &mut Vec<PeerId>,
-    ) -> Option<PeerId> {
-        let (_, peers) = self.transaction_fetcher.unknown_hashes.peek(&hash)?;
-
-        for &peer_id in peers.iter() {
-            if self.transaction_fetcher.is_idle(peer_id) {
-                if self.peers.contains_key(&peer_id) {
-                    return Some(peer_id)
-                } else {
-                    ended_sessions_buf.push(peer_id);
-                }
-            }
-        }
-
-        None
-    }
-
     /// Returns any idle peer for any buffered unknown hash, and writes that hash to the request's
     /// hashes buffer that is passed as parameter.
     ///
@@ -733,11 +711,15 @@ where
     fn pop_any_idle_peer(&mut self, hashes: &mut Vec<TxHash>) -> Option<PeerId> {
         let mut ended_sessions = vec![];
         let mut buffered_hashes_iter = self.transaction_fetcher.buffered_hashes.iter();
+        let peers = &self.peers;
 
         let idle_peer = loop {
             let Some(&hash) = buffered_hashes_iter.next() else { break None };
 
-            let idle_peer = self.get_idle_peer_for(hash, &mut ended_sessions);
+            let idle_peer =
+                self.transaction_fetcher.get_idle_peer_for(hash, &mut ended_sessions, |peer_id| {
+                    peers.contains_key(&peer_id)
+                });
             for peer_id in ended_sessions.drain(..) {
                 let (_, peers) = self.transaction_fetcher.unknown_hashes.peek_mut(&hash)?;
                 _ = peers.remove(&peer_id);
@@ -1336,6 +1318,29 @@ impl TransactionFetcher {
             return true
         }
         false
+    }
+
+    /// Returns any idle peer for the given hash. Writes peer IDs of any ended sessions to buffer
+    /// passed as parameter.
+    fn get_idle_peer_for(
+        &self,
+        hash: TxHash,
+        ended_sessions_buf: &mut Vec<PeerId>,
+        is_session_active: impl Fn(PeerId) -> bool,
+    ) -> Option<PeerId> {
+        let (_, peers) = self.unknown_hashes.peek(&hash)?;
+
+        for &peer_id in peers.iter() {
+            if self.is_idle(peer_id) {
+                if is_session_active(peer_id) {
+                    return Some(peer_id)
+                } else {
+                    ended_sessions_buf.push(peer_id);
+                }
+            }
+        }
+
+        None
     }
 
     /// Packages hashes for [`GetPooledTxRequest`] up to limit. Returns left over hashes.
