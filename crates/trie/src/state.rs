@@ -5,11 +5,19 @@ use crate::{
     StateRoot, StateRootError,
 };
 use ahash::{AHashMap, AHashSet};
-use reth_db::transaction::DbTx;
+use reth_db::{
+    cursor::DbCursorRO,
+    models::{AccountBeforeTx, BlockNumberAddress},
+    tables,
+    transaction::DbTx,
+    DatabaseError,
+};
 use reth_primitives::{
-    keccak256, revm::compat::into_reth_acc, trie::Nibbles, Account, Address, B256, U256,
+    keccak256, revm::compat::into_reth_acc, trie::Nibbles, Account, Address, BlockNumber, B256,
+    U256,
 };
 use revm::db::BundleAccount;
+use std::{collections::HashMap, ops::RangeInclusive};
 
 /// The post state with hashed addresses as keys.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -42,26 +50,74 @@ impl HashedPostState {
     pub fn from_bundle_state<'a>(
         state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
-        let mut hashed_state = Self::default();
+        let mut this = Self::default();
 
         for (address, account) in state {
             let hashed_address = keccak256(address);
-            if let Some(account) = &account.info {
-                hashed_state.insert_account(hashed_address, into_reth_acc(account.clone()))
-            } else {
-                hashed_state.insert_destroyed_account(hashed_address);
-            }
+            this.insert_account(hashed_address, account.info.clone().map(into_reth_acc));
 
             // insert storage.
             let mut hashed_storage = HashedStorage::new(account.status.was_destroyed());
 
             for (key, value) in account.storage.iter() {
                 let hashed_key = keccak256(B256::new(key.to_be_bytes()));
-                hashed_storage.insert_storage(hashed_key, value.present_value);
+                hashed_storage.insert_slot(hashed_key, value.present_value);
             }
-            hashed_state.insert_hashed_storage(hashed_address, hashed_storage)
+            this.insert_hashed_storage(hashed_address, hashed_storage)
         }
-        hashed_state.sorted()
+        this.sorted()
+    }
+
+    /// Initialize [HashedPostState] from revert range.
+    /// Iterate over state reverts in the specified block range and
+    /// apply them to hashed state in reverse.
+    ///
+    /// NOTE: In order to have the resulting [HashedPostState] be a correct
+    /// overlay of the plain state, the end of the range must be the current tip.
+    pub fn from_revert_range<TX: DbTx>(
+        tx: TX,
+        range: RangeInclusive<BlockNumber>,
+    ) -> Result<Self, DatabaseError> {
+        let mut state =
+            HashMap::<Address, (Option<Option<Account>>, HashMap<B256, U256>)>::default();
+
+        // Iterate over account changesets in reverse.
+        let account_changesets = tx
+            .cursor_read::<tables::AccountChangeSet>()?
+            .walk_range(range.clone())?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (_, account_before) in account_changesets.into_iter().rev() {
+            let AccountBeforeTx { address, info } = account_before;
+            state.entry(address).or_default().0 = Some(info);
+        }
+
+        // Iterate over storage changesets in reverse.
+        let storage_range = BlockNumberAddress::range(range);
+        let storage_changesets = tx
+            .cursor_read::<tables::StorageChangeSet>()?
+            .walk_range(storage_range)?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (block_number_and_address, storage) in storage_changesets.into_iter().rev() {
+            let BlockNumberAddress((_, address)) = block_number_and_address;
+            state.entry(address).or_default().1.insert(storage.key, storage.value);
+        }
+
+        let mut this = Self::default();
+        for (address, (maybe_account_change, storage)) in state {
+            let hashed_address = keccak256(&address);
+
+            if let Some(account_change) = maybe_account_change {
+                this.insert_account(hashed_address, account_change);
+            }
+
+            let mut hashed_storage = HashedStorage::new(false);
+            for (slot, value) in storage {
+                hashed_storage.insert_slot(keccak256(slot), value);
+            }
+            this.insert_hashed_storage(hashed_address, hashed_storage);
+        }
+
+        Ok(this.sorted())
     }
 
     /// Sort and return self.
@@ -94,15 +150,14 @@ impl HashedPostState {
         }
     }
 
-    /// Insert non-empty account info.
-    pub fn insert_account(&mut self, hashed_address: B256, account: Account) {
-        self.accounts.push((hashed_address, account));
-        self.sorted = false;
-    }
-
-    /// Insert destroyed hashed account key.
-    pub fn insert_destroyed_account(&mut self, hashed_address: B256) {
-        self.destroyed_accounts.insert(hashed_address);
+    /// Insert account.
+    pub fn insert_account(&mut self, hashed_address: B256, account: Option<Account>) {
+        if let Some(account) = account {
+            self.accounts.push((hashed_address, account));
+            self.sorted = false;
+        } else {
+            self.destroyed_accounts.insert(hashed_address);
+        }
     }
 
     /// Insert hashed storage entry.
@@ -183,7 +238,7 @@ impl HashedPostState {
     /// let mut hashed_state = HashedPostState::default();
     /// hashed_state.insert_account(
     ///     [0x11; 32].into(),
-    ///     Account { nonce: 1, balance: U256::from(10), bytecode_hash: None },
+    ///     Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
     /// );
     /// hashed_state.sort();
     ///
@@ -256,7 +311,7 @@ impl HashedStorage {
 
     /// Insert storage entry.
     #[inline]
-    pub fn insert_storage(&mut self, slot: B256, value: U256) {
+    pub fn insert_slot(&mut self, slot: B256, value: U256) {
         if value.is_zero() {
             self.zero_valued_slots.insert(slot);
         } else {
