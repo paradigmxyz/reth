@@ -556,7 +556,6 @@ where
         };
 
         // message version decides how hashes are packed
-        let is_valid_for_version_eth68 = msg.is_valid_for_version(EthVersion::Eth68);
         // if this is a eth68 message, store eth68 tx metadata
         if let Some(eth68_msg) = msg.as_eth68() {
             for (&hash, (_type, size)) in eth68_msg.metadata_iter() {
@@ -609,9 +608,7 @@ where
         }
         // demand recommended soft limit on response, however the peer may enforce an arbitrary
         // limit on the response (2MB)
-        if let Some(surplus_hashes) =
-            self.transaction_fetcher.pack_hashes(&mut hashes, peer_id, is_valid_for_version_eth68)
-        {
+        if let Some(surplus_hashes) = self.transaction_fetcher.pack_hashes(&mut hashes, peer_id) {
             trace!(target: "net::tx",
                 peer_id=abbrev_hex(peer_id.as_ref()),
                 surplus_hashes=abbrev_hex_hash_list(&surplus_hashes),
@@ -1334,13 +1331,10 @@ impl TransactionFetcher {
     }
 
     /// Packages hashes for [`GetPooledTxRequest`] up to limit. Returns left over hashes.
-    fn pack_hashes(
-        &mut self,
-        hashes: &mut Vec<TxHash>,
-        peer_id: PeerId,
-        is_valid_for_version_eth68: bool,
-    ) -> Option<Vec<TxHash>> {
-        if is_valid_for_version_eth68 {
+    fn pack_hashes(&mut self, hashes: &mut Vec<TxHash>, peer_id: PeerId) -> Option<Vec<TxHash>> {
+        debug_assert!(!hashes.is_empty(), "`pack_hashes` called with empty request hash buffer");
+
+        if self.eth68_meta.get(&hashes[0]).is_some() {
             return self.pack_hashes_eth68(hashes, peer_id)
         }
         self.pack_hashes_eth66(hashes, peer_id).map(|left_over| left_over.collect())
@@ -1383,7 +1377,7 @@ impl TransactionFetcher {
                 return Ok(true)
             }
         }
-        return Ok(false)
+        Ok(false)
     }
 
     /// Packages hashes for [`GetPooledTxRequest`] up to limit as defined by protocol version 68.
