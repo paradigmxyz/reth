@@ -199,12 +199,10 @@ impl NewPooledTransactionHashes {
 
     /// Returns an iterator over tx hashes zipped with corresponding eth68 metadata if this is
     /// an eth68 message.
-    pub fn eth68_metadata_iter(&self) -> Option<impl Iterator<Item = (&B256, (u8, usize))>> {
+    pub fn as_eth68(&self) -> Option<&NewPooledTransactionHashes68> {
         match self {
             NewPooledTransactionHashes::Eth66(_) => None,
-            NewPooledTransactionHashes::Eth68(msg) => Some(
-                msg.hashes.iter().zip(msg.types.iter().copied().zip(msg.sizes.iter().copied())),
-            ),
+            NewPooledTransactionHashes::Eth68(msg) => Some(msg),
         }
     }
 }
@@ -282,6 +280,13 @@ pub struct NewPooledTransactionHashes68 {
     pub sizes: Vec<usize>,
     /// Transaction hashes for new transactions that have appeared on the network.
     pub hashes: Vec<B256>,
+}
+
+impl NewPooledTransactionHashes68 {
+    /// Returns an iterator over tx hashes zipped with corresponding metadata.
+    pub fn metadata_iter(&self) -> impl Iterator<Item = (&B256, (u8, usize))> {
+        self.hashes.iter().zip(self.types.iter().copied().zip(self.sizes.iter().copied()))
+    }
 }
 
 impl Encodable for NewPooledTransactionHashes68 {

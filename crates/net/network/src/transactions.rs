@@ -558,8 +558,8 @@ where
         // message version decides how hashes are packed
         let is_valid_for_version_eth68 = msg.is_valid_for_version(EthVersion::Eth68);
         // if this is a eth68 message, store eth68 tx metadata
-        if let Some(eth68_metadata_iter) = msg.eth68_metadata_iter() {
-            for (&hash, (_type, size)) in eth68_metadata_iter {
+        if let Some(eth68_msg) = msg.as_eth68() {
+            for (&hash, (_type, size)) in eth68_msg.metadata_iter() {
                 self.transaction_fetcher.eth68_meta.insert(hash, size);
             }
         }
