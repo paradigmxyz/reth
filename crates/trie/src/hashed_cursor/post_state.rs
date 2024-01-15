@@ -55,7 +55,7 @@ impl HashedStorage {
 
     /// Insert non zero-valued storage entry.
     #[inline]
-    pub fn insert_non_zero_valued_storage(&mut self, slot: B256, value: U256) {
+    fn insert_non_zero_valued_storage(&mut self, slot: B256, value: U256) {
         debug_assert!(value != U256::ZERO, "value cannot be zero");
         self.non_zero_valued_storage.push((slot, value));
         self.sorted = false;
@@ -63,7 +63,7 @@ impl HashedStorage {
 
     /// Insert zero-valued storage slot.
     #[inline]
-    pub fn insert_zero_valued_slot(&mut self, slot: B256) {
+    fn insert_zero_valued_slot(&mut self, slot: B256) {
         self.zero_valued_slots.insert(slot);
     }
 
@@ -841,7 +841,7 @@ mod tests {
         {
             let wiped = true;
             let mut hashed_storage = HashedStorage::new(wiped);
-            hashed_storage.insert_zero_valued_slot(B256::random());
+            hashed_storage.insert_storage(B256::random(), B256::ZERO);
 
             let mut hashed_post_state = HashedPostState::default();
             hashed_post_state.insert_hashed_storage(address, hashed_storage);
@@ -856,7 +856,7 @@ mod tests {
         {
             let wiped = true;
             let mut hashed_storage = HashedStorage::new(wiped);
-            hashed_storage.insert_non_zero_valued_storage(B256::random(), U256::from(1));
+            hashed_storage.insert_storage(B256::random(), U256::from(1));
 
             let mut hashed_post_state = HashedPostState::default();
             hashed_post_state.insert_hashed_storage(address, hashed_storage);
@@ -892,7 +892,7 @@ mod tests {
         let wiped = false;
         let mut hashed_storage = HashedStorage::new(wiped);
         for (slot, value) in post_state_storage.iter() {
-            hashed_storage.insert_non_zero_valued_storage(*slot, *value);
+            hashed_storage.insert_storage(*slot, *value);
         }
 
         let mut hashed_post_state = HashedPostState::default();
@@ -1001,7 +1001,7 @@ mod tests {
         let wiped = false;
         let mut hashed_storage = HashedStorage::new(wiped);
         for (slot, value) in storage.iter() {
-            hashed_storage.insert_non_zero_valued_storage(*slot, *value);
+            hashed_storage.insert_storage(*slot, *value);
         }
 
         let mut hashed_post_state = HashedPostState::default();
