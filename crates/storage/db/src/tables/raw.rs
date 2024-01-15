@@ -104,6 +104,7 @@ impl<K: Key> Decode for RawKey<K> {
 pub struct RawValue<V: Value> {
     /// Inner compressed value
     value: Vec<u8>,
+    #[serde(skip)]
     _phantom: std::marker::PhantomData<V>,
 }
 
