@@ -119,12 +119,10 @@ impl<'a> SnapshotProviderRW<'a> {
         Ok(self.writer.user_header().block_end())
     }
 
-    /// Truncates a number of rows from disk. It delets and loads an older snapshot file if block
+    /// Truncates a number of rows from disk. It deletes and loads an older snapshot file if block
     /// goes beyond the start of the current block range.
     ///
     /// **last_block** should be passed only with transaction based segments.
-    ///
-    /// ATTENTION: It **requires** `self.commit` to be called manually
     fn truncate(
         &mut self,
         segment: SnapshotSegment,
@@ -172,6 +170,9 @@ impl<'a> SnapshotProviderRW<'a> {
                 num_rows = 0;
             }
         }
+
+        // Commits new changes to disk.
+        self.writer.commit()?;
 
         Ok(())
     }
