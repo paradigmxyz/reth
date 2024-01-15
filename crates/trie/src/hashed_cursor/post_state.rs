@@ -841,7 +841,7 @@ mod tests {
         {
             let wiped = true;
             let mut hashed_storage = HashedStorage::new(wiped);
-            hashed_storage.insert_storage(B256::random(), B256::ZERO);
+            hashed_storage.insert_storage(B256::random(), U256::ZERO);
 
             let mut hashed_post_state = HashedPostState::default();
             hashed_post_state.insert_hashed_storage(address, hashed_storage);
