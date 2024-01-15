@@ -87,7 +87,6 @@ exclude = [".github/"]
 # Like release, but with full debug symbols. Useful for e.g. `perf`.
 [profile.debug-fast]
 inherits = "release"
-opt-level = 0
 debug = true
 
 # Meant for testing - all optimizations, but with debug assertions and overflow checks.
