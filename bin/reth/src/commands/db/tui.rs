@@ -396,32 +396,23 @@ where
             .start_corner(Corner::TopLeft);
         f.render_stateful_widget(key_list, inner_chunks[0], &mut app.list_state);
 
-        let values: Vec<_> = match &app.entries {
-            Entries::RawValues(entries) => entries
-                .iter()
-                .map(|(_, v)| {
-                    serde_json::to_string_pretty(v)
-                        .unwrap_or(String::from("Error serializing value"))
-                })
-                .collect(),
-            Entries::Values(entries) => entries
-                .iter()
-                .map(|(_, v)| {
-                    serde_json::to_string_pretty(v)
-                        .unwrap_or(String::from("Error serializing value"))
-                })
-                .collect(),
-        };
-
         let value_display = Paragraph::new(
             app.list_state
                 .selected()
-                .and_then(|selected| values.get(selected))
-                .map(|entry| {
-                    serde_json::to_string_pretty(entry)
-                        .unwrap_or(String::from("Error serializing value"))
+                .and_then(|selected| {
+                    let maybe_serialized = match &app.entries {
+                        Entries::RawValues(entries) => {
+                            entries.get(selected).map(|(_, v)| serde_json::to_string(v.raw_value()))
+                        }
+                        Entries::Values(entries) => {
+                            entries.get(selected).map(|(_, v)| serde_json::to_string_pretty(v))
+                        }
+                    };
+                    maybe_serialized.map(|ser| {
+                        ser.unwrap_or_else(|error| format!("Error serializing value: {error}"))
+                    })
                 })
-                .unwrap_or("No value selected".to_string()),
+                .unwrap_or_else(|| "No value selected".to_string()),
         )
         .block(Block::default().borders(Borders::ALL).title("Value (JSON)"))
         .wrap(Wrap { trim: false })
