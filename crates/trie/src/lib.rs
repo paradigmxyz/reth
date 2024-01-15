@@ -32,6 +32,10 @@ pub use errors::*;
 // The iterators for traversing existing intermediate hashes and updated trie leaves.
 pub(crate) mod node_iter;
 
+/// In-memory hashed state.
+mod state;
+pub use state::{HashedPostState, HashedStorage};
+
 /// Merkle proof generation.
 pub mod proof;
 

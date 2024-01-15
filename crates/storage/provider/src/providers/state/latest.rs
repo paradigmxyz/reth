@@ -60,7 +60,10 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
 
 impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
     fn state_root(&self, bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
-        bundle_state.state_root_slow(self.db).map_err(|err| ProviderError::Database(err.into()))
+        bundle_state
+            .hash_state_slow()
+            .state_root(self.db)
+            .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn state_root_with_updates(
@@ -68,7 +71,8 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
         bundle_state: &BundleStateWithReceipts,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         bundle_state
-            .state_root_slow_with_updates(self.db)
+            .hash_state_slow()
+            .state_root_with_updates(self.db)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }

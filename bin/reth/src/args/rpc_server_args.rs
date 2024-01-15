@@ -242,7 +242,7 @@ impl RpcServerArgs {
         let module_config = self.transport_rpc_module_config();
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
-        let (mut modules, auth_module, mut registry) = RpcModuleBuilder::default()
+        let (mut modules, mut auth_module, mut registry) = RpcModuleBuilder::default()
             .with_provider(components.provider())
             .with_pool(components.pool())
             .with_network(components.network())
@@ -250,7 +250,11 @@ impl RpcServerArgs {
             .with_executor(components.task_executor())
             .build_with_auth_server(module_config, engine_api);
 
-        let rpc_components = RethRpcComponents { registry: &mut registry, modules: &mut modules };
+        let rpc_components = RethRpcComponents {
+            registry: &mut registry,
+            modules: &mut modules,
+            auth_module: &mut auth_module,
+        };
         // apply configured customization
         conf.extend_rpc_modules(self, components, rpc_components)?;
 
@@ -268,7 +272,7 @@ impl RpcServerArgs {
             handle
         });
 
-        let launch_auth = auth_module.start_server(auth_config).map_ok(|handle| {
+        let launch_auth = auth_module.clone().start_server(auth_config).map_ok(|handle| {
             let addr = handle.local_addr();
             info!(target: "reth::cli", url=%addr, "RPC auth server started");
             handle
@@ -279,7 +283,11 @@ impl RpcServerArgs {
         let handles = RethRpcServerHandles { rpc, auth };
 
         // call hook
-        let rpc_components = RethRpcComponents { registry: &mut registry, modules: &mut modules };
+        let rpc_components = RethRpcComponents {
+            registry: &mut registry,
+            modules: &mut modules,
+            auth_module: &mut auth_module,
+        };
         conf.on_rpc_server_started(self, components, rpc_components, handles.clone())?;
 
         Ok(handles)

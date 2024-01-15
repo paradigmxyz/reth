@@ -18,7 +18,7 @@
 //! # use reth_rpc_types::engine::{PayloadAttributes as EthPayloadAttributes, PayloadId, Withdrawal};
 //! # use reth_primitives::{B256, ChainSpec, Address};
 //! # use reth_node_api::{EngineTypes, EngineApiMessageVersion, validate_version_specific_fields, AttributesValidationError, PayloadAttributes, PayloadBuilderAttributes};
-//! # use reth_payload_builder::EthPayloadBuilderAttributes;
+//! # use reth_payload_builder::{EthPayloadBuilderAttributes, EthBuiltPayload};
 //! # use serde::{Deserialize, Serialize};
 //! # use thiserror::Error;
 //! # use std::convert::Infallible;
@@ -121,6 +121,7 @@
 //! impl EngineTypes for CustomEngineTypes {
 //!    type PayloadAttributes = CustomPayloadAttributes;
 //!    type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
+//!    type BuiltPayload = EthBuiltPayload;
 //! }
 //! ```
 
@@ -129,7 +130,7 @@ use reth_primitives::{ChainSpec, Hardfork};
 /// Contains traits to abstract over payload attributes types and default implementations of the
 /// [PayloadAttributes] trait for ethereum mainnet and optimism types.
 pub mod traits;
-pub use traits::{PayloadAttributes, PayloadBuilderAttributes};
+pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
 
 /// Contains error types used in the traits defined in this crate.
 pub mod error;
@@ -149,7 +150,8 @@ pub trait EngineTypes: Send + Sync {
         + Clone
         + Unpin;
 
-    // TODO: payload type
+    /// The built payload type.
+    type BuiltPayload: BuiltPayload + Clone + Unpin;
 }
 
 /// Validates the timestamp depending on the version called:

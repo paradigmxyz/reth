@@ -240,7 +240,6 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types",
  "itertools 0.12.0",
- "jsonrpsee-types",
  "serde",
  "serde_json",
  "thiserror",
@@ -6122,7 +6121,6 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
- "reth-codecs",
  "serde",
  "thiserror",
 ]
@@ -6862,6 +6860,7 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
+ "revm",
  "serde_json",
  "thiserror",
  "tokio",

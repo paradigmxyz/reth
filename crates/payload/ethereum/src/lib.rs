@@ -17,7 +17,7 @@ mod builder {
         BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
     };
     use reth_payload_builder::{
-        error::PayloadBuilderError, BuiltPayload, EthPayloadBuilderAttributes,
+        error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
     };
     use reth_primitives::{
         constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
@@ -48,11 +48,12 @@ mod builder {
         Pool: TransactionPool,
     {
         type Attributes = EthPayloadBuilderAttributes;
+        type BuiltPayload = EthBuiltPayload;
 
         fn try_build(
             &self,
-            args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes>,
-        ) -> Result<BuildOutcome, PayloadBuilderError> {
+            args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
+        ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
             default_ethereum_payload_builder(args)
         }
     }
@@ -64,8 +65,8 @@ mod builder {
     /// a result indicating success with the payload or an error in case of failure.
     #[inline]
     pub fn default_ethereum_payload_builder<Pool, Client>(
-        args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes>,
-    ) -> Result<BuildOutcome, PayloadBuilderError>
+        args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
+    ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
     where
         Client: StateProviderFactory,
         Pool: TransactionPool,
@@ -218,7 +219,7 @@ mod builder {
         }
 
         // check if we have a better block
-        if !is_better_payload(best_payload.as_deref(), total_fees) {
+        if !is_better_payload(best_payload.as_ref(), total_fees) {
             // can skip building the block
             return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
         }
@@ -298,7 +299,7 @@ mod builder {
         let sealed_block = block.seal_slow();
         debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
-        let mut payload = BuiltPayload::new(attributes.id, sealed_block, total_fees);
+        let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees);
 
         // extend the payload with the blob sidecars from the executed txs
         payload.extend_sidecars(blob_sidecars);

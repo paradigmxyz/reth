@@ -51,19 +51,6 @@ impl<T: Hash + Eq> LruCache<T> {
         (false, None)
     }
 
-    /// Same as [`Self::insert`] but returns a tuple, where the second index is the evicted value,
-    /// if one was evicted.
-    pub fn insert_with_eviction_feedback(&mut self, entry: T) -> (bool, Option<T>) {
-        if self.inner.insert(entry) {
-            if self.limit.get() == self.inner.len() {
-                // remove the oldest element in the set
-                return (true, self.remove_lru())
-            }
-            return (true, None)
-        }
-        (false, None)
-    }
-
     /// Remove the least recently used entry and return it.
     ///
     /// If the `LruCache` is empty or if the eviction feedback is
