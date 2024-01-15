@@ -27,7 +27,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo clippy --bin "${{ matrix.binary }}" --workspace --features arbitrary,test-utils,"${{ matrix.network }}" --lib --tests --benches --examples
+      - run: cargo clippy --bin "${{ matrix.binary }}" --workspace --features "arbitrary,test-utils,${{ matrix.network }}" --lib --tests --benches --examples
         env:
           RUSTFLAGS: -D warnings
 
