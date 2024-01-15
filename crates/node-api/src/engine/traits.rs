@@ -180,7 +180,7 @@ impl PayloadAttributes for EthPayloadAttributes {
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
     ) -> Result<(), AttributesValidationError> {
-        validate_version_specific_fields(chain_spec, version, &self.into())
+        validate_version_specific_fields(chain_spec, version, self.into())
     }
 }
 
@@ -202,7 +202,7 @@ impl PayloadAttributes for OptimismPayloadAttributes {
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
     ) -> Result<(), AttributesValidationError> {
-        validate_version_specific_fields(chain_spec, version, &self.into())?;
+        validate_version_specific_fields(chain_spec, version, self.into())?;
 
         if self.gas_limit.is_none() && chain_spec.is_optimism() {
             return Err(AttributesValidationError::InvalidParams(
