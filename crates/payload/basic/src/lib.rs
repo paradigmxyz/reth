@@ -12,9 +12,9 @@ use alloy_rlp::Encodable;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_interfaces::RethResult;
-use reth_node_api::PayloadBuilderAttributes;
+use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
 use reth_payload_builder::{
-    database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
+    database::CachedReads, error::PayloadBuilderError, EthBuiltPayload, KeepPayloadJobAlive,
     PayloadId, PayloadJob, PayloadJobGenerator,
 };
 use reth_primitives::{
@@ -154,6 +154,7 @@ where
     Tasks: TaskSpawner + Clone + Unpin + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
     <Builder as PayloadBuilder<Pool, Client>>::Attributes: Unpin + Clone,
+    <Builder as PayloadBuilder<Pool, Client>>::BuiltPayload: Unpin + Clone,
 {
     type Job = BasicPayloadJob<Client, Pool, Tasks, Builder>;
 
@@ -343,9 +344,9 @@ where
     /// The interval at which the job should build a new payload after the last.
     interval: Interval,
     /// The best payload so far.
-    best_payload: Option<Arc<BuiltPayload>>,
+    best_payload: Option<Builder::BuiltPayload>,
     /// Receiver for the block that is currently being built.
-    pending_block: Option<PendingPayload>,
+    pending_block: Option<PendingPayload<Builder::BuiltPayload>>,
     /// Restricts how many generator tasks can be executed at once.
     payload_task_guard: PayloadTaskGuard,
     /// Caches all disk reads for the state the new payloads builds on
@@ -368,6 +369,7 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
     <Builder as PayloadBuilder<Pool, Client>>::Attributes: Unpin + Clone,
+    <Builder as PayloadBuilder<Pool, Client>>::BuiltPayload: Unpin + Clone,
 {
     type Output = Result<(), PayloadBuilderError>;
 
@@ -424,7 +426,7 @@ where
                         BuildOutcome::Better { payload, cached_reads } => {
                             this.cached_reads = Some(cached_reads);
                             debug!(target: "payload_builder", value = %payload.fees(), "built better payload");
-                            let payload = Arc::new(payload);
+                            let payload = payload;
                             this.best_payload = Some(payload);
                         }
                         BuildOutcome::Aborted { fees, cached_reads } => {
@@ -457,12 +459,14 @@ where
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
-    <Builder as PayloadBuilder<Pool, Client>>::Attributes: PayloadBuilderAttributes + Unpin + Clone,
+    <Builder as PayloadBuilder<Pool, Client>>::Attributes: Unpin + Clone,
+    <Builder as PayloadBuilder<Pool, Client>>::BuiltPayload: Unpin + Clone,
 {
     type PayloadAttributes = Builder::Attributes;
-    type ResolvePayloadFuture = ResolveBestPayload;
+    type ResolvePayloadFuture = ResolveBestPayload<Self::BuiltPayload>;
+    type BuiltPayload = Builder::BuiltPayload;
 
-    fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
+    fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         if let Some(ref payload) = self.best_payload {
             return Ok(payload.clone())
         }
@@ -473,7 +477,7 @@ where
         // away and the first full block should have been built by the time CL is requesting the
         // payload.
         self.metrics.inc_requested_empty_payload();
-        build_empty_payload(&self.client, self.config.clone()).map(Arc::new)
+        build_empty_payload(&self.client, self.config.clone())
     }
 
     fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError> {
@@ -538,17 +542,20 @@ where
 /// If no payload has been built so far, it will either return an empty payload or the result of the
 /// in progress build job, whatever finishes first.
 #[derive(Debug)]
-pub struct ResolveBestPayload {
+pub struct ResolveBestPayload<Payload> {
     /// Best payload so far.
-    best_payload: Option<Arc<BuiltPayload>>,
+    best_payload: Option<Payload>,
     /// Regular payload job that's currently running that might produce a better payload.
-    maybe_better: Option<PendingPayload>,
+    maybe_better: Option<PendingPayload<Payload>>,
     /// The empty payload building job in progress.
-    empty_payload: Option<oneshot::Receiver<Result<BuiltPayload, PayloadBuilderError>>>,
+    empty_payload: Option<oneshot::Receiver<Result<Payload, PayloadBuilderError>>>,
 }
 
-impl Future for ResolveBestPayload {
-    type Output = Result<Arc<BuiltPayload>, PayloadBuilderError>;
+impl<Payload> Future for ResolveBestPayload<Payload>
+where
+    Payload: Unpin,
+{
+    type Output = Result<Payload, PayloadBuilderError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -559,7 +566,7 @@ impl Future for ResolveBestPayload {
                 this.maybe_better = None;
                 if let Ok(BuildOutcome::Better { payload, .. }) = res {
                     debug!(target: "payload_builder", "resolving better payload");
-                    return Poll::Ready(Ok(Arc::new(payload)))
+                    return Poll::Ready(Ok(payload))
                 }
             }
         }
@@ -577,7 +584,7 @@ impl Future for ResolveBestPayload {
                 } else {
                     debug!(target: "payload_builder", "resolving empty payload");
                 }
-                Poll::Ready(res.map(Arc::new))
+                Poll::Ready(res)
             }
             Poll::Ready(Err(err)) => Poll::Ready(Err(err.into())),
             Poll::Pending => {
@@ -590,15 +597,15 @@ impl Future for ResolveBestPayload {
 
 /// A future that resolves to the result of the block building job.
 #[derive(Debug)]
-struct PendingPayload {
+struct PendingPayload<P> {
     /// The marker to cancel the job on drop
     _cancel: Cancelled,
     /// The channel to send the result to.
-    payload: oneshot::Receiver<Result<BuildOutcome, PayloadBuilderError>>,
+    payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
 }
 
-impl Future for PendingPayload {
-    type Output = Result<BuildOutcome, PayloadBuilderError>;
+impl<P> Future for PendingPayload<P> {
+    type Output = Result<BuildOutcome<P>, PayloadBuilderError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let res = ready!(self.payload.poll_unpin(cx));
@@ -684,11 +691,11 @@ where
 
 /// The possible outcomes of a payload building attempt.
 #[derive(Debug)]
-pub enum BuildOutcome {
+pub enum BuildOutcome<Payload> {
     /// Successfully built a better block.
     Better {
         /// The new payload that was built.
-        payload: BuiltPayload,
+        payload: Payload,
         /// The cached reads that were used to build the payload.
         cached_reads: CachedReads,
     },
@@ -709,7 +716,7 @@ pub enum BuildOutcome {
 /// building process. It holds references to the Ethereum client, transaction pool, cached reads,
 /// payload configuration, cancellation status, and the best payload achieved so far.
 #[derive(Debug)]
-pub struct BuildArguments<Pool, Client, Attributes> {
+pub struct BuildArguments<Pool, Client, Attributes, Payload> {
     /// How to interact with the chain.
     pub client: Client,
     /// The transaction pool.
@@ -721,10 +728,10 @@ pub struct BuildArguments<Pool, Client, Attributes> {
     /// A marker that can be used to cancel the job.
     pub cancel: Cancelled,
     /// The best payload achieved so far.
-    pub best_payload: Option<Arc<BuiltPayload>>,
+    pub best_payload: Option<Payload>,
 }
 
-impl<Pool, Client, Attributes> BuildArguments<Pool, Client, Attributes> {
+impl<Pool, Client, Attributes, Payload> BuildArguments<Pool, Client, Attributes, Payload> {
     /// Create new build arguments.
     pub fn new(
         client: Client,
@@ -732,7 +739,7 @@ impl<Pool, Client, Attributes> BuildArguments<Pool, Client, Attributes> {
         cached_reads: CachedReads,
         config: PayloadConfig<Attributes>,
         cancel: Cancelled,
-        best_payload: Option<Arc<BuiltPayload>>,
+        best_payload: Option<Payload>,
     ) -> Self {
         Self { client, pool, cached_reads, config, cancel, best_payload }
     }
@@ -748,7 +755,9 @@ impl<Pool, Client, Attributes> BuildArguments<Pool, Client, Attributes> {
 /// Ethereum client types.
 pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
     /// The payload attributes type to accept for building.
-    type Attributes: PayloadBuilderAttributes + Send + Sync + std::fmt::Debug;
+    type Attributes: PayloadBuilderAttributes;
+    /// The type of the built payload.
+    type BuiltPayload: BuiltPayload;
 
     /// Tries to build a transaction payload using provided arguments.
     ///
@@ -764,8 +773,8 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
     /// A `Result` indicating the build outcome or an error.
     fn try_build(
         &self,
-        args: BuildArguments<Pool, Client, Self::Attributes>,
-    ) -> Result<BuildOutcome, PayloadBuilderError>;
+        args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
+    ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError>;
 
     /// Invoked when the payload job is being resolved and there is no payload yet.
     ///
@@ -774,21 +783,22 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
     /// TODO(mattsse): This needs to be refined a bit because this only exists for OP atm
     fn on_missing_payload(
         &self,
-        args: BuildArguments<Pool, Client, Self::Attributes>,
-    ) -> Option<Arc<BuiltPayload>> {
+        args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
+    ) -> Option<Self::BuiltPayload> {
         let _args = args;
         None
     }
 }
 
 /// Builds an empty payload without any transactions.
-fn build_empty_payload<Client, Attributes>(
+fn build_empty_payload<Client, Attributes, Payload>(
     client: &Client,
     config: PayloadConfig<Attributes>,
-) -> Result<BuiltPayload, PayloadBuilderError>
+) -> Result<Payload, PayloadBuilderError>
 where
     Client: StateProviderFactory,
     Attributes: PayloadBuilderAttributes,
+    Payload: BuiltPayload,
 {
     let extra_data = config.extra_data();
     let PayloadConfig {
@@ -872,7 +882,7 @@ where
     let block = Block { header, body: vec![], ommers: vec![], withdrawals };
     let sealed_block = block.seal_slow();
 
-    Ok(BuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO))
+    Ok(Payload::new(attributes.payload_id(), sealed_block, U256::ZERO))
 }
 
 /// Represents the outcome of committing withdrawals to the runtime database and post state.
@@ -978,7 +988,7 @@ where
 ///
 /// This compares the total fees of the blocks, higher is better.
 #[inline(always)]
-pub fn is_better_payload(best_payload: Option<&BuiltPayload>, new_fees: U256) -> bool {
+pub fn is_better_payload(best_payload: Option<&EthBuiltPayload>, new_fees: U256) -> bool {
     if let Some(best_payload) = best_payload {
         new_fees > best_payload.fees()
     } else {
