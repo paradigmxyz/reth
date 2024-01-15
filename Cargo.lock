@@ -6858,6 +6858,7 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
+ "revm",
  "serde_json",
  "thiserror",
  "tokio",

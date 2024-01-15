@@ -45,9 +45,7 @@ use reth_primitives::{
     StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
 };
-use reth_trie::{
-    hashed_cursor::HashedPostState, prefix_set::PrefixSetMut, updates::TrieUpdates, StateRoot,
-};
+use reth_trie::{prefix_set::PrefixSetMut, updates::TrieUpdates, HashedPostState, StateRoot};
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
 use std::{
     collections::{hash_map, BTreeMap, BTreeSet, HashMap},
