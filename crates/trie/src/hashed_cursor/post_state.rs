@@ -659,7 +659,7 @@ mod tests {
         {
             let wiped = true;
             let mut hashed_storage = HashedStorage::new(wiped);
-            hashed_storage.insert_zero_valued_slot(B256::random());
+            hashed_storage.insert_storage(B256::random(), U256::ZERO);
 
             let mut hashed_post_state = HashedPostState::default();
             hashed_post_state.insert_hashed_storage(address, hashed_storage);
@@ -674,7 +674,7 @@ mod tests {
         {
             let wiped = true;
             let mut hashed_storage = HashedStorage::new(wiped);
-            hashed_storage.insert_non_zero_valued_storage(B256::random(), U256::from(1));
+            hashed_storage.insert_storage(B256::random(), U256::from(1));
 
             let mut hashed_post_state = HashedPostState::default();
             hashed_post_state.insert_hashed_storage(address, hashed_storage);
@@ -710,7 +710,7 @@ mod tests {
         let wiped = false;
         let mut hashed_storage = HashedStorage::new(wiped);
         for (slot, value) in post_state_storage.iter() {
-            hashed_storage.insert_non_zero_valued_storage(*slot, *value);
+            hashed_storage.insert_storage(*slot, *value);
         }
 
         let mut hashed_post_state = HashedPostState::default();
@@ -746,11 +746,7 @@ mod tests {
         let wiped = false;
         let mut hashed_storage = HashedStorage::new(wiped);
         for (slot, value) in post_state_storage.iter() {
-            if value.is_zero() {
-                hashed_storage.insert_zero_valued_slot(*slot);
-            } else {
-                hashed_storage.insert_non_zero_valued_storage(*slot, *value);
-            }
+            hashed_storage.insert_storage(*slot, *value);
         }
 
         let mut hashed_post_state = HashedPostState::default();
@@ -788,7 +784,7 @@ mod tests {
         let wiped = true;
         let mut hashed_storage = HashedStorage::new(wiped);
         for (slot, value) in post_state_storage.iter() {
-            hashed_storage.insert_non_zero_valued_storage(*slot, *value);
+            hashed_storage.insert_storage(*slot, *value);
         }
 
         let mut hashed_post_state = HashedPostState::default();
@@ -823,7 +819,7 @@ mod tests {
         let wiped = false;
         let mut hashed_storage = HashedStorage::new(wiped);
         for (slot, value) in storage.iter() {
-            hashed_storage.insert_non_zero_valued_storage(*slot, *value);
+            hashed_storage.insert_storage(*slot, *value);
         }
 
         let mut hashed_post_state = HashedPostState::default();
@@ -860,11 +856,7 @@ mod tests {
             for (address, (wiped, storage)) in &post_state_storages {
                 let mut hashed_storage = HashedStorage::new(*wiped);
                 for (slot, value) in storage {
-                    if value.is_zero() {
-                        hashed_storage.insert_zero_valued_slot(*slot);
-                    } else {
-                        hashed_storage.insert_non_zero_valued_storage(*slot, *value);
-                    }
+                    hashed_storage.insert_storage(*slot, *value);
                 }
                 hashed_post_state.insert_hashed_storage(*address, hashed_storage);
             }
