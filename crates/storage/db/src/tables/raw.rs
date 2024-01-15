@@ -52,7 +52,7 @@ pub struct RawKey<K: Key> {
 impl<K: Key> RawKey<K> {
     /// Create new raw key.
     pub fn new(key: K) -> Self {
-        Self { key: K::encode(key).as_ref().to_vec(), _phantom: std::marker::PhantomData }
+        Self { key: K::encode(key).into(), _phantom: std::marker::PhantomData }
     }
 
     /// Returns the decoded value.
@@ -111,7 +111,7 @@ pub struct RawValue<V: Value> {
 impl<V: Value> RawValue<V> {
     /// Create new raw value.
     pub fn new(value: V) -> Self {
-        Self { value: V::compress(value).as_ref().to_vec(), _phantom: std::marker::PhantomData }
+        Self { value: V::compress(value).into(), _phantom: std::marker::PhantomData }
     }
 
     /// Returns the decompressed value.
