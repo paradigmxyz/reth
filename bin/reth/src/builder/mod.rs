@@ -1194,20 +1194,14 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         let initial_target = self.config.initial_pipeline_target(genesis_hash);
         let mut hooks = EngineHooks::new();
 
-        let pruner_events = if let Some(prune_config) = prune_config {
-            let mut pruner = PrunerBuilder::new(prune_config.clone())
-                .max_reorg_depth(tree_config.max_reorg_depth() as usize)
-                .prune_delete_limit(self.config.chain.prune_delete_limit)
-                .build(provider_factory.clone());
+        let mut pruner = PrunerBuilder::new(prune_config.clone().unwrap_or_default())
+            .max_reorg_depth(tree_config.max_reorg_depth() as usize)
+            .prune_delete_limit(self.config.chain.prune_delete_limit)
+            .build(provider_factory.clone());
 
-            let events = pruner.events();
-            hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));
-
-            info!(target: "reth::cli", ?prune_config, "Pruner initialized");
-            Either::Left(events)
-        } else {
-            Either::Right(stream::empty())
-        };
+        let pruner_events = pruner.events();
+        hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));
+        info!(target: "reth::cli", ?prune_config, "Pruner initialized");
 
         let snapshotter = reth_snapshot::Snapshotter::new(
             provider_factory.clone(),
@@ -1216,6 +1210,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
                 .expect("snapshot provider initialized via provider factory"),
         );
         hooks.add(SnapshotHook::new(snapshotter, Box::new(executor.clone())));
+        info!(target: "reth::cli", "Snapshotter initialized");
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(

@@ -114,7 +114,10 @@ impl<DB: Database> Snapshotter<DB> {
         // TODO(alexey): snapshot headers and receipts
 
         snapshot_provider.commit()?;
-        snapshot_provider.update_index()?;
+        if let Some(block_range) = targets.transactions.clone() {
+            snapshot_provider
+                .update_index(SnapshotSegment::Transactions, Some(*block_range.end()))?;
+        }
 
         Ok(targets)
     }
