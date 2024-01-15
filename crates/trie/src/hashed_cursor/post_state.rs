@@ -62,7 +62,7 @@ impl HashedStorage {
             self.insert_non_zero_valued_storage(slot, value)
         }
     }
-    
+
     /// Insert non zero-valued storage entry.
     #[inline]
     fn insert_non_zero_valued_storage(&mut self, slot: B256, value: U256) {
