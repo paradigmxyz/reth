@@ -8,8 +8,8 @@ use reth_provider::{
     providers::{SnapshotProvider, SnapshotWriter},
     BlockReader, ProviderFactory,
 };
-use std::{ops::RangeInclusive, sync::Arc};
-use tracing::trace;
+use std::{ops::RangeInclusive, sync::Arc, time::Instant};
+use tracing::{debug, trace};
 
 /// Result of [Snapshotter::run] execution.
 pub type SnapshotterResult = Result<SnapshotTargets, SnapshotterError>;
@@ -82,18 +82,23 @@ impl<DB: Database> Snapshotter<DB> {
             targets.is_contiguous_to_highest_snapshots(snapshot_provider.get_highest_snapshots())
         );
 
+        debug!(target: "snapshot", ?targets, "Snapshotter started");
+        let start = Instant::now();
+
         if let Some(block_range) = targets.transactions.clone() {
-            trace!(target: "snapshot", ?block_range, "Snapshotting transactions");
+            debug!(target: "snapshot", ?block_range, "Snapshotting transactions");
+            let start = Instant::now();
+
             let mut snapshot_writer =
                 snapshot_provider.writer(*block_range.start(), SnapshotSegment::Transactions)?;
 
-            for block in block_range {
+            for block in block_range.clone() {
                 // Create a new database transaction on every block to prevent long-lived read-only
                 // transactions
                 let provider = self.provider_factory.provider()?;
 
                 let Some(block_body_indices) = provider.block_body_indices(block)? else {
-                    // TODO(alexey): return an error?
+                    // TODO(alexey): this shouldn't be possible, return a fatal error?
                     continue
                 };
 
@@ -109,6 +114,9 @@ impl<DB: Database> Snapshotter<DB> {
                 }
                 snapshot_writer.increment_block(SnapshotSegment::Transactions)?;
             }
+
+            let elapsed = start.elapsed(); // TODO(alexey): track in metrics
+            debug!(target: "snapshot", ?block_range, ?elapsed, "Finished snapshotting transactions");
         }
 
         // TODO(alexey): snapshot headers and receipts
@@ -118,6 +126,9 @@ impl<DB: Database> Snapshotter<DB> {
             snapshot_provider
                 .update_index(SnapshotSegment::Transactions, Some(*block_range.end()))?;
         }
+
+        let elapsed = start.elapsed(); // TODO(alexey): track in metrics
+        debug!(target: "snapshot", ?targets, ?elapsed, "Snapshotter finished");
 
         Ok(targets)
     }
@@ -130,13 +141,23 @@ impl<DB: Database> Snapshotter<DB> {
         finalized_block_number: BlockNumber,
     ) -> RethResult<SnapshotTargets> {
         let highest_snapshots = self.snapshot_provider.get_highest_snapshots();
-
-        Ok(SnapshotTargets {
+        let targets = SnapshotTargets {
             headers: self.get_snapshot_target(highest_snapshots.headers, finalized_block_number),
             receipts: self.get_snapshot_target(highest_snapshots.receipts, finalized_block_number),
             transactions: self
                 .get_snapshot_target(highest_snapshots.transactions, finalized_block_number),
-        })
+        };
+
+        trace!(
+            target: "snapshot",
+            %finalized_block_number,
+            ?highest_snapshots,
+            ?targets,
+            any = %targets.any(),
+            "Snapshot targets"
+        );
+
+        Ok(targets)
     }
 
     fn get_snapshot_target(
