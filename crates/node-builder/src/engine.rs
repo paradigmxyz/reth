@@ -47,7 +47,7 @@ impl EngineTypes for OptimismEngineTypes {
     fn validate_version_specific_fields(
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
-        payload_or_attrs: &PayloadOrAttributes<'_, OptimismPayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<'_, OptimismPayloadAttributes>,
     ) -> Result<(), AttributesValidationError> {
         optimism_validate_version_specific_fields(chain_spec, version, payload_or_attrs)
     }

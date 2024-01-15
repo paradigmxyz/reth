@@ -367,7 +367,7 @@ where
 pub fn optimism_validate_version_specific_fields<Type>(
     chain_spec: &ChainSpec,
     version: EngineApiMessageVersion,
-    payload_or_attrs: &PayloadOrAttributes<'_, Type>,
+    payload_or_attrs: PayloadOrAttributes<'_, Type>,
 ) -> Result<(), AttributesValidationError>
 where
     Type: PayloadAttributes,
