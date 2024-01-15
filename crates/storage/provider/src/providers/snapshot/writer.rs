@@ -74,14 +74,10 @@ impl<'a> SnapshotProviderRW<'a> {
         // Commits offsets and new user_header to disk
         self.writer.commit()?;
 
-        // TODO(joshie): update the index without re-iterating all snapshots
-        self.reader.update_index()?;
-
-        // Reader needs to reload the static file again to have the new changes.
-        self.reader.remove_cached_provider(
+        self.reader.update_index(
             self.writer.user_header().segment(),
-            *find_fixed_range(BLOCKS_PER_SNAPSHOT, self.writer.user_header().block_start()).end(),
-        );
+            Some(self.writer.user_header().block_end()),
+        )?;
 
         Ok(())
     }
@@ -163,10 +159,6 @@ impl<'a> SnapshotProviderRW<'a> {
                 }
 
                 NippyJar::<SegmentHeader>::load(&previous_snap)?.delete()?;
-                self.reader.remove_cached_provider(
-                    segment,
-                    *find_fixed_range(BLOCKS_PER_SNAPSHOT, block_start).end(),
-                );
 
                 num_rows -= len;
             } else {
