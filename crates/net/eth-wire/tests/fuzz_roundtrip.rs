@@ -130,7 +130,7 @@ pub mod fuzz_rlp {
         RlpEncodableWrapper,
         RlpDecodableWrapper,
     )]
-    struct GetBlockHeadersWrapper(pub GetBlockHeaders);
+    struct GetBlockHeadersWrapper(GetBlockHeaders);
 
     impl Default for GetBlockHeadersWrapper {
         fn default() -> Self {
