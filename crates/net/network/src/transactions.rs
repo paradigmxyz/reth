@@ -649,7 +649,12 @@ where
         }
     }
 
-    // Requests buffered hashes for which an idle peer exists.
+    /// Tries to request hashes in buffer.
+    ///
+    /// If any idle fallback peer exists for any hash in the buffer, that hash is taken out of the
+    /// buffer and put into a request to that peer. Before sending, the request is filled with
+    /// additional hashes out of the buffer, for which the peer is listed as fallback, as long as
+    /// space remains in the respective transactions response.
     fn request_buffered_hashes(&mut self) {
         loop {
             let mut hashes = vec![];
@@ -720,8 +725,11 @@ where
         None
     }
 
-    /// Returns any idle peer for any buffered unknown hash, and writes that hash to the request
-    /// buffer passed as parameter.
+    /// Returns any idle peer for any buffered unknown hash, and writes that hash to the request's
+    /// hashes buffer that is passed as parameter.
+    ///
+    /// Loops through the fallback peers of each buffered hashes, until an idle fallback peer is
+    /// found. As a side effect, dead fallback peers are filtered out for visited hashes.
     fn pop_any_idle_peer(&mut self, hashes: &mut Vec<TxHash>) -> Option<PeerId> {
         let mut ended_sessions = vec![];
         let mut buffered_hashes_iter = self.transaction_fetcher.buffered_hashes.iter();
@@ -1341,6 +1349,8 @@ impl TransactionFetcher {
     }
 
     /// Packages hashes for [`GetPooledTxRequest`] up to limit as defined by protocol version 66.
+    /// If necessary, takes hashes from buffer for which peer is listed as fallback peer.
+    ///
     /// Returns left over hashes.
     fn pack_hashes_eth66<'a>(
         &mut self,
@@ -1381,6 +1391,8 @@ impl TransactionFetcher {
     }
 
     /// Packages hashes for [`GetPooledTxRequest`] up to limit as defined by protocol version 68.
+    /// If necessary, takes hashes from buffer for which peer is listed as fallback peer.
+    ///
     /// Returns left over hashes.
     fn pack_hashes_eth68(
         &mut self,
@@ -1617,20 +1629,28 @@ impl TransactionFetcher {
         None
     }
 
-    /// Fills free space in request with hashes from buffer.
+    /// Tries to fill request so that the respective tx response is at its size limit. It does so
+    /// by taking buffered hashes for which peer is listed as fallback peer. If this is an eth68
+    /// request, the accumulated size of transactions corresponding to parameter hashes, must also
+    /// be passed as parameter.
     fn fill_request_for_peer(
         &mut self,
         hashes: &mut Vec<TxHash>,
         peer_id: PeerId,
         acc_eth68_size: Option<usize>,
     ) {
+        debug_assert!(
+            {
+                let mut acc_size = 0;
+                for &hash in hashes.iter() {
+                    _ = self.include_eth68_hash(&mut acc_size, hash);
+                }
+                Some(acc_size) == acc_eth68_size
+            },
+            "broken invariant `acc_eth68_size` and `hashes`"
+        );
+
         for hash in self.buffered_hashes.iter() {
-            debug_assert!(!hashes.is_empty(), "expected request buffer to have at least one hash");
-
-            if *hash == hashes[0] {
-                continue
-            }
-
             // if this request is eth68 txns, check the size metadata
             if let Some(mut acc_size) = acc_eth68_size {
                 match self.include_eth68_hash(&mut acc_size, *hash) {
