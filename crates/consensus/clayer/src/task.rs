@@ -1,9 +1,10 @@
+use crate::engine_api::{forkchoice_updated, forkchoice_updated_with_attributes, new_payload};
 use crate::{consensus::ClayerConsensusEngine, engine_api::http::HttpJsonRpc, timing, ClStorage};
 use alloy_primitives::B256;
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_interfaces::clayer::ClayerConsensus;
 use reth_network::NetworkHandle;
-use reth_primitives::hex;
+use reth_primitives::{hex, TransactionSigned};
 use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_rpc_types::engine::{
@@ -134,7 +135,7 @@ where
                     let last_block_height = storage.best_height;
 
                     info!(target: "consensus::cl","step 1: forkchoice_updated {}",timestamp);
-                    let forkchoice_updated_result = match ClayerConsensusEngine::forkchoice_updated(
+                    let forkchoice_updated_result = match forkchoice_updated(
                         &api,
                         last_block_hash.clone(),
                     )
@@ -152,19 +153,18 @@ where
                     }
 
                     info!(target: "consensus::cl","step 2: forkchoice_updated_with_attributes");
-                    let forkchoice_updated_result =
-                        match ClayerConsensusEngine::forkchoice_updated_with_attributes(
-                            &api,
-                            last_block_hash.clone(),
-                        )
-                        .await
-                        {
-                            Ok(x) => x,
-                            Err(e) => {
-                                error!(target:"consensus::cl", "step 2: Forkchoice updated error: {:?}", e);
-                                return events;
-                            }
-                        };
+                    let forkchoice_updated_result = match forkchoice_updated_with_attributes(
+                        &api,
+                        last_block_hash.clone(),
+                    )
+                    .await
+                    {
+                        Ok(x) => x,
+                        Err(e) => {
+                            error!(target:"consensus::cl", "step 2: Forkchoice updated error: {:?}", e);
+                            return events;
+                        }
+                    };
 
                     info!(target: "consensus::cl","forkchoice state response {:?}", forkchoice_updated_result);
                     if !forkchoice_updated_result.payload_status.status.is_valid() {
@@ -190,12 +190,7 @@ where
                     let newest_height =
                         execution_payload.execution_payload.payload_inner.block_number;
 
-                    let payload_status = match ClayerConsensusEngine::new_payload(
-                        &api,
-                        execution_payload,
-                    )
-                    .await
-                    {
+                    let payload_status = match new_payload(&api, execution_payload).await {
                         Ok(x) => {
                             info!(target: "consensus::cl","step 4: new_payload");
                             x
@@ -215,19 +210,18 @@ where
 
                     if let Some(latest_valid_hash) = &payload_status.latest_valid_hash {
                         info!(target: "consensus::cl","step 5: forkchoice_updated");
-                        let forkchoice_updated_result: ForkchoiceUpdated =
-                            match ClayerConsensusEngine::forkchoice_updated(
-                                &api,
-                                latest_valid_hash.clone(),
-                            )
-                            .await
-                            {
-                                Ok(x) => x,
-                                Err(e) => {
-                                    error!(target:"consensus::cl", "Forkchoice updated error: {:?}", e);
-                                    return events;
-                                }
-                            };
+                        let forkchoice_updated_result: ForkchoiceUpdated = match forkchoice_updated(
+                            &api,
+                            latest_valid_hash.clone(),
+                        )
+                        .await
+                        {
+                            Ok(x) => x,
+                            Err(e) => {
+                                error!(target:"consensus::cl", "Forkchoice updated error: {:?}", e);
+                                return events;
+                            }
+                        };
                         info!(target: "consensus::cl","forkchoice state response {:?}", forkchoice_updated_result);
 
                         if forkchoice_updated_result.payload_status.status.is_valid() {

@@ -159,12 +159,12 @@ impl Chain {
         self.named().map_or(false, |c| {
             matches!(
                 c,
-                NamedChain::Optimism |
-                    NamedChain::OptimismGoerli |
-                    NamedChain::OptimismKovan |
-                    NamedChain::Base |
-                    NamedChain::BaseGoerli |
-                    NamedChain::BaseSepolia
+                NamedChain::Optimism
+                    | NamedChain::OptimismGoerli
+                    | NamedChain::OptimismKovan
+                    | NamedChain::Base
+                    | NamedChain::BaseGoerli
+                    | NamedChain::BaseSepolia
             )
         })
     }
@@ -195,7 +195,7 @@ impl Chain {
         let named: NamedChain = self.try_into().ok()?;
 
         if matches!(named, C::Mainnet | C::Goerli | C::Sepolia | C::Ropsten | C::Rinkeby) {
-            return Some(format!("{DNS_PREFIX}all.{}.ethdisco.net", named.as_ref().to_lowercase()))
+            return Some(format!("{DNS_PREFIX}all.{}.ethdisco.net", named.as_ref().to_lowercase()));
         }
         None
     }
@@ -325,7 +325,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Chain {
         if u.ratio(1, 2)? {
             let chain = u.int_in_range(0..=(NamedChain::COUNT - 1))?;
 
-            return Ok(Chain::Named(NamedChain::iter().nth(chain).expect("in range")))
+            return Ok(Chain::Named(NamedChain::iter().nth(chain).expect("in range")));
         }
 
         Ok(Self::Id(u64::arbitrary(u)?))

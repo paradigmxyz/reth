@@ -168,7 +168,7 @@ impl NetworkHandle {
     pub fn send_consensus(&self, peer_id: PeerId, msg: reth_primitives::Bytes) {
         self.send_message(NetworkHandleMessage::SendConsensus {
             peer_id,
-            msg: ClayerConsensusMsg(vec![msg]),
+            msg: ClayerConsensusMsg(msg),
         })
     }
 }

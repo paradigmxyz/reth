@@ -48,4 +48,5 @@ pub mod blockchain_tree;
 /// Common test helpers for mocking out Consensus, Downloaders and Header Clients.
 pub mod test_utils;
 
+/// Consensus layer messages
 pub mod clayer;

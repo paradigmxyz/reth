@@ -38,6 +38,9 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 
+# clayer signature
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+
 [dev-dependencies]
 reth-net-common.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary"] }

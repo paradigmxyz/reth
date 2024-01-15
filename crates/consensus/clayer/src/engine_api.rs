@@ -1,11 +1,17 @@
 use crate::error::{PrettyReqwestError, RpcError};
 use alloy_primitives::{B256, U256};
 use reqwest::StatusCode;
-use reth_rpc_types::{engine::PayloadStatus, ExecutionPayloadV2};
+use reth_rpc_types::{
+    engine::{
+        ExecutionPayloadInputV2, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes,
+        PayloadStatus,
+    },
+    ExecutionPayloadV2,
+};
 use serde::{Deserialize, Serialize};
-use std::convert::TryFrom;
-use strum::IntoStaticStr;
-use superstruct::superstruct;
+use std::sync::Arc;
+
+use self::http::HttpJsonRpc;
 
 pub mod auth;
 pub mod http;
@@ -95,14 +101,65 @@ pub struct ExecutionBlock {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionPayloadWrapperV2 {
-    /// Execution payload, which could be either V1 or V2
-    ///
-    /// V1 (_NO_ withdrawals) MUST be returned if the payload timestamp is lower than the Shanghai
-    /// timestamp
-    ///
-    /// V2 (_WITH_ withdrawals) MUST be returned if the payload timestamp is greater or equal to
-    /// the Shanghai timestamp
     pub execution_payload: ExecutionPayloadV2,
     /// The expected value to be received by the feeRecipient in wei
     pub block_value: U256,
+}
+
+pub async fn forkchoice_updated(
+    api: &Arc<HttpJsonRpc>,
+    last_block: B256,
+) -> Result<ForkchoiceUpdated, ClRpcError> {
+    let forkchoice_state = ForkchoiceState {
+        head_block_hash: last_block,
+        finalized_block_hash: last_block,
+        safe_block_hash: last_block,
+    };
+
+    let response = api.forkchoice_updated_v2(forkchoice_state, None).await?;
+    Ok(response)
+}
+
+pub async fn forkchoice_updated_with_attributes(
+    api: &Arc<HttpJsonRpc>,
+    last_block: B256,
+) -> Result<ForkchoiceUpdated, ClRpcError> {
+    let forkchoice_state = ForkchoiceState {
+        head_block_hash: last_block,
+        finalized_block_hash: last_block,
+        safe_block_hash: last_block,
+    };
+
+    let data = r#"
+        {
+            "timestamp": "0x658967b8",
+            "prevRandao": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "suggestedFeeRecipient": "0x0000000000000000000000000000000000000000",
+            "withdrawals": [
+                {
+                    "index": "0x00",
+                    "validatorIndex": "0x00",
+                    "address": "0x00000000000000000000000000000000000010f0",
+                    "amount": "0x1"
+                }
+            ]
+        }"#;
+    let mut p: PayloadAttributes = serde_json::from_str(data).unwrap();
+    let dt = chrono::prelude::Local::now();
+    p.timestamp = dt.timestamp() as u64;
+    let response = api.forkchoice_updated_v2(forkchoice_state, Some(p)).await?;
+    Ok(response)
+}
+
+pub async fn new_payload(
+    api: &Arc<HttpJsonRpc>,
+    execution_payload: ExecutionPayloadWrapperV2,
+) -> Result<PayloadStatus, ClRpcError> {
+    let input = ExecutionPayloadInputV2 {
+        execution_payload: execution_payload.execution_payload.payload_inner.clone(),
+        withdrawals: Some(execution_payload.execution_payload.withdrawals.clone()),
+    };
+    let response = api.new_payload_v2(input).await?;
+
+    Ok(response)
 }

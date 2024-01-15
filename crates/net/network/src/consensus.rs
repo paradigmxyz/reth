@@ -92,9 +92,7 @@ where
         match event {
             NetworkConsensusEvent::IncomingConsensus { peer_id, msg } => {
                 debug!(target: "net::consensus", ?peer_id, "received consensus broadcast");
-                for data in msg.0.iter() {
-                    self.clayer.push_cache(data.clone());
-                }
+                self.clayer.push_cache(msg.0.clone());
             }
         }
     }

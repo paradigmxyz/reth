@@ -12,7 +12,6 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
 use url::Url;
 
 const STATIC_ID: u32 = 1;

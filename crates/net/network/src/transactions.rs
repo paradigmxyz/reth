@@ -275,7 +275,7 @@ where
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             if self.network.tx_gossip_disabled() {
                 let _ = response.send(Ok(PooledTransactions::default()));
-                return
+                return;
             }
             let transactions = self
                 .pool
@@ -304,10 +304,10 @@ where
     fn on_new_transactions(&mut self, hashes: Vec<TxHash>) {
         // Nothing to propagate while initially syncing
         if self.network.is_initially_syncing() {
-            return
+            return;
         }
         if self.network.tx_gossip_disabled() {
-            return
+            return;
         }
 
         trace!(target: "net::tx", num_hashes=?hashes.len(), "Start propagating transactions");
@@ -334,7 +334,7 @@ where
     ) -> PropagatedTransactions {
         let mut propagated = PropagatedTransactions::default();
         if self.network.tx_gossip_disabled() {
-            return propagated
+            return propagated;
         }
 
         // send full transactions to a fraction fo the connected peers (square root of the total
@@ -442,7 +442,7 @@ where
 
         if full_transactions.transactions.is_empty() {
             // nothing to propagate
-            return None
+            return None;
         }
 
         let new_full_transactions = full_transactions.build();
@@ -469,7 +469,7 @@ where
         let propagated = {
             let Some(peer) = self.peers.get_mut(&peer_id) else {
                 // no such peer
-                return
+                return;
             };
 
             let to_propagate: Vec<PropagateTransaction> =
@@ -490,7 +490,7 @@ where
 
             if new_pooled_hashes.is_empty() {
                 // nothing to propagate
-                return
+                return;
             }
 
             for hash in new_pooled_hashes.iter_hashes().copied() {
@@ -518,10 +518,10 @@ where
     ) {
         // If the node is initially syncing, ignore transactions
         if self.network.is_initially_syncing() {
-            return
+            return;
         }
         if self.network.tx_gossip_disabled() {
-            return
+            return;
         }
 
         let mut num_already_seen = 0;
@@ -539,7 +539,7 @@ where
 
             if hashes.is_empty() {
                 // nothing to request
-                return
+                return;
             }
 
             // enforce recommended soft limit, however the peer may enforce an arbitrary limit on
@@ -551,7 +551,7 @@ where
                 self.transaction_fetcher.request_transactions_from_peer(hashes, peer);
             if !request_sent {
                 self.metrics.egress_peer_channel_full.increment(1);
-                return
+                return;
             }
 
             if num_already_seen > 0 {
@@ -665,7 +665,7 @@ where
                 // pool
                 if !self.network.is_initially_syncing() {
                     if self.network.tx_gossip_disabled() {
-                        return
+                        return;
                     }
                     let peer = self.peers.get_mut(&peer_id).expect("is present; qed");
 
@@ -675,7 +675,7 @@ where
                         self.pool.pooled_transactions_max(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT);
                     if pooled_txs.is_empty() {
                         // do not send a message if there are no transactions in the pool
-                        return
+                        return;
                     }
 
                     for pooled_tx in pooled_txs.into_iter() {
@@ -700,10 +700,10 @@ where
     ) {
         // If the node is pipeline syncing, ignore transactions
         if self.network.is_initially_syncing() {
-            return
+            return;
         }
         if self.network.tx_gossip_disabled() {
-            return
+            return;
         }
 
         // tracks the quality of the given transactions
@@ -717,7 +717,7 @@ where
                     tx
                 } else {
                     has_bad_transactions = true;
-                    continue
+                    continue;
                 };
 
                 // track that the peer knows this transaction, but only if this is a new broadcast.
@@ -772,7 +772,7 @@ where
             RequestError::Timeout => ReputationChangeKind::Timeout,
             RequestError::ChannelClosed | RequestError::ConnectionDropped => {
                 // peer is already disconnected
-                return
+                return;
             }
             RequestError::BadResponse => ReputationChangeKind::BadTransactions,
         };
@@ -859,7 +859,7 @@ where
                     if err.is_bad_transaction() && !this.network.is_syncing() {
                         debug!(target: "net::tx", ?err, "bad pool transaction import");
                         this.on_bad_import(err.hash);
-                        continue
+                        continue;
                     }
                     this.on_good_import(err.hash);
                 }
@@ -919,7 +919,7 @@ impl FullTransactionsBuilder {
     fn push(&mut self, transaction: &PropagateTransaction) {
         let new_size = self.total_size + transaction.size;
         if new_size > MAX_FULL_TRANSACTIONS_PACKET_SIZE {
-            return
+            return;
         }
 
         self.total_size = new_size;
@@ -1129,7 +1129,7 @@ impl TransactionFetcher {
                         error: RequestError::ChannelClosed,
                     })
                 }
-            }
+            };
         }
         Poll::Pending
     }
@@ -1179,7 +1179,7 @@ impl TransactionFetcher {
         // 2. request all missing from peer
         if announced_hashes.is_empty() {
             // nothing to request
-            return false
+            return false;
         }
 
         let (response, rx) = oneshot::channel();
@@ -1202,7 +1202,7 @@ impl TransactionFetcher {
                     }
                 }
             }
-            return false
+            return false;
         } else {
             //create a new request for it, from that peer
             self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, announced_hashes, rx))

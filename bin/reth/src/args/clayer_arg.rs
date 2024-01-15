@@ -1,5 +1,4 @@
 //! clap [Args](clap::Args) for Dev testnet configuration
-use std::time::Duration;
 
 use clap::Args;
 /// Parameters for Dev testnet configuration
