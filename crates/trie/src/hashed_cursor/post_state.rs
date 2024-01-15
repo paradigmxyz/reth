@@ -784,7 +784,7 @@ mod tests {
         let wiped = true;
         let mut hashed_storage = HashedStorage::new(wiped);
         for (slot, value) in post_state_storage.iter() {
-            hashed_storage.insert_non_zero_valued_storage(*slot, *value);
+            hashed_storage.insert_storage(*slot, *value);
         }
 
         let mut hashed_post_state = HashedPostState::default();
