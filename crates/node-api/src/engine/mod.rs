@@ -58,7 +58,7 @@
 //!         chain_spec: &ChainSpec,
 //!         version: EngineApiMessageVersion,
 //!     ) -> Result<(), AttributesValidationError> {
-//!         validate_version_specific_fields(chain_spec, version, &self.into())?;
+//!         validate_version_specific_fields(chain_spec, version, self.into())?;
 //!
 //!         // custom validation logic - ensure that the custom field is not zero
 //!         if self.custom == 0 {
@@ -123,13 +123,11 @@
 //!    type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
 //!    type BuiltPayload = EthBuiltPayload;
 //!
-//!    fn validate_version_specific_fields<Type>(
+//!    fn validate_version_specific_fields(
 //!        chain_spec: &ChainSpec,
 //!        version: EngineApiMessageVersion,
-//!        payload_or_attrs: &PayloadOrAttributes<'_, Type>,
-//!    ) -> Result<(), AttributesValidationError>
-//!    where
-//!        Type: PayloadAttributes {
+//!        payload_or_attrs: PayloadOrAttributes<'_, CustomPayloadAttributes>,
+//!    ) -> Result<(), AttributesValidationError> {
 //!        validate_version_specific_fields(chain_spec, version, payload_or_attrs)
 //!    }
 //! }
