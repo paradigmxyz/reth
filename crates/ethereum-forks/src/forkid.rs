@@ -5,7 +5,11 @@
 use crate::Head;
 use alloy_primitives::{hex, BlockNumber, B256};
 use alloy_rlp::*;
+#[cfg(any(test, feature = "arbitrary"))]
+use arbitrary::Arbitrary;
 use crc::*;
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest_derive::Arbitrary as PropTestArbitrary;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
@@ -14,10 +18,6 @@ use std::{
     ops::{Add, AddAssign},
 };
 use thiserror::Error;
-#[cfg(any(test, feature = "arbitrary"))]
-use arbitrary::Arbitrary;
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest_derive::Arbitrary as PropTestArbitrary;
 
 const CRC_32_IEEE: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 
