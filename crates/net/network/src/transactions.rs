@@ -1482,7 +1482,7 @@ impl TransactionFetcher {
         peer_id: PeerId,
         is_session_active: impl Fn(PeerId) -> bool,
     ) {
-        // 1. filter out inflight hashes, and register the peer as fallback for all inflight hashes
+        // filter out inflight hashes, and register the peer as fallback for all inflight hashes
         new_announced_hashes.retain(|hash| {
             // occupied entry
             if let Some((_retries, ref mut backups)) = self.unknown_hashes.peek_mut(hash) {
