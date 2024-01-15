@@ -260,7 +260,6 @@ impl HashedStorage {
         if value.is_zero() {
             self.zero_valued_slots.insert(slot);
         } else {
-            debug_assert!(value != U256::ZERO, "value cannot be zero");
             self.non_zero_valued_storage.push((slot, value));
             self.sorted = false;
         }
