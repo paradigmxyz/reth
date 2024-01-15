@@ -104,7 +104,7 @@ impl HashedPostState {
 
         let mut this = Self::default();
         for (address, (maybe_account_change, storage)) in state {
-            let hashed_address = keccak256(&address);
+            let hashed_address = keccak256(address);
 
             if let Some(account_change) = maybe_account_change {
                 this.insert_account(hashed_address, account_change);
