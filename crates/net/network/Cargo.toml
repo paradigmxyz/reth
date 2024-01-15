@@ -63,6 +63,8 @@ linked_hash_set = "0.1"
 linked-hash-map = "0.5.6"
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+derive_more.workspace = true
+schnellru.workspace = true
 
 enr = { workspace = true, features = ["rust-secp256k1"], optional = true }
 tempfile = { workspace = true, optional = true }

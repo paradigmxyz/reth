@@ -101,7 +101,8 @@ Please also make sure that the following commands pass if you have changed the c
 cargo check --all
 cargo test --all --all-features
 cargo +nightly fmt -- --check
-cargo +nightly clippy --all --all-features -- -D warnings
+cargo clippy --bin "reth" --workspace --features "ethereum" --lib --tests --benches --examples -- -D warnings
+cargo clippy --bin "op-reth" --workspace --features "optimism" --lib --tests --benches --examples -- -D warnings
 ```
 
 If you are working in VSCode, we recommend you install the [rust-analyzer](https://rust-analyzer.github.io/) extension,

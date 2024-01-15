@@ -501,6 +501,7 @@ where
             // with this branch. remove this branch from the non-op code. remove
             // `on_missing_payload` requirement from builder trait
             if let Some(payload) = self.builder.on_missing_payload(args) {
+                debug!(target: "payload_builder", id=%self.config.payload_id(), "resolving fallback payload as best payload");
                 return (
                     ResolveBestPayload { best_payload: Some(payload), maybe_better, empty_payload },
                     KeepPayloadJobAlive::Yes,

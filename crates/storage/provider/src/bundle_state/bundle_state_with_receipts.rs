@@ -6,16 +6,12 @@ use reth_db::{
 };
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
-    keccak256, logs_bloom,
+    logs_bloom,
     revm::compat::{into_reth_acc, into_revm_acc},
     Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, StorageEntry, B256,
     U256,
 };
-use reth_trie::{
-    hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
-    updates::TrieUpdates,
-    StateRoot, StateRootError,
-};
+use reth_trie::HashedPostState;
 use revm::{
     db::{states::BundleState, BundleAccount},
     primitives::AccountInfo,
@@ -135,106 +131,10 @@ impl BundleStateWithReceipts {
         self.bundle.bytecode(code_hash).map(Bytecode)
     }
 
-    /// Hash all changed accounts and storage entries that are currently stored in the post state.
-    ///
-    /// # Returns
-    ///
-    /// The hashed post state.
+    /// Returns [HashedPostState] for this bundle state.
+    /// See [HashedPostState::from_bundle_state] for more info.
     pub fn hash_state_slow(&self) -> HashedPostState {
-        let mut hashed_state = HashedPostState::default();
-
-        for (address, account) in self.bundle.state() {
-            let hashed_address = keccak256(address);
-            if let Some(account) = &account.info {
-                hashed_state.insert_account(hashed_address, into_reth_acc(account.clone()))
-            } else {
-                hashed_state.insert_destroyed_account(hashed_address);
-            }
-
-            // insert storage.
-            let mut hashed_storage = HashedStorage::new(account.status.was_destroyed());
-
-            for (key, value) in account.storage.iter() {
-                let hashed_key = keccak256(B256::new(key.to_be_bytes()));
-                if value.present_value.is_zero() {
-                    hashed_storage.insert_zero_valued_slot(hashed_key);
-                } else {
-                    hashed_storage.insert_non_zero_valued_storage(hashed_key, value.present_value);
-                }
-            }
-            hashed_state.insert_hashed_storage(hashed_address, hashed_storage)
-        }
-        hashed_state.sorted()
-    }
-
-    /// Returns [StateRoot] calculator based on database and in-memory state.
-    pub fn state_root_calculator<'a, 'b, TX: DbTx>(
-        &self,
-        tx: &'a TX,
-        hashed_post_state: &'b HashedPostState,
-    ) -> StateRoot<&'a TX, HashedPostStateCursorFactory<'a, 'b, TX>> {
-        let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
-        let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, hashed_post_state);
-        StateRoot::from_tx(tx)
-            .with_hashed_cursor_factory(hashed_cursor_factory)
-            .with_changed_account_prefixes(account_prefix_set)
-            .with_changed_storage_prefixes(storage_prefix_set)
-            .with_destroyed_accounts(hashed_post_state.destroyed_accounts())
-    }
-
-    /// Calculate the state root for this [BundleState].
-    /// Internally, function calls [Self::hash_state_slow] to obtain the [HashedPostState].
-    /// Afterwards, it retrieves the prefixsets from the [HashedPostState] and uses them to
-    /// calculate the incremental state root.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use reth_db::{database::Database, test_utils::create_test_rw_db};
-    /// use reth_primitives::{Account, Receipts, U256};
-    /// use reth_provider::BundleStateWithReceipts;
-    /// use std::collections::HashMap;
-    ///
-    /// // Initialize the database
-    /// let db = create_test_rw_db();
-    ///
-    /// // Initialize the bundle state
-    /// let bundle = BundleStateWithReceipts::new_init(
-    ///     HashMap::from([(
-    ///         [0x11; 20].into(),
-    ///         (
-    ///             None,
-    ///             Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
-    ///             HashMap::from([]),
-    ///         ),
-    ///     )]),
-    ///     HashMap::from([]),
-    ///     vec![],
-    ///     Receipts::new(),
-    ///     0,
-    /// );
-    ///
-    /// // Calculate the state root
-    /// let tx = db.tx().expect("failed to create transaction");
-    /// let state_root = bundle.state_root_slow(&tx);
-    /// ```
-    ///
-    /// # Returns
-    ///
-    /// The state root for this [BundleState].
-    pub fn state_root_slow<TX: DbTx>(&self, tx: &TX) -> Result<B256, StateRootError> {
-        let hashed_post_state = self.hash_state_slow();
-        self.state_root_calculator(tx, &hashed_post_state).root()
-    }
-
-    /// Calculates the state root for this [BundleState] and returns it alongside trie updates.
-    /// See [Self::state_root_slow] for more info.
-    pub fn state_root_slow_with_updates<TX: DbTx>(
-        &self,
-        tx: &TX,
-    ) -> Result<(B256, TrieUpdates), StateRootError> {
-        let hashed_post_state = self.hash_state_slow();
-        self.state_root_calculator(tx, &hashed_post_state).root_with_updates()
+        HashedPostState::from_bundle_state(&self.bundle.state)
     }
 
     /// Transform block number to the index of block.
@@ -439,9 +339,10 @@ mod tests {
         transaction::DbTx,
     };
     use reth_primitives::{
-        revm::compat::into_reth_acc, Address, Receipt, Receipts, StorageEntry, B256, U256,
+        keccak256, revm::compat::into_reth_acc, Address, Receipt, Receipts, StorageEntry, B256,
+        U256,
     };
-    use reth_trie::test_utils::state_root;
+    use reth_trie::{test_utils::state_root, StateRoot};
     use revm::{
         db::{
             states::{
@@ -1265,7 +1166,8 @@ mod tests {
         let assert_state_root = |state: &State<EmptyDB>, expected: &PreState, msg| {
             assert_eq!(
                 BundleStateWithReceipts::new(state.bundle_state.clone(), Receipts::default(), 0)
-                    .state_root_slow(&tx)
+                    .hash_state_slow()
+                    .state_root(&tx)
                     .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
                     address,
