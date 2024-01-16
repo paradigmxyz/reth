@@ -26,6 +26,7 @@ use futures::{pin_mut, Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt
 use reth_primitives::ForkFilter;
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing::debug;
 
 /// A Stream and Sink type that wraps a raw rlpx stream [P2PStream] and handles message ID
 /// multiplexing.
@@ -490,6 +491,10 @@ where
                 }
             }
 
+            if let Poll::Ready(Err(err)) = this.inner.conn.poll_flush_unpin(cx) {
+                return Poll::Ready(Some(Err(err.into())))
+            }
+
             // advance all satellites once
             for idx in (0..this.inner.protocols.len()).rev() {
                 let mut proto = this.inner.protocols.swap_remove(idx);
@@ -497,7 +502,14 @@ where
                     Poll::Ready(Some(msg)) => {
                         this.inner.out_buffer.push_back(msg);
                     }
-                    Poll::Ready(None) => return Poll::Ready(None),
+                    Poll::Ready(None) => {
+                        debug!(
+                            capability=?proto.shared_cap(),
+                            "stream for capability handle has closed"
+                        );
+
+                        continue
+                    }
                     Poll::Pending => this.inner.protocols.push(proto),
                 }
             }
@@ -516,12 +528,12 @@ where
                             if cap == &this.primary.shared_cap {
                                 // delegate to primary
                                 let _ = this.primary.to_primary.send(msg);
+                                break // read messages until an eth message is received
                             } else {
                                 // delegate to installed satellite if any
                                 for proto in &this.inner.protocols {
                                     if proto.shared_cap == *cap {
                                         proto.send_raw(msg);
-                                        break
                                     }
                                 }
                             }
@@ -589,6 +601,11 @@ struct ProtocolStream {
 }
 
 impl ProtocolStream {
+    /// Returns the shared capability that this stream supports.
+    fn shared_cap(&self) -> &SharedCapability {
+        &self.shared_cap
+    }
+
     /// Masks the message ID of a message to be sent on the wire.
     ///
     /// # Panics
