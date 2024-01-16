@@ -185,7 +185,7 @@ pub struct ExecutionConfig {
     pub max_changes: Option<u64>,
     /// The maximum cumulative amount of gas to process before the execution stage commits.
     pub max_cumulative_gas: Option<u64>,
-    /// The maximum spent on blocks processing before the execution stage commits.
+    /// The maximum time spent on blocks processing before the execution stage commits.
     pub max_duration: Option<Duration>,
 }
 

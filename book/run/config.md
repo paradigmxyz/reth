@@ -141,7 +141,7 @@ max_blocks = 500000
 max_changes = 5000000
 # The maximum cumulative amount of gas to process before the execution stage commits.
 max_cumulative_gas = 1500000000000 # 30_000_000 * 50_000_000
-# The maximum spent on blocks processing before the execution stage commits.
+# The maximum time spent on blocks processing before the execution stage commits.
 max_duration = '10m'
 ```
 
