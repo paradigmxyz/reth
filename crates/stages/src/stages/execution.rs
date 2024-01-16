@@ -138,10 +138,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Execute block range
         let mut cumulative_gas = 0;
-        let start = Instant::now();
+        let batch_start = Instant::now();
 
         for block_number in start_block..=max_block {
-            let time = Instant::now();
+            let block_start = Instant::now();
             let td = provider
                 .header_td_by_number(block_number)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
@@ -151,22 +151,22 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 .block_with_senders(block_number.into(), TransactionVariant::NoHash)?
                 .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
 
-            fetch_block_duration += time.elapsed();
+            let execute_start = Instant::now();
+            fetch_block_duration += execute_start - block_start;
 
             cumulative_gas += block.gas_used;
 
             // Configure the executor to use the current state.
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
 
-            let time = Instant::now();
             // Execute the block
             executor.execute_and_verify_receipt(&block, td).map_err(|error| StageError::Block {
                 block: Box::new(block.header.clone().seal_slow()),
                 error: BlockErrorKind::Execution(error),
             })?;
 
-            let now = Instant::now();
-            execution_duration += now - time;
+            let block_finish = Instant::now();
+            execution_duration += block_finish - execute_start;
 
             // Gas metrics
             if let Some(metrics_tx) = &mut self.metrics_tx {
@@ -184,7 +184,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 block_number - start_block,
                 bundle_size_hint,
                 cumulative_gas,
-                now - start,
+                block_finish - batch_start,
             ) {
                 break
             }
