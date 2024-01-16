@@ -455,7 +455,8 @@ where
             }
 
             let mut conn_ready = true;
-            loop {
+            // give each protocol stream a fair chance to advance
+            for _ in 0..this.inner.protocols.len() {
                 match this.inner.conn.poll_ready_unpin(cx) {
                     Poll::Ready(_) => {
                         if let Some(msg) = this.inner.out_buffer.pop_front() {
@@ -487,19 +488,17 @@ where
                 }
             }
 
-            // advance all satellites
+            // advance all satellites once
             for idx in (0..this.inner.protocols.len()).rev() {
                 let mut proto = this.inner.protocols.swap_remove(idx);
-                loop {
-                    match proto.poll_next_unpin(cx) {
-                        Poll::Ready(Some(msg)) => {
-                            this.inner.out_buffer.push_back(msg);
-                        }
-                        Poll::Ready(None) => return Poll::Ready(None),
-                        Poll::Pending => {
-                            this.inner.protocols.push(proto);
-                            break
-                        }
+                match proto.poll_next_unpin(cx) {
+                    Poll::Ready(Some(msg)) => {
+                        this.inner.out_buffer.push_back(msg);
+                    }
+                    Poll::Ready(None) => return Poll::Ready(None),
+                    Poll::Pending => {
+                        this.inner.protocols.push(proto);
+                        break
                     }
                 }
             }
