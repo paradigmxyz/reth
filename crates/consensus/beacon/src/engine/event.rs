@@ -9,7 +9,7 @@ pub enum BeaconConsensusEngineEvent {
     /// The fork choice state was updated.
     ForkchoiceUpdated(ForkchoiceState, ForkchoiceStatus),
     /// A block was added to the canonical chain.
-    CanonicalBlockAdded(Arc<SealedBlock>),
+    CanonicalBlockAdded(Arc<SealedBlock>, Duration),
     /// A canonical chain was committed.
     CanonicalChainCommitted(Box<SealedHeader>, Duration),
     /// A block was added to the fork chain.

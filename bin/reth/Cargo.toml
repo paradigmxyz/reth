@@ -115,6 +115,7 @@ boyer-moore-magiclen = "0.2.16"
 itertools.workspace = true
 rayon.workspace = true
 futures-util.workspace = true
+num-format = "0.4.4"
 
 [target.'cfg(not(windows))'.dependencies]
 jemallocator = { version = "0.5.0", optional = true }

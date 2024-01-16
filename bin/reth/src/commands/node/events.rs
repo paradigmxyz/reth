@@ -2,6 +2,7 @@
 
 use crate::commands::node::cl_events::ConsensusLayerHealthEvent;
 use futures::Stream;
+use num_format::{Buffer, Locale};
 use reth_beacon_consensus::BeaconConsensusEngineEvent;
 use reth_db::{database::Database, database_metrics::DatabaseMetadata};
 use reth_interfaces::consensus::ForkchoiceState;
@@ -163,8 +164,20 @@ impl<DB> NodeState<DB> {
                     "Forkchoice updated"
                 );
             }
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(block) => {
-                info!(number=block.number, hash=?block.hash, "Block added to canonical chain");
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed) => {
+                let mut gas_fmt_buf = Buffer::default();
+                gas_fmt_buf.write_formatted(&block.header.header.gas_used, &Locale::en);
+                info!(
+                    number=block.number,
+                    hash=?block.hash,
+                    txs=block.body.len(),
+                    gas=gas_fmt_buf.as_str(),
+                    gas_used=format!( "{:.2}%", block.header.header.gas_used as f32 * 100.0 / block.header.header.gas_limit as f32),
+                    base_fee=block.header.header.base_fee_per_gas.map(|g| format!("{:.2} gWei", g as f32 / 1.0e9)).unwrap_or_default(),
+                    blob_gas=block.header.header.blob_gas_used.map(|g| format!("{:} gWei", g)).unwrap_or_default(),
+                    excess_blob_gas=block.header.header.excess_blob_gas.map(|g| format!("{:} b", g)).unwrap_or_default(),
+                    ?elapsed,
+                    "Block added to canonical chain");
             }
             BeaconConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
                 self.latest_block = Some(head.number);

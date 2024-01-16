@@ -43,6 +43,7 @@ use std::{
     task::{Context, Poll},
     time::{Duration, Instant},
 };
+use stopwatch::{Stopwatch};
 use tokio::sync::{
     mpsc,
     mpsc::{UnboundedReceiver, UnboundedSender},
@@ -1257,15 +1258,17 @@ where
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
         let block_hash = block.hash;
+        let sw = Stopwatch::start_new();
         let status = self
             .blockchain
             .insert_block_without_senders(block.clone(), BlockValidationKind::Exhaustive)?;
+        let elapsed = sw.elapsed();
         let mut latest_valid_hash = None;
         let block = Arc::new(block);
         let status = match status {
             InsertPayloadOk::Inserted(BlockStatus::Valid) => {
                 latest_valid_hash = Some(block_hash);
-                self.listeners.notify(BeaconConsensusEngineEvent::CanonicalBlockAdded(block));
+                self.listeners.notify(BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed));
                 PayloadStatusEnum::Valid
             }
             InsertPayloadOk::Inserted(BlockStatus::Accepted) => {
