@@ -116,6 +116,9 @@ itertools.workspace = true
 rayon.workspace = true
 futures-util.workspace = true
 
+[dev-dependencies]
+jsonrpsee.workspace = true
+
 [target.'cfg(not(windows))'.dependencies]
 jemallocator = { version = "0.5.0", optional = true }
 jemalloc-ctl = { version = "0.5.0", optional = true }
