@@ -5,15 +5,16 @@ use super::{
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
-use crate::{
-    errors::{EthStreamError, P2PHandshakeError, P2PStreamError},
-    EthVersion, SharedTransactions,
-};
+use crate::{errors::EthStreamError, EthVersion, SharedTransactions};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
-use reth_primitives::bytes::{Buf, BufMut};
+use reth_primitives::{
+    bytes::{Buf, BufMut},
+    U8,
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, sync::Arc};
+use test_fuzz::runtime::num_traits::ToBytes;
 
 /// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
 // https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
@@ -237,9 +238,10 @@ impl<T: Encodable> EncodableExt for Vec<T> {
     fn encode_truncate(&self, limit: usize) -> Vec<u8> {
         let mut buffer = Vec::new();
         for item in self {
+            let current_len = buffer.len();
             item.encode(&mut buffer);
             if buffer.len() > limit {
-                buffer.truncate(limit);
+                buffer.truncate(current_len);
                 break;
             }
         }
