@@ -7,14 +7,10 @@ use super::{
 };
 use crate::{errors::EthStreamError, EthVersion, SharedTransactions};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
-use reth_primitives::{
-    bytes::{Buf, BufMut},
-    U8,
-};
+use reth_primitives::bytes::{Buf, BufMut};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, sync::Arc};
-use test_fuzz::runtime::num_traits::ToBytes;
 
 /// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
 // https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
