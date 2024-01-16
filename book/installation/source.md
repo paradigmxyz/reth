@@ -135,6 +135,9 @@ If compilation fails with `(signal: 9, SIGKILL: kill)`, this could mean your mac
 memory during compilation. If you are on Docker, consider increasing the memory of the container, or use a [pre-built
 binary](../installation/binaries.md).
 
+If compilation fails in either the `keccak-asm` or `sha3-asm` crates, it is likely that your current
+system configuration is not supported. See the [`keccak-asm` target table](https://github.com/DaniPopes/keccak-asm?tab=readme-ov-file#support) for supported targets.
+
 If compilation fails with `error: linking with cc failed: exit code: 1`, try running `cargo clean`.
 
 _(Thanks to Sigma Prime for this section from [their Lighthouse book](https://lighthouse-book.sigmaprime.io/installation.html)!)_

@@ -1,7 +1,7 @@
 //! Utils for testing purposes.
 
 use crate::{
-    error::PayloadBuilderError, traits::KeepPayloadJobAlive, BuiltPayload,
+    error::PayloadBuilderError, traits::KeepPayloadJobAlive, EthBuiltPayload,
     EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
     PayloadJobGenerator,
 };
@@ -11,7 +11,6 @@ use reth_provider::CanonStateNotification;
 use std::{
     future::Future,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -25,7 +24,10 @@ pub fn test_payload_service<Engine>() -> (
     PayloadBuilderHandle<Engine>,
 )
 where
-    Engine: EngineTypes<PayloadBuilderAttributes = EthPayloadBuilderAttributes>,
+    Engine: EngineTypes<
+        PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+        BuiltPayload = EthBuiltPayload,
+    >,
 {
     PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
 }
@@ -33,7 +35,10 @@ where
 /// Creates a new [PayloadBuilderService] for testing purposes and spawns it in the background.
 pub fn spawn_test_payload_service<Engine>() -> PayloadBuilderHandle<Engine>
 where
-    Engine: EngineTypes<PayloadBuilderAttributes = EthPayloadBuilderAttributes> + 'static,
+    Engine: EngineTypes<
+            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+            BuiltPayload = EthBuiltPayload,
+        > + 'static,
 {
     let (service, handle) = test_payload_service();
     tokio::spawn(service);
@@ -73,14 +78,11 @@ impl Future for TestPayloadJob {
 impl PayloadJob for TestPayloadJob {
     type PayloadAttributes = EthPayloadBuilderAttributes;
     type ResolvePayloadFuture =
-        futures_util::future::Ready<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
+        futures_util::future::Ready<Result<EthBuiltPayload, PayloadBuilderError>>;
+    type BuiltPayload = EthBuiltPayload;
 
-    fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
-        Ok(Arc::new(BuiltPayload::new(
-            self.attr.payload_id(),
-            Block::default().seal_slow(),
-            U256::ZERO,
-        )))
+    fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
+        Ok(EthBuiltPayload::new(self.attr.payload_id(), Block::default().seal_slow(), U256::ZERO))
     }
 
     fn payload_attributes(&self) -> Result<EthPayloadBuilderAttributes, PayloadBuilderError> {
