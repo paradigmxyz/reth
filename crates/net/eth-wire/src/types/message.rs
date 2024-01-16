@@ -214,6 +214,23 @@ impl EthMessage {
     }
 }
 
+trait EncodableExt {
+    fn encode_max(&self, size: usize) -> alloy_rlp::Result<Vec<u8>, String>;
+}
+
+impl<T: Encodable> EncodableExt for Vec<T> {
+    fn encode_max(&self, limit: usize) -> alloy_rlp::Result<Vec<u8>, String> {
+        let mut buffer = Vec::new();
+        for item in self {
+            item.encode(&mut buffer);
+            if buffer.len() > limit {
+                return Err("Size limit exceeded".to_string());
+            }
+        }
+        Ok(buffer)
+    }
+}
+
 impl Encodable for EthMessage {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
@@ -235,6 +252,7 @@ impl Encodable for EthMessage {
             EthMessage::Receipts(receipts) => receipts.encode(out),
         }
     }
+
     fn length(&self) -> usize {
         match self {
             EthMessage::Status(status) => status.length(),
