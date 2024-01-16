@@ -2334,7 +2334,6 @@ mod tests {
         replacement.transaction.set_max_fee(110);
         let err =
             pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap_err();
-        println!("{:?}", err);
         assert!(matches!(err, InsertErr::Underpriced { .. }));
         assert!(pool.contains(first.hash()));
         assert_eq!(pool.len(), 1);
@@ -2343,7 +2342,6 @@ mod tests {
         replacement.transaction.set_priority_fee(111);
         replacement.transaction.set_max_fee(110);
         let err = pool.insert_tx(replacement, on_chain_balance, on_chain_nonce).unwrap_err();
-        println!("{:?}", err);
         assert!(matches!(err, InsertErr::Underpriced { .. }));
         assert!(pool.contains(first.hash()));
         assert_eq!(pool.len(), 1);
