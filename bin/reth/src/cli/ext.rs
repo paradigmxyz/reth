@@ -142,6 +142,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
                 Reth::Pool,
                 Reth::Provider,
                 Attributes = Engine::PayloadBuilderAttributes,
+                BuiltPayload = Engine::BuiltPayload,
             > + Unpin
             + 'static,
     {
@@ -331,6 +332,7 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
                 Reth::Pool,
                 Reth::Provider,
                 Attributes = Engine::PayloadBuilderAttributes,
+                BuiltPayload = Engine::BuiltPayload,
             > + Unpin
             + 'static,
     {
