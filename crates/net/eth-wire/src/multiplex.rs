@@ -496,10 +496,7 @@ where
                         this.inner.out_buffer.push_back(msg);
                     }
                     Poll::Ready(None) => return Poll::Ready(None),
-                    Poll::Pending => {
-                        this.inner.protocols.push(proto);
-                        break
-                    }
+                    Poll::Pending => this.inner.protocols.push(proto),
                 }
             }
 
@@ -726,6 +723,7 @@ mod tests {
             .unwrap();
 
             loop {
+                println!("stuck here");
                 let _ = st.next().await;
             }
         });
