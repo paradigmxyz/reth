@@ -169,7 +169,7 @@ alloy-primitives = "0.6"
 alloy-dyn-abi = "0.6"
 alloy-sol-types = "0.6"
 alloy-rlp = "0.3"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", features = ["jsonrpsee-types"] }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy" }
 alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy" }
 alloy-trie = "0.2"
 ethers-core = { version = "2.0", default-features = false }
