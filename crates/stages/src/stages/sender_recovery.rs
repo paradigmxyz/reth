@@ -83,10 +83,12 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         let mut senders_cursor = tx.cursor_write::<tables::TxSenders>()?;
 
         // Acquire the cursor over the transactions
-        let mut tx_cursor = tx.cursor_read::<RawTable<tables::Transactions>>()?;
+        let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
+        // let mut tx_cursor = tx.cursor_read::<RawTable<tables::Transactions>>()?;
         // Walk the transactions from start to end index (inclusive)
-        let raw_tx_range = RawKey::new(tx_range.start)..RawKey::new(tx_range.end);
-        let tx_walker = tx_cursor.walk_range(raw_tx_range)?;
+        // let raw_tx_range = RawKey::new(tx_range.start)..RawKey::new(tx_range.end);
+        let tx_walker = tx_cursor.walk_range(tx_range.clone())?;
+        // let tx_walker = tx_cursor.walk_range(raw_tx_range)?;
 
         // Iterate over transactions in chunks
         info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
@@ -188,14 +190,16 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 }
 
 fn recover_sender(
-    entry: Result<(RawKey<TxNumber>, RawValue<TransactionSignedNoHash>), DatabaseError>,
+    // entry: Result<(RawKey<TxNumber>, RawValue<TransactionSignedNoHash>), DatabaseError>,
+    entry: Result<(TxNumber, TransactionSignedNoHash), DatabaseError>,
     rlp_buf: &mut Vec<u8>,
 ) -> Result<(u64, Address), Box<SenderRecoveryStageError>> {
     let (tx_id, transaction) =
         entry.map_err(|e| Box::new(SenderRecoveryStageError::StageError(e.into())))?;
-    let tx_id = tx_id.key().expect("key to be formated");
+    // let tx_id = tx_id.key().expect("key to be formated");
 
-    let tx = transaction.value().expect("value to be formated");
+    // let tx = transaction.value().expect("value to be formated");
+    let tx = transaction;
     tx.transaction.encode_without_signature(rlp_buf);
 
     // We call [Signature::recover_signer_unchecked] because transactions run in the pipeline are
