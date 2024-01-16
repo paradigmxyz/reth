@@ -58,8 +58,7 @@ impl CursorSubNode {
         let nibble = node
             .as_ref()
             .filter(|n| n.root_hash.is_none())
-            .and_then(|n| CHILD_INDEX_RANGE.clone().find(|i| n.state_mask.is_bit_set(*i)))
-            .map_or(-1, |nibble| nibble as i8);
+            .map_or(-1, |n| CHILD_INDEX_RANGE.clone().find(|i| n.state_mask.is_bit_set(*i)).unwrap() as i8);
         let full_key = full_key(key.clone(), nibble);
         CursorSubNode { key, node, nibble, full_key }
     }
@@ -73,7 +72,7 @@ impl CursorSubNode {
     pub fn state_flag(&self) -> bool {
         self.node
             .as_ref()
-            .map_or(true, |node| self.nibble >= 0 && node.state_mask.is_bit_set(self.nibble as u8))
+            .map_or(true, |node| self.nibble < 0 || node.state_mask.is_bit_set(self.nibble as u8))
     }
 
     /// Returns `true` if the tree flag is set for the current nibble.
@@ -95,10 +94,15 @@ impl CursorSubNode {
 
     /// Returns the root hash of the current node, if it has one.
     pub fn hash(&self) -> Option<B256> {
-        self.node.as_ref().filter(|_| self.hash_flag()).and_then(|node| match self.nibble {
-            -1 => node.root_hash,
-            _ => Some(node.hash_for_nibble(self.nibble as u8)),
-        })
+        if self.hash_flag() {
+            let node = self.node.as_ref().unwrap();
+            match self.nibble {
+                -1 => node.root_hash,
+                _ => Some(node.hash_for_nibble(self.nibble as u8)),
+            }
+        } else {
+            None
+        }
     }
 
     /// Returns the next child index to visit.
