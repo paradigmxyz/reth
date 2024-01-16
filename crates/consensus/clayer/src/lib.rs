@@ -22,8 +22,8 @@ use reth_primitives::{
     SealedBlock, SealedHeader, TransactionSigned, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{
-    BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts, CanonChainTracker,
-    CanonStateNotificationSender, Chain, StateProviderFactory,
+    providers::BlockchainProvider, BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts,
+    CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory,
 };
 use reth_revm::{
     database::StateProviderDatabase, db::states::bundle_state::BundleRetention,
@@ -325,7 +325,7 @@ impl ClStorageInner {
     }
 }
 
-pub struct ConsensusBuilder<Client, Pool> {
+pub struct ConsensusBuilder<Client, Pool, CDB> {
     chain_spec: Arc<ChainSpec>,
     client: Client,
     pool: Pool,
@@ -333,9 +333,10 @@ pub struct ConsensusBuilder<Client, Pool> {
     api: Arc<HttpJsonRpc>,
     network: NetworkHandle,
     consensus: ClayerConsensusEngine,
+    storages: CDB,
 }
 
-impl<Client, Pool: TransactionPool> ConsensusBuilder<Client, Pool>
+impl<Client, Pool: TransactionPool, CDB> ConsensusBuilder<Client, Pool, CDB>
 where
     Client: BlockReaderIdExt,
 {
@@ -347,6 +348,7 @@ where
         pool: Pool,
         network: NetworkHandle,
         clayer_consensus: ClayerConsensusEngine,
+        storages: CDB,
     ) -> Self {
         let latest_header = client
             .latest_header()
@@ -364,12 +366,13 @@ where
             api: Arc::new(api),
             network,
             consensus: clayer_consensus,
+            storages,
         }
     }
     /// Consumes the type and returns all components
     #[track_caller]
-    pub fn build(self) -> ClTask<Client, Pool> {
-        let Self { chain_spec, client, pool, storage, api, network, consensus } = self;
+    pub fn build(self) -> ClTask<Client, Pool, CDB> {
+        let Self { chain_spec, client, pool, storage, api, network, consensus, storages } = self;
         let task = ClTask::new(
             Arc::clone(&chain_spec),
             storage,
@@ -378,6 +381,7 @@ where
             Arc::clone(&api),
             network.clone(),
             consensus,
+            storages,
         );
         task
     }

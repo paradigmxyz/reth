@@ -63,8 +63,9 @@ use reth_primitives::{
     BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, B256,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
-    HeaderProvider, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
+    providers::BlockchainProvider, providers::ConsensusProvider, BlockHashReader, BlockReader,
+    CanonStateSubscriptions, HeaderProvider, HeaderSyncMode, ProviderFactory,
+    StageCheckpointReader,
 };
 use reth_prune::PrunerBuilder;
 use reth_revm::EvmProcessorFactory;
@@ -465,6 +466,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
             // ===============================================================================
             // extract the jwt secret from the args if possible
+
+            let consensus_db = ConsensusProvider::new(provider_factory.clone())?;
+
             let default_jwt_path = data_dir.jwt_path();
             let jwt_secret = self.rpc.auth_jwt_secret(default_jwt_path)?;
             let mut task = ConsensusBuilder::new(
@@ -474,6 +478,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 transaction_pool.clone(),
                 network.clone(),
                 clayer_consensus,
+                consensus_db,
             )
             .build();
             let pipeline_events = pipeline.events();
