@@ -477,7 +477,7 @@ where
         // away and the first full block should have been built by the time CL is requesting the
         // payload.
         self.metrics.inc_requested_empty_payload();
-        build_empty_payload(&self.client, self.config.clone())
+        Builder::build_empty_payload(&self.client, self.config.clone())
     }
 
     fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError> {
@@ -519,7 +519,7 @@ where
             let client = self.client.clone();
             let config = self.config.clone();
             self.executor.spawn_blocking(Box::pin(async move {
-                let res = build_empty_payload(&client, config);
+                let res = Builder::build_empty_payload(&client, config);
                 let _ = tx.send(res);
             }));
 
@@ -788,101 +788,101 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
         let _args = args;
         None
     }
-}
 
-/// Builds an empty payload without any transactions.
-fn build_empty_payload<Client, Attributes, Payload>(
-    client: &Client,
-    config: PayloadConfig<Attributes>,
-) -> Result<Payload, PayloadBuilderError>
-where
-    Client: StateProviderFactory,
-    Attributes: PayloadBuilderAttributes,
-    Payload: BuiltPayload,
-{
-    let extra_data = config.extra_data();
-    let PayloadConfig {
-        initialized_block_env,
-        parent_block,
-        attributes,
-        chain_spec,
-        initialized_cfg,
-        ..
-    } = config;
+    /// Builds an empty payload without any transactions.
+    fn build_empty_payload<Attributes, Payload>(
+        client: &Client,
+        config: PayloadConfig<Attributes>,
+    ) -> Result<Payload, PayloadBuilderError>
+    where
+        Client: StateProviderFactory,
+        Attributes: PayloadBuilderAttributes,
+        Payload: BuiltPayload,
+    {
+        let extra_data = config.extra_data();
+        let PayloadConfig {
+            initialized_block_env,
+            parent_block,
+            attributes,
+            chain_spec,
+            initialized_cfg,
+            ..
+        } = config;
 
-    debug!(target: "payload_builder", parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building empty payload");
+        debug!(target: "payload_builder", parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building empty payload");
 
-    let state = client.state_by_block_hash(parent_block.hash).map_err(|err| {
-        warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to get state for empty payload");
-        err
-    })?;
-    let mut db = State::builder()
-        .with_database_boxed(Box::new(StateProviderDatabase::new(&state)))
-        .with_bundle_update()
-        .build();
+        let state = client.state_by_block_hash(parent_block.hash).map_err(|err| {
+            warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to get state for empty payload");
+            err
+        })?;
+        let mut db = State::builder()
+            .with_database_boxed(Box::new(StateProviderDatabase::new(&state)))
+            .with_bundle_update()
+            .build();
 
-    let base_fee = initialized_block_env.basefee.to::<u64>();
-    let block_number = initialized_block_env.number.to::<u64>();
-    let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
+        let base_fee = initialized_block_env.basefee.to::<u64>();
+        let block_number = initialized_block_env.number.to::<u64>();
+        let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
 
-    // apply eip-4788 pre block contract call
-    pre_block_beacon_root_contract_call(
-        &mut db,
-        &chain_spec,
-        block_number,
-        &initialized_cfg,
-        &initialized_block_env,
-        &attributes,
-    ).map_err(|err| {
-        warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to apply beacon root contract call for empty payload");
-        err
-    })?;
-
-    let WithdrawalsOutcome { withdrawals_root, withdrawals } =
-        commit_withdrawals(&mut db, &chain_spec, attributes.timestamp(), attributes.withdrawals().clone()).map_err(|err| {
-            warn!(target: "payload_builder", parent_hash=%parent_block.hash,?err,  "failed to commit withdrawals for empty payload");
+        // apply eip-4788 pre block contract call
+        pre_block_beacon_root_contract_call(
+            &mut db,
+            &chain_spec,
+            block_number,
+            &initialized_cfg,
+            &initialized_block_env,
+            &attributes,
+        ).map_err(|err| {
+            warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to apply beacon root contract call for empty payload");
             err
         })?;
 
-    // merge all transitions into bundle state, this would apply the withdrawal balance changes and
-    // 4788 contract call
-    db.merge_transitions(BundleRetention::PlainState);
+        let WithdrawalsOutcome { withdrawals_root, withdrawals } =
+            commit_withdrawals(&mut db, &chain_spec, attributes.timestamp(), attributes.withdrawals().clone()).map_err(|err| {
+                warn!(target: "payload_builder", parent_hash=%parent_block.hash,?err,  "failed to commit withdrawals for empty payload");
+                err
+            })?;
 
-    // calculate the state root
-    let bundle_state =
-        BundleStateWithReceipts::new(db.take_bundle(), Receipts::new(), block_number);
-    let state_root = state.state_root(&bundle_state).map_err(|err| {
-        warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to calculate state root for empty payload");
-        err
-    })?;
+        // merge all transitions into bundle state, this would apply the withdrawal balance changes
+        // and 4788 contract call
+        db.merge_transitions(BundleRetention::PlainState);
 
-    let header = Header {
-        parent_hash: parent_block.hash,
-        ommers_hash: EMPTY_OMMER_ROOT_HASH,
-        beneficiary: initialized_block_env.coinbase,
-        state_root,
-        transactions_root: EMPTY_TRANSACTIONS,
-        withdrawals_root,
-        receipts_root: EMPTY_RECEIPTS,
-        logs_bloom: Default::default(),
-        timestamp: attributes.timestamp(),
-        mix_hash: attributes.prev_randao(),
-        nonce: BEACON_NONCE,
-        base_fee_per_gas: Some(base_fee),
-        number: parent_block.number + 1,
-        gas_limit: block_gas_limit,
-        difficulty: U256::ZERO,
-        gas_used: 0,
-        extra_data,
-        blob_gas_used: None,
-        excess_blob_gas: None,
-        parent_beacon_block_root: attributes.parent_beacon_block_root(),
-    };
+        // calculate the state root
+        let bundle_state =
+            BundleStateWithReceipts::new(db.take_bundle(), Receipts::new(), block_number);
+        let state_root = state.state_root(&bundle_state).map_err(|err| {
+            warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to calculate state root for empty payload");
+            err
+        })?;
 
-    let block = Block { header, body: vec![], ommers: vec![], withdrawals };
-    let sealed_block = block.seal_slow();
+        let header = Header {
+            parent_hash: parent_block.hash,
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
+            beneficiary: initialized_block_env.coinbase,
+            state_root,
+            transactions_root: EMPTY_TRANSACTIONS,
+            withdrawals_root,
+            receipts_root: EMPTY_RECEIPTS,
+            logs_bloom: Default::default(),
+            timestamp: attributes.timestamp(),
+            mix_hash: attributes.prev_randao(),
+            nonce: BEACON_NONCE,
+            base_fee_per_gas: Some(base_fee),
+            number: parent_block.number + 1,
+            gas_limit: block_gas_limit,
+            difficulty: U256::ZERO,
+            gas_used: 0,
+            extra_data,
+            blob_gas_used: None,
+            excess_blob_gas: None,
+            parent_beacon_block_root: attributes.parent_beacon_block_root(),
+        };
 
-    Ok(Payload::new(attributes.payload_id(), sealed_block, U256::ZERO))
+        let block = Block { header, body: vec![], ommers: vec![], withdrawals };
+        let sealed_block = block.seal_slow();
+
+        Ok(Payload::new(attributes.payload_id(), sealed_block, U256::ZERO))
+    }
 }
 
 /// Represents the outcome of committing withdrawals to the runtime database and post state.
