@@ -217,20 +217,18 @@ impl EthMessage {
 }
 
 trait EncodableExt {
-    fn encode_max(&self, size: usize) -> alloy_rlp::Result<Vec<u8>, P2PStreamError>;
+    fn encode_max(&self, size: usize) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error>;
 
     fn encode_truncate(&self, limit: usize) -> alloy_rlp::Result<Vec<u8>>;
 }
 
 impl<T: Encodable> EncodableExt for Vec<T> {
-    fn encode_max(&self, limit: usize) -> alloy_rlp::Result<Vec<u8>, P2PStreamError> {
+    fn encode_max(&self, limit: usize) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error> {
         let mut buffer = Vec::new();
         for item in self {
             item.encode(&mut buffer);
             if buffer.len() > limit {
-                return Err(P2PStreamError::HandshakeError(P2PHandshakeError::DecodeError(
-                    alloy_rlp::Error::Custom("Size limit exceeded"),
-                )));
+                return Err(alloy_rlp::Error::Custom("Size limit exceeded"));
             }
         }
         Ok(buffer)
