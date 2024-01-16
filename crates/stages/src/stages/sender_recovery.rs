@@ -1,11 +1,10 @@
 use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use itertools::Itertools;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
+    cursor::DbCursorRW,
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
-    DatabaseError, RawKey, RawTable, RawValue,
 };
 use reth_interfaces::consensus;
 use reth_primitives::{

@@ -20,7 +20,7 @@ use setup::StageRange;
 criterion_group! {
     name = benches;
     config = Criterion::default().with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
-    targets = senders
+    targets = transaction_lookup, account_hashing, senders, total_difficulty, merkle
 }
 criterion_main!(benches);
 
