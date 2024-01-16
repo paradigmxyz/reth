@@ -139,6 +139,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Execute block range
         let range_size = (start_block..=max_block).count();
         let mut cumulative_gas = 0;
+        let start = Instant::now();
 
         for (i, block_number) in (start_block..=max_block).enumerate() {
             let time = Instant::now();
@@ -165,7 +166,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 error: BlockErrorKind::Execution(error),
             })?;
 
-            execution_duration += time.elapsed();
+            let now = Instant::now();
+            execution_duration += now - time;
 
             // Gas metrics
             if let Some(metrics_tx) = &mut self.metrics_tx {
@@ -183,6 +185,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 block_number - start_block,
                 bundle_size_hint,
                 cumulative_gas,
+                now - start,
             ) {
                 break
             }
@@ -193,7 +196,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 debug!(
                     target: "sync::stages::execution",
                     ?block_number,
-                    percentage = %format!("{:.2}%", 100.0 * i as f64 / range_size as f64),
                     range = ?start_block..=max_block,
                     "Execution progress"
                 );
@@ -464,12 +466,14 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 /// current database transaction, which frees up memory.
 #[derive(Debug, Clone)]
 pub struct ExecutionStageThresholds {
-    /// The maximum number of blocks to process before the execution stage commits.
+    /// The maximum number of blocks to execute before the execution stage commits.
     pub max_blocks: Option<u64>,
-    /// The maximum amount of state changes to keep in memory before the execution stage commits.
+    /// The maximum number of state changes to keep in memory before the execution stage commits.
     pub max_changes: Option<u64>,
-    /// The maximum amount of cumultive gas used in the batch.
+    /// The maximum cumulative amount of gas to process before the execution stage commits.
     pub max_cumulative_gas: Option<u64>,
+    /// The maximum spent on blocks processing before the execution stage commits.
+    pub max_duration: Option<Duration>,
 }
 
 impl Default for ExecutionStageThresholds {
@@ -477,8 +481,10 @@ impl Default for ExecutionStageThresholds {
         Self {
             max_blocks: Some(500_000),
             max_changes: Some(5_000_000),
-            // 30M gas per block on 50k blocks
+            // 50k full blocks of 30M gas
             max_cumulative_gas: Some(30_000_000 * 50_000),
+            // 10 minutes
+            max_duration: Some(Duration::from_secs(10 * 60)),
         }
     }
 }
@@ -491,10 +497,12 @@ impl ExecutionStageThresholds {
         blocks_processed: u64,
         changes_processed: u64,
         cumulative_gas_used: u64,
+        elapsed: Duration,
     ) -> bool {
         blocks_processed >= self.max_blocks.unwrap_or(u64::MAX) ||
             changes_processed >= self.max_changes.unwrap_or(u64::MAX) ||
-            cumulative_gas_used >= self.max_cumulative_gas.unwrap_or(u64::MAX)
+            cumulative_gas_used >= self.max_cumulative_gas.unwrap_or(u64::MAX) ||
+            elapsed >= self.max_duration.unwrap_or(Duration::MAX)
     }
 }
 
@@ -524,6 +532,7 @@ mod tests {
                 max_blocks: Some(100),
                 max_changes: None,
                 max_cumulative_gas: None,
+                max_duration: None,
             },
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),
