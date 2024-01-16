@@ -2,7 +2,7 @@
 
 Start the node
 
-```text
+```bash
 $ reth node --help
 Usage: reth node [OPTIONS]
 
@@ -93,7 +93,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
 
-          [default: reth/<VERSION>-<SHA>/<ARCH>]
+          [default: reth/<VERSION>-<SHA>/<ARCH>
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
@@ -104,7 +104,7 @@ Networking:
           Do not persist peers.
 
       --nat <NAT>
-          NAT resolution method (any|none|upnp|publicip|extip:<IP>)
+          NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
 
           [default: any]
 
@@ -329,6 +329,9 @@ TxPool:
       --txpool.nolocals
           Flag to disable local transaction exemptions
 
+      --txpool.locals <LOCALS>
+          Flag to allow certain addresses as local
+
 Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder
@@ -384,6 +387,9 @@ Debug:
       --debug.hook-all
           Hook on every transaction in a block
 
+      --debug.engine-api-store <PATH>
+          The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location
+
 Database:
       --db.log-level <LOG_LEVEL>
           Database logging level. Levels higher than "notice" require a debug build
@@ -422,6 +428,36 @@ Pruning:
           Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored. This flag takes priority over pruning configuration in reth.toml
 
 Logging:
+      --log.stdout.format <FORMAT>
+          The format to use for logs written to stdout
+
+          [default: terminal]
+
+          Possible values:
+          - json:     Represents JSON formatting for logs. This format outputs log records as JSON objects, making it suitable for structured logging
+          - log-fmt:  Represents logfmt (key=value) formatting for logs. This format is concise and human-readable, typically used in command-line applications
+          - terminal: Represents terminal-friendly formatting for logs
+
+      --log.stdout.filter <FILTER>
+          The filter to use for logs written to stdout
+
+          [default: info]
+
+      --log.file.format <FORMAT>
+          The format to use for logs written to the log file
+
+          [default: terminal]
+
+          Possible values:
+          - json:     Represents JSON formatting for logs. This format outputs log records as JSON objects, making it suitable for structured logging
+          - log-fmt:  Represents logfmt (key=value) formatting for logs. This format is concise and human-readable, typically used in command-line applications
+          - terminal: Represents terminal-friendly formatting for logs
+
+      --log.file.filter <FILTER>
+          The filter to use for logs written to the log file
+
+          [default: debug]
+
       --log.file.directory <PATH>
           The path to put log files in
 
@@ -436,11 +472,6 @@ Logging:
           The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
 
           [default: 5]
-
-      --log.file.filter <FILTER>
-          The filter to use for logs written to the log file
-
-          [default: debug]
 
       --log.journald
           Write logs to journald
