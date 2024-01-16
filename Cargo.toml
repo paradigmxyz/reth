@@ -76,7 +76,7 @@ rust.unused_must_use = "deny"
 rust.rust_2018_idioms = "deny"
 
 [workspace.package]
-version = "0.1.0-alpha.14"
+version = "0.1.0-alpha.15"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
