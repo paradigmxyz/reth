@@ -55,10 +55,9 @@ impl CursorSubNode {
     /// Creates a new `CursorSubNode` from a key and an optional node.
     pub fn new(key: Nibbles, node: Option<BranchNodeCompact>) -> Self {
         // Find the first nibble that is set in the state mask of the node.
-        let nibble = node
-            .as_ref()
-            .filter(|n| n.root_hash.is_none())
-            .map_or(-1, |n| CHILD_INDEX_RANGE.clone().find(|i| n.state_mask.is_bit_set(*i)).unwrap() as i8);
+        let nibble = node.as_ref().filter(|n| n.root_hash.is_none()).map_or(-1, |n| {
+            CHILD_INDEX_RANGE.clone().find(|i| n.state_mask.is_bit_set(*i)).unwrap() as i8
+        });
         let full_key = full_key(key.clone(), nibble);
         CursorSubNode { key, node, nibble, full_key }
     }
