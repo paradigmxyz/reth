@@ -478,7 +478,9 @@ where
             loop {
                 match this.primary.from_primary.poll_next_unpin(cx) {
                     Poll::Ready(Some(msg)) => {
-                        this.inner.out_buffer.push_back(msg);
+                        if let Err(err) = this.inner.conn.start_send_unpin(msg) {
+                            return Poll::Ready(Some(Err(err.into())))
+                        }
                     }
                     Poll::Ready(None) => {
                         // primary closed
