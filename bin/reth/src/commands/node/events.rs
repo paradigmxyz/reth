@@ -19,9 +19,8 @@ use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::Interval;
 use tracing::{info, warn};
 
@@ -41,7 +40,7 @@ struct NodeState<DB> {
     /// The latest block reached by either pipeline or consensus engine.
     latest_block: Option<BlockNumber>,
     /// The time of the latest block seen by the pipeline
-    latest_block_time: Option<u64>
+    latest_block_time: Option<u64>,
 }
 
 impl<DB> NodeState<DB> {
@@ -375,9 +374,11 @@ where
                     );
                 }
             } else if let Some(latest_block) = this.state.latest_block {
-                let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+                let now =
+                    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
                 if now - this.state.latest_block_time.unwrap_or(0) > 60 {
-                    // Once we start receiving consensus nodes, don't emit status unless stalled for 1 minute
+                    // Once we start receiving consensus nodes, don't emit status unless stalled for
+                    // 1 minute
                     info!(
                         target: "reth::cli",
                         connected_peers = this.state.num_connected_peers(),

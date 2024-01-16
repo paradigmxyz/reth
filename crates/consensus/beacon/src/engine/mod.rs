@@ -43,7 +43,7 @@ use std::{
     task::{Context, Poll},
     time::{Duration, Instant},
 };
-use stopwatch::{Stopwatch};
+use stopwatch::Stopwatch;
 use tokio::sync::{
     mpsc,
     mpsc::{UnboundedReceiver, UnboundedSender},
@@ -1268,7 +1268,8 @@ where
         let status = match status {
             InsertPayloadOk::Inserted(BlockStatus::Valid) => {
                 latest_valid_hash = Some(block_hash);
-                self.listeners.notify(BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed));
+                self.listeners
+                    .notify(BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed));
                 PayloadStatusEnum::Valid
             }
             InsertPayloadOk::Inserted(BlockStatus::Accepted) => {
