@@ -15,7 +15,7 @@ BUILD_PATH = "target"
 ifeq ($(OS),Windows_NT)
     FEATURES ?=
 else
-    FEATURES ?= jemalloc,asm-keccak
+    FEATURES ?= jemalloc asm-keccak
 endif
 
 # Cargo profile for builds. Default is for local builds, CI uses an override.
