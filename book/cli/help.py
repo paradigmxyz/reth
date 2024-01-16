@@ -258,8 +258,6 @@ def preprocess_help(s: str):
     s = re.sub(r"default: reth/.*/(linux|macos|ios|freebsd|dragonfly|netbsd|openbsd|solaris|android|windows)", "default: reth/<VERSION>/<OS>", s)
     # Remove the commit SHA and architecture
     s = re.sub(r"default: reth/.*-[0-9A-Fa-f]{6,10}/.*", "default: reth/<VERSION>-<SHA>/<ARCH>", s)
-    # Replace lines with only spaces with just empty lines
-    s = re.sub(r"^\s+$", "", s, flags=re.MULTILINE)
 
     return s
 
