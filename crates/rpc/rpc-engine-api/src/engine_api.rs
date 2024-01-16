@@ -4,8 +4,8 @@ use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_node_api::{
-    validate_payload_timestamp, validate_version_specific_fields, EngineApiMessageVersion,
-    EngineTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
+    validate_payload_timestamp, BuiltPayload, EngineApiMessageVersion, EngineTypes,
+    PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
 };
 use reth_payload_builder::PayloadStore;
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
@@ -55,7 +55,6 @@ impl<Provider, EngineT> EngineApi<Provider, EngineT>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     EngineT: EngineTypes + 'static,
-    EngineT::PayloadBuilderAttributes: Send,
 {
     /// Create new instance of [EngineApi].
     pub fn new(
@@ -100,10 +99,10 @@ where
             PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
                 &payload, None,
             );
-        validate_version_specific_fields(
+        EngineT::validate_version_specific_fields(
             &self.inner.chain_spec,
             EngineApiMessageVersion::V1,
-            &payload_or_attrs,
+            payload_or_attrs,
         )?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
@@ -118,10 +117,10 @@ where
             PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
                 &payload, None,
             );
-        validate_version_specific_fields(
+        EngineT::validate_version_specific_fields(
             &self.inner.chain_spec,
             EngineApiMessageVersion::V2,
-            &payload_or_attrs,
+            payload_or_attrs,
         )?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
@@ -139,10 +138,10 @@ where
                 &payload,
                 Some(parent_beacon_block_root),
             );
-        validate_version_specific_fields(
+        EngineT::validate_version_specific_fields(
             &self.inner.chain_spec,
             EngineApiMessageVersion::V3,
-            &payload_or_attrs,
+            payload_or_attrs,
         )?;
 
         let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };
@@ -210,7 +209,7 @@ where
             .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| (*payload).clone().into_v1_payload())?)
+            .map(|payload| payload.into_v1_payload())?)
     }
 
     /// Returns the most recent version of the payload that is available in the corresponding
@@ -241,7 +240,7 @@ where
             .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| (*payload).clone().into_v2_payload())?)
+            .map(|payload| payload.into_v2_payload())?)
     }
 
     /// Returns the most recent version of the payload that is available in the corresponding
@@ -272,7 +271,7 @@ where
             .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| (*payload).clone().into_v3_payload())?)
+            .map(|payload| payload.into_v3_payload())?)
     }
 
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
@@ -471,9 +470,7 @@ where
 impl<Provider, EngineT> EngineApiServer<EngineT> for EngineApi<Provider, EngineT>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
-    EngineT: EngineTypes + 'static + Send,
-    EngineT::PayloadAttributes: Send,
-    EngineT::PayloadBuilderAttributes: Send,
+    EngineT: EngineTypes + 'static,
 {
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>

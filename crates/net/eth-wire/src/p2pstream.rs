@@ -556,6 +556,13 @@ where
     }
 
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
+        if item.len() > MAX_PAYLOAD_SIZE {
+            return Err(P2PStreamError::MessageTooBig {
+                message_size: item.len(),
+                max_size: MAX_PAYLOAD_SIZE,
+            })
+        }
+
         // ensure we have free capacity
         if !self.has_outgoing_capacity() {
             return Err(P2PStreamError::SendBufferFull)

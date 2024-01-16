@@ -484,11 +484,7 @@ where
     ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
         let transaction_id = TransactionId::new(self.pool.get_sender_id(sender), nonce);
 
-        self.inner()
-            .get_pool_data()
-            .all()
-            .get(&transaction_id)
-            .map(|tx| Arc::clone(&tx.transaction))
+        self.inner().get_pool_data().all().get(&transaction_id).map(|tx| tx.transaction.clone())
     }
 
     fn get_transactions_by_origin(

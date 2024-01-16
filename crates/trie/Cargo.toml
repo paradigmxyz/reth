@@ -16,11 +16,11 @@ workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-db.workspace = true
+revm.workspace = true
 
+# alloy
 alloy-rlp.workspace = true
-
-# tokio
-tokio = { workspace = true, default-features = false, features = ["sync"] }
+alloy-chains.workspace = true
 
 # tracing
 tracing.workspace = true

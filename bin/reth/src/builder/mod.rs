@@ -90,7 +90,7 @@ use reth_stages::{
 };
 use reth_tasks::{TaskExecutor, TaskManager};
 use reth_transaction_pool::{
-    blobstore::InMemoryBlobStore, EthTransactionPool, TransactionPool,
+    blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
     TransactionValidationTaskExecutor,
 };
 use revm_inspectors::stack::Hook;
@@ -542,7 +542,7 @@ impl NodeConfig {
         head: Head,
         executor: &TaskExecutor,
         data_dir: &ChainPath<DataDirPath>,
-    ) -> eyre::Result<EthTransactionPool<BlockchainProvider<DB, Tree>, InMemoryBlobStore>>
+    ) -> eyre::Result<EthTransactionPool<BlockchainProvider<DB, Tree>, DiskFileBlobStore>>
     where
         DB: Database + Unpin + Clone + 'static,
         Tree: BlockchainTreeEngine
@@ -551,7 +551,7 @@ impl NodeConfig {
             + Clone
             + 'static,
     {
-        let blob_store = InMemoryBlobStore::default();
+        let blob_store = DiskFileBlobStore::open(data_dir.blobstore_path(), Default::default())?;
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
             .with_head_timestamp(head.timestamp)
             .kzg_settings(self.kzg_settings()?)
@@ -1452,6 +1452,7 @@ mod tests {
         // spawn_test_node takes roughly 1 second per node, so this test takes ~4 seconds
         let num_nodes = 4;
 
+        // this reserves instances 3-6
         let starting_instance = 3;
         let mut handles = Vec::new();
         for i in 0..num_nodes {

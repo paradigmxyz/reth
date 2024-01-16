@@ -9,6 +9,7 @@ pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
     http_client::HeaderMap,
     server::{RpcModule, ServerHandle},
+    Methods,
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_node_api::EngineTypes;
@@ -247,12 +248,12 @@ impl AuthServerConfigBuilder {
 }
 
 /// Holds installed modules for the auth server.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AuthRpcModule {
     pub(crate) inner: RpcModule<()>,
 }
 
-// === impl TransportRpcModules ===
+// === impl AuthRpcModule ===
 
 impl AuthRpcModule {
     /// Create a new `AuthRpcModule` with the given `engine_api`.
@@ -269,6 +270,16 @@ impl AuthRpcModule {
     /// Get a reference to the inner `RpcModule`.
     pub fn module_mut(&mut self) -> &mut RpcModule<()> {
         &mut self.inner
+    }
+
+    /// Merge the given [Methods] in the configured authenticated methods.
+    ///
+    /// Fails if any of the methods in other is present already.
+    pub fn merge_auth_methods(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, jsonrpsee::core::error::Error> {
+        self.module_mut().merge(other.into()).map(|_| true)
     }
 
     /// Convenience function for starting a server

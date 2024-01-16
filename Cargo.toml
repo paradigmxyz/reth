@@ -76,7 +76,7 @@ rust.unused_must_use = "deny"
 rust.rust_2018_idioms = "deny"
 
 [workspace.package]
-version = "0.1.0-alpha.14"
+version = "0.1.0-alpha.15"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
@@ -164,14 +164,13 @@ revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_fr
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors" }
 
 # eth
+alloy-chains = {version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
 alloy-primitives = "0.6"
 alloy-dyn-abi = "0.6"
 alloy-sol-types = "0.6"
 alloy-rlp = "0.3"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", features = ["jsonrpsee-types"] }
-alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", features = [
-    "jsonrpsee-types",
-] }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy" }
+alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy" }
 alloy-trie = "0.2"
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
@@ -185,10 +184,11 @@ boa_engine = "0.17"
 boa_gc = "0.17"
 
 # misc
-aquamarine = "0.4"
+aquamarine = "0.5"
 bytes = "1.5"
 bitflags = "2.4"
 clap = "4"
+derive_more = "0.99.17"
 eyre = "0.6"
 tracing = "0.1.0"
 tracing-appender = "0.2"

@@ -211,9 +211,8 @@ impl<K: TransactionKind> MetricsHandler<K> {
                 warn!(
                     target: "storage::db::mdbx",
                     ?open_duration,
-                    ?backtrace,
                     %self.txn_id,
-                    "The database read transaction has been open for too long"
+                    "The database read transaction has been open for too long. Backtrace: {}", backtrace.to_string()
                 );
             }
         }

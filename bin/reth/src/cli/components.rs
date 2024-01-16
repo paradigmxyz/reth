@@ -8,7 +8,8 @@ use reth_provider::{
     EvmEnvProvider, StateProviderFactory,
 };
 use reth_rpc_builder::{
-    auth::AuthServerHandle, RethModuleRegistry, RpcServerHandle, TransportRpcModules,
+    auth::{AuthRpcModule, AuthServerHandle},
+    RethModuleRegistry, RpcServerHandle, TransportRpcModules,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -43,7 +44,7 @@ impl<T> FullProvider for T where
 
 /// The trait that is implemented for the Node command.
 pub trait RethNodeComponents: Clone + Send + Sync + 'static {
-    /// The Provider type that is provided by the not itself
+    /// The Provider type that is provided by the node itself
     type Provider: FullProvider;
     /// The transaction pool type
     type Pool: TransactionPool + Clone + Unpin + 'static;
@@ -75,11 +76,11 @@ pub trait RethNodeComponents: Clone + Send + Sync + 'static {
     }
 }
 
-/// Helper container to encapsulate [RethModuleRegistry] and [TransportRpcModules].
+/// Helper container to encapsulate [RethModuleRegistry],[TransportRpcModules] and [AuthRpcModule].
 ///
 /// This can be used to access installed modules, or create commonly used handlers like
 /// [reth_rpc::EthApi], and ultimately merge additional rpc handler into the configured transport
-/// modules [TransportRpcModules].
+/// modules [TransportRpcModules] as well as configured authenticated methods [AuthRpcModule].
 #[derive(Debug)]
 #[allow(clippy::type_complexity)]
 pub struct RethRpcComponents<'a, Reth: RethNodeComponents> {
@@ -98,6 +99,10 @@ pub struct RethRpcComponents<'a, Reth: RethNodeComponents> {
     /// This can be used to merge additional modules into the configured transports (http, ipc,
     /// ws). See [TransportRpcModules::merge_configured]
     pub modules: &'a mut TransportRpcModules,
+    /// Holds jwt authenticated rpc module.
+    ///
+    /// This can be used to merge additional modules into the configured authenticated methods
+    pub auth_module: &'a mut AuthRpcModule,
 }
 
 /// A Generic implementation of the RethNodeComponents trait.

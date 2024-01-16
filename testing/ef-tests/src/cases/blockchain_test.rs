@@ -59,7 +59,7 @@ impl Case for BlockchainTestCase {
     fn run(&self) -> Result<(), Error> {
         // If the test is marked for skipping, return a Skipped error immediately.
         if self.skip {
-            return Err(Error::Skipped);
+            return Err(Error::Skipped)
         }
 
         // Iterate through test cases, filtering by the network type to exclude specific forks.
