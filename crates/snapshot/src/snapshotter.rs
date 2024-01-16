@@ -17,7 +17,7 @@ pub type SnapshotterResult = Result<SnapshotTargets, SnapshotterError>;
 /// The snapshotter type itself with the result of [Snapshotter::run]
 pub type SnapshotterWithResult<DB> = (Snapshotter<DB>, SnapshotterResult);
 
-/// Snapshotting routine. Main snapshotting logic happens in [Snapshotter::run].
+/// Snapshotting routine. See [Snapshotter::run] for more detailed description.
 #[derive(Debug)]
 pub struct Snapshotter<DB> {
     /// Provider factory
@@ -74,56 +74,30 @@ impl<DB: Database> Snapshotter<DB> {
         Self { provider_factory, snapshot_provider }
     }
 
-    /// Run the snapshotter
+    /// Run the snapshotter.
+    ///
+    /// For each [Some] target in [SnapshotTargets], runs the snapshotting logic by opening a
+    /// _read-only_ database transaction, walking through corresponding tables and writing to static
+    /// files via [SnapshotProvider].
+    ///
+    /// NOTE: it doesn't delete the data from database, and the actual deleting (aka pruning) logic
+    /// is in `prune` crate.
     pub fn run(&self, targets: SnapshotTargets) -> SnapshotterResult {
-        let snapshot_provider = &self.snapshot_provider;
-
-        debug_assert!(
-            targets.is_contiguous_to_highest_snapshots(snapshot_provider.get_highest_snapshots())
-        );
+        debug_assert!(targets
+            .is_contiguous_to_highest_snapshots(self.snapshot_provider.get_highest_snapshots()));
 
         debug!(target: "snapshot", ?targets, "Snapshotter started");
         let start = Instant::now();
 
         if let Some(block_range) = targets.transactions.clone() {
-            debug!(target: "snapshot", ?block_range, "Snapshotting transactions");
-            let start = Instant::now();
-
-            let mut snapshot_writer =
-                snapshot_provider.writer(*block_range.start(), SnapshotSegment::Transactions)?;
-
-            for block in block_range.clone() {
-                // Create a new database transaction on every block to prevent long-lived read-only
-                // transactions
-                let provider = self.provider_factory.provider()?;
-
-                let Some(block_body_indices) = provider.block_body_indices(block)? else {
-                    // TODO(alexey): this shouldn't be possible, return a fatal error?
-                    continue
-                };
-
-                let mut transactions_cursor =
-                    provider.tx_ref().cursor_read::<tables::Transactions>()?;
-                let transactions_walker =
-                    transactions_cursor.walk_range(block_body_indices.tx_num_range())?;
-
-                for entry in transactions_walker {
-                    let (tx_number, transaction) = entry?;
-
-                    snapshot_writer.append_transaction(tx_number, transaction)?;
-                }
-                snapshot_writer.increment_block(SnapshotSegment::Transactions)?;
-            }
-
-            let elapsed = start.elapsed(); // TODO(alexey): track in metrics
-            debug!(target: "snapshot", ?block_range, ?elapsed, "Finished snapshotting transactions");
+            self.snapshot_transactions(block_range)?;
         }
 
         // TODO(alexey): snapshot headers and receipts
 
-        snapshot_provider.commit()?;
+        self.snapshot_provider.commit()?;
         if let Some(block_range) = targets.transactions.clone() {
-            snapshot_provider
+            self.snapshot_provider
                 .update_index(SnapshotSegment::Transactions, Some(*block_range.end()))?;
         }
 
@@ -131,6 +105,44 @@ impl<DB: Database> Snapshotter<DB> {
         debug!(target: "snapshot", ?targets, ?elapsed, "Snapshotter finished");
 
         Ok(targets)
+    }
+
+    /// Write transactions from database table [tables::Transactions] to static files with segment
+    /// [SnapshotSegment::Transactions] for the provided block range.
+    fn snapshot_transactions(&self, block_range: RangeInclusive<BlockNumber>) -> RethResult<()> {
+        debug!(target: "snapshot", ?block_range, "Snapshotting transactions");
+        let start = Instant::now();
+
+        let mut snapshot_writer =
+            self.snapshot_provider.writer(*block_range.start(), SnapshotSegment::Transactions)?;
+
+        for block in block_range.clone() {
+            // Create a new database transaction on every block to prevent long-lived read-only
+            // transactions
+            let provider = self.provider_factory.provider()?;
+
+            let Some(block_body_indices) = provider.block_body_indices(block)? else {
+                // TODO(alexey): this shouldn't be possible, return a fatal error?
+                continue
+            };
+
+            let mut transactions_cursor =
+                provider.tx_ref().cursor_read::<tables::Transactions>()?;
+            let transactions_walker =
+                transactions_cursor.walk_range(block_body_indices.tx_num_range())?;
+
+            for entry in transactions_walker {
+                let (tx_number, transaction) = entry?;
+
+                snapshot_writer.append_transaction(tx_number, transaction)?;
+            }
+            snapshot_writer.increment_block(SnapshotSegment::Transactions)?;
+        }
+
+        let elapsed = start.elapsed(); // TODO(alexey): track in metrics
+        debug!(target: "snapshot", ?block_range, ?elapsed, "Finished snapshotting transactions");
+
+        Ok(())
     }
 
     /// Returns a snapshot targets at the provided finalized block number.
