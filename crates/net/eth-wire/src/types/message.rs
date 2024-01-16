@@ -219,7 +219,7 @@ impl EthMessage {
 trait EncodableExt {
     fn encode_max(&self, size: usize) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error>;
 
-    fn encode_truncate(&self, limit: usize) -> alloy_rlp::Result<Vec<u8>>;
+    fn encode_truncate(&self, limit: usize) -> Vec<u8>;
 }
 
 impl<T: Encodable> EncodableExt for Vec<T> {
@@ -234,7 +234,7 @@ impl<T: Encodable> EncodableExt for Vec<T> {
         Ok(buffer)
     }
 
-    fn encode_truncate(&self, limit: usize) -> alloy_rlp::Result<Vec<u8>> {
+    fn encode_truncate(&self, limit: usize) -> Vec<u8> {
         let mut buffer = Vec::new();
         for item in self {
             item.encode(&mut buffer);
@@ -243,7 +243,7 @@ impl<T: Encodable> EncodableExt for Vec<T> {
                 break;
             }
         }
-        Ok(buffer)
+        buffer
     }
 }
 
