@@ -9,7 +9,6 @@ pub trait EvmEnvConfig {
     /// Additional metadata that can be used when filling the transaction environment.
     type TxMeta;
 
-    // TODO: get rid of cfg,figure it out
     /// Fill transaction environment from a [Transaction] and the given sender address.
     fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address, meta: Self::TxMeta)
     where
