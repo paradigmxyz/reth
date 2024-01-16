@@ -1,4 +1,25 @@
 //! Transactions management for the p2p network.
+//!
+//! `TransactionFetcher` is responsible for rate limiting and retry logic for fetching
+//! transactions. Upon receiving an announcement, the `TransactionFetcher` filters out hashes
+//! 1) for which the tx is already known and 2) unknown but the hash is already seen in a previous
+//! announcement. The hashes that remain from an announcement are then packed into a request with
+//! respect to the [`EthVersion`] of the announcement. Any hashes that don't fit into the request,
+//! are buffered in the `TransactionFetcher`. If on the other hand, space remains, hashes that
+//! the peer has previously announced are taken out of buffered hashes to fill the request up. The
+//! `GetPooledTransactions` request is then sent to the peer's session, this marks the peer as
+//! active with respect to `MAX_CONCURRENT_TX_REQUESTS_PER_PEER`.
+//!
+//! When a peer buffers hashes in the `TransactionsManager::on_new_pooled_transaction_hashes`
+//! pipeline, it is stored as fallback peer for those hashes. When [`TransactionsManager`] is
+//! polled, it checks if any of fallback peer is idle. If so, it packs a request for that peer,
+//! filling it from the buffered hashes. It does so until there are no more idle peers or until
+//! the hashes buffer is empty.
+//!
+//! If a [`GetPooledTransactions`] request resolves with an error, the hashes in the request are
+//! buffered with respect to `MAX_REQUEST_RETRIES_PER_TX_HASH`. So is the case if the request
+//! resolves with partial success, that is some of the requested hashes are not in the response,
+//! these are then buffered.
 
 use crate::{
     cache::{LruCache, LruMap},
