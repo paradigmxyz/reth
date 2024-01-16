@@ -5,13 +5,15 @@ use super::{
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
-use crate::{errors::EthStreamError, EthVersion, SharedTransactions};
+use crate::{
+    errors::{EthStreamError, P2PHandshakeError, P2PStreamError},
+    EthVersion, SharedTransactions,
+};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use reth_primitives::bytes::{Buf, BufMut};
-use std::{fmt::Debug, sync::Arc};
-
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use std::{fmt::Debug, sync::Arc};
 
 /// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
 // https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
@@ -215,16 +217,32 @@ impl EthMessage {
 }
 
 trait EncodableExt {
-    fn encode_max(&self, size: usize) -> alloy_rlp::Result<Vec<u8>, String>;
+    fn encode_max(&self, size: usize) -> alloy_rlp::Result<Vec<u8>, P2PStreamError>;
+
+    fn encode_truncate(&self, limit: usize) -> alloy_rlp::Result<Vec<u8>>;
 }
 
 impl<T: Encodable> EncodableExt for Vec<T> {
-    fn encode_max(&self, limit: usize) -> alloy_rlp::Result<Vec<u8>, String> {
+    fn encode_max(&self, limit: usize) -> alloy_rlp::Result<Vec<u8>, P2PStreamError> {
         let mut buffer = Vec::new();
         for item in self {
             item.encode(&mut buffer);
             if buffer.len() > limit {
-                return Err("Size limit exceeded".to_string());
+                return Err(P2PStreamError::HandshakeError(P2PHandshakeError::DecodeError(
+                    alloy_rlp::Error::Custom("Size limit exceeded"),
+                )));
+            }
+        }
+        Ok(buffer)
+    }
+
+    fn encode_truncate(&self, limit: usize) -> alloy_rlp::Result<Vec<u8>> {
+        let mut buffer = Vec::new();
+        for item in self {
+            item.encode(&mut buffer);
+            if buffer.len() > limit {
+                buffer.truncate(limit);
+                break;
             }
         }
         Ok(buffer)
