@@ -8,6 +8,7 @@ use crate::{
     NetworkEvents, NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
+use itertools::Itertools;
 use pin_project::pin_project;
 use reth_eth_wire::{
     EthVersion, GetPooledTransactions, NewPooledTransactionHashes, NewPooledTransactionHashes66,
@@ -589,7 +590,7 @@ where
 
         debug!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            hashes=format!("[{}]", hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
+            hashes=format!("[{:#}]", hashes.iter().format(", ")),
             "received previously unseen hashes in announcement from peer"
         );
 
@@ -598,7 +599,7 @@ where
         if !self.transaction_fetcher.is_idle(peer_id) {
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                hashes=format!("[{}]", hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
+                hashes=format!("[{:#}]", hashes.iter().format(", ")),
                 "buffering hashes announced by busy peer"
             );
 
@@ -618,7 +619,7 @@ where
 
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            hashes=format!("[{}]", hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
+            hashes=format!("[{:#}]", hashes.iter().format(", ")),
             "sending hashes in `GetPooledTransactions` request to peer's session"
         );
 
@@ -674,7 +675,7 @@ where
             trace!(
                 target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                hashes=format!("[{}]", hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
+                hashes=format!("[{:#}]", hashes.iter().format(", ")),
                 "requesting buffered hashes from idle peer"
             );
 
