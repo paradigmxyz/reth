@@ -2368,7 +2368,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         let mut next_tx_num = self
             .tx
-            .cursor_read::<tables::Transactions>()?
+            .cursor_read::<tables::TransactionBlock>()?
             .last()?
             .map(|(n, _)| n + 1)
             .unwrap_or_default();
