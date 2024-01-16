@@ -8,8 +8,9 @@
 //! "dependent satellite" protocols.
 
 use std::{
+    any,
     collections::VecDeque,
-    fmt,
+    error, fmt,
     future::Future,
     io,
     pin::Pin,
@@ -18,7 +19,7 @@ use std::{
 
 use crate::{
     capability::{Capability, SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
-    errors::{EthStreamError, P2PStreamError},
+    errors::{EthStreamError, MultiplexResult, P2PStreamError, SubprotocolError},
     CanDisconnect, DisconnectReason, EthStream, P2PStream, Status, UnauthedEthStream,
 };
 use bytes::{Bytes, BytesMut};
@@ -26,7 +27,7 @@ use futures::{pin_mut, Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt
 use reth_primitives::ForkFilter;
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::debug;
+use tracing::{debug, trace};
 
 /// A Stream and Sink type that wraps a raw rlpx stream [P2PStream] and handles message ID
 /// multiplexing.
@@ -443,60 +444,117 @@ where
     St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
     Primary: TryStream<Error = PrimaryErr> + Unpin,
     P2PStreamError: Into<PrimaryErr>,
+    <Primary as TryStream>::Ok: fmt::Debug,
+    PrimaryErr: error::Error,
 {
-    type Item = Result<Primary::Ok, Primary::Error>;
+    type Item = Result<Primary::Ok, MultiplexResult<Primary::Ok, PrimaryErr>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
+        // If any error is thrown, even though polling the primary stream returns ok, then
+        // `Poll::Ready(Some(Err(MultiplexResult))` is returned
+        let mut res = MultiplexResult::new();
+
         loop {
-            // first drain the primary stream
-            if let Poll::Ready(Some(msg)) = this.primary.st.try_poll_next_unpin(cx) {
-                return Poll::Ready(Some(msg))
+            /* ==================== SINK ==================== */
+
+            // 1. RECV + SINK primary
+            //
+            // advance primary out, sink all available bytes from primary directly to p2p stream
+            'recv_and_sink_bytes_from_primary: loop {
+                match this.inner.conn.poll_ready_unpin(cx) {
+                    Poll::Ready(Ok(())) => {
+                        // receive bytes from primary
+                        match this.primary.from_primary.poll_next_unpin(cx) {
+                            Poll::Ready(Some(msg)) => {
+                                trace!(target="net::eth-wire::multiplex",
+                                    msg=?msg,
+                                    "received bytes from primary stream"
+                                );
+
+                                trace!(target="net::eth-wire::multiplex",
+                                    msg=?msg,
+                                    "starting send of bytes from primary stream to p2p stream"
+                                );
+
+                                if let Err(err) = this.inner.conn.start_send_unpin(msg) {
+                                    // this is a fatal error for the satellite stream, return
+                                    // immediately
+                                    res.add_multiplex_error(err);
+                                    return Poll::Ready(Some(Err(res)))
+                                }
+                            }
+                            Poll::Ready(None) => {
+                                _ = this.inner.conn.poll_flush_unpin(cx);
+                                // channel to primary closed, primary probably closed, this likely
+                                // leads to the satellite not being polled anymore hence is
+                                // terminal, return immediately
+                                return Poll::Ready(None)
+                            }
+                            Poll::Pending => break 'recv_and_sink_bytes_from_primary,
+                        }
+                    }
+                    Poll::Ready(Err(e)) => {
+                        // this is a fatal error for the satellite stream, return immediately
+                        res.add_multiplex_error(e);
+                        return Poll::Ready(Some(Err(res)))
+                    }
+                    Poll::Pending => break 'recv_and_sink_bytes_from_primary,
+                }
+            }
+            // flush bytes from primary to p2p stream
+            if let Poll::Ready(Err(err)) = this.inner.conn.poll_flush_unpin(cx) {
+                res.add_multiplex_error(err);
+                return Poll::Ready(Some(Err(res)))
             }
 
-            let mut conn_ready = true;
+            trace!(
+                target = "net::eth-wire::multiplex",
+                "successfully sent bytes from primary stream to p2p stream"
+            );
+
+            // 2. DEQUEUE + SINK subprotocols
+            //
             // give each protocol stream a fair chance to advance
-            for _ in 0..this.inner.protocols.len() {
+            'dequeue_and_sink_bytes_from_subprotocols: for _ in 0..this.inner.protocols.len() {
                 match this.inner.conn.poll_ready_unpin(cx) {
                     Poll::Ready(_) => {
-                        if let Some(msg) = this.inner.out_buffer.pop_front() {
-                            if let Err(err) = this.inner.conn.start_send_unpin(msg) {
-                                return Poll::Ready(Some(Err(err.into())))
-                            }
-                        } else {
-                            break
-                        }
-                    }
-                    Poll::Pending => {
-                        conn_ready = false;
-                        break
-                    }
-                }
-            }
+                        let Some(msg) = this.inner.out_buffer.pop_front() else {
+                            break 'dequeue_and_sink_bytes_from_subprotocols
+                        };
 
-            // advance primary out
-            loop {
-                match this.primary.from_primary.poll_next_unpin(cx) {
-                    Poll::Ready(Some(msg)) => {
+                        trace!(target="net::eth-wire::multiplex",
+                            msg=?msg,
+                            "received bytes from subprotocols"
+                        );
+
                         if let Err(err) = this.inner.conn.start_send_unpin(msg) {
-                            return Poll::Ready(Some(Err(err.into())))
+                            // p2p sink error, fatal for satellite, return immediately
+                            res.add_multiplex_error(err);
+                            return Poll::Ready(Some(Err(res)))
                         }
                     }
-                    Poll::Ready(None) => {
-                        // primary closed
-                        return Poll::Ready(None)
-                    }
-                    Poll::Pending => break,
+                    Poll::Pending => break 'dequeue_and_sink_bytes_from_subprotocols,
                 }
             }
-
+            // flush bytes from primary to p2p stream
             if let Poll::Ready(Err(err)) = this.inner.conn.poll_flush_unpin(cx) {
-                return Poll::Ready(Some(Err(err.into())))
+                res.add_multiplex_error(err);
+                return Poll::Ready(Some(Err(res)))
             }
 
+            trace!(
+                target = "net::eth-wire::multiplex",
+                "successfully sent bytes from subprotocol streams to p2p stream"
+            );
+
+            // 3. RECV + QUEUE subprotocols
+            //
             // advance all satellites once
-            for idx in (0..this.inner.protocols.len()).rev() {
+            'recv_and_queue_bytes_from_subprotocols: for idx in
+                (0..this.inner.protocols.len()).rev()
+            {
                 let mut proto = this.inner.protocols.swap_remove(idx);
                 match proto.poll_next_unpin(cx) {
                     Poll::Ready(Some(msg)) => {
@@ -504,58 +562,112 @@ where
                         this.inner.protocols.push(proto);
                     }
                     Poll::Ready(None) => {
-                        debug!(
-                            capability=?proto.shared_cap(),
-                            "stream for capability handle has closed"
-                        );
+                        let cap = proto.shared_cap().capability().to_mut().clone();
+                        res.add_subprotocol_error(cap, SubprotocolError::HandleClosed);
                     }
                     Poll::Pending => this.inner.protocols.push(proto),
                 }
             }
 
-            let mut delegated = false;
-            loop {
-                // pull messages from connection
+            /* ==================== STREAM ==================== */
+
+            // 4. RECV + DELEGATE p2p
+            //
+            // receive bytes from p2p until a primary bytes are received
+            'receive_and_delegate_bytes_from_p2p_stream: loop {
+                // pull messages from p2p connection
                 match this.inner.conn.poll_next_unpin(cx) {
                     Poll::Ready(Some(Ok(msg))) => {
-                        delegated = true;
                         let offset = msg[0];
                         // delegate the multiplexed message to the correct protocol
-                        if let Some(cap) =
+                        let Some(cap) =
                             this.inner.conn.shared_capabilities().find_by_relative_offset(offset)
-                        {
-                            if cap == &this.primary.shared_cap {
-                                // delegate to primary
-                                let _ = this.primary.to_primary.send(msg);
-                                break // read messages until an eth message is received
-                            } else {
-                                // delegate to installed satellite if any
-                                for proto in &this.inner.protocols {
-                                    if proto.shared_cap == *cap {
-                                        proto.send_raw(msg);
-                                        break
-                                    }
+                        else {
+                            res.add_multiplex_error(P2PStreamError::UnknownReservedMessageId(
+                                offset,
+                            ));
+                            continue
+                        };
+
+                        if cap == &this.primary.shared_cap {
+                            trace!(
+                                target = "net::eth-wire::multiplex",
+                                primary=any::type_name::<Primary>(),
+                                msg=?msg,
+                                "received bytes from p2p for primary"
+                            );
+
+                            // delegate to primary
+                            if let Err(e) = this.primary.to_primary.send(msg) {
+                                res.add_multiplex_error(e);
+                            }
+                            // read messages until an eth message is received, so we break
+                            break 'receive_and_delegate_bytes_from_p2p_stream
+                        } else {
+                            // delegate to installed satellite if any
+                            for proto in &this.inner.protocols {
+                                if proto.shared_cap == *cap {
+                                    trace!(
+                                        target = "net::eth-wire::multiplex",
+                                        cap=?cap,
+                                        msg=?msg,
+                                        "received bytes from p2p for subprotocol"
+                                    );
+
+                                    proto.send_raw(msg);
+                                    break 'receive_and_delegate_bytes_from_p2p_stream
                                 }
                             }
-                        } else {
-                            return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(
-                                offset,
-                            )
-                            .into())))
                         }
                     }
-                    Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
+                    Poll::Ready(Some(Err(err))) => {
+                        // potentially fatal error for the satellite, add to list for caller
+                        // context to evaluate
+                        res.add_multiplex_error(err);
+                    }
                     Poll::Ready(None) => {
-                        // connection closed
+                        // p2p connection closed, terminal for satellite
                         return Poll::Ready(None)
                     }
-                    Poll::Pending => break,
+                    Poll::Pending => break 'receive_and_delegate_bytes_from_p2p_stream,
                 }
             }
 
-            if !conn_ready || (!delegated && this.inner.out_buffer.is_empty()) {
+            // 5. RECV + STREAM primary
+            //
+            // receive and return decoded bytes from primary stream
+            match this.primary.st.try_poll_next_unpin(cx) {
+                Poll::Ready(Some(Ok(msg))) => {
+                    trace!(
+                        target = "net::eth-wire::multiplex",
+                        primary = any::type_name::<Primary>(),
+                        msg=?msg,
+                        "received decoded primary message from primary"
+                    );
+
+                    if res.is_none() {
+                        return Poll::Ready(Some(Ok(msg)))
+                    }
+                    return Poll::Ready(Some(Err(res.set_primary_ok(msg))))
+                }
+                Poll::Ready(Some(Err(e))) => {
+                    return Poll::Ready(Some(Err(res.set_primary_error(e))))
+                }
+                Poll::Ready(None) => {
+                    // primary probably closed, this likely leads to the satellite not being polled
+                    // anymore hence is terminal, return immediately
+                    return Poll::Ready(None)
+                }
+                Poll::Pending => (),
+            }
+
+            // todo: combine steps 2 and 3 and eliminate buffer
+            if !this.inner.conn.poll_ready_unpin(cx).is_ready() || this.inner.out_buffer.is_empty()
+            {
                 return Poll::Pending
             }
+
+            return Poll::Ready(Some(Err(res)))
         }
     }
 }

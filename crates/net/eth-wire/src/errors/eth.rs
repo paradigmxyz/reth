@@ -1,18 +1,21 @@
 //! Error handling for (`EthStream`)[crate::EthStream]
 
 use crate::{
-    errors::{MuxDemuxError, P2PStreamError},
+    errors::{MultiplexResult, MuxDemuxError, P2PStreamError},
     version::ParseVersionError,
-    DisconnectReason, EthMessageID, EthVersion,
+    DisconnectReason, EthMessage, EthMessageID, EthVersion,
 };
 use alloy_chains::Chain;
 use reth_primitives::{GotExpected, GotExpectedBoxed, ValidationError, B256};
-use std::io;
+use std::{io, sync::Arc};
 
 /// Errors when sending/receiving messages
 #[derive(thiserror::Error, Debug)]
 
 pub enum EthStreamError {
+    /// Error of the underlying satellite.
+    #[error(transparent)]
+    MultiplexError(#[from] MultiplexResult<EthMessage, Arc<EthStreamError>>),
     #[error(transparent)]
     /// Error of the underlying P2P connection.
     P2PStreamError(#[from] P2PStreamError),
