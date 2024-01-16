@@ -9,7 +9,7 @@ use reth_basic_payload_builder::{
     BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, PayloadBuilder,
 };
 use reth_node_api::EngineTypes;
-use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_payload_builder::{EthBuiltPayload, PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
@@ -137,7 +137,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
-        Engine: EngineTypes + 'static,
+        Engine: EngineTypes<BuiltPayload = EthBuiltPayload> + 'static,
         Builder: PayloadBuilder<
                 Reth::Pool,
                 Reth::Provider,
@@ -327,7 +327,7 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
-        Engine: EngineTypes + 'static,
+        Engine: EngineTypes<BuiltPayload = EthBuiltPayload> + 'static,
         Builder: PayloadBuilder<
                 Reth::Pool,
                 Reth::Provider,
