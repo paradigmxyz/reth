@@ -26,10 +26,10 @@ use reth_provider::{
 };
 use reth_revm::{
     database::{StateProviderDatabase, SubState},
-    tracing::{
-        js::{JsDbRequest, JsInspector},
-        FourByteInspector, TracingInspector, TracingInspectorConfig,
-    },
+};
+use revm_inspectors::tracing::{
+    js::{JsDbRequest, JsInspector,TransactionContext},
+    FourByteInspector, TracingInspector, TracingInspectorConfig,
 };
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
@@ -106,7 +106,7 @@ where
                     let tx = tx_env_with_recovered(&tx);
                     let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
                     let (result, state_changes) =
-                        this.trace_transaction(opts.clone(), env, at, &mut db).map_err(|err| {
+                        this.trace_transaction(opts.clone(), env, at, &mut db,None).map_err(|err| {
                             results.push(TraceResult::Error {
                                 error: err.to_string(),
                                 tx_hash: Some(tx_hash),
@@ -494,6 +494,7 @@ where
         env: Env,
         at: BlockId,
         db: &mut SubState<StateProviderBox>,
+        transaction_context: Option<TransactionContext>
     ) -> EthResult<(GethTrace, revm_primitives::State)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -558,7 +559,7 @@ where
                     // transaction because the service needs access to the committed state changes
                     let to_db_service = self.spawn_js_trace_service(at, Some(js_db))?;
 
-                    let mut inspector = JsInspector::new(code, config, to_db_service)?;
+                    let mut inspector = JsInspector::with_transaction_context(code, config, to_db_service,transaction_context)?;
                     let (res, env) = inspect(db, env, &mut inspector)?;
 
                     let state = res.state.clone();
