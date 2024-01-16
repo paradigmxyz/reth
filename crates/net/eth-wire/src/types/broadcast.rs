@@ -321,7 +321,7 @@ impl Decodable for NewPooledTransactionHashes68 {
                 expected: msg.hashes.len(),
                 got: msg.types.len(),
             })
-        } else if msg.hashes.len() == msg.sizes.len() {
+        } else if msg.hashes.len() != msg.sizes.len() {
             Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: msg.hashes.len(),
                 got: msg.sizes.len(),
