@@ -1,6 +1,6 @@
 use reth_primitives::{
     revm::env::{fill_block_env_with_coinbase, recover_header_signer},
-    Address, Chain, ChainSpec, Header, Transaction, TransactionSignedEcRecovered, U256,
+    Address, Chain, ChainSpec, Header, Transaction, U256,
 };
 use revm_primitives::{BlockEnv, CfgEnv, SpecId, TxEnv};
 
@@ -22,15 +22,6 @@ pub trait EvmEnvConfig {
         header: &Header,
         total_difficulty: U256,
     );
-
-    /// Fill transaction environment from [TransactionSignedEcRecovered].
-    fn fill_tx_env_with_recovered(
-        tx_env: &mut TxEnv,
-        transaction: &TransactionSignedEcRecovered,
-        meta: Self::TxMeta,
-    ) {
-        Self::fill_tx_env(tx_env, transaction.as_ref(), transaction.signer(), meta);
-    }
 
     /// Convenience function to call both [fill_cfg_env](EvmEnvConfig::fill_cfg_env) and
     /// [fill_block_env](EvmEnvConfig::fill_block_env).
