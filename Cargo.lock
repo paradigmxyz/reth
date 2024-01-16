@@ -253,8 +253,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
- "ethereum_ssz",
- "ethereum_ssz_derive",
  "itertools 0.12.0",
  "jsonrpsee-types",
  "proptest",
