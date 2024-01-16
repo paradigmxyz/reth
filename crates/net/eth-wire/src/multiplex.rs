@@ -501,6 +501,7 @@ where
                 match proto.poll_next_unpin(cx) {
                     Poll::Ready(Some(msg)) => {
                         this.inner.out_buffer.push_back(msg);
+                        this.inner.protocols.push(proto);
                     }
                     Poll::Ready(None) => {
                         debug!(
