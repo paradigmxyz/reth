@@ -16,7 +16,7 @@ mod builder {
         commit_withdrawals, is_better_payload, pre_block_beacon_root_contract_call, BuildArguments,
         BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
     };
-    use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
+    use reth_node_api::PayloadBuilderAttributes;
     use reth_payload_builder::{
         error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
     };
