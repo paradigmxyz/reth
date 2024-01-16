@@ -507,8 +507,6 @@ where
                             capability=?proto.shared_cap(),
                             "stream for capability handle has closed"
                         );
-
-                        continue
                     }
                     Poll::Pending => this.inner.protocols.push(proto),
                 }
@@ -534,6 +532,7 @@ where
                                 for proto in &this.inner.protocols {
                                     if proto.shared_cap == *cap {
                                         proto.send_raw(msg);
+                                        break
                                     }
                                 }
                             }
