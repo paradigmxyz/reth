@@ -657,9 +657,7 @@ where
     fn request_buffered_hashes(&mut self) {
         loop {
             let mut hashes = vec![];
-            let Some(peer_id) = self.pop_any_idle_peer(&mut hashes) else {
-                return;
-            };
+            let Some(peer_id) = self.pop_any_idle_peer(&mut hashes) else { return };
 
             debug_assert!(
                 self.peers.contains_key(&peer_id),
@@ -667,37 +665,34 @@ where
             );
 
             // fill the request with other buffered hashes that have been announced by the peer
-            if let Some(peer) = self.peers.get(&peer_id) {
-                let acc_eth68_size = self.transaction_fetcher.eth68_meta.get(&hashes[0]).copied();
-                self.transaction_fetcher.fill_request_for_peer(
-                    &mut hashes,
-                    peer_id,
-                    acc_eth68_size,
-                );
+            let Some(peer) = self.peers.get(&peer_id) else { return };
 
-                trace!(
-                    target: "net::tx",
+            let Some(hash) = hashes.first() else { return };
+            let acc_eth68_size = self.transaction_fetcher.eth68_meta.get(hash).copied();
+            self.transaction_fetcher.fill_request_for_peer(&mut hashes, peer_id, acc_eth68_size);
+
+            trace!(
+                target: "net::tx",
+                peer_id=format!("{peer_id:#}"),
+                hashes=format!("[{}]", hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
+                "requesting buffered hashes from idle peer"
+            );
+
+            // request the buffered missing transactions
+            let metrics = &self.metrics;
+            if let Some(failed_to_request_hashes) =
+                self.transaction_fetcher.request_transactions_from_peer(hashes, peer, || {
+                    metrics.egress_peer_channel_full.increment(1)
+                })
+            {
+                debug!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
-                    hashes=format!("[{}]", hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
-                    "requesting buffered hashes from idle peer"
+                    hashes=format!("[{}]", failed_to_request_hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
+                    "failed sending request to peer's session, buffering hashes"
                 );
 
-                // request the buffered missing transactions
-                let metrics = &self.metrics;
-                if let Some(failed_to_request_hashes) =
-                    self.transaction_fetcher.request_transactions_from_peer(hashes, peer, || {
-                        metrics.egress_peer_channel_full.increment(1)
-                    })
-                {
-                    debug!(target: "net::tx",
-                        peer_id=format!("{peer_id:#}"),
-                        hashes=format!("[{}]", failed_to_request_hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
-                        "failed sending request to peer's session, buffering hashes"
-                    );
-
-                    self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
-                    return
-                }
+                self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
+                return
             }
         }
     }
@@ -730,13 +725,14 @@ where
         };
 
         let peer_id = &idle_peer?;
+        let hash = hashes.first()?;
 
-        let (_, peers) = self.transaction_fetcher.unknown_hashes.get(&hashes[0])?;
+        let (_, peers) = self.transaction_fetcher.unknown_hashes.get(hash)?;
         // pop peer from fallback peers
         _ = peers.remove(peer_id);
         // pop hash that is loaded in request buffer from buffered hashes
         drop(buffered_hashes_iter);
-        self.transaction_fetcher.buffered_hashes.remove(&hashes[0]);
+        _ = self.transaction_fetcher.buffered_hashes.remove(hash);
 
         idle_peer
     }
@@ -1292,7 +1288,7 @@ impl TransactionFetcher {
 
         debug_assert!(
             self.active_peers.get(peer_id).is_some(),
-            "broken invariant `active_peers` and `inflight_requests`"
+            "broken invariant `active-peers` and `inflight-requests`"
         );
 
         let remove = || -> bool {
@@ -1344,9 +1340,8 @@ impl TransactionFetcher {
 
     /// Packages hashes for [`GetPooledTxRequest`] up to limit. Returns left over hashes.
     fn pack_hashes(&mut self, hashes: &mut Vec<TxHash>, peer_id: PeerId) -> Option<Vec<TxHash>> {
-        debug_assert!(!hashes.is_empty(), "`pack_hashes` called with empty request hash buffer");
-
-        if self.eth68_meta.get(&hashes[0]).is_some() {
+        let hash = hashes.first()?;
+        if self.eth68_meta.get(hash).is_some() {
             return self.pack_hashes_eth68(hashes, peer_id)
         }
         self.pack_hashes_eth66(hashes, peer_id).map(|left_over| left_over.collect())
@@ -1378,7 +1373,7 @@ impl TransactionFetcher {
     ) -> Result<bool, &'static str> {
         debug_assert!(
             self.eth68_meta.peek(&eth68_hash).is_some(),
-            "broken invariant `eth68_hash` and `eth68-meta`"
+            "broken invariant `eth68-hash` and `eth68-meta`"
         );
 
         if let Some(size) = self.eth68_meta.peek(&eth68_hash) {
@@ -1617,7 +1612,7 @@ impl TransactionFetcher {
                     }
                     true
                 }(),
-                "broken invariant `buffered_hashes` and `unknown_hashes`"
+                "broken invariant `buffered-hashes` and `unknown-hashes`"
             );
 
             // stores a new request future for the request
@@ -1649,7 +1644,7 @@ impl TransactionFetcher {
                 }
                 Some(acc_size) == acc_eth68_size
             },
-            "broken invariant `acc_eth68_size` and `hashes`"
+            "broken invariant `acc-eth68-size` and `hashes`"
         );
 
         for hash in self.buffered_hashes.iter() {
