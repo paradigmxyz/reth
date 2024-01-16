@@ -20,8 +20,8 @@ use reth_interfaces::{
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
-    hex, FromRecoveredPooledTransaction, PeerId, PooledTransactionsElement, TransactionSigned,
-    TxHash, B256,
+    FromRecoveredPooledTransaction, PeerId, PooledTransactionsElement, TransactionSigned, TxHash,
+    B256,
 };
 use reth_transaction_pool::{
     error::PoolResult, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
@@ -30,7 +30,6 @@ use reth_transaction_pool::{
 use schnellru::{ByLength, Unlimited};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
-    fmt::Write,
     num::NonZeroUsize,
     pin::Pin,
     sync::Arc,
@@ -548,7 +547,7 @@ where
         // get handle to peer's session, if the session is still active
         let Some(peer) = self.peers.get_mut(&peer_id) else {
             debug!(
-                peer_id=abbrev_hex(peer_id.as_ref()),
+                peer_id=format!("{peer_id:#}"),
                 msg=?msg,
                 "discarding announcement from inactive peer"
             );
@@ -589,8 +588,8 @@ where
         }
 
         debug!(target: "net::tx",
-            peer_id=abbrev_hex(peer_id.as_ref()),
-            hashes=abbrev_hex_hash_list(&hashes),
+            peer_id=format!("{peer_id:#}"),
+            hashes=format!("[{}]", hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
             "received previously unseen hashes in announcement from peer"
         );
 
@@ -598,8 +597,8 @@ where
         // fallback
         if !self.transaction_fetcher.is_idle(peer_id) {
             trace!(target: "net::tx",
-                peer_id=abbrev_hex(peer_id.as_ref()),
-                hashes=abbrev_hex_hash_list(&hashes),
+                peer_id=format!("{peer_id:#}"),
+                hashes=format!("[{}]", hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
                 "buffering hashes announced by busy peer"
             );
 
@@ -610,16 +609,16 @@ where
         // limit on the response (2MB)
         if let Some(surplus_hashes) = self.transaction_fetcher.pack_hashes(&mut hashes, peer_id) {
             trace!(target: "net::tx",
-                peer_id=abbrev_hex(peer_id.as_ref()),
-                surplus_hashes=abbrev_hex_hash_list(&surplus_hashes),
+                peer_id=format!("{peer_id:#}"),
+                surplus_hashes=format!("{surplus_hashes:#?}"),
                 "some hashes in announcement from peer didn't fit in `GetPooledTransactions` request, buffering surplus hashes"
             );
             self.transaction_fetcher.buffer_hashes(surplus_hashes, Some(peer_id));
         }
 
         trace!(target: "net::tx",
-            peer_id=abbrev_hex(peer_id.as_ref()),
-            hashes=abbrev_hex_hash_list(&hashes),
+            peer_id=format!("{peer_id:#}"),
+            hashes=format!("[{}]", hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
             "sending hashes in `GetPooledTransactions` request to peer's session"
         );
 
@@ -634,8 +633,8 @@ where
             })
         {
             debug!(target: "net::tx",
-                peer_id=abbrev_hex(peer_id.as_ref()),
-                hashes=%abbrev_hex_hash_list(&failed_to_request_hashes),
+                peer_id=format!("{peer_id:#}"),
+                hashes=format!("[{}]", failed_to_request_hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
                 "sending `GetPooledTransactions` request to peer's session failed, buffering hashes"
             );
             self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
@@ -678,8 +677,8 @@ where
 
                 trace!(
                     target: "net::tx",
-                    peer_id=abbrev_hex(peer_id.as_ref()),
-                    hashes=abbrev_hex_hash_list(&hashes),
+                    peer_id=format!("{peer_id:#}"),
+                    hashes=format!("[{}]", hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
                     "requesting buffered hashes from idle peer"
                 );
 
@@ -691,8 +690,8 @@ where
                     })
                 {
                     debug!(target: "net::tx",
-                        peer_id=abbrev_hex(peer_id.as_ref()),
-                        hashes=%abbrev_hex_hash_list(&failed_to_request_hashes),
+                        peer_id=format!("{peer_id:#}"),
+                        hashes=format!("[{}]", failed_to_request_hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
                         "failed sending request to peer's session, buffering hashes"
                     );
 
@@ -1456,7 +1455,7 @@ impl TransactionFetcher {
                 // fallback peer.
                 if *retries >= MAX_REQUEST_RETRIES_PER_TX_HASH {
                     warn!(target: "net::tx",
-                        hash=abbrev_hex(hash.as_ref()),
+                        hash=format!("{hash:#}"),
                         retries=retries,
                         "retry limit for `GetPooledTransactions` requests reached for hash, dropping hash"
                     );
@@ -1517,8 +1516,8 @@ impl TransactionFetcher {
             // vacant entry
             trace!(
                 target: "net::tx",
-                peer_id=abbrev_hex(peer_id.as_ref()),
-                hashes=abbrev_hex(hash.as_ref()),
+                peer_id=format!("{peer_id:#}"),
+                hash=format!("{hash:#}"),
                 "new hash seen in announcement by peer"
             );
 
@@ -1530,8 +1529,8 @@ impl TransactionFetcher {
             ).is_none() {
 
                 warn!(target: "net::tx",
-                    peer_id=abbrev_hex(peer_id.as_ref()),
-                    hashes=abbrev_hex(hash.as_ref()),
+                    peer_id=format!("{peer_id:#}"),
+                    hash=format!("{hash:#}"),
                     "failed to cache new announced hash from peer in schnellru::LruMap, dropping hash"
                 );
 
@@ -1558,8 +1557,8 @@ impl TransactionFetcher {
 
         if self.active_peers.len() as u32 >= MAX_CONCURRENT_TX_REQUESTS {
             debug!(target: "net::tx",
-                peer_id=abbrev_hex(peer_id.as_ref()),
-                hashes=abbrev_hex_hash_list(&new_announced_hashes),
+                peer_id=format!("{peer_id:#}"),
+                hashes=format!("[{}]", new_announced_hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
                 limit=MAX_CONCURRENT_TX_REQUESTS,
                 "limit for concurrent `GetPooledTransactions` requests reached, dropping request for hashes to peer"
             );
@@ -1568,8 +1567,8 @@ impl TransactionFetcher {
 
         let Some(inflight_count) = self.active_peers.get_or_insert(peer_id, || 0) else {
             warn!(target: "net::tx",
-                peer_id=abbrev_hex(peer_id.as_ref()),
-                hashes=abbrev_hex_hash_list(&new_announced_hashes),
+                peer_id=format!("{peer_id:#}"),
+                hashes=format!("[{}]", new_announced_hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
                 "failed to cache active peer in schnellru::LruMap, dropping request to peer"
             );
             return Some(new_announced_hashes)
@@ -1577,8 +1576,8 @@ impl TransactionFetcher {
 
         if *inflight_count >= MAX_CONCURRENT_TX_REQUESTS_PER_PEER {
             debug!(target: "net::tx",
-                peer_id=abbrev_hex(peer_id.as_ref()),
-                hashes=abbrev_hex_hash_list(&new_announced_hashes),
+                peer_id=format!("{peer_id:#}"),
+                hashes=format!("[{}]", new_announced_hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
                 limit=MAX_CONCURRENT_TX_REQUESTS_PER_PEER,
                 "limit for concurrent `GetPooledTransactions` requests per peer reached"
             );
@@ -1824,29 +1823,6 @@ pub enum NetworkTransactionEvent {
         /// The sender for responding to the request with a result of `PooledTransactions`.
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     },
-}
-
-// todo: standard for whole codebase
-fn write_abbrev_hex(w: &mut String, hash: &[u8]) {
-    let hex = hex::encode(hash);
-    write!(w, "0x{}..{}, ", &hex[0..4], &hex[hex.len() - 4..])
-        .expect("should write to abbreviated hex string")
-}
-
-fn abbrev_hex(hash: &[u8]) -> String {
-    let mut w = String::new();
-    write_abbrev_hex(&mut w, hash);
-    w
-}
-
-fn abbrev_hex_hash_list(list: &[TxHash]) -> String {
-    let mut w = String::new();
-    write!(&mut w, "[").expect("should write to abbreviated hex list string");
-    for item in list {
-        write_abbrev_hex(&mut w, item.as_ref())
-    }
-    write!(&mut w, "]").expect("should write to abbreviated hex list string");
-    w
 }
 
 #[cfg(test)]
