@@ -327,9 +327,9 @@ impl Decodable for NewPooledTransactionHashes68 {
                 expected: msg.hashes.len(),
                 got: msg.sizes.len(),
             })
-        } else {
-            Ok(msg)
         }
+
+        Ok(msg)
     }
 }
 
