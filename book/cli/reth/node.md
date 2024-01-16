@@ -93,7 +93,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
           
-          [default: reth/<VERSION>-<SHA>/<ARCH>
+          [default: reth/<VERSION>-<SHA>/<ARCH>]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
