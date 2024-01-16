@@ -51,7 +51,7 @@ pub enum TableType {
 }
 
 /// Number of tables that should be present inside database.
-pub const NUM_TABLES: usize = 26;
+pub const NUM_TABLES: usize = 27;
 
 /// The general purpose of this is to use with a combination of Tables enum,
 /// by implementing a `TableViewer` trait you can operate on db tables in an abstract way.
@@ -215,7 +215,8 @@ tables!([
             TxSenders,
             SyncStage,
             SyncStageProgress,
-            PruneCheckpoints
+            PruneCheckpoints,
+            ConsensusNumber
         ]
     ),
     (
@@ -451,6 +452,11 @@ table!(
     ( PruneCheckpoints ) PruneSegment | PruneCheckpoint
 );
 
+table!(
+    /// Stores the consensus number corresponding to a block hash.
+    ( ConsensusNumber ) BlockHash | BlockNumber
+);
+
 /// Alias Types
 
 /// List with transaction numbers.
@@ -485,6 +491,7 @@ mod tests {
         (TableType::Table, SyncStage::NAME),
         (TableType::Table, SyncStageProgress::NAME),
         (TableType::Table, PruneCheckpoints::NAME),
+        (TableType::Table, ConsensusNumber::NAME),
         (TableType::DupSort, PlainStorageState::NAME),
         (TableType::DupSort, AccountChangeSet::NAME),
         (TableType::DupSort, StorageChangeSet::NAME),

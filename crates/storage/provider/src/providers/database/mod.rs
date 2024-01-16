@@ -4,10 +4,10 @@ use crate::{
         SnapshotProvider,
     },
     traits::{BlockSource, ReceiptProvider},
-    BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, EvmEnvProvider,
-    HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode, ProviderError,
-    PruneCheckpointReader, StageCheckpointReader, StateProviderBox, TransactionVariant,
-    TransactionsProvider, WithdrawalsProvider,
+    BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, ConsensusNumberReader,
+    ConsensusNumberWriter, EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+    HeaderSyncMode, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::{db::LogLevel, provider::ProviderResult, RethError, RethResult};
@@ -138,8 +138,8 @@ impl<DB: Database> ProviderFactory<DB> {
     ) -> ProviderResult<StateProviderBox> {
         let provider = self.provider()?;
 
-        if block_number == provider.best_block_number().unwrap_or_default() &&
-            block_number == provider.last_block_number().unwrap_or_default()
+        if block_number == provider.best_block_number().unwrap_or_default()
+            && block_number == provider.last_block_number().unwrap_or_default()
         {
             return Ok(Box::new(LatestStateProvider::new(provider.into_tx())));
         }
@@ -493,6 +493,16 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
         segment: PruneSegment,
     ) -> ProviderResult<Option<PruneCheckpoint>> {
         self.provider()?.get_prune_checkpoint(segment)
+    }
+}
+
+impl<DB: Database> ConsensusNumberReader for ProviderFactory<DB> {
+    fn last_consensus_number(&self) -> ProviderResult<BlockNumber> {
+        self.provider()?.last_consensus_number()
+    }
+
+    fn consensus_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
+        self.provider()?.consensus_number(hash)
     }
 }
 

@@ -17,10 +17,10 @@ use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
     AccountChangeSet, AccountHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
-    BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnv, HashedAccount, HashedStorage,
-    HeaderNumbers, HeaderTD, Headers, PlainAccountState, PlainStorageState, PruneCheckpoints,
-    Receipts, StorageChangeSet, StorageHistory, StoragesTrie, SyncStage, SyncStageProgress, Tables,
-    TransactionBlock, Transactions, TxHashNumber, TxSenders,
+    BlockWithdrawals, Bytecodes, CanonicalHeaders, ConsensusNumber, DatabaseEnv, HashedAccount,
+    HashedStorage, HeaderNumbers, HeaderTD, Headers, PlainAccountState, PlainStorageState,
+    PruneCheckpoints, Receipts, StorageChangeSet, StorageHistory, StoragesTrie, SyncStage,
+    SyncStageProgress, Tables, TransactionBlock, Transactions, TxHashNumber, TxSenders,
 };
 use tracing::info;
 
@@ -139,6 +139,9 @@ impl Command {
                 }
                 Tables::PruneCheckpoints => {
                     find_diffs::<PruneCheckpoints>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::ConsensusNumber => {
+                    find_diffs::<ConsensusNumber>(primary_tx, secondary_tx, output_dir)?
                 }
             };
         }
@@ -362,12 +365,12 @@ where
     ) {
         // do not bother comparing if the key is already in the discrepancies map
         if self.discrepancies.contains_key(&key) {
-            return
+            return;
         }
 
         // do not bother comparing if the key is already in the extra elements map
         if self.extra_elements.contains_key(&key) {
-            return
+            return;
         }
 
         match (first, second) {
