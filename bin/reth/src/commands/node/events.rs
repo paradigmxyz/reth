@@ -21,6 +21,7 @@ use std::{
     task::{Context, Poll},
     time::{Duration, Instant},
 };
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::Interval;
 use tracing::{info, warn};
 
@@ -39,11 +40,13 @@ struct NodeState<DB> {
     current_stage: Option<CurrentStage>,
     /// The latest block reached by either pipeline or consensus engine.
     latest_block: Option<BlockNumber>,
+    /// The time of the latest block seen by the pipeline
+    latest_block_time: Option<u64>
 }
 
 impl<DB> NodeState<DB> {
     fn new(db: DB, network: Option<NetworkHandle>, latest_block: Option<BlockNumber>) -> Self {
-        Self { db, network, current_stage: None, latest_block }
+        Self { db, network, current_stage: None, latest_block, latest_block_time: None }
     }
 
     fn num_connected_peers(&self) -> usize {
@@ -170,17 +173,19 @@ impl<DB> NodeState<DB> {
                 info!(
                     number=block.number,
                     hash=?block.hash,
-                    txs=block.body.len(),
-                    gas=gas_fmt_buf.as_str(),
-                    gas_used=format!( "{:.2}%", block.header.header.gas_used as f32 * 100.0 / block.header.header.gas_limit as f32),
-                    base_fee=block.header.header.base_fee_per_gas.map(|g| format!("{:.2} gWei", g as f32 / 1.0e9)).unwrap_or_default(),
-                    blob_gas=block.header.header.blob_gas_used.map(|g| format!("{:} gWei", g)).unwrap_or_default(),
-                    excess_blob_gas=block.header.header.excess_blob_gas.map(|g| format!("{:} b", g)).unwrap_or_default(),
-                    ?elapsed,
-                    "Block added to canonical chain");
+                    num_connected_peers = self.num_connected_peers(),
+                    "Block added to canonical chain\ttxs={:} mgas={:.3} gas_pct={:.2}% base_fee_gwei={:.2} elapsed={:.2}s",
+                    block.body.len(),
+                    block.header.header.gas_used as f64 / 1.0E6,
+                    block.header.header.gas_used as f64 * 100.0 / block.header.header.gas_limit as f64,
+                    block.header.header.base_fee_per_gas.unwrap_or(0) as f64 / 1e9,
+                    elapsed.as_secs_f64()
+                    //TODO blob base fee and excess blob gas
+                );
             }
             BeaconConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
                 self.latest_block = Some(head.number);
+                self.latest_block_time = Some(head.timestamp);
 
                 info!(number=head.number, hash=?head.hash, ?elapsed, "Canonical chain committed");
             }
@@ -370,13 +375,17 @@ where
                     );
                 }
             } else if let Some(latest_block) = this.state.latest_block {
-                info!(
-                    target: "reth::cli",
-                    connected_peers = this.state.num_connected_peers(),
-                    %freelist,
-                    %latest_block,
-                    "Status"
-                );
+                let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+                if now - this.state.latest_block_time.unwrap_or(0) > 60 {
+                    // Once we start receiving consensus nodes, don't emit status unless stalled for 1 minute
+                    info!(
+                        target: "reth::cli",
+                        connected_peers = this.state.num_connected_peers(),
+                        %freelist,
+                        %latest_block,
+                        "Status"
+                    );
+                }
             } else {
                 info!(
                     target: "reth::cli",
