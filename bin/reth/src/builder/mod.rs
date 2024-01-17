@@ -1417,9 +1417,6 @@ mod tests {
         // this launches a test node with http
         let rpc_args = RpcServerArgs::default().with_http();
 
-        // NOTE: tests here manually set an instance number. The alternative would be to use an
-        // atomic counter. This works for `cargo test` but if tests would be run in `nextest` then
-        // they would become flaky. So new tests should manually set a unique instance number.
         let (handle, _manager) = spawn_node(NodeConfig::test().with_rpc(rpc_args)).await.unwrap();
 
         // call a function on the node
