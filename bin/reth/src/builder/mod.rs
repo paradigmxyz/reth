@@ -1525,7 +1525,8 @@ mod tests {
     async fn optimism_pre_canyon_withdrawals_invalid() {
         reth_tracing::init_test_tracing();
         use alloy_chains::Chain;
-        use jsonrpsee::http_client::HttpClient;
+        use assert_matches::assert_matches;
+        use jsonrpsee::{core::Error, http_client::HttpClient, types::error::INVALID_PARAMS_CODE};
         use reth_primitives::Genesis;
         use reth_rpc_api::EngineApiClient;
         use reth_rpc_types::engine::{
@@ -1585,6 +1586,7 @@ mod tests {
         )
         .await;
         let err = res.expect_err("pre-canyon engine call with withdrawals should fail");
+        assert_matches!(err, Error::Call(ref object) if object.code() == INVALID_PARAMS_CODE);
     }
 
     #[cfg(feature = "optimism")]
@@ -1592,7 +1594,8 @@ mod tests {
     async fn optimism_post_canyon_no_withdrawals_invalid() {
         reth_tracing::init_test_tracing();
         use alloy_chains::Chain;
-        use jsonrpsee::http_client::HttpClient;
+        use assert_matches::assert_matches;
+        use jsonrpsee::{core::Error, http_client::HttpClient, types::error::INVALID_PARAMS_CODE};
         use reth_primitives::Genesis;
         use reth_rpc_api::EngineApiClient;
         use reth_rpc_types::engine::{
@@ -1652,6 +1655,7 @@ mod tests {
         )
         .await;
         let err = res.expect_err("post-canyon engine call with no withdrawals should fail");
+        assert_matches!(err, Error::Call(ref object) if object.code() == INVALID_PARAMS_CODE);
     }
 
     #[cfg(feature = "optimism")]

@@ -5684,6 +5684,7 @@ dependencies = [
  "alloy-chains",
  "alloy-rlp",
  "aquamarine",
+ "assert_matches",
  "backon",
  "boyer-moore-magiclen",
  "clap",
