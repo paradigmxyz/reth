@@ -1,5 +1,4 @@
-use crate::{providers::SnapshotProviderRW, StateChanges, StateReverts};
-use dashmap::mapref::one::RefMut;
+use crate::{providers::SnapshotProviderRWRefMut, StateChanges, StateReverts};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     tables,
@@ -295,7 +294,7 @@ impl BundleStateWithReceipts {
     pub fn write_to_storage<TX: DbTxMut + DbTx>(
         self,
         tx: &TX,
-        mut snapshotter: Option<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>>,
+        mut snapshotter: Option<SnapshotProviderRWRefMut<'_>>,
         is_value_known: OriginalValuesKnown,
     ) -> ProviderResult<()> {
         let (plain_state, reverts) = self.bundle.into_plain_state_and_reverts(is_value_known);

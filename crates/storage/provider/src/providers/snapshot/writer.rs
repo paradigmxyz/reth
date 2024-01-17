@@ -10,7 +10,7 @@ use reth_primitives::{
 use std::{ops::Deref, path::PathBuf, sync::Arc};
 
 /// Mutable reference to a dashmap element of [`SnapshotProviderRW`].
-pub type SnapshotProviderRefMut<'a> = RefMut<'a, SnapshotSegment, SnapshotProviderRW<'static>>;
+pub type SnapshotProviderRWRefMut<'a> = RefMut<'a, SnapshotSegment, SnapshotProviderRW<'static>>;
 
 #[derive(Debug)]
 /// Extends `SnapshotProvider` with writing capabilities

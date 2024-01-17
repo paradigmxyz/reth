@@ -1,10 +1,13 @@
-use super::{LoadedJar, SnapshotJarProvider, SnapshotProviderRW, BLOCKS_PER_SNAPSHOT};
+use super::{
+    LoadedJar, SnapshotJarProvider, SnapshotProviderRW, SnapshotProviderRWRefMut,
+    BLOCKS_PER_SNAPSHOT,
+};
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
     ReceiptProvider, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
     WithdrawalsProvider,
 };
-use dashmap::{mapref::one::RefMut, DashMap};
+use dashmap::DashMap;
 use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
@@ -406,13 +409,13 @@ pub trait SnapshotWriter {
         &self,
         block: BlockNumber,
         segment: SnapshotSegment,
-    ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>>;
+    ) -> ProviderResult<SnapshotProviderRWRefMut<'_>>;
 
     /// Returns a mutable reference to a [`SnapshotProviderRW`] of the latest [`SnapshotSegment`].
     fn latest_writer(
         &self,
         segment: SnapshotSegment,
-    ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>>;
+    ) -> ProviderResult<SnapshotProviderRWRefMut<'_>>;
 
     /// Commits all changes of all [`SnapshotProviderRW`] of all [`SnapshotSegment`].
     fn commit(&self) -> ProviderResult<()>;
@@ -423,7 +426,7 @@ impl SnapshotWriter for Arc<SnapshotProvider> {
         &self,
         block: BlockNumber,
         segment: SnapshotSegment,
-    ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>> {
+    ) -> ProviderResult<SnapshotProviderRWRefMut<'_>> {
         if let Some(writer) = self.writers.get_mut(&segment) {
             Ok(writer)
         } else {
@@ -435,7 +438,7 @@ impl SnapshotWriter for Arc<SnapshotProvider> {
     fn latest_writer(
         &self,
         segment: SnapshotSegment,
-    ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>> {
+    ) -> ProviderResult<SnapshotProviderRWRefMut<'_>> {
         self.writer(self.get_highest_snapshot_block(segment).unwrap_or_default(), segment)
     }
 

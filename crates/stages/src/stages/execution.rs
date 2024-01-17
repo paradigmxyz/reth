@@ -18,7 +18,7 @@ use reth_primitives::{
     BlockNumber, Header, PruneModes, SnapshotSegment, U256,
 };
 use reth_provider::{
-    providers::{SnapshotProviderRefMut, SnapshotWriter},
+    providers::{SnapshotProviderRWRefMut, SnapshotWriter},
     BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, TransactionVariant,
 };
@@ -500,7 +500,7 @@ fn maybe_snapshotter<'a, 'b, DB: Database>(
     prune_modes: &PruneModes,
     provider: &'b DatabaseProviderRW<DB>,
     start_block: u64,
-) -> Result<Option<SnapshotProviderRefMut<'a>>, StageError>
+) -> Result<Option<SnapshotProviderRWRefMut<'a>>, StageError>
 where
     'b: 'a,
 {

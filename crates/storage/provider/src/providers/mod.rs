@@ -39,7 +39,7 @@ mod chain_info;
 mod database;
 mod snapshot;
 pub use snapshot::{
-    SnapshotJarProvider, SnapshotProvider, SnapshotProviderRW, SnapshotProviderRefMut,
+    SnapshotJarProvider, SnapshotProvider, SnapshotProviderRW, SnapshotProviderRWRefMut,
     SnapshotWriter,
 };
 mod state;
