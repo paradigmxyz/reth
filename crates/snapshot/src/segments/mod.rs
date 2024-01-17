@@ -31,8 +31,8 @@ pub trait Segment<DB: Database> {
     /// Returns the [`SnapshotSegment`].
     fn segment(&self) -> SnapshotSegment;
 
-    /// Snapshot data for the provided range. [SnapshotProvider] will handle the management, writing
-    /// and committing to files.
+    /// Snapshot data for the provided block range. [SnapshotProvider] will handle the management of
+    /// and writing to files.
     fn snapshot(
         &self,
         provider: DatabaseProviderRO<DB>,
@@ -40,8 +40,8 @@ pub trait Segment<DB: Database> {
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()>;
 
-    /// Create a snapshot file of data for the provided block range.
-    /// The `directory` parameter determines the snapshot file's save location.
+    /// Create a snapshot file of data for the provided block range. The `directory` parameter
+    /// determines the snapshot file's save location.
     fn create_snapshot_file(
         &self,
         provider: &DatabaseProviderRO<DB>,
