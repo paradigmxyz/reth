@@ -2,6 +2,7 @@ use crate::engine_api::{forkchoice_updated, forkchoice_updated_with_attributes, 
 use crate::{consensus::ClayerConsensusEngine, engine_api::http::HttpJsonRpc, timing, ClStorage};
 use alloy_primitives::B256;
 use futures_util::{future::BoxFuture, FutureExt};
+use rand::Rng;
 use reth_interfaces::clayer::ClayerConsensus;
 use reth_network::NetworkHandle;
 use reth_primitives::{hex, TransactionSigned};
@@ -110,6 +111,34 @@ where
 
             if let Some(data) = this.consensus_engine.pop_cache() {
                 info!(target:"consensus::cl","trace-consensus ========= received consensus: {}",hex::encode(data));
+            }
+
+            let mut rng = rand::thread_rng();
+            let cn = rng.gen();
+            let hash = B256::with_last_byte(cn);
+
+            match this.storages.save_consensus_number(hash, cn as u64) {
+                Ok(o) => {
+                    info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: {}-{}", cn, hash, cn);
+                    if o {
+                        info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: ture", cn);
+                    } else {
+                        info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: false", cn);
+                    }
+                }
+                Err(e) => {
+                    info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: error!", cn)
+                }
+            }
+
+            if this.storages.consensus_number(hash).is_ok() {
+                if let Some(num) = this.storages.consensus_number(hash).unwrap() {
+                    info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages get{}: {}-{}",cn, hash, num);
+                } else {
+                    info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages get{}: NOne", cn);
+                }
+            } else {
+                info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ received get{}: error!", cn);
             }
 
             if this.insert_task.is_none() {

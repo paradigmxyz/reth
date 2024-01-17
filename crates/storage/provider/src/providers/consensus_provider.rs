@@ -44,7 +44,9 @@ impl<DB> ConsensusNumberWriter for ConsensusProvider<DB>
 where
     DB: Database,
 {
-    fn save_consensus_number(&self, hash: B256, num: BlockNumber) -> ProviderResult<()> {
-        self.database.provider_rw()?.save_consensus_number(hash, num)
+    fn save_consensus_number(&self, hash: B256, num: BlockNumber) -> ProviderResult<bool> {
+        let provider = self.database.provider_rw()?;
+        provider.save_consensus_number(hash, num)?;
+        provider.commit()
     }
 }

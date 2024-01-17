@@ -2529,8 +2529,9 @@ impl<TX: DbTx> ConsensusNumberReader for DatabaseProvider<TX> {
 
 impl<TX: DbTxMut> ConsensusNumberWriter for DatabaseProvider<TX> {
     /// Save stage checkpoint.
-    fn save_consensus_number(&self, hash: B256, num: BlockNumber) -> ProviderResult<()> {
-        Ok(self.tx.put::<tables::ConsensusNumber>(hash, num)?)
+    fn save_consensus_number(&self, hash: B256, num: BlockNumber) -> ProviderResult<bool> {
+        self.tx.put::<tables::ConsensusNumber>(hash, num)?;
+        Ok(true)
     }
 }
 
