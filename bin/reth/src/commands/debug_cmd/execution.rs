@@ -136,6 +136,7 @@ impl Command {
                         max_blocks: None,
                         max_changes: None,
                         max_cumulative_gas: None,
+                        max_duration: None,
                     },
                     stage_conf
                         .merkle

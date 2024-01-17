@@ -205,6 +205,7 @@ impl Command {
                 max_blocks: Some(1),
                 max_changes: None,
                 max_cumulative_gas: None,
+                max_duration: None,
             },
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::all(),
