@@ -252,15 +252,26 @@ impl SnapshotProvider {
                 // block_start than our current static file.
                 if let Some(tx_range) = jar.user_header().tx_range() {
                     let tx_end = *tx_range.end();
-                    let block_range = jar.user_header().block_range().clone();
 
+                    // Current block range has the same block start as `fixed_range``, but block end
+                    // might be different if we are still filling this static file.
+                    let current_block_range = jar.user_header().block_range().clone();
+
+                    // Considering that `update_index` is called when we either append/truncate, we
+                    // are sure that we are handling the latest data points.
+                    //
+                    // Here we remove every entry of the index that has a block start higher or
+                    // equal than our current one. This is important in the case
+                    // that we prune a lot of rows resulting in a file (and thus
+                    // a higher block range) deletion.
                     tx_index
                         .entry(segment)
                         .and_modify(|index| {
-                            index.retain(|_, range| range.start() < fixed_range.start());
-                            index.insert(tx_end, block_range.clone());
+                            index
+                                .retain(|_, block_range| block_range.start() < fixed_range.start());
+                            index.insert(tx_end, current_block_range.clone());
                         })
-                        .or_insert_with(|| BTreeMap::from([(tx_end, block_range)]));
+                        .or_insert_with(|| BTreeMap::from([(tx_end, current_block_range)]));
                 }
 
                 // Update the cached provider.
