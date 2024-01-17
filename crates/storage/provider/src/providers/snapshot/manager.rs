@@ -262,6 +262,13 @@ impl SnapshotProvider {
                             index.insert(tx_end, block_range.clone());
                         })
                         .or_insert_with(|| BTreeMap::from([(tx_end, block_range)]));
+                } else if let Some(1) = tx_index.get(&segment).map(|index| index.len()) {
+                    // Only happens if we unwind all the txes/receipts from the first static file.
+                    // Should only happen in test scenarios.
+                    if matches!(segment, SnapshotSegment::Receipts | SnapshotSegment::Transactions)
+                    {
+                        tx_index.remove(&segment);
+                    }
                 }
 
                 // Update the cached provider.
