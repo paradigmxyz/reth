@@ -126,17 +126,18 @@ impl SnapshotProvider {
         // If we have a path, then get the block range from its name.
         // Otherwise, check `self.available_snapshots`
         let block_range = match path {
-            Some(path) => {
-                SnapshotSegment::parse_filename(path.file_name().ok_or_else(|| {
-                    ProviderError::MissingSnapshotPath(segment, path.to_path_buf())
-                })?)
-                .and_then(|(parsed_segment, block_range)| {
-                    if parsed_segment == segment {
-                        return Some(block_range)
-                    }
-                    None
-                })
-            }
+            Some(path) => SnapshotSegment::parse_filename(
+                &path
+                    .file_name()
+                    .ok_or_else(|| ProviderError::MissingSnapshotPath(segment, path.to_path_buf()))?
+                    .to_string_lossy(),
+            )
+            .and_then(|(parsed_segment, block_range)| {
+                if parsed_segment == segment {
+                    return Some(block_range)
+                }
+                None
+            }),
             None => fn_range(),
         };
 

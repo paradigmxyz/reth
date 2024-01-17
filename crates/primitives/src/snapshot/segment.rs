@@ -4,7 +4,7 @@ use crate::{
 };
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use std::{ffi::OsStr, ops::RangeInclusive, str::FromStr};
+use std::{ops::RangeInclusive, str::FromStr};
 use strum::{AsRefStr, EnumIter, EnumString};
 
 #[derive(
@@ -113,8 +113,8 @@ impl SnapshotSegment {
     /// # Note
     /// This function is tightly coupled with the naming convention defined in [`Self::filename`].
     /// Any changes in the filename format in `filename` should be reflected here.
-    pub fn parse_filename(name: &OsStr) -> Option<(Self, RangeInclusive<BlockNumber>)> {
-        let mut parts = name.to_str()?.split('_');
+    pub fn parse_filename(name: &str) -> Option<(Self, RangeInclusive<BlockNumber>)> {
+        let mut parts = name.split('_');
         if parts.next() != Some("snapshot") {
             return None
         }
@@ -337,13 +337,10 @@ mod tests {
                 assert_eq!(segment.filename(&block_range), filename);
             }
 
-            assert_eq!(
-                SnapshotSegment::parse_filename(OsStr::new(filename)),
-                Some((segment, block_range))
-            );
+            assert_eq!(SnapshotSegment::parse_filename(filename), Some((segment, block_range)));
         }
 
-        assert_eq!(SnapshotSegment::parse_filename(OsStr::new("snapshot_headers_2")), None);
-        assert_eq!(SnapshotSegment::parse_filename(OsStr::new("snapshot_headers_")), None);
+        assert_eq!(SnapshotSegment::parse_filename("snapshot_headers_2"), None);
+        assert_eq!(SnapshotSegment::parse_filename("snapshot_headers_"), None);
     }
 }
