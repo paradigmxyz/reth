@@ -1392,7 +1392,7 @@ impl TransactionFetcher {
 
     /// Returns `Ok(true)` if hash is included in request. If there is still space in the
     /// respective response but not enough for the tx of given hash, `Ok(false)` is returned.
-    /// Throws error if [`MAX_FULL_TRANSACTIONS_PACKET_BYTE_SIZE`] is reached.
+    /// Throws error if `MAX_FULL_TRANSACTIONS_PACKET_BYTE_SIZE` is reached.
     fn include_eth68_hash(
         &self,
         acc_size_response: &mut usize,
