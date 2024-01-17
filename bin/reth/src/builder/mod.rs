@@ -354,12 +354,6 @@ impl NodeConfig {
         self
     }
 
-    /// Set the node instance number
-    pub fn with_instance_number(mut self, instance: u16) -> Self {
-        self.instance = instance;
-        self
-    }
-
     /// Set the rollup args for the node
     #[cfg(feature = "optimism")]
     pub fn with_rollup(mut self, rollup: crate::args::RollupArgs) -> Self {
