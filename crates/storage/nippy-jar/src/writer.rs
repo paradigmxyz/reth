@@ -92,7 +92,7 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
         &mut self.jar.user_header
     }
 
-    /// Creates a [`NippyJarWriter`] from [`JarHolder`].
+    /// Creates a [`NippyJarWriter`] from [`CowJar`].
     fn new(mut jar: CowJar<'a, H>) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;

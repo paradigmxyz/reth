@@ -22,3 +22,6 @@ serde.workspace = true
 [dev-dependencies]
 # for examples
 reth-payload-builder.workspace = true
+
+[features]
+optimism = []

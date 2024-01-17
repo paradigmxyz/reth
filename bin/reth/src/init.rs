@@ -294,7 +294,7 @@ mod tests {
         let address_with_storage = Address::with_last_byte(2);
         let storage_key = B256::with_last_byte(1);
         let chain_spec = Arc::new(ChainSpec {
-            chain: Chain::Id(1),
+            chain: Chain::from_id(1),
             genesis: Genesis {
                 alloc: HashMap::from([
                     (

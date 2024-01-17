@@ -146,7 +146,7 @@ impl Header {
     /// Returns an error if the extradata size is larger than 100 KB.
     pub fn ensure_extradata_valid(&self) -> Result<(), HeaderError> {
         if self.extra_data.len() > 100 * 1024 {
-            return Err(HeaderError::LargeExtraData);
+            return Err(HeaderError::LargeExtraData)
         }
         Ok(())
     }
@@ -158,7 +158,7 @@ impl Header {
     /// Returns an error if the block difficulty exceeds 80 bits.
     pub fn ensure_difficulty_valid(&self) -> Result<(), HeaderError> {
         if self.difficulty.bit_len() > 80 {
-            return Err(HeaderError::LargeDifficulty);
+            return Err(HeaderError::LargeDifficulty)
         }
         Ok(())
     }
@@ -482,9 +482,9 @@ impl Decodable for Header {
             receipts_root: Decodable::decode(buf)?,
             logs_bloom: Decodable::decode(buf)?,
             difficulty: Decodable::decode(buf)?,
-            number: U256::decode(buf)?.to::<u64>(),
-            gas_limit: U256::decode(buf)?.to::<u64>(),
-            gas_used: U256::decode(buf)?.to::<u64>(),
+            number: u64::decode(buf)?,
+            gas_limit: u64::decode(buf)?,
+            gas_used: u64::decode(buf)?,
             timestamp: Decodable::decode(buf)?,
             extra_data: Decodable::decode(buf)?,
             mix_hash: Decodable::decode(buf)?,
@@ -500,7 +500,7 @@ impl Decodable for Header {
             if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
                 buf.advance(1)
             } else {
-                this.base_fee_per_gas = Some(U256::decode(buf)?.to::<u64>());
+                this.base_fee_per_gas = Some(u64::decode(buf)?);
             }
         }
 
@@ -518,7 +518,7 @@ impl Decodable for Header {
             if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
                 buf.advance(1)
             } else {
-                this.blob_gas_used = Some(U256::decode(buf)?.to::<u64>());
+                this.blob_gas_used = Some(u64::decode(buf)?);
             }
         }
 
@@ -526,7 +526,7 @@ impl Decodable for Header {
             if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
                 buf.advance(1)
             } else {
-                this.excess_blob_gas = Some(U256::decode(buf)?.to::<u64>());
+                this.excess_blob_gas = Some(u64::decode(buf)?);
             }
         }
 
@@ -1036,5 +1036,13 @@ mod tests {
         let direction = HeadersDirection::Rising;
         direction.encode(&mut buf);
         assert_eq!(direction, HeadersDirection::decode(&mut buf.as_slice()).unwrap());
+    }
+
+    #[test]
+    fn test_decode_block_header_with_invalid_blob_gas_used() {
+        // This should error because the blob_gas_used is too large
+        let data = hex!("f90242a013a7ec98912f917b3e804654e37c9866092043c13eb8eab94eb64818e886cff5a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d4934794f97e180c050e5ab072211ad2c213eb5aee4df134a0ec229dbe85b0d3643ad0f471e6ec1a36bbc87deffbbd970762d22a53b35d068aa056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080830305988401c9c380808464c40d5499d883010c01846765746888676f312e32302e35856c696e7578a070ccadc40b16e2094954b1064749cc6fbac783c1712f1b271a8aac3eda2f232588000000000000000007a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421891122334455667788998401600000");
+        Header::decode(&mut data.as_slice())
+            .expect_err("blob_gas_used size should make this header decoding fail");
     }
 }

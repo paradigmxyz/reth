@@ -306,8 +306,8 @@ impl Command {
 
                 let hashed_state = state.hash_state_slow();
                 let (state_root, trie_updates) = state
-                    .state_root_calculator(provider_factory.provider()?.tx_ref(), &hashed_state)
-                    .root_with_updates()?;
+                    .hash_state_slow()
+                    .state_root_with_updates(provider_factory.provider()?.tx_ref())?;
 
                 if state_root != block_with_senders.state_root {
                     eyre::bail!(

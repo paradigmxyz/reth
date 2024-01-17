@@ -101,6 +101,14 @@ impl PendingBlockEnv {
                 continue
             }
 
+            if pool_tx.origin.is_private() {
+                // we don't want to leak any state changes made by private transactions, so we mark
+                // them as invalid here which removes all dependent transactions from the iterator
+                // before we can continue
+                best_txs.mark_invalid(&pool_tx);
+                continue
+            }
+
             // convert tx to a signed transaction
             let tx = pool_tx.to_recovered_transaction();
 

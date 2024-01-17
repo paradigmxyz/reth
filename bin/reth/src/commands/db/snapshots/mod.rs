@@ -174,7 +174,7 @@ impl Command {
         segment: impl Segment + Send + Sync,
     ) -> eyre::Result<()> {
         let dir = PathBuf::default();
-        let ranges = self.block_ranges(factory.last_block_number()?);
+        let ranges = self.block_ranges(factory.best_block_number()?);
 
         let mut created_snapshots = vec![];
 
