@@ -1,4 +1,4 @@
-use super::{SnapshotProvider, BLOCKS_PER_SNAPSHOT};
+use super::SnapshotProvider;
 use reth_codecs::Compact;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
@@ -33,7 +33,7 @@ impl<'a> SnapshotProviderRW<'a> {
         block: u64,
         reader: Arc<SnapshotProvider>,
     ) -> ProviderResult<(NippyJarWriter<'a, SegmentHeader>, PathBuf)> {
-        let block_range = find_fixed_range(BLOCKS_PER_SNAPSHOT, block);
+        let block_range = find_fixed_range(block);
         let (jar, path) =
             match reader.get_segment_provider_from_block(segment, *block_range.start(), None) {
                 Ok(provider) => {
@@ -88,7 +88,7 @@ impl<'a> SnapshotProviderRW<'a> {
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn increment_block(&mut self, segment: SnapshotSegment) -> ProviderResult<BlockNumber> {
         let last_block = self.writer.user_header().block_end();
-        let writer_range_end = *find_fixed_range(BLOCKS_PER_SNAPSHOT, last_block).end();
+        let writer_range_end = *find_fixed_range(last_block).end();
 
         // We have finished the previous snapshot and must freeze it
         if last_block + 1 > writer_range_end {
@@ -103,8 +103,7 @@ impl<'a> SnapshotProviderRW<'a> {
             match segment {
                 SnapshotSegment::Headers => todo!(),
                 SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
-                    let block_start =
-                        *find_fixed_range(BLOCKS_PER_SNAPSHOT, last_block + 1).start();
+                    let block_start = *find_fixed_range(last_block + 1).start();
                     *self.writer.user_header_mut() =
                         SegmentHeader::new(block_start..=block_start, None, segment)
                 }

@@ -195,7 +195,7 @@ impl SnapshotProvider {
             .get(&segment)
             .into_iter()
             .find(|max| **max >= block)
-            .map(|block| find_fixed_range(BLOCKS_PER_SNAPSHOT, *block))
+            .map(|block| find_fixed_range(*block))
     }
 
     /// Gets a snapshot segment's fixed block range from the provider inner
@@ -219,13 +219,14 @@ impl SnapshotProvider {
             }
             let tx_start = snapshots_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
             if tx_start <= tx {
-                return Some(find_fixed_range(BLOCKS_PER_SNAPSHOT, *block_range.end()))
+                return Some(find_fixed_range(*block_range.end()))
             }
         }
         None
     }
 
-    /// Updates the inner transaction and block indexes alongside the internal cached providers in `self.map`.
+    /// Updates the inner transaction and block indexes alongside the internal cached providers in
+    /// `self.map`.
     ///
     /// Any entry higher than `segment_max_block` will be deleted from the previous structures.
     pub fn update_index(
@@ -240,7 +241,7 @@ impl SnapshotProvider {
             Some(segment_max_block) => {
                 // Update the max block for the segment
                 max_block.insert(segment, segment_max_block);
-                let fixed_range = find_fixed_range(BLOCKS_PER_SNAPSHOT, segment_max_block);
+                let fixed_range = find_fixed_range(segment_max_block);
 
                 let jar = NippyJar::<SegmentHeader>::load(
                     &self.path.join(segment.filename(&fixed_range)),
@@ -330,7 +331,7 @@ impl SnapshotProvider {
         func: impl Fn(SnapshotJarProvider<'_>) -> ProviderResult<Option<T>>,
     ) -> ProviderResult<Option<T>> {
         if let Some(highest_block) = self.get_highest_snapshot_block(segment) {
-            let mut range = find_fixed_range(BLOCKS_PER_SNAPSHOT, highest_block);
+            let mut range = find_fixed_range(highest_block);
             while *range.end() > 0 {
                 if let Some(res) = func(self.get_or_create_jar_provider(segment, &range)?)? {
                     return Ok(Some(res))

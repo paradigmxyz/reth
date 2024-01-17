@@ -17,7 +17,7 @@ use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     snapshot::{
         find_fixed_range, Compression, Filters, InclusionFilter, PerfectHashingFunction,
-        SegmentConfig, SegmentHeader, BLOCKS_PER_SNAPSHOT,
+        SegmentConfig, SegmentHeader,
     },
     BlockNumber, SnapshotSegment,
 };
@@ -76,9 +76,7 @@ pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
 
     let mut nippy_jar = NippyJar::new(
         COLUMNS,
-        &directory.as_ref().join(
-            segment.filename(&find_fixed_range(BLOCKS_PER_SNAPSHOT, *block_range.end())).as_str(),
-        ),
+        &directory.as_ref().join(segment.filename(&find_fixed_range(*block_range.end())).as_str()),
         SegmentHeader::new(block_range, tx_range, segment),
     );
 
