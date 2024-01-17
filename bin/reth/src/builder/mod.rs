@@ -1455,7 +1455,7 @@ mod tests {
 
     #[cfg(feature = "optimism")]
     #[tokio::test]
-    async fn optimism_pre_canyon_withdrawals_invalid() {
+    async fn optimism_pre_canyon_no_withdrawals_valid() {
         reth_tracing::init_test_tracing();
         use alloy_chains::Chain;
         use jsonrpsee::http_client::HttpClient;
@@ -1502,6 +1502,73 @@ mod tests {
                 prev_randao: Default::default(),
                 suggested_fee_recipient: Default::default(),
                 // canyon is _not_ in the chain spec, so this should cause the engine call to fail
+                withdrawals: None,
+                parent_beacon_block_root: None,
+            },
+            no_tx_pool: None,
+            gas_limit: Some(1),
+            transactions: None,
+        };
+
+        // call the engine_forkchoiceUpdated function with payload attributes
+        let res = <HttpClient as EngineApiClient<OptimismEngineTypes>>::fork_choice_updated_v2(
+            &client,
+            forkchoice_state,
+            Some(payload_attributes),
+        )
+        .await;
+        res.expect("pre-canyon engine call should succeed");
+    }
+
+    #[cfg(feature = "optimism")]
+    #[tokio::test]
+    async fn optimism_pre_canyon_withdrawals_invalid() {
+        reth_tracing::init_test_tracing();
+        use alloy_chains::Chain;
+        use jsonrpsee::http_client::HttpClient;
+        use reth_primitives::Genesis;
+        use reth_rpc_api::EngineApiClient;
+        use reth_rpc_types::engine::{
+            ForkchoiceState, OptimismPayloadAttributes, PayloadAttributes,
+        };
+
+        // this launches a test node with http
+        let rpc_args = RpcServerArgs::default().with_http();
+
+        // create optimism genesis with canyon at block 2
+        let spec = ChainSpec::builder()
+            .chain(Chain::optimism_mainnet())
+            .genesis(Genesis::default())
+            .regolith_activated()
+            .build();
+
+        let genesis_hash = spec.genesis_hash();
+
+        // create node config
+        let node_config = NodeConfig::test().with_rpc(rpc_args).with_instance(8).with_chain(spec);
+
+        let (handle, _manager) = spawn_node(node_config).await.unwrap();
+
+        // call a function on the node
+        let client = handle.rpc_server_handles().auth.http_client();
+        let block_number = client.block_number().await.unwrap();
+
+        // it should be zero, since this is an ephemeral test node
+        assert_eq!(block_number, U256::ZERO);
+
+        // call the engine_forkchoiceUpdated function with payload attributes
+        let forkchoice_state = ForkchoiceState {
+            head_block_hash: genesis_hash,
+            safe_block_hash: genesis_hash,
+            finalized_block_hash: genesis_hash,
+        };
+
+        let payload_attributes = OptimismPayloadAttributes {
+            payload_attributes: PayloadAttributes {
+                timestamp: 1,
+                prev_randao: Default::default(),
+                suggested_fee_recipient: Default::default(),
+                // canyon is _not_ in the chain spec, so this should cause the engine call to fail
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: None,
             },
@@ -1518,5 +1585,139 @@ mod tests {
         )
         .await;
         assert!(res.is_err());
+    }
+
+    #[cfg(feature = "optimism")]
+    #[tokio::test]
+    async fn optimism_post_canyon_no_withdrawals_invalid() {
+        reth_tracing::init_test_tracing();
+        use alloy_chains::Chain;
+        use jsonrpsee::http_client::HttpClient;
+        use reth_primitives::Genesis;
+        use reth_rpc_api::EngineApiClient;
+        use reth_rpc_types::engine::{
+            ForkchoiceState, OptimismPayloadAttributes, PayloadAttributes,
+        };
+
+        // this launches a test node with http
+        let rpc_args = RpcServerArgs::default().with_http();
+
+        // create optimism genesis with canyon at block 2
+        let spec = ChainSpec::builder()
+            .chain(Chain::optimism_mainnet())
+            .genesis(Genesis::default())
+            .canyon_activated()
+            .build();
+
+        let genesis_hash = spec.genesis_hash();
+
+        // create node config
+        let node_config = NodeConfig::test().with_rpc(rpc_args).with_instance(9).with_chain(spec);
+
+        let (handle, _manager) = spawn_node(node_config).await.unwrap();
+
+        // call a function on the node
+        let client = handle.rpc_server_handles().auth.http_client();
+        let block_number = client.block_number().await.unwrap();
+
+        // it should be zero, since this is an ephemeral test node
+        assert_eq!(block_number, U256::ZERO);
+
+        // call the engine_forkchoiceUpdated function with payload attributes
+        let forkchoice_state = ForkchoiceState {
+            head_block_hash: genesis_hash,
+            safe_block_hash: genesis_hash,
+            finalized_block_hash: genesis_hash,
+        };
+
+        let payload_attributes = OptimismPayloadAttributes {
+            payload_attributes: PayloadAttributes {
+                timestamp: 1,
+                prev_randao: Default::default(),
+                suggested_fee_recipient: Default::default(),
+                // canyon is _not_ in the chain spec, so this should cause the engine call to fail
+                withdrawals: None,
+                parent_beacon_block_root: None,
+            },
+            no_tx_pool: None,
+            gas_limit: Some(1),
+            transactions: None,
+        };
+
+        // call the engine_forkchoiceUpdated function with payload attributes
+        let res = <HttpClient as EngineApiClient<OptimismEngineTypes>>::fork_choice_updated_v2(
+            &client,
+            forkchoice_state,
+            Some(payload_attributes),
+        )
+        .await;
+        assert!(res.is_err());
+    }
+
+    #[cfg(feature = "optimism")]
+    #[tokio::test]
+    async fn optimism_post_canyon_withdrawals_valid() {
+        reth_tracing::init_test_tracing();
+        use alloy_chains::Chain;
+        use jsonrpsee::http_client::HttpClient;
+        use reth_primitives::Genesis;
+        use reth_rpc_api::EngineApiClient;
+        use reth_rpc_types::engine::{
+            ForkchoiceState, OptimismPayloadAttributes, PayloadAttributes,
+        };
+
+        // this launches a test node with http
+        let rpc_args = RpcServerArgs::default().with_http();
+
+        // create optimism genesis with canyon at block 2
+        let spec = ChainSpec::builder()
+            .chain(Chain::optimism_mainnet())
+            .genesis(Genesis::default())
+            .canyon_activated()
+            .build();
+
+        let genesis_hash = spec.genesis_hash();
+
+        // create node config
+        let node_config = NodeConfig::test().with_rpc(rpc_args).with_instance(10).with_chain(spec);
+
+        let (handle, _manager) = spawn_node(node_config).await.unwrap();
+
+        // call a function on the node
+        let client = handle.rpc_server_handles().auth.http_client();
+        let block_number = client.block_number().await.unwrap();
+
+        // it should be zero, since this is an ephemeral test node
+        assert_eq!(block_number, U256::ZERO);
+
+        // call the engine_forkchoiceUpdated function with payload attributes
+        let forkchoice_state = ForkchoiceState {
+            head_block_hash: genesis_hash,
+            safe_block_hash: genesis_hash,
+            finalized_block_hash: genesis_hash,
+        };
+
+        let payload_attributes = OptimismPayloadAttributes {
+            payload_attributes: PayloadAttributes {
+                timestamp: 1,
+                prev_randao: Default::default(),
+                suggested_fee_recipient: Default::default(),
+                // canyon is _not_ in the chain spec, so this should cause the engine call to fail
+                withdrawals: Some(vec![]),
+                parent_beacon_block_root: None,
+            },
+            no_tx_pool: None,
+            gas_limit: Some(1),
+            transactions: None,
+        };
+
+        // call the engine_forkchoiceUpdated function with payload attributes
+        let res = <HttpClient as EngineApiClient<OptimismEngineTypes>>::fork_choice_updated_v2(
+            &client,
+            forkchoice_state,
+            Some(payload_attributes),
+        )
+        .await;
+        res.expect("post-canyon engine call should succeed");
     }
 }
