@@ -119,21 +119,23 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
 
+        // Get id for the next tx_num of zero if there are no transactions.
+        let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
+
         let snapshot_provider = provider.snapshot_provider.as_ref().expect("should exist");
         let mut snapshotter =
             snapshot_provider.writer(from_block, SnapshotSegment::Transactions)?;
 
         // Make sure Transactions static file is at the same height. If it's further, this
         // input execution was interrupted previously and we need to unwind the static file.
-        let snapshot_tx_num = snapshot_provider
+        let next_snapshot_tx_num = snapshot_provider
             .get_highest_snapshot_tx(SnapshotSegment::Transactions)
+            .map(|id| id + 1)
             .unwrap_or_default();
-        let db_tx_num = tx_block_cursor.last()?.unwrap_or_default().0;
 
-        match snapshot_tx_num.cmp(&db_tx_num) {
-            Ordering::Greater => {
-                snapshotter.prune_transactions(snapshot_tx_num - db_tx_num, from_block - 1)?
-            }
+        match next_snapshot_tx_num.cmp(&next_tx_num) {
+            Ordering::Greater => snapshotter
+                .prune_transactions(next_snapshot_tx_num - next_tx_num, from_block - 1)?,
             Ordering::Less => {
                 let last_block = snapshot_provider
                     .get_highest_snapshot_block(SnapshotSegment::Transactions)
@@ -147,9 +149,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             }
             Ordering::Equal => {}
         }
-
-        // Get id for the next tx_num of zero if there are no transactions.
-        let mut next_tx_num = db_tx_num + 1;
 
         debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, start_tx_id = next_tx_num, "Commencing sync");
 
@@ -669,7 +668,7 @@ mod tests {
                             snapshot_provider.writer(start, SnapshotSegment::Transactions)?;
 
                         let body = StoredBlockBodyIndices {
-                            first_tx_num: 1,
+                            first_tx_num: 0,
                             tx_count: progress.body.len() as u64,
                         };
 
