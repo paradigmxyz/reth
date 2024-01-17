@@ -98,7 +98,7 @@ pub fn init_db<P: AsRef<Path>>(path: P, log_level: Option<LogLevel>) -> eyre::Re
 
     let rpath = path.as_ref();
     if is_database_empty(rpath) {
-        std::fs::create_dir_all(rpath)
+        reth_primitives::fs::create_dir_all(rpath)
             .wrap_err_with(|| format!("Could not create database directory {}", rpath.display()))?;
         create_db_version_file(rpath)?;
     } else {
@@ -231,7 +231,7 @@ pub mod test_utils {
         let path = tempdir_path();
         let emsg = format!("{}: {:?}", ERROR_SNAPSHOTS_CREATION, path);
 
-        std::fs::create_dir_all(path.clone()).expect(&emsg);
+        reth_primitives::fs::create_dir_all(path.clone()).expect(&emsg);
         path
     }
 
