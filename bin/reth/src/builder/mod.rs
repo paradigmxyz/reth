@@ -1383,7 +1383,7 @@ impl NodeHandle {
 }
 
 /// A simple function to launch a node with the specified [NodeConfig], spawning tasks on the
-/// [TaskExecutor] constructed from [Handle::current].
+/// [TaskExecutor] constructed from [TaskManager::current].
 ///
 /// # Example
 /// ```
