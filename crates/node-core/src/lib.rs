@@ -1,3 +1,5 @@
+//! The core of the Ethereum node. Collection of utilities and libraries that are used by the node.
+
 #![allow(missing_docs)]
 #![allow(missing_debug_implementations)]
 #![allow(dead_code)]

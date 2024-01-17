@@ -33,7 +33,7 @@ impl RethCliExt for () {
 }
 
 /// A trait that allows for extending and customizing parts of the node command
-/// [NodeCommand](crate::commands::node::NodeCommand).
+/// [NodeCommand](https://github.com/paradigmxyz/reth/blob/main/bin/reth/src/commands/node/mod.rs).
 ///
 /// The functions are invoked during the initialization of the node command in the following order:
 ///
@@ -185,7 +185,7 @@ pub trait RethNodeCommandExt: RethNodeCommandConfig + fmt::Debug + clap::Args {}
 impl<T> RethNodeCommandExt for T where T: RethNodeCommandConfig + fmt::Debug + clap::Args {}
 
 /// The default configuration for the reth node command
-/// [Command](crate::commands::node::NodeCommand).
+/// [Command](https://github.com/paradigmxyz/reth/blob/main/bin/reth/src/commands/node/mod.rs).
 ///
 /// This is a convenience type for [NoArgs<()>].
 #[derive(Debug, Clone, Copy, Default, Args)]
@@ -208,7 +208,7 @@ impl<Conf: RethNodeCommandConfig> RethCliExt for NoArgsCliExt<Conf> {
 /// additional CLI arguments.
 ///
 /// Note: This type must be manually filled with a [RethNodeCommandConfig] manually before executing
-/// the [NodeCommand](crate::commands::node::NodeCommand).
+/// the [NodeCommand](https://github.com/paradigmxyz/reth/blob/main/bin/reth/src/commands/node/mod.rs).
 #[derive(Debug, Clone, Copy, Default, Args)]
 pub struct NoArgs<T = ()> {
     #[clap(skip)]
