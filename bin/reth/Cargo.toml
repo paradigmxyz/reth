@@ -156,6 +156,7 @@ optimism = [
     "reth-ethereum-payload-builder/optimism",
     "reth-node-api/optimism",
     "reth-node-builder/optimism",
+    "reth-node-core/optimism",
 ]
 
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices

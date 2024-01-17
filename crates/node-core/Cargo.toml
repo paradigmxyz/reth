@@ -16,7 +16,6 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
-reth-consensus-common.workspace = true
 reth-interfaces = { workspace = true, features = ["clap"] }
 reth-provider.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
@@ -33,19 +32,10 @@ reth-tasks.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-payload-builder.workspace = true
 reth-basic-payload-builder.workspace = true
-reth-nippy-jar.workspace = true
-reth-snapshot = { workspace = true, features = ["clap"] }
-reth-beacon-consensus.workspace = true
-reth-blockchain-tree.workspace = true
-reth-rpc-types.workspace = true
-reth-revm.workspace = true
+reth-optimism-payload-builder = { path = "../../crates/payload/optimism", optional = true }
 reth-ethereum-payload-builder.workspace = true
-reth-stages.workspace = true
-reth-downloaders.workspace = true
-reth-trie.workspace = true
-reth-node-builder.workspace = true
-reth-prune.workspace = true
-reth-rpc-api = { workspace = true, features = ["client"] }
+reth-consensus-common.workspace = true
+
 
 
 
@@ -112,7 +102,24 @@ reth-metrics.workspace = true
 metrics.workspace = true
 once_cell.workspace = true
 
+[features]
+optimism = [
+    "reth-primitives/optimism",
+    "reth-optimism-payload-builder/optimism",
+    "reth-interfaces/optimism",
+    "reth-rpc/optimism",
+    "reth-rpc-engine-api/optimism",
+    "reth-transaction-pool/optimism",
+    "reth-provider/optimism",
+    "reth-network/optimism",
+    "reth-network-api/optimism",
+    "reth-payload-builder/optimism",
+    "reth-optimism-payload-builder/optimism",
+    "reth-ethereum-payload-builder/optimism",
+    "reth-node-api/optimism",
+]
+
+
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "git2"] }
-
