@@ -544,13 +544,6 @@ impl TaskExecutor {
     }
 }
 
-impl Drop for TaskExecutor {
-    fn drop(&mut self) {
-        // log that the executor is dropped
-        debug!("dropping task executor");
-    }
-}
-
 impl TaskSpawner for TaskExecutor {
     fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
         self.metrics.inc_regular_tasks();
