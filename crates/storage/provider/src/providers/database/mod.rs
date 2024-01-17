@@ -617,7 +617,7 @@ mod tests {
         let mut rng = generators::rng();
         let block = random_block(&mut rng, 0, None, Some(3), None);
 
-        let tx_ranges: Vec<RangeInclusive<TxNumber>> = vec![0..=0, 1..=1, 2..=2, 0..=1, 1..=2];
+        let tx_ranges: Vec<RangeInclusive<TxNumber>> = vec![1..=1, 2..=2, 3..=3, 1..=2, 1..=3];
         for range in tx_ranges {
             let provider = factory.provider_rw().unwrap();
 
@@ -633,7 +633,7 @@ mod tests {
                     .clone()
                     .map(|tx_number| (
                         tx_number,
-                        block.body[tx_number as usize].recover_signer().unwrap()
+                        block.body[tx_number as usize - 1].recover_signer().unwrap()
                     ))
                     .collect())
             );
