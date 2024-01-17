@@ -166,8 +166,12 @@ impl<DB: Database> Snapshotter<DB> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{snapshotter::SnapshotTargets, Snapshotter};
-    use reth_interfaces::test_utils::{generators, generators::random_block_range};
+    use crate::{snapshotter::SnapshotTargets, Snapshotter, SnapshotterError};
+    use assert_matches::assert_matches;
+    use reth_interfaces::{
+        provider::ProviderError,
+        test_utils::{generators, generators::random_block_range},
+    };
     use reth_primitives::{snapshot::HighestSnapshots, B256};
     use reth_stages::test_utils::TestStageDB;
 
@@ -192,30 +196,34 @@ mod tests {
         let targets = snapshotter.get_snapshot_targets(1).expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets {
-                headers: Some(1..=1),
-                receipts: Some(1..=1),
-                transactions: Some(1..=1)
-            }
+            SnapshotTargets { headers: None, receipts: None, transactions: Some(1..=1) }
         );
-
-        snapshotter.run(targets).expect("run snapshotter");
+        assert_matches!(snapshotter.run(targets), Ok(_));
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
             HighestSnapshots { headers: None, receipts: None, transactions: Some(1) }
         );
 
-        let targets = snapshotter.get_snapshot_targets(5).expect("get snapshot targets");
+        let targets = snapshotter.get_snapshot_targets(3).expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets {
-                headers: Some(1..=5),
-                receipts: Some(1..=5),
-                transactions: Some(2..=5)
-            }
+            SnapshotTargets { headers: None, receipts: None, transactions: Some(2..=3) }
+        );
+        assert_matches!(snapshotter.run(targets), Ok(_));
+        assert_eq!(
+            snapshot_provider.get_highest_snapshots(),
+            HighestSnapshots { headers: None, receipts: None, transactions: Some(3) }
         );
 
-        snapshotter.run(targets).expect("run snapshotter");
+        let targets = snapshotter.get_snapshot_targets(4).expect("get snapshot targets");
+        assert_eq!(
+            targets,
+            SnapshotTargets { headers: None, receipts: None, transactions: Some(4..=4) }
+        );
+        assert_matches!(
+            snapshotter.run(targets),
+            Err(SnapshotterError::Provider(ProviderError::BlockBodyIndicesNotFound(4)))
+        );
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
             HighestSnapshots { headers: None, receipts: None, transactions: Some(3) }
