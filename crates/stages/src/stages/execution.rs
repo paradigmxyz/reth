@@ -536,14 +536,18 @@ where
     // Get next expected receipt number in static files
     let snapshot_provider = provider.snapshot_provider.as_ref().expect("should exist");
     let mut snapshotter = snapshot_provider.writer(start_block, SnapshotSegment::Receipts)?;
-    let next_snapshot_receipt_num =
-        snapshotter.get_highest_snapshot_tx(SnapshotSegment::Receipts).map(|num| num + 1).unwrap_or(0);
+    let next_snapshot_receipt_num = snapshotter
+        .get_highest_snapshot_tx(SnapshotSegment::Receipts)
+        .map(|num| num + 1)
+        .unwrap_or(0);
 
     // Check if we had any unexpected shutdown after committing to static files, but
     // NOT committing to database.
     match next_snapshot_receipt_num.cmp(&next_receipt_num) {
-        Ordering::Greater => snapshotter
-            .prune_receipts(next_snapshot_receipt_num - next_receipt_num, start_block.saturating_sub(1))?,
+        Ordering::Greater => snapshotter.prune_receipts(
+            next_snapshot_receipt_num - next_receipt_num,
+            start_block.saturating_sub(1),
+        )?,
         Ordering::Less => {
             let last_block = snapshot_provider
                 .get_highest_snapshot_block(SnapshotSegment::Receipts)
