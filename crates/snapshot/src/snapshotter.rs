@@ -24,6 +24,9 @@ pub struct Snapshotter<DB> {
     provider_factory: ProviderFactory<DB>,
     /// Snapshot provider
     snapshot_provider: Arc<SnapshotProvider>,
+    /// Pruning configuration for every part of the data that can be pruned. Set by user, and
+    /// needed in [Snapshotter] to prevent snapshotting the prunable data.
+    /// See [Snapshotter::get_snapshot_targets].
     prune_modes: PruneModes,
 }
 
