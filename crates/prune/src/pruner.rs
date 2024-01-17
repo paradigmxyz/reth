@@ -209,8 +209,10 @@ impl<DB: Database> Pruner<DB> {
             if let Some(to_block) =
                 snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Receipts)
             {
-                segments
-                    .push(Box::new(segments::Receipts::new(PruneMode::before_inclusive(to_block))))
+                segments.push(Box::new(segments::Receipts::new(
+                    PruneSegment::ReceiptsSnapshotter,
+                    PruneMode::before_inclusive(to_block),
+                )))
             }
         }
 

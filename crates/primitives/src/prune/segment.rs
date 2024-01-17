@@ -13,6 +13,8 @@ pub enum PruneSegment {
     TransactionLookup,
     /// Prune segment responsible for all rows in `Receipts` table.
     Receipts,
+    /// Prune segment responsible for all rows in `Receipts` table.
+    ReceiptsSnapshotter,
     /// Prune segment responsible for some rows in `Receipts` table filtered by logs.
     ContractLogs,
     /// Prune segment responsible for the `AccountChangeSet` and `AccountHistory` tables.
@@ -29,9 +31,11 @@ impl PruneSegment {
     /// Returns minimum number of blocks to left in the database for this segment.
     pub fn min_blocks(&self) -> u64 {
         match self {
-            Self::SenderRecovery | Self::TransactionLookup | Self::Headers | Self::Transactions => {
-                0
-            }
+            Self::SenderRecovery |
+            Self::TransactionLookup |
+            Self::ReceiptsSnapshotter |
+            Self::Headers |
+            Self::Transactions => 0,
             Self::Receipts | Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
                 MINIMUM_PRUNING_DISTANCE
             }

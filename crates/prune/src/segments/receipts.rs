@@ -10,18 +10,23 @@ use tracing::{instrument, trace};
 
 #[derive(Debug)]
 pub struct Receipts {
+    segment: PruneSegment,
     mode: PruneMode,
 }
 
 impl Receipts {
-    pub fn new(mode: PruneMode) -> Self {
-        Self { mode }
+    pub fn new(segment: PruneSegment, mode: PruneMode) -> Self {
+        debug_assert!(matches!(
+            segment,
+            PruneSegment::Receipts | PruneSegment::ReceiptsSnapshotter
+        ));
+        Self { segment, mode }
     }
 }
 
 impl<DB: Database> Segment<DB> for Receipts {
     fn segment(&self) -> PruneSegment {
-        PruneSegment::Receipts
+        self.segment
     }
 
     fn mode(&self) -> Option<PruneMode> {
@@ -140,7 +145,7 @@ mod tests {
                 to_block,
                 delete_limit: 10,
             };
-            let segment = Receipts::new(prune_mode);
+            let segment = Receipts::new_regular(prune_mode);
 
             let next_tx_number_to_prune = db
                 .factory

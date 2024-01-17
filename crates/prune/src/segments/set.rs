@@ -3,7 +3,7 @@ use crate::segments::{
     TransactionLookup,
 };
 use reth_db::database::Database;
-use reth_primitives::PruneModes;
+use reth_primitives::{PruneModes, PruneSegment};
 
 /// Collection of [Segment]. Thread-safe, allocated on the heap.
 #[derive(Debug)]
@@ -49,7 +49,7 @@ impl<DB: Database> SegmentSet<DB> {
 
         SegmentSet::default()
             // Receipts
-            .segment_opt(receipts.map(Receipts::new))
+            .segment_opt(receipts.map(|mode| Receipts::new(PruneSegment::Receipts, mode)))
             // Receipts by logs
             .segment_opt(
                 (!receipts_log_filter.is_empty())
