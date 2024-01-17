@@ -125,7 +125,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // We only append receipts to static files if there is no pruning or filtering configured
         // for receipts.
-        let snapshotter = maybe_snapshotter(&prune_modes, provider, start_block)?;
+        let snapshotter = maybe_snapshotter(&self.prune_modes, provider, start_block)?;
 
         // Build executor
         let mut executor =
