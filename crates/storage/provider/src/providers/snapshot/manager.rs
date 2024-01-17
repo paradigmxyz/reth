@@ -225,7 +225,7 @@ impl SnapshotProvider {
         None
     }
 
-    /// Updates the inner transaction and block index alongside the internal `self.map`.
+    /// Updates the inner transaction and block indexes alongside the internal cached providers in `self.map`.
     ///
     /// Any entry higher than `segment_max_block` will be deleted from the previous structures.
     pub fn update_index(
