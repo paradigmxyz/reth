@@ -156,25 +156,28 @@ impl<'a> SnapshotProviderRW<'a> {
                     )?;
                     self.writer = writer;
                     self.data_path = data_path;
-                }
 
-                NippyJar::<SegmentHeader>::load(&previous_snap)?.delete()?;
+                    NippyJar::<SegmentHeader>::load(&previous_snap)?.delete()?;
+                } else {
+                    // Update `SegmentHeader`
+                    self.writer.user_header_mut().prune(num_rows);
+                }
 
                 num_rows -= len;
             } else {
                 // Update `SegmentHeader`
                 self.writer.user_header_mut().prune(num_rows);
 
-                // Only Transactions and Receipts
-                if let Some(last_block) = last_block {
-                    let header = self.writer.user_header_mut();
-                    header.set_block_range(header.block_start()..=last_block);
-                }
-
                 // Truncate data
                 self.writer.prune_rows(num_rows as usize)?;
                 num_rows = 0;
             }
+        }
+
+        // Only Transactions and Receipts
+        if let Some(last_block) = last_block {
+            let header = self.writer.user_header_mut();
+            header.set_block_range(header.block_start()..=last_block);
         }
 
         // Commits new changes to disk.

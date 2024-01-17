@@ -237,12 +237,12 @@ impl SegmentHeader {
                 self.block_range =
                     *self.block_range.start()..=self.block_range.end().saturating_sub(num)
             }
-            SnapshotSegment::Transactions | SnapshotSegment::Receipts => match &mut self.tx_range {
-                Some(tx_range) => {
-                    *tx_range = *tx_range.start()..=tx_range.end().saturating_sub(num);
-                }
-                None => (),
-            },
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                self.tx_range = self.tx_range.as_ref().and_then(|tx_range| {
+                    let tx_end = tx_range.end().saturating_sub(num);
+                    (tx_end != 0).then(|| *tx_range.start()..=tx_end)
+                });
+            }
         };
     }
 
