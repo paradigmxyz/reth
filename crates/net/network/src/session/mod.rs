@@ -53,6 +53,9 @@ pub use handle::{
 use reth_eth_wire::multiplex::RlpxProtocolMultiplexer;
 pub use reth_network_api::{Direction, PeerInfo};
 
+/// Incoming connections counter.
+#[derive(Debug)]
+pub struct Counter(pub Arc<()>);
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
 pub struct SessionId(usize);
@@ -309,10 +312,12 @@ impl SessionManager {
         &mut self,
         stream: TcpStream,
         reason: DisconnectReason,
+        counter: &Counter,
     ) {
         let secret_key = self.secret_key;
 
         self.spawn(async move {
+            let counter_clone = Counter(Arc::clone(&counter.0));
             if let Ok(stream) = get_eciess_stream(stream, secret_key, Direction::Incoming).await {
                 let _ = UnauthedP2PStream::new(stream).send_disconnect(reason).await;
             }
