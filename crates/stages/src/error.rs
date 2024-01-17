@@ -84,7 +84,7 @@ pub enum StageError {
     },
     /// Unrecoverable inconsistency error related to a transaction number in a static file segment.
     #[error(
-        "inconsistent transaction number on {segment}. db: {database} static_file: {static_file}"
+        "inconsistent transaction number for {segment}. db: {database}, static_file: {static_file}"
     )]
     InconsistentTxNumber {
         /// Snapshot segment where this error was encountered.
