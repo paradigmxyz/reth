@@ -949,6 +949,13 @@ impl NodeConfig {
     fn adjust_instance_ports(&mut self) {
         self.rpc.adjust_instance_ports(self.instance);
     }
+
+    /// Sets networking and RPC ports to zero, causing the OS to choose random unused ports when
+    /// sockets are bound.
+    fn with_unused_ports(&mut self) {
+        self.rpc.with_unused_ports();
+        self.network.with_unused_ports();
+    }
 }
 
 impl Default for NodeConfig {
