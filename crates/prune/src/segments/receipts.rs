@@ -140,7 +140,7 @@ mod tests {
                 to_block,
                 delete_limit: 10,
             };
-            let segment = Receipts::new_regular(prune_mode);
+            let segment = Receipts::new(prune_mode);
 
             let next_tx_number_to_prune = db
                 .factory

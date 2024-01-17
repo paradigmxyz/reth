@@ -72,7 +72,9 @@ impl Default for PruneMode {
 
 #[cfg(test)]
 mod tests {
-    use crate::{prune::PruneMode, PruneSegment, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
+    use crate::{
+        prune::PruneMode, PrunePurpose, PruneSegment, PruneSegmentError, MINIMUM_PRUNING_DISTANCE,
+    };
     use assert_matches::assert_matches;
     use serde::Deserialize;
 
@@ -87,8 +89,8 @@ mod tests {
             // Nothing to prune
             (PruneMode::Distance(tip + 1), Ok(None)),
             (
-                PruneMode::Distance(segment.min_blocks() + 1),
-                Ok(Some(tip - (segment.min_blocks() + 1))),
+                PruneMode::Distance(segment.min_blocks(PrunePurpose::User) + 1),
+                Ok(Some(tip - (segment.min_blocks(PrunePurpose::User) + 1))),
             ),
             // Nothing to prune
             (PruneMode::Before(tip + 1), Ok(None)),
@@ -105,7 +107,7 @@ mod tests {
 
         for (index, (mode, expected_result)) in tests.into_iter().enumerate() {
             assert_eq!(
-                mode.prune_target_block(tip, segment),
+                mode.prune_target_block(tip, segment, PrunePurpose::User),
                 expected_result.map(|r| r.map(|b| (b, mode))),
                 "Test {} failed",
                 index + 1,
@@ -114,7 +116,7 @@ mod tests {
 
         // Test for a scenario where there are no minimum blocks and Full can be used
         assert_eq!(
-            PruneMode::Full.prune_target_block(tip, PruneSegment::Transactions),
+            PruneMode::Full.prune_target_block(tip, PruneSegment::Transactions, PrunePurpose::User),
             Ok(Some((tip, PruneMode::Full))),
         );
     }

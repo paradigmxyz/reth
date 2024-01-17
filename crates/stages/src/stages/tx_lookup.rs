@@ -506,7 +506,11 @@ mod tests {
                     if let Some((target_prunable_block, _)) = self
                         .prune_mode
                         .map(|mode| {
-                            mode.prune_target_block(input.target(), PruneSegment::TransactionLookup)
+                            mode.prune_target_block(
+                                input.target(),
+                                PruneSegment::TransactionLookup,
+                                PrunePurpose::User,
+                            )
                         })
                         .transpose()
                         .expect("prune target block for transaction lookup")
