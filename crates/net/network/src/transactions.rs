@@ -659,7 +659,7 @@ where
         {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                hashes=format!("[{}]", failed_to_request_hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
+                hashes=format!("[{:#}]", failed_to_request_hashes.iter().format(", ")),
                 "sending `GetPooledTransactions` request to peer's session failed, buffering hashes"
             );
             self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
@@ -712,7 +712,7 @@ where
             {
                 debug!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
-                    hashes=format!("[{}]", failed_to_request_hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
+                    hashes=format!("[{:#}]", failed_to_request_hashes.iter().format(", ")),
                     "failed sending request to peer's session, buffering hashes"
                 );
 
@@ -1590,7 +1590,7 @@ impl TransactionFetcher {
         if self.active_peers.len() as u32 >= MAX_CONCURRENT_TX_REQUESTS {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                hashes=format!("[{}]", new_announced_hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
+                hashes=format!("[{:#}]", new_announced_hashes.iter().format(", ")),
                 limit=MAX_CONCURRENT_TX_REQUESTS,
                 "limit for concurrent `GetPooledTransactions` requests reached, dropping request for hashes to peer"
             );
@@ -1600,7 +1600,7 @@ impl TransactionFetcher {
         let Some(inflight_count) = self.active_peers.get_or_insert(peer_id, || 0) else {
             warn!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                hashes=format!("[{}]", new_announced_hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
+                hashes=format!("[{:#}]", new_announced_hashes.iter().format(", ")),
                 "failed to cache active peer in schnellru::LruMap, dropping request to peer"
             );
             return Some(new_announced_hashes)
@@ -1609,7 +1609,7 @@ impl TransactionFetcher {
         if *inflight_count >= MAX_CONCURRENT_TX_REQUESTS_PER_PEER {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                hashes=format!("[{}]", new_announced_hashes.iter().fold(String::new(), |acc, &hash| acc + &format!("{hash:#},"))),
+                hashes=format!("[{:#}]", new_announced_hashes.iter().format(", ")),
                 limit=MAX_CONCURRENT_TX_REQUESTS_PER_PEER,
                 "limit for concurrent `GetPooledTransactions` requests per peer reached"
             );
