@@ -38,7 +38,10 @@ mod bundle_state_provider;
 mod chain_info;
 mod database;
 mod snapshot;
-pub use snapshot::{SnapshotJarProvider, SnapshotProvider, SnapshotProviderRW, SnapshotWriter};
+pub use snapshot::{
+    SnapshotJarProvider, SnapshotProvider, SnapshotProviderRW, SnapshotProviderRefMut,
+    SnapshotWriter,
+};
 mod state;
 use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
 pub use bundle_state_provider::BundleStateProvider;

@@ -2482,7 +2482,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         // Write state and changesets to the database.
         // Must be written after blocks because of the receipt lookup.
-        state.write_to_db(self.tx_ref(), OriginalValuesKnown::No)?;
+        state.write_to_storage(self.tx_ref(), None, OriginalValuesKnown::No)?;
         durations_recorder.record_relative(metrics::Action::InsertState);
 
         // insert hashes and intermediate merkle nodes

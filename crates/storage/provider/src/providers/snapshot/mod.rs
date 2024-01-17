@@ -5,7 +5,7 @@ mod jar;
 pub use jar::SnapshotJarProvider;
 
 mod writer;
-pub use writer::SnapshotProviderRW;
+pub use writer::{SnapshotProviderRW, SnapshotProviderRefMut};
 
 use reth_interfaces::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;

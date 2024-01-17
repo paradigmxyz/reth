@@ -15,13 +15,15 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    BlockNumber, Header, PruneModes, U256,
+    BlockNumber, Header, PruneModes, SnapshotSegment, U256,
 };
 use reth_provider::{
+    providers::{SnapshotProviderRefMut, SnapshotWriter},
     BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, TransactionVariant,
 };
 use std::{
+    cmp::Ordering,
     ops::RangeInclusive,
     time::{Duration, Instant},
 };
@@ -121,6 +123,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let max_block = input.target();
         let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
 
+        // We only append receipts to static files if there is no pruning or filtering configured
+        // for receipts.
+        let snapshotter = maybe_snapshotter(&prune_modes, provider, start_block)?;
+
         // Build executor
         let mut executor =
             self.executor_factory.with_state(LatestStateProviderRef::new(provider.tx_ref()));
@@ -192,7 +198,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         let time = Instant::now();
         // write output
-        state.write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)?;
+        state.write_to_storage(provider.tx_ref(), snapshotter, OriginalValuesKnown::Yes)?;
         let db_write_duration = time.elapsed();
         debug!(
             target: "sync::stages::execution",
@@ -483,6 +489,60 @@ impl ExecutionStageThresholds {
             changes_processed >= self.max_changes.unwrap_or(u64::MAX) ||
             cumulative_gas_used >= self.max_cumulative_gas.unwrap_or(u64::MAX)
     }
+}
+
+/// Checks if receipts have any filtering or pruning configured. If so, returns `None`. Otherwise,
+/// returns the snapshotter for saving receipts to static files.
+///
+/// Additionally, performs a consistency check between the expected highest receipt and the highest
+/// receipt in the static file to detect any unexpected shutdown.
+fn maybe_snapshotter<'a, 'b, DB: Database>(
+    prune_modes: &PruneModes,
+    provider: &'b DatabaseProviderRW<DB>,
+    start_block: u64,
+) -> Result<Option<SnapshotProviderRefMut<'a>>, StageError>
+where
+    'b: 'a,
+{
+    // If there is any receipt pruning or filtering, then don't use static files for Receipts.
+    if prune_modes.receipts.is_some() || !prune_modes.receipts_log_filter.is_empty() {
+        return Ok(None)
+    }
+
+    // Get expected highest receipt
+    let tx = provider.tx_ref();
+    let db_receipt_num = tx
+        .cursor_read::<tables::BlockBodyIndices>()?
+        .seek_exact(start_block)?
+        .map(|(_, value)| value.first_tx_num.saturating_sub(1))
+        .unwrap_or(0);
+
+    // Get expected highest receipt in static files
+    let snapshot_provider = provider.snapshot_provider.as_ref().expect("should exist");
+    let mut snapshotter = snapshot_provider.writer(start_block, SnapshotSegment::Receipts)?;
+    let snapshot_receipt_num =
+        snapshotter.get_highest_snapshot_tx(SnapshotSegment::Receipts).unwrap_or(0);
+
+    // Check if we had any unexpected shutdown after committing to static files, but
+    // NOT committing to database.
+    match snapshot_receipt_num.cmp(&db_receipt_num) {
+        Ordering::Greater => {
+            snapshotter.prune_receipts(snapshot_receipt_num - db_receipt_num, start_block - 1)?
+        }
+        Ordering::Less => {
+            let last_block = snapshot_provider
+                .get_highest_snapshot_block(SnapshotSegment::Receipts)
+                .unwrap_or(0);
+
+            let missing_block = Box::new(
+                tx.get::<tables::Headers>(last_block + 1)?.unwrap_or_default().seal_slow(),
+            );
+
+            return Err(StageError::MissingSnapshotData { block: missing_block })
+        }
+        Ordering::Equal => {}
+    }
+    Ok(Some(snapshotter))
 }
 
 #[cfg(test)]

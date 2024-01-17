@@ -203,7 +203,7 @@ impl Command {
                 .map_err(|_| BlockValidationError::SenderRecoveryError)?,
             None,
         )?;
-        block_state.write_to_db(provider_rw.tx_ref(), OriginalValuesKnown::No)?;
+        block_state.write_to_storage(provider_rw.tx_ref(), None, OriginalValuesKnown::No)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
         let storages = provider_rw.plain_state_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;
