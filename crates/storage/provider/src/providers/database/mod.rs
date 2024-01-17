@@ -586,10 +586,10 @@ mod tests {
                 Ok(_)
             );
             assert_matches!(
-                provider.transaction_sender(0), Ok(Some(sender))
+                provider.transaction_sender(1), Ok(Some(sender))
                 if sender == block.body[0].recover_signer().unwrap()
             );
-            assert_matches!(provider.transaction_id(block.body[0].hash), Ok(Some(0)));
+            assert_matches!(provider.transaction_id(block.body[0].hash), Ok(Some(1)));
         }
 
         {
@@ -605,7 +605,7 @@ mod tests {
                 ),
                 Ok(_)
             );
-            assert_matches!(provider.transaction_sender(0), Ok(None));
+            assert_matches!(provider.transaction_sender(1), Ok(None));
             assert_matches!(provider.transaction_id(block.body[0].hash), Ok(None));
         }
     }
