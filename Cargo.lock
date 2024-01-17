@@ -6373,7 +6373,7 @@ dependencies = [
 
 [[package]]
 name = "reth-node-core"
-version = "0.1.0-alpha.14"
+version = "0.1.0-alpha.15"
 dependencies = [
  "alloy-chains",
  "alloy-rlp",

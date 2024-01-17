@@ -115,7 +115,7 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     /// Rollup related arguments
     #[cfg(feature = "optimism")]
     #[clap(flatten)]
-    pub rollup: crate::args::RollupArgs,
+    pub rollup: reth_node_core::args::RollupArgs,
 
     /// Additional cli arguments
     #[clap(flatten)]

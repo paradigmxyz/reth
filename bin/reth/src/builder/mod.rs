@@ -242,7 +242,7 @@ pub struct NodeConfig {
 
     /// Rollup related arguments
     #[cfg(feature = "optimism")]
-    pub rollup: crate::args::RollupArgs,
+    pub rollup: reth_node_core::args::RollupArgs,
 }
 
 impl NodeConfig {
@@ -264,7 +264,7 @@ impl NodeConfig {
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
             #[cfg(feature = "optimism")]
-            rollup: crate::args::RollupArgs::default(),
+            rollup: reth_node_core::args::RollupArgs::default(),
         }
     }
 
@@ -366,7 +366,7 @@ impl NodeConfig {
 
     /// Set the rollup args for the node
     #[cfg(feature = "optimism")]
-    pub fn with_rollup(mut self, rollup: crate::args::RollupArgs) -> Self {
+    pub fn with_rollup(mut self, rollup: reth_node_core::args::RollupArgs) -> Self {
         self.rollup = rollup;
         self
     }
@@ -976,7 +976,7 @@ impl Default for NodeConfig {
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
             #[cfg(feature = "optimism")]
-            rollup: crate::args::RollupArgs::default(),
+            rollup: reth_node_core::args::RollupArgs::default(),
         }
     }
 }
