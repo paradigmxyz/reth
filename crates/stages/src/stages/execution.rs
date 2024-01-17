@@ -141,7 +141,9 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let batch_start = Instant::now();
 
         for block_number in start_block..=max_block {
-            let block_start = Instant::now();
+            // Fetch the block
+            let fetch_block_start = Instant::now();
+
             let td = provider
                 .header_td_by_number(block_number)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
@@ -151,8 +153,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 .block_with_senders(block_number.into(), TransactionVariant::NoHash)?
                 .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
 
-            let execute_start = Instant::now();
-            fetch_block_duration += execute_start - block_start;
+            fetch_block_duration += fetch_block_start.elapsed();
 
             cumulative_gas += block.gas_used;
 
@@ -160,13 +161,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
 
             // Execute the block
+            let execute_start = Instant::now();
             executor.execute_and_verify_receipt(&block, td).map_err(|error| StageError::Block {
                 block: Box::new(block.header.clone().seal_slow()),
                 error: BlockErrorKind::Execution(error),
             })?;
-
-            let block_finish = Instant::now();
-            execution_duration += block_finish - execute_start;
+            execution_duration += execute_start.elapsed();
 
             // Gas metrics
             if let Some(metrics_tx) = &mut self.metrics_tx {
@@ -184,7 +184,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 block_number - start_block,
                 bundle_size_hint,
                 cumulative_gas,
-                block_finish - batch_start,
+                batch_start.elapsed(),
             ) {
                 break
             }
