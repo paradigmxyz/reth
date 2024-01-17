@@ -2382,8 +2382,13 @@ mod tests {
         let unseen_eth68_hashes = [B256::from_slice(&[1; 32]), B256::from_slice(&[2; 32])];
         let unseen_eth68_hashes_sizes =
             [MAX_FULL_TRANSACTIONS_PACKET_SIZE / 2, MAX_FULL_TRANSACTIONS_PACKET_SIZE / 2 - 4];
-        let seen_eth68_hashes = [B256::from_slice(&[3; 32]), B256::from_slice(&[4; 32])];
-        let seen_eth68_hashes_sizes = [5, 3]; // the second hash should be filled into the request because there is still space for it
+        let seen_eth68_hashes =
+            [B256::from_slice(&[3; 32]), B256::from_slice(&[4; 32]), B256::from_slice(&[5; 32])];
+        let seen_eth68_hashes_sizes = [
+            5,
+            3, // the second hash should be filled into the request because there is space for it
+            4, // then there is no space for the last anymore
+        ];
 
         // insert peer in tx manager
         let (peer, _to_mock_session_rx) = new_mock_session(peer_id, eth_version);
@@ -2393,14 +2398,11 @@ mod tests {
         // for first try to fetch.
         let mut backups = default_cache();
         backups.insert(peer_id);
-        // load seen hashes into buffer so they will be used filling request which doesn't reach
-        // limit with let alone unseen hashes
-        tx_fetcher.unknown_hashes.insert(seen_eth68_hashes[0], (0, backups.clone()));
-        tx_fetcher.unknown_hashes.insert(seen_eth68_hashes[1], (0, backups));
-        tx_fetcher.eth68_meta.insert(seen_eth68_hashes[0], seen_eth68_hashes_sizes[0]);
-        tx_fetcher.eth68_meta.insert(seen_eth68_hashes[1], seen_eth68_hashes_sizes[1]);
-        tx_fetcher.buffered_hashes.insert(seen_eth68_hashes[0]);
-        tx_fetcher.buffered_hashes.insert(seen_eth68_hashes[1]);
+        for i in 0..3 {
+            tx_fetcher.unknown_hashes.insert(seen_eth68_hashes[i], (0, backups.clone()));
+            tx_fetcher.eth68_meta.insert(seen_eth68_hashes[i], seen_eth68_hashes_sizes[i]);
+            tx_fetcher.buffered_hashes.insert(seen_eth68_hashes[i]);
+        }
 
         let (peer, mut to_mock_session_rx) = new_mock_session(peer_id, eth_version);
         tx_manager.peers.insert(peer_id, peer);
@@ -2416,9 +2418,9 @@ mod tests {
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
         // since hashes are unseen, length of unknown hashes increases
-        assert_eq!(tx_fetcher.unknown_hashes.len(), 4);
+        assert_eq!(tx_fetcher.unknown_hashes.len(), 5);
         // seen_eth68_hashes[1] should be taken out of buffer and packed into request
-        assert_eq!(tx_fetcher.buffered_hashes.len(), 1);
+        assert_eq!(tx_fetcher.buffered_hashes.len(), 2);
         assert!(tx_fetcher.buffered_hashes.contains(&seen_eth68_hashes[0]));
 
         // mock session of peer receives request
