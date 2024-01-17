@@ -20,6 +20,11 @@
 //! buffered with respect to `MAX_REQUEST_RETRIES_PER_TX_HASH`. So is the case if the request
 //! resolves with partial success, that is some of the requested hashes are not in the response,
 //! these are then buffered.
+//!
+//! Most healthy peers will send the same hashes in their announcements, as RLPx is a gossip
+//! protocol. This means it's unlikely, that a valid hash, will be buffered for very long
+//! before it's re-tried. Nonetheless, the capacity of the buffered hashes cache must be large
+//! enough to buffer many hashes during network failure, to allow for recovery.
 
 use crate::{
     cache::{LruCache, LruMap},
@@ -1461,8 +1466,9 @@ impl TransactionFetcher {
         self.buffer_hashes(hashes, None)
     }
 
-    /// Buffers hashes. Only peers that haven't yet tried to request the hashes should be passed
-    /// as `fallback_peer` parameter.
+    /// Buffers hashes. Note: Only peers that haven't yet tried to request the hashes should be
+    /// passed as `fallback_peer` parameter! Hashes that have been re-requested
+    /// [`MAX_REQUEST_RETRIES_PER_TX_HASH`], are dropped.
     fn buffer_hashes(
         &mut self,
         hashes: impl IntoIterator<Item = TxHash>,
@@ -1532,7 +1538,8 @@ impl TransactionFetcher {
                 }
                 // hash has been seen and is in flight. store peer as fallback peer.
                 //
-                // remove any ended sessions
+                // remove any ended sessions, so that in case of a full cache, alive peers aren't 
+                // removed in favour of lru dead peers
                 let mut ended_sessions = vec!();
                 for &peer_id in backups.iter() {
                     if is_session_active(peer_id) {
