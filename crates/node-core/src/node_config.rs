@@ -1196,7 +1196,8 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         let initial_target = self.config.initial_pipeline_target(genesis_hash);
         let mut hooks = EngineHooks::new();
 
-        let mut pruner = PrunerBuilder::new(prune_config.clone().unwrap_or_default())
+        let prune_config = prune_config.unwrap_or_default();
+        let mut pruner = PrunerBuilder::new(prune_config.clone())
             .max_reorg_depth(tree_config.max_reorg_depth() as usize)
             .prune_delete_limit(self.config.chain.prune_delete_limit)
             .build(provider_factory.clone());
@@ -1210,6 +1211,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             provider_factory
                 .snapshot_provider()
                 .expect("snapshot provider initialized via provider factory"),
+            prune_config.segments,
         );
         hooks.add(SnapshotHook::new(snapshotter, Box::new(executor.clone())));
         info!(target: "reth::cli", "Snapshotter initialized");

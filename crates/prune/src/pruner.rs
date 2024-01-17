@@ -192,18 +192,18 @@ impl<DB: Database> Pruner<DB> {
 
         if let Some(snapshot_provider) = self.provider_factory.snapshot_provider() {
             if let Some(to_block) =
-                snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Headers)
-            {
-                segments
-                    .push(Box::new(segments::Headers::new(PruneMode::before_inclusive(to_block))))
-            }
-
-            if let Some(to_block) =
                 snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Transactions)
             {
                 segments.push(Box::new(segments::Transactions::new(PruneMode::before_inclusive(
                     to_block,
                 ))))
+            }
+
+            if let Some(to_block) =
+                snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Headers)
+            {
+                segments
+                    .push(Box::new(segments::Headers::new(PruneMode::before_inclusive(to_block))))
             }
 
             if let Some(to_block) =

@@ -1,11 +1,16 @@
 use crate::segments::{dataset_for_compression, prepare_jar, Segment};
-use reth_db::{database::Database, snapshot::create_snapshot_T1, tables};
-use reth_interfaces::provider::ProviderResult;
+use reth_db::{
+    cursor::DbCursorRO, database::Database, snapshot::create_snapshot_T1, tables, transaction::DbTx,
+};
+use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     snapshot::{SegmentConfig, SegmentHeader},
     BlockNumber, SnapshotSegment, TxNumber,
 };
-use reth_provider::{providers::SnapshotProvider, DatabaseProviderRO, TransactionsProviderExt};
+use reth_provider::{
+    providers::{SnapshotProvider, SnapshotWriter},
+    BlockReader, DatabaseProviderRO, TransactionsProviderExt,
+};
 use std::{ops::RangeInclusive, path::Path, sync::Arc};
 
 /// Snapshot segment responsible for [SnapshotSegment::Receipts] part of data.
@@ -19,11 +24,30 @@ impl<DB: Database> Segment<DB> for Receipts {
 
     fn snapshot(
         &self,
-        _provider: DatabaseProviderRO<DB>,
-        _snapshot_provider: Arc<SnapshotProvider>,
-        _block_range: RangeInclusive<BlockNumber>,
+        provider: DatabaseProviderRO<DB>,
+        snapshot_provider: Arc<SnapshotProvider>,
+        block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
-        unimplemented!()
+        let mut snapshot_writer =
+            snapshot_provider.writer(*block_range.start(), SnapshotSegment::Receipts)?;
+
+        for block in block_range {
+            let block_body_indices = provider
+                .block_body_indices(block)?
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
+
+            let mut receipts_cursor = provider.tx_ref().cursor_read::<tables::Receipts>()?;
+            let receipts_walker = receipts_cursor.walk_range(block_body_indices.tx_num_range())?;
+
+            for entry in receipts_walker {
+                let (tx_number, receipt) = entry?;
+
+                snapshot_writer.append_receipt(tx_number, receipt)?;
+            }
+            snapshot_writer.increment_block(SnapshotSegment::Receipts)?;
+        }
+
+        Ok(())
     }
 
     fn create_snapshot_file(
