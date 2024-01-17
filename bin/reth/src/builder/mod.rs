@@ -1517,7 +1517,7 @@ mod tests {
             Some(payload_attributes),
         )
         .await;
-        res.expect("pre-canyon engine call should succeed");
+        res.expect("pre-canyon engine call without withdrawals should succeed");
     }
 
     #[cfg(feature = "optimism")]
@@ -1584,7 +1584,7 @@ mod tests {
             Some(payload_attributes),
         )
         .await;
-        assert!(res.is_err());
+        let err = res.expect_err("pre-canyon engine call with withdrawals should fail");
     }
 
     #[cfg(feature = "optimism")]
@@ -1651,7 +1651,7 @@ mod tests {
             Some(payload_attributes),
         )
         .await;
-        assert!(res.is_err());
+        let err = res.expect_err("post-canyon engine call with no withdrawals should fail");
     }
 
     #[cfg(feature = "optimism")]
@@ -1718,6 +1718,6 @@ mod tests {
             Some(payload_attributes),
         )
         .await;
-        res.expect("post-canyon engine call should succeed");
+        res.expect("post-canyon engine call with withdrawals should succeed");
     }
 }
