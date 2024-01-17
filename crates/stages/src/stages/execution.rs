@@ -424,17 +424,33 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
 
         // Unwind all receipts for transactions in the block range
-        let mut cursor = tx.cursor_write::<tables::Receipts>()?;
-        let mut reverse_walker = cursor.walk_back(None)?;
-
-        while let Some(Ok((tx_number, receipt))) = reverse_walker.next() {
-            if tx_number < first_tx_num {
-                break
+        match maybe_snapshotter(&self.prune_modes, provider, *range.start())? {
+            Some(_) => {
+                // `maybe_snapshotter` already prunes receipts if it detects that there are more
+                // elements in the static files than expected.
+                if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
+                    for block_number in range {
+                        stage_checkpoint.progress.processed -= provider
+                            .block_by_number(block_number)?
+                            .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?
+                            .gas_used;
+                    }
+                }
             }
-            reverse_walker.delete_current()?;
+            None => {
+                let mut cursor = tx.cursor_write::<tables::Receipts>()?;
+                let mut reverse_walker = cursor.walk_back(None)?;
 
-            if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
-                stage_checkpoint.progress.processed -= receipt.cumulative_gas_used;
+                while let Some(Ok((tx_number, receipt))) = reverse_walker.next() {
+                    if tx_number < first_tx_num {
+                        break
+                    }
+                    reverse_walker.delete_current()?;
+
+                    if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
+                        stage_checkpoint.progress.processed -= receipt.cumulative_gas_used;
+                    }
+                }
             }
         }
 
@@ -492,7 +508,7 @@ impl ExecutionStageThresholds {
 }
 
 /// Checks if receipts have any filtering or pruning configured. If so, returns `None`. Otherwise,
-/// returns the snapshotter for saving receipts to static files.
+/// returns the snapshotter for saving/pruning receipts to/from static files.
 ///
 /// Additionally, performs a consistency check between the expected highest receipt and the highest
 /// receipt in the static file to detect any unexpected shutdown.
@@ -526,9 +542,8 @@ where
     // Check if we had any unexpected shutdown after committing to static files, but
     // NOT committing to database.
     match snapshot_receipt_num.cmp(&db_receipt_num) {
-        Ordering::Greater => {
-            snapshotter.prune_receipts(snapshot_receipt_num - db_receipt_num, start_block - 1)?
-        }
+        Ordering::Greater => snapshotter
+            .prune_receipts(snapshot_receipt_num - db_receipt_num, start_block.saturating_sub(1))?,
         Ordering::Less => {
             let last_block = snapshot_provider
                 .get_highest_snapshot_block(SnapshotSegment::Receipts)
@@ -551,15 +566,19 @@ mod tests {
     use crate::test_utils::TestStageDB;
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
-    use reth_db::{models::AccountBeforeTx, test_utils::create_test_rw_db};
+    use reth_db::{
+        models::AccountBeforeTx,
+        test_utils::{create_test_rw_db, create_test_snapshots_dir},
+    };
     use reth_interfaces::executor::BlockValidationError;
     use reth_primitives::{
-        address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
-        ChainSpecBuilder, PruneModes, SealedBlock, StorageEntry, B256, MAINNET, U256,
+        address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Address,
+        Bytecode, ChainSpecBuilder, PruneMode, PruneModes, ReceiptsLogPruneConfig, SealedBlock,
+        StorageEntry, B256, MAINNET, U256,
     };
     use reth_provider::{AccountReader, BlockWriter, ProviderFactory, ReceiptProvider};
     use reth_revm::EvmProcessorFactory;
-    use std::sync::Arc;
+    use std::{collections::BTreeMap, sync::Arc};
 
     fn stage() -> ExecutionStage<EvmProcessorFactory> {
         let executor_factory = EvmProcessorFactory::new(Arc::new(
@@ -821,7 +840,9 @@ mod tests {
         // is merged as it has similar framework
 
         let state_db = create_test_rw_db();
-        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone())
+            .with_snapshots(create_test_snapshots_dir(), tokio::sync::watch::channel(None).1)
+            .unwrap();
         let provider = factory.provider_rw().unwrap();
         let input = ExecInput { target: Some(1), checkpoint: None };
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
@@ -851,44 +872,77 @@ mod tests {
         provider.commit().unwrap();
 
         // execute
-        let provider = factory.provider_rw().unwrap();
-        let mut execution_stage = stage();
-        let result = execution_stage.execute(&provider, input).unwrap();
-        provider.commit().unwrap();
+        let mut provider = factory.provider_rw().unwrap();
 
-        let provider = factory.provider_rw().unwrap();
-        let mut stage = stage();
-        let result = stage
-            .unwind(
-                &provider,
-                UnwindInput { checkpoint: result.checkpoint, unwind_to: 0, bad_block: None },
-            )
-            .unwrap();
+        // If there is a pruning configuration, then it's forced to use the database.
+        // This way we test both cases.
 
-        assert_matches!(result, UnwindOutput {
-            checkpoint: StageCheckpoint {
-                block_number: 0,
-                stage_checkpoint: Some(StageUnitCheckpoint::Execution(ExecutionCheckpoint {
-                    block_range: CheckpointBlockRange {
-                        from: 1,
-                        to: 1,
-                    },
-                    progress: EntitiesCheckpoint {
-                        processed: 0,
-                        total
-                    }
-                }))
+        let modes = [None, Some(PruneModes::none())];
+        let random_filter =
+            ReceiptsLogPruneConfig(BTreeMap::from([(Address::random(), PruneMode::Full)]));
+
+        for mut mode in modes {
+            if let Some(mode) = &mut mode {
+                // Simulating a full node where we write receipts to database
+                mode.receipts_log_filter = random_filter.clone();
             }
-        } if total == block.gas_used);
 
-        // assert unwind stage
-        assert_eq!(provider.basic_account(acc1), Ok(Some(acc1_info)), "Pre changed of a account");
-        assert_eq!(provider.basic_account(acc2), Ok(Some(acc2_info)), "Post changed of a account");
+            // Test Execution
+            let mut execution_stage = stage();
+            execution_stage.prune_modes = mode.clone().unwrap_or_default();
 
-        let miner_acc = address!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
-        assert_eq!(provider.basic_account(miner_acc), Ok(None), "Third account should be unwound");
+            let result = execution_stage.execute(&provider, input).unwrap();
+            provider.commit().unwrap();
 
-        assert_eq!(provider.receipt(0), Ok(None), "First receipt should be unwound");
+            // Test Unwind
+            provider = factory.provider_rw().unwrap();
+            let mut stage = stage();
+            stage.prune_modes = mode.unwrap_or_default();
+
+            let result = stage
+                .unwind(
+                    &provider,
+                    UnwindInput { checkpoint: result.checkpoint, unwind_to: 0, bad_block: None },
+                )
+                .unwrap();
+
+            assert_matches!(result, UnwindOutput {
+                checkpoint: StageCheckpoint {
+                    block_number: 0,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Execution(ExecutionCheckpoint {
+                        block_range: CheckpointBlockRange {
+                            from: 1,
+                            to: 1,
+                        },
+                        progress: EntitiesCheckpoint {
+                            processed: 0,
+                            total
+                        }
+                    }))
+                }
+            } if total == block.gas_used);
+
+            // assert unwind stage
+            assert_eq!(
+                provider.basic_account(acc1),
+                Ok(Some(acc1_info)),
+                "Pre changed of a account"
+            );
+            assert_eq!(
+                provider.basic_account(acc2),
+                Ok(Some(acc2_info)),
+                "Post changed of a account"
+            );
+
+            let miner_acc = address!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
+            assert_eq!(
+                provider.basic_account(miner_acc),
+                Ok(None),
+                "Third account should be unwound"
+            );
+
+            assert_eq!(provider.receipt(0), Ok(None), "First receipt should be unwound");
+        }
     }
 
     #[tokio::test]
