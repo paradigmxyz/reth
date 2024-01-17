@@ -2,13 +2,13 @@
 
 use crate::{chain::BlockReceipts, Chain};
 use auto_impl::auto_impl;
-use reth_primitives::SealedBlockWithSenders;
+use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders};
 use std::{
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 use tokio_stream::{wrappers::BroadcastStream, Stream};
 use tracing::debug;
 
@@ -31,6 +31,11 @@ pub trait CanonStateSubscriptions: Send + Sync {
         CanonStateNotificationStream {
             st: BroadcastStream::new(self.subscribe_to_canonical_state()),
         }
+    }
+
+    /// Subscribe to get updates about the recent pending block.
+    fn pending_blocks_stream(&self) -> watch::Receiver<Option<(SealedBlock, Vec<Receipt>)>> {
+        todo!() // Placeholder for now
     }
 }
 

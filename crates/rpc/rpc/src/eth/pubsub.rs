@@ -1,6 +1,6 @@
 //! `eth_` PubSub RPC handler implementation
 
-use crate::{eth::logs_utils, result::invalid_params_rpc_err};
+use crate::{eth::logs_utils, result::invalid_params_rpc_err, EthApi};
 use futures::StreamExt;
 use jsonrpsee::{server::SubscriptionMessage, PendingSubscriptionSink, SubscriptionSink};
 use reth_network_api::NetworkInfo;
@@ -12,16 +12,18 @@ use reth_rpc_types::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
         SyncStatusMetadata,
     },
-    FilteredParams, Header, Log,
+    BlockNumberOrTag, FilteredParams, Header, Log,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
 use serde::Serialize;
 use std::sync::Arc;
 use tokio_stream::{
-    wrappers::{BroadcastStream, ReceiverStream},
+    wrappers::{BroadcastStream, ReceiverStream, WatchStream},
     Stream,
 };
+
+use reth_rpc_types_compat::log::from_primitive_log;
 
 /// `Eth` pubsub RPC implementation.
 ///
@@ -40,13 +42,20 @@ impl<Provider, Pool, Events, Network> EthPubSub<Provider, Pool, Events, Network>
     /// Creates a new, shareable instance.
     ///
     /// Subscription tasks are spawned via [tokio::task::spawn]
-    pub fn new(provider: Provider, pool: Pool, chain_events: Events, network: Network) -> Self {
+    pub fn new(
+        provider: Provider,
+        pool: Pool,
+        chain_events: Events,
+        network: Network,
+        api: EthApi<Provider, Pool, Network>,
+    ) -> Self {
         Self::with_spawner(
             provider,
             pool,
             chain_events,
             network,
             Box::<TokioTaskExecutor>::default(),
+            api,
         )
     }
 
@@ -57,6 +66,7 @@ impl<Provider, Pool, Events, Network> EthPubSub<Provider, Pool, Events, Network>
         chain_events: Events,
         network: Network,
         subscription_task_spawner: Box<dyn TaskSpawner>,
+        api: EthApi<Provider, Pool, Network>,
     ) -> Self {
         let inner = EthPubSubInner { provider, pool, chain_events, network };
         Self { inner: Arc::new(inner), subscription_task_spawner }
@@ -118,8 +128,20 @@ where
                 }
                 _ => FilteredParams::default(),
             };
+            let is_pending_filter = filter.filter.as_ref().map_or(false, |f| {
+                f.block_option.get_from_block().map_or(false, BlockNumberOrTag::is_pending) &&
+                    f.block_option.get_to_block().map_or(false, BlockNumberOrTag::is_pending)
+            });
+
+            if is_pending_filter {
+                let stream = pubsub
+                    .pending_log_stream()
+                    .map(|log| EthSubscriptionResult::Log(Box::new(log)));
+                return pipe_from_stream(accepted_sink, stream).await
+            };
             let stream =
                 pubsub.log_stream(filter).map(|log| EthSubscriptionResult::Log(Box::new(log)));
+
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::NewPendingTransactions => {
@@ -317,5 +339,23 @@ where
                 );
                 futures::stream::iter(all_logs)
             })
+    }
+
+    fn pending_log_stream(&self) -> impl Stream<Item = Log> {
+        WatchStream::new(self.chain_events.pending_blocks_stream()).flat_map(
+            |new_pending_block_with_receipts| {
+                let logs = new_pending_block_with_receipts
+                    .map(|(_, receipts)| {
+                        receipts
+                            .into_iter()
+                            .flat_map(|receipt| {
+                                receipt.logs.into_iter().map(|log| from_primitive_log(log.clone()))
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_else(Vec::new);
+                futures::stream::iter(logs)
+            },
+        )
     }
 }

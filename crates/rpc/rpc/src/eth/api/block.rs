@@ -157,7 +157,7 @@ where
     }
 
     /// Returns the block object for the given block id.
-    pub(crate) async fn block_with_senders(
+    pub async fn block_with_senders(
         &self,
         block_id: impl Into<BlockId>,
     ) -> EthResult<Option<reth_primitives::SealedBlockWithSenders>> {
