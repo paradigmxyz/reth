@@ -17,6 +17,7 @@ use clap::{
     Arg, Args, Command,
 };
 use futures::TryFutureExt;
+use rand::Rng;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_node_api::EngineTypes;
 use reth_provider::{
@@ -42,7 +43,6 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
 };
-use rand::Rng;
 use tracing::{debug, info};
 
 /// Default max number of subscriptions per connection.
