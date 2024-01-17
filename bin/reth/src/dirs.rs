@@ -11,10 +11,7 @@ use std::{
 
 /// Constructs a string to be used as a path for configuration and db paths.
 pub fn config_path_prefix(chain: Chain) -> String {
-    match chain {
-        Chain::Named(name) => name.to_string(),
-        Chain::Id(id) => id.to_string(),
-    }
+    chain.to_string()
 }
 
 /// Returns the path to the reth data directory.
@@ -310,6 +307,13 @@ impl<D> ChainPath<D> {
     /// `<DIR>/<CHAIN_ID>/blobstore`
     pub fn blobstore_path(&self) -> PathBuf {
         self.0.join("blobstore").into()
+    }
+
+    /// Returns the path to the local transactions backup file
+    ///
+    /// `<DIR>/<CHAIN_ID>/txpool-transactions-backup.rlp`
+    pub fn txpool_transactions_path(&self) -> PathBuf {
+        self.0.join("txpool-transactions-backup.rlp").into()
     }
 
     /// Returns the path to the config file for this chain.

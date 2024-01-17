@@ -114,7 +114,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()));
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         let start_block = input.next_block();
@@ -135,12 +135,15 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let mut fetch_block_duration = Duration::default();
         let mut execution_duration = Duration::default();
         debug!(target: "sync::stages::execution", start = start_block, end = max_block, "Executing range");
-        // Execute block range
 
+        // Execute block range
         let mut cumulative_gas = 0;
+        let batch_start = Instant::now();
 
         for block_number in start_block..=max_block {
-            let time = Instant::now();
+            // Fetch the block
+            let fetch_block_start = Instant::now();
+
             let td = provider
                 .header_td_by_number(block_number)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
@@ -150,21 +153,20 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 .block_with_senders(block_number.into(), TransactionVariant::NoHash)?
                 .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
 
-            fetch_block_duration += time.elapsed();
+            fetch_block_duration += fetch_block_start.elapsed();
 
             cumulative_gas += block.gas_used;
 
             // Configure the executor to use the current state.
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
 
-            let time = Instant::now();
             // Execute the block
+            let execute_start = Instant::now();
             executor.execute_and_verify_receipt(&block, td).map_err(|error| StageError::Block {
                 block: Box::new(block.header.clone().seal_slow()),
                 error: BlockErrorKind::Execution(error),
             })?;
-
-            execution_duration += time.elapsed();
+            execution_duration += execute_start.elapsed();
 
             // Gas metrics
             if let Some(metrics_tx) = &mut self.metrics_tx {
@@ -182,8 +184,9 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 block_number - start_block,
                 bundle_size_hint,
                 cumulative_gas,
+                batch_start.elapsed(),
             ) {
-                break;
+                break
             }
         }
         let time = Instant::now();
@@ -360,7 +363,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         if range.is_empty() {
             return Ok(UnwindOutput {
                 checkpoint: input.checkpoint.with_block_number(input.unwind_to),
-            });
+            })
         }
 
         // get all batches for account change
@@ -403,7 +406,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
         while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
             if key.block_number() < *range.start() {
-                break;
+                break
             }
             // delete all changesets
             rev_storage_changeset_walker.delete_current()?;
@@ -423,7 +426,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 
         while let Some(Ok((tx_number, receipt))) = reverse_walker.next() {
             if tx_number < first_tx_num {
-                break;
+                break
             }
             reverse_walker.delete_current()?;
 
@@ -451,12 +454,14 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 /// current database transaction, which frees up memory.
 #[derive(Debug, Clone)]
 pub struct ExecutionStageThresholds {
-    /// The maximum number of blocks to process before the execution stage commits.
+    /// The maximum number of blocks to execute before the execution stage commits.
     pub max_blocks: Option<u64>,
-    /// The maximum amount of state changes to keep in memory before the execution stage commits.
+    /// The maximum number of state changes to keep in memory before the execution stage commits.
     pub max_changes: Option<u64>,
-    /// The maximum amount of cumultive gas used in the batch.
+    /// The maximum cumulative amount of gas to process before the execution stage commits.
     pub max_cumulative_gas: Option<u64>,
+    /// The maximum spent on blocks processing before the execution stage commits.
+    pub max_duration: Option<Duration>,
 }
 
 impl Default for ExecutionStageThresholds {
@@ -464,8 +469,10 @@ impl Default for ExecutionStageThresholds {
         Self {
             max_blocks: Some(500_000),
             max_changes: Some(5_000_000),
-            // 30M block per gas on 50k blocks
+            // 50k full blocks of 30M gas
             max_cumulative_gas: Some(30_000_000 * 50_000),
+            // 10 minutes
+            max_duration: Some(Duration::from_secs(10 * 60)),
         }
     }
 }
@@ -478,10 +485,12 @@ impl ExecutionStageThresholds {
         blocks_processed: u64,
         changes_processed: u64,
         cumulative_gas_used: u64,
+        elapsed: Duration,
     ) -> bool {
         blocks_processed >= self.max_blocks.unwrap_or(u64::MAX) ||
             changes_processed >= self.max_changes.unwrap_or(u64::MAX) ||
-            cumulative_gas_used >= self.max_cumulative_gas.unwrap_or(u64::MAX)
+            cumulative_gas_used >= self.max_cumulative_gas.unwrap_or(u64::MAX) ||
+            elapsed >= self.max_duration.unwrap_or(Duration::MAX)
     }
 }
 
@@ -511,6 +520,7 @@ mod tests {
                 max_blocks: Some(100),
                 max_changes: None,
                 max_cumulative_gas: None,
+                max_duration: None,
             },
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),

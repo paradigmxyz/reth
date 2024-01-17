@@ -1,11 +1,10 @@
 //! Relay API bindings: <https://flashbots.github.io/relay-specs/>
 
-#![allow(missing_docs)]
-
 use crate::{
     beacon::{BlsPublicKey, BlsSignature},
-    engine::{BlobsBundleV1, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3},
-    ExecutionPayload,
+    engine::{
+        BlobsBundleV1, ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    },
 };
 use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
@@ -17,28 +16,42 @@ pub mod error;
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Validator {
+    /// The slot number for the validator entry.
     #[serde_as(as = "DisplayFromStr")]
     pub slot: u64,
+    /// The index of the validator.
     #[serde_as(as = "DisplayFromStr")]
     pub validator_index: u64,
+    /// Details of the validator registration.
     pub entry: ValidatorRegistration,
 }
 
+/// Details of a validator registration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValidatorRegistration {
+    /// The registration message.
     pub message: ValidatorRegistrationMessage,
+    /// The signature for the registration.
     pub signature: BlsSignature,
 }
 
+/// Represents the message of a validator registration.
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValidatorRegistrationMessage {
+    /// The fee recipient's address.
     #[serde(rename = "fee_recipient")]
     pub fee_recipient: Address,
+
+    /// The gas limit for the registration.
     #[serde_as(as = "DisplayFromStr")]
     pub gas_limit: u64,
+
+    /// The timestamp of the registration.
     #[serde_as(as = "DisplayFromStr")]
     pub timestamp: u64,
+
+    /// The public key of the validator.
     pub pubkey: BlsPublicKey,
 }
 
@@ -49,19 +62,28 @@ pub struct ValidatorRegistrationMessage {
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ssz", derive(ssz_derive::Encode, ssz_derive::Decode))]
 pub struct BidTrace {
+    /// The slot associated with the block.
     #[serde_as(as = "DisplayFromStr")]
     pub slot: u64,
+    /// The parent hash of the block.
     pub parent_hash: B256,
+    /// The hash of the block.
     pub block_hash: B256,
+    /// The public key of the builder.
     #[serde(rename = "builder_pubkey")]
     pub builder_public_key: BlsPublicKey,
+    /// The public key of the proposer.
     #[serde(rename = "proposer_pubkey")]
     pub proposer_public_key: BlsPublicKey,
+    /// The recipient of the proposer's fee.
     pub proposer_fee_recipient: Address,
+    /// The gas limit associated with the block.
     #[serde_as(as = "DisplayFromStr")]
     pub gas_limit: u64,
+    /// The gas used within the block.
     #[serde_as(as = "DisplayFromStr")]
     pub gas_used: u64,
+    /// The value associated with the block.
     #[serde_as(as = "DisplayFromStr")]
     pub value: U256,
 }
@@ -70,7 +92,9 @@ pub struct BidTrace {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ssz", derive(ssz_derive::Encode, ssz_derive::Decode))]
 pub struct SignedBidTrace {
+    /// The BidTrace message associated with the submission.
     pub message: BidTrace,
+    /// The signature associated with the submission.
     pub signature: BlsSignature,
 }
 
@@ -79,9 +103,12 @@ pub struct SignedBidTrace {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "ssz", derive(ssz_derive::Decode, ssz_derive::Encode))]
 pub struct SignedBidSubmissionV1 {
+    /// The BidTrace message associated with the submission.
     pub message: BidTrace,
+    /// The execution payload for the submission.
     #[serde(with = "crate::beacon::payload::beacon_payload_v1")]
     pub execution_payload: ExecutionPayloadV1,
+    /// The signature associated with the submission.
     pub signature: BlsSignature,
 }
 
@@ -90,9 +117,12 @@ pub struct SignedBidSubmissionV1 {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "ssz", derive(ssz_derive::Decode, ssz_derive::Encode))]
 pub struct SignedBidSubmissionV2 {
+    /// The BidTrace message associated with the submission.
     pub message: BidTrace,
+    /// The execution payload for the submission.
     #[serde(with = "crate::beacon::payload::beacon_payload_v2")]
     pub execution_payload: ExecutionPayloadV2,
+    /// The signature associated with the submission.
     pub signature: BlsSignature,
 }
 
@@ -101,20 +131,26 @@ pub struct SignedBidSubmissionV2 {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "ssz", derive(ssz_derive::Decode, ssz_derive::Encode))]
 pub struct SignedBidSubmissionV3 {
+    /// The BidTrace message associated with the submission.
     pub message: BidTrace,
+    /// The execution payload for the submission.
     #[serde(with = "crate::beacon::payload::beacon_payload_v3")]
     pub execution_payload: ExecutionPayloadV3,
     /// The Deneb block bundle for this bid.
     pub blobs_bundle: BlobsBundleV1,
+    /// The signature associated with the submission.
     pub signature: BlsSignature,
 }
 
 /// SubmitBlockRequest is the request from the builder to submit a block.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubmitBlockRequest {
+    /// The BidTrace message associated with the block submission.
     pub message: BidTrace,
+    /// The execution payload for the block submission.
     #[serde(with = "crate::beacon::payload::beacon_payload")]
     pub execution_payload: ExecutionPayload,
+    /// The signature associated with the block submission.
     pub signature: BlsSignature,
 }
 
@@ -122,8 +158,10 @@ pub struct SubmitBlockRequest {
 #[serde_as]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuilderBlockValidationRequest {
+    /// The [SubmitBlockRequest] data to be validated.
     #[serde(flatten)]
     pub request: SubmitBlockRequest,
+    /// The registered gas limit for the validation request.
     #[serde_as(as = "DisplayFromStr")]
     pub registered_gas_limit: u64,
 }
@@ -132,10 +170,13 @@ pub struct BuilderBlockValidationRequest {
 #[serde_as]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuilderBlockValidationRequestV2 {
+    /// The [SubmitBlockRequest] data to be validated.
     #[serde(flatten)]
     pub request: SubmitBlockRequest,
+    /// The registered gas limit for the validation request.
     #[serde_as(as = "DisplayFromStr")]
     pub registered_gas_limit: u64,
+    /// The withdrawals root for the validation request.
     pub withdrawals_root: B256,
 }
 

@@ -65,11 +65,8 @@ pub fn try_payload_v2_to_block(payload: ExecutionPayloadV2) -> Result<Block, Pay
     // this performs the same conversion as the underlying V1 payload, but calculates the
     // withdrawals root and adds withdrawals
     let mut base_sealed_block = try_payload_v1_to_block(payload.payload_inner)?;
-    let withdrawals: Vec<_> = payload
-        .withdrawals
-        .iter()
-        .map(|w| convert_standalone_withdraw_to_withdrawal(w.clone()))
-        .collect();
+    let withdrawals: Vec<_> =
+        payload.withdrawals.iter().map(|w| convert_standalone_withdraw_to_withdrawal(*w)).collect();
     let withdrawals_root = proofs::calculate_withdrawals_root(&withdrawals);
     base_sealed_block.withdrawals = Some(withdrawals);
     base_sealed_block.header.withdrawals_root = Some(withdrawals_root);

@@ -9,7 +9,7 @@ use reth_primitives::{
     Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, ChainSpec,
     Header, PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, B256,
 };
-use reth_trie::{hashed_cursor::HashedPostState, updates::TrieUpdates};
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::ops::RangeInclusive;
 
 /// Enum to control transaction hash inclusion.

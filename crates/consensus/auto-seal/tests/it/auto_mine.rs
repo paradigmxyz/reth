@@ -1,3 +1,4 @@
+#![allow(unreachable_pub)]
 //! auto-mine consensus integration test
 
 use clap::Parser;

@@ -9,8 +9,20 @@ Usage: reth stage run [OPTIONS] --from <FROM> --to <TO> <STAGE>
 Arguments:
   <STAGE>
           The name of the stage to run
-          
-          [possible values: headers, bodies, senders, execution, account-hashing, storage-hashing, hashing, merkle, tx-lookup, account-history, storage-history, total-difficulty]
+
+          Possible values:
+          - headers:          The headers stage within the pipeline
+          - bodies:           The bodies stage within the pipeline
+          - senders:          The senders stage within the pipeline
+          - execution:        The execution stage within the pipeline
+          - account-hashing:  The account hashing stage within the pipeline
+          - storage-hashing:  The storage hashing stage within the pipeline
+          - hashing:          The hashing stage within the pipeline
+          - merkle:           The Merkle stage within the pipeline
+          - tx-lookup:        The transaction lookup stage within the pipeline
+          - account-history:  The account history stage within the pipeline
+          - storage-history:  The storage history stage within the pipeline
+          - total-difficulty: The total difficulty stage within the pipeline
 
 Options:
       --config <FILE>
@@ -109,7 +121,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
           
-          [default: reth/v0.1.0-alpha.13-<SHA>/aarch64-apple-darwin]
+          [default: reth/<VERSION>-<SHA>/<ARCH>]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
@@ -120,7 +132,7 @@ Networking:
           Do not persist peers.
 
       --nat <NAT>
-          NAT resolution method (any|none|upnp|publicip|extip:<IP>)
+          NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
           
           [default: any]
 
@@ -160,6 +172,36 @@ Database:
           Useful when you want to run diagnostics on the database.
 
 Logging:
+      --log.stdout.format <FORMAT>
+          The format to use for logs written to stdout
+          
+          [default: terminal]
+
+          Possible values:
+          - json:     Represents JSON formatting for logs. This format outputs log records as JSON objects, making it suitable for structured logging
+          - log-fmt:  Represents logfmt (key=value) formatting for logs. This format is concise and human-readable, typically used in command-line applications
+          - terminal: Represents terminal-friendly formatting for logs
+
+      --log.stdout.filter <FILTER>
+          The filter to use for logs written to stdout
+          
+          [default: info]
+
+      --log.file.format <FORMAT>
+          The format to use for logs written to the log file
+          
+          [default: terminal]
+
+          Possible values:
+          - json:     Represents JSON formatting for logs. This format outputs log records as JSON objects, making it suitable for structured logging
+          - log-fmt:  Represents logfmt (key=value) formatting for logs. This format is concise and human-readable, typically used in command-line applications
+          - terminal: Represents terminal-friendly formatting for logs
+
+      --log.file.filter <FILTER>
+          The filter to use for logs written to the log file
+          
+          [default: debug]
+
       --log.file.directory <PATH>
           The path to put log files in
           
@@ -174,11 +216,6 @@ Logging:
           The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
           
           [default: 5]
-
-      --log.file.filter <FILTER>
-          The filter to use for logs written to the log file
-          
-          [default: debug]
 
       --log.journald
           Write logs to journald

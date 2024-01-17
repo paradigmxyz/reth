@@ -20,7 +20,10 @@ use reth_blockchain_tree::{
 };
 use reth_db::{init_db, DatabaseEnv};
 use reth_interfaces::{consensus::Consensus, RethResult};
-use reth_payload_builder::{database::CachedReads, PayloadBuilderAttributes};
+use reth_node_api::PayloadBuilderAttributes;
+use reth_payload_builder::database::CachedReads;
+#[cfg(feature = "optimism")]
+use reth_payload_builder::OptimismPayloadBuilderAttributes;
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     fs,
@@ -34,6 +37,8 @@ use reth_provider::{
     ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
 use reth_revm::EvmProcessorFactory;
+#[cfg(feature = "optimism")]
+use reth_rpc_types::engine::OptimismPayloadAttributes;
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
@@ -41,6 +46,9 @@ use reth_transaction_pool::{
 };
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 use tracing::*;
+
+#[cfg(not(feature = "optimism"))]
+use reth_payload_builder::EthPayloadBuilderAttributes;
 
 /// `reth debug build-block` command
 /// This debug routine requires that the node is positioned at the block before the target.
@@ -235,16 +243,31 @@ impl Command {
             suggested_fee_recipient: self.suggested_fee_recipient,
             // TODO: add support for withdrawals
             withdrawals: None,
-            #[cfg(feature = "optimism")]
-            optimism_payload_attributes: reth_rpc_types::engine::OptimismPayloadAttributes::default(
-            ),
         };
+        #[cfg(feature = "optimism")]
         let payload_config = PayloadConfig::new(
             Arc::clone(&best_block),
             Bytes::default(),
-            PayloadBuilderAttributes::try_new(best_block.hash, payload_attrs)?,
+            OptimismPayloadBuilderAttributes::try_new(
+                best_block.hash,
+                OptimismPayloadAttributes {
+                    payload_attributes: payload_attrs,
+                    transactions: None,
+                    no_tx_pool: None,
+                    gas_limit: None,
+                },
+            )?,
             self.chain.clone(),
         );
+
+        #[cfg(not(feature = "optimism"))]
+        let payload_config = PayloadConfig::new(
+            Arc::clone(&best_block),
+            Bytes::default(),
+            EthPayloadBuilderAttributes::try_new(best_block.hash, payload_attrs)?,
+            self.chain.clone(),
+        );
+
         let args = BuildArguments::new(
             blockchain_db.clone(),
             transaction_pool,
@@ -283,8 +306,8 @@ impl Command {
 
                 let hashed_state = state.hash_state_slow();
                 let (state_root, trie_updates) = state
-                    .state_root_calculator(provider_factory.provider()?.tx_ref(), &hashed_state)
-                    .root_with_updates()?;
+                    .hash_state_slow()
+                    .state_root_with_updates(provider_factory.provider()?.tx_ref())?;
 
                 if state_root != block_with_senders.state_root {
                     eyre::bail!(

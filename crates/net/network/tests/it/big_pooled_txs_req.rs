@@ -12,7 +12,6 @@ use reth_transaction_pool::{
     TransactionPool,
 };
 use tokio::sync::oneshot;
-
 // peer0: `GetPooledTransactions` requestor
 // peer1: `GetPooledTransactions` responder
 #[tokio::test(flavor = "multi_thread")]

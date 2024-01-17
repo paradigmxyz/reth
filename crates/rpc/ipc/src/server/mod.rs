@@ -94,7 +94,6 @@ where
         Ok(ServerHandle::new(stop_tx))
     }
 
-    #[allow(clippy::let_unit_value)]
     async fn start_inner(
         self,
         methods: Methods,
@@ -122,6 +121,7 @@ where
         let connection_guard = ConnectionGuard::new(self.cfg.max_connections as usize);
 
         let mut connections = FutureDriver::default();
+        let endpoint_path = self.endpoint.path().to_string();
         let incoming = match self.endpoint.incoming() {
             Ok(connections) => {
                 #[cfg(windows)]
@@ -129,7 +129,8 @@ where
                 Incoming::new(connections)
             }
             Err(err) => {
-                on_ready.send(Err(err.to_string())).ok();
+                let msg = format!("failed to listen on ipc endpoint `{endpoint_path}`: {err}");
+                on_ready.send(Err(msg)).ok();
                 return Err(err)
             }
         };

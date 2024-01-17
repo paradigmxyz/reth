@@ -11,7 +11,10 @@ use crate::{
         db_type::{DatabaseBuilder, DatabaseInstance},
         ext::{RethCliExt, RethNodeCommandConfig},
     },
-    commands::node::{cl_events::ConsensusLayerHealthEvents, events},
+    commands::{
+        debug_cmd::EngineApiStore,
+        node::{cl_events::ConsensusLayerHealthEvents, events},
+    },
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     init::init_genesis,
     prometheus_exporter,
@@ -56,6 +59,11 @@ use reth_interfaces::{
 };
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle, NetworkManager};
 use reth_network_api::{NetworkInfo, PeersInfo};
+#[cfg(not(feature = "optimism"))]
+use reth_node_builder::EthEngineTypes;
+#[cfg(feature = "optimism")]
+use reth_node_builder::OptimismEngineTypes;
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     kzg::KzgSettings,
@@ -70,7 +78,6 @@ use reth_provider::{
 };
 use reth_prune::PrunerBuilder;
 use reth_revm::EvmProcessorFactory;
-use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
 use reth_stages::{
     prelude::*,
@@ -83,21 +90,19 @@ use reth_stages::{
 };
 use reth_tasks::{TaskExecutor, TaskManager};
 use reth_transaction_pool::{
-    blobstore::InMemoryBlobStore, EthTransactionPool, TransactionPool,
+    blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
     TransactionValidationTaskExecutor,
 };
+use revm_inspectors::stack::Hook;
 use secp256k1::SecretKey;
 use std::{
     net::{SocketAddr, SocketAddrV4},
     path::PathBuf,
     sync::Arc,
 };
-use tokio::{
-    runtime::Handle,
-    sync::{
-        mpsc::{unbounded_channel, Receiver, UnboundedSender},
-        oneshot, watch,
-    },
+use tokio::sync::{
+    mpsc::{unbounded_channel, Receiver, UnboundedSender},
+    oneshot, watch,
 };
 use tracing::*;
 
@@ -438,19 +443,19 @@ impl NodeConfig {
 
     /// Returns the max block that the node should run to, looking it up from the network if
     /// necessary
-    pub async fn max_block<DB, Client>(
+    async fn max_block<Provider, Client>(
         &self,
         network_client: &Client,
-        provider_factory: ProviderFactory<DB>,
+        provider: Provider,
     ) -> eyre::Result<Option<BlockNumber>>
     where
-        DB: Database,
+        Provider: HeaderProvider,
         Client: HeadersClient,
     {
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
         } else if let Some(tip) = self.debug.tip {
-            Some(self.lookup_or_fetch_tip(provider_factory, network_client, tip).await?)
+            Some(self.lookup_or_fetch_tip(provider, network_client, tip).await?)
         } else {
             None
         };
@@ -483,10 +488,7 @@ impl NodeConfig {
         DB: Database + Unpin + Clone + 'static,
     {
         info!(target: "reth::cli", "Connecting to P2P network");
-        let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
-        debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
-        let secret_key = get_secret_key(&network_secret_path)?;
+        let secret_key = self.network_secret(data_dir)?;
         let default_peers_path = data_dir.known_peers_path();
         let network_config = self.load_network_config(
             config,
@@ -536,7 +538,8 @@ impl NodeConfig {
         blockchain_db: &BlockchainProvider<DB, Tree>,
         head: Head,
         executor: &TaskExecutor,
-    ) -> eyre::Result<EthTransactionPool<BlockchainProvider<DB, Tree>, InMemoryBlobStore>>
+        data_dir: &ChainPath<DataDirPath>,
+    ) -> eyre::Result<EthTransactionPool<BlockchainProvider<DB, Tree>, DiskFileBlobStore>>
     where
         DB: Database + Unpin + Clone + 'static,
         Tree: BlockchainTreeEngine
@@ -545,7 +548,7 @@ impl NodeConfig {
             + Clone
             + 'static,
     {
-        let blob_store = InMemoryBlobStore::default();
+        let blob_store = DiskFileBlobStore::open(data_dir.blobstore_path(), Default::default())?;
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
             .with_head_timestamp(head.timestamp)
             .kzg_settings(self.kzg_settings()?)
@@ -555,12 +558,28 @@ impl NodeConfig {
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
         info!(target: "reth::cli", "Transaction pool initialized");
+        let transactions_path = data_dir.txpool_transactions_path();
 
         // spawn txpool maintenance task
         {
             let pool = transaction_pool.clone();
             let chain_events = blockchain_db.canonical_state_stream();
             let client = blockchain_db.clone();
+            let transactions_backup_config =
+                reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+
+            executor.spawn_critical_with_graceful_shutdown_signal(
+                "local transactions backup task",
+                |shutdown| {
+                    reth_transaction_pool::maintain::backup_local_transactions_task(
+                        shutdown,
+                        pool.clone(),
+                        transactions_backup_config,
+                    )
+                },
+            );
+
+            // spawn the maintenance task
             executor.spawn_critical(
                 "txpool maintenance task",
                 reth_transaction_pool::maintain::maintain_transaction_pool_future(
@@ -737,42 +756,38 @@ impl NodeConfig {
     /// If it doesn't exist, download the header and return the block number.
     ///
     /// NOTE: The download is attempted with infinite retries.
-    async fn lookup_or_fetch_tip<DB, Client>(
+    async fn lookup_or_fetch_tip<Provider, Client>(
         &self,
-        provider_factory: ProviderFactory<DB>,
+        provider: Provider,
         client: Client,
         tip: B256,
     ) -> RethResult<u64>
     where
-        DB: Database,
+        Provider: HeaderProvider,
         Client: HeadersClient,
     {
-        Ok(self.fetch_tip(provider_factory, client, BlockHashOrNumber::Hash(tip)).await?.number)
+        let header = provider.header_by_hash_or_number(tip.into())?;
+
+        // try to look up the header in the database
+        if let Some(header) = header {
+            info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
+            return Ok(header.number)
+        }
+
+        Ok(self.fetch_tip_from_network(client, tip.into()).await?.number)
     }
 
     /// Attempt to look up the block with the given number and return the header.
     ///
     /// NOTE: The download is attempted with infinite retries.
-    async fn fetch_tip<DB, Client>(
+    async fn fetch_tip_from_network<Client>(
         &self,
-        factory: ProviderFactory<DB>,
         client: Client,
         tip: BlockHashOrNumber,
     ) -> RethResult<SealedHeader>
     where
-        DB: Database,
         Client: HeadersClient,
     {
-        let provider = factory.provider()?;
-
-        let header = provider.header_by_hash_or_number(tip)?;
-
-        // try to look up the header in the database
-        if let Some(header) = header {
-            info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.seal_slow())
-        }
-
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
         loop {
             match get_single_header(&client, tip).await {
@@ -849,7 +864,7 @@ impl NodeConfig {
         }
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        use reth_revm_inspectors::stack::InspectorStackConfig;
+        use revm_inspectors::stack::InspectorStackConfig;
         let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
 
         let stack_config = InspectorStackConfig {
@@ -897,6 +912,7 @@ impl NodeConfig {
                             max_blocks: stage_config.execution.max_blocks,
                             max_changes: stage_config.execution.max_changes,
                             max_cumulative_gas: stage_config.execution.max_cumulative_gas,
+                            max_duration: stage_config.execution.max_duration,
                         },
                         stage_config
                             .merkle
@@ -1055,7 +1071,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
 
         // build transaction pool
         let transaction_pool =
-            self.config.build_and_spawn_txpool(&blockchain_db, head, &executor)?;
+            self.config.build_and_spawn_txpool(&blockchain_db, head, &executor, &self.data_dir)?;
 
         // build network
         let (network_client, mut network_builder) = self
@@ -1096,10 +1112,35 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         ext.on_components_initialized(&components)?;
 
         debug!(target: "reth::cli", "Spawning payload builder service");
-        let payload_builder =
-            ext.spawn_payload_builder_service(&self.config.builder, &components)?;
 
-        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
+        // TODO: stateful node builder should handle this in with_payload_builder
+        // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
+        #[cfg(feature = "optimism")]
+        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
+            .set_compute_pending_block(self.config.builder.compute_pending_block);
+
+        #[cfg(feature = "optimism")]
+        let payload_builder: PayloadBuilderHandle<OptimismEngineTypes> =
+            ext.spawn_payload_builder_service(&self.config.builder, &components, payload_builder)?;
+
+        // The default payload builder is implemented on the unit type.
+        #[cfg(not(feature = "optimism"))]
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
+
+        #[cfg(not(feature = "optimism"))]
+        let payload_builder: PayloadBuilderHandle<EthEngineTypes> =
+            ext.spawn_payload_builder_service(&self.config.builder, &components, payload_builder)?;
+
+        let (consensus_engine_tx, mut consensus_engine_rx) = unbounded_channel();
+        if let Some(store_path) = self.config.debug.engine_api_store.clone() {
+            let (engine_intercept_tx, engine_intercept_rx) = unbounded_channel();
+            let engine_api_store = EngineApiStore::new(store_path);
+            executor.spawn_critical(
+                "engine api interceptor",
+                engine_api_store.intercept(consensus_engine_rx, engine_intercept_tx),
+            );
+            consensus_engine_rx = engine_intercept_rx;
+        };
         let max_block = self.config.max_block(&network_client, provider_factory.clone()).await?;
 
         // Configure the pipeline
@@ -1257,7 +1298,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         #[cfg(feature = "optimism")]
         if self.config.chain.is_optimism() && !self.config.rollup.enable_genesis_walkback {
             let client = rpc_server_handles.auth.http_client();
-            reth_rpc_api::EngineApiClient::fork_choice_updated_v2(
+            reth_rpc_api::EngineApiClient::<OptimismEngineTypes>::fork_choice_updated_v2(
                 &client,
                 reth_rpc_types::engine::ForkchoiceState {
                     head_block_hash: head.hash,
@@ -1343,7 +1384,7 @@ impl NodeHandle {
 }
 
 /// A simple function to launch a node with the specified [NodeConfig], spawning tasks on the
-/// [TaskExecutor] constructed from [Handle::current].
+/// [TaskExecutor] constructed from [TaskManager::current].
 ///
 /// # Example
 /// ```
@@ -1359,14 +1400,13 @@ impl NodeHandle {
 ///     let builder = NodeConfig::test().with_rpc(rpc_args).with_instance(2);
 ///
 ///     // Spawn the builder, returning a handle to the node
-///     let _handle = spawn_node(builder).await.unwrap();
+///     let (_handle, _manager) = spawn_node(builder).await.unwrap();
 /// }
 /// ```
-pub async fn spawn_node(config: NodeConfig) -> eyre::Result<NodeHandle> {
-    let handle = Handle::current();
-    let task_manager = TaskManager::new(handle);
+pub async fn spawn_node(config: NodeConfig) -> eyre::Result<(NodeHandle, TaskManager)> {
+    let task_manager = TaskManager::current();
     let ext = DefaultRethNodeCommandConfig;
-    config.launch::<()>(ext, task_manager.executor()).await
+    Ok((config.launch::<()>(ext, task_manager.executor()).await?, task_manager))
 }
 
 #[cfg(test)]
@@ -1383,7 +1423,7 @@ mod tests {
         // NOTE: tests here manually set an instance number. The alternative would be to use an
         // atomic counter. This works for `cargo test` but if tests would be run in `nextest` then
         // they would become flaky. So new tests should manually set a unique instance number.
-        let handle =
+        let (handle, _manager) =
             spawn_node(NodeConfig::test().with_rpc(rpc_args).with_instance(1)).await.unwrap();
 
         // call a function on the node
@@ -1397,7 +1437,7 @@ mod tests {
     #[tokio::test]
     async fn rpc_handles_none_without_http() {
         // this launches a test node _without_ http
-        let handle = spawn_node(NodeConfig::test().with_instance(2)).await.unwrap();
+        let (handle, _manager) = spawn_node(NodeConfig::test().with_instance(2)).await.unwrap();
 
         // ensure that the `http_client` is none
         let maybe_client = handle.rpc_server_handles().rpc.http_client();
@@ -1409,7 +1449,9 @@ mod tests {
         // spawn_test_node takes roughly 1 second per node, so this test takes ~4 seconds
         let num_nodes = 4;
 
+        // this reserves instances 3-6
         let starting_instance = 3;
+        // contains handles and managers
         let mut handles = Vec::new();
         for i in 0..num_nodes {
             let handle =

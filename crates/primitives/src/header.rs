@@ -126,6 +126,19 @@ impl Default for Header {
 }
 
 impl Header {
+    /// Checks if the block's difficulty is set to zero, indicating a Proof-of-Stake header.
+    ///
+    /// This function is linked to EIP-3675, proposing the consensus upgrade to Proof-of-Stake:
+    /// [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0)
+    ///
+    /// Verifies whether, as per the EIP, the block's difficulty is updated to zero,
+    /// signifying the transition to a Proof-of-Stake mechanism.
+    ///
+    /// Returns `true` if the block's difficulty matches the constant zero set by the EIP.
+    pub fn is_zero_difficulty(&self) -> bool {
+        self.difficulty.is_zero()
+    }
+
     /// Performs a sanity check on the extradata field of the header.
     ///
     /// # Errors
@@ -133,7 +146,7 @@ impl Header {
     /// Returns an error if the extradata size is larger than 100 KB.
     pub fn ensure_extradata_valid(&self) -> Result<(), HeaderError> {
         if self.extra_data.len() > 100 * 1024 {
-            return Err(HeaderError::LargeExtraData);
+            return Err(HeaderError::LargeExtraData)
         }
         Ok(())
     }
@@ -145,7 +158,7 @@ impl Header {
     /// Returns an error if the block difficulty exceeds 80 bits.
     pub fn ensure_difficulty_valid(&self) -> Result<(), HeaderError> {
         if self.difficulty.bit_len() > 80 {
-            return Err(HeaderError::LargeDifficulty);
+            return Err(HeaderError::LargeDifficulty)
         }
         Ok(())
     }
@@ -269,6 +282,34 @@ impl Header {
         self.extra_data.len() // extra data
     }
 
+    /// Checks if `blob_gas_used` is present in the header.
+    ///
+    /// Returns `true` if `blob_gas_used` is `Some`, otherwise `false`.
+    fn has_blob_gas_used(&self) -> bool {
+        self.blob_gas_used.is_some()
+    }
+
+    /// Checks if `excess_blob_gas` is present in the header.
+    ///
+    /// Returns `true` if `excess_blob_gas` is `Some`, otherwise `false`.
+    fn has_excess_blob_gas(&self) -> bool {
+        self.excess_blob_gas.is_some()
+    }
+
+    // Checks if `withdrawals_root` is present in the header.
+    ///
+    /// Returns `true` if `withdrawals_root` is `Some`, otherwise `false`.
+    fn has_withdrawals_root(&self) -> bool {
+        self.withdrawals_root.is_some()
+    }
+
+    /// Checks if `parent_beacon_block_root` is present in the header.
+    ///
+    /// Returns `true` if `parent_beacon_block_root` is `Some`, otherwise `false`.
+    fn has_parent_beacon_block_root(&self) -> bool {
+        self.parent_beacon_block_root.is_some()
+    }
+
     fn header_payload_length(&self) -> usize {
         let mut length = 0;
         length += self.parent_hash.length(); // Hash of the previous block.
@@ -290,10 +331,10 @@ impl Header {
         if let Some(base_fee) = self.base_fee_per_gas {
             // Adding base fee length if it exists.
             length += U256::from(base_fee).length();
-        } else if self.withdrawals_root.is_some() ||
-            self.blob_gas_used.is_some() ||
-            self.excess_blob_gas.is_some() ||
-            self.parent_beacon_block_root.is_some()
+        } else if self.has_withdrawals_root() ||
+            self.has_blob_gas_used() ||
+            self.has_excess_blob_gas() ||
+            self.has_parent_beacon_block_root()
         {
             // Placeholder code for empty lists.
             length += 1;
@@ -302,9 +343,9 @@ impl Header {
         if let Some(root) = self.withdrawals_root {
             // Adding withdrawals_root length if it exists.
             length += root.length();
-        } else if self.blob_gas_used.is_some() ||
-            self.excess_blob_gas.is_some() ||
-            self.parent_beacon_block_root.is_some()
+        } else if self.has_blob_gas_used() ||
+            self.has_excess_blob_gas() ||
+            self.has_parent_beacon_block_root()
         {
             // Placeholder code for a missing string value.
             length += 1;
@@ -313,7 +354,7 @@ impl Header {
         if let Some(blob_gas_used) = self.blob_gas_used {
             // Adding blob_gas_used length if it exists.
             length += U256::from(blob_gas_used).length();
-        } else if self.excess_blob_gas.is_some() || self.parent_beacon_block_root.is_some() {
+        } else if self.has_excess_blob_gas() || self.has_parent_beacon_block_root() {
             // Placeholder code for empty lists.
             length += 1;
         }
@@ -321,7 +362,7 @@ impl Header {
         if let Some(excess_blob_gas) = self.excess_blob_gas {
             // Adding excess_blob_gas length if it exists.
             length += U256::from(excess_blob_gas).length();
-        } else if self.parent_beacon_block_root.is_some() {
+        } else if self.has_parent_beacon_block_root() {
             // Placeholder code for empty lists.
             length += 1;
         }
@@ -370,10 +411,10 @@ impl Encodable for Header {
         // but withdrawals root is present.
         if let Some(ref base_fee) = self.base_fee_per_gas {
             U256::from(*base_fee).encode(out);
-        } else if self.withdrawals_root.is_some() ||
-            self.blob_gas_used.is_some() ||
-            self.excess_blob_gas.is_some() ||
-            self.parent_beacon_block_root.is_some()
+        } else if self.has_withdrawals_root() ||
+            self.has_blob_gas_used() ||
+            self.has_excess_blob_gas() ||
+            self.has_parent_beacon_block_root()
         {
             out.put_u8(EMPTY_LIST_CODE);
         }
@@ -382,9 +423,9 @@ impl Encodable for Header {
         // but blob gas used is present.
         if let Some(ref root) = self.withdrawals_root {
             root.encode(out);
-        } else if self.blob_gas_used.is_some() ||
-            self.excess_blob_gas.is_some() ||
-            self.parent_beacon_block_root.is_some()
+        } else if self.has_blob_gas_used() ||
+            self.has_excess_blob_gas() ||
+            self.has_parent_beacon_block_root()
         {
             out.put_u8(EMPTY_STRING_CODE);
         }
@@ -393,7 +434,7 @@ impl Encodable for Header {
         // but excess blob gas is present.
         if let Some(ref blob_gas_used) = self.blob_gas_used {
             U256::from(*blob_gas_used).encode(out);
-        } else if self.excess_blob_gas.is_some() || self.parent_beacon_block_root.is_some() {
+        } else if self.has_excess_blob_gas() || self.has_parent_beacon_block_root() {
             out.put_u8(EMPTY_LIST_CODE);
         }
 
@@ -401,7 +442,7 @@ impl Encodable for Header {
         // but parent beacon block root is present.
         if let Some(ref excess_blob_gas) = self.excess_blob_gas {
             U256::from(*excess_blob_gas).encode(out);
-        } else if self.parent_beacon_block_root.is_some() {
+        } else if self.has_parent_beacon_block_root() {
             out.put_u8(EMPTY_LIST_CODE);
         }
 
@@ -441,9 +482,9 @@ impl Decodable for Header {
             receipts_root: Decodable::decode(buf)?,
             logs_bloom: Decodable::decode(buf)?,
             difficulty: Decodable::decode(buf)?,
-            number: U256::decode(buf)?.to::<u64>(),
-            gas_limit: U256::decode(buf)?.to::<u64>(),
-            gas_used: U256::decode(buf)?.to::<u64>(),
+            number: u64::decode(buf)?,
+            gas_limit: u64::decode(buf)?,
+            gas_used: u64::decode(buf)?,
             timestamp: Decodable::decode(buf)?,
             extra_data: Decodable::decode(buf)?,
             mix_hash: Decodable::decode(buf)?,
@@ -459,7 +500,7 @@ impl Decodable for Header {
             if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
                 buf.advance(1)
             } else {
-                this.base_fee_per_gas = Some(U256::decode(buf)?.to::<u64>());
+                this.base_fee_per_gas = Some(u64::decode(buf)?);
             }
         }
 
@@ -477,7 +518,7 @@ impl Decodable for Header {
             if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
                 buf.advance(1)
             } else {
-                this.blob_gas_used = Some(U256::decode(buf)?.to::<u64>());
+                this.blob_gas_used = Some(u64::decode(buf)?);
             }
         }
 
@@ -485,7 +526,7 @@ impl Decodable for Header {
             if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
                 buf.advance(1)
             } else {
-                this.excess_blob_gas = Some(U256::decode(buf)?.to::<u64>());
+                this.excess_blob_gas = Some(u64::decode(buf)?);
             }
         }
 
@@ -995,5 +1036,13 @@ mod tests {
         let direction = HeadersDirection::Rising;
         direction.encode(&mut buf);
         assert_eq!(direction, HeadersDirection::decode(&mut buf.as_slice()).unwrap());
+    }
+
+    #[test]
+    fn test_decode_block_header_with_invalid_blob_gas_used() {
+        // This should error because the blob_gas_used is too large
+        let data = hex!("f90242a013a7ec98912f917b3e804654e37c9866092043c13eb8eab94eb64818e886cff5a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d4934794f97e180c050e5ab072211ad2c213eb5aee4df134a0ec229dbe85b0d3643ad0f471e6ec1a36bbc87deffbbd970762d22a53b35d068aa056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080830305988401c9c380808464c40d5499d883010c01846765746888676f312e32302e35856c696e7578a070ccadc40b16e2094954b1064749cc6fbac783c1712f1b271a8aac3eda2f232588000000000000000007a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421891122334455667788998401600000");
+        Header::decode(&mut data.as_slice())
+            .expect_err("blob_gas_used size should make this header decoding fail");
     }
 }

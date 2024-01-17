@@ -2,6 +2,7 @@ use crate::{mode::MiningMode, Storage};
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_interfaces::consensus::ForkchoiceState;
+use reth_node_api::EngineTypes;
 use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_stages::PipelineEvent;
@@ -18,7 +19,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, warn};
 
 /// A Future that listens for new ready transactions and puts new blocks into storage
-pub struct MiningTask<Client, Pool: TransactionPool> {
+pub struct MiningTask<Client, Pool: TransactionPool, Engine: EngineTypes> {
     /// The configured chain spec
     chain_spec: Arc<ChainSpec>,
     /// The client used to interact with the state
@@ -34,7 +35,7 @@ pub struct MiningTask<Client, Pool: TransactionPool> {
     /// backlog of sets of transactions ready to be mined
     queued: VecDeque<Vec<Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>>,
     // TODO: ideally this would just be a sender of hashes
-    to_engine: UnboundedSender<BeaconEngineMessage>,
+    to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
     /// Used to notify consumers of new blocks
     canon_state_notification: CanonStateNotificationSender,
     /// The pipeline events to listen on
@@ -43,12 +44,12 @@ pub struct MiningTask<Client, Pool: TransactionPool> {
 
 // === impl MiningTask ===
 
-impl<Client, Pool: TransactionPool> MiningTask<Client, Pool> {
+impl<Client, Pool: TransactionPool, Engine: EngineTypes> MiningTask<Client, Pool, Engine> {
     /// Creates a new instance of the task
     pub(crate) fn new(
         chain_spec: Arc<ChainSpec>,
         miner: MiningMode,
-        to_engine: UnboundedSender<BeaconEngineMessage>,
+        to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
         canon_state_notification: CanonStateNotificationSender,
         storage: Storage,
         client: Client,
@@ -74,11 +75,12 @@ impl<Client, Pool: TransactionPool> MiningTask<Client, Pool> {
     }
 }
 
-impl<Client, Pool> Future for MiningTask<Client, Pool>
+impl<Client, Pool, Engine> Future for MiningTask<Client, Pool, Engine>
 where
     Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
+    Engine: EngineTypes + 'static,
 {
     type Output = ();
 
@@ -192,8 +194,11 @@ where
 
                             debug!(target: "consensus::auto", header=?sealed_block_with_senders.hash(), "sending block notification");
 
-                            let chain =
-                                Arc::new(Chain::new(vec![sealed_block_with_senders], bundle_state));
+                            let chain = Arc::new(Chain::new(
+                                vec![sealed_block_with_senders],
+                                bundle_state,
+                                None,
+                            ));
 
                             // send block notification
                             let _ = canon_state_notification
@@ -225,7 +230,9 @@ where
     }
 }
 
-impl<Client, Pool: TransactionPool> std::fmt::Debug for MiningTask<Client, Pool> {
+impl<Client, Pool: TransactionPool, Engine: EngineTypes> std::fmt::Debug
+    for MiningTask<Client, Pool, Engine>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MiningTask").finish_non_exhaustive()
     }

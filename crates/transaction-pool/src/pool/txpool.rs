@@ -90,6 +90,20 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
+    /// Retrieves the highest nonce for a specific sender from the transaction pool.
+    pub fn get_highest_nonce_by_sender(&self, sender: SenderId) -> Option<u64> {
+        self.all().txs_iter(sender).last().map(|(_, tx)| tx.transaction.nonce())
+    }
+
+    /// Retrieves the highest transaction (wrapped in an `Arc`) for a specific sender from the
+    /// transaction pool.
+    pub fn get_highest_transaction_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.all().txs_iter(sender).last().map(|(_, tx)| Arc::clone(&tx.transaction))
+    }
+
     /// Returns access to the [`AllTransactions`] container.
     pub(crate) fn all(&self) -> &AllTransactions<T::Transaction> {
         &self.all_transactions
@@ -477,7 +491,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         on_chain_nonce: u64,
     ) -> PoolResult<AddedTransaction<T::Transaction>> {
         if self.contains(tx.hash()) {
-            return Err(PoolError::new(*tx.hash(), PoolErrorKind::AlreadyImported));
+            return Err(PoolError::new(*tx.hash(), PoolErrorKind::AlreadyImported))
         }
 
         // Update sender info with balance and nonce
@@ -705,7 +719,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 }
                 id = descendant;
             } else {
-                return;
+                return
             }
         }
     }
@@ -915,7 +929,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Returns the internal transaction with additional metadata
-    #[cfg(test)]
     pub(crate) fn get(&self, id: &TransactionId) -> Option<&PoolInternalTransaction<T>> {
         self.txs.get(id)
     }
@@ -932,7 +945,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             let count = entry.get_mut();
             if *count == 1 {
                 entry.remove();
-                return;
+                return
             }
             *count -= 1;
         }
@@ -992,7 +1005,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 ($iter:ident) => {
                     'this: while let Some((peek, _)) = iter.peek() {
                         if peek.sender != id.sender {
-                            break 'this;
+                            break 'this
                         }
                         iter.next();
                     }
@@ -1011,7 +1024,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                         current: tx.subpool,
                         destination: Destination::Discard,
                     });
-                    continue 'transactions;
+                    continue 'transactions
                 }
 
                 let ancestor = TransactionId::ancestor(id.nonce, info.state_nonce, id.sender);
@@ -1034,7 +1047,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             // If there's a nonce gap, we can shortcircuit, because there's nothing to update yet.
             if tx.state.has_nonce_gap() {
                 next_sender!(iter);
-                continue 'transactions;
+                continue 'transactions
             }
 
             // Since this is the first transaction of the sender, it has no parked ancestors
@@ -1054,13 +1067,13 @@ impl<T: PoolTransaction> AllTransactions<T> {
             while let Some((peek, ref mut tx)) = iter.peek_mut() {
                 if peek.sender != id.sender {
                     // Found the next sender
-                    continue 'transactions;
+                    continue 'transactions
                 }
 
                 // can short circuit
                 if tx.state.has_nonce_gap() {
                     next_sender!(iter);
-                    continue 'transactions;
+                    continue 'transactions
                 }
 
                 // update cumulative cost
@@ -1222,7 +1235,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     fn contains_conflicting_transaction(&self, tx: &ValidPoolTransaction<T>) -> bool {
         let mut iter = self.txs_iter(tx.transaction_id.sender);
         if let Some((_, existing)) = iter.next() {
-            return tx.tx_type_conflicts_with(&existing.transaction);
+            return tx.tx_type_conflicts_with(&existing.transaction)
         }
         // no existing transaction for this sender
         false
@@ -1240,13 +1253,13 @@ impl<T: PoolTransaction> AllTransactions<T> {
         &self,
         transaction: ValidPoolTransaction<T>,
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
-        if !transaction.origin.is_local() || self.local_transactions_config.no_local_exemptions() {
+        if !self.local_transactions_config.is_local(transaction.origin, transaction.sender()) {
             let current_txs =
                 self.tx_counter.get(&transaction.sender_id()).copied().unwrap_or_default();
             if current_txs >= self.max_account_slots {
                 return Err(InsertErr::ExceededSenderTransactionsCapacity {
                     transaction: Arc::new(transaction),
-                });
+                })
             }
         }
         if transaction.gas_limit() > self.block_gas_limit {
@@ -1254,12 +1267,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 block_gas_limit: self.block_gas_limit,
                 tx_gas_limit: transaction.gas_limit(),
                 transaction: Arc::new(transaction),
-            });
+            })
         }
 
         if self.contains_conflicting_transaction(&transaction) {
             // blob vs non blob transactions are mutually exclusive for the same sender
-            return Err(InsertErr::TxTypeConflict { transaction: Arc::new(transaction) });
+            return Err(InsertErr::TxTypeConflict { transaction: Arc::new(transaction) })
         }
 
         Ok(transaction)
@@ -1279,12 +1292,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
         if let Some(ancestor) = ancestor {
             let Some(ancestor_tx) = self.txs.get(&ancestor) else {
                 // ancestor tx is missing, so we can't insert the new blob
-                return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(new_blob_tx) });
+                return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(new_blob_tx) })
             };
             if ancestor_tx.state.has_nonce_gap() {
                 // the ancestor transaction already has a nonce gap, so we can't insert the new
                 // blob
-                return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(new_blob_tx) });
+                return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(new_blob_tx) })
             }
 
             // the max cost executing this transaction requires
@@ -1293,7 +1306,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             // check if the new blob would go into overdraft
             if cumulative_cost > on_chain_balance {
                 // the transaction would go into overdraft
-                return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) });
+                return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
             }
 
             // ensure that a replacement would not shift already propagated blob transactions into
@@ -1310,14 +1323,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
                         cumulative_cost += tx.transaction.cost();
                         if tx.transaction.is_eip4844() && cumulative_cost > on_chain_balance {
                             // the transaction would shift
-                            return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) });
+                            return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
                         }
                     }
                 }
             }
         } else if new_blob_tx.cost() > on_chain_balance {
             // the transaction would go into overdraft
-            return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) });
+            return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
         }
 
         Ok(new_blob_tx)
@@ -1332,12 +1345,11 @@ impl<T: PoolTransaction> AllTransactions<T> {
         price_bumps: &PriceBumpConfig,
     ) -> bool {
         let price_bump = price_bumps.price_bump(existing_transaction.tx_type());
-        let price_bump_multiplier = (100 + price_bump) / 100;
 
         if maybe_replacement.max_fee_per_gas() <=
-            existing_transaction.max_fee_per_gas() * price_bump_multiplier
+            existing_transaction.max_fee_per_gas() * (100 + price_bump) / 100
         {
-            return true;
+            return true
         }
 
         let existing_max_priority_fee_per_gas =
@@ -1346,11 +1358,11 @@ impl<T: PoolTransaction> AllTransactions<T> {
             maybe_replacement.transaction.max_priority_fee_per_gas().unwrap_or(0);
 
         if replacement_max_priority_fee_per_gas <=
-            existing_max_priority_fee_per_gas * price_bump_multiplier &&
+            existing_max_priority_fee_per_gas * (100 + price_bump) / 100 &&
             existing_max_priority_fee_per_gas != 0 &&
             replacement_max_priority_fee_per_gas != 0
         {
-            return true;
+            return true
         }
 
         // check max blob fee per gas
@@ -1361,9 +1373,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
             let replacement_max_blob_fee_per_gas =
                 maybe_replacement.transaction.max_fee_per_blob_gas().unwrap_or(0);
             if replacement_max_blob_fee_per_gas <=
-                existing_max_blob_fee_per_gas * price_bump_multiplier
+                existing_max_blob_fee_per_gas * (100 + price_bump) / 100
             {
-                return true;
+                return true
             }
         }
 
@@ -1455,7 +1467,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let fee_cap = transaction.max_fee_per_gas();
 
         if fee_cap < self.minimal_protocol_basefee as u128 {
-            return Err(InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap });
+            return Err(InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap })
         }
         if fee_cap >= self.pending_fees.base_fee as u128 {
             state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
@@ -1489,7 +1501,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     return Err(InsertErr::Underpriced {
                         transaction: pool_tx.transaction,
                         existing: *entry.get().transaction.hash(),
-                    });
+                    })
                 }
                 let new_hash = *pool_tx.transaction.hash();
                 let new_transaction = pool_tx.transaction.clone();
@@ -1532,7 +1544,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
                 // If there's a nonce gap, we can shortcircuit
                 if next_nonce != id.nonce {
-                    break;
+                    break
                 }
 
                 // close the nonce gap
@@ -1608,8 +1620,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
 }
 
 #[cfg(test)]
-#[allow(missing_docs)]
 impl<T: PoolTransaction> AllTransactions<T> {
+    /// This function retrieves the number of transactions stored in the pool for a specific sender.
+    ///
+    /// If there are no transactions for the given sender, it returns zero by default.
     pub(crate) fn tx_count(&self, sender: SenderId) -> usize {
         self.tx_counter.get(&sender).copied().unwrap_or_default()
     }
@@ -1624,7 +1638,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             by_hash: Default::default(),
             txs: Default::default(),
             tx_counter: Default::default(),
-            last_seen_block_number: 0,
+            last_seen_block_number: Default::default(),
             last_seen_block_hash: Default::default(),
             pending_fees: Default::default(),
             price_bumps: Default::default(),
@@ -2293,6 +2307,47 @@ mod tests {
     }
 
     #[test]
+    fn insert_replace_underpriced_not_enough_bump() {
+        let on_chain_balance = U256::ZERO;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let mut tx = MockTransaction::eip1559().inc_price().inc_limit();
+        tx.set_priority_fee(100);
+        tx.set_max_fee(100);
+        let first = f.validated(tx.clone());
+        let _ = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let mut replacement = f.validated(tx.rng_hash().inc_price());
+        // a price bump of 9% is not enough for a default min price bump of 10%
+        replacement.transaction.set_priority_fee(109);
+        replacement.transaction.set_max_fee(109);
+        let err =
+            pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::Underpriced { .. }));
+
+        // ensure first tx is not removed
+        assert!(pool.contains(first.hash()));
+        assert_eq!(pool.len(), 1);
+
+        // price bump of 10% is also not enough because the bump should be strictly greater than 10%
+        replacement.transaction.set_priority_fee(110);
+        replacement.transaction.set_max_fee(110);
+        let err =
+            pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::Underpriced { .. }));
+        assert!(pool.contains(first.hash()));
+        assert_eq!(pool.len(), 1);
+
+        // should also fail if the bump in priority fee is not enough
+        replacement.transaction.set_priority_fee(111);
+        replacement.transaction.set_max_fee(110);
+        let err = pool.insert_tx(replacement, on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::Underpriced { .. }));
+        assert!(pool.contains(first.hash()));
+        assert_eq!(pool.len(), 1);
+    }
+
+    #[test]
     fn insert_conflicting_type_normal_to_blob() {
         let on_chain_balance = U256::from(10_000);
         let on_chain_nonce = 0;
@@ -2545,6 +2600,38 @@ mod tests {
         assert_eq!(pool.basefee_pool.len(), 1);
 
         assert_eq!(pool.all_transactions.txs.get(&id).unwrap().subpool, SubPool::BaseFee)
+    }
+
+    #[test]
+    fn get_highest_transaction_by_sender_and_nonce() {
+        // Set up a mock transaction factory and a new transaction pool.
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        // Create a mock transaction and add it to the pool.
+        let tx = MockTransaction::eip1559();
+        pool.add_transaction(f.validated(tx.clone()), U256::from(1_000), 0).unwrap();
+
+        // Create another mock transaction with an incremented price.
+        let tx1 = tx.inc_price().next().clone();
+
+        // Validate the second mock transaction and add it to the pool.
+        let tx1_validated = f.validated(tx1.clone());
+        pool.add_transaction(tx1_validated, U256::from(1_000), 0).unwrap();
+
+        // Ensure that the calculated next nonce for the sender matches the expected value.
+        assert_eq!(
+            pool.get_highest_nonce_by_sender(f.ids.sender_id(&tx.sender()).unwrap()),
+            Some(1)
+        );
+
+        // Retrieve the highest transaction by sender.
+        let highest_tx = pool
+            .get_highest_transaction_by_sender(f.ids.sender_id(&tx.sender()).unwrap())
+            .expect("Failed to retrieve highest transaction");
+
+        // Validate that the retrieved highest transaction matches the expected transaction.
+        assert_eq!(highest_tx.as_ref().transaction, tx1);
     }
 
     #[test]

@@ -284,38 +284,49 @@ impl Borrow<(PeerId, GetBlockHeaders)> for RespondedGetBlockHeaders {
 
 /// All `eth` request related to blocks delegated by the network.
 #[derive(Debug)]
-#[allow(missing_docs)]
 pub enum IncomingEthRequest {
     /// Request Block headers from the peer.
     ///
     /// The response should be sent through the channel.
     GetBlockHeaders {
+        /// The ID of the peer to request block headers from.
         peer_id: PeerId,
+        /// The specific block headers requested.
         request: GetBlockHeaders,
+        /// The channel sender for the response containing block headers.
         response: oneshot::Sender<RequestResult<BlockHeaders>>,
     },
-    /// Request Block headers from the peer.
+    /// Request Block bodies from the peer.
     ///
     /// The response should be sent through the channel.
     GetBlockBodies {
+        /// The ID of the peer to request block bodies from.
         peer_id: PeerId,
+        /// The specific block bodies requested.
         request: GetBlockBodies,
+        /// The channel sender for the response containing block bodies.
         response: oneshot::Sender<RequestResult<BlockBodies>>,
     },
     /// Request Node Data from the peer.
     ///
     /// The response should be sent through the channel.
     GetNodeData {
+        /// The ID of the peer to request node data from.
         peer_id: PeerId,
+        /// The specific node data requested.
         request: GetNodeData,
+        /// The channel sender for the response containing node data.
         response: oneshot::Sender<RequestResult<NodeData>>,
     },
     /// Request Receipts from the peer.
     ///
     /// The response should be sent through the channel.
     GetReceipts {
+        /// The ID of the peer to request receipts from.
         peer_id: PeerId,
+        /// The specific receipts requested.
         request: GetReceipts,
+        /// The channel sender for the response containing receipts.
         response: oneshot::Sender<RequestResult<Receipts>>,
     },
 }
