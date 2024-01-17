@@ -77,7 +77,7 @@ pub enum StageError {
     #[error("invalid download response: {0}")]
     Download(#[from] DownloadError),
     /// Database is ahead of snapshot data.
-    #[error("missing snapshot data from block number: {number}", number = block.number)]
+    #[error("missing snapshot data for block number: {number}", number = block.number)]
     MissingSnapshotData {
         /// Starting block with  missing data.
         block: Box<SealedHeader>,
