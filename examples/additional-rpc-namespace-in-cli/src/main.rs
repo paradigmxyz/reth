@@ -14,11 +14,11 @@
 
 use clap::Parser;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth::cli::{
+use reth::cli::Cli;
+use reth_node_core::cli::{
     components::{RethNodeComponents, RethRpcComponents},
     config::RethRpcConfig,
     ext::{RethCliExt, RethNodeCommandConfig},
-    Cli,
 };
 use reth_transaction_pool::TransactionPool;
 

@@ -1,11 +1,6 @@
 //! CLI definition and entrypoint to executable
 
 use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        LogArgs,
-    },
-    cli::ext::RethCliExt,
     commands::{
         config_cmd, db, debug_cmd, import, init_cmd, node, p2p, recover, stage, test_vectors,
     },
@@ -17,11 +12,15 @@ use reth_primitives::ChainSpec;
 use reth_tracing::FileWorkerGuard;
 use std::sync::Arc;
 
-pub mod components;
-pub mod config;
-pub mod db_type;
-pub mod ext;
+use reth_node_core::{
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        LogArgs,
+    },
+    cli::ext::RethCliExt,
+};
 
+pub mod db_type;
 /// The main reth cli interface.
 ///
 /// This is the entrypoint to the executable.
@@ -164,7 +163,7 @@ impl<Ext: RethCliExt> Commands<Ext> {
 mod tests {
     use clap::CommandFactory;
 
-    use crate::args::{utils::SUPPORTED_CHAINS, ColorMode};
+    use reth_node_core::args::{utils::SUPPORTED_CHAINS, ColorMode};
 
     use super::*;
 

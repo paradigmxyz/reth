@@ -1,21 +1,10 @@
 //! Support for customizing the node
-use super::cli::{components::RethRpcServerHandles, ext::DefaultRethNodeCommandConfig};
 use crate::{
-    args::{
-        get_secret_key, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RpcServerArgs, TxPoolArgs,
-    },
-    cli::{
-        components::RethNodeComponentsImpl,
-        config::{RethRpcConfig, RethTransactionPoolConfig},
-        db_type::{DatabaseBuilder, DatabaseInstance},
-        ext::{RethCliExt, RethNodeCommandConfig},
-    },
+    cli::db_type::{DatabaseBuilder, DatabaseInstance},
     commands::{
         debug_cmd::EngineApiStore,
         node::{cl_events::ConsensusLayerHealthEvents, events},
     },
-    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     init::init_genesis,
     prometheus_exporter,
     utils::{get_single_header, write_peers_to_file},
@@ -63,6 +52,19 @@ use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_node_builder::EthEngineTypes;
 #[cfg(feature = "optimism")]
 use reth_node_builder::OptimismEngineTypes;
+use reth_node_core::{
+    args::{
+        get_secret_key, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
+        PruningArgs, RpcServerArgs, TxPoolArgs,
+    },
+    cli::{
+        components::{RethNodeComponentsImpl, RethRpcServerHandles},
+        config::{RethRpcConfig, RethTransactionPoolConfig},
+        ext::{DefaultRethNodeCommandConfig, RethCliExt, RethNodeCommandConfig},
+    },
+    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
+};
+
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
@@ -1408,7 +1410,7 @@ impl NodeHandle {
 pub async fn spawn_node(config: NodeConfig) -> eyre::Result<NodeHandle> {
     let handle = Handle::current();
     let task_manager = TaskManager::new(handle);
-    let ext = DefaultRethNodeCommandConfig;
+    let ext = DefaultRethNodeCommandConfig::default();
     config.launch::<()>(ext, task_manager.executor()).await
 }
 

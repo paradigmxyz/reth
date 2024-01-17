@@ -7,11 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{
-    args::DatabaseArgs,
-    dirs::{DataDirPath, PlatformPath},
-    utils::DbTool,
-};
+use crate::utils::DbTool;
 use clap::Parser;
 
 use reth_db::{
@@ -21,6 +17,11 @@ use reth_db::{
     HeaderNumbers, HeaderTD, Headers, PlainAccountState, PlainStorageState, PruneCheckpoints,
     Receipts, StorageChangeSet, StorageHistory, StoragesTrie, SyncStage, SyncStageProgress, Tables,
     TransactionBlock, Transactions, TxHashNumber, TxSenders,
+};
+
+use reth_node_core::{
+    args::DatabaseArgs,
+    dirs::{DataDirPath, PlatformPath},
 };
 use tracing::info;
 

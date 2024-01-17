@@ -2,21 +2,20 @@
 //!
 //! Stage debugging tool
 
-use crate::{
+use crate::{prometheus_exporter, version::SHORT_VERSION};
+use clap::Parser;
+use reth_beacon_consensus::BeaconConsensus;
+use reth_config::Config;
+use reth_db::init_db;
+use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
+use reth_node_core::{
     args::{
         get_secret_key,
         utils::{chain_help, chain_spec_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs, StageEnum,
     },
     dirs::{DataDirPath, MaybePlatformPath},
-    prometheus_exporter,
-    version::SHORT_VERSION,
 };
-use clap::Parser;
-use reth_beacon_consensus::BeaconConsensus;
-use reth_config::Config;
-use reth_db::init_db;
-use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_primitives::ChainSpec;
 use reth_provider::{ProviderFactory, StageCheckpointReader};
 use reth_stages::{

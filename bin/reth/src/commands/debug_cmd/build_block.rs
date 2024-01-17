@@ -1,13 +1,6 @@
 //! Command for debugging block building.
 
-use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
-    runner::CliContext,
-};
+use crate::runner::CliContext;
 use alloy_rlp::Decodable;
 use clap::Parser;
 use eyre::Context;
@@ -49,6 +42,14 @@ use tracing::*;
 
 #[cfg(not(feature = "optimism"))]
 use reth_payload_builder::EthPayloadBuilderAttributes;
+
+use reth_node_core::{
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs,
+    },
+    dirs::{DataDirPath, MaybePlatformPath},
+};
 
 /// `reth debug build-block` command
 /// This debug routine requires that the node is positioned at the block before the target.

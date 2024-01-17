@@ -1,15 +1,6 @@
 //! Command for debugging merkle trie calculation.
 
-use crate::{
-    args::{
-        get_secret_key,
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, NetworkArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
-    runner::CliContext,
-    utils::get_single_header,
-};
+use crate::{runner::CliContext, utils::get_single_header};
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
@@ -18,6 +9,14 @@ use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEn
 use reth_interfaces::{consensus::Consensus, p2p::full_block::FullBlockClient};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
+use reth_node_core::{
+    args::{
+        get_secret_key,
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs, NetworkArgs,
+    },
+    dirs::{DataDirPath, MaybePlatformPath},
+};
 use reth_primitives::{
     fs,
     stage::{StageCheckpoint, StageId},

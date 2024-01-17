@@ -22,6 +22,7 @@ reth-revm.workspace = true
 reth-transaction-pool.workspace = true
 reth-node-api.workspace = true
 
+
 # async
 futures-util.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
@@ -31,6 +32,7 @@ tracing.workspace = true
 [dev-dependencies]
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth.workspace = true
+reth-node-core.workspace = true
 tempfile.workspace = true
 clap.workspace = true
 jsonrpsee.workspace = true
