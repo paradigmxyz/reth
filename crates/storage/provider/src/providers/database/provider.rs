@@ -104,8 +104,14 @@ pub struct DatabaseProvider<TX> {
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Snapshot provider
-    #[allow(dead_code)]
-    pub snapshot_provider: Option<Arc<SnapshotProvider>>,
+    snapshot_provider: Option<Arc<SnapshotProvider>>,
+}
+
+impl<TX> DatabaseProvider<TX> {
+    /// Returns snapshot provider
+    pub fn snapshot_provider(&self) -> Option<Arc<SnapshotProvider>> {
+        self.snapshot_provider.clone()
+    }
 }
 
 impl<TX: DbTxMut> DatabaseProvider<TX> {

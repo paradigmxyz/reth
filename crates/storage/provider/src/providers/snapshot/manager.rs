@@ -29,7 +29,7 @@ use tokio::sync::watch;
 
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a snapshot range.
-type SegmentRanges = HashMap<SnapshotSegment, BTreeMap<u64, RangeInclusive<u64>>>;
+type SegmentRanges = HashMap<SnapshotSegment, BTreeMap<TxNumber, RangeInclusive<BlockNumber>>>;
 
 /// [`SnapshotProvider`] manages all existing [`SnapshotJarProvider`].
 #[derive(Debug, Default)]
