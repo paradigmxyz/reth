@@ -221,10 +221,9 @@ impl SegmentHeader {
             SnapshotSegment::Headers => (),
             SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
                 if let Some(tx_range) = &mut self.tx_range {
-                    let start = if *tx_range.start() == 0 { 1 } else { *tx_range.start() };
-                    *tx_range = start..=*tx_range.end() + 1;
+                    *tx_range = *tx_range.start()..=*tx_range.end() + 1;
                 } else {
-                    self.tx_range = Some(1..=1);
+                    self.tx_range = Some(0..=0);
                 }
             }
         }
@@ -239,8 +238,10 @@ impl SegmentHeader {
             }
             SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
                 self.tx_range = self.tx_range.as_ref().and_then(|tx_range| {
-                    let tx_end = tx_range.end().saturating_sub(num);
-                    (tx_end != 0).then(|| *tx_range.start()..=tx_end)
+                    if num > *tx_range.end() {
+                        return None
+                    }
+                    Some(*tx_range.start()..=tx_range.end().saturating_sub(num))
                 });
             }
         };
