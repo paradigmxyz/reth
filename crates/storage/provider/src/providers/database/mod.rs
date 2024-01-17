@@ -586,10 +586,10 @@ mod tests {
                 Ok(_)
             );
             assert_matches!(
-                provider.transaction_sender(1), Ok(Some(sender))
+                provider.transaction_sender(0), Ok(Some(sender))
                 if sender == block.body[0].recover_signer().unwrap()
             );
-            assert_matches!(provider.transaction_id(block.body[0].hash), Ok(Some(1)));
+            assert_matches!(provider.transaction_id(block.body[0].hash), Ok(Some(0)));
         }
 
         {
@@ -605,7 +605,7 @@ mod tests {
                 ),
                 Ok(_)
             );
-            assert_matches!(provider.transaction_sender(1), Ok(None));
+            assert_matches!(provider.transaction_sender(0), Ok(None));
             assert_matches!(provider.transaction_id(block.body[0].hash), Ok(None));
         }
     }
@@ -617,7 +617,7 @@ mod tests {
         let mut rng = generators::rng();
         let block = random_block(&mut rng, 0, None, Some(3), None);
 
-        let tx_ranges: Vec<RangeInclusive<TxNumber>> = vec![1..=1, 2..=2, 3..=3, 1..=2, 1..=3];
+        let tx_ranges: Vec<RangeInclusive<TxNumber>> = vec![0..=0, 1..=1, 2..=2, 0..=1, 1..=2];
         for range in tx_ranges {
             let provider = factory.provider_rw().unwrap();
 
@@ -633,7 +633,7 @@ mod tests {
                     .clone()
                     .map(|tx_number| (
                         tx_number,
-                        block.body[tx_number as usize - 1].recover_signer().unwrap()
+                        block.body[tx_number as usize].recover_signer().unwrap()
                     ))
                     .collect())
             );

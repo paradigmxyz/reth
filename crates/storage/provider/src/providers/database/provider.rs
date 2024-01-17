@@ -2369,7 +2369,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
             .cursor_read::<tables::TransactionBlock>()?
             .last()?
             .map(|(n, _)| n + 1)
-            .unwrap_or(1);
+            .unwrap_or_default();
         durations_recorder.record_relative(metrics::Action::GetNextTxNum);
         let first_tx_num = next_tx_num;
 
