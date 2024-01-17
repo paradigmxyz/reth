@@ -1,41 +1,27 @@
-use crate::segments::{prepare_jar, Segment};
+use crate::segments::{dataset_for_compression, prepare_jar, Segment};
 use reth_db::{database::Database, snapshot::create_snapshot_T1, tables};
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
-    snapshot::{Compression, Filters, SegmentConfig, SegmentHeader},
+    snapshot::{SegmentConfig, SegmentHeader},
     BlockNumber, SnapshotSegment, TxNumber,
 };
 use reth_provider::{DatabaseProviderRO, TransactionsProviderExt};
-use std::{ops::RangeInclusive, path::Path};
+use std::{ops::RangeInclusive, path::PathBuf};
 
 /// Snapshot segment responsible for [SnapshotSegment::Receipts] part of data.
-#[derive(Debug)]
-pub struct Receipts {
-    config: SegmentConfig,
-}
+#[derive(Debug, Default)]
+pub struct Receipts;
 
-impl Receipts {
-    /// Creates new instance of [Receipts] snapshot segment.
-    pub fn new(compression: Compression, filters: Filters) -> Self {
-        Self { config: SegmentConfig { compression, filters } }
-    }
-}
-
-impl Default for Receipts {
-    fn default() -> Self {
-        Self { config: SnapshotSegment::Receipts.config() }
-    }
-}
-
-impl Segment for Receipts {
+impl<DB: Database> Segment<DB> for Receipts {
     fn segment(&self) -> SnapshotSegment {
         SnapshotSegment::Receipts
     }
 
-    fn snapshot<DB: Database>(
+    fn create_snapshot_file(
         &self,
         provider: &DatabaseProviderRO<DB>,
-        directory: impl AsRef<Path>,
+        directory: &PathBuf,
+        config: SegmentConfig,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
         let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
@@ -44,12 +30,12 @@ impl Segment for Receipts {
         let mut jar = prepare_jar::<DB, 1>(
             provider,
             directory,
-            self.segment(),
-            self.config,
+            SnapshotSegment::Receipts,
+            config,
             block_range,
             tx_range_len,
             || {
-                Ok([self.dataset_for_compression::<DB, tables::Receipts>(
+                Ok([dataset_for_compression::<DB, tables::Receipts>(
                     provider,
                     &tx_range,
                     tx_range_len,
@@ -59,7 +45,7 @@ impl Segment for Receipts {
 
         // Generate list of hashes for filters & PHF
         let mut hashes = None;
-        if self.config.filters.has_filters() {
+        if config.filters.has_filters() {
             hashes = Some(
                 provider
                     .transaction_hashes_by_range(*tx_range.start()..(*tx_range.end() + 1))?

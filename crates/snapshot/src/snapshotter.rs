@@ -1,12 +1,12 @@
 //! Support for snapshotting.
 
-use crate::SnapshotterError;
-use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
-use reth_interfaces::{provider::ProviderError, RethResult};
-use reth_primitives::{snapshot::HighestSnapshots, BlockNumber, SnapshotSegment};
+use crate::{segments, segments::Segment, SnapshotterError};
+use reth_db::database::Database;
+use reth_interfaces::RethResult;
+use reth_primitives::{snapshot::HighestSnapshots, BlockNumber};
 use reth_provider::{
     providers::{SnapshotProvider, SnapshotWriter},
-    BlockReader, ProviderFactory,
+    ProviderFactory,
 };
 use std::{ops::RangeInclusive, sync::Arc, time::Instant};
 use tracing::{debug, trace};
@@ -89,59 +89,42 @@ impl<DB: Database> Snapshotter<DB> {
         debug!(target: "snapshot", ?targets, "Snapshotter started");
         let start = Instant::now();
 
+        let mut segments = Vec::<(Box<dyn Segment<DB>>, RangeInclusive<BlockNumber>)>::new();
+
         if let Some(block_range) = targets.transactions.clone() {
-            self.snapshot_transactions(block_range)?;
+            segments.push((Box::new(segments::Transactions), block_range));
+        }
+        // TODO(alexey): snapshot headers and receipts
+        // if let Some(block_range) = targets.headers.clone() {
+        //     segments.push((Box::new(segments::Headers), block_range));
+        // }
+        // if let Some(block_range) = targets.receipts.clone() {
+        //     segments.push((Box::new(segments::Receipts), block_range));
+        // }
+
+        for (segment, block_range) in &segments {
+            debug!(target: "snapshot", segment = %segment.segment(), ?block_range, "Snapshotting segment");
+            let start = Instant::now();
+
+            segment.snapshot(
+                &self.provider_factory,
+                self.snapshot_provider.clone(),
+                block_range.clone(),
+            )?;
+
+            let elapsed = start.elapsed(); // TODO(alexey): track in metrics
+            debug!(target: "snapshot", segment = %segment.segment(), ?block_range, ?elapsed, "Finished snapshotting segment");
         }
 
-        // TODO(alexey): snapshot headers and receipts
-
         self.snapshot_provider.commit()?;
-        if let Some(block_range) = targets.transactions.clone() {
-            self.snapshot_provider
-                .update_index(SnapshotSegment::Transactions, Some(*block_range.end()))?;
+        for (segment, block_range) in segments {
+            self.snapshot_provider.update_index(segment.segment(), Some(*block_range.end()))?;
         }
 
         let elapsed = start.elapsed(); // TODO(alexey): track in metrics
         debug!(target: "snapshot", ?targets, ?elapsed, "Snapshotter finished");
 
         Ok(targets)
-    }
-
-    /// Write transactions from database table [tables::Transactions] to static files with segment
-    /// [SnapshotSegment::Transactions] for the provided block range.
-    fn snapshot_transactions(&self, block_range: RangeInclusive<BlockNumber>) -> RethResult<()> {
-        debug!(target: "snapshot", ?block_range, "Snapshotting transactions");
-        let start = Instant::now();
-
-        let mut snapshot_writer =
-            self.snapshot_provider.writer(*block_range.start(), SnapshotSegment::Transactions)?;
-
-        for block in block_range.clone() {
-            // Create a new database transaction on every block to prevent long-lived read-only
-            // transactions
-            let provider = self.provider_factory.provider()?;
-
-            let block_body_indices = provider
-                .block_body_indices(block)?
-                .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
-
-            let mut transactions_cursor =
-                provider.tx_ref().cursor_read::<tables::Transactions>()?;
-            let transactions_walker =
-                transactions_cursor.walk_range(block_body_indices.tx_num_range())?;
-
-            for entry in transactions_walker {
-                let (tx_number, transaction) = entry?;
-
-                snapshot_writer.append_transaction(tx_number, transaction)?;
-            }
-            snapshot_writer.increment_block(SnapshotSegment::Transactions)?;
-        }
-
-        let elapsed = start.elapsed(); // TODO(alexey): track in metrics
-        debug!(target: "snapshot", ?block_range, ?elapsed, "Finished snapshotting transactions");
-
-        Ok(())
     }
 
     /// Returns a snapshot targets at the provided finalized block number.

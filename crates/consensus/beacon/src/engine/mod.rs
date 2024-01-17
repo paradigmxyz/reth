@@ -1698,7 +1698,16 @@ where
     }
 
     fn on_hook_result(&self, polled_hook: PolledHook) -> Result<(), BeaconConsensusEngineError> {
-        if result.db_access_level.is_read_write() {
+        if let EngineHookEvent::Finished(Err(error)) = &polled_hook.event {
+            error!(
+                target: "consensus::engine",
+                name = %polled_hook.name,
+                ?error,
+                "Hook finished with error"
+            )
+        }
+
+        if polled_hook.db_access_level.is_read_write() {
             match polled_hook.event {
                 EngineHookEvent::NotReady => {}
                 EngineHookEvent::Started => {
@@ -1707,16 +1716,7 @@ where
                     // unneeded updates, we need to respond `true` on `eth_syncing` request.
                     self.sync_state_updater.update_sync_state(SyncState::Syncing)
                 }
-                EngineHookEvent::Finished(result) => {
-                    if let Some(error) = result.err() {
-                        error!(
-                            target: "consensus::engine",
-                            name = %polled_hook.name,
-                            ?error,
-                            "Hook finished with error"
-                        )
-                    }
-
+                EngineHookEvent::Finished(_) => {
                     // Hook with read-write access to the database has finished running, so engine
                     // can process new FCU messages from CL again. It's safe to
                     // return `false` on `eth_syncing` request.

@@ -1,64 +1,53 @@
-use crate::segments::{prepare_jar, Segment, SegmentHeader};
+use crate::segments::{dataset_for_compression, prepare_jar, Segment, SegmentHeader};
 use reth_db::{
     cursor::DbCursorRO, database::Database, snapshot::create_snapshot_T1_T2_T3, tables,
     transaction::DbTx, RawKey, RawTable,
 };
 use reth_interfaces::provider::ProviderResult;
-use reth_primitives::{
-    snapshot::{Compression, Filters, SegmentConfig},
-    BlockNumber, SnapshotSegment,
-};
+use reth_primitives::{snapshot::SegmentConfig, BlockNumber, SnapshotSegment};
 use reth_provider::DatabaseProviderRO;
-use std::{ops::RangeInclusive, path::Path};
+use std::{ops::RangeInclusive, path::PathBuf};
 
 /// Snapshot segment responsible for [SnapshotSegment::Headers] part of data.
-#[derive(Debug)]
-pub struct Headers {
-    config: SegmentConfig,
-}
+#[derive(Debug, Default)]
+pub struct Headers;
 
-impl Headers {
-    /// Creates new instance of [Headers] snapshot segment.
-    pub fn new(compression: Compression, filters: Filters) -> Self {
-        Self { config: SegmentConfig { compression, filters } }
-    }
-}
-
-impl Default for Headers {
-    fn default() -> Self {
-        Self { config: SnapshotSegment::Headers.config() }
-    }
-}
-
-impl Segment for Headers {
+impl<DB: Database> Segment<DB> for Headers {
     fn segment(&self) -> SnapshotSegment {
         SnapshotSegment::Headers
     }
 
-    fn snapshot<DB: Database>(
+    fn create_snapshot_file(
         &self,
         provider: &DatabaseProviderRO<DB>,
-        directory: impl AsRef<Path>,
-        range: RangeInclusive<BlockNumber>,
+        directory: &PathBuf,
+        config: SegmentConfig,
+        block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
-        let range_len = range.clone().count();
+        let range_len = block_range.clone().count();
         let mut jar = prepare_jar::<DB, 3>(
             provider,
             directory,
-            self.segment(),
-            self.config,
-            range.clone(),
+            SnapshotSegment::Headers,
+            config,
+            block_range.clone(),
             range_len,
             || {
                 Ok([
-                    self.dataset_for_compression::<DB, tables::Headers>(
-                        provider, &range, range_len,
+                    dataset_for_compression::<DB, tables::Headers>(
+                        provider,
+                        &block_range,
+                        range_len,
                     )?,
-                    self.dataset_for_compression::<DB, tables::HeaderTD>(
-                        provider, &range, range_len,
+                    dataset_for_compression::<DB, tables::HeaderTD>(
+                        provider,
+                        &block_range,
+                        range_len,
                     )?,
-                    self.dataset_for_compression::<DB, tables::CanonicalHeaders>(
-                        provider, &range, range_len,
+                    dataset_for_compression::<DB, tables::CanonicalHeaders>(
+                        provider,
+                        &block_range,
+                        range_len,
                     )?,
                 ])
             },
@@ -67,10 +56,10 @@ impl Segment for Headers {
         // Generate list of hashes for filters & PHF
         let mut cursor = provider.tx_ref().cursor_read::<RawTable<tables::CanonicalHeaders>>()?;
         let mut hashes = None;
-        if self.config.filters.has_filters() {
+        if config.filters.has_filters() {
             hashes = Some(
                 cursor
-                    .walk(Some(RawKey::from(*range.start())))?
+                    .walk(Some(RawKey::from(*block_range.start())))?
                     .take(range_len)
                     .map(|row| row.map(|(_key, value)| value.into_value()).map_err(|e| e.into())),
             );
@@ -84,7 +73,7 @@ impl Segment for Headers {
             SegmentHeader,
         >(
             provider.tx_ref(),
-            range,
+            block_range,
             None,
             // We already prepared the dictionary beforehand
             None::<Vec<std::vec::IntoIter<Vec<u8>>>>,
