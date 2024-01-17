@@ -194,20 +194,23 @@ impl<DB: Database> Pruner<DB> {
             if let Some(to_block) =
                 snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Headers)
             {
-                segments.push(Box::new(segments::Headers::new(PruneMode::Before(to_block + 1))))
+                segments
+                    .push(Box::new(segments::Headers::new(PruneMode::before_inclusive(to_block))))
             }
 
             if let Some(to_block) =
                 snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Transactions)
             {
-                segments
-                    .push(Box::new(segments::Transactions::new(PruneMode::Before(to_block + 1))))
+                segments.push(Box::new(segments::Transactions::new(PruneMode::before_inclusive(
+                    to_block,
+                ))))
             }
 
             if let Some(to_block) =
                 snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Receipts)
             {
-                segments.push(Box::new(segments::Receipts::new(PruneMode::Before(to_block + 1))))
+                segments
+                    .push(Box::new(segments::Receipts::new(PruneMode::before_inclusive(to_block))))
             }
         }
 
