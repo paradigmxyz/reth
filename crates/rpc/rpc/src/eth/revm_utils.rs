@@ -2,8 +2,8 @@
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
 use reth_primitives::{
-    revm::env::{fill_tx_env, fill_tx_env_with_recovered},
-    Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256, U256,
+    revm::env::fill_tx_env_with_recovered, Address, TransactionSigned,
+    TransactionSignedEcRecovered, TxHash, B256, U256,
 };
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
@@ -20,9 +20,12 @@ use revm_primitives::{
     Bytecode,
 };
 use tracing::trace;
-
 #[cfg(feature = "optimism")]
 use revm::primitives::{Bytes, OptimismFields};
+#[cfg(feature = "optimism")]
+use reth_primitives::revm::env::fill_op_tx_env;
+#[cfg(not(feature = "optimism"))]
+use reth_primitives::revm::env::fill_tx_env;
 
 /// Helper type that bundles various overrides for EVM Execution.
 ///
@@ -104,7 +107,7 @@ impl FillableTransaction for TransactionSigned {
         {
             let mut envelope_buf = Vec::with_capacity(self.length_without_header());
             self.encode_enveloped(&mut envelope_buf);
-            fill_tx_env(tx_env, self, signer, envelope_buf.into());
+            fill_op_tx_env(tx_env, self, signer, envelope_buf.into());
         }
         Ok(())
     }

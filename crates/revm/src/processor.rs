@@ -6,10 +6,9 @@ use crate::{
 };
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    revm::env::{fill_cfg_and_block_env, fill_tx_env},
-    Address, Block, BlockNumber, BlockWithSenders, Bloom, ChainSpec, GotExpected, Hardfork, Header,
-    PruneMode, PruneModes, PruneSegmentError, Receipt, ReceiptWithBloom, Receipts,
-    TransactionSigned, B256, MINIMUM_PRUNING_DISTANCE, U256,
+    revm::env::fill_cfg_and_block_env, Address, Block, BlockNumber, BlockWithSenders, Bloom,
+    ChainSpec, GotExpected, Hardfork, Header, PruneMode, PruneModes, PruneSegmentError, Receipt,
+    ReceiptWithBloom, Receipts, TransactionSigned, B256, MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_provider::{
     BlockExecutor, BlockExecutorStats, ProviderError, PrunableBlockExecutor, StateProvider,
@@ -20,6 +19,11 @@ use revm::{
     State, EVM,
 };
 use std::{sync::Arc, time::Instant};
+
+#[cfg(feature = "optimism")]
+use reth_primitives::revm::env::fill_op_tx_env;
+#[cfg(not(feature = "optimism"))]
+use reth_primitives::revm::env::fill_tx_env;
 
 #[cfg(not(feature = "optimism"))]
 use reth_primitives::revm::compat::into_reth_log;
@@ -240,7 +244,7 @@ impl<'a> EVMProcessor<'a> {
         {
             let mut envelope_buf = Vec::with_capacity(transaction.length_without_header());
             transaction.encode_enveloped(&mut envelope_buf);
-            fill_tx_env(&mut self.evm.env.tx, transaction, sender, envelope_buf.into());
+            fill_op_tx_env(&mut self.evm.env.tx, transaction, sender, envelope_buf.into());
         }
 
         let hash = transaction.hash();

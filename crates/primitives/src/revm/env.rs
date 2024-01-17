@@ -146,7 +146,12 @@ pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEn
     {
         let mut envelope_buf = Vec::with_capacity(transaction.length_without_header());
         transaction.encode_enveloped(&mut envelope_buf);
-        fill_tx_env(&mut tx_env, transaction.as_ref(), transaction.signer(), envelope_buf.into());
+        fill_op_tx_env(
+            &mut tx_env,
+            transaction.as_ref(),
+            transaction.signer(),
+            envelope_buf.into(),
+        );
     }
 
     tx_env
@@ -175,7 +180,7 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
         nonce: None,
         gas_limit: 30_000_000,
         value: U256::ZERO,
-        data: parent_beacon_block_root.0.to_vec().into(),
+        data: parent_beacon_block_root.0.into(),
         // Setting the gas price to zero enforces that no value is transferred as part of the call,
         // and that the call will not count against the block's gas limit
         gas_price: U256::ZERO,
@@ -217,16 +222,12 @@ pub fn fill_tx_env_with_recovered(
     transaction: &TransactionSignedEcRecovered,
     envelope: Bytes,
 ) {
-    fill_tx_env(tx_env, transaction.as_ref(), transaction.signer(), envelope);
+    fill_op_tx_env(tx_env, transaction.as_ref(), transaction.signer(), envelope);
 }
 
 /// Fill transaction environment from a [Transaction] and the given sender address.
-pub fn fill_tx_env<T>(
-    tx_env: &mut TxEnv,
-    transaction: T,
-    sender: Address,
-    #[cfg(feature = "optimism")] envelope: Bytes,
-) where
+pub fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address)
+where
     T: AsRef<Transaction>,
 {
     tx_env.caller = sender;
@@ -332,14 +333,18 @@ pub fn fill_tx_env<T>(
             tx_env.nonce = None;
         }
     }
-
-    #[cfg(feature = "optimism")]
-    fill_op_tx_env(tx_env, transaction, envelope);
 }
 
+/// Fill transaction environment from a [Transaction], envelope, and the given sender address.
 #[cfg(feature = "optimism")]
 #[inline(always)]
-fn fill_op_tx_env<T: AsRef<Transaction>>(tx_env: &mut TxEnv, transaction: T, envelope: Bytes) {
+pub fn fill_op_tx_env<T: AsRef<Transaction>>(
+    tx_env: &mut TxEnv,
+    transaction: T,
+    sender: Address,
+    envelope: Bytes,
+) {
+    fill_tx_env(tx_env, &transaction, sender);
     match transaction.as_ref() {
         Transaction::Deposit(tx) => {
             tx_env.optimism = OptimismFields {
@@ -359,6 +364,7 @@ fn fill_op_tx_env<T: AsRef<Transaction>>(tx_env: &mut TxEnv, transaction: T, env
         }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
