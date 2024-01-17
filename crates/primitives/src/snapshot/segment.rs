@@ -103,7 +103,7 @@ impl SnapshotSegment {
     /// The filename is expected to follow the format:
     /// "snapshot_{segment}_{block_start}_{block_end}". This function checks
     /// for the correct prefix ("snapshot"), and then parses the segment and the inclusive
-    /// ranges for blocks. It ensures that the start of each range is less than the
+    /// ranges for blocks. It ensures that the start of each range is less than or equal to the
     /// end.
     ///
     /// # Returns
