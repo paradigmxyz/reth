@@ -2,11 +2,16 @@ use crate::engine_api::{forkchoice_updated, forkchoice_updated_with_attributes, 
 use crate::{consensus::ClayerConsensusEngine, engine_api::http::HttpJsonRpc, timing, ClStorage};
 use alloy_primitives::B256;
 use futures_util::{future::BoxFuture, FutureExt};
+use rand::Rng;
 use reth_interfaces::clayer::ClayerConsensus;
 use reth_network::NetworkHandle;
 use reth_primitives::{hex, TransactionSigned};
 use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
-use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
+use reth_provider::providers::BlockchainProvider;
+use reth_provider::{
+    CanonChainTracker, CanonStateNotificationSender, Chain, ConsensusNumberReader,
+    ConsensusNumberWriter, StateProviderFactory,
+};
 use reth_rpc_types::engine::{
     ExecutionPayloadFieldV2, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes,
 };
@@ -25,7 +30,7 @@ use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
-pub struct ClTask<Client, Pool: TransactionPool> {
+pub struct ClTask<Client, Pool: TransactionPool, CDB> {
     /// The configured chain spec
     chain_spec: Arc<ChainSpec>,
     /// The client used to interact with the state
@@ -49,9 +54,11 @@ pub struct ClTask<Client, Pool: TransactionPool> {
     network: NetworkHandle,
     ///
     consensus_engine: ClayerConsensusEngine,
+    ///
+    storages: CDB,
 }
 
-impl<Client, Pool: TransactionPool> ClTask<Client, Pool> {
+impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
     /// Creates a new instance of the task
     pub(crate) fn new(
         chain_spec: Arc<ChainSpec>,
@@ -61,6 +68,7 @@ impl<Client, Pool: TransactionPool> ClTask<Client, Pool> {
         api: Arc<HttpJsonRpc>,
         network: NetworkHandle,
         consensus_engine: ClayerConsensusEngine,
+        storages: CDB,
     ) -> Self {
         Self {
             chain_spec,
@@ -74,6 +82,7 @@ impl<Client, Pool: TransactionPool> ClTask<Client, Pool> {
             block_publishing_ticker: timing::Ticker::new(Duration::from_secs(12)),
             network,
             consensus_engine,
+            storages,
         }
     }
 
@@ -83,11 +92,12 @@ impl<Client, Pool: TransactionPool> ClTask<Client, Pool> {
     }
 }
 
-impl<Client, Pool> Future for ClTask<Client, Pool>
+impl<Client, Pool, CDB> Future for ClTask<Client, Pool, CDB>
 where
     Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
+    CDB: ConsensusNumberReader + ConsensusNumberWriter + Unpin,
 {
     type Output = ();
 
@@ -101,6 +111,34 @@ where
 
             if let Some(data) = this.consensus_engine.pop_cache() {
                 info!(target:"consensus::cl","trace-consensus ========= received consensus: {}",hex::encode(data));
+            }
+
+            let mut rng = rand::thread_rng();
+            let cn = rng.gen();
+            let hash = B256::with_last_byte(cn);
+
+            match this.storages.save_consensus_number(hash, cn as u64) {
+                Ok(o) => {
+                    info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: {}-{}", cn, hash, cn);
+                    if o {
+                        info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: ture", cn);
+                    } else {
+                        info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: false", cn);
+                    }
+                }
+                Err(e) => {
+                    info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: error!", cn)
+                }
+            }
+
+            if this.storages.consensus_number(hash).is_ok() {
+                if let Some(num) = this.storages.consensus_number(hash).unwrap() {
+                    info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages get{}: {}-{}",cn, hash, num);
+                } else {
+                    info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages get{}: NOne", cn);
+                }
+            } else {
+                info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ received get{}: error!", cn);
             }
 
             if this.insert_task.is_none() {

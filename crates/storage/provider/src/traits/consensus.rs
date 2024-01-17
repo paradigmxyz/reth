@@ -22,5 +22,5 @@ pub trait ConsensusNumberReader: Send + Sync {
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ConsensusNumberWriter: Send + Sync {
     /// Gets the `BlockNumber` for the given hash. Returns `None` if no block with this hash exists.
-    fn save_consensus_number(&self, hash: B256, num: BlockNumber) -> ProviderResult<()>;
+    fn save_consensus_number(&self, hash: B256, num: BlockNumber) -> ProviderResult<bool>;
 }
