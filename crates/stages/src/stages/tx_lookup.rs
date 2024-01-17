@@ -9,7 +9,7 @@ use reth_db::{
 use reth_interfaces::provider::ProviderError;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    PruneCheckpoint, PruneMode, PruneSegment,
+    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter,
@@ -56,7 +56,13 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     ) -> Result<ExecOutput, StageError> {
         if let Some((target_prunable_block, prune_mode)) = self
             .prune_mode
-            .map(|mode| mode.prune_target_block(input.target(), PruneSegment::TransactionLookup))
+            .map(|mode| {
+                mode.prune_target_block(
+                    input.target(),
+                    PruneSegment::TransactionLookup,
+                    PrunePurpose::User,
+                )
+            })
             .transpose()?
             .flatten()
         {

@@ -1,4 +1,4 @@
-use crate::{BlockNumber, PruneSegment, PruneSegmentError};
+use crate::{prune::segment::PrunePurpose, BlockNumber, PruneSegment, PruneSegmentError};
 use reth_codecs::{main_codec, Compact};
 
 /// Prune mode.
@@ -28,15 +28,16 @@ impl PruneMode {
         &self,
         tip: BlockNumber,
         segment: PruneSegment,
+        purpose: PrunePurpose,
     ) -> Result<Option<(BlockNumber, PruneMode)>, PruneSegmentError> {
         let result = match self {
-            PruneMode::Full if segment.min_blocks() == 0 => Some((tip, *self)),
+            PruneMode::Full if segment.min_blocks(purpose) == 0 => Some((tip, *self)),
             PruneMode::Distance(distance) if *distance > tip => None, // Nothing to prune yet
-            PruneMode::Distance(distance) if *distance >= segment.min_blocks() => {
+            PruneMode::Distance(distance) if *distance >= segment.min_blocks(purpose) => {
                 Some((tip - distance, *self))
             }
             PruneMode::Before(n) if *n > tip => None, // Nothing to prune yet
-            PruneMode::Before(n) if tip - n >= segment.min_blocks() => Some((n - 1, *self)),
+            PruneMode::Before(n) if tip - n >= segment.min_blocks(purpose) => Some((n - 1, *self)),
             _ => return Err(PruneSegmentError::Configuration(segment)),
         };
         Ok(result)

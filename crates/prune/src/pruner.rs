@@ -6,7 +6,9 @@ use crate::{
     Metrics, PrunerError, PrunerEvent,
 };
 use reth_db::database::Database;
-use reth_primitives::{BlockNumber, PruneMode, PruneProgress, PruneSegment, SnapshotSegment};
+use reth_primitives::{
+    BlockNumber, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SnapshotSegment,
+};
 use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
 use reth_tokio_util::EventListeners;
 use std::{collections::BTreeMap, time::Instant};
@@ -134,25 +136,29 @@ impl<DB: Database> Pruner<DB> {
         mut delete_limit: usize,
     ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
         let snapshot_segments = self.snapshot_segments();
-        let segments = snapshot_segments.iter().chain(self.segments.iter());
+        let segments = snapshot_segments
+            .iter()
+            .map(|segment| (segment, PrunePurpose::Snapshot))
+            .chain(self.segments.iter().map(|segment| (segment, PrunePurpose::User)));
 
         let mut done = true;
         let mut stats = PrunerStats::new();
 
-        for segment in segments {
+        for (segment, purpose) in segments {
             if delete_limit == 0 {
                 break
             }
 
             if let Some((to_block, prune_mode)) = segment
                 .mode()
-                .map(|mode| mode.prune_target_block(tip_block_number, segment.segment()))
+                .map(|mode| mode.prune_target_block(tip_block_number, segment.segment(), purpose))
                 .transpose()?
                 .flatten()
             {
                 debug!(
                     target: "pruner",
                     segment = ?segment.segment(),
+                    ?purpose,
                     %to_block,
                     ?prune_mode,
                     "Got target block to prune"
@@ -186,7 +192,7 @@ impl<DB: Database> Pruner<DB> {
     }
 
     /// Returns pre-configured segments that needs to be pruned according to the highest snapshots
-    /// for [PruneSegment::Headers], [PruneSegment::Transactions] and [PruneSegment::Receipts].
+    /// for [PruneSegment::Transactions], [PruneSegment::Headers] and [PruneSegment::Receipts].
     fn snapshot_segments(&self) -> Vec<Box<dyn Segment<DB>>> {
         let mut segments = Vec::<Box<dyn Segment<DB>>>::new();
 
@@ -209,10 +215,8 @@ impl<DB: Database> Pruner<DB> {
             if let Some(to_block) =
                 snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Receipts)
             {
-                segments.push(Box::new(segments::Receipts::new(
-                    PruneSegment::ReceiptsSnapshotter,
-                    PruneMode::before_inclusive(to_block),
-                )))
+                segments
+                    .push(Box::new(segments::Receipts::new(PruneMode::before_inclusive(to_block))))
             }
         }
 

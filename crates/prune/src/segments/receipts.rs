@@ -10,23 +10,18 @@ use tracing::{instrument, trace};
 
 #[derive(Debug)]
 pub struct Receipts {
-    segment: PruneSegment,
     mode: PruneMode,
 }
 
 impl Receipts {
-    pub fn new(segment: PruneSegment, mode: PruneMode) -> Self {
-        debug_assert!(matches!(
-            segment,
-            PruneSegment::Receipts | PruneSegment::ReceiptsSnapshotter
-        ));
-        Self { segment, mode }
+    pub fn new(mode: PruneMode) -> Self {
+        Self { mode }
     }
 }
 
 impl<DB: Database> Segment<DB> for Receipts {
     fn segment(&self) -> PruneSegment {
-        self.segment
+        PruneSegment::Receipts
     }
 
     fn mode(&self) -> Option<PruneMode> {
