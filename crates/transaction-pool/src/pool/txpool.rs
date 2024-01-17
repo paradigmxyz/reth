@@ -1345,10 +1345,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
         price_bumps: &PriceBumpConfig,
     ) -> bool {
         let price_bump = price_bumps.price_bump(existing_transaction.tx_type());
-        let price_bump_multiplier = (100 + price_bump) / 100;
 
         if maybe_replacement.max_fee_per_gas() <=
-            existing_transaction.max_fee_per_gas() * price_bump_multiplier
+            existing_transaction.max_fee_per_gas() * (100 + price_bump) / 100
         {
             return true
         }
@@ -1359,7 +1358,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             maybe_replacement.transaction.max_priority_fee_per_gas().unwrap_or(0);
 
         if replacement_max_priority_fee_per_gas <=
-            existing_max_priority_fee_per_gas * price_bump_multiplier &&
+            existing_max_priority_fee_per_gas * (100 + price_bump) / 100 &&
             existing_max_priority_fee_per_gas != 0 &&
             replacement_max_priority_fee_per_gas != 0
         {
@@ -1374,7 +1373,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             let replacement_max_blob_fee_per_gas =
                 maybe_replacement.transaction.max_fee_per_blob_gas().unwrap_or(0);
             if replacement_max_blob_fee_per_gas <=
-                existing_max_blob_fee_per_gas * price_bump_multiplier
+                existing_max_blob_fee_per_gas * (100 + price_bump) / 100
             {
                 return true
             }
@@ -2305,6 +2304,47 @@ mod tests {
         replacement.transaction = replacement.transaction.decr_price();
         let err = pool.insert_tx(replacement, on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::Underpriced { .. }));
+    }
+
+    #[test]
+    fn insert_replace_underpriced_not_enough_bump() {
+        let on_chain_balance = U256::ZERO;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let mut tx = MockTransaction::eip1559().inc_price().inc_limit();
+        tx.set_priority_fee(100);
+        tx.set_max_fee(100);
+        let first = f.validated(tx.clone());
+        let _ = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let mut replacement = f.validated(tx.rng_hash().inc_price());
+        // a price bump of 9% is not enough for a default min price bump of 10%
+        replacement.transaction.set_priority_fee(109);
+        replacement.transaction.set_max_fee(109);
+        let err =
+            pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::Underpriced { .. }));
+
+        // ensure first tx is not removed
+        assert!(pool.contains(first.hash()));
+        assert_eq!(pool.len(), 1);
+
+        // price bump of 10% is also not enough because the bump should be strictly greater than 10%
+        replacement.transaction.set_priority_fee(110);
+        replacement.transaction.set_max_fee(110);
+        let err =
+            pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::Underpriced { .. }));
+        assert!(pool.contains(first.hash()));
+        assert_eq!(pool.len(), 1);
+
+        // should also fail if the bump in priority fee is not enough
+        replacement.transaction.set_priority_fee(111);
+        replacement.transaction.set_max_fee(110);
+        let err = pool.insert_tx(replacement, on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::Underpriced { .. }));
+        assert!(pool.contains(first.hash()));
+        assert_eq!(pool.len(), 1);
     }
 
     #[test]

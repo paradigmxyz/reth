@@ -92,7 +92,7 @@ use reth_stages::{
 };
 use reth_tasks::{TaskExecutor, TaskManager};
 use reth_transaction_pool::{
-    blobstore::InMemoryBlobStore, EthTransactionPool, TransactionPool,
+    blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
     TransactionValidationTaskExecutor,
 };
 use revm_inspectors::stack::Hook;
@@ -102,12 +102,9 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
-use tokio::{
-    runtime::Handle,
-    sync::{
-        mpsc::{unbounded_channel, Receiver, UnboundedSender},
-        oneshot, watch,
-    },
+use tokio::sync::{
+    mpsc::{unbounded_channel, Receiver, UnboundedSender},
+    oneshot, watch,
 };
 use tracing::*;
 
@@ -544,7 +541,7 @@ impl NodeConfig {
         head: Head,
         executor: &TaskExecutor,
         data_dir: &ChainPath<DataDirPath>,
-    ) -> eyre::Result<EthTransactionPool<BlockchainProvider<DB, Tree>, InMemoryBlobStore>>
+    ) -> eyre::Result<EthTransactionPool<BlockchainProvider<DB, Tree>, DiskFileBlobStore>>
     where
         DB: Database + Unpin + Clone + 'static,
         Tree: BlockchainTreeEngine
@@ -553,7 +550,7 @@ impl NodeConfig {
             + Clone
             + 'static,
     {
-        let blob_store = InMemoryBlobStore::default();
+        let blob_store = DiskFileBlobStore::open(data_dir.blobstore_path(), Default::default())?;
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
             .with_head_timestamp(head.timestamp)
             .kzg_settings(self.kzg_settings()?)
@@ -1388,7 +1385,7 @@ impl NodeHandle {
 }
 
 /// A simple function to launch a node with the specified [NodeConfig], spawning tasks on the
-/// [TaskExecutor] constructed from [Handle::current].
+/// [TaskExecutor] constructed from [TaskManager::current].
 ///
 /// # Example
 /// ```
@@ -1404,14 +1401,14 @@ impl NodeHandle {
 ///     let builder = NodeConfig::test().with_rpc(rpc_args).with_instance(2);
 ///
 ///     // Spawn the builder, returning a handle to the node
-///     let _handle = spawn_node(builder).await.unwrap();
+///     let (_handle, _manager) = spawn_node(builder).await.unwrap();
 /// }
 /// ```
-pub async fn spawn_node(config: NodeConfig) -> eyre::Result<NodeHandle> {
-    let handle = Handle::current();
-    let task_manager = TaskManager::new(handle);
+
+pub async fn spawn_node(config: NodeConfig) -> eyre::Result<(NodeHandle, TaskManager)> {
+    let task_manager = TaskManager::current();
     let ext = DefaultRethNodeCommandConfig::default();
-    config.launch::<()>(ext, task_manager.executor()).await
+    Ok((config.launch::<()>(ext, task_manager.executor()).await?, task_manager))
 }
 
 #[cfg(test)]
@@ -1428,7 +1425,7 @@ mod tests {
         // NOTE: tests here manually set an instance number. The alternative would be to use an
         // atomic counter. This works for `cargo test` but if tests would be run in `nextest` then
         // they would become flaky. So new tests should manually set a unique instance number.
-        let handle =
+        let (handle, _manager) =
             spawn_node(NodeConfig::test().with_rpc(rpc_args).with_instance(1)).await.unwrap();
 
         // call a function on the node
@@ -1442,7 +1439,7 @@ mod tests {
     #[tokio::test]
     async fn rpc_handles_none_without_http() {
         // this launches a test node _without_ http
-        let handle = spawn_node(NodeConfig::test().with_instance(2)).await.unwrap();
+        let (handle, _manager) = spawn_node(NodeConfig::test().with_instance(2)).await.unwrap();
 
         // ensure that the `http_client` is none
         let maybe_client = handle.rpc_server_handles().rpc.http_client();
@@ -1456,6 +1453,7 @@ mod tests {
 
         // this reserves instances 3-6
         let starting_instance = 3;
+        // contains handles and managers
         let mut handles = Vec::new();
         for i in 0..num_nodes {
             let handle =
