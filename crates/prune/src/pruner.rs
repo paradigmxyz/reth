@@ -161,10 +161,10 @@ impl<DB: Database> Pruner<DB> {
                 let segment_start = Instant::now();
                 let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
                 let output = segment
-                    .prune(&provider, PruneInput { previous_checkpoint, to_block, delete_limit })?;
+                    .prune(provider, PruneInput { previous_checkpoint, to_block, delete_limit })?;
                 if let Some(checkpoint) = output.checkpoint {
                     segment
-                        .save_checkpoint(&provider, checkpoint.as_prune_checkpoint(prune_mode))?;
+                        .save_checkpoint(provider, checkpoint.as_prune_checkpoint(prune_mode))?;
                 }
                 self.metrics
                     .get_prune_segment_metrics(segment.segment())

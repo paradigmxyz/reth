@@ -37,10 +37,7 @@ pub struct SnapshotTargets {
 impl SnapshotTargets {
     /// Returns `true` if any of the targets are [Some].
     pub fn any(&self) -> bool {
-        // TODO(alexey): headers and receipts snapshotting isn't implemented yet, see
-        //  `Snapshotter::run`
-        // self.headers.is_some() || self.receipts.is_some() ||
-        self.transactions.is_some()
+        self.headers.is_some() || self.receipts.is_some() || self.transactions.is_some()
     }
 
     // Returns `true` if all targets are either [`None`] or has beginning of the range equal to the
@@ -94,26 +91,21 @@ impl<DB: Database> Snapshotter<DB> {
         if let Some(block_range) = targets.transactions.clone() {
             segments.push((Box::new(segments::Transactions), block_range));
         }
-        // TODO(alexey): snapshot headers and receipts
-        // if let Some(block_range) = targets.headers.clone() {
-        //     segments.push((Box::new(segments::Headers), block_range));
-        // }
-        // if let Some(block_range) = targets.receipts.clone() {
-        //     segments.push((Box::new(segments::Receipts), block_range));
-        // }
+        if let Some(block_range) = targets.headers.clone() {
+            segments.push((Box::new(segments::Headers), block_range));
+        }
+        if let Some(block_range) = targets.receipts.clone() {
+            segments.push((Box::new(segments::Receipts), block_range));
+        }
 
         for (segment, block_range) in &segments {
             debug!(target: "snapshot", segment = %segment.segment(), ?block_range, "Snapshotting segment");
             let start = Instant::now();
-            
+
             // Create a new database transaction on every segment to prevent long-lived read-only
             // transactions
             let provider = self.provider_factory.provider()?;
-            segment.snapshot(
-                provider,
-                self.snapshot_provider.clone(),
-                block_range.clone(),
-            )?;
+            segment.snapshot(provider, self.snapshot_provider.clone(), block_range.clone())?;
 
             let elapsed = start.elapsed(); // TODO(alexey): track in metrics
             debug!(target: "snapshot", segment = %segment.segment(), ?block_range, ?elapsed, "Finished snapshotting segment");
@@ -138,9 +130,14 @@ impl<DB: Database> Snapshotter<DB> {
         finalized_block_number: BlockNumber,
     ) -> RethResult<SnapshotTargets> {
         let highest_snapshots = self.snapshot_provider.get_highest_snapshots();
+
+        // TODO(alexey): snapshot headers and receipts
         let targets = SnapshotTargets {
-            headers: self.get_snapshot_target(highest_snapshots.headers, finalized_block_number),
-            receipts: self.get_snapshot_target(highest_snapshots.receipts, finalized_block_number),
+            headers: None,
+            // headers: self.get_snapshot_target(highest_snapshots.headers, finalized_block_number),
+            receipts: None,
+            // receipts: self.get_snapshot_target(highest_snapshots.receipts,
+            // finalized_block_number),
             transactions: self
                 .get_snapshot_target(highest_snapshots.transactions, finalized_block_number),
         };
