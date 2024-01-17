@@ -97,8 +97,7 @@ impl SnapshotSegment {
         format!("{prefix}_{}_{}", filters_name, compression.as_ref())
     }
 
-    /// Parses a filename into a `SnapshotSegment` and its corresponding block and transaction
-    /// ranges.
+    /// Parses a filename into a `SnapshotSegment` and its expected block range.
     ///
     /// The filename is expected to follow the format:
     /// "snapshot_{segment}_{block_start}_{block_end}". This function checks
