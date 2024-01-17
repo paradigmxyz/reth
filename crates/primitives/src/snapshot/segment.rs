@@ -158,7 +158,7 @@ impl SegmentHeader {
 
     /// Returns the block range.
     pub fn block_range(&self) -> RangeInclusive<BlockNumber> {
-        &self.block_range
+        self.block_range.clone()
     }
 
     /// Returns the transaction range.

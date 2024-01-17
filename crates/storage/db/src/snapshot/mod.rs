@@ -40,8 +40,7 @@ pub fn iter_snapshots(path: impl AsRef<Path>) -> Result<SortedSnapshots, NippyJa
             {
                 let jar = NippyJar::<SegmentHeader>::load(&entry.path())?;
 
-                let ranges =
-                    (jar.user_header().block_range().clone(), jar.user_header().tx_range());
+                let ranges = (jar.user_header().block_range(), jar.user_header().tx_range());
 
                 match static_files.entry(segment) {
                     Entry::Occupied(mut entry) => {

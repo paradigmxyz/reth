@@ -255,7 +255,7 @@ impl SnapshotProvider {
 
                     // Current block range has the same block start as `fixed_range``, but block end
                     // might be different if we are still filling this static file.
-                    let current_block_range = jar.user_header().block_range().clone();
+                    let current_block_range = jar.user_header().block_range();
 
                     // Considering that `update_index` is called when we either append/truncate, we
                     // are sure that we are handling the latest data points.
