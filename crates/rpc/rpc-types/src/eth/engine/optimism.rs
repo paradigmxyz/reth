@@ -39,5 +39,6 @@ mod tests {
     fn deserialize_op_payload_attributes() {
         let payload = r#"{"prevRandao":"0x24e8df372a61cdcdb1a163b52aaa1785e0c869d28c3b742ac09e826bbb524723","suggestedFeeRecipient":"0x4200000000000000000000000000000000000011","timestamp":"1","gasLimit":"0x17d7840","transactions":[],"no_tx_pool":"true","withdrawals":[]}"#;
         let _payload = serde_json::from_str::<OptimismPayloadAttributes>(payload).unwrap();
+        assert!(_payload.payload_attributes.withdrawals.is_some())
     }
 }
