@@ -734,7 +734,9 @@ mod tests {
         // TODO cleanup the setup after https://github.com/paradigmxyz/reth/issues/332
         // is merged as it has similar framework
         let state_db = create_test_rw_db();
-        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone())
+            .with_snapshots(create_test_snapshots_dir(), tokio::sync::watch::channel(None).1)
+            .unwrap();
         let provider = factory.provider_rw().unwrap();
         let input = ExecInput { target: Some(1), checkpoint: None };
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
@@ -769,69 +771,101 @@ mod tests {
         db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
         provider.commit().unwrap();
 
-        let provider = factory.provider_rw().unwrap();
-        let mut execution_stage: ExecutionStage<EvmProcessorFactory> = stage();
-        let output = execution_stage.execute(&provider, input).unwrap();
-        provider.commit().unwrap();
-        assert_matches!(output, ExecOutput {
-            checkpoint: StageCheckpoint {
-                block_number: 1,
-                stage_checkpoint: Some(StageUnitCheckpoint::Execution(ExecutionCheckpoint {
-                    block_range: CheckpointBlockRange {
-                        from: 1,
-                        to: 1,
-                    },
-                    progress: EntitiesCheckpoint {
-                        processed,
-                        total
-                    }
-                }))
-            },
-            done: true
-        } if processed == total && total == block.gas_used);
+        // execute
 
-        let provider = factory.provider().unwrap();
+        // If there is a pruning configuration, then it's forced to use the database.
+        // This way we test both cases.
+        let modes = [None, Some(PruneModes::none())];
+        let random_filter =
+            ReceiptsLogPruneConfig(BTreeMap::from([(Address::random(), PruneMode::Full)]));
 
-        // check post state
-        let account1 = address!("1000000000000000000000000000000000000000");
-        let account1_info =
-            Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: Some(code_hash) };
-        let account2 = address!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
-        let account2_info = Account {
-            balance: U256::from(0x1bc16d674ece94bau128),
-            nonce: 0x00,
-            bytecode_hash: None,
-        };
-        let account3 = address!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b");
-        let account3_info = Account {
-            balance: U256::from(0x3635c9adc5de996b46u128),
-            nonce: 0x01,
-            bytecode_hash: None,
-        };
+        // Tests node with database and node with static files
+        for mut mode in modes {
+            let provider = factory.provider_rw().unwrap();
 
-        // assert accounts
-        assert_eq!(
-            provider.basic_account(account1),
-            Ok(Some(account1_info)),
-            "Post changed of a account"
-        );
-        assert_eq!(
-            provider.basic_account(account2),
-            Ok(Some(account2_info)),
-            "Post changed of a account"
-        );
-        assert_eq!(
-            provider.basic_account(account3),
-            Ok(Some(account3_info)),
-            "Post changed of a account"
-        );
-        // assert storage
-        // Get on dupsort would return only first value. This is good enough for this test.
-        assert_eq!(
-            provider.tx_ref().get::<tables::PlainStorageState>(account1),
-            Ok(Some(StorageEntry { key: B256::with_last_byte(1), value: U256::from(2) })),
-            "Post changed of a account"
-        );
+            if let Some(mode) = &mut mode {
+                // Simulating a full node where we write receipts to database
+                mode.receipts_log_filter = random_filter.clone();
+            }
+
+            let mut execution_stage: ExecutionStage<EvmProcessorFactory> = stage();
+            execution_stage.prune_modes = mode.clone().unwrap_or_default();
+
+            let output = execution_stage.execute(&provider, input).unwrap();
+            provider.commit().unwrap();
+
+            assert_matches!(output, ExecOutput {
+                checkpoint: StageCheckpoint {
+                    block_number: 1,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Execution(ExecutionCheckpoint {
+                        block_range: CheckpointBlockRange {
+                            from: 1,
+                            to: 1,
+                        },
+                        progress: EntitiesCheckpoint {
+                            processed,
+                            total
+                        }
+                    }))
+                },
+                done: true
+            } if processed == total && total == block.gas_used);
+
+            let provider = factory.provider().unwrap();
+
+            // check post state
+            let account1 = address!("1000000000000000000000000000000000000000");
+            let account1_info =
+                Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: Some(code_hash) };
+            let account2 = address!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
+            let account2_info = Account {
+                balance: U256::from(0x1bc16d674ece94bau128),
+                nonce: 0x00,
+                bytecode_hash: None,
+            };
+            let account3 = address!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b");
+            let account3_info = Account {
+                balance: U256::from(0x3635c9adc5de996b46u128),
+                nonce: 0x01,
+                bytecode_hash: None,
+            };
+
+            // assert accounts
+            assert_eq!(
+                provider.basic_account(account1),
+                Ok(Some(account1_info)),
+                "Post changed of a account"
+            );
+            assert_eq!(
+                provider.basic_account(account2),
+                Ok(Some(account2_info)),
+                "Post changed of a account"
+            );
+            assert_eq!(
+                provider.basic_account(account3),
+                Ok(Some(account3_info)),
+                "Post changed of a account"
+            );
+            // assert storage
+            // Get on dupsort would return only first value. This is good enough for this test.
+            assert_eq!(
+                provider.tx_ref().get::<tables::PlainStorageState>(account1),
+                Ok(Some(StorageEntry { key: B256::with_last_byte(1), value: U256::from(2) })),
+                "Post changed of a account"
+            );
+
+            let provider = factory.provider_rw().unwrap();
+            let mut stage = stage();
+            stage.prune_modes = mode.unwrap_or_default();
+
+            let _result = stage
+                .unwind(
+                    &provider,
+                    UnwindInput { checkpoint: output.checkpoint, unwind_to: 0, bad_block: None },
+                )
+                .unwrap();
+            provider.commit().unwrap();
+        }
     }
 
     #[tokio::test]
@@ -876,11 +910,11 @@ mod tests {
 
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
-
         let modes = [None, Some(PruneModes::none())];
         let random_filter =
             ReceiptsLogPruneConfig(BTreeMap::from([(Address::random(), PruneMode::Full)]));
 
+        // Tests node with database and node with static files
         for mut mode in modes {
             if let Some(mode) = &mut mode {
                 // Simulating a full node where we write receipts to database
