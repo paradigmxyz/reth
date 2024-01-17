@@ -81,6 +81,8 @@ pub enum StageError {
     MissingSnapshotData {
         /// Starting block with  missing data.
         block: Box<SealedHeader>,
+        /// Snapshot segment
+        segment: SnapshotSegment,
     },
     /// Unrecoverable inconsistency error related to a transaction number in a static file segment.
     #[error(

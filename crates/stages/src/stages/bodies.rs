@@ -145,7 +145,10 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                     tx.get::<tables::Headers>(last_block + 1)?.unwrap_or_default().seal_slow(),
                 );
 
-                return Err(StageError::MissingSnapshotData { block: missing_block })
+                return Err(StageError::MissingSnapshotData {
+                    block: missing_block,
+                    segment: SnapshotSegment::Transactions,
+                })
             }
             Ordering::Equal => {}
         }
@@ -311,7 +314,10 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 tx.get::<tables::Headers>(last_block + 1)?.unwrap_or_default().seal_slow(),
             );
 
-            return Err(StageError::MissingSnapshotData { block: missing_block })
+            return Err(StageError::MissingSnapshotData {
+                block: missing_block,
+                segment: SnapshotSegment::Transactions,
+            })
         }
 
         // Unwinds static file

@@ -458,11 +458,12 @@ fn on_stage_error<DB: Database>(
                 }))
             }
         }
-    } else if let StageError::MissingSnapshotData { block } = err {
+    } else if let StageError::MissingSnapshotData { block, segment } = err {
         error!(
             target: "sync::pipeline",
             stage = %stage_id,
             bad_block = %block.number,
+            segment = %segment,
             "Stage is missing snapshot data."
         );
 
