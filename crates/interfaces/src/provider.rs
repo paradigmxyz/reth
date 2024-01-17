@@ -123,7 +123,7 @@ pub enum ProviderError {
     #[error("not able to find {0} snapshot file for transaction id {1}")]
     MissingSnapshotTx(SnapshotSegment, TxNumber),
     /// Snapshot is finalized and cannot be written to.
-    #[error("not able to write to finalized snapshot {0} (block #{1})")]
+    #[error("not able to write block #{1} to finalized snapshot {0}")]
     FinalizedSnapshot(SnapshotSegment, BlockNumber),
     /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
     #[error("failed to convert block number U256 to u64: {0}")]

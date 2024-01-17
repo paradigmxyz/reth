@@ -4,7 +4,7 @@ use crate::{
 };
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use std::{ffi::OsStr, ops::RangeInclusive, str::FromStr};
+use std::{ops::RangeInclusive, str::FromStr};
 use strum::{AsRefStr, EnumIter, EnumString};
 
 #[derive(
@@ -97,13 +97,12 @@ impl SnapshotSegment {
         format!("{prefix}_{}_{}", filters_name, compression.as_ref())
     }
 
-    /// Parses a filename into a `SnapshotSegment` and its corresponding block and transaction
-    /// ranges.
+    /// Parses a filename into a `SnapshotSegment` and its expected block range.
     ///
     /// The filename is expected to follow the format:
     /// "snapshot_{segment}_{block_start}_{block_end}". This function checks
     /// for the correct prefix ("snapshot"), and then parses the segment and the inclusive
-    /// ranges for blocks. It ensures that the start of each range is less than the
+    /// ranges for blocks. It ensures that the start of each range is less than or equal to the
     /// end.
     ///
     /// # Returns
@@ -114,8 +113,8 @@ impl SnapshotSegment {
     /// # Note
     /// This function is tightly coupled with the naming convention defined in [`Self::filename`].
     /// Any changes in the filename format in `filename` should be reflected here.
-    pub fn parse_filename(name: &OsStr) -> Option<(Self, RangeInclusive<BlockNumber>)> {
-        let mut parts = name.to_str()?.split('_');
+    pub fn parse_filename(name: &str) -> Option<(Self, RangeInclusive<BlockNumber>)> {
+        let mut parts = name.split('_');
         if parts.next() != Some("snapshot") {
             return None
         }
@@ -158,8 +157,8 @@ impl SegmentHeader {
     }
 
     /// Returns the block range.
-    pub fn block_range(&self) -> &RangeInclusive<BlockNumber> {
-        &self.block_range
+    pub fn block_range(&self) -> RangeInclusive<BlockNumber> {
+        self.block_range.clone()
     }
 
     /// Returns the transaction range.
@@ -338,13 +337,10 @@ mod tests {
                 assert_eq!(segment.filename(&block_range), filename);
             }
 
-            assert_eq!(
-                SnapshotSegment::parse_filename(OsStr::new(filename)),
-                Some((segment, block_range))
-            );
+            assert_eq!(SnapshotSegment::parse_filename(filename), Some((segment, block_range)));
         }
 
-        assert_eq!(SnapshotSegment::parse_filename(OsStr::new("snapshot_headers_2")), None);
-        assert_eq!(SnapshotSegment::parse_filename(OsStr::new("snapshot_headers_")), None);
+        assert_eq!(SnapshotSegment::parse_filename("snapshot_headers_2"), None);
+        assert_eq!(SnapshotSegment::parse_filename("snapshot_headers_"), None);
     }
 }

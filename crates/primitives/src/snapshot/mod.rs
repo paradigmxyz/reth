@@ -50,7 +50,7 @@ impl HighestSnapshots {
 
 /// Each snapshot has a fixed number of blocks. This gives out the range where the requested block
 /// is positioned. Used for segment filename.
-pub fn find_fixed_range(interval: u64, block: BlockNumber) -> RangeInclusive<BlockNumber> {
-    let start = (block / interval) * interval;
-    start..=start + interval - 1
+pub fn find_fixed_range(block: BlockNumber) -> RangeInclusive<BlockNumber> {
+    let start = (block / BLOCKS_PER_SNAPSHOT) * BLOCKS_PER_SNAPSHOT;
+    start..=start + BLOCKS_PER_SNAPSHOT - 1
 }
