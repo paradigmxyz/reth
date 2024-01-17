@@ -95,7 +95,7 @@ pub enum StageError {
         static_file: TxNumber,
     },
     /// Unrecoverable inconsistency error related to a block number in a static file segment.
-    #[error("inconsistent block number on {segment}. db: {database} static_file: {static_file}")]
+    #[error("inconsistent block number for {segment}. db: {database}, static_file: {static_file}")]
     InconsistentBlockNumber {
         /// Snapshot segment where this error was encountered.
         segment: SnapshotSegment,
