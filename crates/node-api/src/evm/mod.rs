@@ -6,11 +6,8 @@ use revm_primitives::{BlockEnv, CfgEnv, SpecId, TxEnv};
 
 /// This represents the set of methods used to configure the EVM before execution.
 pub trait EvmEnvConfig {
-    /// Additional metadata that can be used when filling the transaction environment.
-    type TxMeta;
-
     /// Fill transaction environment from a [Transaction] and the given sender address.
-    fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address, meta: Self::TxMeta)
+    fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address)
     where
         T: AsRef<Transaction>;
 

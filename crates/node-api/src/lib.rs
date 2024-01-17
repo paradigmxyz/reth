@@ -21,3 +21,4 @@ pub use engine::{
 
 /// Traits and helper types used to abstract over EVM methods and types.
 pub mod evm;
+pub use evm::EvmEnvConfig;

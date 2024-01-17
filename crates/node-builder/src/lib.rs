@@ -14,3 +14,11 @@ pub use engine::EthEngineTypes;
 
 #[cfg(feature = "optimism")]
 pub use engine::OptimismEngineTypes;
+
+/// Exports commonly used concrete instances of the [EvmEnvConfig](reth_node_api::EvmEnvConfig)
+/// trait.
+pub mod evm;
+pub use evm::EthEvmConfig;
+
+#[cfg(feature = "optimism")]
+pub use evm::OptimismEvmConfig;
