@@ -76,12 +76,12 @@ impl<DB: Database> Snapshotter<DB> {
 
     /// Run the snapshotter.
     ///
-    /// For each [Some] target in [SnapshotTargets], runs the snapshotting logic by opening a
-    /// _read-only_ database transaction, walking through corresponding tables and writing to static
-    /// files via [SnapshotProvider].
+    /// For each [Some] target in [SnapshotTargets], initializes a corresponding [Segment] and runs
+    /// it with the provided block range using [SnapshotProvider] and a read-only database
+    /// transaction from [ProviderFactory].
     ///
     /// NOTE: it doesn't delete the data from database, and the actual deleting (aka pruning) logic
-    /// is in `prune` crate.
+    /// lives in the `prune` crate.
     pub fn run(&self, targets: SnapshotTargets) -> SnapshotterResult {
         debug_assert!(targets
             .is_contiguous_to_highest_snapshots(self.snapshot_provider.get_highest_snapshots()));
@@ -105,9 +105,12 @@ impl<DB: Database> Snapshotter<DB> {
         for (segment, block_range) in &segments {
             debug!(target: "snapshot", segment = %segment.segment(), ?block_range, "Snapshotting segment");
             let start = Instant::now();
-
+            
+            // Create a new database transaction on every segment to prevent long-lived read-only
+            // transactions
+            let provider = self.provider_factory.provider()?;
             segment.snapshot(
-                &self.provider_factory,
+                provider,
                 self.snapshot_provider.clone(),
                 block_range.clone(),
             )?;

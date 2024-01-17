@@ -21,14 +21,8 @@ use reth_primitives::{
     },
     BlockNumber, SnapshotSegment,
 };
-use reth_provider::{
-    providers::SnapshotProvider, DatabaseProviderRO, ProviderFactory, TransactionsProviderExt,
-};
-use std::{
-    ops::RangeInclusive,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use reth_provider::{providers::SnapshotProvider, DatabaseProviderRO, TransactionsProviderExt};
+use std::{ops::RangeInclusive, path::Path, sync::Arc};
 
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
 
@@ -41,19 +35,17 @@ pub trait Segment<DB: Database> {
     /// and committing to files.
     fn snapshot(
         &self,
-        _provider_factory: &ProviderFactory<DB>,
-        _snapshot_provider: Arc<SnapshotProvider>,
-        _block_range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<()> {
-        unimplemented!()
-    }
+        provider: DatabaseProviderRO<DB>,
+        snapshot_provider: Arc<SnapshotProvider>,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<()>;
 
     /// Create a snapshot file of data for the provided block range.
     /// The `directory` parameter determines the snapshot file's save location.
     fn create_snapshot_file(
         &self,
         provider: &DatabaseProviderRO<DB>,
-        directory: &PathBuf,
+        directory: &Path,
         config: SegmentConfig,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()>;

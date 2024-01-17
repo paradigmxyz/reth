@@ -9,9 +9,9 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{SnapshotProvider, SnapshotWriter},
-    BlockReader, DatabaseProviderRO, ProviderFactory, TransactionsProviderExt,
+    BlockReader, DatabaseProviderRO, TransactionsProviderExt,
 };
-use std::{ops::RangeInclusive, path::PathBuf, sync::Arc};
+use std::{ops::RangeInclusive, path::Path, sync::Arc};
 
 /// Snapshot segment responsible for [SnapshotSegment::Transactions] part of data.
 #[derive(Debug, Default)]
@@ -26,18 +26,14 @@ impl<DB: Database> Segment<DB> for Transactions {
     /// [SnapshotSegment::Transactions] for the provided block range.
     fn snapshot(
         &self,
-        provider_factory: &ProviderFactory<DB>,
+        provider: DatabaseProviderRO<DB>,
         snapshot_provider: Arc<SnapshotProvider>,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
         let mut snapshot_writer =
             snapshot_provider.writer(*block_range.start(), SnapshotSegment::Transactions)?;
 
-        for block in block_range.clone() {
-            // Create a new database transaction on every block to prevent long-lived read-only
-            // transactions
-            let provider = provider_factory.provider()?;
-
+        for block in block_range {
             let block_body_indices = provider
                 .block_body_indices(block)?
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
@@ -61,7 +57,7 @@ impl<DB: Database> Segment<DB> for Transactions {
     fn create_snapshot_file(
         &self,
         provider: &DatabaseProviderRO<DB>,
-        directory: &PathBuf,
+        directory: &Path,
         config: SegmentConfig,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {

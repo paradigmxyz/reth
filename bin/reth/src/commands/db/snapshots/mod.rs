@@ -195,7 +195,7 @@ impl Command {
                     if !self.only_stats {
                         segment.create_snapshot_file(
                             &provider,
-                            &dir,
+                            dir.as_path(),
                             config,
                             block_range.clone(),
                         )?;

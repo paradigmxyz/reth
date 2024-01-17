@@ -5,8 +5,8 @@ use reth_db::{
 };
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{snapshot::SegmentConfig, BlockNumber, SnapshotSegment};
-use reth_provider::DatabaseProviderRO;
-use std::{ops::RangeInclusive, path::PathBuf};
+use reth_provider::{providers::SnapshotProvider, DatabaseProviderRO};
+use std::{ops::RangeInclusive, path::Path, sync::Arc};
 
 /// Snapshot segment responsible for [SnapshotSegment::Headers] part of data.
 #[derive(Debug, Default)]
@@ -17,10 +17,19 @@ impl<DB: Database> Segment<DB> for Headers {
         SnapshotSegment::Headers
     }
 
+    fn snapshot(
+        &self,
+        _provider: DatabaseProviderRO<DB>,
+        _snapshot_provider: Arc<SnapshotProvider>,
+        _block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<()> {
+        unimplemented!()
+    }
+
     fn create_snapshot_file(
         &self,
         provider: &DatabaseProviderRO<DB>,
-        directory: &PathBuf,
+        directory: &Path,
         config: SegmentConfig,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
