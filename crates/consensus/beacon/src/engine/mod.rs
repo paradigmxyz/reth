@@ -1698,13 +1698,13 @@ where
         None
     }
 
-    fn on_hook_result(&self, result: PolledHook) -> Result<(), BeaconConsensusEngineError> {
-        if let Some(action) = result.action {
+    fn on_hook_result(&self, polled_hook: PolledHook) -> Result<(), BeaconConsensusEngineError> {
+        if let Some(action) = polled_hook.action {
             match action {}
         }
 
-        if result.db_access_level.is_read_write() {
-            match result.event {
+        if polled_hook.db_access_level.is_read_write() {
+            match polled_hook.event {
                 EngineHookEvent::NotReady => {}
                 EngineHookEvent::Started => {
                     // If the hook has read-write access to the database, it means that the engine
@@ -1712,7 +1712,16 @@ where
                     // unneeded updates, we need to respond `true` on `eth_syncing` request.
                     self.sync_state_updater.update_sync_state(SyncState::Syncing)
                 }
-                EngineHookEvent::Finished(_) => {
+                EngineHookEvent::Finished(result) => {
+                    if let Some(error) = result.err() {
+                        error!(
+                            target: "consensus::engine",
+                            name = %polled_hook.name,
+                            ?error,
+                            "Hook finished with error"
+                        )
+                    }
+
                     // Hook with read-write access to the database has finished running, so engine
                     // can process new FCU messages from CL again. It's safe to
                     // return `false` on `eth_syncing` request.
@@ -1722,7 +1731,11 @@ where
                     if let Err(error) =
                         self.blockchain.connect_buffered_blocks_to_canonical_hashes()
                     {
-                        error!(target: "consensus::engine", ?error, "Error connecting buffered blocks to canonical hashes on hook result");
+                        error!(
+                            target: "consensus::engine",
+                            ?error,
+                            "Error connecting buffered blocks to canonical hashes on hook result"
+                        );
                         return Err(error.into());
                     }
                 }

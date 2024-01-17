@@ -2,7 +2,7 @@
 
 use crate::SnapshotterError;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
-use reth_interfaces::RethResult;
+use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_primitives::{snapshot::HighestSnapshots, BlockNumber, SnapshotSegment};
 use reth_provider::{
     providers::{SnapshotProvider, SnapshotWriter},
@@ -121,10 +121,9 @@ impl<DB: Database> Snapshotter<DB> {
             // transactions
             let provider = self.provider_factory.provider()?;
 
-            let Some(block_body_indices) = provider.block_body_indices(block)? else {
-                // TODO(alexey): this shouldn't be possible, return a fatal error?
-                continue
-            };
+            let block_body_indices = provider
+                .block_body_indices(block)?
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
 
             let mut transactions_cursor =
                 provider.tx_ref().cursor_read::<tables::Transactions>()?;
