@@ -17,7 +17,10 @@ use reth_primitives::{
     U256,
 };
 use revm::db::BundleAccount;
-use std::{collections::HashMap, ops::RangeInclusive};
+use std::{
+    collections::{hash_map, HashMap},
+    ops::RangeInclusive,
+};
 
 /// The post state with hashed addresses as keys.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -78,28 +81,34 @@ impl HashedPostState {
         tx: TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, DatabaseError> {
+        // A single map for aggregating state changes where each map value is a tuple
+        // `(maybe_account_change, storage_changes)`.
+        // If `maybe_account_change` is `None`, no account info change had occurred.
+        // If `maybe_account_change` is `Some(None)`, the account had previously been destroyed
+        // or non-existent.
+        // If `maybe_account_change` is `Some(Some(info))`, the contained value is the previous
+        // account state.
         let mut state =
             HashMap::<Address, (Option<Option<Account>>, HashMap<B256, U256>)>::default();
 
         // Iterate over account changesets in reverse.
-        let account_changesets = tx
-            .cursor_read::<tables::AccountChangeSet>()?
-            .walk_range(range.clone())?
-            .collect::<Result<Vec<_>, _>>()?;
-        for (_, account_before) in account_changesets.into_iter().rev() {
-            let AccountBeforeTx { address, info } = account_before;
-            state.entry(address).or_default().0 = Some(info);
+        let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSet>()?;
+        for entry in account_changesets_cursor.walk_range(range.clone())? {
+            let (_, AccountBeforeTx { address, info }) = entry?;
+            let account_entry = state.entry(address).or_default();
+            if account_entry.0.is_none() {
+                account_entry.0 = Some(info);
+            }
         }
 
         // Iterate over storage changesets in reverse.
-        let storage_range = BlockNumberAddress::range(range);
-        let storage_changesets = tx
-            .cursor_read::<tables::StorageChangeSet>()?
-            .walk_range(storage_range)?
-            .collect::<Result<Vec<_>, _>>()?;
-        for (block_number_and_address, storage) in storage_changesets.into_iter().rev() {
-            let BlockNumberAddress((_, address)) = block_number_and_address;
-            state.entry(address).or_default().1.insert(storage.key, storage.value);
+        let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSet>()?;
+        for entry in storage_changesets_cursor.walk_range(BlockNumberAddress::range(range))? {
+            let (BlockNumberAddress((_, address)), storage) = entry?;
+            let account_entry = state.entry(address).or_default();
+            if let hash_map::Entry::Vacant(entry) = account_entry.1.entry(storage.key) {
+                entry.insert(storage.value);
+            }
         }
 
         let mut this = Self::default();
@@ -110,6 +119,9 @@ impl HashedPostState {
                 this.insert_account(hashed_address, account_change);
             }
 
+            // The `wiped`` flag indicates only  whether previous storage entries should be looked
+            // up in db or not. For reverts it's a noop since all wiped changes had been written as
+            // storage reverts.
             let mut hashed_storage = HashedStorage::new(false);
             for (slot, value) in storage {
                 hashed_storage.insert_slot(keccak256(slot), value);
@@ -150,7 +162,7 @@ impl HashedPostState {
         }
     }
 
-    /// Insert account.
+    /// Insert account. If `account` is `None`, the account had previously been destroyed.
     pub fn insert_account(&mut self, hashed_address: B256, account: Option<Account>) {
         if let Some(account) = account {
             self.accounts.push((hashed_address, account));
