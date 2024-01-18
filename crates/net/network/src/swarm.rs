@@ -204,7 +204,7 @@ where
                         }
                         InboundConnectionError::ExceedsLimit(limit) => {
                             trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; disconnecting");
-                            self.sessions.handle_disconnect_incoming_connection(
+                            self.sessions.disconnect_incoming_connection(
                                 stream,
                                 DisconnectReason::TooManyPeers,
                             );
