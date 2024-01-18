@@ -134,7 +134,7 @@ where
                                 ),
                             ))
                         });
-                        return pipe_from_stream(accepted_sink, stream).await
+                        return pipe_from_stream(accepted_sink, stream).await;
                     }
                     Params::Bool(false) | Params::None => {
                         // only hashes requested
@@ -164,7 +164,7 @@ where
             // send the current status immediately
             let msg = SubscriptionMessage::from_json(&current_sub_res)?;
             if accepted_sink.send(msg).await.is_err() {
-                return Ok(())
+                return Ok(());
             }
 
             while (canon_state.next().await).is_some() {
@@ -178,7 +178,7 @@ where
                     let sync_status = pubsub.sync_status(current_syncing).await;
                     let msg = SubscriptionMessage::from_json(&sync_status)?;
                     if accepted_sink.send(msg).await.is_err() {
-                        break
+                        break;
                     }
                 }
             }

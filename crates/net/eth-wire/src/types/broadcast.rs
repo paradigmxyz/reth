@@ -28,7 +28,7 @@ impl NewBlockHashes {
     pub fn latest(&self) -> Option<&BlockHashNumber> {
         self.0.iter().fold(None, |latest, block| {
             if let Some(latest) = latest {
-                return if latest.number > block.number { Some(latest) } else { Some(block) }
+                return if latest.number > block.number { Some(latest) } else { Some(block) };
             }
             Some(block)
         })

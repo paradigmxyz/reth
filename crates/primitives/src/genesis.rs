@@ -563,15 +563,15 @@ impl ChainConfig {
     /// Checks if the blockchain is active at or after the Shanghai fork block and the specified
     /// timestamp.
     pub fn is_shanghai_active_at_block_and_timestamp(&self, block: u64, timestamp: u64) -> bool {
-        self.is_london_active_at_block(block) &&
-            self.is_active_at_timestamp(self.shanghai_time, timestamp)
+        self.is_london_active_at_block(block)
+            && self.is_active_at_timestamp(self.shanghai_time, timestamp)
     }
 
     /// Checks if the blockchain is active at or after the Cancun fork block and the specified
     /// timestamp.
     pub fn is_cancun_active_at_block_and_timestamp(&self, block: u64, timestamp: u64) -> bool {
-        self.is_london_active_at_block(block) &&
-            self.is_active_at_timestamp(self.cancun_time, timestamp)
+        self.is_london_active_at_block(block)
+            && self.is_active_at_timestamp(self.cancun_time, timestamp)
     }
 
     // Private function handling the comparison logic for block numbers

@@ -88,7 +88,7 @@ where
 
         while let Some(response) = pending_calls.next().await {
             if let Err(too_large) = batch_response.append(&response) {
-                return Some(too_large)
+                return Some(too_large);
             }
         }
 

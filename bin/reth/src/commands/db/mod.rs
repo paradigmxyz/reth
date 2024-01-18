@@ -168,8 +168,8 @@ impl Command {
                     stats_table.add_row(row);
 
                     let freelist = tx.inner.env().freelist()?;
-                    let freelist_size = freelist *
-                        tx.inner.db_stat(&mdbx::Database::freelist_db())?.page_size() as usize;
+                    let freelist_size = freelist
+                        * tx.inner.db_stat(&mdbx::Database::freelist_db())?.page_size() as usize;
 
                     let mut row = Row::new();
                     row.add_cell(Cell::new("Freelist size"))
@@ -212,7 +212,7 @@ impl Command {
 
                     if !input.trim().eq_ignore_ascii_case("y") {
                         println!("Database drop aborted!");
-                        return Ok(())
+                        return Ok(());
                     }
                 }
 

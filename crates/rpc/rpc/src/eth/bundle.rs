@@ -50,12 +50,12 @@ where
         if txs.is_empty() {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::EmptyBundleTransactions.to_string(),
-            ))
+            ));
         }
         if block_number.to::<u64>() == 0 {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::BundleMissingBlockNumber.to_string(),
-            ))
+            ));
         }
 
         let transactions =

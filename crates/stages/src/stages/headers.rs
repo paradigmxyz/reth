@@ -89,7 +89,7 @@ where
         // iterate them in the reverse order
         for header in headers.into_iter().rev() {
             if header.number == 0 {
-                continue
+                continue;
             }
 
             let header_hash = header.hash();
@@ -133,7 +133,7 @@ where
                 checkpoint = %current_checkpoint.block_number,
                 "Buffer is not empty"
             );
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         // Lookup the head and tip of the sync range
@@ -149,7 +149,7 @@ where
                 target = ?tip,
                 "Target block already reached"
             );
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         debug!(target: "sync::stages::headers", ?tip, head = ?gap.local_head.hash(), "Commencing sync");
@@ -183,7 +183,7 @@ where
 
         let gap = self.sync_gap.clone().ok_or(StageError::MissingSyncGap)?;
         if gap.is_closed() {
-            return Ok(ExecOutput::done(current_checkpoint))
+            return Ok(ExecOutput::done(current_checkpoint));
         }
 
         let local_head = gap.local_head.number;
@@ -399,7 +399,7 @@ mod tests {
                 let end = input.target.unwrap_or_default() + 1;
 
                 if start + 1 >= end {
-                    return Ok(Vec::default())
+                    return Ok(Vec::default());
                 }
 
                 let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());

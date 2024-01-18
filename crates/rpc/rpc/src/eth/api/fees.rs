@@ -57,7 +57,7 @@ where
         reward_percentiles: Option<Vec<f64>>,
     ) -> EthResult<FeeHistory> {
         if block_count == 0 {
-            return Ok(FeeHistory::default())
+            return Ok(FeeHistory::default());
         }
 
         // See https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/eth/gasprice/feehistory.go#L218C8-L225
@@ -77,7 +77,7 @@ where
         }
 
         let Some(end_block) = self.provider().block_number_for_id(newest_block.into())? else {
-            return Err(EthApiError::UnknownBlockNumber)
+            return Err(EthApiError::UnknownBlockNumber);
         };
 
         // need to add 1 to the end block to get the correct (inclusive) range
@@ -93,7 +93,7 @@ where
         // Note: The types used ensure that the percentiles are never < 0
         if let Some(percentiles) = &reward_percentiles {
             if percentiles.windows(2).any(|w| w[0] > w[1] || w[0] > 100.) {
-                return Err(EthApiError::InvalidRewardPercentiles)
+                return Err(EthApiError::InvalidRewardPercentiles);
             }
         }
 
@@ -114,7 +114,7 @@ where
 
         if let Some(fee_entries) = fee_entries {
             if fee_entries.len() != block_count as usize {
-                return Err(EthApiError::InvalidBlockRange)
+                return Err(EthApiError::InvalidBlockRange);
             }
 
             for entry in &fee_entries {
@@ -147,7 +147,7 @@ where
             // read the requested header range
             let headers = self.provider().sealed_headers_range(start_block..=end_block)?;
             if headers.len() != block_count as usize {
-                return Err(EthApiError::InvalidBlockRange)
+                return Err(EthApiError::InvalidBlockRange);
             }
 
             for header in &headers {

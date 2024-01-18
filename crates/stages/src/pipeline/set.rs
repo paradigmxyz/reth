@@ -195,7 +195,7 @@ where
         F: FnOnce() -> bool,
     {
         if f() {
-            return self.disable(stage_id)
+            return self.disable(stage_id);
         }
         self
     }

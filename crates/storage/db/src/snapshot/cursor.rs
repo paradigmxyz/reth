@@ -33,7 +33,7 @@ impl<'a> SnapshotCursor<'a> {
             KeyOrNumber::Number(n) => {
                 let offset = self.jar().user_header().start();
                 if offset > n {
-                    return Ok(None)
+                    return Ok(None);
                 }
                 self.row_by_number_with_cols((n - offset) as usize, mask)
             }

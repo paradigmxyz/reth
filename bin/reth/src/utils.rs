@@ -134,18 +134,18 @@ impl<'a, DB: Database> DbTool<'a, DB> {
                     let (key, value) = (k.into_key(), v.into_value());
 
                     if key.len() + value.len() < filter.min_row_size {
-                        return None
+                        return None;
                     }
                     if key.len() < filter.min_key_size {
-                        return None
+                        return None;
                     }
                     if value.len() < filter.min_value_size {
-                        return None
+                        return None;
                     }
 
                     let result = || {
                         if filter.only_count {
-                            return None
+                            return None;
                         }
                         Some((
                             <T as Table>::Key::decode(&key).unwrap(),
@@ -155,16 +155,16 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
                     match &*bmb {
                         Some(searcher) => {
-                            if searcher.find_first_in(&value).is_some() ||
-                                searcher.find_first_in(&key).is_some()
+                            if searcher.find_first_in(&value).is_some()
+                                || searcher.find_first_in(&key).is_some()
                             {
                                 hits += 1;
-                                return result()
+                                return result();
                             }
                         }
                         None => {
                             hits += 1;
-                            return result()
+                            return result();
                         }
                     }
                 }

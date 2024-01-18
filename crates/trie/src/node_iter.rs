@@ -108,7 +108,7 @@ where
                             key.clone(),
                             self.walker.hash().unwrap(),
                             self.walker.children_are_in_trie(),
-                        ))))
+                        ))));
                     }
                 }
             }
@@ -119,12 +119,12 @@ where
                 // status and continue
                 if self.walker.key().map_or(false, |key| key < &Nibbles::unpack(hashed_address)) {
                     self.current_walker_key_checked = false;
-                    continue
+                    continue;
                 }
 
                 // Set the next hashed entry as a leaf node and return
                 self.current_hashed_entry = self.hashed_account_cursor.next()?;
-                return Ok(Some(AccountNode::Leaf(hashed_address, account)))
+                return Ok(Some(AccountNode::Leaf(hashed_address, account)));
             }
 
             // Handle seeking and advancing based on the previous account key
@@ -211,7 +211,7 @@ where
                             key.clone(),
                             self.walker.hash().unwrap(),
                             self.walker.children_are_in_trie(),
-                        ))))
+                        ))));
                     }
                 }
             }
@@ -222,12 +222,12 @@ where
                 // Compare keys and proceed accordingly.
                 if self.walker.key().map_or(false, |key| key < &Nibbles::unpack(hashed_key)) {
                     self.current_walker_key_checked = false;
-                    continue
+                    continue;
                 }
 
                 // Move to the next hashed storage entry and return the corresponding leaf node.
                 self.current_hashed_entry = self.hashed_storage_cursor.next()?;
-                return Ok(Some(StorageNode::Leaf(hashed_key, value)))
+                return Ok(Some(StorageNode::Leaf(hashed_key, value)));
             }
 
             // Attempt to get the next unprocessed key from the walker.
@@ -238,7 +238,7 @@ where
                 self.walker.advance()?;
             } else {
                 // No more keys to process, break the loop.
-                break
+                break;
             }
         }
 

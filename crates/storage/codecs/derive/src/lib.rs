@@ -116,7 +116,7 @@ pub fn use_compact(args: TokenStream, input: TokenStream) -> TokenStream {
 
     if let Some(first_arg) = args.clone().into_iter().next() {
         if first_arg.to_string() == "no_arbitrary" {
-            return compact
+            return compact;
         }
     }
 

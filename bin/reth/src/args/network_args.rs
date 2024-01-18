@@ -117,7 +117,7 @@ impl NetworkArgs {
     /// If `no_persist_peers` is true then this returns the path to the persistent peers file path.
     pub fn persistent_peers_file(&self, peers_file: PathBuf) -> Option<PathBuf> {
         if self.no_persist_peers {
-            return None
+            return None;
         }
 
         Some(peers_file)

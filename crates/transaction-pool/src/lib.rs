@@ -356,7 +356,7 @@ where
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>> {
         if transactions.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
         let validated = self.validate_all(origin, transactions).await?;
 

@@ -91,7 +91,7 @@ impl FixedBlockTimeMiner {
     {
         if self.interval.poll_tick(cx).is_ready() {
             // drain the pool
-            return Poll::Ready(pool.best_transactions().collect())
+            return Poll::Ready(pool.best_transactions().collect());
         }
         Poll::Pending
     }
@@ -130,7 +130,7 @@ impl ReadyTransactionMiner {
         }
 
         if self.has_pending_txs == Some(false) {
-            return Poll::Pending
+            return Poll::Pending;
         }
 
         let transactions = pool.best_transactions().take(self.max_transactions).collect::<Vec<_>>();
@@ -139,7 +139,7 @@ impl ReadyTransactionMiner {
         self.has_pending_txs = Some(transactions.len() >= self.max_transactions);
 
         if transactions.is_empty() {
-            return Poll::Pending
+            return Poll::Pending;
         }
 
         Poll::Ready(transactions)

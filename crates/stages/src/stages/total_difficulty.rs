@@ -55,7 +55,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     ) -> Result<ExecOutput, StageError> {
         let tx = provider.tx_ref();
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
@@ -250,7 +250,7 @@ mod tests {
             let end = input.target.unwrap_or_default() + 1;
 
             if start + 1 >= end {
-                return Ok(Vec::default())
+                return Ok(Vec::default());
             }
 
             let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());

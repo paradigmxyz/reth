@@ -52,20 +52,20 @@ impl ExecutionPayloadValidator {
         if let Some(versioned_hashes) = cancun_fields.versioned_hashes() {
             if num_blob_versioned_hashes != versioned_hashes.len() {
                 // Number of blob versioned hashes does not match
-                return Err(PayloadError::InvalidVersionedHashes)
+                return Err(PayloadError::InvalidVersionedHashes);
             }
             // we can use `zip` safely here because we already compared their length
             for (payload_versioned_hash, block_versioned_hash) in
                 versioned_hashes.iter().zip(sealed_block.blob_versioned_hashes_iter())
             {
                 if payload_versioned_hash != block_versioned_hash {
-                    return Err(PayloadError::InvalidVersionedHashes)
+                    return Err(PayloadError::InvalidVersionedHashes);
                 }
             }
         } else {
             // No Cancun fields, if block includes any blobs, this is an error
             if num_blob_versioned_hashes > 0 {
-                return Err(PayloadError::InvalidVersionedHashes)
+                return Err(PayloadError::InvalidVersionedHashes);
             }
         }
 
@@ -109,7 +109,7 @@ impl ExecutionPayloadValidator {
 
         if !cancun_active && block.has_blob_transactions() {
             // cancun not active but blob transactions present
-            return Err(PayloadError::PreCancunBlockWithBlobTransactions)
+            return Err(PayloadError::PreCancunBlockWithBlobTransactions);
         }
 
         // Ensure the hash included in the payload matches the block hash

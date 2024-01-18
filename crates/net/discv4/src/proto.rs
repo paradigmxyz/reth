@@ -136,7 +136,7 @@ impl Message {
     /// Returns the decoded message and the public key of the sender.
     pub fn decode(packet: &[u8]) -> Result<Packet, DecodePacketError> {
         if packet.len() < MIN_PACKET_SIZE {
-            return Err(DecodePacketError::PacketTooShort)
+            return Err(DecodePacketError::PacketTooShort);
         }
 
         // parses the wire-protocol, every packet starts with a header:
@@ -147,7 +147,7 @@ impl Message {
         let header_hash = keccak256(&packet[32..]);
         let data_hash = B256::from_slice(&packet[..32]);
         if data_hash != header_hash {
-            return Err(DecodePacketError::HashMismatch)
+            return Err(DecodePacketError::HashMismatch);
         }
 
         let signature = &packet[32..96];
@@ -230,9 +230,9 @@ where
     K: EnrKey,
 {
     fn encode(&self, out: &mut dyn BufMut) {
-        let payload_length = self.0.signature().length() +
-            self.0.seq().length() +
-            self.0.iter().fold(0, |acc, (k, v)| acc + k.as_slice().length() + v.len());
+        let payload_length = self.0.signature().length()
+            + self.0.seq().length()
+            + self.0.iter().fold(0, |acc, (k, v)| acc + k.as_slice().length() + v.len());
 
         let header = Header { list: true, payload_length };
         header.encode(out);
@@ -249,9 +249,9 @@ where
     }
 
     fn length(&self) -> usize {
-        let payload_length = self.0.signature().length() +
-            self.0.seq().length() +
-            self.0.iter().fold(0, |acc, (k, v)| acc + k.as_slice().length() + v.len());
+        let payload_length = self.0.signature().length()
+            + self.0.seq().length()
+            + self.0.iter().fold(0, |acc, (k, v)| acc + k.as_slice().length() + v.len());
         payload_length + length_of_length(payload_length)
     }
 }
@@ -262,8 +262,8 @@ fn to_alloy_rlp_error(e: rlp::DecoderError) -> RlpError {
         rlp::DecoderError::RlpInvalidLength => RlpError::Overflow,
         rlp::DecoderError::RlpExpectedToBeList => RlpError::UnexpectedString,
         rlp::DecoderError::RlpExpectedToBeData => RlpError::UnexpectedList,
-        rlp::DecoderError::RlpDataLenWithZeroPrefix |
-        rlp::DecoderError::RlpListLenWithZeroPrefix => RlpError::LeadingZero,
+        rlp::DecoderError::RlpDataLenWithZeroPrefix
+        | rlp::DecoderError::RlpListLenWithZeroPrefix => RlpError::LeadingZero,
         rlp::DecoderError::RlpInvalidIndirection => RlpError::NonCanonicalSize,
         rlp::DecoderError::RlpIncorrectListLen => {
             RlpError::Custom("incorrect list length when decoding rlp")
@@ -320,7 +320,7 @@ impl Decodable for EnrResponse {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString)
+            return Err(RlpError::UnexpectedString);
         }
         // let started_len = b.len();
         let this = Self {
@@ -395,7 +395,7 @@ impl Decodable for Ping {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString)
+            return Err(RlpError::UnexpectedString);
         }
         let started_len = b.len();
 
@@ -420,7 +420,7 @@ impl Decodable for Ping {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
         let rem = rlp_head.payload_length - consumed;
         b.advance(rem);
@@ -470,7 +470,7 @@ impl Decodable for Pong {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString)
+            return Err(RlpError::UnexpectedString);
         }
         let started_len = b.len();
         let mut this = Self {
@@ -490,7 +490,7 @@ impl Decodable for Pong {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
         let rem = rlp_head.payload_length - consumed;
         b.advance(rem);

@@ -90,7 +90,7 @@ pub struct ECIES {
 
 fn split_at_mut<T>(arr: &mut [T], idx: usize) -> Result<(&mut [T], &mut [T]), ECIESError> {
     if idx > arr.len() {
-        return Err(ECIESErrorImpl::OutOfBounds { idx, len: arr.len() }.into())
+        return Err(ECIESErrorImpl::OutOfBounds { idx, len: arr.len() }.into());
     }
     Ok(arr.split_at_mut(idx))
 }
@@ -236,7 +236,7 @@ impl ECIES {
 
         let check_tag = hmac_sha256(mac_key.as_ref(), &[iv, encrypted_data], auth_data);
         if check_tag != tag {
-            return Err(ECIESErrorImpl::TagCheckDecryptFailed.into())
+            return Err(ECIESErrorImpl::TagCheckDecryptFailed.into());
         }
 
         let decrypted_data = encrypted_data;
@@ -496,12 +496,12 @@ impl ECIES {
         self.ingress_mac.as_mut().unwrap().update_header(header);
         let check_mac = self.ingress_mac.as_mut().unwrap().digest();
         if check_mac != mac {
-            return Err(ECIESErrorImpl::TagCheckHeaderFailed.into())
+            return Err(ECIESErrorImpl::TagCheckHeaderFailed.into());
         }
 
         self.ingress_aes.as_mut().unwrap().apply_keystream(header);
         if header.as_slice().len() < 3 {
-            return Err(ECIESErrorImpl::InvalidHeader.into())
+            return Err(ECIESErrorImpl::InvalidHeader.into());
         }
 
         let body_size = usize::try_from(header.as_slice().read_uint::<BigEndian>(3)?)?;
@@ -548,7 +548,7 @@ impl ECIES {
         self.ingress_mac.as_mut().unwrap().update_body(body);
         let check_mac = self.ingress_mac.as_mut().unwrap().digest();
         if check_mac != mac {
-            return Err(ECIESErrorImpl::TagCheckBodyFailed.into())
+            return Err(ECIESErrorImpl::TagCheckBodyFailed.into());
         }
 
         let size = self.body_size.unwrap();

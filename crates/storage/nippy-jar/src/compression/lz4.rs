@@ -43,7 +43,7 @@ impl Compression for Lz4 {
                 Err(err) => {
                     multiplier *= 2;
                     if multiplier == 16 {
-                        return Err(NippyJarError::Custom(err.to_string()))
+                        return Err(NippyJarError::Custom(err.to_string()));
                     }
                 }
             }

@@ -55,8 +55,8 @@ impl ReceiptsLogPruneConfig {
             let block = (pruned_block + 1).max(
                 mode.prune_target_block(tip, PruneSegment::ContractLogs)?
                     .map(|(block, _)| block)
-                    .unwrap_or_default() +
-                    1,
+                    .unwrap_or_default()
+                    + 1,
             );
 
             map.entry(block).or_insert_with(Vec::new).push(address)

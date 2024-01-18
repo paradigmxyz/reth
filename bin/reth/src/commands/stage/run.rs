@@ -187,8 +187,8 @@ impl Command {
                                 config.stages.bodies.downloader_max_buffered_blocks_size_bytes,
                             )
                             .with_concurrent_requests_range(
-                                config.stages.bodies.downloader_min_concurrent_requests..=
-                                    config.stages.bodies.downloader_max_concurrent_requests,
+                                config.stages.bodies.downloader_min_concurrent_requests
+                                    ..=config.stages.bodies.downloader_max_concurrent_requests,
                             )
                             .build(fetch_client, consensus.clone(), provider_factory),
                     );
@@ -272,7 +272,7 @@ impl Command {
             }
 
             if output.done {
-                break
+                break;
             }
         }
 

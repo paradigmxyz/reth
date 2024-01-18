@@ -139,7 +139,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         let Some((key, node)) = self.node(false)? else {
             // If no next node is found, clear the stack.
             self.stack.clear();
-            return Ok(())
+            return Ok(());
         };
 
         // Overwrite the root node's first nibble
@@ -178,19 +178,19 @@ impl<C: TrieCursor> TrieWalker<C> {
         if subnode.nibble() >= 15 || (subnode.nibble() < 0 && !allow_root_to_child_nibble) {
             self.stack.pop();
             self.move_to_next_sibling(false)?;
-            return Ok(())
+            return Ok(());
         }
 
         subnode.inc_nibble();
 
         if subnode.node.is_none() {
-            return self.consume_node()
+            return self.consume_node();
         }
 
         // Find the next sibling with state.
         while subnode.nibble() < 16 {
             if subnode.state_flag() {
-                return Ok(())
+                return Ok(());
             }
             subnode.inc_nibble();
         }

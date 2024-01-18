@@ -217,10 +217,10 @@ impl PeersManager {
         addr: IpAddr,
     ) -> Result<(), InboundConnectionError> {
         if self.ban_list.is_banned_ip(&addr) {
-            return Err(InboundConnectionError::IpBanned)
+            return Err(InboundConnectionError::IpBanned);
         }
         if !self.connection_info.has_in_capacity() {
-            return Err(InboundConnectionError::ExceedsLimit(self.connection_info.max_inbound))
+            return Err(InboundConnectionError::ExceedsLimit(self.connection_info.max_inbound));
         }
         // keep track of new connection
         self.connection_info.inc_in();
@@ -267,7 +267,7 @@ impl PeersManager {
         // on_inbound_pending_session. We also check if the peer is in the backoff list here.
         if self.ban_list.is_banned_peer(&peer_id) {
             self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
-            return
+            return;
         }
 
         // start a new tick, so the peer is not immediately rewarded for the time since last tick
@@ -278,7 +278,7 @@ impl PeersManager {
                 let value = entry.get_mut();
                 if value.is_banned() {
                     self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
-                    return
+                    return;
                 }
                 value.state = PeerConnectionState::In;
             }
@@ -359,7 +359,7 @@ impl PeersManager {
                 peer.apply_reputation(reputation_change.as_i32())
             }
         } else {
-            return
+            return;
         };
 
         match outcome {
@@ -383,7 +383,7 @@ impl PeersManager {
         if let Some(peer) = self.peers.get_mut(peer_id) {
             peer.state = PeerConnectionState::Idle;
         } else {
-            return
+            return;
         }
 
         self.connection_info.decr_out();
@@ -416,7 +416,7 @@ impl PeersManager {
                     // session to that peer
                     entry.get_mut().severe_backoff_counter = 0;
                     entry.get_mut().state = PeerConnectionState::Idle;
-                    return
+                    return;
                 }
             }
             Entry::Vacant(_) => return,
@@ -576,7 +576,7 @@ impl PeersManager {
         fork_id: Option<ForkId>,
     ) {
         if self.ban_list.is_banned(&peer_id, &addr.ip()) {
-            return
+            return;
         }
 
         match self.peers.entry(peer_id) {
@@ -607,7 +607,7 @@ impl PeersManager {
     pub(crate) fn remove_peer(&mut self, peer_id: PeerId) {
         let Entry::Occupied(entry) = self.peers.entry(peer_id) else { return };
         if entry.get().is_trusted() {
-            return
+            return;
         }
         let mut peer = entry.remove();
 
@@ -634,7 +634,7 @@ impl PeersManager {
     pub(crate) fn remove_peer_from_trusted_set(&mut self, peer_id: PeerId) {
         let Entry::Occupied(mut entry) = self.peers.entry(peer_id) else { return };
         if !entry.get().is_trusted() {
-            return
+            return;
         }
 
         let peer = entry.get_mut();
@@ -653,23 +653,23 @@ impl PeersManager {
     /// Returns `None` if no peer is available.
     fn best_unconnected(&mut self) -> Option<(PeerId, &mut Peer)> {
         let mut unconnected = self.peers.iter_mut().filter(|(_, peer)| {
-            !peer.is_backed_off() &&
-                !peer.is_banned() &&
-                peer.state.is_unconnected() &&
-                (!self.connect_trusted_nodes_only || peer.is_trusted())
+            !peer.is_backed_off()
+                && !peer.is_banned()
+                && peer.state.is_unconnected()
+                && (!self.connect_trusted_nodes_only || peer.is_trusted())
         });
 
         // keep track of the best peer, if there's one
         let mut best_peer = unconnected.next()?;
 
         if best_peer.1.is_trusted() {
-            return Some((*best_peer.0, best_peer.1))
+            return Some((*best_peer.0, best_peer.1));
         }
 
         for maybe_better in unconnected {
             // if the peer is trusted, return it immediately
             if maybe_better.1.is_trusted() {
-                return Some((*maybe_better.0, maybe_better.1))
+                return Some((*maybe_better.0, maybe_better.1));
             }
 
             // otherwise we keep track of the best peer using the reputation
@@ -699,7 +699,7 @@ impl PeersManager {
 
                 // If best peer does not meet reputation threshold exit immediately.
                 if peer.is_banned() {
-                    break
+                    break;
                 }
 
                 trace!(target: "net::peers",  ?peer_id, addr=?peer.addr, "schedule outbound connection");
@@ -714,7 +714,7 @@ impl PeersManager {
 
             new_outbound_dials += 1;
             if new_outbound_dials > self.connection_info.max_concurrent_outbound_dials {
-                break
+                break;
             }
         }
     }
@@ -727,7 +727,7 @@ impl PeersManager {
         loop {
             // drain buffered actions
             if let Some(action) = self.queued_actions.pop_front() {
-                return Poll::Ready(action)
+                return Poll::Ready(action);
             }
 
             while let Poll::Ready(Some(cmd)) = self.handle_rx.poll_next_unpin(cx) {
@@ -756,7 +756,7 @@ impl PeersManager {
                     if let Some(peer) = self.peers.get_mut(&peer_id) {
                         peer.unban();
                     } else {
-                        continue
+                        continue;
                     }
                     self.queued_actions.push_back(PeerAction::UnBanPeer { peer_id });
                 }
@@ -768,7 +768,7 @@ impl PeersManager {
                         if let Some(peer) = self.peers.get_mut(peer_id) {
                             peer.backed_off = false;
                         }
-                        return false
+                        return false;
                     }
                     true
                 })
@@ -779,7 +779,7 @@ impl PeersManager {
             }
 
             if self.queued_actions.is_empty() {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -927,15 +927,15 @@ impl Peer {
 
         if self.state.is_connected() && self.is_banned() {
             self.state.disconnect();
-            return ReputationChangeOutcome::DisconnectAndBan
+            return ReputationChangeOutcome::DisconnectAndBan;
         }
 
         if self.is_banned() && !is_banned_reputation(previous) {
-            return ReputationChangeOutcome::Ban
+            return ReputationChangeOutcome::Ban;
         }
 
         if !self.is_banned() && is_banned_reputation(previous) {
-            return ReputationChangeOutcome::Unban
+            return ReputationChangeOutcome::Unban;
         }
 
         ReputationChangeOutcome::None

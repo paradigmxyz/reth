@@ -60,7 +60,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let (tx_range, block_range, is_final_range) =
@@ -74,7 +74,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                 checkpoint: StageCheckpoint::new(end_block)
                     .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
                 done: is_final_range,
-            })
+            });
         }
 
         let tx = provider.tx_ref();
@@ -148,7 +148,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                                     error: BlockErrorKind::Validation(
                                         consensus::ConsensusError::TransactionSignerRecoveryError,
                                     ),
-                                })
+                                });
                             }
                             SenderRecoveryStageError::StageError(err) => return Err(err),
                         }
@@ -516,7 +516,7 @@ mod tests {
                     let end_block = output.checkpoint.block_number;
 
                     if start_block > end_block {
-                        return Ok(())
+                        return Ok(());
                     }
 
                     let mut body_cursor =

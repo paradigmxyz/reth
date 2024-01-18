@@ -164,7 +164,7 @@ impl Command {
                 }
                 _ => {
                     info!("Nothing to do for stage {:?}", self.stage);
-                    return Ok(())
+                    return Ok(());
                 }
             }
 

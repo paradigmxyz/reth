@@ -78,8 +78,8 @@ impl AccessList {
     #[inline]
     pub fn size(&self) -> usize {
         // take into account capacity
-        self.0.iter().map(AccessListItem::size).sum::<usize>() +
-            self.0.capacity() * mem::size_of::<AccessListItem>()
+        self.0.iter().map(AccessListItem::size).sum::<usize>()
+            + self.0.capacity() * mem::size_of::<AccessListItem>()
     }
 }
 

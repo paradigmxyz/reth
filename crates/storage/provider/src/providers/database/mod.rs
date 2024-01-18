@@ -141,10 +141,10 @@ impl<DB: Database> ProviderFactory<DB> {
     ) -> ProviderResult<StateProviderBox> {
         let provider = self.provider()?;
 
-        if block_number == provider.best_block_number().unwrap_or_default() &&
-            block_number == provider.last_block_number().unwrap_or_default()
+        if block_number == provider.best_block_number().unwrap_or_default()
+            && block_number == provider.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProvider::new(provider.into_tx())))
+            return Ok(Box::new(LatestStateProvider::new(provider.into_tx())));
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.

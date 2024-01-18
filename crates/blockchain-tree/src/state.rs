@@ -87,7 +87,7 @@ impl TreeState {
     /// Inserts a chain into the tree and builds the block indices.
     pub(crate) fn insert_chain(&mut self, chain: AppendableChain) -> Option<BlockChainId> {
         if chain.is_empty() {
-            return None
+            return None;
         }
         let chain_id = self.next_id();
 

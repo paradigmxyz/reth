@@ -115,7 +115,7 @@ where
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty(hashed_address)? {
-            return Ok((EMPTY_ROOT_HASH, proofs))
+            return Ok((EMPTY_ROOT_HASH, proofs));
         }
 
         let target_nibbles = proofs.iter().map(|p| p.nibbles.clone()).collect::<Vec<_>>();

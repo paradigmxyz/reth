@@ -71,13 +71,13 @@ pub trait CliqueMiddleware: Send + Sync + Middleware {
 
         let unlocked_addr = self.import_raw_key(key_bytes, password.to_string()).await?;
         if unlocked_addr != our_address {
-            return Err(CliqueError::AddressMismatch { local: our_address, remote: unlocked_addr })
+            return Err(CliqueError::AddressMismatch { local: our_address, remote: unlocked_addr });
         }
 
         let unlock_success = self.unlock_account(our_address, password.to_string(), None).await?;
 
         if !unlock_success {
-            return Err(CliqueError::AccountNotUnlocked)
+            return Err(CliqueError::AccountNotUnlocked);
         }
 
         // start mining?
@@ -86,7 +86,7 @@ pub trait CliqueMiddleware: Send + Sync + Middleware {
         // check that we are mining
         let mining = self.mining().await?;
         if !mining {
-            return Err(CliqueError::MiningNotEnabled)
+            return Err(CliqueError::MiningNotEnabled);
         }
         Ok(())
     }

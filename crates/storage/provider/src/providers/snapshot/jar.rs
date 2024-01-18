@@ -115,7 +115,7 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
             {
                 let sealed = header.seal(hash);
                 if !predicate(&sealed) {
-                    break
+                    break;
                 }
                 headers.push(sealed);
             }
@@ -275,7 +275,7 @@ impl<'a> ReceiptProvider for SnapshotJarProvider<'a> {
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
         if let Some(tx_snapshot) = &self.auxiliar_jar {
             if let Some(num) = tx_snapshot.transaction_id(hash)? {
-                return self.receipt(num)
+                return self.receipt(num);
             }
         }
         Ok(None)

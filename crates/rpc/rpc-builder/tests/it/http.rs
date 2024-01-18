@@ -31,8 +31,8 @@ use std::collections::HashSet;
 fn is_unimplemented(err: Error) -> bool {
     match err {
         Error::Call(error_obj) => {
-            error_obj.code() == ErrorCode::InternalError.code() &&
-                error_obj.message() == "unimplemented"
+            error_obj.code() == ErrorCode::InternalError.code()
+                && error_obj.message() == "unimplemented"
         }
         _ => false,
     }

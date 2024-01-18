@@ -79,13 +79,13 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
             BlockId::Hash(hash) => Ok(Some(hash.into())),
             BlockId::Number(num) => {
                 if matches!(num, BlockNumberOrTag::Latest) {
-                    return Ok(Some(self.chain_info()?.best_hash))
+                    return Ok(Some(self.chain_info()?.best_hash));
                 }
 
                 if matches!(num, BlockNumberOrTag::Pending) {
                     return self
                         .pending_block_num_hash()
-                        .map(|res_opt| res_opt.map(|num_hash| num_hash.hash))
+                        .map(|res_opt| res_opt.map(|num_hash| num_hash.hash));
                 }
 
                 self.convert_block_number(num)?

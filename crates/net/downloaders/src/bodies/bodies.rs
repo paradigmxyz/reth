@@ -97,7 +97,7 @@ where
         max_non_empty: u64,
     ) -> DownloadResult<Option<Vec<SealedHeader>>> {
         if range.is_empty() || max_non_empty == 0 {
-            return Ok(None)
+            return Ok(None);
         }
 
         // Collect headers while
@@ -108,9 +108,9 @@ where
         let mut collected = 0;
         let mut non_empty_headers = 0;
         let headers = self.provider.sealed_headers_while(range.clone(), |header| {
-            let should_take = range.contains(&header.number) &&
-                non_empty_headers < max_non_empty &&
-                collected < self.stream_batch_size;
+            let should_take = range.contains(&header.number)
+                && non_empty_headers < max_non_empty
+                && collected < self.stream_batch_size;
 
             if should_take {
                 collected += 1;
@@ -146,7 +146,7 @@ where
 
         // if we're only connected to a few peers, we keep it low
         if num_peers < *self.concurrent_requests_range.start() {
-            return max_requests
+            return max_requests;
         }
 
         max_requests.min(*self.concurrent_requests_range.end())
@@ -167,10 +167,10 @@ where
                 .map(|last| last == *self.download_range.end())
                 .unwrap_or_default();
 
-        nothing_to_request &&
-            self.in_progress_queue.is_empty() &&
-            self.buffered_responses.is_empty() &&
-            self.queued_bodies.is_empty()
+        nothing_to_request
+            && self.in_progress_queue.is_empty()
+            && self.buffered_responses.is_empty()
+            && self.queued_bodies.is_empty()
     }
 
     /// Clear all download related data.
@@ -212,8 +212,8 @@ where
     /// Adds a new response to the internal buffer
     fn buffer_bodies_response(&mut self, response: Vec<BlockResponse>) {
         // take into account capacity
-        let size = response.iter().map(BlockResponse::size).sum::<usize>() +
-            response.capacity() * mem::size_of::<BlockResponse>();
+        let size = response.iter().map(BlockResponse::size).sum::<usize>()
+            + response.capacity() * mem::size_of::<BlockResponse>();
 
         let response = OrderedBodiesResponse { resp: response, size };
         let response_len = response.len();
@@ -240,7 +240,7 @@ where
                         .skip_while(|b| b.block_number() < expected)
                         .take_while(|b| self.download_range.contains(&b.block_number()))
                         .collect()
-                })
+                });
             }
 
             // Drop buffered response since we passed that range
@@ -259,7 +259,7 @@ where
             self.queued_bodies.shrink_to_fit();
             self.metrics.total_flushed.increment(next_batch.len() as u64);
             self.metrics.queued_blocks.set(self.queued_bodies.len() as f64);
-            return Some(next_batch)
+            return Some(next_batch);
         }
         None
     }
@@ -300,16 +300,16 @@ where
         // Check if the range is valid.
         if range.is_empty() {
             tracing::error!(target: "downloaders::bodies", ?range, "Bodies download range is invalid (empty)");
-            return Err(DownloadError::InvalidBodyRange { range })
+            return Err(DownloadError::InvalidBodyRange { range });
         }
 
         // Check if the provided range is the subset of the existing range.
-        let is_current_range_subset = self.download_range.contains(range.start()) &&
-            *range.end() == *self.download_range.end();
+        let is_current_range_subset = self.download_range.contains(range.start())
+            && *range.end() == *self.download_range.end();
         if is_current_range_subset {
             tracing::trace!(target: "downloaders::bodies", ?range, "Download range already in progress");
             // The current range already includes requested.
-            return Ok(())
+            return Ok(());
         }
 
         // Check if the provided range is the next expected range.
@@ -320,7 +320,7 @@ where
             tracing::trace!(target: "downloaders::bodies", ?range, "New download range set");
             info!(target: "downloaders::bodies", count, ?range, "Downloading bodies");
             self.download_range = range;
-            return Ok(())
+            return Ok(());
         }
 
         // The block range is reset. This can happen either after unwind or after the bodies were
@@ -343,13 +343,13 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         if this.is_terminated() {
-            return Poll::Ready(None)
+            return Poll::Ready(None);
         }
         // Submit new requests and poll any in progress
         loop {
             // Yield next batch if ready
             if let Some(next_batch) = this.try_split_next_batch() {
-                return Poll::Ready(Some(Ok(next_batch)))
+                return Poll::Ready(Some(Ok(next_batch)));
             }
 
             // Poll requests
@@ -362,7 +362,7 @@ where
                     Err(error) => {
                         tracing::debug!(target: "downloaders::bodies", ?error, "Request failed");
                         this.clear();
-                        return Poll::Ready(Some(Err(error)))
+                        return Poll::Ready(Some(Err(error)));
                     }
                 };
             }
@@ -371,8 +371,8 @@ where
             let mut new_request_submitted = false;
             // Submit new requests
             let concurrent_requests_limit = this.concurrent_request_limit();
-            'inner: while this.in_progress_queue.len() < concurrent_requests_limit &&
-                this.has_buffer_capacity()
+            'inner: while this.in_progress_queue.len() < concurrent_requests_limit
+                && this.has_buffer_capacity()
             {
                 match this.next_headers_request() {
                     Ok(Some(request)) => {
@@ -388,7 +388,7 @@ where
                     Err(error) => {
                         tracing::error!(target: "downloaders::bodies", ?error, "Failed to download from next request");
                         this.clear();
-                        return Poll::Ready(Some(Err(error)))
+                        return Poll::Ready(Some(Err(error)));
                     }
                 };
             }
@@ -401,21 +401,21 @@ where
             this.buffered_responses.shrink_to_fit();
 
             if !new_request_submitted {
-                break
+                break;
             }
         }
 
         // All requests are handled, stream is finished
         if this.in_progress_queue.is_empty() {
             if this.queued_bodies.is_empty() {
-                return Poll::Ready(None)
+                return Poll::Ready(None);
             }
             let batch_size = this.stream_batch_size.min(this.queued_bodies.len());
             let next_batch = this.queued_bodies.drain(..batch_size).collect::<Vec<_>>();
             this.queued_bodies.shrink_to_fit();
             this.metrics.total_flushed.increment(next_batch.len() as u64);
             this.metrics.queued_blocks.set(this.queued_bodies.len() as f64);
-            return Poll::Ready(Some(Ok(next_batch)))
+            return Poll::Ready(Some(Ok(next_batch)));
         }
 
         Poll::Pending
@@ -502,8 +502,8 @@ impl BodiesDownloaderBuilder {
             .with_request_limit(config.downloader_request_limit)
             .with_max_buffered_blocks_size_bytes(config.downloader_max_buffered_blocks_size_bytes)
             .with_concurrent_requests_range(
-                config.downloader_min_concurrent_requests..=
-                    config.downloader_max_concurrent_requests,
+                config.downloader_min_concurrent_requests
+                    ..=config.downloader_max_concurrent_requests,
             )
     }
 }

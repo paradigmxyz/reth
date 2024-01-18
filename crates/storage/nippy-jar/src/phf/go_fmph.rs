@@ -28,7 +28,7 @@ impl PerfectHashingFunction for GoFmph {
 
     fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError> {
         if let Some(f) = &self.function {
-            return Ok(f.get(key))
+            return Ok(f.get(key));
         }
         Err(NippyJarError::PHFMissingKeys)
     }
@@ -39,9 +39,9 @@ impl PartialEq for GoFmph {
     fn eq(&self, other: &Self) -> bool {
         match (&self.function, &other.function) {
             (Some(func1), Some(func2)) => {
-                func1.level_sizes() == func2.level_sizes() &&
-                    func1.write_bytes() == func2.write_bytes() &&
-                    {
+                func1.level_sizes() == func2.level_sizes()
+                    && func1.write_bytes() == func2.write_bytes()
+                    && {
                         let mut f1 = Vec::with_capacity(func1.write_bytes());
                         func1.write(&mut f1).expect("enough capacity");
 
@@ -93,7 +93,7 @@ impl<'de> Deserialize<'de> for GoFmph {
                     GOFunction::read(&mut std::io::Cursor::new(buffer))
                         .map_err(D::Error::custom)?,
                 ),
-            })
+            });
         }
         Ok(GoFmph { function: None })
     }

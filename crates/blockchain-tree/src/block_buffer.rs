@@ -114,7 +114,7 @@ impl BlockBuffer {
         // discard all blocks that are before the finalized number.
         while let Some(entry) = self.earliest_blocks.first_entry() {
             if *entry.key() > finalized_number {
-                break
+                break;
             }
             let block_hashes = entry.remove();
             block_hashes_to_remove.extend(block_hashes);

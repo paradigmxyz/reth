@@ -56,7 +56,7 @@ impl NodeRecord {
         if let IpAddr::V6(v6) = self.address {
             if let Some(v4) = v6.to_ipv4_mapped() {
                 self.address = v4.into();
-                return true
+                return true;
             }
         }
         false

@@ -129,7 +129,7 @@ impl TxEip4844 {
                 self.blob_versioned_hashes.len(),
                 sidecar.commitments.len()
             ))
-            .into())
+            .into());
         }
 
         // zip and iterate, calculating versioned hashes
@@ -146,7 +146,7 @@ impl TxEip4844 {
             // validation failed?
             let calculated_versioned_hash = kzg_to_versioned_hash(commitment);
             if *versioned_hash != calculated_versioned_hash {
-                return Err(BlobTransactionValidationError::InvalidProof)
+                return Err(BlobTransactionValidationError::InvalidProof);
             }
         }
 

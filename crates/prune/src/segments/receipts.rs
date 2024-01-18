@@ -38,7 +38,7 @@ impl<DB: Database> Segment<DB> for Receipts {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No receipts to prune");
-                return Ok(PruneOutput::done())
+                return Ok(PruneOutput::done());
             }
         };
         let tx_range_end = *tx_range.end();

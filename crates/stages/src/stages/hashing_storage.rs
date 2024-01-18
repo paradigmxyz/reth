@@ -58,7 +58,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     ) -> Result<ExecOutput, StageError> {
         let tx = provider.tx_ref();
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let (from_block, to_block) = input.next_block_range().into_inner();
@@ -144,7 +144,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                             keccak_address = Some(keccak256(address));
                         } else {
                             // We have reached the end of table
-                            break
+                            break;
                         }
                     }
                 }
@@ -165,7 +165,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                     },
                 );
 
-                return Ok(ExecOutput { checkpoint, done: false })
+                return Ok(ExecOutput { checkpoint, done: false });
             }
         } else {
             // Aggregate all changesets and and make list of storages that have been
@@ -286,7 +286,7 @@ mod tests {
 
                     // Continue from checkpoint
                     input.checkpoint = Some(checkpoint);
-                    continue
+                    continue;
                 } else {
                     assert!(checkpoint.block_number == previous_stage);
                     assert_matches!(checkpoint.storage_hashing_stage_checkpoint(), Some(StorageHashingCheckpoint {
@@ -304,7 +304,7 @@ mod tests {
                         "execution validation"
                     );
 
-                    break
+                    break;
                 }
             }
             panic!("Failed execution");
@@ -569,7 +569,7 @@ mod tests {
                 let start_block = input.checkpoint().block_number + 1;
                 let end_block = output.checkpoint.block_number;
                 if start_block > end_block {
-                    return Ok(())
+                    return Ok(());
                 }
             }
             self.check_hashed_storage()
@@ -670,7 +670,7 @@ mod tests {
 
                 while let Some((bn_address, entry)) = rev_changeset_walker.next().transpose()? {
                     if bn_address.block_number() < target_block {
-                        break
+                        break;
                     }
 
                     if storage_cursor

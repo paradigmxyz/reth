@@ -12,7 +12,7 @@ use std::{collections::HashSet, time::Instant};
 async fn trace_many_blocks() {
     let url = parse_env_url("RETH_RPC_TEST_NODE_URL");
     if url.is_err() {
-        return
+        return;
     }
     let url = url.unwrap();
 

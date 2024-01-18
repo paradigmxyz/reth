@@ -40,7 +40,7 @@ impl<DB: Database> Segment<DB> for Headers {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No headers to prune");
-                return Ok(PruneOutput::done())
+                return Ok(PruneOutput::done());
             }
         };
 
@@ -48,7 +48,7 @@ impl<DB: Database> Segment<DB> for Headers {
         if delete_limit == 0 {
             // Nothing to do, `input.delete_limit` is less than 3, so we can't prune all
             // headers-related tables up to the same height
-            return Ok(PruneOutput::not_done())
+            return Ok(PruneOutput::not_done());
         }
 
         let results = [
@@ -64,7 +64,7 @@ impl<DB: Database> Segment<DB> for Headers {
         if !results.iter().map(|(_, _, last_pruned_block)| last_pruned_block).all_equal() {
             return Err(PrunerError::InconsistentData(
                 "All headers-related tables should be pruned up to the same height",
-            ))
+            ));
         }
 
         let (done, pruned, last_pruned_block) = results.into_iter().fold(

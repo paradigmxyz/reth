@@ -44,9 +44,9 @@ impl<T: Hash + Eq> LruCache<T> {
         if self.inner.insert(entry) {
             if self.limit.get() == self.inner.len() {
                 // remove the oldest element in the set
-                return (true, self.remove_lru())
+                return (true, self.remove_lru());
             }
-            return (true, None)
+            return (true, None);
         }
         (false, None)
     }

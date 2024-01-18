@@ -105,23 +105,23 @@ impl ErrorData {
 impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: EngineApiError) -> Self {
         match error {
-            EngineApiError::InvalidBodiesRange { .. } |
-            EngineApiError::AttributesValidationError(
+            EngineApiError::InvalidBodiesRange { .. }
+            | EngineApiError::AttributesValidationError(
                 AttributesValidationError::WithdrawalsNotSupportedInV1,
-            ) |
-            EngineApiError::AttributesValidationError(
+            )
+            | EngineApiError::AttributesValidationError(
                 AttributesValidationError::ParentBeaconBlockRootNotSupportedBeforeV3,
-            ) |
-            EngineApiError::AttributesValidationError(
+            )
+            | EngineApiError::AttributesValidationError(
                 AttributesValidationError::NoParentBeaconBlockRootPostCancun,
-            ) |
-            EngineApiError::AttributesValidationError(
+            )
+            | EngineApiError::AttributesValidationError(
                 AttributesValidationError::NoWithdrawalsPostShanghai,
-            ) |
-            EngineApiError::AttributesValidationError(
+            )
+            | EngineApiError::AttributesValidationError(
                 AttributesValidationError::HasWithdrawalsPreShanghai,
-            ) |
-            EngineApiError::AttributesValidationError(
+            )
+            | EngineApiError::AttributesValidationError(
                 AttributesValidationError::InvalidParams(_),
             ) => {
                 // Note: the data field is not required by the spec, but is also included by other
@@ -154,8 +154,8 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             // Error responses from the consensus engine
             EngineApiError::ForkChoiceUpdate(ref err) => match err {
                 BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => (*err).into(),
-                BeaconForkChoiceUpdateError::EngineUnavailable |
-                BeaconForkChoiceUpdateError::Internal(_) => {
+                BeaconForkChoiceUpdateError::EngineUnavailable
+                | BeaconForkChoiceUpdateError::Internal(_) => {
                     jsonrpsee_types::error::ErrorObject::owned(
                         INTERNAL_ERROR_CODE,
                         SERVER_ERROR_MSG,
@@ -194,10 +194,10 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 )
             }
             // Any other server error
-            EngineApiError::TerminalTD { .. } |
-            EngineApiError::TerminalBlockHash { .. } |
-            EngineApiError::Internal(_) |
-            EngineApiError::GetPayloadError(_) => jsonrpsee_types::error::ErrorObject::owned(
+            EngineApiError::TerminalTD { .. }
+            | EngineApiError::TerminalBlockHash { .. }
+            | EngineApiError::Internal(_)
+            | EngineApiError::GetPayloadError(_) => jsonrpsee_types::error::ErrorObject::owned(
                 INTERNAL_ERROR_CODE,
                 SERVER_ERROR_MSG,
                 Some(ErrorData::new(error)),

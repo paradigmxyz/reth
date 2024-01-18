@@ -72,7 +72,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         input: ExecInput,
     ) -> Poll<Result<(), StageError>> {
         if input.target_reached() || self.buffer.is_some() {
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         // Update the header range on the downloader
@@ -102,7 +102,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
         let (from_block, to_block) = input.next_block_range().into_inner();
 
@@ -202,7 +202,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut rev_walker = body_cursor.walk_back(None)?;
         while let Some((number, block_meta)) = rev_walker.next().transpose()? {
             if number <= input.unwind_to {
-                break
+                break;
             }
 
             // Delete the ommers entry if any
@@ -216,8 +216,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             }
 
             // Delete all transaction to block values.
-            if !block_meta.is_empty() &&
-                tx_block_cursor.seek_exact(block_meta.last_tx_num())?.is_some()
+            if !block_meta.is_empty()
+                && tx_block_cursor.seek_exact(block_meta.last_tx_num())?.is_some()
             {
                 tx_block_cursor.delete_current()?;
             }
@@ -799,7 +799,7 @@ mod tests {
                 let this = self.get_mut();
 
                 if this.headers.is_empty() {
-                    return Poll::Ready(None)
+                    return Poll::Ready(None);
                 }
 
                 let mut response = Vec::default();
@@ -818,12 +818,12 @@ mod tests {
                     }
 
                     if response.len() as u64 >= this.batch_size {
-                        break
+                        break;
                     }
                 }
 
                 if !response.is_empty() {
-                    return Poll::Ready(Some(Ok(response)))
+                    return Poll::Ready(Some(Ok(response)));
                 }
 
                 panic!("requested bodies without setting headers")

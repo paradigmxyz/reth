@@ -31,7 +31,7 @@ impl SenderIdentifiers {
     /// Returns the existing `SendId` or assigns a new one if it's missing
     pub(crate) fn sender_id_or_create(&mut self, addr: Address) -> SenderId {
         if let Some(id) = self.sender_id(&addr) {
-            return id
+            return id;
         }
         let id = self.next_id();
         self.address_to_id.insert(addr, id);
@@ -99,7 +99,7 @@ impl TransactionId {
         sender: SenderId,
     ) -> Option<TransactionId> {
         if transaction_nonce == on_chain_nonce {
-            return None
+            return None;
         }
         let prev_nonce = transaction_nonce.saturating_sub(1);
         (on_chain_nonce <= prev_nonce).then(|| Self::new(sender, prev_nonce))

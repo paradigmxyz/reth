@@ -152,7 +152,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         if self.len() <= limit.max_txs {
             // if we are below the limits, we don't need to drop anything
-            return Vec::new()
+            return Vec::new();
         }
 
         let mut removed = Vec::new();
@@ -173,7 +173,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
                     }
                 }
                 drop -= list.len();
-                continue
+                continue;
             }
 
             // Otherwise drop only last few transactions
@@ -256,7 +256,7 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
                     // still parked -> skip descendant transactions
                     'this: while let Some((peek, _)) = iter.peek() {
                         if peek.sender != id.sender {
-                            break 'this
+                            break 'this;
                         }
                         iter.next();
                     }

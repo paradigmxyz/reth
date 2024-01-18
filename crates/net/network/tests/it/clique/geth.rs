@@ -86,7 +86,7 @@ impl CliqueGethInstance {
                     (err_reader.read_line(&mut buf), buf.clone())
                 } {
                     if line == 0 {
-                        break
+                        break;
                     }
                     if !line_str.is_empty() {
                         dbg!(line_str);
@@ -112,7 +112,7 @@ impl CliqueGethInstance {
                     (err_reader.read_line(&mut buf), buf.clone())
                 } {
                     if line == 0 {
-                        break
+                        break;
                     }
                 }
             }

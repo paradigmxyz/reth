@@ -105,7 +105,7 @@ impl StateFetcher {
             if number > peer.best_number {
                 peer.best_hash = hash;
                 peer.best_number = number;
-                return true
+                return true;
             }
         }
         false
@@ -133,7 +133,7 @@ impl StateFetcher {
     fn poll_action(&mut self) -> PollAction {
         // we only check and not pop here since we don't know yet whether a peer is available.
         if self.queued_requests.is_empty() {
-            return PollAction::NoRequests
+            return PollAction::NoRequests;
         }
 
         let Some(peer_id) = self.next_peer() else { return PollAction::NoPeersAvailable };
@@ -180,7 +180,7 @@ impl StateFetcher {
             }
 
             if self.queued_requests.is_empty() || no_peers_available {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -252,7 +252,7 @@ impl StateFetcher {
             // If the peer is still ready to accept new requests, we try to send a followup
             // request immediately.
             if peer.state.on_request_finished() && !is_error && !is_likely_bad_response {
-                return self.followup_request(peer_id)
+                return self.followup_request(peer_id);
             }
         }
 
@@ -273,7 +273,7 @@ impl StateFetcher {
         }
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             if peer.state.on_request_finished() {
-                return self.followup_request(peer_id)
+                return self.followup_request(peer_id);
             }
         }
         None
@@ -344,7 +344,7 @@ impl PeerState {
     fn on_request_finished(&mut self) -> bool {
         if !matches!(self, PeerState::Closing) {
             *self = PeerState::Idle;
-            return true
+            return true;
         }
         false
     }

@@ -91,7 +91,7 @@ mod builder {
             if args.config.attributes.no_tx_pool {
                 if let Ok(BuildOutcome::Better { payload, .. }) = self.try_build(args) {
                     trace!(target: "payload_builder", "[OPTIMISM] Forced best payload");
-                    return Some(payload)
+                    return Some(payload);
                 }
             }
 
@@ -173,7 +173,7 @@ mod builder {
         for sequencer_tx in &attributes.transactions {
             // Check if the job was cancelled, if so we can exit early.
             if cancel.is_cancelled() {
-                return Ok(BuildOutcome::Cancelled)
+                return Ok(BuildOutcome::Cancelled);
             }
 
             // Convert the transaction to a [TransactionSignedEcRecovered]. This is
@@ -217,11 +217,11 @@ mod builder {
                     match err {
                         EVMError::Transaction(err) => {
                             trace!(target: "payload_builder", ?err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                            continue
+                            continue;
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err))
+                            return Err(PayloadBuilderError::EvmExecutionError(err));
                         }
                     }
                 }
@@ -262,12 +262,12 @@ mod builder {
                     // invalid which also removes all dependent transaction from
                     // the iterator before we can continue
                     best_txs.mark_invalid(&pool_tx);
-                    continue
+                    continue;
                 }
 
                 // check if the job was cancelled, if so we can exit early
                 if cancel.is_cancelled() {
-                    return Ok(BuildOutcome::Cancelled)
+                    return Ok(BuildOutcome::Cancelled);
                 }
 
                 // convert tx to a signed transaction
@@ -298,11 +298,11 @@ mod builder {
                                     best_txs.mark_invalid(&pool_tx);
                                 }
 
-                                continue
+                                continue;
                             }
                             err => {
                                 // this is an error that we should treat as fatal for this attempt
-                                return Err(PayloadBuilderError::EvmExecutionError(err))
+                                return Err(PayloadBuilderError::EvmExecutionError(err));
                             }
                         }
                     }
@@ -341,7 +341,7 @@ mod builder {
         // check if we have a better block
         if !is_better_payload(best_payload.as_ref(), total_fees) {
             // can skip building the block
-            return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
+            return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads });
         }
 
         let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(

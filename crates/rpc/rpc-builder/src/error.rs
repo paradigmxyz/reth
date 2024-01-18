@@ -60,7 +60,7 @@ impl RpcError {
                         return RpcError::AddressAlreadyInUse {
                             kind,
                             error: io::Error::from(io_error.kind()),
-                        }
+                        };
                     }
                 }
                 RpcError::RpcError(JsonRpseeError::Transport(err))

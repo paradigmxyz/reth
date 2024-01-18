@@ -102,7 +102,7 @@ impl PruneInput {
 
         let range = from_tx_number..=to_tx_number;
         if range.is_empty() {
-            return Ok(None)
+            return Ok(None);
         }
 
         Ok(Some(range))
@@ -127,7 +127,7 @@ impl PruneInput {
 
         let range = from_block..=self.to_block;
         if range.is_empty() {
-            return None
+            return None;
         }
 
         Some(range)

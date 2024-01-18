@@ -97,14 +97,14 @@ impl StageError {
     pub fn is_fatal(&self) -> bool {
         matches!(
             self,
-            StageError::Database(_) |
-                StageError::Download(_) |
-                StageError::DatabaseIntegrity(_) |
-                StageError::StageCheckpoint(_) |
-                StageError::MissingDownloadBuffer |
-                StageError::MissingSyncGap |
-                StageError::ChannelClosed |
-                StageError::Fatal(_)
+            StageError::Database(_)
+                | StageError::Download(_)
+                | StageError::DatabaseIntegrity(_)
+                | StageError::StageCheckpoint(_)
+                | StageError::MissingDownloadBuffer
+                | StageError::MissingSyncGap
+                | StageError::ChannelClosed
+                | StageError::Fatal(_)
         )
     }
 }

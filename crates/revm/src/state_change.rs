@@ -68,7 +68,7 @@ where
     DB::Error: std::fmt::Display,
 {
     if !chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
-        return Ok(())
+        return Ok(());
     }
 
     let parent_beacon_block_root =
@@ -81,9 +81,9 @@ where
             return Err(BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
                 parent_beacon_block_root,
             }
-            .into())
+            .into());
         }
-        return Ok(())
+        return Ok(());
     }
 
     // get previous env
@@ -100,7 +100,7 @@ where
                 parent_beacon_block_root: Box::new(parent_beacon_block_root),
                 message: e.to_string(),
             }
-            .into())
+            .into());
         }
     };
 

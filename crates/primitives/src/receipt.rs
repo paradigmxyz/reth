@@ -126,7 +126,7 @@ impl Receipts {
             if let Some(receipt) = tx_r.as_ref() {
                 out.push((id as u64, receipt.cumulative_gas_used));
             } else {
-                return Err(PruneSegmentError::ReceiptsPruned)
+                return Err(PruneSegmentError::ReceiptsPruned);
             }
         }
         Ok(out)
@@ -288,7 +288,7 @@ impl ReceiptWithBloom {
         let b = &mut &**buf;
         let rlp_head = alloy_rlp::Header::decode(b)?;
         if !rlp_head.list {
-            return Err(alloy_rlp::Error::UnexpectedString)
+            return Err(alloy_rlp::Error::UnexpectedString);
         }
         let started_len = b.len();
 
@@ -333,7 +333,7 @@ impl ReceiptWithBloom {
             return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
         *buf = *b;
         Ok(this)
@@ -486,7 +486,7 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
     fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         if matches!(self.receipt.tx_type, TxType::Legacy) {
             self.encode_fields(out);
-            return
+            return;
         }
 
         let mut payload = BytesMut::new();

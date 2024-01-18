@@ -40,12 +40,12 @@ pub fn calculate_next_block_base_fee(
         // increased base fee.
         std::cmp::Ordering::Greater => {
             // Calculate the increase in base fee based on the formula defined by EIP-1559.
-            base_fee +
-                (std::cmp::max(
+            base_fee
+                + (std::cmp::max(
                     // Ensure a minimum increase of 1.
                     1,
-                    base_fee as u128 * (gas_used - gas_target) as u128 /
-                        (gas_target as u128 * base_fee_params.max_change_denominator as u128),
+                    base_fee as u128 * (gas_used - gas_target) as u128
+                        / (gas_target as u128 * base_fee_params.max_change_denominator as u128),
                 ) as u64)
         }
         // If the gas used in the current block is less than the gas target, calculate a new
@@ -53,8 +53,8 @@ pub fn calculate_next_block_base_fee(
         std::cmp::Ordering::Less => {
             // Calculate the decrease in base fee based on the formula defined by EIP-1559.
             base_fee.saturating_sub(
-                (base_fee as u128 * (gas_target - gas_used) as u128 /
-                    (gas_target as u128 * base_fee_params.max_change_denominator as u128))
+                (base_fee as u128 * (gas_target - gas_used) as u128
+                    / (gas_target as u128 * base_fee_params.max_change_denominator as u128))
                     as u64,
             )
         }

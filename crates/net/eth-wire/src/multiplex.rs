@@ -78,7 +78,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
     {
         let Ok(shared_cap) = self.shared_capabilities().ensure_matching_capability(cap).cloned()
         else {
-            return Err(P2PStreamError::CapabilityNotShared)
+            return Err(P2PStreamError::CapabilityNotShared);
         };
 
         let (to_primary, from_wire) = mpsc::unbounded_channel();
@@ -146,7 +146,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
     {
         let Ok(shared_cap) = self.shared_capabilities().ensure_matching_capability(cap).cloned()
         else {
-            return Err(P2PStreamError::CapabilityNotShared.into())
+            return Err(P2PStreamError::CapabilityNotShared.into());
         };
 
         let (to_primary, from_wire) = mpsc::unbounded_channel();
@@ -239,7 +239,7 @@ impl<St> MultiplexInner<St> {
         for proto in &self.protocols {
             if proto.shared_cap == *cap {
                 proto.send_raw(msg);
-                return true
+                return true;
             }
         }
         false
@@ -295,7 +295,7 @@ impl ProtocolProxy {
     fn try_send(&self, msg: Bytes) -> Result<(), io::Error> {
         if msg.is_empty() {
             // message must not be empty
-            return Err(io::ErrorKind::InvalidInput.into())
+            return Err(io::ErrorKind::InvalidInput.into());
         }
         self.to_wire.send(self.mask_msg_id(msg)).map_err(|_| io::ErrorKind::BrokenPipe.into())
     }
@@ -451,7 +451,7 @@ where
         loop {
             // first drain the primary stream
             if let Poll::Ready(Some(msg)) = this.primary.st.try_poll_next_unpin(cx) {
-                return Poll::Ready(Some(msg))
+                return Poll::Ready(Some(msg));
             }
 
             let mut conn_ready = true;
@@ -460,15 +460,15 @@ where
                     Poll::Ready(_) => {
                         if let Some(msg) = this.inner.out_buffer.pop_front() {
                             if let Err(err) = this.inner.conn.start_send_unpin(msg) {
-                                return Poll::Ready(Some(Err(err.into())))
+                                return Poll::Ready(Some(Err(err.into())));
                             }
                         } else {
-                            break
+                            break;
                         }
                     }
                     Poll::Pending => {
                         conn_ready = false;
-                        break
+                        break;
                     }
                 }
             }
@@ -481,7 +481,7 @@ where
                     }
                     Poll::Ready(None) => {
                         // primary closed
-                        return Poll::Ready(None)
+                        return Poll::Ready(None);
                     }
                     Poll::Pending => break,
                 }
@@ -498,7 +498,7 @@ where
                         Poll::Ready(None) => return Poll::Ready(None),
                         Poll::Pending => {
                             this.inner.protocols.push(proto);
-                            break
+                            break;
                         }
                     }
                 }
@@ -523,28 +523,27 @@ where
                                 for proto in &this.inner.protocols {
                                     if proto.shared_cap == *cap {
                                         proto.send_raw(msg);
-                                        break
+                                        break;
                                     }
                                 }
                             }
                         } else {
-                            return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(
-                                offset,
-                            )
-                            .into())))
+                            return Poll::Ready(Some(Err(
+                                P2PStreamError::UnknownReservedMessageId(offset).into(),
+                            )));
                         }
                     }
                     Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
                     Poll::Ready(None) => {
                         // connection closed
-                        return Poll::Ready(None)
+                        return Poll::Ready(None);
                     }
                     Poll::Pending => break,
                 }
             }
 
             if !conn_ready || (!delegated && this.inner.out_buffer.is_empty()) {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -561,10 +560,10 @@ where
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let this = self.get_mut();
         if let Err(err) = ready!(this.inner.conn.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err.into()))
+            return Poll::Ready(Err(err.into()));
         }
         if let Err(err) = ready!(this.primary.st.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err))
+            return Poll::Ready(Err(err));
         }
         Poll::Ready(Ok(()))
     }

@@ -64,7 +64,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
     /// Lookup an account in the AccountHistory table
     pub fn account_history_lookup(&self, address: Address) -> ProviderResult<HistoryInfo> {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         // history key to search IntegerList of block number changesets.
@@ -83,7 +83,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         storage_key: StorageKey,
     ) -> ProviderResult<HistoryInfo> {
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         // history key to search IntegerList of block number changesets.
@@ -121,9 +121,9 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
             // short-circuit) and when it passes we save a full seek into the changeset/plain state
             // table.
-            if rank == 0 &&
-                chunk.select(rank) as u64 != self.block_number &&
-                !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))
+            if rank == 0
+                && chunk.select(rank) as u64 != self.block_number
+                && !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))
             {
                 if lowest_available_block_number.is_some() {
                     // The key may have been written, but due to pruning we may not have changesets

@@ -31,7 +31,7 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> BlockHashReader
     fn block_hash(&self, block_number: BlockNumber) -> ProviderResult<Option<B256>> {
         let block_hash = self.bundle_state_data_provider.block_hash(block_number);
         if block_hash.is_some() {
-            return Ok(block_hash)
+            return Ok(block_hash);
         }
         self.state_provider.block_hash(block_number)
     }
@@ -88,7 +88,7 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> StateProvider
         if let Some(value) =
             self.bundle_state_data_provider.state().storage(&account, u256_storage_key)
         {
-            return Ok(Some(value))
+            return Ok(Some(value));
         }
 
         self.state_provider.storage(account, storage_key)
@@ -96,7 +96,7 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> StateProvider
 
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         if let Some(bytecode) = self.bundle_state_data_provider.state().bytecode(&code_hash) {
-            return Ok(Some(bytecode))
+            return Ok(Some(bytecode));
         }
 
         self.state_provider.bytecode_by_hash(code_hash)

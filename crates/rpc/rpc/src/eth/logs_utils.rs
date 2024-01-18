@@ -110,13 +110,13 @@ pub(crate) fn log_matches_filter(
     log: &reth_primitives::Log,
     params: &FilteredParams,
 ) -> bool {
-    if params.filter.is_some() &&
-        (!params.filter_block_range(block.number) ||
-            !params.filter_block_hash(block.hash) ||
-            !params.filter_address(&from_primitive_log(log.clone())) ||
-            !params.filter_topics(&from_primitive_log(log.clone())))
+    if params.filter.is_some()
+        && (!params.filter_block_range(block.number)
+            || !params.filter_block_hash(block.hash)
+            || !params.filter_address(&from_primitive_log(log.clone()))
+            || !params.filter_topics(&from_primitive_log(log.clone())))
     {
-        return false
+        return false;
     }
     true
 }

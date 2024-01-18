@@ -43,7 +43,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No storage history to prune");
-                return Ok(PruneOutput::done())
+                return Ok(PruneOutput::done());
             }
         };
         let range_end = *range.end();

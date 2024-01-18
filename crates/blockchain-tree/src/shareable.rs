@@ -145,7 +145,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTreeViewer for ShareableBlockc
         }
 
         if tree.block_indices().is_block_hash_canonical(&parent) {
-            return Some(parent)
+            return Some(parent);
         }
 
         None

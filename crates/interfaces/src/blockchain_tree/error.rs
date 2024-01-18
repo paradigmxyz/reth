@@ -239,12 +239,12 @@ impl InsertBlockErrorKind {
                         true
                     }
                     // these are internal errors, not caused by an invalid block
-                    BlockExecutionError::ProviderError |
-                    BlockExecutionError::Pruning(_) |
-                    BlockExecutionError::CanonicalRevert { .. } |
-                    BlockExecutionError::CanonicalCommit { .. } |
-                    BlockExecutionError::AppendChainDoesntConnect { .. } |
-                    BlockExecutionError::UnavailableForTest => false,
+                    BlockExecutionError::ProviderError
+                    | BlockExecutionError::Pruning(_)
+                    | BlockExecutionError::CanonicalRevert { .. }
+                    | BlockExecutionError::CanonicalCommit { .. }
+                    | BlockExecutionError::AppendChainDoesntConnect { .. }
+                    | BlockExecutionError::UnavailableForTest => false,
                     #[cfg(feature = "optimism")]
                     BlockExecutionError::OptimismBlockExecution(_) => false,
                 }
@@ -255,11 +255,11 @@ impl InsertBlockErrorKind {
                         // the block's number is lower than the finalized block's number
                         true
                     }
-                    BlockchainTreeError::BlockSideChainIdConsistency { .. } |
-                    BlockchainTreeError::CanonicalChain { .. } |
-                    BlockchainTreeError::BlockNumberNotFoundInChain { .. } |
-                    BlockchainTreeError::BlockHashNotFoundInChain { .. } |
-                    BlockchainTreeError::BlockBufferingFailed { .. } => false,
+                    BlockchainTreeError::BlockSideChainIdConsistency { .. }
+                    | BlockchainTreeError::CanonicalChain { .. }
+                    | BlockchainTreeError::BlockNumberNotFoundInChain { .. }
+                    | BlockchainTreeError::BlockHashNotFoundInChain { .. }
+                    | BlockchainTreeError::BlockBufferingFailed { .. } => false,
                 }
             }
             InsertBlockErrorKind::Provider(_) | InsertBlockErrorKind::Internal(_) => {
@@ -267,9 +267,9 @@ impl InsertBlockErrorKind {
                 false
             }
             InsertBlockErrorKind::Canonical(err) => match err {
-                CanonicalError::BlockchainTree(_) |
-                CanonicalError::CanonicalCommit(_) |
-                CanonicalError::CanonicalRevert(_) => false,
+                CanonicalError::BlockchainTree(_)
+                | CanonicalError::CanonicalCommit(_)
+                | CanonicalError::CanonicalRevert(_) => false,
                 CanonicalError::Validation(_) => true,
             },
             InsertBlockErrorKind::BlockchainTree(_) => false,

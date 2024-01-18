@@ -131,7 +131,7 @@ where
             Err(err) => {
                 let msg = format!("failed to listen on ipc endpoint `{endpoint_path}`: {err}");
                 on_ready.send(Err(msg)).ok();
-                return Err(err)
+                return Err(err);
             }
         };
         // signal that we're ready to accept connections
@@ -149,7 +149,7 @@ where
                         None => {
                             warn!("Too many IPC connections. Please try again later.");
                             connections.add(ipc.reject_connection().boxed());
-                            continue
+                            continue;
                         }
                     };
 
@@ -367,7 +367,7 @@ where
         let this = self.get_mut();
 
         if this.stop_monitor.shutdown_requested() {
-            return Poll::Ready(Err(MonitoredError::Shutdown))
+            return Poll::Ready(Err(MonitoredError::Shutdown));
         }
 
         this.future.poll_accept(cx).map_err(MonitoredError::Selector)
@@ -606,7 +606,7 @@ mod tests {
                     // and you might want to do something smarter if it's
                     // critical that "the most recent item" must be sent when it is produced.
                     if sink.send(notif).await.is_err() {
-                        break Ok(())
+                        break Ok(());
                     }
 
                     closed = c;

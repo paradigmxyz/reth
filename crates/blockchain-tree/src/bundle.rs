@@ -25,7 +25,7 @@ impl<'a> BundleStateDataProvider for BundleStateDataRef<'a> {
     fn block_hash(&self, block_number: BlockNumber) -> Option<BlockHash> {
         let block_hash = self.sidechain_block_hashes.get(&block_number).cloned();
         if block_hash.is_some() {
-            return block_hash
+            return block_hash;
         }
 
         self.canonical_block_hashes.get(&block_number).cloned()

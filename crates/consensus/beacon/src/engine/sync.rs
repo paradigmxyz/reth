@@ -169,7 +169,7 @@ where
     /// given hash.
     pub(crate) fn download_full_block(&mut self, hash: B256) -> bool {
         if self.is_inflight_request(hash) {
-            return false
+            return false;
         }
         trace!(
             target: "consensus::engine::sync",
@@ -241,7 +241,7 @@ where
 
                 if target.is_none() && !self.run_pipeline_continuously {
                     // nothing to sync
-                    return None
+                    return None;
                 }
 
                 let (tx, rx) = oneshot::channel();
@@ -270,14 +270,14 @@ where
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<EngineSyncEvent> {
         // try to spawn a pipeline if a target is set
         if let Some(event) = self.try_spawn_pipeline() {
-            return Poll::Ready(event)
+            return Poll::Ready(event);
         }
 
         // make sure we poll the pipeline if it's active, and return any ready pipeline events
         if !self.is_pipeline_idle() {
             // advance the pipeline
             if let Poll::Ready(event) = self.poll_pipeline(cx) {
-                return Poll::Ready(event)
+                return Poll::Ready(event);
             }
         }
 
@@ -315,10 +315,10 @@ where
                 if peek.0 .0.hash() == block.0 .0.hash() {
                     PeekMut::pop(peek);
                 } else {
-                    break
+                    break;
                 }
             }
-            return Poll::Ready(EngineSyncEvent::FetchedFullBlock(block.0 .0))
+            return Poll::Ready(EngineSyncEvent::FetchedFullBlock(block.0 .0));
         }
 
         Poll::Pending

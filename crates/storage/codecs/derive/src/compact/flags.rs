@@ -25,7 +25,7 @@ pub(crate) fn generate_flag_struct(
                 .iter()
                 .filter_map(|f| {
                     if let FieldTypes::StructField(f) = f {
-                        return Some(f)
+                        return Some(f);
                     }
                     None
                 })
@@ -36,7 +36,7 @@ pub(crate) fn generate_flag_struct(
     };
 
     if total_bits == 0 {
-        return placeholder_flag_struct(&flags_ident)
+        return placeholder_flag_struct(&flags_ident);
     }
 
     let (total_bytes, unused_bits) = pad_flag_struct(total_bits, &mut field_flags);

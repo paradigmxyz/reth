@@ -75,7 +75,7 @@ impl EngineHooksController {
                     self.hooks.push_back(hook);
                 }
 
-                return Poll::Ready(Ok(result))
+                return Poll::Ready(Ok(result));
             }
             Poll::Pending => {
                 self.active_db_write_hook = Some(hook);
@@ -133,10 +133,10 @@ impl EngineHooksController {
     ) -> Poll<Result<PolledHook, EngineHookError>> {
         // Hook with DB write access level is not allowed to run due to already running hook with DB
         // write access level or active DB write according to passed argument
-        if hook.db_access_level().is_read_write() &&
-            (self.active_db_write_hook.is_some() || db_write_active)
+        if hook.db_access_level().is_read_write()
+            && (self.active_db_write_hook.is_some() || db_write_active)
         {
-            return Poll::Pending
+            return Poll::Pending;
         }
 
         if let Poll::Ready(event) = hook.poll(cx, args)? {
@@ -150,7 +150,7 @@ impl EngineHooksController {
                 "Polled next hook"
             );
 
-            return Poll::Ready(Ok(result))
+            return Poll::Ready(Ok(result));
         }
 
         Poll::Pending
@@ -300,9 +300,9 @@ mod tests {
         assert_eq!(
             result.map(|result| {
                 let polled_hook = result.unwrap();
-                polled_hook.name == hook_ro_name &&
-                    polled_hook.event.is_started() &&
-                    polled_hook.db_access_level.is_read_only()
+                polled_hook.name == hook_ro_name
+                    && polled_hook.event.is_started()
+                    && polled_hook.db_access_level.is_read_only()
             }),
             Poll::Ready(true)
         );
@@ -339,9 +339,9 @@ mod tests {
         assert_eq!(
             result.map(|result| {
                 let polled_hook = result.unwrap();
-                polled_hook.name == hook_rw_1_name &&
-                    polled_hook.event.is_started() &&
-                    polled_hook.db_access_level.is_read_write()
+                polled_hook.name == hook_rw_1_name
+                    && polled_hook.event.is_started()
+                    && polled_hook.db_access_level.is_read_write()
             }),
             Poll::Ready(true)
         );
@@ -361,9 +361,9 @@ mod tests {
         assert_eq!(
             result.map(|result| {
                 let polled_hook = result.unwrap();
-                polled_hook.name == hook_ro_name &&
-                    polled_hook.event.is_started() &&
-                    polled_hook.db_access_level.is_read_only()
+                polled_hook.name == hook_ro_name
+                    && polled_hook.event.is_started()
+                    && polled_hook.db_access_level.is_read_only()
             }),
             Poll::Ready(true)
         );

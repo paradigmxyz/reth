@@ -175,7 +175,7 @@ impl BlockIndices {
                     added.push(new.into());
                     new_hash = new_hashes.next();
                 }
-                break
+                break;
             };
             let Some(new_block_value) = new_hash else {
                 // Old canonical chain had more block than new chain.
@@ -185,7 +185,7 @@ impl BlockIndices {
                     removed.push(rem);
                     old_hash = old_hashes.next();
                 }
-                break
+                break;
             };
             // compare old and new canonical block number
             match new_block_value.0.cmp(&old_block_value.0) {
@@ -270,7 +270,7 @@ impl BlockIndices {
     /// It is assumed that blocks are interconnected and that they connect to canonical chain
     pub fn canonicalize_blocks(&mut self, blocks: &BTreeMap<BlockNumber, SealedBlockWithSenders>) {
         if blocks.is_empty() {
-            return
+            return;
         }
 
         // Remove all blocks from canonical chain

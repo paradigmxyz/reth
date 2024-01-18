@@ -64,7 +64,7 @@ where
                     .nonce()
                     .checked_add(1)
                     .ok_or(RpcInvalidTransactionError::NonceMaxValue)?;
-                return Ok(U256::from(tx_count))
+                return Ok(U256::from(tx_count));
             }
         }
 
@@ -104,7 +104,7 @@ where
 
         // TODO: remove when HistoricalStateProviderRef::proof is implemented
         if !is_latest_block {
-            return Err(EthApiError::InvalidBlockRange)
+            return Err(EthApiError::InvalidBlockRange);
         }
 
         let this = self.clone();

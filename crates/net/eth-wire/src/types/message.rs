@@ -77,7 +77,7 @@ impl ProtocolMessage {
                     return Err(EthStreamError::EthInvalidMessageError(
                         version,
                         EthMessageID::GetNodeData,
-                    ))
+                    ));
                 }
                 let request_pair = RequestPair::<GetNodeData>::decode(buf)?;
                 EthMessage::GetNodeData(request_pair)
@@ -87,7 +87,7 @@ impl ProtocolMessage {
                     return Err(EthStreamError::EthInvalidMessageError(
                         version,
                         EthMessageID::GetNodeData,
-                    ))
+                    ));
                 }
                 let request_pair = RequestPair::<NodeData>::decode(buf)?;
                 EthMessage::NodeData(request_pair)
@@ -198,8 +198,10 @@ impl EthMessage {
             EthMessage::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
             EthMessage::NewBlock(_) => EthMessageID::NewBlock,
             EthMessage::Transactions(_) => EthMessageID::Transactions,
-            EthMessage::NewPooledTransactionHashes66(_) |
-            EthMessage::NewPooledTransactionHashes68(_) => EthMessageID::NewPooledTransactionHashes,
+            EthMessage::NewPooledTransactionHashes66(_)
+            | EthMessage::NewPooledTransactionHashes68(_) => {
+                EthMessageID::NewPooledTransactionHashes
+            }
             EthMessage::GetBlockHeaders(_) => EthMessageID::GetBlockHeaders,
             EthMessage::BlockHeaders(_) => EthMessageID::BlockHeaders,
             EthMessage::GetBlockBodies(_) => EthMessageID::GetBlockBodies,

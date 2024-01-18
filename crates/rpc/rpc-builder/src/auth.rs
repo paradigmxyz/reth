@@ -331,8 +331,8 @@ impl AuthServerHandle {
             "Bearer {}",
             self.secret
                 .encode(&Claims {
-                    iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() +
-                        Duration::from_secs(60))
+                    iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
+                        + Duration::from_secs(60))
                     .as_secs(),
                     exp: None,
                 })

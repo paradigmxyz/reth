@@ -30,7 +30,7 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
                 let request_length = headers.len() as u64;
 
                 if request_length <= 1 && request.limit != request_length {
-                    return true
+                    return true;
                 }
 
                 match request.start {

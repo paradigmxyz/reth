@@ -57,7 +57,7 @@ impl NetworkError {
             ErrorKind::AddrInUse => NetworkError::AddressAlreadyInUse { kind, error: err },
             _ => {
                 if let ServiceKind::Discovery(_) = kind {
-                    return NetworkError::Discovery(err)
+                    return NetworkError::Discovery(err);
                 }
                 NetworkError::Io(err)
             }
@@ -124,8 +124,8 @@ impl SessionError for EthStreamError {
         match self {
             EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
                 P2PHandshakeError::HelloNotInHandshake,
-            )) |
-            EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
+            ))
+            | EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
                 P2PHandshakeError::NonHelloMessageInHandshake,
             )) => true,
             EthStreamError::EthHandshakeError(err) => !matches!(err, EthHandshakeError::NoResponse),
@@ -138,30 +138,30 @@ impl SessionError for EthStreamError {
             EthStreamError::P2PStreamError(err) => {
                 matches!(
                     err,
-                    P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities) |
-                        P2PStreamError::HandshakeError(P2PHandshakeError::HelloNotInHandshake) |
-                        P2PStreamError::HandshakeError(
+                    P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities)
+                        | P2PStreamError::HandshakeError(P2PHandshakeError::HelloNotInHandshake)
+                        | P2PStreamError::HandshakeError(
                             P2PHandshakeError::NonHelloMessageInHandshake
-                        ) |
-                        P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(
+                        )
+                        | P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(
                             DisconnectReason::UselessPeer
-                        )) |
-                        P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(
+                        ))
+                        | P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(
                             DisconnectReason::IncompatibleP2PProtocolVersion
-                        )) |
-                        P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(
+                        ))
+                        | P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(
                             DisconnectReason::ProtocolBreach
-                        )) |
-                        P2PStreamError::UnknownReservedMessageId(_) |
-                        P2PStreamError::EmptyProtocolMessage |
-                        P2PStreamError::ParseSharedCapability(_) |
-                        P2PStreamError::CapabilityNotShared |
-                        P2PStreamError::Disconnected(DisconnectReason::UselessPeer) |
-                        P2PStreamError::Disconnected(
+                        ))
+                        | P2PStreamError::UnknownReservedMessageId(_)
+                        | P2PStreamError::EmptyProtocolMessage
+                        | P2PStreamError::ParseSharedCapability(_)
+                        | P2PStreamError::CapabilityNotShared
+                        | P2PStreamError::Disconnected(DisconnectReason::UselessPeer)
+                        | P2PStreamError::Disconnected(
                             DisconnectReason::IncompatibleP2PProtocolVersion
-                        ) |
-                        P2PStreamError::Disconnected(DisconnectReason::ProtocolBreach) |
-                        P2PStreamError::MismatchedProtocolVersion { .. }
+                        )
+                        | P2PStreamError::Disconnected(DisconnectReason::ProtocolBreach)
+                        | P2PStreamError::MismatchedProtocolVersion { .. }
                 )
             }
             EthStreamError::EthHandshakeError(err) => !matches!(err, EthHandshakeError::NoResponse),
@@ -171,49 +171,49 @@ impl SessionError for EthStreamError {
 
     fn should_backoff(&self) -> Option<BackoffKind> {
         if let Some(err) = self.as_io() {
-            return err.should_backoff()
+            return err.should_backoff();
         }
 
         if let Some(err) = self.as_disconnected() {
             return match err {
-                DisconnectReason::TooManyPeers |
-                DisconnectReason::AlreadyConnected |
-                DisconnectReason::PingTimeout |
-                DisconnectReason::DisconnectRequested |
-                DisconnectReason::TcpSubsystemError => Some(BackoffKind::Low),
+                DisconnectReason::TooManyPeers
+                | DisconnectReason::AlreadyConnected
+                | DisconnectReason::PingTimeout
+                | DisconnectReason::DisconnectRequested
+                | DisconnectReason::TcpSubsystemError => Some(BackoffKind::Low),
 
-                DisconnectReason::ProtocolBreach |
-                DisconnectReason::UselessPeer |
-                DisconnectReason::IncompatibleP2PProtocolVersion |
-                DisconnectReason::NullNodeIdentity |
-                DisconnectReason::ClientQuitting |
-                DisconnectReason::UnexpectedHandshakeIdentity |
-                DisconnectReason::ConnectedToSelf |
-                DisconnectReason::SubprotocolSpecific => {
+                DisconnectReason::ProtocolBreach
+                | DisconnectReason::UselessPeer
+                | DisconnectReason::IncompatibleP2PProtocolVersion
+                | DisconnectReason::NullNodeIdentity
+                | DisconnectReason::ClientQuitting
+                | DisconnectReason::UnexpectedHandshakeIdentity
+                | DisconnectReason::ConnectedToSelf
+                | DisconnectReason::SubprotocolSpecific => {
                     // These are considered fatal, and are handled by the
                     // [`SessionError::is_fatal_protocol_error`]
                     Some(BackoffKind::High)
                 }
-            }
+            };
         }
 
         // This only checks for a subset of error variants, the counterpart of
         // [`SessionError::is_fatal_protocol_error`]
         match self {
             // timeouts
-            EthStreamError::EthHandshakeError(EthHandshakeError::NoResponse) |
-            EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
+            EthStreamError::EthHandshakeError(EthHandshakeError::NoResponse)
+            | EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
                 P2PHandshakeError::NoResponse,
-            )) |
-            EthStreamError::P2PStreamError(P2PStreamError::PingTimeout) => Some(BackoffKind::Low),
+            ))
+            | EthStreamError::P2PStreamError(P2PStreamError::PingTimeout) => Some(BackoffKind::Low),
             // malformed messages
-            EthStreamError::P2PStreamError(P2PStreamError::Rlp(_)) |
-            EthStreamError::P2PStreamError(P2PStreamError::UnknownReservedMessageId(_)) |
-            EthStreamError::P2PStreamError(P2PStreamError::UnknownDisconnectReason(_)) |
-            EthStreamError::P2PStreamError(P2PStreamError::MessageTooBig { .. }) |
-            EthStreamError::P2PStreamError(P2PStreamError::EmptyProtocolMessage) |
-            EthStreamError::P2PStreamError(P2PStreamError::PingerError(_)) |
-            EthStreamError::P2PStreamError(P2PStreamError::Snap(_)) => Some(BackoffKind::Medium),
+            EthStreamError::P2PStreamError(P2PStreamError::Rlp(_))
+            | EthStreamError::P2PStreamError(P2PStreamError::UnknownReservedMessageId(_))
+            | EthStreamError::P2PStreamError(P2PStreamError::UnknownDisconnectReason(_))
+            | EthStreamError::P2PStreamError(P2PStreamError::MessageTooBig { .. })
+            | EthStreamError::P2PStreamError(P2PStreamError::EmptyProtocolMessage)
+            | EthStreamError::P2PStreamError(P2PStreamError::PingerError(_))
+            | EthStreamError::P2PStreamError(P2PStreamError::Snap(_)) => Some(BackoffKind::Medium),
             _ => None,
         }
     }

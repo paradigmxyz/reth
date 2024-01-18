@@ -24,7 +24,7 @@ fn to_quantity(val: u128) -> SubscriptionId<'static> {
     let non_zero = b.iter().take_while(|b| **b == 0).count();
     let b = &b[non_zero..];
     if b.is_empty() {
-        return SubscriptionId::Str("0x0".into())
+        return SubscriptionId::Str("0x0".into());
     }
 
     let mut id = String::with_capacity(2 * b.len() + 2);

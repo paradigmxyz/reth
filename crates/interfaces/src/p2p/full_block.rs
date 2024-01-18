@@ -140,7 +140,7 @@ where
     /// Returns the [SealedBlock] if the request is complete and valid.
     fn take_block(&mut self) -> Option<SealedBlock> {
         if self.header.is_none() || self.body.is_none() {
-            return None
+            return None;
         }
 
         let header = self.header.take().unwrap();
@@ -154,7 +154,7 @@ where
                     self.client.report_bad_message(resp.peer_id());
                     self.header = Some(header);
                     self.request.body = Some(self.client.get_block_body(self.hash));
-                    return None
+                    return None;
                 }
                 Some(SealedBlock::new(header, resp.into_data()))
             }
@@ -166,10 +166,10 @@ where
             if let Err(err) = ensure_valid_body_response(header, resp.data()) {
                 debug!(target: "downloaders", ?err,  hash=?header.hash, "Received wrong body");
                 self.client.report_bad_message(resp.peer_id());
-                return
+                return;
             }
             self.body = Some(BodyResponse::Validated(resp.into_data()));
-            return
+            return;
         }
         self.body = Some(BodyResponse::PendingValidation(resp));
     }
@@ -230,7 +230,7 @@ where
             }
 
             if let Some(res) = this.take_block() {
-                return Poll::Ready(res)
+                return Poll::Ready(res);
             }
         }
     }
@@ -265,14 +265,14 @@ where
         if let Some(fut) = Pin::new(&mut self.header).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 self.header = None;
-                return Poll::Ready(ResponseResult::Header(res))
+                return Poll::Ready(ResponseResult::Header(res));
             }
         }
 
         if let Some(fut) = Pin::new(&mut self.body).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 self.body = None;
-                return Poll::Ready(ResponseResult::Body(res))
+                return Poll::Ready(ResponseResult::Body(res));
             }
         }
 
@@ -310,14 +310,14 @@ fn ensure_valid_body_response(
     if header.ommers_hash != ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff(
             GotExpected { got: ommers_hash, expected: header.ommers_hash }.into(),
-        ))
+        ));
     }
 
     let tx_root = block.calculate_tx_root();
     if header.transactions_root != tx_root {
         return Err(ConsensusError::BodyTransactionRootDiff(
             GotExpected { got: tx_root, expected: header.transactions_root }.into(),
-        ))
+        ));
     }
 
     let withdrawals = block.withdrawals.as_deref().unwrap_or(&[]);
@@ -326,13 +326,13 @@ fn ensure_valid_body_response(
         if withdrawals_root != header_withdrawals_root {
             return Err(ConsensusError::BodyWithdrawalsRootDiff(
                 GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
-            ))
+            ));
         }
-        return Ok(())
+        return Ok(());
     }
 
     if !withdrawals.is_empty() {
-        return Err(ConsensusError::WithdrawalsRootUnexpected)
+        return Err(ConsensusError::WithdrawalsRootUnexpected);
     }
 
     Ok(())
@@ -420,7 +420,7 @@ where
     fn take_blocks(&mut self) -> Option<Vec<SealedBlock>> {
         if !self.is_bodies_complete() {
             // not done with bodies yet
-            return None
+            return None;
         }
 
         let headers = self.headers.take()?;
@@ -465,7 +465,7 @@ where
             // create response for failing bodies
             let hashes = self.remaining_bodies_hashes();
             self.request.bodies = Some(self.client.get_block_bodies(hashes));
-            return None
+            return None;
         }
 
         Some(response)
@@ -490,7 +490,7 @@ where
                 if let Err(err) = self.consensus.validate_header_range(&headers_rising) {
                     debug!(target: "downloaders", %err, ?self.start_hash, "Received bad header response");
                     self.client.report_bad_message(peer);
-                    return
+                    return;
                 }
 
                 // get the bodies request so it can be polled later
@@ -618,7 +618,7 @@ where
             }
 
             if let Some(res) = this.take_blocks() {
-                return Poll::Ready(res)
+                return Poll::Ready(res);
             }
         }
     }
@@ -660,13 +660,13 @@ where
         if let Some(blocks) = &mut this.blocks {
             if blocks.is_empty() {
                 // Stream is finished
-                return Poll::Ready(None)
+                return Poll::Ready(None);
             }
 
             // return the next block if it's ready - the vec should be in ascending order since it
             // is reversed right after it is received from the future, so we can just pop() the
             // elements to return them from the stream in descending order
-            return Poll::Ready(blocks.pop())
+            return Poll::Ready(blocks.pop());
         }
 
         // poll the inner future if the blocks are not yet ready
@@ -706,14 +706,14 @@ where
         if let Some(fut) = Pin::new(&mut self.headers).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 self.headers = None;
-                return Poll::Ready(RangeResponseResult::Header(res))
+                return Poll::Ready(RangeResponseResult::Header(res));
             }
         }
 
         if let Some(fut) = Pin::new(&mut self.bodies).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 self.bodies = None;
-                return Poll::Ready(RangeResponseResult::Body(res))
+                return Poll::Ready(RangeResponseResult::Body(res));
             }
         }
 

@@ -68,7 +68,7 @@ impl PooledTransactionsElement {
     /// `tx` is [Transaction::Eip4844]
     pub fn try_from_broadcast(tx: TransactionSigned) -> Result<Self, TransactionSigned> {
         if tx.is_eip4844() {
-            return Err(tx)
+            return Err(tx);
         }
         Ok(tx.into())
     }
@@ -115,9 +115,9 @@ impl PooledTransactionsElement {
     /// Reference to transaction hash. Used to identify transaction.
     pub fn hash(&self) -> &TxHash {
         match self {
-            PooledTransactionsElement::Legacy { hash, .. } |
-            PooledTransactionsElement::Eip2930 { hash, .. } |
-            PooledTransactionsElement::Eip1559 { hash, .. } => hash,
+            PooledTransactionsElement::Legacy { hash, .. }
+            | PooledTransactionsElement::Eip2930 { hash, .. }
+            | PooledTransactionsElement::Eip1559 { hash, .. } => hash,
             PooledTransactionsElement::BlobTransaction(tx) => &tx.hash,
             #[cfg(feature = "optimism")]
             PooledTransactionsElement::Deposit { hash, .. } => hash,
@@ -127,9 +127,9 @@ impl PooledTransactionsElement {
     /// Returns the signature of the transaction.
     pub fn signature(&self) -> &Signature {
         match self {
-            Self::Legacy { signature, .. } |
-            Self::Eip2930 { signature, .. } |
-            Self::Eip1559 { signature, .. } => signature,
+            Self::Legacy { signature, .. }
+            | Self::Eip2930 { signature, .. }
+            | Self::Eip1559 { signature, .. } => signature,
             Self::BlobTransaction(blob_tx) => &blob_tx.signature,
             #[cfg(feature = "optimism")]
             Self::Deposit { .. } => {
@@ -196,7 +196,7 @@ impl PooledTransactionsElement {
         let mut data = tx.as_ref();
 
         if data.is_empty() {
-            return Err(RlpError::InputTooShort)
+            return Err(RlpError::InputTooShort);
         }
 
         // Check if the tx is a list - tx types are less than EMPTY_LIST_CODE (0xc0)
@@ -401,7 +401,7 @@ impl Decodable for PooledTransactionsElement {
         //
         // First, we check whether or not the transaction is a legacy transaction.
         if buf.is_empty() {
-            return Err(RlpError::InputTooShort)
+            return Err(RlpError::InputTooShort);
         }
 
         // keep the original buf around for legacy decoding
@@ -447,7 +447,7 @@ impl Decodable for PooledTransactionsElement {
                 // check that the bytes consumed match the payload length
                 let bytes_consumed = remaining_len - buf.len();
                 if bytes_consumed != header.payload_length {
-                    return Err(RlpError::UnexpectedLength)
+                    return Err(RlpError::UnexpectedLength);
                 }
 
                 Ok(PooledTransactionsElement::BlobTransaction(blob_tx))
@@ -459,7 +459,7 @@ impl Decodable for PooledTransactionsElement {
                 // check that the bytes consumed match the payload length
                 let bytes_consumed = remaining_len - buf.len();
                 if bytes_consumed != header.payload_length {
-                    return Err(RlpError::UnexpectedLength)
+                    return Err(RlpError::UnexpectedLength);
                 }
 
                 // because we checked the tx type, we can be sure that the transaction is not a

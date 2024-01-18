@@ -200,7 +200,7 @@ pub fn validate_payload_timestamp(
         //
         // 1. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
         //    payload or payloadAttributes greater or equal to the Cancun activation timestamp.
-        return Err(AttributesValidationError::UnsupportedFork)
+        return Err(AttributesValidationError::UnsupportedFork);
     }
 
     if version == EngineApiMessageVersion::V3 && !is_cancun {
@@ -209,7 +209,7 @@ pub fn validate_payload_timestamp(
         //
         // 1. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
         //    the built payload does not fall within the time frame of the Cancun fork.
-        return Err(AttributesValidationError::UnsupportedFork)
+        return Err(AttributesValidationError::UnsupportedFork);
     }
     Ok(())
 }
@@ -233,18 +233,18 @@ pub fn optimism_validate_withdrawals_presence(
     match version {
         EngineApiMessageVersion::V1 => {
             if has_withdrawals {
-                return Err(AttributesValidationError::WithdrawalsNotSupportedInV1)
+                return Err(AttributesValidationError::WithdrawalsNotSupportedInV1);
             }
             if is_shanghai {
-                return Err(AttributesValidationError::NoWithdrawalsPostShanghai)
+                return Err(AttributesValidationError::NoWithdrawalsPostShanghai);
             }
         }
         EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 => {
             if is_shanghai && !has_withdrawals {
-                return Err(AttributesValidationError::NoWithdrawalsPostShanghai)
+                return Err(AttributesValidationError::NoWithdrawalsPostShanghai);
             }
             if !is_shanghai && has_withdrawals {
-                return Err(AttributesValidationError::HasWithdrawalsPreShanghai)
+                return Err(AttributesValidationError::HasWithdrawalsPreShanghai);
             }
         }
     };
@@ -266,18 +266,18 @@ pub fn validate_withdrawals_presence(
     match version {
         EngineApiMessageVersion::V1 => {
             if has_withdrawals {
-                return Err(AttributesValidationError::WithdrawalsNotSupportedInV1)
+                return Err(AttributesValidationError::WithdrawalsNotSupportedInV1);
             }
             if is_shanghai {
-                return Err(AttributesValidationError::NoWithdrawalsPostShanghai)
+                return Err(AttributesValidationError::NoWithdrawalsPostShanghai);
             }
         }
         EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 => {
             if is_shanghai && !has_withdrawals {
-                return Err(AttributesValidationError::NoWithdrawalsPostShanghai)
+                return Err(AttributesValidationError::NoWithdrawalsPostShanghai);
             }
             if !is_shanghai && has_withdrawals {
-                return Err(AttributesValidationError::HasWithdrawalsPreShanghai)
+                return Err(AttributesValidationError::HasWithdrawalsPreShanghai);
             }
         }
     };
@@ -321,12 +321,12 @@ pub fn validate_parent_beacon_block_root_presence(
     match version {
         EngineApiMessageVersion::V1 | EngineApiMessageVersion::V2 => {
             if has_parent_beacon_block_root {
-                return Err(AttributesValidationError::ParentBeaconBlockRootNotSupportedBeforeV3)
+                return Err(AttributesValidationError::ParentBeaconBlockRootNotSupportedBeforeV3);
             }
         }
         EngineApiMessageVersion::V3 => {
             if !has_parent_beacon_block_root {
-                return Err(AttributesValidationError::NoParentBeaconBlockRootPostCancun)
+                return Err(AttributesValidationError::NoParentBeaconBlockRootPostCancun);
             }
         }
     };
