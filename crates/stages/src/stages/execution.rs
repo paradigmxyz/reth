@@ -502,6 +502,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::{models::AccountBeforeTx, test_utils::create_test_rw_db};
     use reth_interfaces::executor::BlockValidationError;
+    use reth_node_builder::EthEvmConfig;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
         ChainSpecBuilder, PruneModes, SealedBlock, StorageEntry, B256, MAINNET, U256,
@@ -510,7 +511,7 @@ mod tests {
     use reth_revm::EvmProcessorFactory;
     use std::sync::Arc;
 
-    fn stage() -> ExecutionStage<EvmProcessorFactory> {
+    fn stage() -> ExecutionStage<EvmProcessorFactory<EthEvmConfig>> {
         let executor_factory = EvmProcessorFactory::new(Arc::new(
             ChainSpecBuilder::mainnet().berlin_activated().build(),
         ));
@@ -701,7 +702,7 @@ mod tests {
         provider.commit().unwrap();
 
         let provider = factory.provider_rw().unwrap();
-        let mut execution_stage: ExecutionStage<EvmProcessorFactory> = stage();
+        let mut execution_stage: ExecutionStage<EvmProcessorFactory<EthEvmConfig>> = stage();
         let output = execution_stage.execute(&provider, input).unwrap();
         provider.commit().unwrap();
         assert_matches!(output, ExecOutput {

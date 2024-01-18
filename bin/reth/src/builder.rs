@@ -162,6 +162,14 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             .prune_config(Arc::clone(&self.config.chain))?
             .or(config.prune.clone());
 
+        // TODO: stateful node builder should be able to remove cfgs here
+        #[cfg(feature = "optimism")]
+        let evm_config = OptimismEvmConfig::default();
+
+        // The default payload builder is implemented on the unit type.
+        #[cfg(not(feature = "optimism"))]
+        let evm_config = EthEvmConfig::default();
+
         // configure blockchain tree
         let tree_config = BlockchainTreeConfig::default();
         let tree = self.config.build_blockchain_tree(
@@ -170,6 +178,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             prune_config.clone(),
             sync_metrics_tx.clone(),
             tree_config,
+            evm_config,
         )?;
         let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = ShareableBlockchainTree::new(tree);
@@ -286,6 +295,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
+                    evm_config,
                 )
                 .await?;
 
@@ -307,6 +317,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
+                    evm_config
                 )
                 .await?;
 

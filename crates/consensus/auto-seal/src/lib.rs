@@ -20,6 +20,7 @@ use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
 };
 use reth_node_api::EngineTypes;
+use reth_node_builder::EthEvmConfig;
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom,
@@ -298,10 +299,10 @@ impl StorageInner {
     /// Executes the block with the given block and senders, on the provided [EVMProcessor].
     ///
     /// This returns the poststate from execution and post-block changes, as well as the gas used.
-    pub(crate) fn execute(
+    pub(crate) fn execute<Env>(
         &mut self,
         block: &BlockWithSenders,
-        executor: &mut EVMProcessor<'_>,
+        executor: &mut EVMProcessor<'_, Env>,
     ) -> Result<(BundleStateWithReceipts, u64), BlockExecutionError> {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
         // TODO: there isn't really a parent beacon block root here, so not sure whether or not to
@@ -389,7 +390,7 @@ impl StorageInner {
             .with_database_boxed(Box::new(StateProviderDatabase::new(client.latest().unwrap())))
             .with_bundle_update()
             .build();
-        let mut executor = EVMProcessor::new_with_state(chain_spec.clone(), db);
+        let mut executor = EVMProcessor::<EthEvmConfig>::new_with_state(chain_spec.clone(), db);
 
         let (bundle_state, gas_used) = self.execute(&block, &mut executor)?;
 

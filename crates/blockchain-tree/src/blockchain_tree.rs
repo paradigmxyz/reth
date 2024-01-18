@@ -1239,6 +1239,7 @@ mod tests {
     use linked_hash_set::LinkedHashSet;
     use reth_db::{tables, test_utils::TempDatabase, transaction::DbTxMut, DatabaseEnv};
     use reth_interfaces::test_utils::TestConsensus;
+    use reth_node_builder::EthEvmConfig;
     use reth_primitives::{
         constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH, ETHEREUM_BLOCK_GAS_LIMIT},
         keccak256,
@@ -1402,7 +1403,7 @@ mod tests {
         );
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         let consensus = Arc::new(TestConsensus::default());
-        let executor_factory = EvmProcessorFactory::new(chain_spec.clone());
+        let executor_factory = EvmProcessorFactory::<EthEvmConfig>::new(chain_spec.clone());
 
         {
             let provider_rw = provider_factory.provider_rw().unwrap();

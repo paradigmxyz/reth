@@ -412,16 +412,18 @@ impl NodeConfig {
     }
 
     /// Build the blockchain tree
-    pub fn build_blockchain_tree<DB>(
+    pub fn build_blockchain_tree<DB, EnvConfig>(
         &self,
         provider_factory: ProviderFactory<DB>,
         consensus: Arc<dyn Consensus>,
         prune_config: Option<PruneConfig>,
         sync_metrics_tx: UnboundedSender<MetricEvent>,
         tree_config: BlockchainTreeConfig,
-    ) -> eyre::Result<BlockchainTree<DB, EvmProcessorFactory>>
+        env: EnvConfig,
+    ) -> eyre::Result<BlockchainTree<DB, EvmProcessorFactory<EnvConfig>>>
     where
         DB: Database + Unpin + Clone + 'static,
+        EnvConfig: Send + Sync + 'static,
     {
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
@@ -517,7 +519,7 @@ impl NodeConfig {
 
     /// Constructs a [Pipeline] that's wired to the network
     #[allow(clippy::too_many_arguments)]
-    pub async fn build_networked_pipeline<DB, Client>(
+    pub async fn build_networked_pipeline<DB, Client, EvmConfig>(
         &self,
         config: &StageConfig,
         client: Client,
@@ -527,10 +529,12 @@ impl NodeConfig {
         metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
         max_block: Option<BlockNumber>,
+        evm_config: EvmConfig,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Unpin + Clone + 'static,
         Client: HeadersClient + BodiesClient + Clone + 'static,
+        EvmConfig: Send + Sync + Clone + 'static,
     {
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
@@ -552,6 +556,7 @@ impl NodeConfig {
                 self.debug.continuous,
                 metrics_tx,
                 prune_config,
+                evm_config,
             )
             .await?;
 
@@ -750,7 +755,7 @@ impl NodeConfig {
 
     /// Builds the [Pipeline] with the given [ProviderFactory] and downloaders.
     #[allow(clippy::too_many_arguments)]
-    pub async fn build_pipeline<DB, H, B>(
+    pub async fn build_pipeline<DB, H, B, EvmConfig>(
         &self,
         provider_factory: ProviderFactory<DB>,
         stage_config: &StageConfig,
@@ -761,11 +766,13 @@ impl NodeConfig {
         continuous: bool,
         metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
+        _evm_config: EvmConfig,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Clone + 'static,
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,
+        EvmConfig: Send + Sync + Clone + 'static,
     {
         let mut builder = Pipeline::builder();
 
@@ -776,7 +783,7 @@ impl NodeConfig {
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         use revm_inspectors::stack::InspectorStackConfig;
-        let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
+        let factory = reth_revm::EvmProcessorFactory::<EvmConfig>::new(self.chain.clone());
 
         let stack_config = InspectorStackConfig {
             use_printer_tracer: self.debug.print_inspector,

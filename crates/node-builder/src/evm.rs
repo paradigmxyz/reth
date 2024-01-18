@@ -6,7 +6,7 @@ use reth_primitives::{
 };
 
 /// Ethereum-related EVM configuration.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 #[non_exhaustive]
 pub struct EthEvmConfig;
 

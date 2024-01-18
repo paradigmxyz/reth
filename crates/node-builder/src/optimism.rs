@@ -31,7 +31,7 @@ impl EngineTypes for OptimismEngineTypes {
 }
 
 /// Optimism-related EVM configuration.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct OptimismEvmConfig;
 

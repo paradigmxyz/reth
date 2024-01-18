@@ -55,6 +55,7 @@ mod tests {
         AccountHistory, DatabaseEnv,
     };
     use reth_interfaces::test_utils::generators::{self, random_block};
+    use reth_node_builder::EthEvmConfig;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode,
         PruneModes, SealedBlock, U256,
@@ -128,7 +129,7 @@ mod tests {
             // Check execution and create receipts and changesets according to the pruning
             // configuration
             let mut execution_stage = ExecutionStage::new(
-                EvmProcessorFactory::new(Arc::new(
+                EvmProcessorFactory::<EthEvmConfig>::new(Arc::new(
                     ChainSpecBuilder::mainnet().berlin_activated().build(),
                 )),
                 ExecutionStageThresholds {
