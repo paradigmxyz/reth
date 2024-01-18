@@ -4,7 +4,7 @@
 
 use alloy_primitives::{Address, Bytes, B256, U128, U256, U64};
 use alloy_rlp::{BufMut, Decodable, Encodable, Error as RlpError};
-use alloy_rpc_types::{request::BlobTransactionSidecar, AccessList};
+use alloy_rpc_types::{AccessList, BlobTransactionSidecar};
 use serde::{Deserialize, Serialize};
 
 /// Container type for various Ethereum transaction requests

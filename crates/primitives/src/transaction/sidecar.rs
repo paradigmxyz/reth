@@ -356,14 +356,14 @@ impl BlobTransactionSidecar {
     }
 }
 
-impl From<reth_rpc_types::request::BlobTransactionSidecar> for BlobTransactionSidecar {
-    fn from(value: reth_rpc_types::request::BlobTransactionSidecar) -> Self {
+impl From<reth_rpc_types::BlobTransactionSidecar> for BlobTransactionSidecar {
+    fn from(value: reth_rpc_types::BlobTransactionSidecar) -> Self {
         // SAFETY: Same repr and size
         unsafe { std::mem::transmute(value) }
     }
 }
 
-impl From<BlobTransactionSidecar> for reth_rpc_types::request::BlobTransactionSidecar {
+impl From<BlobTransactionSidecar> for reth_rpc_types::BlobTransactionSidecar {
     fn from(value: BlobTransactionSidecar) -> Self {
         // SAFETY: Same repr and size
         unsafe { std::mem::transmute(value) }
@@ -400,7 +400,7 @@ const _: [(); std::mem::size_of::<BlobTransactionSidecar>()] =
     [(); std::mem::size_of::<BlobTransactionSidecarRlp>()];
 
 const _: [(); std::mem::size_of::<BlobTransactionSidecar>()] =
-    [(); std::mem::size_of::<reth_rpc_types::request::BlobTransactionSidecar>()];
+    [(); std::mem::size_of::<reth_rpc_types::BlobTransactionSidecar>()];
 
 impl BlobTransactionSidecarRlp {
     fn wrap_ref(other: &BlobTransactionSidecar) -> &Self {

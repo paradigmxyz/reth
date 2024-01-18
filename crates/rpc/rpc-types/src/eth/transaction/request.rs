@@ -6,7 +6,7 @@ use crate::{
     AccessList,
 };
 use alloy_primitives::{Address, Bytes, B256, U128, U256, U64, U8};
-use alloy_rpc_types::request::BlobTransactionSidecar;
+use alloy_rpc_types::BlobTransactionSidecar;
 use serde::{Deserialize, Serialize};
 
 /// Represents _all_ transaction requests received from RPC
