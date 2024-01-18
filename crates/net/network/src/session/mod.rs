@@ -330,7 +330,7 @@ impl SessionManager {
     ) {
         let secret_key = self.secret_key;
         let counter_arc = Arc::clone(&counter.0); // Clone the Arc
-    
+
         self.spawn(async move {
             let counter_clone = Counter(counter_arc); // Create the Counter inside the async block
             if let Ok(stream) = get_eciess_stream(stream, secret_key, Direction::Incoming).await {

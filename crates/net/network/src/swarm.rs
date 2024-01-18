@@ -3,7 +3,9 @@ use crate::{
     message::{PeerMessage, PeerRequestSender},
     peers::InboundConnectionError,
     protocol::IntoRlpxSubProtocol,
-    session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager, Counter},
+    session::{
+        Counter, Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager,
+    },
     state::{NetworkState, StateAction},
 };
 use futures::Stream;
@@ -210,10 +212,10 @@ where
                             if Arc::strong_count(&counter.0) < MAX_GRACEFUL_DISCONNECTS {
                                 self.sessions.handle_disconnect_incoming_connection(
                                     stream,
-                                    DisconnectReason::TooManyPeers, &counter
+                                    DisconnectReason::TooManyPeers,
+                                    &counter,
                                 );
-                            }
-                            else {
+                            } else {
                                 self.sessions.disconnect_all(Some(DisconnectReason::TooManyPeers));
                             }
                         }
