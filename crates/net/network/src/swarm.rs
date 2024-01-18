@@ -208,13 +208,13 @@ where
                         InboundConnectionError::ExceedsLimit(limit) => {
                             trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; disconnecting");
                             if Arc::strong_count(&counter.0) < MAX_GRACEFUL_DISCONNECTS {
-                                self.sessions.disconnect_incoming_connection(
+                                self.sessions.handle_disconnect_incoming_connection(
                                     stream,
                                     DisconnectReason::TooManyPeers, &counter
                                 );
                             }
                             else {
-                                self.sessions.disconnect_all(reason);
+                                self.sessions.disconnect_all(Some(DisconnectReason::TooManyPeers));
                             }
                         }
                     }

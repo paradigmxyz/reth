@@ -312,12 +312,27 @@ impl SessionManager {
         &mut self,
         stream: TcpStream,
         reason: DisconnectReason,
-        counter: &Counter,
     ) {
         let secret_key = self.secret_key;
 
         self.spawn(async move {
-            let counter_clone = Counter(Arc::clone(&counter.0));
+            if let Ok(stream) = get_eciess_stream(stream, secret_key, Direction::Incoming).await {
+                let _ = UnauthedP2PStream::new(stream).send_disconnect(reason).await;
+            }
+        });
+    }
+
+    pub(crate) fn handle_disconnect_incoming_connection(
+        &mut self,
+        stream: TcpStream,
+        reason: DisconnectReason,
+        counter: &Counter,
+    ) {
+        let secret_key = self.secret_key;
+        let counter_arc = Arc::clone(&counter.0); // Clone the Arc
+    
+        self.spawn(async move {
+            let counter_clone = Counter(counter_arc); // Create the Counter inside the async block
             if let Ok(stream) = get_eciess_stream(stream, secret_key, Direction::Incoming).await {
                 let _ = UnauthedP2PStream::new(stream).send_disconnect(reason).await;
             }
