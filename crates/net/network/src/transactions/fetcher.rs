@@ -354,8 +354,8 @@ impl TransactionFetcher {
     }
 
     /// Requests the missing transactions from the announced hashes of the peer. Returns the
-    /// requested hashes if concurrency limit is reached or if the request was fails to send over
-    /// the channel to the peer's session task.
+    /// requested hashes if concurrency limit is reached or if the request fails to send over the
+    /// channel to the peer's session task.
     ///
     /// This filters all announced hashes that are already in flight, and requests the missing,
     /// while marking the given peer as an alternative peer for the hashes that are already in
