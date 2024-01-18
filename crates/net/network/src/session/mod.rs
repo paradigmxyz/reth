@@ -55,7 +55,7 @@ pub use reth_network_api::{Direction, PeerInfo};
 
 /// Maximum allowed graceful disconnects.
 pub const MAX_GRACEFUL_DISCONNECTS: usize = 15;
-/// Keep tracks of graceful disconnects.
+/// Keep track of graceful disconnects.
 #[derive(Debug, Clone)]
 pub struct GracefulDisconnects(pub Arc<()>);
 /// Internal identifier for active sessions.
@@ -328,7 +328,7 @@ impl SessionManager {
         });
     }
 
-    ///Handles graceful disconnects when node is at capacity
+    /// Handles graceful disconnects when node is at capacity
     pub(crate) fn handle_disconnect_incoming_connection(
         &mut self,
         stream: TcpStream,
