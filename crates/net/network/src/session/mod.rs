@@ -306,7 +306,8 @@ impl SessionManager {
             session.disconnect(reason);
         }
     }
-
+    
+    #[allow(dead_code)]
     /// Sends a disconnect message to the peer with the given [DisconnectReason].
     pub(crate) fn disconnect_incoming_connection(
         &mut self,
@@ -332,7 +333,7 @@ impl SessionManager {
         let counter_arc = Arc::clone(&counter.0); // Clone the Arc
 
         self.spawn(async move {
-            let counter_clone = Counter(counter_arc); // Create the Counter inside the async block
+            let _counter_clone = Counter(counter_arc); // Create the Counter inside the async block
             if let Ok(stream) = get_eciess_stream(stream, secret_key, Direction::Incoming).await {
                 let _ = UnauthedP2PStream::new(stream).send_disconnect(reason).await;
             }
