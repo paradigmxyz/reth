@@ -12,6 +12,11 @@ use clap::Parser;
 use futures_util::StreamExt;
 use reth::{
     cli::Cli,
+    node_core::cli::{
+        components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
+        config::RethRpcConfig,
+        ext::{RethCliExt, RethNodeCommandConfig},
+    },
     primitives::{Address, IntoRecoveredTransaction},
     rpc::{
         compat::transaction::transaction_to_call_request,
@@ -19,11 +24,6 @@ use reth::{
     },
     tasks::TaskSpawner,
     transaction_pool::TransactionPool,
-};
-use reth_node_core::cli::{
-    components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
-    config::RethRpcConfig,
-    ext::{RethCliExt, RethNodeCommandConfig},
 };
 
 use std::collections::HashSet;

@@ -8,7 +8,6 @@ license.workspace = true
 [dependencies]
 reth.workspace = true
 reth-transaction-pool.workspace = true
-reth-node-core.workspace = true
 
 clap = { workspace = true, features = ["derive"] }
 jsonrpsee = { workspace = true, features = ["server", "macros"] }

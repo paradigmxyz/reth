@@ -9,4 +9,3 @@ license.workspace = true
 reth.workspace = true
 clap.workspace = true
 eyre.workspace = true
-reth-node-core.workspace = true

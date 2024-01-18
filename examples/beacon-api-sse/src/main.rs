@@ -22,7 +22,7 @@ use reth::{cli::Cli, rpc::types::beacon::events::PayloadAttributesEvent, tasks::
 use std::net::{IpAddr, Ipv4Addr};
 use tracing::{info, warn};
 
-use reth_node_core::cli::{
+use reth::node_core::cli::{
     components::RethNodeComponents,
     ext::{RethCliExt, RethNodeCommandConfig},
 };
