@@ -5,12 +5,14 @@ use reth_db::{
     database::Database,
     models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
-    transaction::{DbTx, DbTxMut},
-    DatabaseError,
+    transaction::DbTxMut,
 };
-use reth_interfaces::p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
+use reth_interfaces::{
+    p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
+    provider::ProviderResult,
+};
 use reth_primitives::stage::{EntitiesCheckpoint, StageCheckpoint, StageId};
-use reth_provider::DatabaseProviderRW;
+use reth_provider::{DatabaseProviderRW, StatsReader};
 use std::task::{ready, Context, Poll};
 use tracing::*;
 
@@ -246,10 +248,10 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 //  progress in gas as a proxy to size. Execution stage uses a similar approach.
 fn stage_checkpoint<DB: Database>(
     provider: &DatabaseProviderRW<DB>,
-) -> Result<EntitiesCheckpoint, DatabaseError> {
+) -> ProviderResult<EntitiesCheckpoint> {
     Ok(EntitiesCheckpoint {
-        processed: provider.tx_ref().entries::<tables::BlockBodyIndices>()? as u64,
-        total: provider.tx_ref().entries::<tables::Headers>()? as u64,
+        processed: provider.count_entries::<tables::BlockBodyIndices>()? as u64,
+        total: provider.count_entries::<tables::Headers>()? as u64,
     })
 }
 

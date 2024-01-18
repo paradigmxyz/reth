@@ -8,7 +8,7 @@ use crate::{
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
     Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
     HeaderSyncMode, HistoryWriter, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, StageCheckpointReader, StorageReader, TransactionVariant,
+    PruneCheckpointWriter, StageCheckpointReader, StatsReader, StorageReader, TransactionVariant,
     TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 use ahash::{AHashMap, AHashSet};
@@ -2518,6 +2518,20 @@ impl<TX: DbTxMut> PruneCheckpointWriter for DatabaseProvider<TX> {
         checkpoint: PruneCheckpoint,
     ) -> ProviderResult<()> {
         Ok(self.tx.put::<tables::PruneCheckpoints>(segment, checkpoint)?)
+    }
+}
+
+impl<TX: DbTx> StatsReader for DatabaseProvider<TX> {
+    fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
+        let db_entries = self.tx.entries::<T>()?;
+        let snapshot_entries =
+            match self.snapshot_provider.as_ref().map(|provider| provider.count_entries::<T>()) {
+                Some(Ok(entries)) => entries,
+                Some(Err(ProviderError::UnsupportedProvider)) | None => 0,
+                Some(Err(err)) => return Err(err),
+            };
+
+        Ok(db_entries + snapshot_entries)
     }
 }
 

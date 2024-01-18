@@ -4,14 +4,16 @@ use reth_db::{
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
-    DatabaseError,
 };
-use reth_interfaces::{consensus::Consensus, provider::ProviderError};
+use reth_interfaces::{
+    consensus::Consensus,
+    provider::{ProviderError, ProviderResult},
+};
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     U256,
 };
-use reth_provider::DatabaseProviderRW;
+use reth_provider::{DatabaseProviderRW, StatsReader};
 use std::sync::Arc;
 use tracing::*;
 
@@ -116,10 +118,10 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 
 fn stage_checkpoint<DB: Database>(
     provider: &DatabaseProviderRW<DB>,
-) -> Result<EntitiesCheckpoint, DatabaseError> {
+) -> ProviderResult<EntitiesCheckpoint> {
     Ok(EntitiesCheckpoint {
-        processed: provider.tx_ref().entries::<tables::HeaderTD>()? as u64,
-        total: provider.tx_ref().entries::<tables::Headers>()? as u64,
+        processed: provider.count_entries::<tables::HeaderTD>()? as u64,
+        total: provider.count_entries::<tables::Headers>()? as u64,
     })
 }
 

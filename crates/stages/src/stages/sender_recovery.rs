@@ -14,7 +14,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
-    TransactionsProvider,
+    StatsReader, TransactionsProvider,
 };
 use std::{fmt::Debug, sync::mpsc};
 use thiserror::Error;
@@ -214,8 +214,8 @@ fn stage_checkpoint<DB: Database>(
         // If `TxSenders` table was pruned, we will have a number of entries in it not matching
         // the actual number of processed transactions. To fix that, we add the number of pruned
         // `TxSenders` entries.
-        processed: provider.tx_ref().entries::<tables::TxSenders>()? as u64 + pruned_entries,
-        total: provider.tx_ref().entries::<tables::Transactions>()? as u64,
+        processed: provider.count_entries::<tables::TxSenders>()? as u64 + pruned_entries,
+        total: provider.count_entries::<tables::Transactions>()? as u64,
     })
 }
 
