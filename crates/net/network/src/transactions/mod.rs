@@ -1,14 +1,15 @@
 //! Transactions management for the p2p network.
 //!
 //! `TransactionFetcher` is responsible for rate limiting and retry logic for fetching
-//! transactions. Upon receiving an announcement, the `TransactionFetcher` filters out hashes
-//! 1) for which the tx is already known and 2) unknown but the hash is already seen in a previous
-//! announcement. The hashes that remain from an announcement are then packed into a request with
-//! respect to the [`EthVersion`] of the announcement. Any hashes that don't fit into the request,
-//! are buffered in the `TransactionFetcher`. If on the other hand, space remains, hashes that
-//! the peer has previously announced are taken out of buffered hashes to fill the request up. The
-//! `GetPooledTransactions` request is then sent to the peer's session, this marks the peer as
-//! active with respect to `MAX_CONCURRENT_TX_REQUESTS_PER_PEER`.
+//! transactions. Upon receiving an announcement, functionality of the `TransactionFetcher` is
+//! used for filtering out hashes 1) for which the tx is already known and 2) unknown but the hash
+//! is already seen in a previous announcement. The hashes that remain from an announcement are
+//! then packed into a request with respect to the [`EthVersion`] of the announcement. Any hashes
+//! that don't fit into the request, are buffered in the `TransactionFetcher`. If on the other
+//! hand, space remains, hashes that the peer has previously announced are taken out of buffered
+//! hashes to fill the request up. The [`GetPooledTransactions`] request is then sent to the
+//! peer's session, this marks the peer as active with respect to
+//! `fetcher::MAX_CONCURRENT_TX_REQUESTS_PER_PEER`.
 //!
 //! When a peer buffers hashes in the `TransactionsManager::on_new_pooled_transaction_hashes`
 //! pipeline, it is stored as fallback peer for those hashes. When [`TransactionsManager`] is
@@ -1173,7 +1174,7 @@ impl PooledTransactionsHashesBuilder {
 enum TransactionSource {
     /// Transactions were broadcast to us via [`Transactions`] message.
     Broadcast,
-    /// Transactions were sent as the response of [`GetPooledTxRequest`] issued by us.
+    /// Transactions were sent as the response of [`fetcher::GetPooledTxRequest`] issued by us.
     Response,
 }
 

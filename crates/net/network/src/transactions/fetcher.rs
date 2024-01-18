@@ -19,6 +19,9 @@ use tracing::{debug, trace};
 
 use super::{Peer, PooledTransactions, MAX_FULL_TRANSACTIONS_PACKET_SIZE};
 
+/// Maximum concurrent [`GetPooledTxRequest`]s to allow per peer.
+pub(super) const MAX_CONCURRENT_TX_REQUESTS_PER_PEER: u8 = 1;
+
 /// How many peers we keep track of for each missing transaction.
 pub(super) const MAX_ALTERNATIVE_PEERS_PER_TX: u8 =
     MAX_REQUEST_RETRIES_PER_TX_HASH + MARGINAL_FALLBACK_PEERS_PER_TX;
@@ -30,9 +33,6 @@ const MARGINAL_FALLBACK_PEERS_PER_TX: u8 = 1;
 /// Maximum request retires per [`TxHash`]. Note, this is reset should the [`TxHash`] re-appear in
 /// an announcement after it has been ejected from the hash buffer.
 const MAX_REQUEST_RETRIES_PER_TX_HASH: u8 = 2;
-
-/// Maximum concurrent [`GetPooledTxRequest`]s to allow per peer.
-const MAX_CONCURRENT_TX_REQUESTS_PER_PEER: u8 = 1;
 
 /// Maximum concurrent [`GetPooledTxRequest`]s.
 const MAX_CONCURRENT_TX_REQUESTS: u32 = 10000;
@@ -607,7 +607,7 @@ pub(super) enum FetchEvent {
 }
 
 /// An inflight request for `PooledTransactions` from a peer
-struct GetPooledTxRequest {
+pub(super) struct GetPooledTxRequest {
     peer_id: PeerId,
     /// Transaction hashes that were requested, for cleanup purposes
     requested_hashes: Vec<TxHash>,
