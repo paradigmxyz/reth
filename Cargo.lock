@@ -6573,6 +6573,7 @@ dependencies = [
  "reth-consensus-common",
  "reth-interfaces",
  "reth-metrics",
+ "reth-network",
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
