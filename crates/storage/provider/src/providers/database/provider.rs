@@ -274,7 +274,9 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         if let Some(snapshot_provider) = &self.snapshot_provider {
             // If there is, check the maximum block or transaction number of the segment.
             if let Some(snapshot_upper_bound) = match segment {
-                SnapshotSegment::Headers => snapshot_provider.get_highest_snapshot_block(segment),
+                SnapshotSegment::Headers | SnapshotSegment::HeadersTD => {
+                    snapshot_provider.get_highest_snapshot_block(segment)
+                }
                 SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
                     snapshot_provider.get_highest_snapshot_tx(segment)
                 }
@@ -321,7 +323,9 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         if let Some(provider) = &self.snapshot_provider {
             // If there is, check the maximum block or transaction number of the segment.
             let snapshot_upper_bound = match segment {
-                SnapshotSegment::Headers => provider.get_highest_snapshot_block(segment),
+                SnapshotSegment::Headers | SnapshotSegment::HeadersTD => {
+                    provider.get_highest_snapshot_block(segment)
+                }
                 SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
                     provider.get_highest_snapshot_tx(segment)
                 }
