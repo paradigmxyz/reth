@@ -3,9 +3,7 @@ use crate::{
     message::{PeerMessage, PeerRequestSender},
     peers::InboundConnectionError,
     protocol::IntoRlpxSubProtocol,
-    session::{
-        Counter, Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager,
-    },
+    session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},
     state::{NetworkState, StateAction},
 };
 use futures::Stream;
@@ -24,8 +22,6 @@ use std::{
     task::{Context, Poll},
 };
 use tracing::trace;
-
-pub const MAX_GRACEFUL_DISCONNECTS: usize = 15;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Contains the connectivity related state of the network.
@@ -188,7 +184,6 @@ where
     ///
     /// Depending on the event, this will produce a new [`SwarmEvent`].
     fn on_connection(&mut self, event: ListenerEvent) -> Option<SwarmEvent> {
-        let counter = Counter(Arc::new(()));
         match event {
             ListenerEvent::Error(err) => return Some(SwarmEvent::TcpListenerError(err)),
             ListenerEvent::ListenerClosed { local_address: address } => {
@@ -209,15 +204,10 @@ where
                         }
                         InboundConnectionError::ExceedsLimit(limit) => {
                             trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; disconnecting");
-                            if Arc::strong_count(&counter.0) < MAX_GRACEFUL_DISCONNECTS {
-                                self.sessions.handle_disconnect_incoming_connection(
-                                    stream,
-                                    DisconnectReason::TooManyPeers,
-                                    &counter,
-                                );
-                            } else {
-                                self.sessions.disconnect_all(Some(DisconnectReason::TooManyPeers));
-                            }
+                            self.sessions.handle_disconnect_incoming_connection(
+                                stream,
+                                DisconnectReason::TooManyPeers,
+                            );
                         }
                     }
                     return None
