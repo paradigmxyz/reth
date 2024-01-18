@@ -1250,7 +1250,6 @@ where
                 self.events.clone(),
                 self.network.clone(),
                 executor,
-                api.clone(),
             );
 
             let eth = EthHandlers { api, cache, filter, pubsub, blocking_task_pool };

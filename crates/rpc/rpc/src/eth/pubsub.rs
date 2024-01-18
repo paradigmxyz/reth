@@ -42,20 +42,13 @@ impl<Provider, Pool, Events, Network> EthPubSub<Provider, Pool, Events, Network>
     /// Creates a new, shareable instance.
     ///
     /// Subscription tasks are spawned via [tokio::task::spawn]
-    pub fn new(
-        provider: Provider,
-        pool: Pool,
-        chain_events: Events,
-        network: Network,
-        api: EthApi<Provider, Pool, Network>,
-    ) -> Self {
+    pub fn new(provider: Provider, pool: Pool, chain_events: Events, network: Network) -> Self {
         Self::with_spawner(
             provider,
             pool,
             chain_events,
             network,
             Box::<TokioTaskExecutor>::default(),
-            api,
         )
     }
 
@@ -66,7 +59,6 @@ impl<Provider, Pool, Events, Network> EthPubSub<Provider, Pool, Events, Network>
         chain_events: Events,
         network: Network,
         subscription_task_spawner: Box<dyn TaskSpawner>,
-        api: EthApi<Provider, Pool, Network>,
     ) -> Self {
         let inner = EthPubSubInner { provider, pool, chain_events, network };
         Self { inner: Arc::new(inner), subscription_task_spawner }
