@@ -28,7 +28,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::{
-    hooks::{EngineHooks, PruneHook},
+    hooks::{EngineHooks, PruneHook, SnapshotHook},
     BeaconConsensus, BeaconConsensusEngine, BeaconConsensusEngineError,
     MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
@@ -1012,20 +1012,9 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         let prometheus_handle = self.config.install_prometheus_recorder()?;
         info!(target: "reth::cli", "Database opened");
 
-        let mut provider_factory =
-            ProviderFactory::new(Arc::clone(&self.db), Arc::clone(&self.config.chain));
-
-        // configure snapshotter
-        let snapshotter = reth_snapshot::Snapshotter::new(
-            provider_factory.clone(),
-            self.data_dir.snapshots_path(),
-            self.config.chain.snapshot_block_interval,
-        )?;
-
-        provider_factory = provider_factory.with_snapshots(
-            self.data_dir.snapshots_path(),
-            snapshotter.highest_snapshot_receiver(),
-        )?;
+        let provider_factory =
+            ProviderFactory::new(Arc::clone(&self.db), Arc::clone(&self.config.chain))
+                .with_snapshots(self.data_dir.snapshots_path())?;
 
         self.config.start_metrics_endpoint(prometheus_handle, Arc::clone(&self.db)).await?;
 
@@ -1204,20 +1193,23 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         let initial_target = self.config.initial_pipeline_target(genesis_hash);
         let mut hooks = EngineHooks::new();
 
-        let pruner_events = if let Some(prune_config) = prune_config {
-            let mut pruner = PrunerBuilder::new(prune_config.clone())
-                .max_reorg_depth(tree_config.max_reorg_depth() as usize)
-                .prune_delete_limit(self.config.chain.prune_delete_limit)
-                .build(provider_factory, snapshotter.highest_snapshot_receiver());
+        let mut pruner = PrunerBuilder::new(prune_config.clone().unwrap_or_default())
+            .max_reorg_depth(tree_config.max_reorg_depth() as usize)
+            .prune_delete_limit(self.config.chain.prune_delete_limit)
+            .build(provider_factory.clone());
 
-            let events = pruner.events();
-            hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));
+        let pruner_events = pruner.events();
+        hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));
+        info!(target: "reth::cli", ?prune_config, "Pruner initialized");
 
-            info!(target: "reth::cli", ?prune_config, "Pruner initialized");
-            Either::Left(events)
-        } else {
-            Either::Right(stream::empty())
-        };
+        let snapshotter = reth_snapshot::Snapshotter::new(
+            provider_factory.clone(),
+            provider_factory
+                .snapshot_provider()
+                .expect("snapshot provider initialized via provider factory"),
+        );
+        hooks.add(SnapshotHook::new(snapshotter, Box::new(executor.clone())));
+        info!(target: "reth::cli", "Snapshotter initialized");
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
