@@ -30,6 +30,7 @@ mod environment;
 mod error;
 mod flags;
 mod transaction;
+mod txn_manager;
 
 #[cfg(test)]
 mod test_utils {

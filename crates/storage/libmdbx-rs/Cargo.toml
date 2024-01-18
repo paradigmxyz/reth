@@ -22,6 +22,7 @@ indexmap = "2"
 libc = "0.2"
 parking_lot.workspace = true
 thiserror.workspace = true
+dashmap = { version = "5.5.3", features = ["inline"] }
 
 ffi = { package = "reth-mdbx-sys", path = "./mdbx-sys" }
 

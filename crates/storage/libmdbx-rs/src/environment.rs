@@ -2,8 +2,9 @@ use crate::{
     database::Database,
     error::{mdbx_result, Error, Result},
     flags::EnvironmentFlags,
-    transaction::{CommitLatency, RO, RW},
-    Mode, Transaction, TransactionKind,
+    transaction::{RO, RW},
+    txn_manager::{TxnManager, TxnManagerMessage, TxnPtr},
+    Transaction, TransactionKind,
 };
 use byteorder::{ByteOrder, NativeEndian};
 use mem::size_of;
@@ -15,10 +16,7 @@ use std::{
     ops::{Bound, RangeBounds},
     path::Path,
     ptr,
-    sync::{
-        mpsc::{sync_channel, SyncSender},
-        Arc,
-    },
+    sync::{mpsc::sync_channel, Arc},
     thread::sleep,
     time::Duration,
 };
@@ -68,29 +66,19 @@ impl Environment {
     /// Returns true if the environment was opened in [Mode::ReadWrite] mode.
     #[inline]
     pub fn is_read_write(&self) -> bool {
-        self.inner.txn_manager.is_some()
+        self.inner.env_kind.is_write_map()
     }
 
     /// Returns true if the environment was opened in [Mode::ReadOnly] mode.
     #[inline]
     pub fn is_read_only(&self) -> bool {
-        self.inner.txn_manager.is_none()
+        !self.inner.env_kind.is_write_map()
     }
 
-    /// Returns the manager that handles transaction messages.
-    ///
-    /// Requires [Mode::ReadWrite] and returns None otherwise.
+    /// Returns the transaction manager.
     #[inline]
-    pub(crate) fn txn_manager(&self) -> Option<&SyncSender<TxnManagerMessage>> {
-        self.inner.txn_manager.as_ref()
-    }
-
-    /// Returns the manager that handles transaction messages.
-    ///
-    /// Requires [Mode::ReadWrite] and returns None otherwise.
-    #[inline]
-    pub(crate) fn ensure_txn_manager(&self) -> Result<&SyncSender<TxnManagerMessage>> {
-        self.txn_manager().ok_or(Error::WriteTransactionUnsupportedInReadOnlyMode)
+    pub(crate) fn txn_manager(&self) -> &TxnManager {
+        &self.inner.txn_manager
     }
 
     /// Create a read-only transaction for use with the environment.
@@ -102,16 +90,13 @@ impl Environment {
     /// Create a read-write transaction for use with the environment. This method will block while
     /// there are any other read-write transactions open on the environment.
     pub fn begin_rw_txn(&self) -> Result<Transaction<RW>> {
-        let sender = self.ensure_txn_manager()?;
         let txn = loop {
             let (tx, rx) = sync_channel(0);
-            sender
-                .send(TxnManagerMessage::Begin {
-                    parent: TxnPtr(ptr::null_mut()),
-                    flags: RW::OPEN_FLAGS,
-                    sender: tx,
-                })
-                .unwrap();
+            self.txn_manager().send_message(TxnManagerMessage::Begin {
+                parent: TxnPtr(ptr::null_mut()),
+                flags: RW::OPEN_FLAGS,
+                sender: tx,
+            });
             let res = rx.recv().unwrap();
             if let Err(Error::Busy) = &res {
                 sleep(Duration::from_millis(250));
@@ -235,10 +220,8 @@ struct EnvironmentInner {
     env: *mut ffi::MDBX_env,
     /// Whether the environment was opened as WRITEMAP.
     env_kind: EnvironmentKind,
-    /// the sender half of the transaction manager channel
-    ///
-    /// Only set if the environment was opened in [Mode::ReadWrite] mode.
-    txn_manager: Option<SyncSender<TxnManagerMessage>>,
+    /// Transaction manager
+    txn_manager: TxnManager,
 }
 
 impl Drop for EnvironmentInner {
@@ -293,20 +276,9 @@ impl EnvironmentKind {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct TxnPtr(pub(crate) *mut ffi::MDBX_txn);
-unsafe impl Send for TxnPtr {}
-unsafe impl Sync for TxnPtr {}
-
-#[derive(Copy, Clone, Debug)]
 pub(crate) struct EnvPtr(pub(crate) *mut ffi::MDBX_env);
 unsafe impl Send for EnvPtr {}
 unsafe impl Sync for EnvPtr {}
-
-pub(crate) enum TxnManagerMessage {
-    Begin { parent: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<TxnPtr>> },
-    Abort { tx: TxnPtr, sender: SyncSender<Result<bool>> },
-    Commit { tx: TxnPtr, sender: SyncSender<Result<(bool, CommitLatency)>> },
-}
 
 /// Environment statistics.
 ///
@@ -718,54 +690,11 @@ impl EnvironmentBuilder {
             }
         }
 
-        let mut env = EnvironmentInner { env, txn_manager: None, env_kind: self.kind };
-
-        if let Mode::ReadWrite { .. } = self.flags.mode {
-            let (tx, rx) = std::sync::mpsc::sync_channel(0);
-            let e = EnvPtr(env.env);
-            std::thread::spawn(move || loop {
-                match rx.recv() {
-                    Ok(msg) => match msg {
-                        TxnManagerMessage::Begin { parent, flags, sender } => {
-                            #[allow(clippy::redundant_locals)]
-                            let e = e;
-                            let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
-                            sender
-                                .send(
-                                    mdbx_result(unsafe {
-                                        ffi::mdbx_txn_begin_ex(
-                                            e.0,
-                                            parent.0,
-                                            flags,
-                                            &mut txn,
-                                            ptr::null_mut(),
-                                        )
-                                    })
-                                    .map(|_| TxnPtr(txn)),
-                                )
-                                .unwrap()
-                        }
-                        TxnManagerMessage::Abort { tx, sender } => {
-                            sender.send(mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })).unwrap();
-                        }
-                        TxnManagerMessage::Commit { tx, sender } => {
-                            sender
-                                .send({
-                                    let mut latency = CommitLatency::new();
-                                    mdbx_result(unsafe {
-                                        ffi::mdbx_txn_commit_ex(tx.0, latency.mdb_commit_latency())
-                                    })
-                                    .map(|v| (v, latency))
-                                })
-                                .unwrap();
-                        }
-                    },
-                    Err(_) => return,
-                }
-            });
-
-            env.txn_manager = Some(tx);
-        }
+        let env = EnvironmentInner {
+            env,
+            txn_manager: TxnManager::new(EnvPtr(env), Duration::from_secs(1 * 60)), // 1 minute
+            env_kind: self.kind,
+        };
 
         Ok(Environment { inner: Arc::new(env) })
     }

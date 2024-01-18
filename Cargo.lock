@@ -6196,6 +6196,7 @@ dependencies = [
  "bitflags 2.4.1",
  "byteorder",
  "criterion",
+ "dashmap",
  "derive_more",
  "indexmap 2.1.0",
  "libc",

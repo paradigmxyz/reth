@@ -1,8 +1,9 @@
 use crate::{
     database::Database,
-    environment::{Environment, TxnManagerMessage, TxnPtr},
+    environment::Environment,
     error::{mdbx_result, Result},
     flags::{DatabaseFlags, WriteFlags},
+    txn_manager::{TxnManagerMessage, TxnPtr},
     Cursor, Error, Stat, TableObject,
 };
 use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
@@ -86,6 +87,10 @@ where
     }
 
     pub(crate) fn new_from_ptr(env: Environment, txn: *mut ffi::MDBX_txn) -> Self {
+        if K::IS_READ_ONLY {
+            env.txn_manager().add_read_transaction(txn)
+        }
+
         let inner = TransactionInner {
             txn: TransactionPtr::new(txn),
             primed_dbis: Mutex::new(IndexSet::new()),
@@ -93,6 +98,7 @@ where
             env,
             _marker: Default::default(),
         };
+
         Self { inner: Arc::new(inner) }
     }
 
@@ -179,6 +185,10 @@ where
     pub fn commit_and_rebind_open_dbs(self) -> Result<(bool, CommitLatency, Vec<Database>)> {
         let result = {
             let result = self.txn_execute(|txn| {
+                if K::IS_READ_ONLY {
+                    self.env().txn_manager().remove_read_transaction(txn);
+                }
+
                 if K::ONLY_CLEAN {
                     let mut latency = CommitLatency::new();
                     mdbx_result(unsafe {
@@ -188,13 +198,12 @@ where
                 } else {
                     let (sender, rx) = sync_channel(0);
                     self.env()
-                        .ensure_txn_manager()
-                        .unwrap()
-                        .send(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender })
-                        .unwrap();
+                        .txn_manager()
+                        .send_message(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender });
                     rx.recv().unwrap()
                 }
             });
+
             self.inner.set_committed();
             result
         };
@@ -330,6 +339,8 @@ where
     fn drop(&mut self) {
         self.txn_execute(|txn| {
             if !self.has_committed() {
+                self.env.txn_manager().remove_read_transaction(txn);
+
                 if K::ONLY_CLEAN {
                     unsafe {
                         ffi::mdbx_txn_abort(txn);
@@ -337,10 +348,8 @@ where
                 } else {
                     let (sender, rx) = sync_channel(0);
                     self.env
-                        .ensure_txn_manager()
-                        .unwrap()
-                        .send(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender })
-                        .unwrap();
+                        .txn_manager()
+                        .send_message(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender });
                     rx.recv().unwrap().unwrap();
                 }
             }
@@ -503,15 +512,11 @@ impl Transaction<RW> {
         }
         self.txn_execute(|txn| {
             let (tx, rx) = sync_channel(0);
-            self.env()
-                .ensure_txn_manager()
-                .unwrap()
-                .send(TxnManagerMessage::Begin {
-                    parent: TxnPtr(txn),
-                    flags: RW::OPEN_FLAGS,
-                    sender: tx,
-                })
-                .unwrap();
+            self.env().txn_manager().send_message(TxnManagerMessage::Begin {
+                parent: TxnPtr(txn),
+                flags: RW::OPEN_FLAGS,
+                sender: tx,
+            });
 
             rx.recv().unwrap().map(|ptr| Transaction::new_from_ptr(self.env().clone(), ptr.0))
         })
