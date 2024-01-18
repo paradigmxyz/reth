@@ -1,16 +1,19 @@
 use reth_node_api::EvmEnvConfig;
 use reth_primitives::{
-    revm::env::{fill_cfg_env, fill_tx_env},
-    revm_primitives::{CfgEnv, TxEnv},
-    Address, ChainSpec, Header, Transaction, U256,
+    revm::{config::revm_spec, env::fill_tx_env},
+    revm_primitives::{AnalysisKind, CfgEnv, TxEnv},
+    Address, ChainSpec, Head, Header, Transaction, U256,
 };
 
 /// Ethereum-related EVM configuration.
-#[derive(Debug)]
+#[derive(Debug, Default)]
+#[non_exhaustive]
 pub struct EthEvmConfig;
 
 impl EvmEnvConfig for EthEvmConfig {
-    fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address)
+    type TxMeta = ();
+
+    fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address, _meta: ())
     where
         T: AsRef<Transaction>,
     {
@@ -23,6 +26,19 @@ impl EvmEnvConfig for EthEvmConfig {
         header: &Header,
         total_difficulty: U256,
     ) {
-        fill_cfg_env(cfg_env, chain_spec, header, total_difficulty)
+        let spec_id = revm_spec(
+            chain_spec,
+            Head {
+                number: header.number,
+                timestamp: header.timestamp,
+                difficulty: header.difficulty,
+                total_difficulty,
+                hash: Default::default(),
+            },
+        );
+
+        cfg_env.chain_id = chain_spec.chain().id();
+        cfg_env.spec_id = spec_id;
+        cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
     }
 }

@@ -18,7 +18,7 @@ use revm::{
     primitives::ResultAndState,
     State, EVM,
 };
-use std::{sync::Arc, time::Instant};
+use std::{marker::PhantomData, sync::Arc, time::Instant};
 
 #[cfg(feature = "optimism")]
 use reth_primitives::revm::env::fill_op_tx_env;
@@ -52,7 +52,7 @@ use tracing::{debug, trace};
 // TODO: https://github.com/bluealloy/revm/pull/745
 // #[derive(Debug)]
 #[allow(missing_debug_implementations)]
-pub struct EVMProcessor<'a> {
+pub struct EVMProcessor<'a, Env> {
     /// The configured chain-spec
     pub(crate) chain_spec: Arc<ChainSpec>,
     /// revm instance that contains database and env environment.
@@ -78,9 +78,11 @@ pub struct EVMProcessor<'a> {
     pruning_address_filter: Option<(u64, Vec<Address>)>,
     /// Execution stats
     pub(crate) stats: BlockExecutorStats,
+    /// The type that is able to configure the EVM environment.
+    env: PhantomData<Env>,
 }
 
-impl<'a> EVMProcessor<'a> {
+impl<'a, Env> EVMProcessor<'a, Env> {
     /// Return chain spec.
     pub fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.chain_spec
@@ -99,6 +101,7 @@ impl<'a> EVMProcessor<'a> {
             prune_modes: PruneModes::none(),
             pruning_address_filter: None,
             stats: BlockExecutorStats::default(),
+            env: PhantomData,
         }
     }
 
@@ -132,6 +135,7 @@ impl<'a> EVMProcessor<'a> {
             prune_modes: PruneModes::none(),
             pruning_address_filter: None,
             stats: BlockExecutorStats::default(),
+            env: PhantomData,
         }
     }
 
@@ -378,7 +382,7 @@ impl<'a> EVMProcessor<'a> {
 
 /// Default Ethereum implementation of the [BlockExecutor] trait for the [EVMProcessor].
 #[cfg(not(feature = "optimism"))]
-impl<'a> BlockExecutor for EVMProcessor<'a> {
+impl<'a, Env> BlockExecutor for EVMProcessor<'a, Env> {
     fn execute(
         &mut self,
         block: &BlockWithSenders,
@@ -490,7 +494,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
     }
 }
 
-impl<'a> PrunableBlockExecutor for EVMProcessor<'a> {
+impl<'a, Env> PrunableBlockExecutor for EVMProcessor<'a, Env> {
     fn set_tip(&mut self, tip: BlockNumber) {
         self.tip = Some(tip);
     }
@@ -540,6 +544,7 @@ pub fn verify_receipt<'a>(
 mod tests {
     use super::*;
     use reth_interfaces::provider::ProviderResult;
+    use reth_node_builder::EthEvmConfig;
     use reth_primitives::{
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
@@ -668,7 +673,8 @@ mod tests {
         );
 
         // execute invalid header (no parent beacon block root)
-        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
+        let mut executor: EVMProcessor<'_, EthEvmConfig> =
+            EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
 
         // attempt to execute a block without parent beacon block root, expect err
         let err = executor
@@ -756,7 +762,8 @@ mod tests {
                 .build(),
         );
 
-        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
+        let mut executor: EVMProcessor<'_, EthEvmConfig> =
+            EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
         executor.init_env(&header, U256::ZERO);
 
         // get the env
@@ -813,7 +820,8 @@ mod tests {
                 .build(),
         );
 
-        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
+        let mut executor: EVMProcessor<'_, EthEvmConfig> =
+            EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
 
         // construct the header for block one
         let header = Header {
@@ -876,7 +884,8 @@ mod tests {
 
         let mut header = chain_spec.genesis_header();
 
-        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
+        let mut executor: EVMProcessor<'_, EthEvmConfig> =
+            EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
         executor.init_env(&header, U256::ZERO);
 
         // attempt to execute the genesis block with non-zero parent beacon block root, expect err
@@ -966,7 +975,8 @@ mod tests {
         );
 
         // execute header
-        let mut executor = EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
+        let mut executor: EVMProcessor<'_, EthEvmConfig> =
+            EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db));
         executor.init_env(&header, U256::ZERO);
 
         // ensure that the env is configured with a base fee

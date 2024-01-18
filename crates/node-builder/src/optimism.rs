@@ -1,10 +1,14 @@
 #![cfg(feature = "optimism")]
 use reth_node_api::{
     optimism_validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion,
-    EngineTypes, PayloadOrAttributes,
+    EngineTypes, EvmEnvConfig, PayloadOrAttributes,
 };
 use reth_payload_builder::{EthBuiltPayload, OptimismPayloadBuilderAttributes};
-use reth_primitives::ChainSpec;
+use reth_primitives::{
+    revm::{config::revm_spec, env::fill_op_tx_env},
+    revm_primitives::{AnalysisKind, CfgEnv, TxEnv},
+    Address, Bytes, ChainSpec, Head, Header, Transaction, U256,
+};
 use reth_rpc_types::engine::OptimismPayloadAttributes;
 
 /// The types used in the optimism beacon consensus engine.
@@ -27,18 +31,42 @@ impl EngineTypes for OptimismEngineTypes {
 }
 
 /// Optimism-related EVM configuration.
-#[derive(Debug)]
+#[derive(Debug, Default)]
+#[non_exhaustive]
 pub struct OptimismEvmConfig;
 
-// TODO:
-// * split up fill_tx_env into fill_tx_env and fill_tx_env_optimism
-// * code duplication for op
-// * make fill_tx_env_optimism accept regular fill_tx_env args
-// * do the following code inside trait impl
+impl EvmEnvConfig for OptimismEvmConfig {
+    type TxMeta = Bytes;
 
-// #[cfg(feature = "optimism")]
-// {
-//     let mut envelope_buf = Vec::with_capacity(transaction.length_without_header());
-//     transaction.encode_enveloped(&mut envelope_buf);
-//     fill_tx_env(&mut self.evm.env.tx, transaction, sender, envelope_buf.into());
-// }
+    fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address, meta: Bytes)
+    where
+        T: AsRef<Transaction>,
+    {
+        fill_op_tx_env(tx_env, transaction, sender, meta);
+    }
+
+    fn fill_cfg_env(
+        cfg_env: &mut CfgEnv,
+        chain_spec: &ChainSpec,
+        header: &Header,
+        total_difficulty: U256,
+    ) {
+        let spec_id = revm_spec(
+            chain_spec,
+            Head {
+                number: header.number,
+                timestamp: header.timestamp,
+                difficulty: header.difficulty,
+                total_difficulty,
+                hash: Default::default(),
+            },
+        );
+
+        cfg_env.chain_id = chain_spec.chain().id();
+        cfg_env.spec_id = spec_id;
+        cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
+
+        // optimism-specific configuration
+        cfg_env.optimism = chain_spec.is_optimism();
+    }
+}

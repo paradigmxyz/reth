@@ -6619,6 +6619,8 @@ version = "0.1.0-alpha.16"
 dependencies = [
  "reth-consensus-common",
  "reth-interfaces",
+ "reth-node-api",
+ "reth-node-builder",
  "reth-primitives",
  "reth-provider",
  "reth-trie",

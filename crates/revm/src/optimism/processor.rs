@@ -11,7 +11,7 @@ use revm::DatabaseCommit;
 use std::time::Instant;
 use tracing::{debug, trace};
 
-impl<'a> BlockExecutor for EVMProcessor<'a> {
+impl<'a, Env> BlockExecutor for EVMProcessor<'a, Env> {
     fn execute(
         &mut self,
         block: &BlockWithSenders,
