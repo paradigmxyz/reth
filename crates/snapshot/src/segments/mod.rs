@@ -21,34 +21,39 @@ use reth_primitives::{
     },
     BlockNumber, SnapshotSegment,
 };
-use reth_provider::{providers::SnapshotProvider, DatabaseProviderRO, TransactionsProviderExt};
-use std::{ops::RangeInclusive, path::Path, sync::Arc};
+use reth_provider::{DatabaseProviderRO, TransactionsProviderExt};
+use std::{ops::RangeInclusive, path::Path};
 
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
 
 /// A segment represents a snapshotting of some portion of the data.
-pub trait Segment<DB: Database> {
-    /// Returns the [`SnapshotSegment`].
-    fn segment(&self) -> SnapshotSegment;
-
-    /// Snapshot data for the provided block range. [SnapshotProvider] will handle the management of
-    /// and writing to files.
-    fn snapshot(
-        &self,
-        provider: DatabaseProviderRO<DB>,
-        snapshot_provider: Arc<SnapshotProvider>,
-        block_range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<()>;
-
-    /// Create a snapshot file of data for the provided block range. The `directory` parameter
-    /// determines the snapshot file's save location.
-    fn create_snapshot_file(
+pub trait Segment: Default {
+    /// Snapshot data using the provided range. The `directory` parameter determines the snapshot
+    /// file's save location.
+    fn snapshot<DB: Database>(
         &self,
         provider: &DatabaseProviderRO<DB>,
-        directory: &Path,
-        config: SegmentConfig,
-        block_range: RangeInclusive<BlockNumber>,
+        directory: impl AsRef<Path>,
+        range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()>;
+
+    /// Returns this struct's [`SnapshotSegment`].
+    fn segment(&self) -> SnapshotSegment;
+
+    /// Generates the dataset to train a zstd dictionary with the most recent rows (at most 1000).
+    fn dataset_for_compression<DB: Database, T: Table<Key = u64>>(
+        &self,
+        provider: &DatabaseProviderRO<DB>,
+        range: &RangeInclusive<u64>,
+        range_len: usize,
+    ) -> ProviderResult<Vec<Vec<u8>>> {
+        let mut cursor = provider.tx_ref().cursor_read::<RawTable<T>>()?;
+        Ok(cursor
+            .walk_back(Some(RawKey::from(*range.end())))?
+            .take(range_len.min(1000))
+            .map(|row| row.map(|(_key, value)| value.into_value()).expect("should exist"))
+            .collect::<Vec<_>>())
+    }
 }
 
 /// Returns a [`NippyJar`] according to the desired configuration. The `directory` parameter
@@ -99,18 +104,4 @@ pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     }
 
     Ok(nippy_jar)
-}
-
-/// Generates the dataset to train a zstd dictionary with the most recent rows (at most 1000).
-pub(crate) fn dataset_for_compression<DB: Database, T: Table<Key = u64>>(
-    provider: &DatabaseProviderRO<DB>,
-    range: &RangeInclusive<u64>,
-    range_len: usize,
-) -> ProviderResult<Vec<Vec<u8>>> {
-    let mut cursor = provider.tx_ref().cursor_read::<RawTable<T>>()?;
-    Ok(cursor
-        .walk_back(Some(RawKey::from(*range.end())))?
-        .take(range_len.min(1000))
-        .map(|row| row.map(|(_key, value)| value.into_value()).expect("should exist"))
-        .collect::<Vec<_>>())
 }

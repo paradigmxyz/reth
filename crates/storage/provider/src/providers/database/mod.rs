@@ -12,6 +12,7 @@ use crate::{
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::{db::LogLevel, provider::ProviderResult, RethError, RethResult};
 use reth_primitives::{
+    snapshot::HighestSnapshots,
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
     ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders,
@@ -24,6 +25,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use tokio::sync::watch;
 use tracing::trace;
 
 mod metrics;
@@ -77,8 +79,15 @@ impl<DB> ProviderFactory<DB> {
     }
 
     /// Database provider that comes with a shared snapshot provider.
-    pub fn with_snapshots(mut self, snapshots_path: PathBuf) -> ProviderResult<Self> {
-        self.snapshot_provider = Some(Arc::new(SnapshotProvider::new(snapshots_path)?));
+    pub fn with_snapshots(
+        mut self,
+        snapshots_path: PathBuf,
+        highest_snapshot_tracker: watch::Receiver<Option<HighestSnapshots>>,
+    ) -> ProviderResult<Self> {
+        self.snapshot_provider = Some(Arc::new(
+            SnapshotProvider::new(snapshots_path)?
+                .with_highest_tracker(Some(highest_snapshot_tracker)),
+        ));
         Ok(self)
     }
 

@@ -1697,18 +1697,9 @@ where
         None
     }
 
-    fn on_hook_result(&self, polled_hook: PolledHook) -> Result<(), BeaconConsensusEngineError> {
-        if let EngineHookEvent::Finished(Err(error)) = &polled_hook.event {
-            error!(
-                target: "consensus::engine",
-                name = %polled_hook.name,
-                ?error,
-                "Hook finished with error"
-            )
-        }
-
-        if polled_hook.db_access_level.is_read_write() {
-            match polled_hook.event {
+    fn on_hook_result(&self, result: PolledHook) -> Result<(), BeaconConsensusEngineError> {
+        if result.db_access_level.is_read_write() {
+            match result.event {
                 EngineHookEvent::NotReady => {}
                 EngineHookEvent::Started => {
                     // If the hook has read-write access to the database, it means that the engine
@@ -1726,11 +1717,7 @@ where
                     if let Err(error) =
                         self.blockchain.connect_buffered_blocks_to_canonical_hashes()
                     {
-                        error!(
-                            target: "consensus::engine",
-                            ?error,
-                            "Error connecting buffered blocks to canonical hashes on hook result"
-                        );
+                        error!(target: "consensus::engine", ?error, "Error connecting buffered blocks to canonical hashes on hook result");
                         return Err(error.into())
                     }
                 }

@@ -6,9 +6,7 @@ use reth_db::{database::Database, open_db_read_only, DatabaseEnv};
 use reth_interfaces::db::LogLevel;
 use reth_nippy_jar::{NippyJar, NippyJarCursor};
 use reth_primitives::{
-    snapshot::{
-        Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentConfig, SegmentHeader,
-    },
+    snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentHeader},
     BlockNumber, ChainSpec, SnapshotSegment,
 };
 use reth_provider::{BlockNumReader, ProviderFactory};
@@ -81,15 +79,14 @@ impl Command {
         log_level: Option<LogLevel>,
         chain: Arc<ChainSpec>,
     ) -> eyre::Result<()> {
-        let all_combinations = self
-            .segments
-            .iter()
-            .cartesian_product(self.compression.iter().copied())
-            .cartesian_product(if self.phf.is_empty() {
-                vec![None]
-            } else {
-                self.phf.iter().copied().map(Some).collect::<Vec<_>>()
-            });
+        let all_combinations =
+            self.segments.iter().cartesian_product(self.compression.iter()).cartesian_product(
+                if self.phf.is_empty() {
+                    vec![None]
+                } else {
+                    self.phf.iter().copied().map(Some).collect::<Vec<_>>()
+                },
+            );
 
         {
             let db = open_db_read_only(db_path, None)?;
@@ -106,18 +103,15 @@ impl Command {
                     match mode {
                         SnapshotSegment::Headers => self.generate_snapshot::<DatabaseEnv>(
                             factory.clone(),
-                            snap_segments::Headers,
-                            SegmentConfig { filters, compression },
+                            snap_segments::Headers::new(*compression, filters),
                         )?,
                         SnapshotSegment::Transactions => self.generate_snapshot::<DatabaseEnv>(
                             factory.clone(),
-                            snap_segments::Transactions,
-                            SegmentConfig { filters, compression },
+                            snap_segments::Transactions::new(*compression, filters),
                         )?,
                         SnapshotSegment::Receipts => self.generate_snapshot::<DatabaseEnv>(
                             factory.clone(),
-                            snap_segments::Receipts,
-                            SegmentConfig { filters, compression },
+                            snap_segments::Receipts::new(*compression, filters),
                         )?,
                     }
                 }
@@ -125,13 +119,13 @@ impl Command {
         }
 
         if self.only_bench || self.bench {
-            for ((mode, compression), phf) in all_combinations {
+            for ((mode, compression), phf) in all_combinations.clone() {
                 match mode {
                     SnapshotSegment::Headers => self.bench_headers_snapshot(
                         db_path,
                         log_level,
                         chain.clone(),
-                        compression,
+                        *compression,
                         InclusionFilter::Cuckoo,
                         phf,
                     )?,
@@ -139,7 +133,7 @@ impl Command {
                         db_path,
                         log_level,
                         chain.clone(),
-                        compression,
+                        *compression,
                         InclusionFilter::Cuckoo,
                         phf,
                     )?,
@@ -147,7 +141,7 @@ impl Command {
                         db_path,
                         log_level,
                         chain.clone(),
-                        compression,
+                        *compression,
                         InclusionFilter::Cuckoo,
                         phf,
                     )?,
@@ -177,8 +171,7 @@ impl Command {
     fn generate_snapshot<DB: Database>(
         &self,
         factory: Arc<ProviderFactory<DB>>,
-        segment: impl Segment<DB> + Send + Sync,
-        config: SegmentConfig,
+        segment: impl Segment + Send + Sync,
     ) -> eyre::Result<()> {
         let dir = PathBuf::default();
         let ranges = self.block_ranges(factory.best_block_number()?);
@@ -193,12 +186,7 @@ impl Command {
                     let provider = factory.provider()?;
 
                     if !self.only_stats {
-                        segment.create_snapshot_file(
-                            &provider,
-                            dir.as_path(),
-                            config,
-                            block_range.clone(),
-                        )?;
+                        segment.snapshot::<DB>(&provider, &dir, block_range.clone())?;
                     }
 
                     Ok(segment.segment().filename(block_range))

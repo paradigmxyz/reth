@@ -1,15 +1,17 @@
 //! Support for snapshotting.
 
 use crate::{segments, segments::Segment, SnapshotterError};
-use reth_db::database::Database;
-use reth_interfaces::RethResult;
-use reth_primitives::{snapshot::HighestSnapshots, BlockNumber};
-use reth_provider::{
-    providers::{SnapshotProvider, SnapshotWriter},
-    ProviderFactory,
+use reth_db::{database::Database, snapshot::iter_snapshots};
+use reth_interfaces::{RethError, RethResult};
+use reth_primitives::{snapshot::HighestSnapshots, BlockNumber, TxNumber};
+use reth_provider::{BlockReader, DatabaseProviderRO, ProviderFactory};
+use std::{
+    collections::HashMap,
+    ops::RangeInclusive,
+    path::{Path, PathBuf},
 };
-use std::{ops::RangeInclusive, sync::Arc, time::Instant};
-use tracing::{debug, trace};
+use tokio::sync::watch;
+use tracing::warn;
 
 /// Result of [Snapshotter::run] execution.
 pub type SnapshotterResult = Result<SnapshotTargets, SnapshotterError>;
@@ -17,21 +19,36 @@ pub type SnapshotterResult = Result<SnapshotTargets, SnapshotterError>;
 /// The snapshotter type itself with the result of [Snapshotter::run]
 pub type SnapshotterWithResult<DB> = (Snapshotter<DB>, SnapshotterResult);
 
-/// Snapshotting routine. See [Snapshotter::run] for more detailed description.
+/// Snapshots are initially created in `{...}/datadir/snapshots/temp` and moved once finished. This
+/// directory is cleaned up on every booting up of the node.
+const TEMPORARY_SUBDIRECTORY: &str = "temp";
+
+/// Snapshotting routine. Main snapshotting logic happens in [Snapshotter::run].
 #[derive(Debug)]
 pub struct Snapshotter<DB> {
     /// Provider factory
     provider_factory: ProviderFactory<DB>,
-    /// Snapshot provider
-    snapshot_provider: Arc<SnapshotProvider>,
+    /// Directory where snapshots are located
+    snapshots_path: PathBuf,
+    /// Highest snapshotted block numbers for each segment
+    highest_snapshots: HighestSnapshots,
+    /// Channel sender to notify other components of the new highest snapshots
+    highest_snapshots_notifier: watch::Sender<Option<HighestSnapshots>>,
+    /// Channel receiver to be cloned and shared that already comes with the newest value
+    highest_snapshots_tracker: HighestSnapshotsTracker,
+    /// Block interval after which the snapshot is taken.
+    block_interval: u64,
 }
 
-/// Snapshot targets, per data part, measured in [`BlockNumber`].
+/// Tracker for the latest [`HighestSnapshots`] value.
+pub type HighestSnapshotsTracker = watch::Receiver<Option<HighestSnapshots>>;
+
+/// Snapshot targets, per data part, measured in [`BlockNumber`] and [`TxNumber`], if applicable.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SnapshotTargets {
     headers: Option<RangeInclusive<BlockNumber>>,
-    receipts: Option<RangeInclusive<BlockNumber>>,
-    transactions: Option<RangeInclusive<BlockNumber>>,
+    receipts: Option<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)>,
+    transactions: Option<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)>,
 }
 
 impl SnapshotTargets {
@@ -40,23 +57,31 @@ impl SnapshotTargets {
         self.headers.is_some() || self.receipts.is_some() || self.transactions.is_some()
     }
 
+    /// Returns `true` if all targets are either [None] or multiple of `block_interval`.
+    fn is_multiple_of_block_interval(&self, block_interval: u64) -> bool {
+        [
+            self.headers.as_ref(),
+            self.receipts.as_ref().map(|(blocks, _)| blocks),
+            self.transactions.as_ref().map(|(blocks, _)| blocks),
+        ]
+        .iter()
+        .all(|blocks| blocks.map_or(true, |blocks| (blocks.end() + 1) % block_interval == 0))
+    }
+
     // Returns `true` if all targets are either [`None`] or has beginning of the range equal to the
     // highest snapshot.
     fn is_contiguous_to_highest_snapshots(&self, snapshots: HighestSnapshots) -> bool {
         [
             (self.headers.as_ref(), snapshots.headers),
-            (self.receipts.as_ref(), snapshots.receipts),
-            (self.transactions.as_ref(), snapshots.transactions),
+            (self.receipts.as_ref().map(|(blocks, _)| blocks), snapshots.receipts),
+            (self.transactions.as_ref().map(|(blocks, _)| blocks), snapshots.transactions),
         ]
         .iter()
-        .all(|(target_block_range, highest_snapshotted_block)| {
-            target_block_range.map_or(true, |target_block_range| {
-                highest_snapshotted_block.map_or(
-                    *target_block_range.start() == 1,
-                    |highest_snapshotted_block| {
-                        *target_block_range.start() == highest_snapshotted_block + 1
-                    },
-                )
+        .all(|(target, highest)| {
+            target.map_or(true, |block_number| {
+                highest.map_or(*block_number.start() == 0, |previous_block_number| {
+                    *block_number.start() == previous_block_number + 1
+                })
             })
         })
     }
@@ -66,167 +91,306 @@ impl<DB: Database> Snapshotter<DB> {
     /// Creates a new [Snapshotter].
     pub fn new(
         provider_factory: ProviderFactory<DB>,
-        snapshot_provider: Arc<SnapshotProvider>,
-    ) -> Self {
-        Self { provider_factory, snapshot_provider }
+        snapshots_path: impl AsRef<Path>,
+        block_interval: u64,
+    ) -> RethResult<Self> {
+        let (highest_snapshots_notifier, highest_snapshots_tracker) = watch::channel(None);
+
+        let mut snapshotter = Self {
+            provider_factory,
+            snapshots_path: snapshots_path.as_ref().into(),
+            highest_snapshots: HighestSnapshots::default(),
+            highest_snapshots_notifier,
+            highest_snapshots_tracker,
+            block_interval,
+        };
+
+        snapshotter.create_directory()?;
+        snapshotter.update_highest_snapshots_tracker()?;
+
+        Ok(snapshotter)
     }
 
-    /// Run the snapshotter.
+    /// Ensures the snapshots directory and its temporary subdirectory are properly set up.
     ///
-    /// For each [Some] target in [SnapshotTargets], initializes a corresponding [Segment] and runs
-    /// it with the provided block range using [SnapshotProvider] and a read-only database
-    /// transaction from [ProviderFactory].
+    /// This function performs the following actions:
+    /// 1. If `datadir/snapshots` does not exist, it creates it.
+    /// 2. Ensures `datadir/snapshots/temp` exists and is empty.
     ///
-    /// NOTE: it doesn't delete the data from database, and the actual deleting (aka pruning) logic
-    /// lives in the `prune` crate.
-    pub fn run(&self, targets: SnapshotTargets) -> SnapshotterResult {
-        debug_assert!(targets
-            .is_contiguous_to_highest_snapshots(self.snapshot_provider.get_highest_snapshots()));
+    /// The `temp` subdirectory is where snapshots are initially created before being
+    /// moved to their final location within `datadir/snapshots`.
+    fn create_directory(&self) -> RethResult<()> {
+        let temporary_path = self.snapshots_path.join(TEMPORARY_SUBDIRECTORY);
 
-        debug!(target: "snapshot", ?targets, "Snapshotter started");
-        let start = Instant::now();
-
-        let mut segments = Vec::<(Box<dyn Segment<DB>>, RangeInclusive<BlockNumber>)>::new();
-
-        if let Some(block_range) = targets.transactions.clone() {
-            segments.push((Box::new(segments::Transactions), block_range));
-        }
-        if let Some(block_range) = targets.headers.clone() {
-            segments.push((Box::new(segments::Headers), block_range));
-        }
-        if let Some(block_range) = targets.receipts.clone() {
-            segments.push((Box::new(segments::Receipts), block_range));
+        if !self.snapshots_path.exists() {
+            reth_primitives::fs::create_dir_all(&self.snapshots_path)?;
+        } else if temporary_path.exists() {
+            reth_primitives::fs::remove_dir_all(&temporary_path)?;
         }
 
-        for (segment, block_range) in &segments {
-            debug!(target: "snapshot", segment = %segment.segment(), ?block_range, "Snapshotting segment");
-            let start = Instant::now();
+        reth_primitives::fs::create_dir_all(temporary_path)?;
 
-            // Create a new database transaction on every segment to prevent long-lived read-only
-            // transactions
-            let provider = self.provider_factory.provider()?;
-            segment.snapshot(provider, self.snapshot_provider.clone(), block_range.clone())?;
+        Ok(())
+    }
 
-            let elapsed = start.elapsed(); // TODO(alexey): track in metrics
-            debug!(target: "snapshot", segment = %segment.segment(), ?block_range, ?elapsed, "Finished snapshotting segment");
+    #[cfg(test)]
+    fn set_highest_snapshots_from_targets(&mut self, targets: &SnapshotTargets) {
+        if let Some(block_number) = &targets.headers {
+            self.highest_snapshots.headers = Some(*block_number.end());
+        }
+        if let Some((block_number, _)) = &targets.receipts {
+            self.highest_snapshots.receipts = Some(*block_number.end());
+        }
+        if let Some((block_number, _)) = &targets.transactions {
+            self.highest_snapshots.transactions = Some(*block_number.end());
+        }
+    }
+
+    /// Looks into the snapshot directory to find the highest snapshotted block of each segment, and
+    /// notifies every tracker.
+    fn update_highest_snapshots_tracker(&mut self) -> RethResult<()> {
+        // It walks over the directory and parses the snapshot filenames extracting
+        // `SnapshotSegment` and their inclusive range. It then takes the maximum block
+        // number for each specific segment.
+        for (segment, ranges) in
+            iter_snapshots(&self.snapshots_path).map_err(|err| RethError::Provider(err.into()))?
+        {
+            for (block_range, _) in ranges {
+                let max_segment_block = self.highest_snapshots.as_mut(segment);
+                if max_segment_block.map_or(true, |block| block < *block_range.end()) {
+                    *max_segment_block = Some(*block_range.end());
+                }
+            }
         }
 
-        self.snapshot_provider.commit()?;
-        for (segment, block_range) in segments {
-            self.snapshot_provider.update_index(segment.segment(), Some(*block_range.end()))?;
-        }
+        let _ = self.highest_snapshots_notifier.send(Some(self.highest_snapshots)).map_err(|_| {
+            warn!(target: "snapshot", "Highest snapshots channel closed");
+        });
 
-        let elapsed = start.elapsed(); // TODO(alexey): track in metrics
-        debug!(target: "snapshot", ?targets, ?elapsed, "Snapshotter finished");
+        Ok(())
+    }
+
+    /// Returns a new [`HighestSnapshotsTracker`].
+    pub fn highest_snapshot_receiver(&self) -> HighestSnapshotsTracker {
+        self.highest_snapshots_tracker.clone()
+    }
+
+    /// Run the snapshotter
+    pub fn run(&mut self, targets: SnapshotTargets) -> SnapshotterResult {
+        debug_assert!(targets.is_multiple_of_block_interval(self.block_interval));
+        debug_assert!(targets.is_contiguous_to_highest_snapshots(self.highest_snapshots));
+
+        self.run_segment::<segments::Receipts>(targets.receipts.clone().map(|(range, _)| range))?;
+
+        self.run_segment::<segments::Transactions>(
+            targets.transactions.clone().map(|(range, _)| range),
+        )?;
+
+        self.run_segment::<segments::Headers>(targets.headers.clone())?;
+
+        self.update_highest_snapshots_tracker()?;
 
         Ok(targets)
     }
 
-    /// Returns a snapshot targets at the provided finalized block number.
-    /// The target is determined by the check against highest snapshots using
-    /// [SnapshotProvider::get_highest_snapshots].
+    /// Run the snapshotter for one segment.
+    ///
+    /// It first builds the snapshot in a **temporary directory** inside the snapshots directory. If
+    /// for some reason the node is terminated during the snapshot process, it will be cleaned
+    /// up on boot (on [`Snapshotter::new`]) and the snapshot process restarted from scratch for
+    /// this block range and segment.
+    ///
+    /// If it succeeds, then we move the snapshot file from the temporary directory to its main one.
+    fn run_segment<S: Segment>(
+        &self,
+        block_range: Option<RangeInclusive<BlockNumber>>,
+    ) -> RethResult<()> {
+        if let Some(block_range) = block_range {
+            let temp = self.snapshots_path.join(TEMPORARY_SUBDIRECTORY);
+            let provider = self.provider_factory.provider()?;
+            let segment = S::default();
+            let filename = segment.segment().filename(&block_range);
+
+            segment.snapshot::<DB>(&provider, temp.clone(), block_range)?;
+
+            reth_primitives::fs::rename(temp.join(&filename), self.snapshots_path.join(filename))?;
+        }
+        Ok(())
+    }
+
+    /// Returns a snapshot targets at the provided finalized block number, respecting the block
+    /// interval. The target is determined by the check against last snapshots.
     pub fn get_snapshot_targets(
         &self,
         finalized_block_number: BlockNumber,
     ) -> RethResult<SnapshotTargets> {
-        let highest_snapshots = self.snapshot_provider.get_highest_snapshots();
+        let provider = self.provider_factory.provider()?;
 
-        // TODO(alexey): snapshot headers and receipts
-        let targets = SnapshotTargets {
-            headers: None,
-            // headers: self.get_snapshot_target(highest_snapshots.headers, finalized_block_number),
-            receipts: None,
-            // receipts: self.get_snapshot_target(highest_snapshots.receipts,
-            // finalized_block_number),
-            transactions: self
-                .get_snapshot_target(highest_snapshots.transactions, finalized_block_number),
-        };
-
-        trace!(
-            target: "snapshot",
-            %finalized_block_number,
-            ?highest_snapshots,
-            ?targets,
-            any = %targets.any(),
-            "Snapshot targets"
+        // Round down `finalized_block_number` to a multiple of `block_interval`
+        let to_block_number = finalized_block_number.saturating_sub(
+            // Adjust for 0-indexed block numbers
+            (finalized_block_number + 1) % self.block_interval,
         );
 
-        Ok(targets)
+        // Calculate block ranges to snapshot
+        let headers_block_range =
+            self.get_snapshot_target_block_range(to_block_number, self.highest_snapshots.headers);
+        let receipts_block_range =
+            self.get_snapshot_target_block_range(to_block_number, self.highest_snapshots.receipts);
+        let transactions_block_range = self
+            .get_snapshot_target_block_range(to_block_number, self.highest_snapshots.transactions);
+
+        // Calculate transaction ranges to snapshot
+        let mut block_to_tx_number_cache = HashMap::default();
+        let receipts_tx_range = self.get_snapshot_target_tx_range(
+            &provider,
+            &mut block_to_tx_number_cache,
+            self.highest_snapshots.receipts,
+            &receipts_block_range,
+        )?;
+        let transactions_tx_range = self.get_snapshot_target_tx_range(
+            &provider,
+            &mut block_to_tx_number_cache,
+            self.highest_snapshots.transactions,
+            &transactions_block_range,
+        )?;
+
+        Ok(SnapshotTargets {
+            headers: headers_block_range
+                .size_hint()
+                .1
+                .expect("finalized block should be >= last headers snapshot")
+                .ge(&(self.block_interval as usize))
+                .then_some(headers_block_range),
+            receipts: receipts_block_range
+                .size_hint()
+                .1
+                .expect("finalized block should be >= last receipts snapshot")
+                .ge(&(self.block_interval as usize))
+                .then_some((receipts_block_range, receipts_tx_range)),
+            transactions: transactions_block_range
+                .size_hint()
+                .1
+                .expect("finalized block should be >= last transactions snapshot")
+                .ge(&(self.block_interval as usize))
+                .then_some((transactions_block_range, transactions_tx_range)),
+        })
     }
 
-    fn get_snapshot_target(
+    fn get_snapshot_target_block_range(
         &self,
+        to_block_number: BlockNumber,
         highest_snapshot: Option<BlockNumber>,
-        finalized_block_number: BlockNumber,
-    ) -> Option<RangeInclusive<BlockNumber>> {
-        let range = highest_snapshot.unwrap_or_default() + 1..=finalized_block_number;
-        (!range.is_empty()).then_some(range)
+    ) -> RangeInclusive<BlockNumber> {
+        let highest_snapshot = highest_snapshot.map_or(0, |block_number| block_number + 1);
+        highest_snapshot..=(highest_snapshot + self.block_interval - 1).min(to_block_number)
+    }
+
+    fn get_snapshot_target_tx_range(
+        &self,
+        provider: &DatabaseProviderRO<DB>,
+        block_to_tx_number_cache: &mut HashMap<BlockNumber, TxNumber>,
+        highest_snapshot: Option<BlockNumber>,
+        block_range: &RangeInclusive<BlockNumber>,
+    ) -> RethResult<RangeInclusive<TxNumber>> {
+        let from_tx_number = if let Some(block_number) = highest_snapshot {
+            *block_to_tx_number_cache.entry(block_number).or_insert(
+                provider
+                    .block_body_indices(block_number)?
+                    .ok_or(RethError::Custom(
+                        "Block body indices for highest snapshot not found".to_string(),
+                    ))?
+                    .next_tx_num(),
+            )
+        } else {
+            0
+        };
+
+        let to_tx_number = *block_to_tx_number_cache.entry(*block_range.end()).or_insert(
+            provider
+                .block_body_indices(*block_range.end())?
+                .ok_or(RethError::Custom(
+                    "Block body indices for block range end not found".to_string(),
+                ))?
+                .last_tx_num(),
+        );
+        Ok(from_tx_number..=to_tx_number)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{snapshotter::SnapshotTargets, Snapshotter, SnapshotterError};
+    use crate::{snapshotter::SnapshotTargets, Snapshotter};
     use assert_matches::assert_matches;
     use reth_interfaces::{
-        provider::ProviderError,
         test_utils::{generators, generators::random_block_range},
+        RethError,
     };
     use reth_primitives::{snapshot::HighestSnapshots, B256};
     use reth_stages::test_utils::TestStageDB;
 
     #[test]
-    fn run() {
+    fn new() {
+        let db = TestStageDB::default();
+        let snapshots_dir = tempfile::TempDir::new().unwrap();
+        let snapshotter = Snapshotter::new(db.factory, snapshots_dir.into_path(), 2).unwrap();
+
+        assert_eq!(
+            *snapshotter.highest_snapshot_receiver().borrow(),
+            Some(HighestSnapshots::default())
+        );
+    }
+
+    #[test]
+    fn get_snapshot_targets() {
+        let db = TestStageDB::default();
+        let snapshots_dir = tempfile::TempDir::new().unwrap();
         let mut rng = generators::rng();
 
-        let db = TestStageDB::default();
+        let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3);
+        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
-        let blocks = random_block_range(&mut rng, 1..=3, B256::ZERO, 2..3);
-        db.insert_blocks(blocks.iter(), Some(1)).expect("insert blocks");
+        let mut snapshotter = Snapshotter::new(db.factory, snapshots_dir.into_path(), 2).unwrap();
 
-        let snapshots_dir = tempfile::TempDir::new().unwrap();
-        let provider_factory = db
-            .factory
-            .with_snapshots(snapshots_dir.path().to_path_buf())
-            .expect("factory with snapshots");
-        let snapshot_provider = provider_factory.snapshot_provider().unwrap();
-
-        let snapshotter = Snapshotter::new(provider_factory, snapshot_provider.clone());
-
+        // Snapshot targets has data per part up to the passed finalized block number,
+        // respecting the block interval
         let targets = snapshotter.get_snapshot_targets(1).expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets { headers: None, receipts: None, transactions: Some(1..=1) }
+            SnapshotTargets {
+                headers: Some(0..=1),
+                receipts: Some((0..=1, 0..=3)),
+                transactions: Some((0..=1, 0..=3))
+            }
         );
-        assert_matches!(snapshotter.run(targets), Ok(_));
+        assert!(targets.is_multiple_of_block_interval(snapshotter.block_interval));
+        assert!(targets.is_contiguous_to_highest_snapshots(snapshotter.highest_snapshots));
+        // Imitate snapshotter run according to the targets which updates the last snapshots state
+        snapshotter.set_highest_snapshots_from_targets(&targets);
+
+        // Nothing to snapshot, last snapshots state of snapshotter doesn't pass the thresholds
         assert_eq!(
-            snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: None, receipts: None, transactions: Some(1) }
+            snapshotter.get_snapshot_targets(2),
+            Ok(SnapshotTargets { headers: None, receipts: None, transactions: None })
         );
 
-        let targets = snapshotter.get_snapshot_targets(3).expect("get snapshot targets");
+        // Snapshot targets has data per part up to the passed finalized block number,
+        // respecting the block interval
+        let targets = snapshotter.get_snapshot_targets(5).expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets { headers: None, receipts: None, transactions: Some(2..=3) }
+            SnapshotTargets {
+                headers: Some(2..=3),
+                receipts: Some((2..=3, 4..=7)),
+                transactions: Some((2..=3, 4..=7))
+            }
         );
-        assert_matches!(snapshotter.run(targets), Ok(_));
-        assert_eq!(
-            snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: None, receipts: None, transactions: Some(3) }
-        );
+        assert!(targets.is_multiple_of_block_interval(snapshotter.block_interval));
+        assert!(targets.is_contiguous_to_highest_snapshots(snapshotter.highest_snapshots));
+        // Imitate snapshotter run according to the targets which updates the last snapshots state
+        snapshotter.set_highest_snapshots_from_targets(&targets);
 
-        let targets = snapshotter.get_snapshot_targets(4).expect("get snapshot targets");
-        assert_eq!(
-            targets,
-            SnapshotTargets { headers: None, receipts: None, transactions: Some(4..=4) }
-        );
-        assert_matches!(
-            snapshotter.run(targets),
-            Err(SnapshotterError::Provider(ProviderError::BlockBodyIndicesNotFound(4)))
-        );
-        assert_eq!(
-            snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: None, receipts: None, transactions: Some(3) }
-        );
+        // Block body indices not found
+        assert_matches!(snapshotter.get_snapshot_targets(5), Err(RethError::Custom(_)));
     }
 }
