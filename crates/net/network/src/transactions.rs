@@ -64,7 +64,7 @@ use std::{
 };
 use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 
 /// Cache limit of transactions to keep track of for a single peer.
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
@@ -1488,7 +1488,7 @@ impl TransactionFetcher {
                 // peer in caller's context has requested hash and is hence not eligible as
                 // fallback peer.
                 if *retries >= MAX_REQUEST_RETRIES_PER_TX_HASH {
-                    warn!(target: "net::tx",
+                    debug!(target: "net::tx",
                         hash=format!("{hash:#}"),
                         retries=retries,
                         "retry limit for `GetPooledTransactions` requests reached for hash, dropping hash"
@@ -1563,7 +1563,7 @@ impl TransactionFetcher {
                 (0, LruCache::new(limit))
             ).is_none() {
 
-                warn!(target: "net::tx",
+                debug!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
                     hash=format!("{hash:#}"),
                     "failed to cache new announced hash from peer in schnellru::LruMap, dropping hash"
@@ -1601,7 +1601,7 @@ impl TransactionFetcher {
         }
 
         let Some(inflight_count) = self.active_peers.get_or_insert(peer_id, || 0) else {
-            warn!(target: "net::tx",
+            debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 hashes=format!("[{:#}]", new_announced_hashes.iter().format(", ")),
                 "failed to cache active peer in schnellru::LruMap, dropping request to peer"
