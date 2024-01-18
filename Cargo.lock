@@ -234,11 +234,13 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-engine-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#edf951897de66b534d94e9d09452bde0b6ad2cec"
+source = "git+https://github.com/alloy-rs/alloy#61142b3fee367a9aee087d6cfac8e57abaaa2eb2"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
  "jsonrpsee-types",
  "serde",
  "thiserror",
@@ -247,7 +249,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-trace-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#edf951897de66b534d94e9d09452bde0b6ad2cec"
+source = "git+https://github.com/alloy-rs/alloy#61142b3fee367a9aee087d6cfac8e57abaaa2eb2"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
@@ -258,7 +260,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#edf951897de66b534d94e9d09452bde0b6ad2cec"
+source = "git+https://github.com/alloy-rs/alloy#61142b3fee367a9aee087d6cfac8e57abaaa2eb2"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
