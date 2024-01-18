@@ -786,7 +786,7 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
     fn build_empty_payload<Attributes>(
         client: &Client,
         config: PayloadConfig<Attributes>,
-    ) -> Result<EthBuiltPayload, PayloadBuilderError>
+    ) -> Result<Self::BuiltPayload, PayloadBuilderError>
     where
         Client: StateProviderFactory,
         Attributes: PayloadBuilderAttributes;

@@ -137,7 +137,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
-        Engine: EngineTypes<BuiltPayload = EthBuiltPayload> + 'static,
+        Engine: EngineTypes + 'static,
         Builder: PayloadBuilder<
                 Reth::Pool,
                 Reth::Provider,
