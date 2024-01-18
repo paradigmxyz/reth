@@ -1,4 +1,5 @@
 //! Canonical chain state notification trait and types.
+
 use crate::{chain::BlockReceipts, Chain};
 use auto_impl::auto_impl;
 use reth_primitives::SealedBlockWithSenders;
@@ -62,13 +63,20 @@ impl Stream for CanonStateNotificationStream {
 /// and will return all [`crate::BundleStateWithReceipts`] and
 /// [`reth_primitives::SealedBlockWithSenders`] of both reverted and committed blocks.
 #[derive(Clone, Debug)]
-#[allow(missing_docs)]
 pub enum CanonStateNotification {
     /// Chain got extended without reorg and only new chain is returned.
-    Commit { new: Arc<Chain> },
+    Commit {
+        /// The newly extended chain.
+        new: Arc<Chain>,
+    },
     /// Chain reorgs and both old and new chain are returned.
     /// Revert is just a subset of reorg where the new chain is empty.
-    Reorg { old: Arc<Chain>, new: Arc<Chain> },
+    Reorg {
+        /// The old chain before reorganization.
+        old: Arc<Chain>,
+        /// The new chain after reorganization.
+        new: Arc<Chain>,
+    },
 }
 
 // For one reason or another, the compiler can't derive PartialEq for CanonStateNotification.

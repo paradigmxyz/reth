@@ -50,6 +50,16 @@ impl CachedReads {
     fn as_db_mut<DB>(&mut self, db: DB) -> CachedReadsDbMut<'_, DB> {
         CachedReadsDbMut { cached: self, db }
     }
+
+    /// Inserts an account info into the cache.
+    pub fn insert_account(
+        &mut self,
+        address: Address,
+        info: AccountInfo,
+        storage: HashMap<U256, U256>,
+    ) {
+        self.accounts.insert(address, CachedAccount { info: Some(info), storage });
+    }
 }
 
 #[derive(Debug)]

@@ -1,18 +1,18 @@
 use crate::{
-    constants::EMPTY_ROOT_HASH,
-    keccak256,
+    keccak256, public_key_to_address,
     serde_helper::{
         json_u256::{deserialize_json_ttd_opt, deserialize_json_u256},
         num::{u64_hex_or_decimal, u64_hex_or_decimal_opt},
         storage::deserialize_storage_map,
     },
-    trie::{HashBuilder, Nibbles},
-    Account, Address, Bytes, B256, KECCAK_EMPTY, U256,
+    Account, Address, Bytes, B256, U256,
 };
-use alloy_rlp::{encode_fixed_size, length_of_length, Encodable, Header as RlpHeader};
-use itertools::Itertools;
+use secp256k1::{
+    rand::{thread_rng, RngCore},
+    KeyPair, Secp256k1,
+};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 /// The genesis block specification.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -153,19 +153,6 @@ pub struct GenesisAccount {
 }
 
 impl GenesisAccount {
-    /// Determines the RLP payload length, without the RLP header.
-    fn payload_len(&self) -> usize {
-        let mut len = 0;
-        len += self.nonce.unwrap_or_default().length();
-        len += self.balance.length();
-        // rather than rlp-encoding the storage, we just return the length of a single hash
-        // hashes are a fixed size, so it is safe to use the empty root for this
-        len += EMPTY_ROOT_HASH.length();
-        // we are encoding a hash, so let's just use the length of the empty hash for the code hash
-        len += KECCAK_EMPTY.length();
-        len
-    }
-
     /// Set the nonce.
     pub fn with_nonce(mut self, nonce: Option<u64>) -> Self {
         self.nonce = nonce;
@@ -191,45 +178,6 @@ impl GenesisAccount {
     }
 }
 
-impl Encodable for GenesisAccount {
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        let header = RlpHeader { list: true, payload_length: self.payload_len() };
-        header.encode(out);
-
-        self.nonce.unwrap_or_default().encode(out);
-        self.balance.encode(out);
-        self.storage
-            .as_ref()
-            .map_or(EMPTY_ROOT_HASH, |storage| {
-                if storage.is_empty() {
-                    return EMPTY_ROOT_HASH
-                }
-
-                let storage_with_sorted_hashed_keys = storage
-                    .iter()
-                    .filter(|(_k, &v)| v != B256::ZERO)
-                    .map(|(slot, value)| (keccak256(slot), value))
-                    .sorted_by_key(|(key, _)| *key);
-
-                let mut hb = HashBuilder::default();
-                for (hashed_slot, value) in storage_with_sorted_hashed_keys {
-                    let encoded_value = encode_fixed_size(&U256::from_be_bytes(**value));
-                    hb.add_leaf(Nibbles::unpack(hashed_slot), &encoded_value);
-                }
-
-                hb.root()
-            })
-            .encode(out);
-        self.code.as_ref().map_or(KECCAK_EMPTY, keccak256).encode(out);
-    }
-
-    fn length(&self) -> usize {
-        let len = self.payload_len();
-        // RLP header length + payload length
-        len + length_of_length(len)
-    }
-}
-
 impl From<GenesisAccount> for Account {
     fn from(value: GenesisAccount) -> Self {
         Account {
@@ -241,7 +189,205 @@ impl From<GenesisAccount> for Account {
     }
 }
 
-/// Represents a node's chain configuration.
+/// Helper trait that encapsulates [RngCore], and [Debug](std::fmt::Debug) to get around rules for
+/// auto traits (Opt-in built-in traits).
+trait RngDebug: RngCore + std::fmt::Debug {}
+impl<T> RngDebug for T where T: RngCore + std::fmt::Debug {}
+
+/// This helps create a custom genesis alloc by making it easy to add funded accounts with known
+/// signers to the genesis block.
+///
+/// # Example
+/// ```
+/// # use reth_primitives::{GenesisAllocator, Address, U256, hex, Bytes};
+/// # use std::str::FromStr;
+/// let mut allocator = GenesisAllocator::default();
+///
+/// // This will add a genesis account to the alloc builder, with the provided balance. The
+/// // signer for the account will be returned.
+/// let (_signer, _addr) = allocator.new_funded_account(U256::from(100_000_000_000_000_000u128));
+///
+/// // You can also provide code for the account.
+/// let code = Bytes::from_str("0x1234").unwrap();
+/// let (_second_signer, _second_addr) =
+///     allocator.new_funded_account_with_code(U256::from(100_000_000_000_000_000u128), code);
+///
+/// // You can also add an account with a specific address.
+/// // This will not return a signer, since the address is provided by the user and the signer
+/// // may be unknown.
+/// let addr = "0Ac1dF02185025F65202660F8167210A80dD5086".parse::<Address>().unwrap();
+/// allocator.add_funded_account_with_address(addr, U256::from(100_000_000_000_000_000u128));
+///
+/// // Once you're done adding accounts, you can build the alloc.
+/// let alloc = allocator.build();
+/// ```
+#[derive(Debug)]
+pub struct GenesisAllocator<'a> {
+    /// The genesis alloc to be built.
+    alloc: HashMap<Address, GenesisAccount>,
+    /// The rng to use for generating key pairs.
+    rng: Box<dyn RngDebug + 'a>,
+}
+
+impl<'a> GenesisAllocator<'a> {
+    /// Initialize a new alloc builder with the provided rng.
+    pub fn new_with_rng<R>(rng: &'a mut R) -> Self
+    where
+        R: RngCore + std::fmt::Debug,
+    {
+        Self { alloc: HashMap::default(), rng: Box::new(rng) }
+    }
+
+    /// Use the provided rng for generating key pairs.
+    pub fn with_rng<R>(mut self, rng: &'a mut R) -> Self
+    where
+        R: RngCore + std::fmt::Debug,
+    {
+        self.rng = Box::new(rng);
+        self
+    }
+
+    /// Add a funded account to the genesis alloc.
+    ///
+    /// Returns the key pair for the account and the account's address.
+    pub fn new_funded_account(&mut self, balance: U256) -> (KeyPair, Address) {
+        let secp = Secp256k1::new();
+        let pair = KeyPair::new(&secp, &mut self.rng);
+        let address = public_key_to_address(pair.public_key());
+
+        self.alloc.insert(address, GenesisAccount::default().with_balance(balance));
+
+        (pair, address)
+    }
+
+    /// Add a funded account to the genesis alloc with the provided code.
+    ///
+    /// Returns the key pair for the account and the account's address.
+    pub fn new_funded_account_with_code(
+        &mut self,
+        balance: U256,
+        code: Bytes,
+    ) -> (KeyPair, Address) {
+        let secp = Secp256k1::new();
+        let pair = KeyPair::new(&secp, &mut self.rng);
+        let address = public_key_to_address(pair.public_key());
+
+        self.alloc
+            .insert(address, GenesisAccount::default().with_balance(balance).with_code(Some(code)));
+
+        (pair, address)
+    }
+
+    /// Adds a funded account to the genesis alloc with the provided storage.
+    ///
+    /// Returns the key pair for the account and the account's address.
+    pub fn new_funded_account_with_storage(
+        &mut self,
+        balance: U256,
+        storage: HashMap<B256, B256>,
+    ) -> (KeyPair, Address) {
+        let secp = Secp256k1::new();
+        let pair = KeyPair::new(&secp, &mut self.rng);
+        let address = public_key_to_address(pair.public_key());
+
+        self.alloc.insert(
+            address,
+            GenesisAccount::default().with_balance(balance).with_storage(Some(storage)),
+        );
+
+        (pair, address)
+    }
+
+    /// Adds an account with code and storage to the genesis alloc.
+    ///
+    /// Returns the key pair for the account and the account's address.
+    pub fn new_account_with_code_and_storage(
+        &mut self,
+        code: Bytes,
+        storage: HashMap<B256, B256>,
+    ) -> (KeyPair, Address) {
+        let secp = Secp256k1::new();
+        let pair = KeyPair::new(&secp, &mut self.rng);
+        let address = public_key_to_address(pair.public_key());
+
+        self.alloc.insert(
+            address,
+            GenesisAccount::default().with_code(Some(code)).with_storage(Some(storage)),
+        );
+
+        (pair, address)
+    }
+
+    /// Adds an account with code to the genesis alloc.
+    ///
+    /// Returns the key pair for the account and the account's address.
+    pub fn new_account_with_code(&mut self, code: Bytes) -> (KeyPair, Address) {
+        let secp = Secp256k1::new();
+        let pair = KeyPair::new(&secp, &mut self.rng);
+        let address = public_key_to_address(pair.public_key());
+
+        self.alloc.insert(address, GenesisAccount::default().with_code(Some(code)));
+
+        (pair, address)
+    }
+
+    /// Add a funded account to the genesis alloc with the provided address.
+    ///
+    /// Neither the key pair nor the account will be returned, since the address is provided by the
+    /// user and the signer may be unknown.
+    pub fn add_funded_account_with_address(&mut self, address: Address, balance: U256) {
+        self.alloc.insert(address, GenesisAccount::default().with_balance(balance));
+    }
+
+    /// Adds the given [GenesisAccount] to the genesis alloc.
+    ///
+    /// Returns the key pair for the account and the account's address.
+    pub fn add_account(&mut self, account: GenesisAccount) -> Address {
+        let secp = Secp256k1::new();
+        let pair = KeyPair::new(&secp, &mut self.rng);
+        let address = public_key_to_address(pair.public_key());
+
+        self.alloc.insert(address, account);
+
+        address
+    }
+
+    /// Gets the account for the provided address.
+    ///
+    /// If it does not exist, this returns `None`.
+    pub fn get_account(&self, address: &Address) -> Option<&GenesisAccount> {
+        self.alloc.get(address)
+    }
+
+    /// Gets a mutable version of the account for the provided address, if it exists.
+    pub fn get_account_mut(&mut self, address: &Address) -> Option<&mut GenesisAccount> {
+        self.alloc.get_mut(address)
+    }
+
+    /// Gets an [Entry] for the provided address.
+    pub fn account_entry(&mut self, address: Address) -> Entry<'_, Address, GenesisAccount> {
+        self.alloc.entry(address)
+    }
+
+    /// Build the genesis alloc.
+    pub fn build(self) -> HashMap<Address, GenesisAccount> {
+        self.alloc
+    }
+}
+
+impl Default for GenesisAllocator<'_> {
+    fn default() -> Self {
+        Self { alloc: HashMap::default(), rng: Box::new(thread_rng()) }
+    }
+}
+
+/// Defines core blockchain settings per block.
+///
+/// Tailors unique settings for each network based on its genesis block.
+///
+/// Governs crucial blockchain behavior and adaptability.
+///
+/// Encapsulates parameters shaping network evolution and behavior.
 ///
 /// See [geth's `ChainConfig`
 /// struct](https://github.com/ethereum/go-ethereum/blob/64dccf7aa411c5c7cd36090c3d9b9892945ae813/params/config.go#L349)
@@ -264,55 +410,55 @@ pub struct ChainConfig {
     /// Whether or not the node supports the DAO hard-fork.
     pub dao_fork_support: bool,
 
-    /// The EIP-150 hard fork block (None = no fork).
+    /// The [EIP-150](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-150.md) hard fork block (None = no fork).
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub eip150_block: Option<u64>,
 
-    /// The EIP-150 hard fork hash.
+    /// The [EIP-150](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-150.md) hard fork hash.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub eip150_hash: Option<B256>,
 
-    /// The EIP-155 hard fork block.
+    /// The [EIP-155](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-155.md) hard fork block.
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub eip155_block: Option<u64>,
 
-    /// The EIP-158 hard fork block.
+    /// The [EIP-158](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-158.md) hard fork block.
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub eip158_block: Option<u64>,
 
-    /// The Byzantium hard fork block.
+    /// The Byzantium hard fork block (None = no fork, 0 = already on byzantium).
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub byzantium_block: Option<u64>,
 
-    /// The Constantinople hard fork block.
+    /// The Constantinople hard fork block (None = no fork, 0 = already on constantinople).
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub constantinople_block: Option<u64>,
 
-    /// The Petersburg hard fork block.
+    /// The Petersburg hard fork block (None = no fork, 0 = already on petersburg).
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub petersburg_block: Option<u64>,
 
-    /// The Istanbul hard fork block.
+    /// The Istanbul hard fork block (None = no fork, 0 = already on istanbul).
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub istanbul_block: Option<u64>,
 
-    /// The Muir Glacier hard fork block.
+    /// The Muir Glacier hard fork block (None = no fork, 0 = already on muir glacier).
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub muir_glacier_block: Option<u64>,
 
-    /// The Berlin hard fork block.
+    /// The Berlin hard fork block (None = no fork, 0 = already on berlin).
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub berlin_block: Option<u64>,
 
-    /// The London hard fork block.
+    /// The London hard fork block (None = no fork, 0 = already on london).
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub london_block: Option<u64>,
 
-    /// The Arrow Glacier hard fork block.
+    /// The Arrow Glacier hard fork block (None = no fork, 0 = already on arrow glacier).
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub arrow_glacier_block: Option<u64>,
 
-    /// The Gray Glacier hard fork block.
+    /// The Gray Glacier hard fork block (None = no fork, 0 = already on gray glacier).
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub gray_glacier_block: Option<u64>,
 
@@ -320,11 +466,11 @@ pub struct ChainConfig {
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub merge_netsplit_block: Option<u64>,
 
-    /// Shanghai switch time.
+    /// Shanghai switch time (None = no fork, 0 = already on shanghai).
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub shanghai_time: Option<u64>,
 
-    /// Cancun switch time.
+    /// Cancun switch time (None = no fork, 0 = already on cancun).
     #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub cancun_time: Option<u64>,
 
@@ -346,6 +492,97 @@ pub struct ChainConfig {
     /// Clique parameters.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clique: Option<CliqueConfig>,
+}
+
+impl ChainConfig {
+    /// Checks if the blockchain is active at or after the Homestead fork block.
+    pub fn is_homestead_active_at_block(&self, block: u64) -> bool {
+        self.is_active_at_block(self.homestead_block, block)
+    }
+
+    /// Checks if the blockchain is active at or after the EIP150 fork block.
+    pub fn is_eip150_active_at_block(&self, block: u64) -> bool {
+        self.is_active_at_block(self.eip150_block, block)
+    }
+
+    /// Checks if the blockchain is active at or after the EIP155 fork block.
+    pub fn is_eip155_active_at_block(&self, block: u64) -> bool {
+        self.is_active_at_block(self.eip155_block, block)
+    }
+
+    /// Checks if the blockchain is active at or after the EIP158 fork block.
+    pub fn is_eip158_active_at_block(&self, block: u64) -> bool {
+        self.is_active_at_block(self.eip158_block, block)
+    }
+
+    /// Checks if the blockchain is active at or after the Byzantium fork block.
+    pub fn is_byzantium_active_at_block(&self, block: u64) -> bool {
+        self.is_active_at_block(self.byzantium_block, block)
+    }
+
+    /// Checks if the blockchain is active at or after the Constantinople fork block.
+    pub fn is_constantinople_active_at_block(&self, block: u64) -> bool {
+        self.is_active_at_block(self.constantinople_block, block)
+    }
+
+    /// Checks if the blockchain is active at or after the Muir Glacier (EIP-2384) fork block.
+    pub fn is_muir_glacier_active_at_block(&self, block: u64) -> bool {
+        self.is_active_at_block(self.muir_glacier_block, block)
+    }
+
+    /// Checks if the blockchain is active at or after the Petersburg fork block.
+    pub fn is_petersburg_active_at_block(&self, block: u64) -> bool {
+        self.is_active_at_block(self.petersburg_block, block)
+    }
+
+    /// Checks if the blockchain is active at or after the Istanbul fork block.
+    pub fn is_istanbul_active_at_block(&self, block: u64) -> bool {
+        self.is_active_at_block(self.istanbul_block, block)
+    }
+
+    /// Checks if the blockchain is active at or after the Berlin fork block.
+    pub fn is_berlin_active_at_block(&self, block: u64) -> bool {
+        self.is_active_at_block(self.berlin_block, block)
+    }
+
+    /// Checks if the blockchain is active at or after the London fork block.
+    pub fn is_london_active_at_block(&self, block: u64) -> bool {
+        self.is_active_at_block(self.london_block, block)
+    }
+
+    /// Checks if the blockchain is active at or after the Arrow Glacier (EIP-4345) fork block.
+    pub fn is_arrow_glacier_active_at_block(&self, block: u64) -> bool {
+        self.is_active_at_block(self.arrow_glacier_block, block)
+    }
+
+    /// Checks if the blockchain is active at or after the Gray Glacier (EIP-5133) fork block.
+    pub fn is_gray_glacier_active_at_block(&self, block: u64) -> bool {
+        self.is_active_at_block(self.gray_glacier_block, block)
+    }
+
+    /// Checks if the blockchain is active at or after the Shanghai fork block and the specified
+    /// timestamp.
+    pub fn is_shanghai_active_at_block_and_timestamp(&self, block: u64, timestamp: u64) -> bool {
+        self.is_london_active_at_block(block) &&
+            self.is_active_at_timestamp(self.shanghai_time, timestamp)
+    }
+
+    /// Checks if the blockchain is active at or after the Cancun fork block and the specified
+    /// timestamp.
+    pub fn is_cancun_active_at_block_and_timestamp(&self, block: u64, timestamp: u64) -> bool {
+        self.is_london_active_at_block(block) &&
+            self.is_active_at_timestamp(self.cancun_time, timestamp)
+    }
+
+    // Private function handling the comparison logic for block numbers
+    fn is_active_at_block(&self, config_block: Option<u64>, block: u64) -> bool {
+        config_block.map_or(false, |cb| cb <= block)
+    }
+
+    // Private function handling the comparison logic for timestamps
+    fn is_active_at_timestamp(&self, config_timestamp: Option<u64>, timestamp: u64) -> bool {
+        config_timestamp.map_or(false, |cb| cb <= timestamp)
+    }
 }
 
 // used only for serde
@@ -378,14 +615,11 @@ mod ethers_compat {
         EthashConfig as EthersEthashConfig, GenesisAccount as EthersGenesisAccount,
     };
 
+    /// Converts an `ethers_core::utils::Genesis` into a `Genesis`.
     impl From<ethers_core::utils::Genesis> for Genesis {
+        /// This conversion function extracts and maps specific fields from the input `genesis` to
+        /// create a new `Genesis` instance
         fn from(genesis: ethers_core::utils::Genesis) -> Genesis {
-            let alloc = genesis
-                .alloc
-                .iter()
-                .map(|(addr, account)| (addr.0.into(), account.clone().into()))
-                .collect::<HashMap<Address, GenesisAccount>>();
-
             Genesis {
                 config: genesis.config.into(),
                 nonce: genesis.nonce.as_u64(),
@@ -399,12 +633,23 @@ mod ethers_compat {
                 // TODO: if/when ethers has cancun fields they should be added here
                 excess_blob_gas: None,
                 blob_gas_used: None,
-                alloc,
+                alloc: genesis
+                    .alloc
+                    .iter()
+                    .map(|(addr, account)| (addr.0.into(), account.clone().into()))
+                    .collect(),
             }
         }
     }
 
+    /// Converts an `EthersGenesisAccount` into a `GenesisAccount`.
     impl From<EthersGenesisAccount> for GenesisAccount {
+        /// Converts fields from `EthersGenesisAccount` to construct a `GenesisAccount`.
+        ///
+        /// - Maps the `balance` from limbs.
+        /// - Sets the `nonce`.
+        /// - Handles the `code` field, converting it if present.
+        /// - Processes the `storage` field into key-value pairs.
         fn from(genesis_account: EthersGenesisAccount) -> Self {
             Self {
                 balance: U256::from_limbs(genesis_account.balance.0),
@@ -417,6 +662,7 @@ mod ethers_compat {
         }
     }
 
+    /// Converts an `EthersChainConfig` into a `ChainConfig`.
     impl From<EthersChainConfig> for ChainConfig {
         fn from(chain_config: EthersChainConfig) -> Self {
             let EthersChainConfig {
@@ -475,12 +721,14 @@ mod ethers_compat {
         }
     }
 
+    /// Converts an `EthersEthashConfig` into an `EthashConfig`.
     impl From<EthersEthashConfig> for EthashConfig {
         fn from(_: EthersEthashConfig) -> Self {
             EthashConfig {}
         }
     }
 
+    /// Converts an `EthersCliqueConfig` into a `CliqueConfig`.
     impl From<EthersCliqueConfig> for CliqueConfig {
         fn from(clique_config: EthersCliqueConfig) -> Self {
             let EthersCliqueConfig { period, epoch } = clique_config;

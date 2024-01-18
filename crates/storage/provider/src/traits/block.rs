@@ -6,11 +6,10 @@ use auto_impl::auto_impl;
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
-    Address, Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders,
-    ChainSpec, Header, PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    B256,
+    Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, ChainSpec,
+    Header, PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, B256,
 };
-use reth_trie::{hashed_cursor::HashedPostState, updates::TrieUpdates};
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::ops::RangeInclusive;
 
 /// Enum to control transaction hash inclusion.
@@ -195,10 +194,31 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
         self.sealed_header_by_id(BlockNumberOrTag::Finalized.into())
     }
 
-    /// Returns the block with the matching `BlockId` from the database.
+    /// Returns the block with the matching [BlockId] from the database.
     ///
     /// Returns `None` if block is not found.
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Block>>;
+
+    /// Returns the block with senders with matching [BlockId].
+    ///
+    /// Returns the block's transactions in the requested variant.
+    ///
+    /// Returns `None` if block is not found.
+    fn block_with_senders_by_id(
+        &self,
+        id: BlockId,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<BlockWithSenders>> {
+        match id {
+            BlockId::Hash(hash) => {
+                self.block_with_senders(hash.block_hash.into(), transaction_kind)
+            }
+            BlockId::Number(num) => self.convert_block_number(num)?.map_or_else(
+                || Ok(None),
+                |num| self.block_with_senders(num.into(), transaction_kind),
+            ),
+        }
+    }
 
     /// Returns the header with matching tag from the database
     ///
@@ -280,8 +300,7 @@ pub trait BlockWriter: Send + Sync {
     /// transition in the block.
     fn insert_block(
         &self,
-        block: SealedBlock,
-        senders: Option<Vec<Address>>,
+        block: SealedBlockWithSenders,
         prune_modes: Option<&PruneModes>,
     ) -> ProviderResult<StoredBlockBodyIndices>;
 

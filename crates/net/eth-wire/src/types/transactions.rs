@@ -1,4 +1,5 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
+
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{PooledTransactionsElement, TransactionSigned, B256};
@@ -53,7 +54,7 @@ impl From<Vec<TransactionSigned>> for PooledTransactions {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
     use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::{

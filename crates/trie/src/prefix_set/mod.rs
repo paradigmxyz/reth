@@ -12,7 +12,7 @@ pub use loader::{LoadedPrefixSets, PrefixSetLoader};
 /// Internally, this implementation uses a `Vec` and aims to act like a `BTreeSet` in being both
 /// sorted and deduplicated. It does this by keeping a `sorted` flag. The `sorted` flag represents
 /// whether or not the `Vec` is definitely sorted. When a new element is added, it is set to
-/// `false.`. The `Vec` is sorted and deduplicated when `sorted` is `false` and:
+/// `false.`. The `Vec` is sorted and deduplicated when `sorted` is `true` and:
 ///  * An element is being checked for inclusion (`contains`), or
 ///  * The set is being converted into an immutable `PrefixSet` (`freeze`)
 ///
@@ -26,8 +26,8 @@ pub use loader::{LoadedPrefixSets, PrefixSetLoader};
 /// use reth_trie::prefix_set::PrefixSetMut;
 ///
 /// let mut prefix_set = PrefixSetMut::default();
-/// prefix_set.insert(Nibbles::new_unchecked(&[0xa, 0xb]));
-/// prefix_set.insert(Nibbles::new_unchecked(&[0xa, 0xb, 0xc]));
+/// prefix_set.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb]));
+/// prefix_set.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb, 0xc]));
 /// assert!(prefix_set.contains(&[0xa, 0xb]));
 /// assert!(prefix_set.contains(&[0xa, 0xb, 0xc]));
 /// ```
@@ -118,20 +118,18 @@ impl PrefixSet {
     /// Returns `true` if any of the keys in the set has the given prefix or
     /// if the given prefix is a prefix of any key in the set.
     #[inline]
-    pub fn contains<T: Into<Nibbles>>(&mut self, prefix: T) -> bool {
-        let prefix = prefix.into();
-
-        while self.index > 0 && self.keys[self.index] > prefix {
+    pub fn contains(&mut self, prefix: &Nibbles) -> bool {
+        while self.index > 0 && &self.keys[self.index] > prefix {
             self.index -= 1;
         }
 
         for (idx, key) in self.keys[self.index..].iter().enumerate() {
-            if key.has_prefix(&prefix) {
+            if key.has_prefix(prefix) {
                 self.index += idx;
                 return true
             }
 
-            if key > &prefix {
+            if key > prefix {
                 self.index += idx;
                 return false
             }
@@ -158,10 +156,10 @@ mod tests {
     #[test]
     fn test_contains_with_multiple_inserts_and_duplicates() {
         let mut prefix_set = PrefixSetMut::default();
-        prefix_set.insert(Nibbles::new_unchecked(b"123"));
-        prefix_set.insert(Nibbles::new_unchecked(b"124"));
-        prefix_set.insert(Nibbles::new_unchecked(b"456"));
-        prefix_set.insert(Nibbles::new_unchecked(b"123")); // Duplicate
+        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"123"));
+        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"124"));
+        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"456"));
+        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"123")); // Duplicate
 
         assert!(prefix_set.contains(b"12"));
         assert!(prefix_set.contains(b"45"));

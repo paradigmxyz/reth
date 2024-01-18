@@ -403,7 +403,7 @@ pub struct AccessListItem {
 pub type AccessList = Vec<AccessListItem>;
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use serde_json;
 

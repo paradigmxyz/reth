@@ -1,4 +1,5 @@
 //! Startup tests
+
 use crate::utils::{
     launch_http, launch_http_ws_same_port, launch_ws, test_address, test_rpc_builder,
 };

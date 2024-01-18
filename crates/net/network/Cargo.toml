@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "Ethereum network support"
 
+[lints]
+workspace = true
+
 [package.metadata.cargo-udeps.ignore]
 normal = [
     # Used for diagrams in docs
@@ -60,6 +63,8 @@ linked_hash_set = "0.1"
 linked-hash-map = "0.5.6"
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+derive_more.workspace = true
+schnellru.workspace = true
 
 enr = { workspace = true, features = ["rust-secp256k1"], optional = true }
 tempfile = { workspace = true, optional = true }
@@ -89,6 +94,10 @@ enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
 serial_test.workspace = true
 tempfile.workspace = true
 
+## Benchmarks
+pprof = { workspace = true, features = ["criterion", "flamegraph"] }
+criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
+
 [features]
 default = ["serde"]
 serde = ["dep:serde", "dep:humantime-serde", "secp256k1/serde", "enr?/serde", "dep:serde_json"]
@@ -101,3 +110,8 @@ optimism = [
     "reth-network-api/optimism",
     "reth-rpc-types/optimism",
 ]
+
+[[bench]]
+name = "bench"
+required-features = ["test-utils"]
+harness = false

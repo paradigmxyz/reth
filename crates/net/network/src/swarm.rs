@@ -23,6 +23,7 @@ use std::{
 };
 use tracing::trace;
 
+#[cfg_attr(doc, aquamarine::aquamarine)]
 /// Contains the connectivity related state of the network.
 ///
 /// A swarm emits [`SwarmEvent`]s when polled.
@@ -44,24 +45,8 @@ use tracing::trace;
 /// request channel for the created session and sends requests it receives from the
 /// [`StateFetcher`], which receives request objects from the client interfaces responsible for
 /// downloading headers and bodies.
-#[cfg_attr(doc, aquamarine::aquamarine)]
-/// ```mermaid
-///  graph TB
-///     connections(TCP Listener)
-///     Discovery[(Discovery)]
-///     fetchRequest(Client Interfaces)
-///     Sessions[(SessionManager)]
-///     SessionTask[(Peer Session)]
-///     State[(State)]
-///     StateFetch[(State Fetcher)]
-///   connections --> |incoming| Sessions
-///   State --> |initiate outgoing| Sessions
-///   Discovery --> |update peers| State
-///   Sessions --> |spawns| SessionTask
-///   SessionTask <--> |handle state requests| State
-///   fetchRequest --> |request Headers, Bodies| StateFetch
-///   State --> |poll pending requests| StateFetch
-/// ```
+///
+/// include_mmd!("docs/mermaid/swarm.mmd")
 #[derive(Debug)]
 #[must_use = "Swarm does nothing unless polled"]
 pub(crate) struct Swarm<C> {

@@ -1,3 +1,4 @@
+#![allow(missing_docs, unreachable_pub)]
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
@@ -57,7 +58,7 @@ pub fn prefix_set_lookups(c: &mut Criterion) {
 }
 
 fn prefix_set_bench<T: PrefixSetAbstraction>(
-    group: &mut BenchmarkGroup<WallTime>,
+    group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
     (preload, input, expected): (Vec<Nibbles>, Vec<Nibbles>, Vec<bool>),
 ) {
@@ -94,12 +95,12 @@ fn generate_test_data(size: usize) -> (Vec<Nibbles>, Vec<Nibbles>, Vec<bool>) {
     let mut preload = vec(vec(any::<u8>(), 32), size).new_tree(&mut runner).unwrap().current();
     preload.dedup();
     preload.sort();
-    let preload = preload.into_iter().map(Nibbles::new_unchecked).collect::<Vec<_>>();
+    let preload = preload.into_iter().map(Nibbles::from_nibbles_unchecked).collect::<Vec<_>>();
 
     let mut input = vec(vec(any::<u8>(), 0..=32), size).new_tree(&mut runner).unwrap().current();
     input.dedup();
     input.sort();
-    let input = input.into_iter().map(Nibbles::new_unchecked).collect::<Vec<_>>();
+    let input = input.into_iter().map(Nibbles::from_nibbles_unchecked).collect::<Vec<_>>();
 
     let expected = input
         .iter()

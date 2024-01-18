@@ -24,27 +24,25 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
+#![allow(missing_debug_implementations)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod args;
-pub mod chain;
+pub mod builder;
 pub mod cli;
-pub mod config;
-pub mod db;
-pub mod debug_cmd;
+pub mod commands;
 pub mod dirs;
 pub mod init;
-pub mod node;
-pub mod p2p;
 pub mod prometheus_exporter;
-pub mod recover;
 pub mod runner;
-pub mod stage;
-pub mod test_vectors;
 pub mod utils;
 pub mod version;
+
+/// Re-exported payload related types
+pub mod payload {
+    pub use reth_payload_builder::*;
+    pub use reth_payload_validator::ExecutionPayloadValidator;
+}
 
 /// Re-exported from `reth_provider`.
 pub mod providers {

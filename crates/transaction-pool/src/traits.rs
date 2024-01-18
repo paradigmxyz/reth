@@ -306,6 +306,13 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns a transaction sent by a given user with a given nonce
+    fn get_transactions_by_sender_and_nonce(
+        &self,
+        sender: Address,
+        nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
     /// Returns all transactions that where submitted with the given [TransactionOrigin]
     fn get_transactions_by_origin(
         &self,
@@ -516,8 +523,17 @@ pub enum TransactionOrigin {
 
 impl TransactionOrigin {
     /// Whether the transaction originates from a local source.
-    pub fn is_local(&self) -> bool {
+    pub const fn is_local(&self) -> bool {
         matches!(self, TransactionOrigin::Local)
+    }
+
+    /// Whether the transaction originates from an external source.
+    pub const fn is_external(&self) -> bool {
+        matches!(self, TransactionOrigin::External)
+    }
+    /// Whether the transaction originates from a private source.
+    pub const fn is_private(&self) -> bool {
+        matches!(self, TransactionOrigin::Private)
     }
 }
 

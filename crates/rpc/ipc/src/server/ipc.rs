@@ -1,4 +1,5 @@
 //! IPC request handling adapted from [`jsonrpsee`] http request handling
+
 use futures::{stream::FuturesOrdered, StreamExt};
 use jsonrpsee::{
     core::{
@@ -237,7 +238,7 @@ fn execute_notification(notif: Notif<'_>, max_log_length: u32) -> MethodResponse
     response
 }
 
-#[allow(unused)]
+#[allow(dead_code)]
 pub(crate) struct HandleRequest<L: Logger> {
     pub(crate) methods: Methods,
     pub(crate) max_request_body_size: u32,

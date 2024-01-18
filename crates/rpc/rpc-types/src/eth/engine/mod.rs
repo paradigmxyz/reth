@@ -1,11 +1,16 @@
+//! Engine API types:
+//! <https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md>
+//! and <https://eips.ethereum.org/EIPS/eip-3675>,
+//! following the execution specs <https://github.com/ethereum/execution-apis/tree/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine>.
+
 #![allow(missing_docs)]
-//! Engine API types: <https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md> and <https://eips.ethereum.org/EIPS/eip-3675> following the execution specs <https://github.com/ethereum/execution-apis/tree/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine>
 
 mod cancun;
 mod forkchoice;
+mod optimism;
 pub mod payload;
 mod transition;
-pub use self::{cancun::*, forkchoice::*, payload::*, transition::*};
+pub use self::{cancun::*, forkchoice::*, optimism::*, payload::*, transition::*};
 
 /// The list of all supported Engine capabilities available over the engine endpoint.
 pub const CAPABILITIES: [&str; 12] = [

@@ -1,7 +1,9 @@
 use crate::processor::{verify_receipt, EVMProcessor};
-use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
+use reth_interfaces::executor::{
+    BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
+};
 use reth_primitives::{
-    revm::compat::into_reth_log, revm_primitives::ResultAndState, Address, Block, Hardfork,
+    revm::compat::into_reth_log, revm_primitives::ResultAndState, BlockWithSenders, Hardfork,
     Receipt, U256,
 };
 use reth_provider::{BlockExecutor, BlockExecutorStats, BundleStateWithReceipts};
@@ -12,22 +14,20 @@ use tracing::{debug, trace};
 impl<'a> BlockExecutor for EVMProcessor<'a> {
     fn execute(
         &mut self,
-        block: &Block,
+        block: &BlockWithSenders,
         total_difficulty: U256,
-        senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError> {
-        let receipts = self.execute_inner(block, total_difficulty, senders)?;
+        let receipts = self.execute_inner(block, total_difficulty)?;
         self.save_receipts(receipts)
     }
 
     fn execute_and_verify_receipt(
         &mut self,
-        block: &Block,
+        block: &BlockWithSenders,
         total_difficulty: U256,
-        senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError> {
         // execute block
-        let receipts = self.execute_inner(block, total_difficulty, senders)?;
+        let receipts = self.execute_inner(block, total_difficulty)?;
 
         // TODO Before Byzantium, receipts contained state root that would mean that expensive
         // operation as hashing that is needed for state root got calculated in every
@@ -53,9 +53,8 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
 
     fn execute_transactions(
         &mut self,
-        block: &Block,
+        block: &BlockWithSenders,
         total_difficulty: U256,
-        senders: Option<Vec<Address>>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
         self.init_env(&block.header, total_difficulty);
 
@@ -63,8 +62,6 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         if block.body.is_empty() {
             return Ok((Vec::new(), 0))
         }
-
-        let senders = self.recover_senders(&block.body, senders)?;
 
         let is_regolith =
             self.chain_spec.fork(Hardfork::Regolith).active_at_timestamp(block.timestamp);
@@ -74,11 +71,15 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         // so we can safely assume that this will always be triggered upon the transition and that
         // the above check for empty blocks will never be hit on OP chains.
         super::ensure_create2_deployer(self.chain_spec().clone(), block.timestamp, self.db_mut())
-            .map_err(|_| BlockExecutionError::ProviderError)?;
+            .map_err(|_| {
+            BlockExecutionError::OptimismBlockExecution(
+                OptimismBlockExecutionError::ForceCreate2DeployerFail,
+            )
+        })?;
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
-        for (transaction, sender) in block.body.iter().zip(senders) {
+        for (sender, transaction) in block.transactions_with_sender() {
             let time = Instant::now();
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
@@ -101,14 +102,14 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
             let depositor = (is_regolith && transaction.is_deposit())
                 .then(|| {
                     self.db_mut()
-                        .load_cache_account(sender)
+                        .load_cache_account(*sender)
                         .map(|acc| acc.account_info().unwrap_or_default())
                 })
                 .transpose()
                 .map_err(|_| BlockExecutionError::ProviderError)?;
 
             // Execute transaction.
-            let ResultAndState { result, state } = self.transact(transaction, sender)?;
+            let ResultAndState { result, state } = self.transact(transaction, *sender)?;
             trace!(
                 target: "evm",
                 ?transaction, ?result, ?state,

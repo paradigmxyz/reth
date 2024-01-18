@@ -6,17 +6,16 @@ use reth_db::{
 };
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
-    keccak256, logs_bloom,
+    logs_bloom,
     revm::compat::{into_reth_acc, into_revm_acc},
     Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, StorageEntry, B256,
     U256,
 };
-use reth_trie::{
-    hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
-    updates::TrieUpdates,
-    StateRoot, StateRootError,
+use reth_trie::HashedPostState;
+use revm::{
+    db::{states::BundleState, BundleAccount},
+    primitives::AccountInfo,
 };
-use revm::{db::states::BundleState, primitives::AccountInfo};
 use std::collections::HashMap;
 
 pub use revm::db::states::OriginalValuesKnown;
@@ -95,6 +94,11 @@ impl BundleStateWithReceipts {
         &self.bundle
     }
 
+    /// Returns mutable revm bundle state.
+    pub fn state_mut(&mut self) -> &mut BundleState {
+        &mut self.bundle
+    }
+
     /// Set first block.
     pub fn set_first_block(&mut self, first_block: BlockNumber) {
         self.first_block = first_block;
@@ -103,6 +107,11 @@ impl BundleStateWithReceipts {
     /// Return iterator over all accounts
     pub fn accounts_iter(&self) -> impl Iterator<Item = (Address, Option<&AccountInfo>)> {
         self.bundle.state().iter().map(|(a, acc)| (*a, acc.info.as_ref()))
+    }
+
+    /// Return iterator over all [BundleAccount]s in the bundle
+    pub fn bundle_accounts_iter(&self) -> impl Iterator<Item = (Address, &BundleAccount)> {
+        self.bundle.state().iter().map(|(a, acc)| (*a, acc))
     }
 
     /// Get account if account is known.
@@ -122,106 +131,10 @@ impl BundleStateWithReceipts {
         self.bundle.bytecode(code_hash).map(Bytecode)
     }
 
-    /// Hash all changed accounts and storage entries that are currently stored in the post state.
-    ///
-    /// # Returns
-    ///
-    /// The hashed post state.
+    /// Returns [HashedPostState] for this bundle state.
+    /// See [HashedPostState::from_bundle_state] for more info.
     pub fn hash_state_slow(&self) -> HashedPostState {
-        let mut hashed_state = HashedPostState::default();
-
-        for (address, account) in self.bundle.state() {
-            let hashed_address = keccak256(address);
-            if let Some(account) = &account.info {
-                hashed_state.insert_account(hashed_address, into_reth_acc(account.clone()))
-            } else {
-                hashed_state.insert_destroyed_account(hashed_address);
-            }
-
-            // insert storage.
-            let mut hashed_storage = HashedStorage::new(account.status.was_destroyed());
-
-            for (key, value) in account.storage.iter() {
-                let hashed_key = keccak256(B256::new(key.to_be_bytes()));
-                if value.present_value.is_zero() {
-                    hashed_storage.insert_zero_valued_slot(hashed_key);
-                } else {
-                    hashed_storage.insert_non_zero_valued_storage(hashed_key, value.present_value);
-                }
-            }
-            hashed_state.insert_hashed_storage(hashed_address, hashed_storage)
-        }
-        hashed_state.sorted()
-    }
-
-    /// Returns [StateRoot] calculator based on database and in-memory state.
-    pub fn state_root_calculator<'a, 'b, TX: DbTx>(
-        &self,
-        tx: &'a TX,
-        hashed_post_state: &'b HashedPostState,
-    ) -> StateRoot<'a, TX, HashedPostStateCursorFactory<'a, 'b, TX>> {
-        let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
-        let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, hashed_post_state);
-        StateRoot::new(tx)
-            .with_hashed_cursor_factory(hashed_cursor_factory)
-            .with_changed_account_prefixes(account_prefix_set)
-            .with_changed_storage_prefixes(storage_prefix_set)
-            .with_destroyed_accounts(hashed_post_state.destroyed_accounts())
-    }
-
-    /// Calculate the state root for this [BundleState].
-    /// Internally, function calls [Self::hash_state_slow] to obtain the [HashedPostState].
-    /// Afterwards, it retrieves the prefixsets from the [HashedPostState] and uses them to
-    /// calculate the incremental state root.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use reth_db::{database::Database, test_utils::create_test_rw_db};
-    /// use reth_primitives::{Account, Receipts, U256};
-    /// use reth_provider::BundleStateWithReceipts;
-    /// use std::collections::HashMap;
-    ///
-    /// // Initialize the database
-    /// let db = create_test_rw_db();
-    ///
-    /// // Initialize the bundle state
-    /// let bundle = BundleStateWithReceipts::new_init(
-    ///     HashMap::from([(
-    ///         [0x11; 20].into(),
-    ///         (
-    ///             None,
-    ///             Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
-    ///             HashMap::from([]),
-    ///         ),
-    ///     )]),
-    ///     HashMap::from([]),
-    ///     vec![],
-    ///     Receipts::new(),
-    ///     0,
-    /// );
-    ///
-    /// // Calculate the state root
-    /// let tx = db.tx().expect("failed to create transaction");
-    /// let state_root = bundle.state_root_slow(&tx);
-    /// ```
-    ///
-    /// # Returns
-    ///
-    /// The state root for this [BundleState].
-    pub fn state_root_slow<TX: DbTx>(&self, tx: &TX) -> Result<B256, StateRootError> {
-        let hashed_post_state = self.hash_state_slow();
-        self.state_root_calculator(tx, &hashed_post_state).root()
-    }
-
-    /// Calculates the state root for this [BundleState] and returns it alongside trie updates.
-    /// See [Self::state_root_slow] for more info.
-    pub fn state_root_slow_with_updates<TX: DbTx>(
-        &self,
-        tx: &TX,
-    ) -> Result<(B256, TrieUpdates), StateRootError> {
-        let hashed_post_state = self.hash_state_slow();
-        self.state_root_calculator(tx, &hashed_post_state).root_with_updates()
+        HashedPostState::from_bundle_state(&self.bundle.state)
     }
 
     /// Transform block number to the index of block.
@@ -268,9 +181,14 @@ impl BundleStateWithReceipts {
         self.receipts.root_slow(self.block_number_to_index(block_number)?, chain_spec, timestamp)
     }
 
-    /// Return reference to receipts.
+    /// Returns reference to receipts.
     pub fn receipts(&self) -> &Receipts {
         &self.receipts
+    }
+
+    /// Returns mutable reference to receipts.
+    pub fn receipts_mut(&mut self) -> &mut Receipts {
+        &mut self.receipts
     }
 
     /// Return all block receipts
@@ -351,6 +269,22 @@ impl BundleStateWithReceipts {
         self.receipts.extend(other.receipts.receipt_vec);
     }
 
+    /// Prepends present the state with the given BundleState.
+    /// It adds changes from the given state but does not override any existing changes.
+    ///
+    /// Reverts  and receipts are not updated.
+    pub fn prepend_state(&mut self, mut other: BundleState) {
+        let other_len = other.reverts.len();
+        // take this bundle
+        let this_bundle = std::mem::take(&mut self.bundle);
+        // extend other bundle with this
+        other.extend(this_bundle);
+        // discard other reverts
+        other.take_n_reverts(other_len);
+        // swap bundles
+        std::mem::swap(&mut self.bundle, &mut other)
+    }
+
     /// Write bundle state to database.
     ///
     /// `omit_changed_check` should be set to true of bundle has some of it data
@@ -405,9 +339,10 @@ mod tests {
         transaction::DbTx,
     };
     use reth_primitives::{
-        revm::compat::into_reth_acc, Address, Receipt, Receipts, StorageEntry, B256, U256,
+        keccak256, revm::compat::into_reth_acc, Address, Receipt, Receipts, StorageEntry, B256,
+        U256,
     };
-    use reth_trie::test_utils::state_root;
+    use reth_trie::{test_utils::state_root, StateRoot};
     use revm::{
         db::{
             states::{
@@ -1220,7 +1155,7 @@ mod tests {
                 }
             }
 
-            let (_, updates) = StateRoot::new(tx).root_with_updates().unwrap();
+            let (_, updates) = StateRoot::from_tx(tx).root_with_updates().unwrap();
             updates.flush(tx).unwrap();
         })
         .unwrap();
@@ -1231,7 +1166,8 @@ mod tests {
         let assert_state_root = |state: &State<EmptyDB>, expected: &PreState, msg| {
             assert_eq!(
                 BundleStateWithReceipts::new(state.bundle_state.clone(), Receipts::default(), 0)
-                    .state_root_slow(&tx)
+                    .hash_state_slow()
+                    .state_root(&tx)
                     .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
                     address,
@@ -1354,5 +1290,43 @@ mod tests {
         )]));
         state.merge_transitions(BundleRetention::PlainState);
         assert_state_root(&state, &prestate, "recreated changed storage");
+    }
+
+    #[test]
+    fn prepend_state() {
+        let address1 = Address::random();
+        let address2 = Address::random();
+
+        let account1 = RevmAccountInfo { nonce: 1, ..Default::default() };
+        let account1_changed = RevmAccountInfo { nonce: 1, ..Default::default() };
+        let account2 = RevmAccountInfo { nonce: 1, ..Default::default() };
+
+        let present_state = BundleState::builder(2..=2)
+            .state_present_account_info(address1, account1_changed.clone())
+            .build();
+        assert_eq!(present_state.reverts.len(), 1);
+        let previous_state = BundleState::builder(1..=1)
+            .state_present_account_info(address1, account1)
+            .state_present_account_info(address2, account2.clone())
+            .build();
+        assert_eq!(previous_state.reverts.len(), 1);
+
+        let mut test = BundleStateWithReceipts {
+            bundle: present_state,
+            receipts: Receipts::from_vec(vec![vec![Some(Receipt::default()); 2]; 1]),
+            first_block: 2,
+        };
+
+        test.prepend_state(previous_state);
+
+        assert_eq!(test.receipts.len(), 1);
+        let end_state = test.state();
+        assert_eq!(end_state.state.len(), 2);
+        // reverts num should stay the same.
+        assert_eq!(end_state.reverts.len(), 1);
+        // account1 is not overwritten.
+        assert_eq!(end_state.state.get(&address1).unwrap().info, Some(account1_changed));
+        // account2 got inserted
+        assert_eq!(end_state.state.get(&address2).unwrap().info, Some(account2));
     }
 }

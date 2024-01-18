@@ -1,7 +1,8 @@
 //! Builder structs for messages.
 
 use crate::Status;
-use reth_primitives::{Chain, ForkId, B256, U256};
+use alloy_chains::Chain;
+use reth_primitives::{ForkId, B256, U256};
 
 /// Builder for [`Status`] messages.
 ///
@@ -17,7 +18,7 @@ use reth_primitives::{Chain, ForkId, B256, U256};
 ///     .total_difficulty(U256::from(100))
 ///     .blockhash(B256::from(MAINNET_GENESIS_HASH))
 ///     .genesis(B256::from(MAINNET_GENESIS_HASH))
-///     .forkid(Hardfork::Paris.fork_id(&MAINNET).unwrap())
+///     .forkid(MAINNET.hardfork_fork_id(Hardfork::Paris).unwrap())
 ///     .build();
 ///
 /// assert_eq!(
@@ -28,7 +29,7 @@ use reth_primitives::{Chain, ForkId, B256, U256};
 ///         total_difficulty: U256::from(100),
 ///         blockhash: B256::from(MAINNET_GENESIS_HASH),
 ///         genesis: B256::from(MAINNET_GENESIS_HASH),
-///         forkid: Hardfork::Paris.fork_id(&MAINNET).unwrap(),
+///         forkid: MAINNET.hardfork_fork_id(Hardfork::Paris).unwrap(),
 ///     }
 /// );
 /// ```

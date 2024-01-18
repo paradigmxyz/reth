@@ -102,7 +102,7 @@ async fn handshake_eth(p2p_stream: AuthedP2PStream) -> eyre::Result<(AuthedEthSt
     let status = Status::builder()
         .chain(Chain::mainnet())
         .genesis(MAINNET_GENESIS_HASH)
-        .forkid(Hardfork::Shanghai.fork_id(&MAINNET).unwrap())
+        .forkid(MAINNET.hardfork_fork_id(Hardfork::Shanghai).unwrap())
         .build();
 
     let status = Status { version: p2p_stream.shared_capabilities().eth()?.version(), ..status };

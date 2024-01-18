@@ -1,4 +1,5 @@
 //! Helpers for testing trace calls.
+
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::Error as RpcError;
 use reth_primitives::{BlockId, Bytes, TxHash, B256};

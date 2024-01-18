@@ -1,5 +1,7 @@
 //! Contains RPC handler implementations specific to blocks.
 
+use std::sync::Arc;
+
 use crate::{
     eth::{
         api::transactions::build_transaction_receipt_with_block_receipts,
@@ -65,7 +67,10 @@ where
         let mut block_and_receipts = None;
 
         if block_id.is_pending() {
-            block_and_receipts = self.provider().pending_block_and_receipts()?;
+            block_and_receipts = self
+                .provider()
+                .pending_block_and_receipts()?
+                .map(|(sb, receipts)| (sb, Arc::new(receipts)));
         } else if let Some(block_hash) = self.provider().block_hash_for_id(block_id)? {
             block_and_receipts = self.cache().get_block_and_receipts(block_hash).await?;
         }
@@ -87,7 +92,7 @@ where
             let receipts = block
                 .body
                 .into_iter()
-                .zip(receipts.clone())
+                .zip(receipts.iter())
                 .enumerate()
                 .map(|(idx, (tx, receipt))| {
                     let meta = TransactionMeta {
@@ -106,7 +111,7 @@ where
                     build_transaction_receipt_with_block_receipts(
                         tx,
                         meta,
-                        receipt,
+                        receipt.clone(),
                         &receipts,
                         #[cfg(feature = "optimism")]
                         op_tx_meta,

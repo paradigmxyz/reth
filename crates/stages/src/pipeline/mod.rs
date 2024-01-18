@@ -49,39 +49,7 @@ pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineErr
 /// After the entire pipeline has been run, it will run again unless asked to stop (see
 /// [Pipeline::set_max_block]).
 ///
-/// ```mermaid
-/// graph TB
-///   Start[Start]
-///   Done[Done]
-///   Error[Error]
-///   subgraph Unwind
-///     StartUnwind(Unwind in reverse order of execution)
-///     UnwindStage(Unwind stage)
-///     NextStageToUnwind(Next stage)
-///   end
-///   subgraph Single loop
-///     RunLoop(Run loop)
-///     NextStage(Next stage)
-///     LoopDone(Loop done)
-///     subgraph Stage Execution
-///       Execute(Execute stage)
-///     end
-///   end
-///   Start --> RunLoop --> NextStage
-///   NextStage --> |No stages left| LoopDone
-///   NextStage --> |Next stage| Execute
-///   Execute --> |Not done| Execute
-///   Execute --> |Unwind requested| StartUnwind
-///   Execute --> |Done| NextStage
-///   Execute --> |Error| Error
-///   StartUnwind --> NextStageToUnwind
-///   NextStageToUnwind --> |Next stage| UnwindStage
-///   NextStageToUnwind --> |No stages left| RunLoop
-///   UnwindStage --> |Error| Error
-///   UnwindStage --> |Unwound| NextStageToUnwind
-///   LoopDone --> |Target block reached| Done
-///   LoopDone --> |Target block not reached| RunLoop
-/// ```
+/// include_mmd!("docs/mermaid/pipeline.mmd")
 ///
 /// # Unwinding
 ///

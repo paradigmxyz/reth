@@ -9,17 +9,15 @@ use reth_primitives::{stage::StageCheckpoint, trie::*, *};
 macro_rules! impl_compression_for_compact {
     ($($name:tt),+) => {
         $(
-            impl Compress for $name
-            {
+            impl Compress for $name {
                 type Compressed = Vec<u8>;
 
                 fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
-                    let _  = Compact::to_compact(self, buf);
+                    let _ = Compact::to_compact(self, buf);
                 }
             }
 
-            impl Decompress for $name
-            {
+            impl Decompress for $name {
                 fn decompress<B: AsRef<[u8]>>(value: B) -> Result<$name, $crate::DatabaseError> {
                     let value = value.as_ref();
                     let (obj, _) = Compact::from_compact(&value, value.len());
@@ -37,8 +35,8 @@ impl_compression_for_compact!(
     Receipt,
     TxType,
     StorageEntry,
-    Nibbles,
-    BranchNodeCompact,
+    StoredBranchNode,
+    StoredNibbles,
     StoredNibblesSubKey,
     StorageTrieEntry,
     StoredBlockBodyIndices,

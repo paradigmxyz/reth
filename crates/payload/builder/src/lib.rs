@@ -26,9 +26,8 @@
 //! ```
 //! use std::future::Future;
 //! use std::pin::Pin;
-//! use std::sync::Arc;
 //! use std::task::{Context, Poll};
-//! use reth_payload_builder::{BuiltPayload, KeepPayloadJobAlive, PayloadBuilderAttributes, PayloadJob, PayloadJobGenerator};
+//! use reth_payload_builder::{EthBuiltPayload, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator};
 //! use reth_payload_builder::error::PayloadBuilderError;
 //! use reth_primitives::{Block, Header, U256};
 //!
@@ -39,7 +38,7 @@
 //!     type Job = EmptyBlockPayloadJob;
 //!
 //! /// This is invoked when the node receives payload attributes from the beacon node via `engine_forkchoiceUpdatedV1`
-//! fn new_payload_job(&self, attr: PayloadBuilderAttributes) -> Result<Self::Job, PayloadBuilderError> {
+//! fn new_payload_job(&self, attr: EthPayloadBuilderAttributes) -> Result<Self::Job, PayloadBuilderError> {
 //!         Ok(EmptyBlockPayloadJob{ attributes: attr,})
 //!     }
 //!
@@ -47,13 +46,15 @@
 //!
 //! /// A [PayloadJob] that builds empty blocks.
 //! pub struct EmptyBlockPayloadJob {
-//!   attributes: PayloadBuilderAttributes,
+//!   attributes: EthPayloadBuilderAttributes,
 //! }
 //!
 //! impl PayloadJob for EmptyBlockPayloadJob {
-//!    type ResolvePayloadFuture = futures_util::future::Ready<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
+//!    type PayloadAttributes = EthPayloadBuilderAttributes;
+//!    type ResolvePayloadFuture = futures_util::future::Ready<Result<EthBuiltPayload, PayloadBuilderError>>;
+//!    type BuiltPayload = EthBuiltPayload;
 //!
-//! fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
+//! fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
 //!     // NOTE: some fields are omitted here for brevity
 //!     let payload = Block {
 //!         header: Header {
@@ -64,11 +65,11 @@
 //!         },
 //!         ..Default::default()
 //!     };
-//!     let payload = BuiltPayload::new(self.attributes.id, payload.seal_slow(), U256::ZERO);
-//!     Ok(Arc::new(payload))
+//!     let payload = EthBuiltPayload::new(self.attributes.id, payload.seal_slow(), U256::ZERO);
+//!     Ok(payload)
 //! }
 //!
-//! fn payload_attributes(&self) -> Result<PayloadBuilderAttributes, PayloadBuilderError> {
+//! fn payload_attributes(&self) -> Result<EthPayloadBuilderAttributes, PayloadBuilderError> {
 //!     Ok(self.attributes.clone())
 //! }
 //!
@@ -97,13 +98,12 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod database;
 pub mod error;
 mod metrics;
+mod optimism;
 mod payload;
 mod service;
 mod traits;
@@ -113,7 +113,8 @@ pub mod noop;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-pub use payload::{BuiltPayload, PayloadBuilderAttributes};
+pub use optimism::OptimismPayloadBuilderAttributes;
+pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 pub use reth_rpc_types::engine::PayloadId;
 pub use service::{PayloadBuilderHandle, PayloadBuilderService, PayloadStore};
 pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};

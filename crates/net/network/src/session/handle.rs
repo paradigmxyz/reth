@@ -1,9 +1,8 @@
 //! Session handles.
 
-use super::active::PeerConnection;
 use crate::{
     message::PeerMessage,
-    session::{Direction, SessionId},
+    session::{conn::EthRlpxConnection, Direction, SessionId},
 };
 use reth_ecies::ECIESError;
 use reth_eth_wire::{
@@ -174,7 +173,7 @@ pub enum PendingSessionEvent {
         status: Arc<Status>,
         /// The actual connection stream which can be used to send and receive `eth` protocol
         /// messages
-        conn: PeerConnection,
+        conn: EthRlpxConnection,
         /// The direction of the session, either `Inbound` or `Outgoing`
         direction: Direction,
         /// The remote node's user agent, usually containing the client name and version
@@ -255,7 +254,6 @@ pub enum ActiveSessionMessage {
         message: PeerMessage,
     },
     /// Received a message that does not match the announced capabilities of the peer.
-    #[allow(unused)]
     InvalidMessage {
         /// Identifier of the remote peer.
         peer_id: PeerId,

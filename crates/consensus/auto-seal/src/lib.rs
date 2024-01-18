@@ -12,8 +12,6 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_beacon_consensus::BeaconEngineMessage;
@@ -21,10 +19,11 @@ use reth_interfaces::{
     consensus::{Consensus, ConsensusError},
     executor::{BlockExecutionError, BlockValidationError},
 };
+use reth_node_api::EngineTypes;
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
-    proofs, Address, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Bloom, ChainSpec,
-    Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, B256,
+    proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom,
+    ChainSpec, Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, B256,
     EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{
@@ -42,7 +41,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{mpsc::UnboundedSender, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use tracing::{trace, warn};
+use tracing::trace;
 
 mod client;
 mod mode;
@@ -95,28 +94,30 @@ impl Consensus for AutoSealConsensus {
 
 /// Builder type for configuring the setup
 #[derive(Debug)]
-pub struct AutoSealBuilder<Client, Pool> {
+pub struct AutoSealBuilder<Client, Pool, Engine: EngineTypes> {
     client: Client,
     consensus: AutoSealConsensus,
     pool: Pool,
     mode: MiningMode,
     storage: Storage,
-    to_engine: UnboundedSender<BeaconEngineMessage>,
+    to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
     canon_state_notification: CanonStateNotificationSender,
 }
 
 // === impl AutoSealBuilder ===
 
-impl<Client, Pool: TransactionPool> AutoSealBuilder<Client, Pool>
+impl<Client, Pool, Engine> AutoSealBuilder<Client, Pool, Engine>
 where
     Client: BlockReaderIdExt,
+    Pool: TransactionPool,
+    Engine: EngineTypes,
 {
     /// Creates a new builder instance to configure all parts.
     pub fn new(
         chain_spec: Arc<ChainSpec>,
         client: Client,
         pool: Pool,
-        to_engine: UnboundedSender<BeaconEngineMessage>,
+        to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
         canon_state_notification: CanonStateNotificationSender,
         mode: MiningMode,
     ) -> Self {
@@ -145,7 +146,7 @@ where
 
     /// Consumes the type and returns all components
     #[track_caller]
-    pub fn build(self) -> (AutoSealConsensus, AutoSealClient, MiningTask<Client, Pool>) {
+    pub fn build(self) -> (AutoSealConsensus, AutoSealClient, MiningTask<Client, Pool, Engine>) {
         let Self { client, consensus, pool, mode, storage, to_engine, canon_state_notification } =
             self;
         let auto_client = AutoSealClient::new(storage.clone());
@@ -251,7 +252,7 @@ impl StorageInner {
     /// transactions.
     pub(crate) fn build_header_template(
         &self,
-        transactions: &Vec<TransactionSigned>,
+        transactions: &[TransactionSigned],
         chain_spec: Arc<ChainSpec>,
     ) -> Header {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
@@ -299,9 +300,8 @@ impl StorageInner {
     /// This returns the poststate from execution and post-block changes, as well as the gas used.
     pub(crate) fn execute(
         &mut self,
-        block: &Block,
+        block: &BlockWithSenders,
         executor: &mut EVMProcessor<'_>,
-        senders: Vec<Address>,
     ) -> Result<(BundleStateWithReceipts, u64), BlockExecutionError> {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
         // TODO: there isn't really a parent beacon block root here, so not sure whether or not to
@@ -310,8 +310,7 @@ impl StorageInner {
         // set the first block to find the correct index in bundle state
         executor.set_first_block(block.number);
 
-        let (receipts, gas_used) =
-            executor.execute_transactions(block, U256::ZERO, Some(senders))?;
+        let (receipts, gas_used) = executor.execute_transactions(block, U256::ZERO)?;
 
         // Save receipts.
         executor.save_receipts(receipts)?;
@@ -379,9 +378,8 @@ impl StorageInner {
     ) -> Result<(SealedHeader, BundleStateWithReceipts), BlockExecutionError> {
         let header = self.build_header_template(&transactions, chain_spec.clone());
 
-        let block = Block { header, body: transactions, ommers: vec![], withdrawals: None };
-
-        let senders = TransactionSigned::recover_signers(&block.body, block.body.len())
+        let block = Block { header, body: transactions, ommers: vec![], withdrawals: None }
+            .with_recovered_senders()
             .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
 
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
@@ -393,9 +391,9 @@ impl StorageInner {
             .build();
         let mut executor = EVMProcessor::new_with_state(chain_spec.clone(), db);
 
-        let (bundle_state, gas_used) = self.execute(&block, &mut executor, senders)?;
+        let (bundle_state, gas_used) = self.execute(&block, &mut executor)?;
 
-        let Block { header, body, .. } = block;
+        let Block { header, body, .. } = block.block;
         let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };
 
         trace!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");

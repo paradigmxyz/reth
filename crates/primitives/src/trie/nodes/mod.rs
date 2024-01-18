@@ -1,32 +1,6 @@
-use crate::{keccak256, B256};
-use alloy_rlp::EMPTY_STRING_CODE;
-use std::ops::Range;
+//! Various branch nodes produced by the hash builder.
 
 mod branch;
-pub use branch::{BranchNode, BranchNodeCompact};
+pub use branch::StoredBranchNode;
 
-mod extension;
-pub use extension::ExtensionNode;
-
-mod leaf;
-pub use leaf::LeafNode;
-
-/// The range of valid child indexes.
-pub const CHILD_INDEX_RANGE: Range<u8> = 0..16;
-
-/// Given an RLP encoded node, returns either RLP(node) or RLP(keccak(RLP(node)))
-#[inline]
-fn rlp_node(rlp: &[u8]) -> Vec<u8> {
-    if rlp.len() < B256::len_bytes() {
-        rlp.to_vec()
-    } else {
-        word_rlp(&keccak256(rlp))
-    }
-}
-
-/// Optimization for quick encoding of a 32-byte word as RLP.
-// TODO: this could return [u8; 33] but Vec is needed everywhere this function is used
-#[inline]
-pub fn word_rlp(word: &B256) -> Vec<u8> {
-    [&[EMPTY_STRING_CODE + B256::len_bytes() as u8][..], &word[..]].concat()
-}
+pub use alloy_trie::nodes::*;

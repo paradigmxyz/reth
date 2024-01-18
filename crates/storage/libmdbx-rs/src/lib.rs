@@ -4,10 +4,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![allow(clippy::type_complexity)]
-// TODO(danipopes): add these warnings
-// #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
+#![allow(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub use crate::{
@@ -15,11 +12,12 @@ pub use crate::{
     cursor::{Cursor, Iter, IterDup},
     database::Database,
     environment::{
-        Environment, EnvironmentBuilder, EnvironmentKind, Geometry, Info, PageSize, Stat,
+        Environment, EnvironmentBuilder, EnvironmentKind, Geometry, HandleSlowReadersCallback,
+        HandleSlowReadersReturnCode, Info, PageSize, Stat,
     },
     error::{Error, Result},
     flags::*,
-    transaction::{Transaction, TransactionKind, RO, RW},
+    transaction::{CommitLatency, Transaction, TransactionKind, RO, RW},
 };
 pub mod ffi {
     pub use ffi::{MDBX_dbi as DBI, MDBX_log_level_t as LogLevel};

@@ -1,4 +1,5 @@
 //! Contains RPC handler implementations specific to sign endpoints
+
 use crate::{
     eth::{
         error::{EthResult, SignError},

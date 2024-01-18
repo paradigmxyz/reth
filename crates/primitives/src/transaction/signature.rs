@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 /// The order of the secp256k1 curve, divided by two. Signatures that should be checked according
 /// to EIP-2 should have an S value less than or equal to this.
+///
+/// `57896044618658097711785492504343953926418782139537452191302581570759080747168`
 const SECP256K1N_HALF: U256 = U256::from_be_bytes([
     0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
     0x5D, 0x57, 0x6E, 0x73, 0x57, 0xA4, 0x50, 0x1D, 0xDF, 0xE9, 0x2F, 0x46, 0x68, 0x1B, 0x20, 0xA0,
@@ -80,7 +82,7 @@ impl Signature {
     pub fn v(&self, chain_id: Option<u64>) -> u64 {
         #[cfg(feature = "optimism")]
         if self.r.is_zero() && self.s.is_zero() {
-            return 0;
+            return 0
         }
 
         if let Some(chain_id) = chain_id {
@@ -107,7 +109,7 @@ impl Signature {
         } else {
             // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
             if v != 27 && v != 28 {
-                return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"));
+                return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
             }
             let odd_y_parity = v == 28;
             Ok((Signature { r, s, odd_y_parity }, None))
@@ -160,7 +162,7 @@ impl Signature {
     /// If the S value is too large, then this will return `None`
     pub fn recover_signer(&self, hash: B256) -> Option<Address> {
         if self.s > SECP256K1N_HALF {
-            return None;
+            return None
         }
 
         self.recover_signer_unchecked(hash)

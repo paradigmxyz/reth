@@ -83,12 +83,12 @@ impl<DB> ProviderFactory<DB> {
         mut self,
         snapshots_path: PathBuf,
         highest_snapshot_tracker: watch::Receiver<Option<HighestSnapshots>>,
-    ) -> Self {
+    ) -> ProviderResult<Self> {
         self.snapshot_provider = Some(Arc::new(
-            SnapshotProvider::new(snapshots_path)
+            SnapshotProvider::new(snapshots_path)?
                 .with_highest_tracker(Some(highest_snapshot_tracker)),
         ));
-        self
+        Ok(self)
     }
 
     /// Returns reference to the underlying database.
@@ -101,6 +101,7 @@ impl<DB: Database> ProviderFactory<DB> {
     /// Returns a provider with a created `DbTx` inside, which allows fetching data from the
     /// database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`]. This may fail if the inner read database transaction fails to open.
+    #[track_caller]
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
         let mut provider = DatabaseProvider::new(self.db.tx()?, self.chain_spec.clone());
 
@@ -115,6 +116,7 @@ impl<DB: Database> ProviderFactory<DB> {
     /// data from the database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
     /// open.
+    #[track_caller]
     pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<DB>> {
         let mut provider = DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone());
 
@@ -126,6 +128,7 @@ impl<DB: Database> ProviderFactory<DB> {
     }
 
     /// Storage provider for latest block
+    #[track_caller]
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
         Ok(Box::new(LatestStateProvider::new(self.db.tx()?)))
@@ -408,6 +411,13 @@ impl<DB: Database> ReceiptProvider for ProviderFactory<DB> {
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
         self.provider()?.receipts_by_block(block)
     }
+
+    fn receipts_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Receipt>> {
+        self.provider()?.receipts_by_tx_range(range)
+    }
 }
 
 impl<DB: Database> WithdrawalsProvider for ProviderFactory<DB> {
@@ -573,7 +583,10 @@ mod tests {
 
         {
             let provider = factory.provider_rw().unwrap();
-            assert_matches!(provider.insert_block(block.clone(), None, None), Ok(_));
+            assert_matches!(
+                provider.insert_block(block.clone().try_seal_with_senders().unwrap(), None),
+                Ok(_)
+            );
             assert_matches!(
                 provider.transaction_sender(0), Ok(Some(sender))
                 if sender == block.body[0].recover_signer().unwrap()
@@ -585,8 +598,7 @@ mod tests {
             let provider = factory.provider_rw().unwrap();
             assert_matches!(
                 provider.insert_block(
-                    block.clone(),
-                    None,
+                    block.clone().try_seal_with_senders().unwrap(),
                     Some(&PruneModes {
                         sender_recovery: Some(PruneMode::Full),
                         transaction_lookup: Some(PruneMode::Full),
@@ -611,7 +623,10 @@ mod tests {
         for range in tx_ranges {
             let provider = factory.provider_rw().unwrap();
 
-            assert_matches!(provider.insert_block(block.clone(), None, None), Ok(_));
+            assert_matches!(
+                provider.insert_block(block.clone().try_seal_with_senders().unwrap(), None),
+                Ok(_)
+            );
 
             let senders = provider.get_or_take::<tables::TxSenders, true>(range.clone());
             assert_eq!(

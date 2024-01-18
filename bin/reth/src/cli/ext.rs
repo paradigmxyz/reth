@@ -5,8 +5,12 @@ use crate::cli::{
     config::{PayloadBuilderConfig, RethNetworkConfig, RethRpcConfig},
 };
 use clap::Args;
-use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
+use reth_basic_payload_builder::{
+    BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, PayloadBuilder,
+};
+use reth_node_api::EngineTypes;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_provider::CanonStateSubscriptions;
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
 
@@ -29,7 +33,7 @@ impl RethCliExt for () {
 }
 
 /// A trait that allows for extending and customizing parts of the node command
-/// [NodeCommand](crate::node::NodeCommand).
+/// [NodeCommand](crate::commands::node::NodeCommand).
 ///
 /// The functions are invoked during the initialization of the node command in the following order:
 ///
@@ -124,14 +128,23 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     ///
     /// By default this spawns a [BasicPayloadJobGenerator] with the default configuration
     /// [BasicPayloadJobGeneratorConfig].
-    fn spawn_payload_builder_service<Conf, Reth>(
+    fn spawn_payload_builder_service<Conf, Reth, Builder, Engine>(
         &mut self,
         conf: &Conf,
         components: &Reth,
-    ) -> eyre::Result<PayloadBuilderHandle>
+        payload_builder: Builder,
+    ) -> eyre::Result<PayloadBuilderHandle<Engine>>
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
+        Engine: EngineTypes + 'static,
+        Builder: PayloadBuilder<
+                Reth::Pool,
+                Reth::Provider,
+                Attributes = Engine::PayloadBuilderAttributes,
+                BuiltPayload = Engine::BuiltPayload,
+            > + Unpin
+            + 'static,
     {
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
             .interval(conf.interval())
@@ -140,18 +153,9 @@ pub trait RethNodeCommandConfig: fmt::Debug {
             .extradata(conf.extradata_rlp_bytes())
             .max_gas_limit(conf.max_gas_limit());
 
+        // no extradata for optimism
         #[cfg(feature = "optimism")]
-        let payload_job_config =
-            payload_job_config.compute_pending_block(conf.compute_pending_block());
-
-        // The default payload builder is implemented on the unit type.
-        #[cfg(not(feature = "optimism"))]
-        #[allow(clippy::let_unit_value)]
-        let payload_builder = reth_basic_payload_builder::EthereumPayloadBuilder::default();
-
-        // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
-        #[cfg(feature = "optimism")]
-        let payload_builder = reth_basic_payload_builder::OptimismPayloadBuilder::default();
+        let payload_job_config = payload_job_config.extradata(Default::default());
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             components.provider(),
@@ -161,7 +165,10 @@ pub trait RethNodeCommandConfig: fmt::Debug {
             components.chain_spec(),
             payload_builder,
         );
-        let (payload_service, payload_builder) = PayloadBuilderService::new(payload_generator);
+        let (payload_service, payload_builder) = PayloadBuilderService::new(
+            payload_generator,
+            components.events().canonical_state_stream(),
+        );
 
         components
             .task_executor()
@@ -177,7 +184,8 @@ pub trait RethNodeCommandExt: RethNodeCommandConfig + fmt::Debug + clap::Args {}
 // blanket impl for all types that implement the required traits.
 impl<T> RethNodeCommandExt for T where T: RethNodeCommandConfig + fmt::Debug + clap::Args {}
 
-/// The default configuration for the reth node command [Command](crate::node::NodeCommand).
+/// The default configuration for the reth node command
+/// [Command](crate::commands::node::NodeCommand).
 ///
 /// This is a convenience type for [NoArgs<()>].
 #[derive(Debug, Clone, Copy, Default, Args)]
@@ -200,7 +208,7 @@ impl<Conf: RethNodeCommandConfig> RethCliExt for NoArgsCliExt<Conf> {
 /// additional CLI arguments.
 ///
 /// Note: This type must be manually filled with a [RethNodeCommandConfig] manually before executing
-/// the [NodeCommand](crate::node::NodeCommand).
+/// the [NodeCommand](crate::commands::node::NodeCommand).
 #[derive(Debug, Clone, Copy, Default, Args)]
 pub struct NoArgs<T = ()> {
     #[clap(skip)]
@@ -310,18 +318,27 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         }
     }
 
-    fn spawn_payload_builder_service<Conf, Reth>(
+    fn spawn_payload_builder_service<Conf, Reth, Builder, Engine>(
         &mut self,
         conf: &Conf,
         components: &Reth,
-    ) -> eyre::Result<PayloadBuilderHandle>
+        payload_builder: Builder,
+    ) -> eyre::Result<PayloadBuilderHandle<Engine>>
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
+        Engine: EngineTypes + 'static,
+        Builder: PayloadBuilder<
+                Reth::Pool,
+                Reth::Provider,
+                Attributes = Engine::PayloadBuilderAttributes,
+                BuiltPayload = Engine::BuiltPayload,
+            > + Unpin
+            + 'static,
     {
         self.inner_mut()
             .ok_or_else(|| eyre::eyre!("config value must be set"))?
-            .spawn_payload_builder_service(conf, components)
+            .spawn_payload_builder_service(conf, components, payload_builder)
     }
 }
 
