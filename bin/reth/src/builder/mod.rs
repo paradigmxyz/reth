@@ -266,7 +266,7 @@ impl NodeConfig {
         };
 
         // set all ports to zero by default for test instances
-        test.with_unused_ports();
+        test = test.with_unused_ports();
         test
     }
 
@@ -950,9 +950,10 @@ impl NodeConfig {
 
     /// Sets networking and RPC ports to zero, causing the OS to choose random unused ports when
     /// sockets are bound.
-    fn with_unused_ports(&mut self) {
-        self.rpc.with_unused_ports();
-        self.network.with_unused_ports();
+    fn with_unused_ports(mut self) -> Self {
+        self.rpc = self.rpc.with_unused_ports();
+        self.network = self.network.with_unused_ports();
+        self
     }
 }
 
