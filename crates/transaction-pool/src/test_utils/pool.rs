@@ -83,12 +83,10 @@ impl<R: Rng> MockTransactionSimulator<R> {
     /// Returns a new mock instance
     pub(crate) fn new(mut rng: R, config: MockSimulatorConfig) -> Self {
         let senders = config.addresses(&mut rng);
-        let nonces = senders.iter().copied().map(|a| (a, 0)).collect();
-        let balances = senders.iter().copied().map(|a| (a, config.balance)).collect();
         Self {
             base_fee: config.base_fee,
-            balances,
-            nonces,
+            balances: senders.iter().copied().map(|a| (a, config.balance)).collect(),
+            nonces: senders.iter().copied().map(|a| (a, 0)).collect(),
             senders,
             scenarios: config.scenarios,
             tx_generator: config.tx_generator,

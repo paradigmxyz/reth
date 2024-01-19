@@ -15,7 +15,7 @@ workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
-
+alloy-chains.workspace = true
 # misc
 cfg-if = "1.0.0"
 

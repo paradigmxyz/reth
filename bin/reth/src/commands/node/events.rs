@@ -122,7 +122,7 @@ impl<DB> NodeState<DB> {
                             %target,
                             %stage_progress,
                             %stage_eta,
-                            message,
+                            "{message}",
                         )
                     } else {
                         info!(
@@ -131,7 +131,7 @@ impl<DB> NodeState<DB> {
                             checkpoint = %checkpoint.block_number,
                             %target,
                             %stage_progress,
-                            message,
+                            "{message}",
                         )
                     }
                 }

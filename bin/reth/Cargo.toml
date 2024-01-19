@@ -40,7 +40,7 @@ reth-rpc-types-compat.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-api.workspace = true
-reth-downloaders = { workspace = true, features = ["test-utils"] }
+reth-downloaders.workspace = true
 reth-tracing.workspace = true
 reth-tasks.workspace = true
 reth-net-nat.workspace = true
@@ -59,6 +59,7 @@ reth-node-builder.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
+alloy-chains.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 revm-inspectors.workspace = true
 
@@ -89,7 +90,7 @@ rand.workspace = true
 # tui
 comfy-table = "7.0"
 crossterm = "0.27.0"
-tui = "0.19.0"
+ratatui = "0.25.0"
 human_bytes = "0.4.1"
 
 # async
@@ -115,6 +116,10 @@ itertools.workspace = true
 rayon.workspace = true
 futures-util.workspace = true
 
+[dev-dependencies]
+jsonrpsee.workspace = true
+assert_matches = "1.5.0"
+
 [target.'cfg(not(windows))'.dependencies]
 jemallocator = { version = "0.5.0", optional = true }
 jemalloc-ctl = { version = "0.5.0", optional = true }
@@ -124,13 +129,18 @@ procfs = { version = "0.16.0" }
 
 [features]
 default = ["jemalloc"]
+
+asm-keccak = ["reth-primitives/asm-keccak"]
+
 jemalloc = ["dep:jemallocator", "dep:jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "jemallocator?/profiling"]
+
 min-error-logs = ["tracing/release_max_level_error"]
 min-warn-logs = ["tracing/release_max_level_warn"]
 min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
+
 optimism = [
     "reth-primitives/optimism",
     "reth-revm/optimism",
@@ -147,12 +157,15 @@ optimism = [
     "reth-payload-builder/optimism",
     "reth-optimism-payload-builder/optimism",
     "reth-ethereum-payload-builder/optimism",
+    "reth-node-api/optimism",
+    "reth-node-builder/optimism",
 ]
+
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
 
 [build-dependencies]
-vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }
+vergen = { version = "8.0.0", features = ["build", "cargo", "git", "git2"] }
 
 [[bin]]
 name = "reth"

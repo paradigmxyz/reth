@@ -7,10 +7,11 @@ use crate::{
     NetworkError, NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
     ReputationChangeKind,
 };
+use alloy_chains::Chain;
 use async_trait::async_trait;
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_eth_wire::{DisconnectReason, ProtocolVersion};
-use reth_primitives::{Chain, NodeRecord, PeerId};
+use reth_primitives::{NodeRecord, PeerId};
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::net::{IpAddr, SocketAddr};
 

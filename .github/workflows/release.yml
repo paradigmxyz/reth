@@ -31,10 +31,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - target: aarch64-unknown-linux-gnu
+          - target: x86_64-unknown-linux-gnu
             os: ubuntu-20.04
             profile: maxperf
-          - target: x86_64-unknown-linux-gnu
+          - target: aarch64-unknown-linux-gnu
             os: ubuntu-20.04
             profile: maxperf
           - target: x86_64-apple-darwin

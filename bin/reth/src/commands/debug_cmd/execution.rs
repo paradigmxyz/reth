@@ -136,13 +136,14 @@ impl Command {
                         max_blocks: None,
                         max_changes: None,
                         max_cumulative_gas: None,
+                        max_duration: None,
                     },
                     stage_conf
                         .merkle
                         .clean_threshold
                         .max(stage_conf.account_hashing.clean_threshold)
                         .max(stage_conf.storage_hashing.clean_threshold),
-                    config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default(),
+                    config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
                 )),
             )
             .build(provider_factory);

@@ -17,8 +17,8 @@
 //! ```no_run
 //! # use reth_rpc_types::engine::{PayloadAttributes as EthPayloadAttributes, PayloadId, Withdrawal};
 //! # use reth_primitives::{B256, ChainSpec, Address};
-//! # use reth_node_api::{EngineTypes, EngineApiMessageVersion, validate_version_specific_fields, AttributesValidationError, PayloadAttributes, PayloadBuilderAttributes};
-//! # use reth_payload_builder::EthPayloadBuilderAttributes;
+//! # use reth_node_api::{EngineTypes, EngineApiMessageVersion, validate_version_specific_fields, AttributesValidationError, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes};
+//! # use reth_payload_builder::{EthPayloadBuilderAttributes, EthBuiltPayload};
 //! # use serde::{Deserialize, Serialize};
 //! # use thiserror::Error;
 //! # use std::convert::Infallible;
@@ -58,7 +58,7 @@
 //!         chain_spec: &ChainSpec,
 //!         version: EngineApiMessageVersion,
 //!     ) -> Result<(), AttributesValidationError> {
-//!         validate_version_specific_fields(chain_spec, version, &self.into())?;
+//!         validate_version_specific_fields(chain_spec, version, self.into())?;
 //!
 //!         // custom validation logic - ensure that the custom field is not zero
 //!         if self.custom == 0 {
@@ -121,6 +121,15 @@
 //! impl EngineTypes for CustomEngineTypes {
 //!    type PayloadAttributes = CustomPayloadAttributes;
 //!    type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
+//!    type BuiltPayload = EthBuiltPayload;
+//!
+//!    fn validate_version_specific_fields(
+//!        chain_spec: &ChainSpec,
+//!        version: EngineApiMessageVersion,
+//!        payload_or_attrs: PayloadOrAttributes<'_, CustomPayloadAttributes>,
+//!    ) -> Result<(), AttributesValidationError> {
+//!        validate_version_specific_fields(chain_spec, version, payload_or_attrs)
+//!    }
 //! }
 //! ```
 
@@ -129,7 +138,7 @@ use reth_primitives::{ChainSpec, Hardfork};
 /// Contains traits to abstract over payload attributes types and default implementations of the
 /// [PayloadAttributes] trait for ethereum mainnet and optimism types.
 pub mod traits;
-pub use traits::{PayloadAttributes, PayloadBuilderAttributes};
+pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
 
 /// Contains error types used in the traits defined in this crate.
 pub mod error;
@@ -149,7 +158,16 @@ pub trait EngineTypes: Send + Sync {
         + Clone
         + Unpin;
 
-    // TODO: payload type
+    /// The built payload type.
+    type BuiltPayload: BuiltPayload + Clone + Unpin;
+
+    /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
+    /// and the message version.
+    fn validate_version_specific_fields(
+        chain_spec: &ChainSpec,
+        version: EngineApiMessageVersion,
+        payload_or_attrs: PayloadOrAttributes<'_, Self::PayloadAttributes>,
+    ) -> Result<(), AttributesValidationError>;
 }
 
 /// Validates the timestamp depending on the version called:
@@ -193,6 +211,44 @@ pub fn validate_payload_timestamp(
         //    the built payload does not fall within the time frame of the Cancun fork.
         return Err(AttributesValidationError::UnsupportedFork)
     }
+    Ok(())
+}
+
+#[cfg(feature = "optimism")]
+/// Validates the presence of the `withdrawals` field according to the payload timestamp.
+///
+/// After Canyon, withdrawals field must be [Some].
+/// Before Canyon, withdrawals field must be [None];
+///
+/// Canyon activates the Shanghai EIPs, see the Canyon specs for more details:
+/// <https://github.com/ethereum-optimism/optimism/blob/ab926c5fd1e55b5c864341c44842d6d1ca679d99/specs/superchain-upgrades.md#canyon>
+pub fn optimism_validate_withdrawals_presence(
+    chain_spec: &ChainSpec,
+    version: EngineApiMessageVersion,
+    timestamp: u64,
+    has_withdrawals: bool,
+) -> Result<(), AttributesValidationError> {
+    let is_shanghai = chain_spec.fork(Hardfork::Canyon).active_at_timestamp(timestamp);
+
+    match version {
+        EngineApiMessageVersion::V1 => {
+            if has_withdrawals {
+                return Err(AttributesValidationError::WithdrawalsNotSupportedInV1)
+            }
+            if is_shanghai {
+                return Err(AttributesValidationError::NoWithdrawalsPostShanghai)
+            }
+        }
+        EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 => {
+            if is_shanghai && !has_withdrawals {
+                return Err(AttributesValidationError::NoWithdrawalsPostShanghai)
+            }
+            if !is_shanghai && has_withdrawals {
+                return Err(AttributesValidationError::HasWithdrawalsPreShanghai)
+            }
+        }
+    };
+
     Ok(())
 }
 
@@ -288,12 +344,37 @@ pub fn validate_parent_beacon_block_root_presence(
 pub fn validate_version_specific_fields<Type>(
     chain_spec: &ChainSpec,
     version: EngineApiMessageVersion,
-    payload_or_attrs: &PayloadOrAttributes<'_, Type>,
+    payload_or_attrs: PayloadOrAttributes<'_, Type>,
 ) -> Result<(), AttributesValidationError>
 where
     Type: PayloadAttributes,
 {
     validate_withdrawals_presence(
+        chain_spec,
+        version,
+        payload_or_attrs.timestamp(),
+        payload_or_attrs.withdrawals().is_some(),
+    )?;
+    validate_parent_beacon_block_root_presence(
+        chain_spec,
+        version,
+        payload_or_attrs.timestamp(),
+        payload_or_attrs.parent_beacon_block_root().is_some(),
+    )
+}
+
+#[cfg(feature = "optimism")]
+/// Validates the presence or exclusion of fork-specific fields based on the payload attributes
+/// and the message version.
+pub fn optimism_validate_version_specific_fields<Type>(
+    chain_spec: &ChainSpec,
+    version: EngineApiMessageVersion,
+    payload_or_attrs: PayloadOrAttributes<'_, Type>,
+) -> Result<(), AttributesValidationError>
+where
+    Type: PayloadAttributes,
+{
+    optimism_validate_withdrawals_presence(
         chain_spec,
         version,
         payload_or_attrs.timestamp(),

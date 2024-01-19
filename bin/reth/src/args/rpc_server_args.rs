@@ -17,6 +17,7 @@ use clap::{
     Arg, Args, Command,
 };
 use futures::TryFutureExt;
+use rand::Rng;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_node_api::EngineTypes;
 use reth_provider::{
@@ -220,6 +221,49 @@ impl RpcServerArgs {
         self.ipcpath = format!("{}-{}", self.ipcpath, instance);
     }
 
+    /// Set the http port to zero, to allow the OS to assign a random unused port when the rpc
+    /// server binds to a socket.
+    pub fn with_http_unused_port(mut self) -> Self {
+        self.http_port = 0;
+        self
+    }
+
+    /// Set the ws port to zero, to allow the OS to assign a random unused port when the rpc
+    /// server binds to a socket.
+    pub fn with_ws_unused_port(mut self) -> Self {
+        self.ws_port = 0;
+        self
+    }
+
+    /// Set the auth port to zero, to allow the OS to assign a random unused port when the rpc
+    /// server binds to a socket.
+    pub fn with_auth_unused_port(mut self) -> Self {
+        self.auth_port = 0;
+        self
+    }
+
+    /// Append a random string to the ipc path, to prevent possible collisions when multiple nodes
+    /// are being run on the same machine.
+    pub fn with_ipc_random_path(mut self) -> Self {
+        let random_string: String = rand::thread_rng()
+            .sample_iter(rand::distributions::Alphanumeric)
+            .take(8)
+            .map(char::from)
+            .collect();
+        self.ipcpath = format!("{}-{}", self.ipcpath, random_string);
+        self
+    }
+
+    /// Configure all ports to be set to a random unused port when bound, and set the IPC path to a
+    /// random path.
+    pub fn with_unused_ports(mut self) -> Self {
+        self = self.with_http_unused_port();
+        self = self.with_ws_unused_port();
+        self = self.with_auth_unused_port();
+        self = self.with_ipc_random_path();
+        self
+    }
+
     /// Configures and launches _all_ servers.
     ///
     /// Returns the handles for the launched regular RPC server(s) (if any) and the server handle
@@ -242,7 +286,7 @@ impl RpcServerArgs {
         let module_config = self.transport_rpc_module_config();
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
-        let (mut modules, auth_module, mut registry) = RpcModuleBuilder::default()
+        let (mut modules, mut auth_module, mut registry) = RpcModuleBuilder::default()
             .with_provider(components.provider())
             .with_pool(components.pool())
             .with_network(components.network())
@@ -250,7 +294,11 @@ impl RpcServerArgs {
             .with_executor(components.task_executor())
             .build_with_auth_server(module_config, engine_api);
 
-        let rpc_components = RethRpcComponents { registry: &mut registry, modules: &mut modules };
+        let rpc_components = RethRpcComponents {
+            registry: &mut registry,
+            modules: &mut modules,
+            auth_module: &mut auth_module,
+        };
         // apply configured customization
         conf.extend_rpc_modules(self, components, rpc_components)?;
 
@@ -268,7 +316,7 @@ impl RpcServerArgs {
             handle
         });
 
-        let launch_auth = auth_module.start_server(auth_config).map_ok(|handle| {
+        let launch_auth = auth_module.clone().start_server(auth_config).map_ok(|handle| {
             let addr = handle.local_addr();
             info!(target: "reth::cli", url=%addr, "RPC auth server started");
             handle
@@ -279,7 +327,11 @@ impl RpcServerArgs {
         let handles = RethRpcServerHandles { rpc, auth };
 
         // call hook
-        let rpc_components = RethRpcComponents { registry: &mut registry, modules: &mut modules };
+        let rpc_components = RethRpcComponents {
+            registry: &mut registry,
+            modules: &mut modules,
+            auth_module: &mut auth_module,
+        };
         conf.on_rpc_server_started(self, components, rpc_components, handles.clone())?;
 
         Ok(handles)

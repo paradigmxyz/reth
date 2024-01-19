@@ -347,7 +347,7 @@ impl SnapshotProvider {
                             break 'outer
                         }
                         result.push(res);
-                        break 'inner;
+                        break 'inner
                     }
                     None => {
                         provider = get_provider(number)?;

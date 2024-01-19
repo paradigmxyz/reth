@@ -3,6 +3,13 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use ratatui::{
+    backend::{Backend, CrosstermBackend},
+    layout::{Alignment, Constraint, Direction, Layout},
+    style::{Color, Modifier, Style},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    Frame, Terminal,
+};
 use reth_db::{
     table::{Table, TableRow},
     RawValue,
@@ -12,13 +19,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::error;
-use tui::{
-    backend::{Backend, CrosstermBackend},
-    layout::{Alignment, Constraint, Corner, Direction, Layout},
-    style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
-    Frame, Terminal,
-};
 
 /// Available keybindings for the [DbListTUI]
 static CMDS: [(&str, &str); 6] = [
@@ -315,17 +315,21 @@ where
     }
 
     match event {
-        Event::Key(key) => match key.code {
-            KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(true),
-            KeyCode::Down => app.next(),
-            KeyCode::Up => app.previous(),
-            KeyCode::Right => app.next_page(),
-            KeyCode::Left => app.previous_page(),
-            KeyCode::Char('G') => {
-                app.mode = ViewMode::GoToPage;
+        Event::Key(key) => {
+            if key.kind == event::KeyEventKind::Press {
+                match key.code {
+                    KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(true),
+                    KeyCode::Down => app.next(),
+                    KeyCode::Up => app.previous(),
+                    KeyCode::Right => app.next_page(),
+                    KeyCode::Left => app.previous_page(),
+                    KeyCode::Char('G') => {
+                        app.mode = ViewMode::GoToPage;
+                    }
+                    _ => {}
+                }
             }
-            _ => {}
-        },
+        }
         Event::Mouse(e) => match e.kind {
             MouseEventKind::ScrollDown => app.next(),
             MouseEventKind::ScrollUp => app.previous(),
@@ -352,7 +356,7 @@ where
 }
 
 /// Render the UI
-fn ui<B: Backend, F, T: Table>(f: &mut Frame<'_, B>, app: &mut DbListTUI<F, T>)
+fn ui<F, T: Table>(f: &mut Frame<'_>, app: &mut DbListTUI<F, T>)
 where
     F: FnMut(usize, usize) -> Vec<TableRow<T>>,
 {
@@ -388,36 +392,26 @@ where
             )))
             .style(Style::default().fg(Color::White))
             .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC))
-            .highlight_symbol("➜ ")
-            .start_corner(Corner::TopLeft);
+            .highlight_symbol("➜ ");
         f.render_stateful_widget(key_list, inner_chunks[0], &mut app.list_state);
-
-        let values: Vec<_> = match &app.entries {
-            Entries::RawValues(entries) => entries
-                .iter()
-                .map(|(_, v)| {
-                    serde_json::to_string_pretty(v)
-                        .unwrap_or(String::from("Error serializing value"))
-                })
-                .collect(),
-            Entries::Values(entries) => entries
-                .iter()
-                .map(|(_, v)| {
-                    serde_json::to_string_pretty(v)
-                        .unwrap_or(String::from("Error serializing value"))
-                })
-                .collect(),
-        };
 
         let value_display = Paragraph::new(
             app.list_state
                 .selected()
-                .and_then(|selected| values.get(selected))
-                .map(|entry| {
-                    serde_json::to_string_pretty(entry)
-                        .unwrap_or(String::from("Error serializing value"))
+                .and_then(|selected| {
+                    let maybe_serialized = match &app.entries {
+                        Entries::RawValues(entries) => {
+                            entries.get(selected).map(|(_, v)| serde_json::to_string(v.raw_value()))
+                        }
+                        Entries::Values(entries) => {
+                            entries.get(selected).map(|(_, v)| serde_json::to_string_pretty(v))
+                        }
+                    };
+                    maybe_serialized.map(|ser| {
+                        ser.unwrap_or_else(|error| format!("Error serializing value: {error}"))
+                    })
                 })
-                .unwrap_or("No value selected".to_string()),
+                .unwrap_or_else(|| "No value selected".to_string()),
         )
         .block(Block::default().borders(Borders::ALL).title("Value (JSON)"))
         .wrap(Wrap { trim: false })
