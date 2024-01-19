@@ -171,9 +171,8 @@ mod implementations {
 
     impl PartialEq for MockTransactionWithPriority {
         // NOTE(onbjerg): False positive
-        #[allow(clippy::unconditional_recursion)]
         fn eq(&self, other: &Self) -> bool {
-            self.priority.eq(&other.priority)
+           self.priority == other.priority
         }
     }
 
