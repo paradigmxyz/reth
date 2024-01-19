@@ -41,7 +41,6 @@ tracing.workspace = true
 thiserror.workspace = true
 schnellru.workspace = true
 cfg-if = "1.0.0"
-stopwatch = "0.0.7"
 
 [dev-dependencies]
 # reth

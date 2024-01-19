@@ -43,7 +43,6 @@ use std::{
     task::{Context, Poll},
     time::{Duration, Instant},
 };
-use stopwatch::Stopwatch;
 use tokio::sync::{
     mpsc,
     mpsc::{UnboundedReceiver, UnboundedSender},
@@ -1258,11 +1257,11 @@ where
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
         let block_hash = block.hash;
-        let sw = Stopwatch::start_new();
+        let start = Instant::now();
         let status = self
             .blockchain
             .insert_block_without_senders(block.clone(), BlockValidationKind::Exhaustive)?;
-        let elapsed = sw.elapsed();
+        let elapsed = start.elapsed();
         let mut latest_valid_hash = None;
         let block = Arc::new(block);
         let status = match status {
