@@ -89,7 +89,7 @@ where
                     let tx = tx_env_with_recovered(&tx);
                     let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
                     let (result, state_changes) =
-                        this.trace_transaction(opts.clone(), env, at, &mut db).map_err(|err| {
+                        this.trace_transaction(opts.clone(), env, &mut db).map_err(|err| {
                             results.push(TraceResult::Error {
                                 error: err.to_string(),
                                 tx_hash: Some(tx_hash),
@@ -221,7 +221,7 @@ where
                 )?;
 
                 let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
-                this.trace_transaction(opts, env, state_at, &mut db).map(|(trace, _)| trace)
+                this.trace_transaction(opts, env, &mut db).map(|(trace, _)| trace)
             })
             .await
     }
@@ -429,12 +429,8 @@ where
                             overrides,
                         )?;
 
-                        let (trace, state) = this.trace_transaction(
-                            tracing_options.clone(),
-                            env,
-                            target_block,
-                            &mut db,
-                        )?;
+                        let (trace, state) =
+                            this.trace_transaction(tracing_options.clone(), env, &mut db)?;
 
                         // If there is more transactions, commit the database
                         // If there is no transactions, but more bundles, commit to the database too
@@ -462,7 +458,6 @@ where
         &self,
         opts: GethDebugTracingOptions,
         env: Env,
-        _at: BlockId,
         db: &mut SubState<StateProviderBox>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
