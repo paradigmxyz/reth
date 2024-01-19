@@ -1,7 +1,7 @@
 use crate::{
     database::Database,
     environment::Environment,
-    error::{mdbx_result, mdbx_result_ro_tx, mdbx_result_with_tx_kind, Result},
+    error::{mdbx_result, mdbx_result_with_tx_kind, Result},
     flags::{DatabaseFlags, WriteFlags},
     txn_manager::{TxnManagerMessage, TxnPtr},
     Cursor, Error, Stat, TableObject,
@@ -509,7 +509,7 @@ impl Transaction<RO> {
     /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
     pub unsafe fn close_db(&self, db: Database) -> Result<()> {
-        mdbx_result_ro_tx(
+        mdbx_result_with_tx_kind::<RO>(
             ffi::mdbx_dbi_close(self.env().env_ptr(), db.dbi()),
             self.txn(),
             self.env().txn_manager(),

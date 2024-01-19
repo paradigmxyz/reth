@@ -118,7 +118,7 @@ pub enum Error {
     /// [Mode::ReadOnly](crate::flags::Mode::ReadOnly), write transactions can't be opened.
     #[error("write transactions are not supported in read-only mode")]
     WriteTransactionUnsupportedInReadOnlyMode,
-    #[error("read transaction has been aborte by the transaction manager")]
+    #[error("read transaction has been aborted by the transaction manager")]
     ReadTransactionAborted,
     /// Unknown error code.
     #[error("unknown error code")]
@@ -217,31 +217,20 @@ pub(crate) fn mdbx_result(err_code: c_int) -> Result<bool> {
 }
 
 #[inline]
-pub(crate) fn mdbx_result_ro_tx(
-    err_code: c_int,
-    txn: *mut ffi::MDBX_txn,
-    txn_manager: &TxnManager,
-) -> Result<bool> {
-    match err_code {
-        #[cfg(feature = "read-tx-timeouts")]
-        ffi::MDBX_EBADSIGN if txn_manager.remove_aborted_read_transaction(txn).is_some() => {
-            Err(Error::ReadTransactionAborted)
-        }
-        other => mdbx_result(other),
-    }
-}
-
-#[inline]
 pub(crate) fn mdbx_result_with_tx_kind<K: TransactionKind>(
     err_code: c_int,
     txn: *mut ffi::MDBX_txn,
     txn_manager: &TxnManager,
 ) -> Result<bool> {
-    if K::IS_READ_ONLY {
-        mdbx_result_ro_tx(err_code, txn, txn_manager)
-    } else {
-        mdbx_result(err_code)
+    #[cfg(feature = "read-tx-timeouts")]
+    if K::IS_READ_ONLY &&
+        err_code == ffi::MDBX_EBADSIGN &&
+        txn_manager.remove_aborted_read_transaction(txn).is_some()
+    {
+        return Err(Error::ReadTransactionAborted);
     }
+
+    mdbx_result(err_code)
 }
 
 #[macro_export]
