@@ -1,7 +1,7 @@
 use crate::{
     database::Database,
     environment::Environment,
-    error::{mdbx_result, Result},
+    error::{mdbx_result, mdbx_result_ro_tx, mdbx_result_with_tx_kind, Result},
     flags::{DatabaseFlags, WriteFlags},
     txn_manager::{TxnManagerMessage, TxnPtr},
     Cursor, Error, Stat, TableObject,
@@ -30,11 +30,9 @@ mod private {
 
 pub trait TransactionKind: private::Sealed + Send + Sync + Debug + 'static {
     #[doc(hidden)]
-    const ONLY_CLEAN: bool;
-
-    #[doc(hidden)]
     const OPEN_FLAGS: MDBX_txn_flags_t;
 
+    /// Convenience flag for distinguishing between read-only and read-write transactions.
     #[doc(hidden)]
     const IS_READ_ONLY: bool;
 }
@@ -48,12 +46,10 @@ pub struct RO;
 pub struct RW;
 
 impl TransactionKind for RO {
-    const ONLY_CLEAN: bool = true;
     const OPEN_FLAGS: MDBX_txn_flags_t = MDBX_TXN_RDONLY;
     const IS_READ_ONLY: bool = true;
 }
 impl TransactionKind for RW {
-    const ONLY_CLEAN: bool = false;
     const OPEN_FLAGS: MDBX_txn_flags_t = MDBX_TXN_READWRITE;
     const IS_READ_ONLY: bool = false;
 }
@@ -75,20 +71,25 @@ where
     pub(crate) fn new(env: Environment) -> Result<Self> {
         let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
         unsafe {
-            mdbx_result(ffi::mdbx_txn_begin_ex(
-                env.env_ptr(),
-                ptr::null_mut(),
-                K::OPEN_FLAGS,
-                &mut txn,
-                ptr::null_mut(),
-            ))?;
+            mdbx_result_with_tx_kind::<K>(
+                ffi::mdbx_txn_begin_ex(
+                    env.env_ptr(),
+                    ptr::null_mut(),
+                    K::OPEN_FLAGS,
+                    &mut txn,
+                    ptr::null_mut(),
+                ),
+                txn,
+                env.txn_manager(),
+            )?;
             Ok(Self::new_from_ptr(env, txn))
         }
     }
 
     pub(crate) fn new_from_ptr(env: Environment, txn: *mut ffi::MDBX_txn) -> Self {
+        #[cfg(feature = "read-tx-timeouts")]
         if K::IS_READ_ONLY {
-            env.txn_manager().add_read_transaction(txn)
+            env.txn_manager().add_active_read_transaction(txn)
         }
 
         let inner = TransactionInner {
@@ -186,14 +187,15 @@ where
         let result = {
             let result = self.txn_execute(|txn| {
                 if K::IS_READ_ONLY {
-                    self.env().txn_manager().remove_read_transaction(txn);
-                }
+                    #[cfg(feature = "read-tx-timeouts")]
+                    self.env().txn_manager().remove_active_read_transaction(txn);
 
-                if K::ONLY_CLEAN {
                     let mut latency = CommitLatency::new();
-                    mdbx_result(unsafe {
-                        ffi::mdbx_txn_commit_ex(txn, latency.mdb_commit_latency())
-                    })
+                    mdbx_result_with_tx_kind::<K>(
+                        unsafe { ffi::mdbx_txn_commit_ex(txn, latency.mdb_commit_latency()) },
+                        txn,
+                        self.env().txn_manager(),
+                    )
                     .map(|v| (v, latency))
                 } else {
                     let (sender, rx) = sync_channel(0);
@@ -240,9 +242,13 @@ where
     pub fn db_flags(&self, db: &Database) -> Result<DatabaseFlags> {
         let mut flags: c_uint = 0;
         unsafe {
-            mdbx_result(self.txn_execute(|txn| {
-                ffi::mdbx_dbi_flags_ex(txn, db.dbi(), &mut flags, ptr::null_mut())
-            }))?;
+            self.txn_execute(|txn| {
+                mdbx_result_with_tx_kind::<K>(
+                    ffi::mdbx_dbi_flags_ex(txn, db.dbi(), &mut flags, ptr::null_mut()),
+                    txn,
+                    self.env().txn_manager(),
+                )
+            })?;
         }
 
         // The types are not the same on Windows. Great!
@@ -259,9 +265,13 @@ where
     pub fn db_stat_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Stat> {
         unsafe {
             let mut stat = Stat::new();
-            mdbx_result(self.txn_execute(|txn| {
-                ffi::mdbx_dbi_stat(txn, dbi, stat.mdb_stat(), size_of::<Stat>())
-            }))?;
+            self.txn_execute(|txn| {
+                mdbx_result_with_tx_kind::<K>(
+                    ffi::mdbx_dbi_stat(txn, dbi, stat.mdb_stat(), size_of::<Stat>()),
+                    txn,
+                    self.env().txn_manager(),
+                )
+            })?;
             Ok(stat)
         }
     }
@@ -339,9 +349,10 @@ where
     fn drop(&mut self) {
         self.txn_execute(|txn| {
             if !self.has_committed() {
-                self.env.txn_manager().remove_read_transaction(txn);
+                if K::IS_READ_ONLY {
+                    #[cfg(feature = "read-tx-timeouts")]
+                    self.env.txn_manager().remove_active_read_transaction(txn);
 
-                if K::ONLY_CLEAN {
                     unsafe {
                         ffi::mdbx_txn_abort(txn);
                     }
@@ -498,7 +509,11 @@ impl Transaction<RO> {
     /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
     pub unsafe fn close_db(&self, db: Database) -> Result<()> {
-        mdbx_result(ffi::mdbx_dbi_close(self.env().env_ptr(), db.dbi()))?;
+        mdbx_result_ro_tx(
+            ffi::mdbx_dbi_close(self.env().env_ptr(), db.dbi()),
+            self.txn(),
+            self.env().txn_manager(),
+        )?;
 
         Ok(())
     }

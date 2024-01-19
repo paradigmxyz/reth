@@ -21,6 +21,8 @@ use std::{
     time::Duration,
 };
 
+const DEFAULT_MAX_READ_TRANSACTION_DURATION: Duration = Duration::from_secs(5 * 60);
+
 /// An environment supports multiple databases, all residing in the same shared-memory map.
 ///
 /// Accessing the environment is thread-safe.
@@ -48,6 +50,8 @@ impl Environment {
             kind: Default::default(),
             #[cfg(not(windows))]
             handle_slow_readers: None,
+            #[cfg(feature = "read-tx-timeouts")]
+            max_read_transaction_duration: None,
         }
     }
 
@@ -569,6 +573,8 @@ pub struct EnvironmentBuilder {
     kind: EnvironmentKind,
     #[cfg(not(windows))]
     handle_slow_readers: Option<HandleSlowReadersCallback>,
+    #[cfg(feature = "read-tx-timeouts")]
+    max_read_transaction_duration: Option<Duration>,
 }
 
 impl EnvironmentBuilder {
@@ -690,11 +696,13 @@ impl EnvironmentBuilder {
             }
         }
 
-        let env = EnvironmentInner {
-            env,
-            txn_manager: TxnManager::new(EnvPtr(env), Duration::from_secs(1 * 60)), // 1 minute
-            env_kind: self.kind,
-        };
+        let txn_manager = TxnManager::new(
+            EnvPtr(env),
+            #[cfg(feature = "read-tx-timeouts")]
+            self.max_read_transaction_duration.unwrap_or(DEFAULT_MAX_READ_TRANSACTION_DURATION),
+        );
+
+        let env = EnvironmentInner { env, txn_manager, env_kind: self.kind };
 
         Ok(Environment { inner: Arc::new(env) })
     }
@@ -790,6 +798,11 @@ impl EnvironmentBuilder {
         self
     }
 
+    pub fn set_log_level(&mut self, log_level: ffi::MDBX_log_level_t) -> &mut Self {
+        self.log_level = Some(log_level);
+        self
+    }
+
     /// Set the Handle-Slow-Readers callback. See [HandleSlowReadersCallback] for more information.
     #[cfg(not(windows))]
     pub fn set_handle_slow_readers(&mut self, hsr: HandleSlowReadersCallback) -> &mut Self {
@@ -797,8 +810,13 @@ impl EnvironmentBuilder {
         self
     }
 
-    pub fn set_log_level(&mut self, log_level: ffi::MDBX_log_level_t) -> &mut Self {
-        self.log_level = Some(log_level);
+    /// Set the maximum time a read-only transaction can be open.
+    #[cfg(feature = "read-tx-timeouts")]
+    pub fn set_max_read_transaction_duration(
+        &mut self,
+        max_read_transaction_duration: Duration,
+    ) -> &mut Self {
+        self.max_read_transaction_duration = Some(max_read_transaction_duration);
         self
     }
 }

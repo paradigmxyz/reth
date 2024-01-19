@@ -3,15 +3,13 @@ use crate::{
     error::{mdbx_result, Result},
     CommitLatency,
 };
-use dashmap::DashMap;
 use std::{
-    backtrace::Backtrace,
     ptr,
     sync::{
         mpsc::{sync_channel, Receiver, SyncSender},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 #[derive(Copy, Clone, Debug)]
@@ -25,24 +23,30 @@ pub(crate) enum TxnManagerMessage {
     Commit { tx: TxnPtr, sender: SyncSender<Result<(bool, CommitLatency)>> },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct TxnManager {
     sender: SyncSender<TxnManagerMessage>,
-    read_transactions: Arc<DashMap<usize, (Instant, Backtrace)>>,
-    max_read_transaction_duration: Duration,
+    #[cfg(feature = "read-tx-timeouts")]
+    read_transactions: Arc<read_transactions::ReadTransactions>,
 }
 
 impl TxnManager {
-    pub(crate) fn new(env: EnvPtr, max_read_transaction_duration: Duration) -> Self {
+    pub(crate) fn new(
+        env: EnvPtr,
+        #[cfg(feature = "read-tx-timeouts")] max_read_transaction_duration: Duration,
+    ) -> Self {
         let (tx, rx) = sync_channel(0);
         let txn_manager = Self {
             sender: tx,
-            read_transactions: Arc::new(DashMap::new()),
-            max_read_transaction_duration,
+            #[cfg(feature = "read-tx-timeouts")]
+            read_transactions: Arc::new(read_transactions::ReadTransactions::new(
+                max_read_transaction_duration,
+            )),
         };
 
         txn_manager.start_message_listener(env, rx);
-        txn_manager.clone().start_read_transactions_monitor();
+        #[cfg(feature = "read-tx-timeouts")]
+        txn_manager.read_transactions.clone().start_monitor(txn_manager.sender.clone());
 
         txn_manager
     }
@@ -94,40 +98,94 @@ impl TxnManager {
         });
     }
 
-    fn start_read_transactions_monitor(self) {
-        std::thread::spawn(move || loop {
-            let now = Instant::now();
-
-            for entry in self.read_transactions.iter() {
-                let (ptr, (start, backtrace)) = entry.pair();
-                if (now - *start) > self.max_read_transaction_duration {
-                    let (sender, rx) = sync_channel(0);
-                    self.send_message(TxnManagerMessage::Abort {
-                        tx: TxnPtr(*ptr as *mut ffi::MDBX_txn),
-                        sender,
-                    });
-                    rx.recv().unwrap().unwrap();
-                    println!("{backtrace}");
-
-                    self.read_transactions.remove(ptr);
-                }
-            }
-
-            std::thread::sleep(Duration::from_millis(10));
-        });
-    }
-
     pub(crate) fn send_message(&self, message: TxnManagerMessage) {
         self.sender.send(message).unwrap()
     }
+}
 
-    pub(crate) fn add_read_transaction(&self, ptr: *mut ffi::MDBX_txn) {
-        let _ = self
-            .read_transactions
-            .insert(ptr as usize, (Instant::now(), Backtrace::force_capture()));
+#[cfg(feature = "read-tx-timeouts")]
+mod read_transactions {
+    use crate::txn_manager::{TxnManager, TxnManagerMessage, TxnPtr};
+    use dashmap::{DashMap, DashSet};
+    use std::{
+        sync::{
+            mpsc::{sync_channel, SyncSender},
+            Arc,
+        },
+        time::{Duration, Instant},
+    };
+
+    impl TxnManager {
+        pub(crate) fn add_active_read_transaction(&self, ptr: *mut ffi::MDBX_txn) {
+            self.read_transactions.add_active(ptr);
+        }
+
+        pub(crate) fn remove_active_read_transaction(
+            &self,
+            ptr: *mut ffi::MDBX_txn,
+        ) -> Option<(usize, Instant)> {
+            self.read_transactions.remove_active(ptr)
+        }
+
+        pub(crate) fn remove_aborted_read_transaction(
+            &self,
+            ptr: *mut ffi::MDBX_txn,
+        ) -> Option<usize> {
+            self.read_transactions.remove_aborted(ptr)
+        }
     }
 
-    pub(crate) fn remove_read_transaction(&self, ptr: *mut ffi::MDBX_txn) {
-        let _ = self.read_transactions.remove(&(ptr as usize));
+    #[derive(Debug, Default)]
+    pub(crate) struct ReadTransactions {
+        max_duration: Duration,
+        active: DashMap<usize, Instant>,
+        aborted: DashSet<usize>,
+    }
+
+    impl ReadTransactions {
+        pub(super) fn new(max_duration: Duration) -> Self {
+            Self { max_duration, ..Default::default() }
+        }
+        pub(crate) fn add_active(&self, ptr: *mut ffi::MDBX_txn) {
+            let _ = self.active.insert(ptr as usize, Instant::now());
+        }
+
+        pub(crate) fn remove_active(&self, ptr: *mut ffi::MDBX_txn) -> Option<(usize, Instant)> {
+            self.active.remove(&(ptr as usize))
+        }
+
+        pub(crate) fn add_aborted(&self, ptr: *mut ffi::MDBX_txn) {
+            self.aborted.insert(ptr as usize);
+        }
+
+        pub(crate) fn remove_aborted(&self, ptr: *mut ffi::MDBX_txn) -> Option<usize> {
+            self.aborted.remove(&(ptr as usize))
+        }
+
+        pub(super) fn start_monitor(
+            self: Arc<Self>,
+            txn_manager_messages: SyncSender<TxnManagerMessage>,
+        ) {
+            std::thread::spawn(move || loop {
+                let now = Instant::now();
+
+                for entry in self.active.iter() {
+                    let (ptr, start) = entry.pair();
+                    let ptr = *ptr as *mut ffi::MDBX_txn;
+                    if (now - *start) > self.max_duration {
+                        let (sender, rx) = sync_channel(0);
+                        txn_manager_messages
+                            .send(TxnManagerMessage::Abort { tx: TxnPtr(ptr), sender })
+                            .unwrap();
+                        rx.recv().unwrap().unwrap();
+
+                        self.add_aborted(ptr);
+                        self.remove_active(ptr);
+                    }
+                }
+
+                std::thread::sleep(Duration::from_millis(10));
+            });
+        }
     }
 }
