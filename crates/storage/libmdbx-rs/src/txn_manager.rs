@@ -62,7 +62,6 @@ impl TxnManager {
                 match rx.recv() {
                     Ok(msg) => match msg {
                         TxnManagerMessage::Begin { parent, flags, sender } => {
-                            #[allow(clippy::redundant_locals)]
                             let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
                             sender
                                 .send(
