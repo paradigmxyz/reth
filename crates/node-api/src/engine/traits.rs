@@ -7,8 +7,9 @@ use reth_primitives::{
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, OptimismPayloadAttributes,
-        PayloadAttributes as EthPayloadAttributes, PayloadId, Withdrawal,
+        PayloadAttributes as EthPayloadAttributes, PayloadId,
     },
+    withdrawal::Withdrawal,
     ExecutionPayloadV1,
 };
 

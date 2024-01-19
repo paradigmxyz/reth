@@ -10,7 +10,7 @@ use reth_rpc_types::{
     BlockOverrides, CallRequest,
 };
 use revm::{
-    db::{CacheDB, EmptyDB},
+    db::CacheDB,
     precompile::{Precompiles, SpecId as PrecompilesSpecId},
     primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId, TransactTo, TxEnv},
     Database, Inspector,
@@ -585,22 +585,6 @@ where
     };
 
     Ok(())
-}
-
-/// This clones and transforms the given [CacheDB] with an arbitrary [DatabaseRef] into a new
-/// [CacheDB] with [EmptyDB] as the database type
-#[inline]
-pub(crate) fn clone_into_empty_db<DB>(db: &CacheDB<DB>) -> CacheDB<EmptyDB>
-where
-    DB: DatabaseRef,
-{
-    CacheDB {
-        accounts: db.accounts.clone(),
-        contracts: db.contracts.clone(),
-        logs: db.logs.clone(),
-        block_hashes: db.block_hashes.clone(),
-        db: Default::default(),
-    }
 }
 
 #[cfg(test)]
