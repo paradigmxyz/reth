@@ -118,27 +118,23 @@ mod read_transactions {
 
     impl TxnManager {
         pub(crate) fn add_active_read_transaction(&self, ptr: *mut ffi::MDBX_txn) {
-            let Some(read_transactions) = &self.read_transactions else { return };
-
-            read_transactions.add_active(ptr);
+            if let Some(read_transactions) = &self.read_transactions {
+                read_transactions.add_active(ptr);
+            }
         }
 
         pub(crate) fn remove_active_read_transaction(
             &self,
             ptr: *mut ffi::MDBX_txn,
         ) -> Option<(usize, Instant)> {
-            let Some(read_transactions) = &self.read_transactions else { return None };
-
-            read_transactions.remove_active(ptr)
+            self.read_transactions.as_ref()?.remove_active(ptr)
         }
 
         pub(crate) fn remove_aborted_read_transaction(
             &self,
             ptr: *mut ffi::MDBX_txn,
         ) -> Option<usize> {
-            let Some(read_transactions) = &self.read_transactions else { return None };
-
-            read_transactions.remove_aborted(ptr)
+            self.read_transactions.as_ref()?.remove_aborted(ptr)
         }
     }
 

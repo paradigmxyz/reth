@@ -65,11 +65,13 @@ pub struct DatabaseArguments {
 }
 
 impl DatabaseArguments {
+    /// Set the log level.
     pub fn log_level(mut self, log_level: LogLevel) -> Self {
         self.log_level = Some(log_level);
         self
     }
 
+    /// Set the maximum duration of a read transaction.
     pub fn max_read_transaction_duration(
         mut self,
         max_read_transaction_duration: MaxReadTransactionDuration,
