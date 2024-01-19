@@ -786,9 +786,7 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
     fn build_empty_payload(
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
-    ) -> Result<Self::BuiltPayload, PayloadBuilderError>
-    where
-        Client: StateProviderFactory;
+    ) -> Result<Self::BuiltPayload, PayloadBuilderError>;
 }
 
 /// Represents the outcome of committing withdrawals to the runtime database and post state.
