@@ -64,7 +64,7 @@ impl From<Option<StateOverride>> for EvmOverrides {
 }
 
 /// Helper type to work with different transaction types when configuring the EVM env. This is
-/// the infallible version of [TryFillableTransaction].
+/// the infallible version of `TryFillableTransaction`.
 pub trait FillableTransaction {
     /// Returns the hash of the transaction.
     fn hash(&self) -> TxHash;
