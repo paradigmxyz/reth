@@ -177,7 +177,7 @@ impl EthPayloadBuilderAttributes {
         let id = payload_id(&parent, &attributes);
 
         let withdraw = attributes.withdrawals.map(
-            |withdrawals: Vec<reth_rpc_types::engine::payload::Withdrawal>| {
+            |withdrawals: Vec<reth_rpc_types::withdrawal::Withdrawal>| {
                 withdrawals
                     .into_iter()
                     .map(convert_standalone_withdraw_to_withdrawal) // Removed the parentheses here
