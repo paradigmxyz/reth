@@ -5990,8 +5990,35 @@ dependencies = [
  "discv5",
  "enr",
  "generic-array",
+ "itertools 0.12.0",
  "parking_lot 0.12.1",
  "rand 0.8.5",
+ "reth-net-common",
+ "reth-net-nat",
+ "reth-primitives",
+ "reth-tracing",
+ "rlp",
+ "secp256k1 0.27.0",
+ "serde",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
+name = "reth-discv5"
+version = "0.1.0-alpha.15"
+dependencies = [
+ "alloy-rlp",
+ "derive_more",
+ "discv5",
+ "enr",
+ "futures",
+ "generic-array",
+ "parking_lot 0.12.1",
+ "rand 0.8.5",
+ "reth-discv4",
  "reth-net-common",
  "reth-net-nat",
  "reth-primitives",
@@ -6280,6 +6307,7 @@ dependencies = [
  "auto_impl",
  "criterion",
  "derive_more",
+ "discv5",
  "enr",
  "ethers-core",
  "ethers-middleware",

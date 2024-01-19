@@ -4,8 +4,12 @@ use crate::{
     error::{NetworkError, ServiceKind},
     manager::DiscoveredEvent,
 };
+use discv5::Discv5;
+use enr::EnrBuilder;
 use futures::StreamExt;
-use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry};
+use reth_discv4::{
+    DiscoveryUpdate, Discv4, Discv4Config, Discv4Service, Discv5KBucketsKeysMirror, EnrForkIdEntry,
+};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
@@ -18,7 +22,10 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::{
+    sync::{mpsc, watch},
+    task::JoinHandle,
+};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 
 /// An abstraction over the configured discovery protocol.
@@ -61,20 +68,68 @@ impl Discovery {
         sk: SecretKey,
         discv4_config: Option<Discv4Config>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
+        discv5_config: Option<discv5::Config>,
     ) -> Result<Self, NetworkError> {
         // setup discv4
         let local_enr = NodeRecord::from_secret_key(discovery_addr, &sk);
-        let (discv4, discv4_updates, _discv4_service) = if let Some(disc_config) = discv4_config {
-            let (discv4, mut discv4_service) =
-                Discv4::bind(discovery_addr, local_enr, sk, disc_config).await.map_err(|err| {
+        let (discv4, discv4_updates) = match (discv4_config, discv5_config) {
+            (Some(config_v4), None) => {
+                let (discv4, mut discv4_service) =
+                    Discv4::bind(discovery_addr, local_enr, sk, config_v4).await.map_err(
+                        |err| {
+                            NetworkError::from_io_error(err, ServiceKind::Discovery(discovery_addr))
+                        },
+                    )?;
+                let discv4_updates = discv4_service.update_stream();
+                // spawn the service
+                let _discv4_service = discv4_service.spawn();
+                (Some(discv4), Some(discv4_updates))
+            }
+            (Some(config_v4), Some(config_v5)) => {
+                // for EIP-868 construct an ENR
+                let enr = {
+                    let mut builder = EnrBuilder::new("v4");
+                    // should be different than discv4
+                    let listen_addr =
+                        "0.0.0.0".parse().expect("should parce listen on all IFs address");
+                    let listen_port = discovery_addr.port();
+                    builder.ip(listen_addr);
+                    if listen_addr.is_ipv4() {
+                        builder.udp4(listen_port);
+                    } else {
+                        builder.udp6(listen_port);
+                    }
+
+                    // todo: add additional fields from config if any
+
+                    builder.build(&sk).expect("should build enr v4") // v4 not to get confused with
+                                                                     // discv4, independent
+                                                                     // versioning
+                };
+
+                let mut discv5 = Discv5::new(enr, sk, config_v5).map(Arc::new)?;
+                let (discv5_kbuckets_change_tx, discv5_kbuckets_change_rx) = watch::channel(true);
+                let discv5_ref = discv5.clone();
+
+                let (discv4, discv4_service) = Discv4::bind_as_discv5_fallback(
+                    discovery_addr,
+                    local_enr,
+                    sk,
+                    config_v4,
+                    discv5_kbuckets_change_rx,
+                    || discv5.table_entries_id(),
+                )
+                .await
+                .map_err(|err| {
                     NetworkError::from_io_error(err, ServiceKind::Discovery(discovery_addr))
                 })?;
-            let discv4_updates = discv4_service.update_stream();
-            // spawn the service
-            let _discv4_service = discv4_service.spawn();
-            (Some(discv4), Some(discv4_updates), Some(_discv4_service))
-        } else {
-            (None, None, None)
+                let mut discv4_service: Discv4Service<Discv5KBucketsKeysMirror<_>> = discv4_service;
+                let discv4_updates = discv4_service.update_stream();
+                // spawn the service
+                let _discv4_service = discv4_service.spawn();
+                (Some(discv4), Some(discv4_updates))
+            }
+            _ => (None, None),
         };
 
         // setup DNS discovery
@@ -90,7 +145,6 @@ impl Discovery {
             } else {
                 (None, None, None)
             };
-
         Ok(Self {
             discovery_listeners: Default::default(),
             local_enr,

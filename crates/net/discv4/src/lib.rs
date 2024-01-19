@@ -37,6 +37,7 @@ use discv5::{
     ConnectionDirection, ConnectionState,
 };
 use enr::{Enr, EnrBuilder};
+use itertools::Itertools;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
 use reth_primitives::{
@@ -57,7 +58,7 @@ use std::{
 };
 use tokio::{
     net::UdpSocket,
-    sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::Sender as OneshotSender},
+    sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::Sender as OneshotSender, watch},
     task::{JoinHandle, JoinSet},
     time::Interval,
 };
@@ -236,6 +237,36 @@ impl Discv4 {
         Ok((discv4, service))
     }
 
+    pub async fn bind_as_discv5_fallback<F>(
+        local_address: SocketAddr,
+        mut local_node_record: NodeRecord,
+        secret_key: SecretKey,
+        config: Discv4Config,
+        discv5_kbuckets_change_tx: watch::Receiver<bool>,
+        discv5_kbuckets_keys_callback: F,
+    ) -> io::Result<(Self, Discv4Service<Discv5KBucketsKeysMirror<F>>)>
+    where
+        F: FnOnce() -> Vec<[u8; 32]> + Send + Unpin + 'static,
+        Discv5KBucketsKeysMirror<F>: MirrorDiscv5KBuckets,
+    {
+        let socket = UdpSocket::bind(local_address).await?;
+        let local_addr = socket.local_addr()?;
+        local_node_record.udp_port = local_addr.port();
+        trace!(target: "discv4",  ?local_addr,"opened UDP socket");
+
+        let service = Discv4Service::new_as_discv5_fallback(
+            socket,
+            local_addr,
+            local_node_record,
+            secret_key,
+            config,
+            discv5_kbuckets_change_tx,
+            discv5_kbuckets_keys_callback,
+        );
+        let discv4 = service.handle();
+        Ok((discv4, service))
+    }
+
     /// Returns the address of the UDP socket.
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
@@ -399,7 +430,7 @@ impl Discv4 {
 /// Manages discv4 peer discovery over UDP.
 #[must_use = "Stream does nothing unless polled"]
 #[allow(missing_debug_implementations)]
-pub struct Discv4Service {
+pub struct Discv4Service<M = Discv5Noop> {
     /// Local address of the UDP socket.
     local_address: SocketAddr,
     /// The local ENR for EIP-868 <https://eips.ethereum.org/EIPS/eip-868>
@@ -464,9 +495,14 @@ pub struct Discv4Service {
     received_pongs: PongTable,
     /// Interval used to expire additionally tracked nodes
     expire_interval: Interval,
+    /// Mirrors discv5 kbuckets. Set if node is run with discv5, to support downgrading to discv4.
+    discv5: Option<M>,
 }
 
-impl Discv4Service {
+impl<M> Discv4Service<M>
+where
+    M: MirrorDiscv5KBuckets + Unpin + Send + 'static,
+{
     /// Create a new instance for a bound [`UdpSocket`].
     pub(crate) fn new(
         socket: UdpSocket,
@@ -565,6 +601,7 @@ impl Discv4Service {
             queued_events: Default::default(),
             received_pongs: Default::default(),
             expire_interval: tokio::time::interval(EXPIRE_DURATION),
+            discv5: None,
         }
     }
 
@@ -1617,31 +1654,48 @@ impl Discv4Service {
                     IngressEvent::BadPacket(from, err, data) => {
                         debug!(target: "discv4", ?from, ?err, packet=?hex::encode(&data),   "bad packet");
                     }
-                    IngressEvent::Packet(remote_addr, Packet { msg, node_id, hash }) => {
+                    IngressEvent::Packet(remote_addr, Packet { msg, node_id: src_id, hash }) => {
                         trace!(target: "discv4",  r#type=?msg.msg_type(), from=?remote_addr,"received packet");
                         let event = match msg {
                             Message::Ping(ping) => {
-                                self.on_ping(ping, remote_addr, node_id, hash);
+                                self.on_ping(ping, remote_addr, src_id, hash);
                                 Discv4Event::Ping
                             }
                             Message::Pong(pong) => {
-                                self.on_pong(pong, remote_addr, node_id);
+                                self.on_pong(pong, remote_addr, src_id);
                                 Discv4Event::Pong
                             }
                             Message::FindNode(msg) => {
-                                self.on_find_node(msg, remote_addr, node_id);
+                                self.on_find_node(msg, remote_addr, src_id);
                                 Discv4Event::FindNode
                             }
-                            Message::Neighbours(msg) => {
-                                self.on_neighbours(msg, remote_addr, node_id);
+                            Message::Neighbours(mut msg) => {
+                                let nodes = &mut msg.nodes;
+                                if let Some(ref mut discv5) = self.discv5 {
+                                    let received_empty_nodes = nodes.is_empty();
+
+                                    if let Err(err) = discv5.filter_nodes(nodes) {
+                                        debug!(target: "discv4",
+                                            src_id=format!("{:#}", src_id),
+                                            nodes=format!("[{:#}]", nodes.iter().format(", ")),
+                                            err=?err,
+                                            "failed to filter nodes against discv5 mirror"
+                                        );
+                                    }
+
+                                    if !received_empty_nodes && nodes.is_empty() {
+                                        trace!(target: "discv4", src_id=format!("{:#}", src_id), nodes=format!("[{:#}]", msg.nodes.iter().format(", ")), "dropping `Neighbours` response from peer, nodes connected over discv5");
+                                    }
+                                }
+                                self.on_neighbours(msg, remote_addr, src_id);
                                 Discv4Event::Neighbours
                             }
                             Message::EnrRequest(msg) => {
-                                self.on_enr_request(msg, remote_addr, node_id, hash);
+                                self.on_enr_request(msg, remote_addr, src_id, hash);
                                 Discv4Event::EnrRequest
                             }
                             Message::EnrResponse(msg) => {
-                                self.on_enr_response(msg, remote_addr, node_id);
+                                self.on_enr_response(msg, remote_addr, src_id);
                                 Discv4Event::EnrResponse
                             }
                         };
@@ -1672,7 +1726,10 @@ impl Discv4Service {
 }
 
 /// Endless future impl
-impl Stream for Discv4Service {
+impl<M> Stream for Discv4Service<M>
+where
+    M: MirrorDiscv5KBuckets + Unpin + Send + 'static,
+{
     type Item = Discv4Event;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -1683,6 +1740,30 @@ impl Stream for Discv4Service {
             // For any other event, return Poll::Ready(Some(event))
             ev => Poll::Ready(Some(ev)),
         }
+    }
+}
+
+impl<F> Discv4Service<Discv5KBucketsKeysMirror<F>>
+where
+    F: FnOnce() -> Vec<[u8; 32]> + Send + Unpin + 'static,
+    Discv5KBucketsKeysMirror<F>: MirrorDiscv5KBuckets,
+{
+    pub fn new_as_discv5_fallback(
+        socket: UdpSocket,
+        local_address: SocketAddr,
+        local_node_record: NodeRecord,
+        secret_key: SecretKey,
+        config: Discv4Config,
+        discv5_kbuckets_change_tx: watch::Receiver<bool>,
+        discv5_kbuckets_keys_callback: F,
+    ) -> Self {
+        let mut discv4 = Self::new(socket, local_address, local_node_record, secret_key, config);
+        discv4.discv5 = Some(Discv5KBucketsKeysMirror::new(
+            discv5_kbuckets_change_tx,
+            discv5_kbuckets_keys_callback,
+        ));
+
+        discv4
     }
 }
 
@@ -1699,6 +1780,9 @@ pub enum Discv4Event {
     FindNode,
     /// A `Neighbours` message was handled.
     Neighbours,
+    /// A `Neighbours` message was dropped, since all nodes in message were found in discv5. This
+    /// event only occurs if discv5 is ran to support downgrading to discv4.
+    NeighboursDropped,
     /// A `EnrRequest` message was handled.
     EnrRequest,
     /// A `EnrResponse` message was handled.
@@ -2125,6 +2209,61 @@ pub struct EnrForkIdEntry {
 impl From<ForkId> for EnrForkIdEntry {
     fn from(fork_id: ForkId) -> Self {
         Self { fork_id }
+    }
+}
+
+pub trait MirrorDiscv5KBuckets {
+    fn update_mirror(&mut self);
+    fn filter_nodes(&mut self, nodes: &mut Vec<NodeRecord>) -> Result<(), watch::error::RecvError>;
+}
+
+#[derive(Debug)]
+pub struct Discv5KBucketsKeysMirror<F> {
+    mirror: Vec<[u8; 32]>,
+    callback: F,
+    change_tx: watch::Receiver<bool>,
+}
+
+impl<F> Discv5KBucketsKeysMirror<F>
+where
+    F: Send + Unpin,
+{
+    pub fn new(change_tx: watch::Receiver<bool>, callback: F) -> Self {
+        Self { mirror: Default::default(), callback, change_tx }
+    }
+}
+
+impl<F> MirrorDiscv5KBuckets for Discv5KBucketsKeysMirror<F>
+where
+    F: Fn() -> Vec<[u8; 32]> + Send + Unpin,
+{
+    fn update_mirror(&mut self) {
+        self.mirror = (self.callback)();
+    }
+
+    fn filter_nodes(&mut self, nodes: &mut Vec<NodeRecord>) -> Result<(), watch::error::RecvError> {
+        if self.change_tx.has_changed()? {
+            self.update_mirror();
+            self.change_tx.borrow_and_update();
+        }
+        Ok(nodes.retain(|node|
+            //todo: make peer_id into compressed public key
+            !self.mirror.contains(&node.id)))
+    }
+}
+
+#[derive(Debug)]
+pub struct Discv5Noop;
+
+unsafe impl Send for Discv5Noop {}
+
+impl MirrorDiscv5KBuckets for Discv5Noop {
+    fn update_mirror(&mut self) {}
+    fn filter_nodes(
+        &mut self,
+        _nodes: &mut Vec<NodeRecord>,
+    ) -> Result<(), watch::error::RecvError> {
+        Ok(())
     }
 }
 
