@@ -129,9 +129,10 @@ mod tests {
             // Check execution and create receipts and changesets according to the pruning
             // configuration
             let mut execution_stage = ExecutionStage::new(
-                EvmProcessorFactory::<EthEvmConfig>::new(Arc::new(
-                    ChainSpecBuilder::mainnet().berlin_activated().build(),
-                )),
+                EvmProcessorFactory::new(
+                    Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()),
+                    EthEvmConfig::default(),
+                ),
                 ExecutionStageThresholds {
                     max_blocks: Some(100),
                     max_changes: None,

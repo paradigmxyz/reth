@@ -512,9 +512,10 @@ mod tests {
     use std::sync::Arc;
 
     fn stage() -> ExecutionStage<EvmProcessorFactory<EthEvmConfig>> {
-        let executor_factory = EvmProcessorFactory::new(Arc::new(
-            ChainSpecBuilder::mainnet().berlin_activated().build(),
-        ));
+        let executor_factory = EvmProcessorFactory::new(
+            Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()),
+            EthEvmConfig::default(),
+        );
         ExecutionStage::new(
             executor_factory,
             ExecutionStageThresholds {

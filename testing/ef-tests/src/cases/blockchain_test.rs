@@ -107,11 +107,10 @@ impl Case for BlockchainTestCase {
 
             // Execute the execution stage using the EVM processor factory for the test case
             // network.
-            let _ = ExecutionStage::new_with_factory(
-                reth_revm::EvmProcessorFactory::<EthEvmConfig>::new(Arc::new(
-                    case.network.clone().into(),
-                )),
-            )
+            let _ = ExecutionStage::new_with_factory(reth_revm::EvmProcessorFactory::new(
+                Arc::new(case.network.clone().into()),
+                EthEvmConfig::default(),
+            ))
             .execute(
                 &provider,
                 ExecInput { target: last_block.as_ref().map(|b| b.number), checkpoint: None },

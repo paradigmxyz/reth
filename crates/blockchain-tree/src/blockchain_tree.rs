@@ -1403,7 +1403,8 @@ mod tests {
         );
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         let consensus = Arc::new(TestConsensus::default());
-        let executor_factory = EvmProcessorFactory::<EthEvmConfig>::new(chain_spec.clone());
+        let executor_factory =
+            EvmProcessorFactory::new(chain_spec.clone(), EthEvmConfig::default());
 
         {
             let provider_rw = provider_factory.provider_rw().unwrap();

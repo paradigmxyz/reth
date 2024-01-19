@@ -412,24 +412,24 @@ impl NodeConfig {
     }
 
     /// Build the blockchain tree
-    pub fn build_blockchain_tree<DB, EnvConfig>(
+    pub fn build_blockchain_tree<DB, EvmConfig>(
         &self,
         provider_factory: ProviderFactory<DB>,
         consensus: Arc<dyn Consensus>,
         prune_config: Option<PruneConfig>,
         sync_metrics_tx: UnboundedSender<MetricEvent>,
         tree_config: BlockchainTreeConfig,
-        env: EnvConfig,
-    ) -> eyre::Result<BlockchainTree<DB, EvmProcessorFactory<EnvConfig>>>
+        evm_config: EvmConfig,
+    ) -> eyre::Result<BlockchainTree<DB, EvmProcessorFactory<EvmConfig>>>
     where
         DB: Database + Unpin + Clone + 'static,
-        EnvConfig: Send + Sync + 'static,
+        EvmConfig: Send + Sync + Clone + 'static,
     {
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
             provider_factory.clone(),
             consensus.clone(),
-            EvmProcessorFactory::new(self.chain.clone()),
+            EvmProcessorFactory::new(self.chain.clone(), evm_config),
         );
         let tree = BlockchainTree::new(
             tree_externals,
@@ -766,7 +766,7 @@ impl NodeConfig {
         continuous: bool,
         metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
-        _evm_config: EvmConfig,
+        evm_config: EvmConfig,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Clone + 'static,
@@ -783,7 +783,7 @@ impl NodeConfig {
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         use revm_inspectors::stack::InspectorStackConfig;
-        let factory = reth_revm::EvmProcessorFactory::<EvmConfig>::new(self.chain.clone());
+        let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone(), evm_config);
 
         let stack_config = InspectorStackConfig {
             use_printer_tracer: self.debug.print_inspector,

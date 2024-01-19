@@ -474,6 +474,7 @@ where
             }
             TestExecutorConfig::Real => EitherExecutorFactory::Right(EvmProcessorFactory::new(
                 self.base_config.chain_spec.clone(),
+                EthEvmConfig::default(),
             )),
         };
 
