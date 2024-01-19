@@ -78,7 +78,7 @@ impl HashedPostState {
     /// NOTE: In order to have the resulting [HashedPostState] be a correct
     /// overlay of the plain state, the end of the range must be the current tip.
     pub fn from_revert_range<TX: DbTx>(
-        tx: TX,
+        tx: &TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, DatabaseError> {
         // A single map for aggregating state changes where each map value is a tuple
@@ -119,7 +119,7 @@ impl HashedPostState {
                 this.insert_account(hashed_address, account_change);
             }
 
-            // The `wiped`` flag indicates only  whether previous storage entries should be looked
+            // The `wiped` flag indicates only  whether previous storage entries should be looked
             // up in db or not. For reverts it's a noop since all wiped changes had been written as
             // storage reverts.
             let mut hashed_storage = HashedStorage::new(false);
@@ -130,6 +130,40 @@ impl HashedPostState {
         }
 
         Ok(this.sorted())
+    }
+
+    /// Extend this hashed post state with contents of another.
+    /// Entries in the second hashed post state take precedence.
+    pub fn extend(&mut self, other: Self) {
+        // Merge accounts and insert them into extended state.
+        let mut accounts: HashMap<B256, Option<Account>> = HashMap::from_iter(
+            self.accounts
+                .drain(..)
+                .map(|(hashed_address, account)| (hashed_address, Some(account)))
+                .chain(
+                    self.destroyed_accounts.drain().map(|hashed_address| (hashed_address, None)),
+                ),
+        );
+        for (hashed_address, account) in other.accounts {
+            accounts.insert(hashed_address, Some(account));
+        }
+        for hashed_address in other.destroyed_accounts {
+            accounts.insert(hashed_address, None);
+        }
+        for (hashed_address, account) in accounts {
+            self.insert_account(hashed_address, account);
+        }
+
+        for (hashed_address, storage) in other.storages {
+            match self.storages.entry(hashed_address) {
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(storage);
+                }
+                hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().extend(storage);
+                }
+            }
+        }
     }
 
     /// Sort and return self.
@@ -204,7 +238,7 @@ impl HashedPostState {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
 
             let storage_prefix_set_entry = storage_prefix_set.entry(*hashed_address).or_default();
-            for (hashed_slot, _) in &hashed_storage.non_zero_valued_storage {
+            for (hashed_slot, _) in &hashed_storage.non_zero_valued_slots {
                 storage_prefix_set_entry.insert(Nibbles::unpack(hashed_slot));
             }
             for hashed_slot in &hashed_storage.zero_valued_slots {
@@ -223,6 +257,7 @@ impl HashedPostState {
         &self,
         tx: &'a TX,
     ) -> StateRoot<&'a TX, HashedPostStateCursorFactory<'a, '_, TX>> {
+        assert!(self.sorted, "Hashed post state must be sorted for state root calculation");
         let (account_prefix_set, storage_prefix_set) = self.construct_prefix_sets();
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, self);
         StateRoot::from_tx(tx)
@@ -277,10 +312,10 @@ impl HashedPostState {
 }
 
 /// The post state account storage with hashed slots.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct HashedStorage {
     /// Hashed storage slots with non-zero.
-    pub(crate) non_zero_valued_storage: Vec<(B256, U256)>,
+    pub(crate) non_zero_valued_slots: Vec<(B256, U256)>,
     /// Slots that have been zero valued.
     pub(crate) zero_valued_slots: AHashSet<B256>,
     /// Whether the storage was wiped or not.
@@ -293,11 +328,30 @@ impl HashedStorage {
     /// Create new instance of [HashedStorage].
     pub fn new(wiped: bool) -> Self {
         Self {
-            non_zero_valued_storage: Vec::new(),
+            non_zero_valued_slots: Vec::new(),
             zero_valued_slots: AHashSet::new(),
             wiped,
             sorted: true, // empty is sorted
         }
+    }
+
+    /// Extend hashed storage with contents of other.
+    /// The entries in second hashed storage take precedence.
+    pub fn extend(&mut self, other: Self) {
+        let mut entries: HashMap<B256, U256> =
+            HashMap::from_iter(self.non_zero_valued_slots.drain(..).chain(
+                self.zero_valued_slots.drain().map(|hashed_slot| (hashed_slot, U256::ZERO)),
+            ));
+        for (hashed_slot, value) in other.non_zero_valued_slots {
+            entries.insert(hashed_slot, value);
+        }
+        for hashed_slot in other.zero_valued_slots {
+            entries.insert(hashed_slot, U256::ZERO);
+        }
+        for (hashed_slot, value) in entries {
+            self.insert_slot(hashed_slot, value);
+        }
+        self.wiped |= other.wiped;
     }
 
     /// Returns `true` if the storage was wiped.
@@ -310,13 +364,13 @@ impl HashedStorage {
         self.zero_valued_slots
             .iter()
             .map(|slot| (*slot, U256::ZERO))
-            .chain(self.non_zero_valued_storage.iter().cloned())
+            .chain(self.non_zero_valued_slots.iter().cloned())
     }
 
     /// Sorts the non zero value storage entries.
     pub fn sort_storage(&mut self) {
         if !self.sorted {
-            self.non_zero_valued_storage.sort_unstable_by_key(|(slot, _)| *slot);
+            self.non_zero_valued_slots.sort_unstable_by_key(|(slot, _)| *slot);
             self.sorted = true;
         }
     }
@@ -327,7 +381,7 @@ impl HashedStorage {
         if value.is_zero() {
             self.zero_valued_slots.insert(slot);
         } else {
-            self.non_zero_valued_storage.push((slot, value));
+            self.non_zero_valued_slots.push((slot, value));
             self.sorted = false;
         }
     }

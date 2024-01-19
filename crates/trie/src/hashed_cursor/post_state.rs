@@ -280,7 +280,7 @@ where
                 // If the storage has been wiped at any point
                 storage.wiped &&
                     // and the current storage does not contain any non-zero values 
-                    storage.non_zero_valued_storage.is_empty()
+                    storage.non_zero_valued_slots.is_empty()
             }
             None => self.cursor.seek_exact(key)?.is_none(),
         };
@@ -304,12 +304,11 @@ where
         if let Some(storage) = self.post_state.storages.get(&account) {
             debug_assert!(storage.sorted, "`HashedStorage` must be pre-sorted");
 
-            post_state_entry = storage.non_zero_valued_storage.get(self.post_state_storage_index);
+            post_state_entry = storage.non_zero_valued_slots.get(self.post_state_storage_index);
 
             while post_state_entry.map(|(slot, _)| slot < &subkey).unwrap_or_default() {
                 self.post_state_storage_index += 1;
-                post_state_entry =
-                    storage.non_zero_valued_storage.get(self.post_state_storage_index);
+                post_state_entry = storage.non_zero_valued_slots.get(self.post_state_storage_index);
             }
         }
 
@@ -384,11 +383,10 @@ where
         if let Some(storage) = self.post_state.storages.get(&account) {
             debug_assert!(storage.sorted, "`HashedStorage` must be pre-sorted");
 
-            post_state_entry = storage.non_zero_valued_storage.get(self.post_state_storage_index);
+            post_state_entry = storage.non_zero_valued_slots.get(self.post_state_storage_index);
             while post_state_entry.map(|(slot, _)| slot <= last_slot).unwrap_or_default() {
                 self.post_state_storage_index += 1;
-                post_state_entry =
-                    storage.non_zero_valued_storage.get(self.post_state_storage_index);
+                post_state_entry = storage.non_zero_valued_slots.get(self.post_state_storage_index);
             }
         }
 

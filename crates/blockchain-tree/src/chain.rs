@@ -226,9 +226,15 @@ impl AppendableChain {
 
         // check state root if the block extends the canonical chain __and__ if state root
         // validation was requested.
-        if block_kind.extends_canonical_head() && block_validation_kind.is_exhaustive() {
+        if block_validation_kind.is_exhaustive() {
             // check state root
-            let (state_root, trie_updates) = provider.state_root_with_updates(&bundle_state)?;
+            let (state_root, trie_updates) = if block_kind.extends_canonical_head() {
+                provider
+                    .state_root_with_updates(&bundle_state)
+                    .map(|(root, updates)| (root, Some(updates)))?
+            } else {
+                (provider.state_root(&bundle_state)?, None)
+            };
             if block.state_root != state_root {
                 return Err(ConsensusError::BodyStateRootDiff(
                     GotExpected { got: state_root, expected: block.state_root }.into(),
@@ -236,7 +242,7 @@ impl AppendableChain {
                 .into())
             }
 
-            Ok((bundle_state, Some(trie_updates)))
+            Ok((bundle_state, trie_updates))
         } else {
             Ok((bundle_state, None))
         }
