@@ -21,7 +21,9 @@ use std::{
     time::Duration,
 };
 
-const DEFAULT_MAX_READ_TRANSACTION_DURATION: Duration = Duration::from_secs(10);
+/// The default maximum number of readers for an environment.
+#[cfg(feature = "read-tx-timeouts")]
+const DEFAULT_MAX_READ_TRANSACTION_DURATION: Duration = Duration::from_secs(5 * 60);
 
 /// An environment supports multiple databases, all residing in the same shared-memory map.
 ///
