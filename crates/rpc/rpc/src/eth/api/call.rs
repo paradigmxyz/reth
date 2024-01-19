@@ -6,7 +6,7 @@ use crate::{
         revm_utils::{
             apply_state_overrides, build_call_evm_env, caller_gas_allowance,
             cap_tx_gas_limit_with_caller_allowance, get_precompiles, inspect, prepare_call_env,
-            transact, EvmOverrides,
+            transact, EvmOverrides, FillableTransaction,
         },
         EthTransactions,
     },
@@ -14,7 +14,7 @@ use crate::{
 };
 use reth_network_api::NetworkInfo;
 use reth_node_api::ConfigureEvmEnv;
-use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, U256};
+use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
@@ -126,7 +126,7 @@ where
                 // to be replayed
                 let transactions = block.into_transactions_ecrecovered().take(num_txs);
                 for tx in transactions {
-                    let tx = tx_env_with_recovered(&tx);
+                    let tx = tx.new_filled_tx_env();
                     let env =
                         EnvWithHandlerCfg::new_with_cfg_env(cfg.clone(), block_env.clone(), tx);
                     let (res, _) = transact(&mut db, env)?;

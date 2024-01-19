@@ -25,12 +25,13 @@ mod builder {
         },
         eip4844::calculate_excess_blob_gas,
         proofs,
-        revm::env::tx_env_with_recovered,
+        revm::compat::into_reth_log,
         Block, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH, U256,
     };
     use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
     use reth_revm::database::StateProviderDatabase;
     use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
+    use reth_rpc::eth::revm_utils::FillableTransaction;
     use revm::{
         db::states::bundle_state::BundleRetention,
         primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
@@ -267,7 +268,7 @@ mod builder {
                 .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
                     initialized_cfg.clone(),
                     initialized_block_env.clone(),
-                    tx_env_with_recovered(&tx),
+                    tx.new_filled_tx_env(),
                 ))
                 .build();
 

@@ -1,10 +1,13 @@
 //! Support for building a pending block via local txpool.
 
-use crate::eth::error::{EthApiError, EthResult};
+use crate::eth::{
+    error::{EthApiError, EthResult},
+    revm_utils::FillableTransaction,
+};
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs,
-    revm::env::tx_env_with_recovered,
+    revm::compat::into_reth_log,
     revm_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
     },
@@ -132,7 +135,7 @@ impl PendingBlockEnv {
 
             // Configure the environment for the block.
             let env =
-                Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx_env_with_recovered(&tx));
+                Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx.new_filled_tx_env());
 
             let mut evm = revm::Evm::builder().with_env(env).with_db(&mut db).build();
 

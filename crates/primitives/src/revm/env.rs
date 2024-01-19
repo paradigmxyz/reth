@@ -93,28 +93,6 @@ pub fn recover_header_signer(header: &Header) -> Result<Address, CliqueSignerRec
         .map_err(CliqueSignerRecoveryError::InvalidSignature)
 }
 
-/// Returns a new [TxEnv] filled with the transaction's data.
-pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEnv {
-    let mut tx_env = TxEnv::default();
-
-    #[cfg(not(feature = "optimism"))]
-    fill_tx_env(&mut tx_env, transaction.as_ref(), transaction.signer());
-
-    #[cfg(feature = "optimism")]
-    {
-        let mut envelope_buf = Vec::with_capacity(transaction.length_without_header());
-        transaction.encode_enveloped(&mut envelope_buf);
-        fill_op_tx_env(
-            &mut tx_env,
-            transaction.as_ref(),
-            transaction.signer(),
-            envelope_buf.into(),
-        );
-    }
-
-    tx_env
-}
-
 /// Fill transaction environment with the EIP-4788 system contract message data.
 ///
 /// This requirements for the beacon root contract call defined by

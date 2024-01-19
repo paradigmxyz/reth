@@ -3,7 +3,7 @@ use crate::{
         error::{EthApiError, EthResult},
         revm_utils::{
             inspect, inspect_and_return_db, prepare_call_env, replay_transactions_until, transact,
-            EvmOverrides,
+            EvmOverrides, FillableTransaction,
         },
         EthTransactions, TransactionSource,
     },
@@ -89,7 +89,7 @@ where
                 let mut transactions = transactions.into_iter().enumerate().peekable();
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
-                    let tx = tx_env_with_recovered(&tx);
+                    let tx = tx.new_filled_tx_env();
                     let env = EnvWithHandlerCfg {
                         env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
                         handler_cfg: cfg.handler_cfg,
@@ -238,7 +238,7 @@ where
                 )?;
 
                 let env = EnvWithHandlerCfg {
-                    env: Env::boxed(cfg.cfg_env.clone(), block_env, tx_env_with_recovered(&tx)),
+                    env: Env::boxed(cfg.cfg_env.clone(), block_env, tx.new_filled_tx_env()),
                     handler_cfg: cfg.handler_cfg,
                 };
 
@@ -436,7 +436,7 @@ where
 
                     // Execute all transactions until index
                     for tx in transactions {
-                        let tx = tx_env_with_recovered(&tx);
+                        let tx = tx.new_filled_tx_env();
                         let env = EnvWithHandlerCfg {
                             env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
                             handler_cfg: cfg.handler_cfg,

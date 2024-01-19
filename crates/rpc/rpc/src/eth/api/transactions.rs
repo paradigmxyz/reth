@@ -5,7 +5,7 @@ use crate::{
         error::{EthApiError, EthResult, SignError},
         revm_utils::{
             inspect, inspect_and_return_db, prepare_call_env, replay_transactions_until, transact,
-            EvmOverrides,
+            EvmOverrides, FillableTransaction,
         },
         utils::recover_raw_transaction,
     },
@@ -16,7 +16,8 @@ use reth_network_api::NetworkInfo;
 use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     eip4844::calc_blob_gasprice,
-    revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
+    revm::env::fill_block_env_with_coinbase,
+    revm_primitives::{db::DatabaseCommit, Env, ExecutionResult, ResultAndState, SpecId, State},
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionKind::{Call, Create},
@@ -903,7 +904,7 @@ where
             replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;
 
             let env =
-                EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env_with_recovered(&tx));
+                EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx.new_filled_tx_env());
 
             let mut inspector = TracingInspector::new(config);
             let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
@@ -986,7 +987,7 @@ where
                         block_number: Some(block_number),
                         base_fee: Some(base_fee),
                     };
-                    let tx_env = tx_env_with_recovered(&tx);
+                    let tx_env = tx.new_filled_tx_env();
                     (tx_info, tx_env)
                 })
                 .peekable();

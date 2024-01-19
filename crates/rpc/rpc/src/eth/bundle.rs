@@ -3,7 +3,7 @@
 use crate::{
     eth::{
         error::{EthApiError, EthResult, RpcInvalidTransactionError},
-        revm_utils::FillableTransaction,
+        revm_utils::TryFillableTransaction,
         utils::recover_raw_transaction,
         EthTransactions,
     },
