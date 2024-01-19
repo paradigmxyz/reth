@@ -6157,6 +6157,7 @@ name = "reth-ethereum-payload-builder"
 version = "0.1.0-alpha.15"
 dependencies = [
  "reth-basic-payload-builder",
+ "reth-node-api",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
