@@ -98,13 +98,12 @@ mod builder {
             None
         }
 
-        fn build_empty_payload<Attributes>(
+        fn build_empty_payload(
             client: &Client,
-            config: PayloadConfig<Attributes>,
+            config: PayloadConfig<Self::Attributes>,
         ) -> Result<EthBuiltPayload, PayloadBuilderError>
         where
             Client: StateProviderFactory,
-            Attributes: PayloadBuilderAttributes,
         {
             let extra_data = config.extra_data();
             let PayloadConfig {

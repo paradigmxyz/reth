@@ -783,13 +783,12 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
     }
 
     /// Builds an empty payload without any transaction.
-    fn build_empty_payload<Attributes>(
+    fn build_empty_payload(
         client: &Client,
-        config: PayloadConfig<Attributes>,
+        config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError>
     where
-        Client: StateProviderFactory,
-        Attributes: PayloadBuilderAttributes;
+        Client: StateProviderFactory;
 }
 
 /// Represents the outcome of committing withdrawals to the runtime database and post state.
