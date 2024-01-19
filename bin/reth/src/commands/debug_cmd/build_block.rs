@@ -170,7 +170,7 @@ impl Command {
         let tree_externals = TreeExternals::new(
             provider_factory.clone(),
             Arc::clone(&consensus),
-            EvmProcessorFactory::new(self.chain.clone(), evm_config.clone()),
+            EvmProcessorFactory::new(self.chain.clone(), evm_config),
         );
         let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
         let blockchain_tree = ShareableBlockchainTree::new(tree);
