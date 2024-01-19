@@ -22,8 +22,9 @@ use reth_primitives::{
 };
 
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, LocalPendingBlockWatcherSender,
-    StateProviderBox, StateProviderFactory,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, LocalPendingBlockWatcherReceiver,
+    LocalPendingBlockWatcherSender, PendingBlockWatcherReceiver, StateProviderBox,
+    StateProviderFactory,
 };
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -51,6 +52,11 @@ mod transactions;
 
 use crate::BlockingTaskPool;
 pub use transactions::{EthTransactions, TransactionSource};
+
+/// Type alias for a watch receiver that receives the recent pending block with receipts
+pub type LocalPendingBlockWatcherReceiver = watch::Receiver<Option<(SealedBlock, Vec<Receipt>)>>;
+/// Type alias for a watch sender that sends the recent local pending block with receipts
+pub type LocalPendingBlockWatcherSender = watch::Sender<Option<(SealedBlock, Vec<Receipt>)>>;
 
 /// `Eth` API trait.
 ///

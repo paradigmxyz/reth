@@ -19,12 +19,7 @@ pub type CanonStateNotifications = broadcast::Receiver<CanonStateNotification>;
 pub type CanonStateNotificationSender = broadcast::Sender<CanonStateNotification>;
 
 /// Type alias for a watch receiver that receives the recent pending block with receipts
-type PendingBlockWatcherReceiver = watch::Receiver<Option<(SealedBlock, Vec<Receipt>)>>;
-
-/// Type alias for a watch receiver that receives the recent pending block with receipts
-pub type LocalPendingBlockWatcherReceiver = watch::Receiver<Option<(SealedBlock, Vec<Receipt>)>>;
-/// Type alias for a watch sender that sends the recent local pending block with receipts
-pub type LocalPendingBlockWatcherSender = watch::Sender<Option<(SealedBlock, Vec<Receipt>)>>;
+pub type PendingBlockWatcherReceiver = watch::Receiver<Option<(SealedBlock, Vec<Receipt>)>>;
 
 /// A type that allows to register chain related event subscriptions.
 #[auto_impl(&, Arc)]

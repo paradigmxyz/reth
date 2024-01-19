@@ -144,24 +144,19 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use constants::*;
+use error::{RpcError, ServerKind};
 use hyper::{header::AUTHORIZATION, HeaderMap};
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
     server::{IdProvider, Server, ServerHandle},
     Methods, RpcModule,
 };
-use reth_node_api::EngineTypes;
-use serde::{Deserialize, Serialize, Serializer};
-use strum::{AsRefStr, EnumIter, EnumVariantNames, IntoStaticStr, ParseError, VariantNames};
-use tower::layer::util::{Identity, Stack};
-use tower_http::cors::CorsLayer;
-use tracing::{instrument, trace};
-
-use constants::*;
-use error::{RpcError, ServerKind};
 use reth_ipc::server::IpcServer;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
+use reth_node_api::EngineTypes;
+use reth_primitives::Receipt;
 use reth_provider::{
     AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -180,6 +175,12 @@ use reth_rpc::{
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
+use serde::{Deserialize, Serialize, Serializer};
+use strum::{AsRefStr, EnumIter, EnumVariantNames, IntoStaticStr, ParseError, VariantNames};
+use tokio::sync::watch;
+use tower::layer::util::{Identity, Stack};
+use tower_http::cors::CorsLayer;
+use tracing::{instrument, trace};
 
 use crate::{
     auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics,
@@ -1225,6 +1226,11 @@ where
             let executor = Box::new(self.executor.clone());
             let blocking_task_pool =
                 BlockingTaskPool::build().expect("failed to build tracing pool");
+
+            let initial_value: Option<(SealedBlock, Vec<Receipt>)> = None; // or some initial value
+            let (local_pending_block_watcher_tx, local_pending_block_watcher_rx) =
+                watch::channel(initial_value);
+
             let api = EthApi::with_spawner(
                 self.provider.clone(),
                 self.pool.clone(),
@@ -1235,6 +1241,7 @@ where
                 executor.clone(),
                 blocking_task_pool.clone(),
                 fee_history_cache,
+                local_pending_block_watcher_tx,
             );
             let filter = EthFilter::new(
                 self.provider.clone(),
@@ -1250,6 +1257,7 @@ where
                 self.events.clone(),
                 self.network.clone(),
                 executor,
+                local_pending_block_watcher_rx,
             );
 
             let eth = EthHandlers { api, cache, filter, pubsub, blocking_task_pool };

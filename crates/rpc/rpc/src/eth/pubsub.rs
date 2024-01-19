@@ -1,11 +1,14 @@
 //! `eth_` PubSub RPC handler implementation
 
 use crate::{eth::logs_utils, result::invalid_params_rpc_err};
-use futures::StreamExt;
+use futures::{stream, StreamExt};
 use jsonrpsee::{server::SubscriptionMessage, PendingSubscriptionSink, SubscriptionSink};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{IntoRecoveredTransaction, TxHash};
-use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
+use reth_provider::{
+    BlockReader, CanonStateSubscriptions, EvmEnvProvider, LocalPendingBlockWatcherReceiver,
+    PendingBlockWatcherReceiver,
+};
 use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::{
     pubsub::{
@@ -36,19 +39,29 @@ pub struct EthPubSub<Provider, Pool, Events, Network> {
     subscription_task_spawner: Box<dyn TaskSpawner>,
 }
 
+/// Type which wrap both pending block watchers (CL and Local)
+pub type PendingBlockWatchers = (PendingBlockWatcherReceiver, LocalPendingBlockWatcherReceiver);
+
 // === impl EthPubSub ===
 
 impl<Provider, Pool, Events, Network> EthPubSub<Provider, Pool, Events, Network> {
     /// Creates a new, shareable instance.
     ///
     /// Subscription tasks are spawned via [tokio::task::spawn]
-    pub fn new(provider: Provider, pool: Pool, chain_events: Events, network: Network) -> Self {
+    pub fn new(
+        provider: Provider,
+        pool: Pool,
+        chain_events: Events,
+        network: Network,
+        local_pending_block_watcher_rx: LocalPendingBlockWatcherReceiver,
+    ) -> Self {
         Self::with_spawner(
             provider,
             pool,
             chain_events,
             network,
             Box::<TokioTaskExecutor>::default(),
+            local_pending_block_watcher_rx,
         )
     }
 
@@ -59,8 +72,15 @@ impl<Provider, Pool, Events, Network> EthPubSub<Provider, Pool, Events, Network>
         chain_events: Events,
         network: Network,
         subscription_task_spawner: Box<dyn TaskSpawner>,
+        local_pending_block_watcher_rx: LocalPendingBlockWatcherReceiver,
     ) -> Self {
-        let inner = EthPubSubInner { provider, pool, chain_events, network };
+        let inner = EthPubSubInner {
+            provider,
+            pool,
+            chain_events,
+            local_pending_block_watcher_rx,
+            network,
+        };
         Self { inner: Arc::new(inner), subscription_task_spawner }
     }
 }
@@ -251,6 +271,8 @@ struct EthPubSubInner<Provider, Pool, Events, Network> {
     provider: Provider,
     /// A type that allows to create new event subscriptions.
     chain_events: Events,
+    /// A type that can receive new locally built pending block.
+    local_pending_block_watcher_rx: LocalPendingBlockWatcherReceiver,
     /// The network.
     network: Network,
 }
@@ -334,7 +356,22 @@ where
     }
 
     fn pending_log_stream(&self) -> impl Stream<Item = Log> {
-        WatchStream::new(self.chain_events.pending_blocks_stream()).flat_map(
+        let stream_local = WatchStream::new(self.local_pending_block_watcher_rx.clone()).flat_map(
+            |new_local_pending_block_with_receipts| {
+                let logs = new_local_pending_block_with_receipts
+                    .map(|(_, receipts)| {
+                        receipts
+                            .into_iter()
+                            .flat_map(|receipt| {
+                                receipt.logs.into_iter().map(|log| from_primitive_log(log.clone()))
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_else(Vec::new);
+                futures::stream::iter(logs)
+            },
+        );
+        let stream_cl = WatchStream::new(self.chain_events.pending_blocks_stream()).flat_map(
             |new_pending_block_with_receipts| {
                 let logs = new_pending_block_with_receipts
                     .map(|(_, receipts)| {
@@ -348,6 +385,7 @@ where
                     .unwrap_or_else(Vec::new);
                 futures::stream::iter(logs)
             },
-        )
+        );
+        stream::select(stream_local, stream_cl)
     }
 }
