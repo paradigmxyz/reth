@@ -27,26 +27,15 @@ pub(crate) struct TxnManager {
 }
 
 impl TxnManager {
-    pub(crate) fn new(
-        env: EnvPtr,
-        #[cfg(feature = "read-tx-timeouts")]
-        max_read_transaction_duration: crate::MaxReadTransactionDuration,
-    ) -> Self {
+    pub(crate) fn new(env: EnvPtr) -> Self {
         let (tx, rx) = sync_channel(0);
         let txn_manager = Self {
             sender: tx,
             #[cfg(feature = "read-tx-timeouts")]
-            read_transactions: max_read_transaction_duration
-                .as_duration()
-                .map(read_transactions::ReadTransactions::new)
-                .map(std::sync::Arc::new),
+            read_transactions: None,
         };
 
         txn_manager.start_message_listener(env, rx);
-        #[cfg(feature = "read-tx-timeouts")]
-        if let Some(read_transactions) = txn_manager.read_transactions.clone() {
-            read_transactions.start_monitor();
-        }
 
         txn_manager
     }
@@ -113,6 +102,17 @@ mod read_transactions {
     use tracing::{error, trace, warn};
 
     impl TxnManager {
+        pub(crate) fn with_max_read_transaction_duration(
+            mut self,
+            duration: Duration,
+        ) -> TxnManager {
+            let read_transactions = Arc::new(ReadTransactions::new(duration));
+            read_transactions.clone().start_monitor();
+            self.read_transactions = Some(read_transactions);
+
+            self
+        }
+
         pub(crate) fn add_active_read_transaction(&self, ptr: *mut ffi::MDBX_txn) {
             if let Some(read_transactions) = &self.read_transactions {
                 read_transactions.add_active(ptr);
@@ -231,7 +231,10 @@ mod read_transactions {
                         trace!(
                             target: "libmdbx",
                             elapsed = ?now.elapsed(),
-                            active = ?self.active,
+                            active = ?self.active.iter().map(|entry| {
+                                let (ptr, start) = entry.pair();
+                                (*ptr, start.elapsed())
+                            }).collect::<Vec<_>>(),
                             aborted = ?self.aborted.iter().map(|entry| *entry).collect::<Vec<_>>(),
                             "Read transactions"
                         );
