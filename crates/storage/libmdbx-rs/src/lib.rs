@@ -23,6 +23,9 @@ pub mod ffi {
     pub use ffi::{MDBX_dbi as DBI, MDBX_log_level_t as LogLevel};
 }
 
+#[cfg(feature = "read-tx-timeouts")]
+pub use crate::environment::read_transactions::MaxReadTransactionDuration;
+
 mod codec;
 mod cursor;
 mod database;

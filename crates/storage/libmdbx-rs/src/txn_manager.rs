@@ -9,7 +9,6 @@ use std::{
         mpsc::{sync_channel, Receiver, SyncSender},
         Arc,
     },
-    time::Duration,
 };
 
 #[derive(Copy, Clone, Debug)]
@@ -27,26 +26,30 @@ pub(crate) enum TxnManagerMessage {
 pub(crate) struct TxnManager {
     sender: SyncSender<TxnManagerMessage>,
     #[cfg(feature = "read-tx-timeouts")]
-    read_transactions: Arc<read_transactions::ReadTransactions>,
+    read_transactions: Option<Arc<read_transactions::ReadTransactions>>,
 }
 
 impl TxnManager {
     pub(crate) fn new(
         env: EnvPtr,
-        #[cfg(feature = "read-tx-timeouts")] max_read_transaction_duration: Duration,
+        #[cfg(feature = "read-tx-timeouts")]
+        max_read_transaction_duration: crate::MaxReadTransactionDuration,
     ) -> Self {
         let (tx, rx) = sync_channel(0);
         let txn_manager = Self {
             sender: tx,
             #[cfg(feature = "read-tx-timeouts")]
-            read_transactions: Arc::new(read_transactions::ReadTransactions::new(
-                max_read_transaction_duration,
-            )),
+            read_transactions: max_read_transaction_duration
+                .as_duration()
+                .map(read_transactions::ReadTransactions::new)
+                .map(Arc::new),
         };
 
         txn_manager.start_message_listener(env, rx);
         #[cfg(feature = "read-tx-timeouts")]
-        txn_manager.read_transactions.clone().start_monitor(txn_manager.sender.clone());
+        if let Some(read_transactions) = txn_manager.read_transactions.clone() {
+            read_transactions.start_monitor();
+        }
 
         txn_manager
     }
@@ -105,44 +108,55 @@ impl TxnManager {
 
 #[cfg(feature = "read-tx-timeouts")]
 mod read_transactions {
-    use crate::{
-        txn_manager::{TxnManager, TxnManagerMessage, TxnPtr},
-        Error,
-    };
+    use crate::{error::mdbx_result, txn_manager::TxnManager, Error};
     use dashmap::{DashMap, DashSet};
     use std::{
-        sync::{
-            mpsc::{sync_channel, SyncSender},
-            Arc,
-        },
+        sync::Arc,
         time::{Duration, Instant},
     };
-    use tracing::{error, warn};
+    use tracing::{error, trace, warn};
 
     impl TxnManager {
         pub(crate) fn add_active_read_transaction(&self, ptr: *mut ffi::MDBX_txn) {
-            self.read_transactions.add_active(ptr);
+            let Some(read_transactions) = &self.read_transactions else { return };
+
+            read_transactions.add_active(ptr);
         }
 
         pub(crate) fn remove_active_read_transaction(
             &self,
             ptr: *mut ffi::MDBX_txn,
         ) -> Option<(usize, Instant)> {
-            self.read_transactions.remove_active(ptr)
+            let Some(read_transactions) = &self.read_transactions else { return None };
+
+            read_transactions.remove_active(ptr)
         }
 
         pub(crate) fn remove_aborted_read_transaction(
             &self,
             ptr: *mut ffi::MDBX_txn,
         ) -> Option<usize> {
-            self.read_transactions.remove_aborted(ptr)
+            let Some(read_transactions) = &self.read_transactions else { return None };
+
+            read_transactions.remove_aborted(ptr)
         }
     }
 
     #[derive(Debug, Default)]
     pub(crate) struct ReadTransactions {
+        /// Maximum duration that a read transaction can be open until the
+        /// [ReadTransactions::start_monitor] aborts it.
         max_duration: Duration,
+        /// List of currently active read transactions.
+        ///
+        /// We store `usize` instead of a raw pointer as a key, because pointers are not
+        /// comparable. The time of transaction opening is stored as a value.
         active: DashMap<usize, Instant>,
+        /// List of read transactions aborted by the [ReadTransactions::start_monitor].
+        /// We keep them until user tries to abort the transaction, so we're able to report a nice
+        /// [Error::ReadTransactionAborted] error.
+        ///
+        /// We store `usize` instead of a raw pointer, because pointers are not comparable.
         aborted: DashSet<usize>,
     }
 
@@ -167,10 +181,7 @@ mod read_transactions {
             self.aborted.remove(&(ptr as usize))
         }
 
-        pub(super) fn start_monitor(
-            self: Arc<Self>,
-            txn_manager_messages: SyncSender<TxnManagerMessage>,
-        ) {
+        pub(super) fn start_monitor(self: Arc<Self>) {
             std::thread::spawn(move || {
                 let mut aborted_active = Vec::new();
 
@@ -181,21 +192,17 @@ mod read_transactions {
                     // longer than `self.max_duration`.
                     for entry in self.active.iter() {
                         let (ptr, start) = entry.pair();
-                        let ptr = *ptr as *mut ffi::MDBX_txn;
                         let duration = now - *start;
 
                         if duration > self.max_duration {
-                            // Add the transaction to the list of aborted transactions list, so
-                            // further usages report the correct error
-                            // when the transaction is closed.
+                            let ptr = *ptr as *mut ffi::MDBX_txn;
+
+                            // Add the transaction to the list of aborted transactions, so further
+                            // usages report the correct error when the transaction is closed.
                             self.add_aborted(ptr);
 
                             // Abort the transaction
-                            let (sender, rx) = sync_channel(0);
-                            txn_manager_messages
-                                .send(TxnManagerMessage::Abort { tx: TxnPtr(ptr), sender })
-                                .unwrap();
-                            let result = rx.recv().unwrap();
+                            let result = mdbx_result(unsafe { ffi::mdbx_txn_abort(ptr) });
 
                             // Add the transaction to `aborted_active`. We can't remove it instantly
                             // from the list of active transactions, because we iterate through it.
@@ -219,6 +226,7 @@ mod read_transactions {
                                 error!(target: "libmdbx", ?err, ?open_duration, "Failed to abort the long-lived read transactions");
                             }
                         } else {
+                            // Happy path, the transaction has been aborted by us with no errors.
                             warn!(target: "libmdbx", ?open_duration, "Long-lived read transactions has been aborted");
                         }
                     }
@@ -226,6 +234,16 @@ mod read_transactions {
                     // Clear the list of aborted transactions, but not de-allocate the reserved
                     // capacity to save on further pushes.
                     aborted_active.clear();
+
+                    if !self.active.is_empty() || !self.aborted.is_empty() {
+                        trace!(
+                            target: "libmdbx",
+                            elapsed = ?now.elapsed(),
+                            active = ?self.active,
+                            aborted = ?self.aborted.iter().map(|entry| *entry).collect::<Vec<_>>(),
+                            "Read transactions"
+                        );
+                    }
 
                     std::thread::sleep(Duration::from_millis(500));
                 }

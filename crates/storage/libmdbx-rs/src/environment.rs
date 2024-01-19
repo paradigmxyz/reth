@@ -21,7 +21,7 @@ use std::{
     time::Duration,
 };
 
-const DEFAULT_MAX_READ_TRANSACTION_DURATION: Duration = Duration::from_secs(5 * 60);
+const DEFAULT_MAX_READ_TRANSACTION_DURATION: Duration = Duration::from_secs(10);
 
 /// An environment supports multiple databases, all residing in the same shared-memory map.
 ///
@@ -574,7 +574,7 @@ pub struct EnvironmentBuilder {
     #[cfg(not(windows))]
     handle_slow_readers: Option<HandleSlowReadersCallback>,
     #[cfg(feature = "read-tx-timeouts")]
-    max_read_transaction_duration: Option<Duration>,
+    max_read_transaction_duration: Option<read_transactions::MaxReadTransactionDuration>,
 }
 
 impl EnvironmentBuilder {
@@ -699,7 +699,11 @@ impl EnvironmentBuilder {
         let txn_manager = TxnManager::new(
             EnvPtr(env),
             #[cfg(feature = "read-tx-timeouts")]
-            self.max_read_transaction_duration.unwrap_or(DEFAULT_MAX_READ_TRANSACTION_DURATION),
+            self.max_read_transaction_duration.unwrap_or(
+                read_transactions::MaxReadTransactionDuration::Set(
+                    DEFAULT_MAX_READ_TRANSACTION_DURATION,
+                ),
+            ),
         );
 
         let env = EnvironmentInner { env, txn_manager, env_kind: self.kind };
@@ -809,15 +813,42 @@ impl EnvironmentBuilder {
         self.handle_slow_readers = Some(hsr);
         self
     }
+}
 
-    /// Set the maximum time a read-only transaction can be open.
+#[cfg(feature = "read-tx-timeouts")]
+pub(crate) mod read_transactions {
+    use crate::EnvironmentBuilder;
+    use std::time::Duration;
+
+    /// The maximum duration of a read transaction.
+    #[derive(Debug, Clone, Copy)]
     #[cfg(feature = "read-tx-timeouts")]
-    pub fn set_max_read_transaction_duration(
-        &mut self,
-        max_read_transaction_duration: Duration,
-    ) -> &mut Self {
-        self.max_read_transaction_duration = Some(max_read_transaction_duration);
-        self
+    pub enum MaxReadTransactionDuration {
+        /// The maximum duration of a read transaction is unbounded.
+        Unbounded,
+        /// The maximum duration of a read transaction is set to the given duration.
+        Set(Duration),
+    }
+
+    #[cfg(feature = "read-tx-timeouts")]
+    impl MaxReadTransactionDuration {
+        pub fn as_duration(&self) -> Option<Duration> {
+            match self {
+                MaxReadTransactionDuration::Unbounded => None,
+                MaxReadTransactionDuration::Set(duration) => Some(*duration),
+            }
+        }
+    }
+
+    impl EnvironmentBuilder {
+        /// Set the maximum time a read-only transaction can be open.
+        pub fn set_max_read_transaction_duration(
+            &mut self,
+            max_read_transaction_duration: MaxReadTransactionDuration,
+        ) -> &mut Self {
+            self.max_read_transaction_duration = Some(max_read_transaction_duration);
+            self
+        }
     }
 }
 
