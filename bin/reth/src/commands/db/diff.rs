@@ -15,15 +15,14 @@ use crate::{
 use clap::Parser;
 
 use reth_db::{
-    cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
-    AccountChangeSet, AccountHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
-    BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnv, HashedAccount, HashedStorage,
-    HeaderNumbers, HeaderTD, Headers, PlainAccountState, PlainStorageState, PruneCheckpoints,
-    Receipts, StorageChangeSet, StorageHistory, StoragesTrie, SyncStage, SyncStageProgress, Tables,
-    TransactionBlock, Transactions, TxHashNumber, TxSenders,
+    cursor::DbCursorRO, database::Database, mdbx::DatabaseArguments, open_db_read_only,
+    table::Table, transaction::DbTx, AccountChangeSet, AccountHistory, AccountsTrie,
+    BlockBodyIndices, BlockOmmers, BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnv,
+    HashedAccount, HashedStorage, HeaderNumbers, HeaderTD, Headers, PlainAccountState,
+    PlainStorageState, PruneCheckpoints, Receipts, StorageChangeSet, StorageHistory, StoragesTrie,
+    SyncStage, SyncStageProgress, Tables, TransactionBlock, Transactions, TxHashNumber, TxSenders,
 };
 use tracing::info;
-use reth_db::mdbx::DatabaseArguments;
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db diff` command
