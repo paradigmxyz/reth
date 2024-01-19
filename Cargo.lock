@@ -171,6 +171,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-genesis"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/alloy#892a3844f96fdb30e0d1c03aa9e174d4864d7c6b"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rpc-types",
+ "serde",
+]
+
+[[package]]
 name = "alloy-json-abi"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -234,21 +244,18 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-trace-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#50e38e845afb27fc311a74d2260dd087f8e972f3"
+source = "git+https://github.com/alloy-rs/alloy#892a3844f96fdb30e0d1c03aa9e174d4864d7c6b"
 dependencies = [
  "alloy-primitives",
- "alloy-rlp",
  "alloy-rpc-types",
- "itertools 0.12.0",
  "serde",
  "serde_json",
- "thiserror",
 ]
 
 [[package]]
 name = "alloy-rpc-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#50e38e845afb27fc311a74d2260dd087f8e972f3"
+source = "git+https://github.com/alloy-rs/alloy#892a3844f96fdb30e0d1c03aa9e174d4864d7c6b"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -6424,6 +6431,7 @@ version = "0.1.0-alpha.15"
 dependencies = [
  "ahash",
  "alloy-chains",
+ "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
