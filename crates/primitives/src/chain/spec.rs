@@ -21,10 +21,10 @@ use std::{
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    let mainnet_str = include_str!("../../res/genesis/mainnet.json");
     ChainSpec {
         chain: Chain::mainnet(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/mainnet.json"))
-            .expect("Can't deserialize Mainnet genesis json"),
+        genesis: serde_json::from_str(mainnet_str).expect("Can't deserialize Mainnet genesis json"),
         genesis_hash: Some(b256!(
             "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
         )),
@@ -73,10 +73,10 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// The Goerli spec
 pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    let goerli_str = include_str!("../../res/genesis/goerli.json");
     ChainSpec {
         chain: Chain::goerli(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/goerli.json"))
-            .expect("Can't deserialize Goerli genesis json"),
+        genesis: serde_json::from_str(goerli_str).expect("Can't deserialize Goerli genesis json"),
         genesis_hash: Some(b256!(
             "bf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a"
         )),
@@ -117,10 +117,10 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// The Sepolia spec
 pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    let sepolia_str = include_str!("../../res/genesis/sepolia.json");
     ChainSpec {
         chain: Chain::sepolia(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia.json"))
-            .expect("Can't deserialize Sepolia genesis json"),
+        genesis: serde_json::from_str(sepolia_str).expect("Can't deserialize Sepolia genesis json"),
         genesis_hash: Some(b256!(
             "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"
         )),
@@ -165,10 +165,10 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// The Holesky spec
 pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    let holesky_str = include_str!("../../res/genesis/holesky.json");
     ChainSpec {
         chain: Chain::holesky(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/holesky.json"))
-            .expect("Can't deserialize Holesky genesis json"),
+        genesis: serde_json::from_str(holesky_str).expect("Can't deserialize Holesky genesis json"),
         genesis_hash: Some(b256!(
             "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4"
         )),
@@ -211,9 +211,10 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 /// Includes 20 prefunded accounts with 10_000 ETH each derived from mnemonic "test test test test
 /// test test test test test test test junk".
 pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    let devtest_str = include_str!("../../res/genesis/dev.json");
     ChainSpec {
         chain: Chain::dev(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/dev.json"))
+        genesis: serde_json::from_str(devtest_str)
             .expect("Can't deserialize Dev testnet genesis json"),
         genesis_hash: Some(b256!(
             "2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c"
@@ -249,9 +250,10 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 /// The Optimism Goerli spec
 #[cfg(feature = "optimism")]
 pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    let optimism_str = include_str!("../../res/genesis/goerli_op.json");
     ChainSpec {
         chain: Chain::optimism_goerli(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/goerli_op.json"))
+        genesis: serde_json::from_str(optimism_str)
             .expect("Can't deserialize Optimism Goerli genesis json"),
         genesis_hash: Some(b256!(
             "c1fc15cd51159b1f1e5cbc4b82e85c1447ddfa33c52cf1d98d14fba0d6354be1"
@@ -298,9 +300,10 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 /// The Base Goerli spec
 #[cfg(feature = "optimism")]
 pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    let base_goerli_str = include_str!("../../res/genesis/goerli_base.json");
     ChainSpec {
         chain: Chain::base_goerli(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/goerli_base.json"))
+        genesis: serde_json::from_str(base_goerli_str)
             .expect("Can't deserialize Base Goerli genesis json"),
         genesis_hash: Some(b256!(
             "a3ab140f15ea7f7443a4702da64c10314eb04d488e72974e02e2d728096b4f76"
@@ -347,9 +350,10 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 /// The Base Sepolia spec
 #[cfg(feature = "optimism")]
 pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    let base_sepolia_str = include_str!("../../res/genesis/sepolia_base.json");
     ChainSpec {
         chain: Chain::base_sepolia(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia_base.json"))
+        genesis: serde_json::from_str(base_sepolia_str)
             .expect("Can't deserialize Base Sepolia genesis json"),
         genesis_hash: Some(b256!(
             "0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4"
@@ -396,9 +400,10 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 /// The Base mainnet spec
 #[cfg(feature = "optimism")]
 pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    let base_mainnet_str = include_str!("../../res/genesis/base.json");
     ChainSpec {
         chain: Chain::base_mainnet(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/base.json"))
+        genesis: serde_json::from_str(base_mainnet_str)
             .expect("Can't deserialize Base genesis json"),
         genesis_hash: Some(b256!(
             "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"
