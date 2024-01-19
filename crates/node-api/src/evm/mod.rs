@@ -5,7 +5,7 @@ use reth_primitives::{
 use revm_primitives::{BlockEnv, CfgEnv, SpecId, TxEnv};
 
 /// This represents the set of methods used to configure the EVM before execution.
-pub trait EvmEnvConfig {
+pub trait EvmEnvConfig: Send + Sync {
     /// The type of the transaction metadata.
     type TxMeta;
 

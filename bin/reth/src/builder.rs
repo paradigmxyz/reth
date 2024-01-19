@@ -25,9 +25,9 @@ use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::NetworkEvents;
 use reth_network_api::{NetworkInfo, PeersInfo};
 #[cfg(not(feature = "optimism"))]
-use reth_node_builder::EthEngineTypes;
+use reth_node_builder::{EthEngineTypes, EthEvmConfig};
 #[cfg(feature = "optimism")]
-use reth_node_builder::OptimismEngineTypes;
+use reth_node_builder::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_node_core::{
     cli::{
         components::{RethNodeComponentsImpl, RethRpcServerHandles},
@@ -281,6 +281,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
                 consensus_engine_tx.clone(),
                 canon_state_notification_sender,
                 mining_mode,
+                evm_config,
             )
             .build();
 
@@ -317,7 +318,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
-                    evm_config
+                    evm_config,
                 )
                 .await?;
 

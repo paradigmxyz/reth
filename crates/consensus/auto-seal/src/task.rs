@@ -2,7 +2,7 @@ use crate::{mode::MiningMode, Storage};
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_node_api::EngineTypes;
+use reth_node_api::{EngineTypes, EvmEnvConfig};
 use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_stages::PipelineEvent;
@@ -50,6 +50,7 @@ impl<EvmConfig, Client, Pool: TransactionPool, Engine: EngineTypes>
     MiningTask<Client, Pool, EvmConfig, Engine>
 {
     /// Creates a new instance of the task
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         chain_spec: Arc<ChainSpec>,
         miner: MiningMode,
@@ -87,7 +88,7 @@ where
     Pool: TransactionPool + Unpin + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
     Engine: EngineTypes + 'static,
-    EvmConfig: Clone + Unpin + Send + Sync + 'static,
+    EvmConfig: EvmEnvConfig + Clone + Unpin + Send + Sync + 'static,
 {
     type Output = ();
 

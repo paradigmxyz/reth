@@ -3,6 +3,7 @@ use crate::{
     processor::EVMProcessor,
     stack::{InspectorStack, InspectorStackConfig},
 };
+use reth_node_api::EvmEnvConfig;
 use reth_primitives::ChainSpec;
 use reth_provider::{ExecutorFactory, PrunableBlockExecutor, StateProvider};
 use std::sync::Arc;
@@ -37,7 +38,7 @@ impl<Env> EvmProcessorFactory<Env> {
 
 impl<Env> ExecutorFactory for EvmProcessorFactory<Env>
 where
-    Env: Send + Sync + Clone + 'static,
+    Env: EvmEnvConfig + Send + Sync + Clone + 'static,
 {
     fn with_state<'a, SP: StateProvider + 'a>(
         &'a self,
