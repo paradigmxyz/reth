@@ -6,7 +6,7 @@ use std::result;
 pub type Result<T> = result::Result<T, Error>;
 
 /// An MDBX error kind.
-#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     /// Key/data pair already exists.
     #[error("key/data pair already exists")]

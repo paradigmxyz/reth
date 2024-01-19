@@ -105,7 +105,10 @@ impl TxnManager {
 
 #[cfg(feature = "read-tx-timeouts")]
 mod read_transactions {
-    use crate::txn_manager::{TxnManager, TxnManagerMessage, TxnPtr};
+    use crate::{
+        txn_manager::{TxnManager, TxnManagerMessage, TxnPtr},
+        Error,
+    };
     use dashmap::{DashMap, DashSet};
     use std::{
         sync::{
@@ -114,6 +117,7 @@ mod read_transactions {
         },
         time::{Duration, Instant},
     };
+    use tracing::{error, warn};
 
     impl TxnManager {
         pub(crate) fn add_active_read_transaction(&self, ptr: *mut ffi::MDBX_txn) {
@@ -146,6 +150,7 @@ mod read_transactions {
         pub(super) fn new(max_duration: Duration) -> Self {
             Self { max_duration, ..Default::default() }
         }
+
         pub(crate) fn add_active(&self, ptr: *mut ffi::MDBX_txn) {
             let _ = self.active.insert(ptr as usize, Instant::now());
         }
@@ -166,25 +171,64 @@ mod read_transactions {
             self: Arc<Self>,
             txn_manager_messages: SyncSender<TxnManagerMessage>,
         ) {
-            std::thread::spawn(move || loop {
-                let now = Instant::now();
+            std::thread::spawn(move || {
+                let mut aborted_active = Vec::new();
 
-                for entry in self.active.iter() {
-                    let (ptr, start) = entry.pair();
-                    let ptr = *ptr as *mut ffi::MDBX_txn;
-                    if (now - *start) > self.max_duration {
-                        let (sender, rx) = sync_channel(0);
-                        txn_manager_messages
-                            .send(TxnManagerMessage::Abort { tx: TxnPtr(ptr), sender })
-                            .unwrap();
-                        rx.recv().unwrap().unwrap();
+                loop {
+                    let now = Instant::now();
 
-                        self.add_aborted(ptr);
-                        self.remove_active(ptr);
+                    // Iterate through active read transactions and abort those that's open for
+                    // longer than `self.max_duration`.
+                    for entry in self.active.iter() {
+                        let (ptr, start) = entry.pair();
+                        let ptr = *ptr as *mut ffi::MDBX_txn;
+                        let duration = now - *start;
+
+                        if duration > self.max_duration {
+                            // Add the transaction to the list of aborted transactions list, so
+                            // further usages report the correct error
+                            // when the transaction is closed.
+                            self.add_aborted(ptr);
+
+                            // Abort the transaction
+                            let (sender, rx) = sync_channel(0);
+                            txn_manager_messages
+                                .send(TxnManagerMessage::Abort { tx: TxnPtr(ptr), sender })
+                                .unwrap();
+                            let result = rx.recv().unwrap();
+
+                            // Add the transaction to `aborted_active`. We can't remove it instantly
+                            // from the list of active transactions, because we iterate through it.
+                            aborted_active.push((ptr, duration, result.err()));
+                        }
                     }
-                }
 
-                std::thread::sleep(Duration::from_millis(10));
+                    // Walk through aborted transactions, and delete them from the list of active
+                    // transactions.
+                    for (ptr, open_duration, err) in aborted_active.iter().copied() {
+                        // Try deleting the transaction from the list of active transactions.
+                        let was_in_active = self.remove_active(ptr).is_some();
+                        if let Some(err) = err {
+                            // If there was an error when aborting the transaction, we need to
+                            // remove it from the list of aborted transactions, because otherwise it
+                            // will stay there forever.
+                            self.remove_aborted(ptr);
+                            if was_in_active && err != Error::BadSignature {
+                                // If the transaction was in the list of active transactions and the
+                                // error code is not `EBADSIGN`, then user didn't abort it.
+                                error!(target: "libmdbx", ?err, ?open_duration, "Failed to abort the long-lived read transactions");
+                            }
+                        } else {
+                            warn!(target: "libmdbx", ?open_duration, "Long-lived read transactions has been aborted");
+                        }
+                    }
+
+                    // Clear the list of aborted transactions, but not de-allocate the reserved
+                    // capacity to save on further pushes.
+                    aborted_active.clear();
+
+                    std::thread::sleep(Duration::from_millis(500));
+                }
             });
         }
     }
