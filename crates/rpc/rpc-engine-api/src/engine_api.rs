@@ -862,7 +862,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let res = api.exchange_transition_configuration(transition_config.clone()).await;
+            let res = api.exchange_transition_configuration(transition_config).await;
 
             assert_matches!(
                 res,
@@ -890,7 +890,7 @@ mod tests {
             };
 
             // Unknown block number
-            let res = api.exchange_transition_configuration(transition_config.clone()).await;
+            let res = api.exchange_transition_configuration(transition_config).await;
 
             assert_matches!(
                res,
@@ -904,7 +904,7 @@ mod tests {
                 execution_terminal_block.clone().unseal(),
             );
 
-            let res = api.exchange_transition_configuration(transition_config.clone()).await;
+            let res = api.exchange_transition_configuration(transition_config).await;
 
             assert_matches!(
                 res,
@@ -929,8 +929,7 @@ mod tests {
 
             handle.provider.add_block(terminal_block.hash(), terminal_block.unseal());
 
-            let config =
-                api.exchange_transition_configuration(transition_config.clone()).await.unwrap();
+            let config = api.exchange_transition_configuration(transition_config).await.unwrap();
             assert_eq!(config, transition_config);
         }
     }

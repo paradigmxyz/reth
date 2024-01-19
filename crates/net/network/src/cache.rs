@@ -53,13 +53,13 @@ impl<T: Hash + Eq> LruCache<T> {
 
     /// Remove the least recently used entry and return it.
     ///
-    /// If the `LruCache` is empty this will return None.
+    /// If the `LruCache` is empty or if the eviction feedback is
+    /// configured, this will return None.
     #[inline]
     fn remove_lru(&mut self) -> Option<T> {
         self.inner.pop_front()
     }
 
-    #[allow(dead_code)]
     /// Expels the given value. Returns true if the value existed.
     pub fn remove(&mut self, value: &T) -> bool {
         self.inner.remove(value)
@@ -80,14 +80,12 @@ impl<T: Hash + Eq> LruCache<T> {
     }
 
     /// Returns number of elements currently in cache.
-    #[cfg(test)]
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
     /// Returns `true` if there are currently no elements in the cache.
-    #[cfg(test)]
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
@@ -136,7 +134,6 @@ where
     K: Hash + PartialEq,
 {
     /// Returns a new cache with default limiter and hash builder.
-    #[allow(dead_code)]
     pub fn new(max_length: u32) -> Self {
         LruMap(schnellru::LruMap::new(ByLength::new(max_length)))
     }
@@ -147,7 +144,6 @@ where
     K: Hash + PartialEq,
 {
     /// Returns a new cache with [`Unlimited`] limiter and default hash builder.
-    #[allow(dead_code)]
     pub fn new_unlimited() -> Self {
         LruMap(schnellru::LruMap::new(Unlimited))
     }

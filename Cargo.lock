@@ -232,23 +232,35 @@ dependencies = [
 ]
 
 [[package]]
-name = "alloy-rpc-trace-types"
+name = "alloy-rpc-engine-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#50e38e845afb27fc311a74d2260dd087f8e972f3"
+source = "git+https://github.com/alloy-rs/alloy#61142b3fee367a9aee087d6cfac8e57abaaa2eb2"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
- "itertools 0.12.0",
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
+ "jsonrpsee-types",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "alloy-rpc-trace-types"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/alloy#61142b3fee367a9aee087d6cfac8e57abaaa2eb2"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rpc-types",
  "serde",
  "serde_json",
- "thiserror",
 ]
 
 [[package]]
 name = "alloy-rpc-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#50e38e845afb27fc311a74d2260dd087f8e972f3"
+source = "git+https://github.com/alloy-rs/alloy#61142b3fee367a9aee087d6cfac8e57abaaa2eb2"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -5653,6 +5665,7 @@ dependencies = [
  "http",
  "http-body",
  "hyper",
+ "hyper-rustls",
  "ipnet",
  "js-sys",
  "log",
@@ -5661,11 +5674,13 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "rustls",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "system-configuration",
  "tokio",
+ "tokio-rustls",
  "tokio-util",
  "tower-service",
  "url",
@@ -5673,6 +5688,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
+ "webpki-roots",
  "winreg",
 ]
 
@@ -6286,6 +6302,7 @@ dependencies = [
  "fnv",
  "futures",
  "humantime-serde",
+ "itertools 0.12.0",
  "linked-hash-map",
  "linked_hash_set",
  "metrics",
@@ -6575,6 +6592,7 @@ dependencies = [
  "reth-consensus-common",
  "reth-interfaces",
  "reth-metrics",
+ "reth-network",
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
@@ -6697,6 +6715,7 @@ version = "0.1.0-alpha.15"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-engine-types",
  "alloy-rpc-trace-types",
  "alloy-rpc-types",
  "arbitrary",
@@ -6895,7 +6914,7 @@ dependencies = [
 [[package]]
 name = "revm-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/evm-inspectors#b9e6e4ea25b00e0ddcbe1f295c8a69a6d2a08e39"
+source = "git+https://github.com/paradigmxyz/evm-inspectors#eb629fda7401c5b600257860636fc96d0d0322fe"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-trace-types",
@@ -6907,7 +6926,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "tokio",
 ]
 
 [[package]]
