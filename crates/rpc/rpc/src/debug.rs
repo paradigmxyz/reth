@@ -24,13 +24,7 @@ use reth_primitives::{
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,
 };
-use reth_revm::{
-    database::{StateProviderDatabase, SubState},
-};
-use revm_inspectors::tracing::{
-    js::{JsDbRequest, JsInspector,TransactionContext},
-    FourByteInspector, TracingInspector, TracingInspectorConfig,
-};
+use reth_revm::database::{StateProviderDatabase, SubState};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
     trace::geth::{
@@ -43,6 +37,10 @@ use reth_tasks::TaskSpawner;
 use revm::{
     db::{CacheDB, EmptyDB},
     primitives::Env,
+};
+use revm_inspectors::tracing::{
+    js::{JsDbRequest, JsInspector, TransactionContext},
+    FourByteInspector, TracingInspector, TracingInspectorConfig,
 };
 use std::sync::Arc;
 use tokio::sync::{mpsc, AcquireError, OwnedSemaphorePermit};
@@ -105,8 +103,9 @@ where
                     let tx_hash = tx.hash;
                     let tx = tx_env_with_recovered(&tx);
                     let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
-                    let (result, state_changes) =
-                        this.trace_transaction(opts.clone(), env, at, &mut db,None).map_err(|err| {
+                    let (result, state_changes) = this
+                        .trace_transaction(opts.clone(), env, at, &mut db, None)
+                        .map_err(|err| {
                             results.push(TraceResult::Error {
                                 error: err.to_string(),
                                 tx_hash: Some(tx_hash),
@@ -238,7 +237,7 @@ where
                 )?;
 
                 let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
-                this.trace_transaction(opts, env, state_at, &mut db).map(|(trace, _)| trace)
+                this.trace_transaction(opts, env, state_at, &mut db, None).map(|(trace, _)| trace)
             })
             .await
     }
@@ -464,6 +463,7 @@ where
                             env,
                             target_block,
                             &mut db,
+                            None,
                         )?;
 
                         // If there is more transactions, commit the database
@@ -494,7 +494,7 @@ where
         env: Env,
         at: BlockId,
         db: &mut SubState<StateProviderBox>,
-        transaction_context: Option<TransactionContext>
+        transaction_context: Option<TransactionContext>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -558,13 +558,26 @@ where
                     // we spawn the database service that will be used by the JS tracer
                     // transaction because the service needs access to the committed state changes
                     let to_db_service = self.spawn_js_trace_service(at, Some(js_db))?;
+                    if let Some(tx_context) = transaction_context {
+                        let mut inspector = JsInspector::with_transaction_context(
+                            code,
+                            config,
+                            to_db_service,
+                            tx_context,
+                        )?;
+                        let (res, env) = inspect(db, env, &mut inspector)?;
 
-                    let mut inspector = JsInspector::with_transaction_context(code, config, to_db_service,transaction_context)?;
-                    let (res, env) = inspect(db, env, &mut inspector)?;
+                        let state = res.state.clone();
+                        let result = inspector.json_result(res, &env)?;
+                        Ok((GethTrace::JS(result), state))
+                    } else {
+                        let mut inspector = JsInspector::new(code, config, to_db_service)?;
+                        let (res, env) = inspect(db, env, &mut inspector)?;
 
-                    let state = res.state.clone();
-                    let result = inspector.json_result(res, &env)?;
-                    Ok((GethTrace::JS(result), state))
+                        let state = res.state.clone();
+                        let result = inspector.json_result(res, &env)?;
+                        Ok((GethTrace::JS(result), state))
+                    }
                 }
             }
         }
