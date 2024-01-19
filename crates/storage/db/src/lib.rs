@@ -239,7 +239,7 @@ pub mod test_utils {
         let db = init_db(
             &path,
             DatabaseArguments::default()
-                .max_read_transaction_duration(MaxReadTransactionDuration::Unbounded),
+                .max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
         )
         .expect(&emsg);
 
@@ -252,7 +252,7 @@ pub mod test_utils {
         let db = init_db(
             path.as_path(),
             DatabaseArguments::default()
-                .max_read_transaction_duration(MaxReadTransactionDuration::Unbounded),
+                .max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
         )
         .expect(ERROR_DB_CREATION);
         Arc::new(TempDatabase { db: Some(db), path })
@@ -261,7 +261,7 @@ pub mod test_utils {
     /// Create read only database for testing
     pub fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnv>> {
         let args = DatabaseArguments::default()
-            .max_read_transaction_duration(MaxReadTransactionDuration::Unbounded);
+            .max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
 
         let path = tempdir_path();
         {
@@ -289,7 +289,7 @@ mod tests {
         let path = tempdir().unwrap();
 
         let args = DatabaseArguments::default()
-            .max_read_transaction_duration(MaxReadTransactionDuration::Unbounded);
+            .max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
 
         // Database is empty
         {

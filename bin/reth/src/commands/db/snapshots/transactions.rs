@@ -30,10 +30,7 @@ impl Command {
         inclusion_filter: InclusionFilter,
         phf: Option<PerfectHashingFunction>,
     ) -> eyre::Result<()> {
-        let mut db_args = DatabaseArguments::default();
-        if let Some(log_level) = log_level {
-            db_args = db_args.log_level(log_level);
-        }
+        let db_args = DatabaseArguments::default().log_level(log_level);
 
         let factory = ProviderFactory::new(open_db_read_only(db_path, db_args)?, chain.clone());
         let provider = factory.provider()?;
