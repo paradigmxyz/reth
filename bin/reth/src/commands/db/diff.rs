@@ -23,6 +23,7 @@ use reth_db::{
     TransactionBlock, Transactions, TxHashNumber, TxSenders,
 };
 use tracing::info;
+use reth_db::mdbx::DatabaseArguments;
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db diff` command
@@ -61,7 +62,10 @@ impl Command {
     pub fn execute(self, tool: &DbTool<'_, DatabaseEnv>) -> eyre::Result<()> {
         // open second db
         let second_db_path: PathBuf = self.secondary_datadir.join("db").into();
-        let second_db = open_db_read_only(&second_db_path, self.second_db.log_level)?;
+        let second_db = open_db_read_only(
+            &second_db_path,
+            DatabaseArguments::default().log_level(self.second_db.log_level),
+        )?;
 
         let tables = match self.table {
             Some(table) => vec![table],
