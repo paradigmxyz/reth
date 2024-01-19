@@ -14,6 +14,7 @@ use reth_provider::{
     TransactionsProvider, TransactionsProviderExt,
 };
 
+use reth_db::mdbx::DatabaseArguments;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -29,7 +30,12 @@ impl Command {
         inclusion_filter: InclusionFilter,
         phf: Option<PerfectHashingFunction>,
     ) -> eyre::Result<()> {
-        let factory = ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone());
+        let mut db_args = DatabaseArguments::default();
+        if let Some(log_level) = log_level {
+            db_args = db_args.log_level(log_level);
+        }
+
+        let factory = ProviderFactory::new(open_db_read_only(db_path, db_args)?, chain.clone());
         let provider = factory.provider()?;
         let tip = provider.last_block_number()?;
         let block_range =
@@ -61,7 +67,7 @@ impl Command {
         for bench_kind in [BenchKind::Walk, BenchKind::RandomAll] {
             bench(
                 bench_kind,
-                (open_db_read_only(db_path, log_level)?, chain.clone()),
+                (open_db_read_only(db_path, db_args)?, chain.clone()),
                 SnapshotSegment::Transactions,
                 filters,
                 compression,
@@ -93,7 +99,7 @@ impl Command {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())];
             bench(
                 BenchKind::RandomOne,
-                (open_db_read_only(db_path, log_level)?, chain.clone()),
+                (open_db_read_only(db_path, db_args)?, chain.clone()),
                 SnapshotSegment::Transactions,
                 filters,
                 compression,
@@ -115,14 +121,14 @@ impl Command {
         {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())] as u64;
             let transaction_hash =
-                ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone())
+                ProviderFactory::new(open_db_read_only(db_path, db_args)?, chain.clone())
                     .transaction_by_id(num)?
                     .ok_or(ProviderError::TransactionNotFound(num.into()))?
                     .hash();
 
             bench(
                 BenchKind::RandomHash,
-                (open_db_read_only(db_path, log_level)?, chain.clone()),
+                (open_db_read_only(db_path, db_args)?, chain.clone()),
                 SnapshotSegment::Transactions,
                 filters,
                 compression,
