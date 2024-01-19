@@ -1,6 +1,6 @@
 //! `eth_` PubSub RPC handler implementation
 
-use crate::{eth::logs_utils, result::invalid_params_rpc_err, EthApi};
+use crate::{eth::logs_utils, result::invalid_params_rpc_err};
 use futures::StreamExt;
 use jsonrpsee::{server::SubscriptionMessage, PendingSubscriptionSink, SubscriptionSink};
 use reth_network_api::NetworkInfo;

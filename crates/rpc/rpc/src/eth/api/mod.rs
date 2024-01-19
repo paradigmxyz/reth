@@ -17,11 +17,13 @@ use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnv},
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, B256, U256, U64,
+    Address, BlockId, BlockNumberOrTag, ChainInfo, Receipt, SealedBlockWithSenders, B256, U256,
+    U64,
 };
 
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, LocalPendingBlockWatcherSender,
+    StateProviderBox, StateProviderFactory,
 };
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -102,6 +104,7 @@ where
         gas_cap: impl Into<GasCap>,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
+        local_pending_block_sender: LocalPendingBlockWatcherSender,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -113,6 +116,7 @@ where
             Box::<TokioTaskExecutor>::default(),
             blocking_task_pool,
             fee_history_cache,
+            local_pending_block_sender,
         )
     }
 
@@ -128,6 +132,7 @@ where
         task_spawner: Box<dyn TaskSpawner>,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
+        local_pending_block_sender: LocalPendingBlockWatcherSender,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -152,6 +157,7 @@ where
             fee_history_cache,
             #[cfg(feature = "optimism")]
             http_client: reqwest::Client::new(),
+            local_pending_block_sender,
         };
 
         Self { inner: Arc::new(inner) }
@@ -210,6 +216,11 @@ where
     /// Returns fee history cache
     pub fn fee_history_cache(&self) -> &FeeHistoryCache {
         &self.inner.fee_history_cache
+    }
+
+    /// Returns local pending block sender
+    pub fn local_pending_block_sender(&self) -> &LocalPendingBlockWatcherSender {
+        &self.inner.local_pending_block_sender
     }
 }
 
@@ -341,6 +352,10 @@ where
                 expires_at: now + Duration::from_secs(3),
             });
 
+            let receipts = self.cache().get_receipts(pending_block.hash).await?.unwrap_or_default();
+            self.local_pending_block_sender()
+                .send_modify(|v| *v = Some((pending_block.block.clone(), receipts.to_vec())));
+
             Ok(Some(pending_block))
         })
         .await
@@ -468,6 +483,8 @@ struct EthApiInner<Provider, Pool, Network> {
     blocking_task_pool: BlockingTaskPool,
     /// Cache for block fees history
     fee_history_cache: FeeHistoryCache,
+    /// A tokio watch sender to notify about the most recent locally built pending block
+    local_pending_block_sender: LocalPendingBlockWatcherSender,
     /// An http client for communicating with sequencers.
     #[cfg(feature = "optimism")]
     http_client: reqwest::Client,
