@@ -67,13 +67,13 @@ impl Environment {
         self.inner.env_kind
     }
 
-    /// Returns true if the environment was opened in [Mode::ReadWrite] mode.
+    /// Returns true if the environment was opened in [crate::Mode::ReadWrite] mode.
     #[inline]
     pub fn is_read_write(&self) -> bool {
         self.inner.env_kind.is_write_map()
     }
 
-    /// Returns true if the environment was opened in [Mode::ReadOnly] mode.
+    /// Returns true if the environment was opened in [crate::Mode::ReadOnly] mode.
     #[inline]
     pub fn is_read_only(&self) -> bool {
         !self.inner.env_kind.is_write_map()
@@ -252,12 +252,12 @@ pub enum EnvironmentKind {
     Default,
     /// Open the environment as mdbx-WRITEMAP.
     /// Use a writeable memory map unless the environment is opened as MDBX_RDONLY
-    /// ([Mode::ReadOnly]).
+    /// ([crate::Mode::ReadOnly]).
     ///
-    /// All data will be mapped into memory in the read-write mode [Mode::ReadWrite]. This offers a
-    /// significant performance benefit, since the data will be modified directly in mapped
-    /// memory and then flushed to disk by single system call, without any memory management
-    /// nor copying.
+    /// All data will be mapped into memory in the read-write mode [crate::Mode::ReadWrite]. This
+    /// offers a significant performance benefit, since the data will be modified directly in
+    /// mapped memory and then flushed to disk by single system call, without any memory
+    /// management nor copying.
     ///
     /// This mode is incompatible with nested transactions.
     WriteMap,
