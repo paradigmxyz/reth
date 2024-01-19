@@ -20,6 +20,7 @@ reth-rpc-types.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true
+reth-network.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-revm = { workspace = true, features = ["js-tracer"] }
 reth-tasks.workspace = true
@@ -48,7 +49,7 @@ hyper = "0.14.24"
 jsonwebtoken = "8"
 
 ## required for optimism sequencer delegation
-reqwest = { version = "0.11", default-features = false, features = ["rustls"], optional = true }
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"], optional = true }
 
 # async
 async-trait.workspace = true
@@ -88,6 +89,7 @@ optimism = [
     "reth-primitives/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-network-api/optimism",
+    "reth-network/optimism",
     "reth-provider/optimism",
     "reth-transaction-pool/optimism",
 ]

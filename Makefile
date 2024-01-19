@@ -15,7 +15,7 @@ BUILD_PATH = "target"
 ifeq ($(OS),Windows_NT)
     FEATURES ?=
 else
-    FEATURES ?= jemalloc
+    FEATURES ?= jemalloc asm-keccak
 endif
 
 # Cargo profile for builds. Default is for local builds, CI uses an override.
@@ -73,6 +73,9 @@ op-build-native-%:
 
 # No jemalloc on Windows
 build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(FEATURES))
+
+# asm keccak optimizations not enabled
+build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
 
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
