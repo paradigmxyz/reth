@@ -466,33 +466,36 @@ impl TransactionFetcher {
         );
 
         for hash in self.buffered_hashes.iter() {
-            // if this request is eth68 txns, check the size metadata
+            // if this request is for eth68 txns...
             if let Some(acc_size_response) = acc_eth68_size.as_mut() {
-                if *acc_size_response >= MAX_FULL_TRANSACTIONS_PACKET_SIZE {
-                    trace!(
-                        target: "net::tx",
-                        peer_id=format!("{peer_id:#}"),
-                        hash=format!("{hash:#}"),
-                        size=self.eth68_meta.get(hash).expect("should find size in `eth68-meta`"),
-                        acc_size_response=acc_size_response,
-                        MAX_FULL_TRANSACTIONS_PACKET_SIZE=MAX_FULL_TRANSACTIONS_PACKET_SIZE,
-                        "found buffered hash for peer but can't fit it into request"
-                    );
+                // ...and this buffered hash is for an eth68 tx, check the size metadata
+                if self.eth68_meta.get(hash).is_some() {
+                    if *acc_size_response >= MAX_FULL_TRANSACTIONS_PACKET_SIZE {
+                        trace!(
+                            target: "net::tx",
+                            peer_id=format!("{peer_id:#}"),
+                            hash=format!("{hash:#}"),
+                            size=self.eth68_meta.get(hash).expect("should find size in `eth68-meta`"),
+                            acc_size_response=acc_size_response,
+                            MAX_FULL_TRANSACTIONS_PACKET_SIZE=MAX_FULL_TRANSACTIONS_PACKET_SIZE,
+                            "found buffered hash for peer but can't fit it into request"
+                        );
 
-                    break
-                }
-                if !self.include_eth68_hash(acc_size_response, *hash) {
-                    trace!(
-                        target: "net::tx",
-                        peer_id=format!("{peer_id:#}"),
-                        hash=format!("{hash:#}"),
-                        size=self.eth68_meta.get(hash).expect("should find size in `eth68-meta`"),
-                        acc_size_response=acc_size_response,
-                        MAX_FULL_TRANSACTIONS_PACKET_SIZE=MAX_FULL_TRANSACTIONS_PACKET_SIZE,
-                        "found buffered hash for peer but can't fit it into request"
-                    );
+                        break
+                    }
+                    if !self.include_eth68_hash(acc_size_response, *hash) {
+                        trace!(
+                            target: "net::tx",
+                            peer_id=format!("{peer_id:#}"),
+                            hash=format!("{hash:#}"),
+                            size=self.eth68_meta.get(hash).expect("should find size in `eth68-meta`"),
+                            acc_size_response=acc_size_response,
+                            MAX_FULL_TRANSACTIONS_PACKET_SIZE=MAX_FULL_TRANSACTIONS_PACKET_SIZE,
+                            "found buffered hash for peer but can't fit it into request"
+                        );
 
-                    continue
+                        continue
+                    }
                 }
             // otherwise fill request based on hashes count
             } else if hashes.len() >= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
