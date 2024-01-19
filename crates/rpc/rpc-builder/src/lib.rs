@@ -1119,7 +1119,6 @@ where
                         RethRpcModule::Debug => DebugApi::new(
                             self.provider.clone(),
                             eth_api.clone(),
-                            Box::new(self.executor.clone()),
                             self.blocking_pool_guard.clone(),
                         )
                         .into_rpc()
@@ -1318,7 +1317,6 @@ where
         DebugApi::new(
             self.provider.clone(),
             eth_api,
-            Box::new(self.executor.clone()),
             self.blocking_pool_guard.clone(),
         )
     }
