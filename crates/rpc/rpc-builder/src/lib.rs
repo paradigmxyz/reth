@@ -1314,11 +1314,7 @@ where
     /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn debug_api(&mut self) -> DebugApi<Provider, EthApi<Provider, Pool, Network>> {
         let eth_api = self.eth_api();
-        DebugApi::new(
-            self.provider.clone(),
-            eth_api,
-            self.blocking_pool_guard.clone(),
-        )
+        DebugApi::new(self.provider.clone(), eth_api, self.blocking_pool_guard.clone())
     }
 
     /// Instantiates NetApi
