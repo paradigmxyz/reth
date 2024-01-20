@@ -1258,23 +1258,25 @@ mod tests {
     use super::*;
     use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
     use alloy_rlp::Decodable;
+    use fetcher::MAX_ALTERNATIVE_PEERS_PER_TX;
     use futures::FutureExt;
     use reth_interfaces::sync::{NetworkSyncUpdater, SyncState};
     use reth_network_api::NetworkInfo;
     use reth_primitives::hex;
     use reth_provider::test_utils::NoopProvider;
-
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use secp256k1::SecretKey;
     use std::{future::poll_fn, hash};
-
-    use fetcher::MAX_ALTERNATIVE_PEERS_PER_TX;
 
     async fn new_tx_manager() -> TransactionsManager<impl TransactionPool> {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
         let client = NoopProvider::default();
 
-        let config = NetworkConfigBuilder::new(secret_key).disable_discovery().build(client);
+        let config = NetworkConfigBuilder::new(secret_key)
+            // let OS choose port
+            .listener_port(0)
+            .disable_discovery()
+            .build(client);
 
         let pool = testing_pool();
 

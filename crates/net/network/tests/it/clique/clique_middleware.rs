@@ -91,7 +91,7 @@ pub trait CliqueMiddleware: Send + Sync + Middleware {
         Ok(())
     }
 
-    /// Returns the genesis block of the [`Geth`](ethers_core::utils::Geth) instance by calling
+    /// Returns the genesis block of the [`Geth`](alloy_node_bindings::Geth) instance by calling
     /// geth's `eth_getBlock`.
     async fn remote_genesis_block(&self) -> Result<Block<H256>, CliqueMiddlewareError<Self>> {
         self.get_block(BlockNumber::Earliest).await?.ok_or(CliqueError::NoGenesis)
@@ -109,7 +109,7 @@ pub trait CliqueMiddleware: Send + Sync + Middleware {
         Ok(())
     }
 
-    /// Returns the [`Geth`](ethers_core::utils::Geth) instance [`PeerId`](reth_primitives::PeerId)
+    /// Returns the [`Geth`](alloy_node_bindings::Geth) instance [`PeerId`](reth_primitives::PeerId)
     /// by calling geth's `admin_nodeInfo`.
     async fn peer_id(&self) -> Result<PeerId, CliqueMiddlewareError<Self>> {
         Ok(enr_to_peer_id(self.node_info().await?.enr))

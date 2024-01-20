@@ -173,7 +173,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#892a3844f96fdb30e0d1c03aa9e174d4864d7c6b"
+source = "git+https://github.com/alloy-rs/alloy#42778ba44fbf9fdcfd44de81436f65d73e70ede2"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
@@ -190,6 +190,18 @@ dependencies = [
  "alloy-sol-type-parser",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "alloy-node-bindings"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/alloy#42778ba44fbf9fdcfd44de81436f65d73e70ede2"
+dependencies = [
+ "alloy-genesis",
+ "alloy-primitives",
+ "k256",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -244,9 +256,10 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-engine-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#61142b3fee367a9aee087d6cfac8e57abaaa2eb2"
+source = "git+https://github.com/alloy-rs/alloy#42778ba44fbf9fdcfd44de81436f65d73e70ede2"
 dependencies = [
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-rpc-types",
  "ethereum_ssz",
  "ethereum_ssz_derive",
@@ -258,7 +271,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-trace-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#61142b3fee367a9aee087d6cfac8e57abaaa2eb2"
+source = "git+https://github.com/alloy-rs/alloy#42778ba44fbf9fdcfd44de81436f65d73e70ede2"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
@@ -269,7 +282,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#61142b3fee367a9aee087d6cfac8e57abaaa2eb2"
+source = "git+https://github.com/alloy-rs/alloy#42778ba44fbf9fdcfd44de81436f65d73e70ede2"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -6296,6 +6309,7 @@ dependencies = [
 name = "reth-network"
 version = "0.1.0-alpha.15"
 dependencies = [
+ "alloy-node-bindings",
  "alloy-rlp",
  "aquamarine",
  "async-trait",
