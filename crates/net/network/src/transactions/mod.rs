@@ -559,13 +559,14 @@ where
         };
 
         // message version decides how hashes are packed
-        // if this is a eth68 message, store eth68 tx metadata
-        if let Some(eth68_msg) = msg.as_eth68() {
-            for (&hash, (_type, size)) in eth68_msg.metadata_iter() {
-                self.transaction_fetcher.eth68_meta.insert(hash, size);
-            }
-        }
-        // extract hashes payload
+        let msg_version = msg.version();
+        // extract hashes payload, and sizes if version eth68
+        let sizes = msg.as_eth68().map(|eth68_msg| {
+            eth68_msg
+                .metadata_iter()
+                .map(|(&hash, (_type, size))| (hash, size))
+                .collect::<HashMap<_, _>>()
+        });
         let mut hashes = msg.into_hashes();
 
         // keep track of the transactions the peer knows
@@ -593,16 +594,26 @@ where
 
         debug!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            hashes=format!("[{:#}]", hashes.iter().format(", ")),
+            hashes=?hashes,
+            msg_version=?msg_version,
             "received previously unseen hashes in announcement from peer"
         );
+
+        if msg_version == EthVersion::Eth68 {
+            // cache size metadata of unseen hashes
+            for (hash, size) in sizes.expect("should be at least empty map") {
+                if hashes.contains(&hash) {
+                    self.transaction_fetcher.eth68_meta.insert(hash, size);
+                }
+            }
+        }
 
         // only send request for hashes to idle peer, otherwise buffer hashes storing peer as
         // fallback
         if !self.transaction_fetcher.is_idle(peer_id) {
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                hashes=format!("[{:#}]", hashes.iter().format(", ")),
+                hashes=?hashes,
                 "buffering hashes announced by busy peer"
             );
 
