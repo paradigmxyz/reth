@@ -15,3 +15,36 @@ pub mod version;
 pub mod primitives {
     pub use reth_primitives::*;
 }
+
+/// Re-export of `reth_rpc_*` crates.
+pub mod rpc {
+
+    /// Re-exported from `reth_rpc_builder`.
+    pub mod builder {
+        pub use reth_rpc_builder::*;
+    }
+
+    /// Re-exported from `reth_rpc_types`.
+    pub mod types {
+        pub use reth_rpc_types::*;
+    }
+
+    /// Re-exported from `reth_rpc_api`.
+    pub mod api {
+        pub use reth_rpc_api::*;
+    }
+    /// Re-exported from `reth_rpc::eth`.
+    pub mod eth {
+        pub use reth_rpc::eth::*;
+    }
+
+    /// Re-exported from `reth_rpc::rpc`.
+    pub mod result {
+        pub use reth_rpc::result::*;
+    }
+
+    /// Re-exported from `reth_rpc::eth`.
+    pub mod compat {
+        pub use reth_rpc_types_compat::*;
+    }
+}

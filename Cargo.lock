@@ -1483,7 +1483,7 @@ version = "7.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c64043d6c7b7a4c58e39e7efccfdea7b93d885a795d0c054a69dbbf4dd52686"
 dependencies = [
- "crossterm",
+ "crossterm 0.27.0",
  "strum",
  "strum_macros",
  "unicode-width",
@@ -1697,6 +1697,22 @@ name = "crossbeam-utils"
 version = "0.8.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "248e3bacc7dc6baa3b21e405ee045c3047101a49145e7e9eca583ab4c2ca5345"
+
+[[package]]
+name = "crossterm"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e64e6c0fbe2c17357405f7c758c1ef960fce08bdfb2c03d88d2a18d7e09c4b67"
+dependencies = [
+ "bitflags 1.3.2",
+ "crossterm_winapi",
+ "libc",
+ "mio",
+ "parking_lot 0.12.1",
+ "signal-hook",
+ "signal-hook-mio",
+ "winapi",
+]
 
 [[package]]
 name = "crossterm"
@@ -3387,7 +3403,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.4.10",
+ "socket2 0.5.5",
  "tokio",
  "tower-service",
  "tracing",
@@ -5549,7 +5565,7 @@ checksum = "a5659e52e4ba6e07b2dad9f1158f578ef84a73762625ddb51536019f34d180eb"
 dependencies = [
  "bitflags 2.4.1",
  "cassowary",
- "crossterm",
+ "crossterm 0.27.0",
  "indoc",
  "itertools 0.12.0",
  "lru 0.12.1",
@@ -5738,7 +5754,7 @@ dependencies = [
  "comfy-table",
  "confy",
  "const-str",
- "crossterm",
+ "crossterm 0.27.0",
  "dirs-next",
  "eyre",
  "fdlimit",
@@ -6467,8 +6483,11 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-rpc",
+ "reth-rpc-api",
  "reth-rpc-builder",
  "reth-rpc-engine-api",
+ "reth-rpc-types",
+ "reth-rpc-types-compat",
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
@@ -8785,6 +8804,19 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "termcolor",
+]
+
+[[package]]
+name = "tui"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ccdd26cbd674007e649a272da4475fb666d3aa0ad0531da7136db6fab0e5bad1"
+dependencies = [
+ "bitflags 1.3.2",
+ "cassowary",
+ "crossterm 0.25.0",
+ "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]
