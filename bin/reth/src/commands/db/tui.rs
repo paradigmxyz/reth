@@ -3,6 +3,13 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use ratatui::{
+    backend::{Backend, CrosstermBackend},
+    layout::{Alignment, Constraint, Direction, Layout},
+    style::{Color, Modifier, Style},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    Frame, Terminal,
+};
 use reth_db::{
     table::{Table, TableRow},
     RawValue,
@@ -12,13 +19,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::error;
-use tui::{
-    backend::{Backend, CrosstermBackend},
-    layout::{Alignment, Constraint, Corner, Direction, Layout},
-    style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
-    Frame, Terminal,
-};
 
 /// Available keybindings for the [DbListTUI]
 static CMDS: [(&str, &str); 6] = [
@@ -356,7 +356,7 @@ where
 }
 
 /// Render the UI
-fn ui<B: Backend, F, T: Table>(f: &mut Frame<'_, B>, app: &mut DbListTUI<F, T>)
+fn ui<F, T: Table>(f: &mut Frame<'_>, app: &mut DbListTUI<F, T>)
 where
     F: FnMut(usize, usize) -> Vec<TableRow<T>>,
 {
@@ -392,8 +392,7 @@ where
             )))
             .style(Style::default().fg(Color::White))
             .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC))
-            .highlight_symbol("➜ ")
-            .start_corner(Corner::TopLeft);
+            .highlight_symbol("➜ ");
         f.render_stateful_widget(key_list, inner_chunks[0], &mut app.list_state);
 
         let value_display = Paragraph::new(

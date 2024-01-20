@@ -101,18 +101,18 @@ impl Signature {
         let v = u64::decode(buf)?;
         let r = Decodable::decode(buf)?;
         let s = Decodable::decode(buf)?;
-        if v >= 35 {
-            // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
-            let odd_y_parity = ((v - 35) % 2) != 0;
-            let chain_id = (v - 35) >> 1;
-            Ok((Signature { r, s, odd_y_parity }, Some(chain_id)))
-        } else {
+        if v < 35 {
             // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
             if v != 27 && v != 28 {
                 return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
             }
             let odd_y_parity = v == 28;
             Ok((Signature { r, s, odd_y_parity }, None))
+        } else {
+            // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
+            let odd_y_parity = ((v - 35) % 2) != 0;
+            let chain_id = (v - 35) >> 1;
+            Ok((Signature { r, s, odd_y_parity }, Some(chain_id)))
         }
     }
 

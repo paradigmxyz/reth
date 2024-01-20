@@ -5,7 +5,7 @@ use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
 use reth_primitives::PruneModes;
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 /// Configuration for the reth node.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
@@ -181,10 +181,12 @@ impl Default for SenderRecoveryConfig {
 pub struct ExecutionConfig {
     /// The maximum number of blocks to process before the execution stage commits.
     pub max_blocks: Option<u64>,
-    /// The maximum amount of state changes to keep in memory before the execution stage commits.
+    /// The maximum number of state changes to keep in memory before the execution stage commits.
     pub max_changes: Option<u64>,
-    /// The maximum gas to process before the execution stage commits.
+    /// The maximum cumulative amount of gas to process before the execution stage commits.
     pub max_cumulative_gas: Option<u64>,
+    /// The maximum time spent on blocks processing before the execution stage commits.
+    pub max_duration: Option<Duration>,
 }
 
 impl Default for ExecutionConfig {
@@ -194,6 +196,8 @@ impl Default for ExecutionConfig {
             max_changes: Some(5_000_000),
             // 50k full blocks of 30M gas
             max_cumulative_gas: Some(30_000_000 * 50_000),
+            // 10 minutes
+            max_duration: Some(Duration::from_secs(10 * 60)),
         }
     }
 }
