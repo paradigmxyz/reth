@@ -1,6 +1,11 @@
 //! Database debugging tool
 
 use crate::{
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs, StageEnum,
+    },
+    dirs::{DataDirPath, MaybePlatformPath},
     init::{insert_genesis_header, insert_genesis_state},
     utils::DbTool,
 };
@@ -10,13 +15,6 @@ use reth_primitives::{fs, stage::StageId, ChainSpec};
 use std::sync::Arc;
 use tracing::info;
 
-use reth_node_core::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, StageEnum,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
-};
 /// `reth drop-stage` command
 #[derive(Debug, Parser)]
 pub struct Command {

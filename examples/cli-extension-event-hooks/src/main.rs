@@ -16,12 +16,10 @@
 //! once the node has been started.
 
 use clap::Parser;
-use reth::{
-    cli::Cli,
-    node_core::cli::{
-        components::RethNodeComponents,
-        ext::{NoArgsCliExt, RethNodeCommandConfig},
-    },
+use reth::cli::{
+    components::RethNodeComponents,
+    ext::{NoArgsCliExt, RethNodeCommandConfig},
+    Cli,
 };
 
 fn main() {

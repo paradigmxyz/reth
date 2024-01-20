@@ -7,7 +7,7 @@ use reth_primitives::ChainSpec;
 use std::sync::Arc;
 use tracing::info;
 
-use reth_node_core::{
+use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs,

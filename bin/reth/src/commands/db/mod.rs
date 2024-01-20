@@ -1,6 +1,13 @@
 //! Database debugging tool
 
-use crate::utils::DbTool;
+use crate::{
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs,
+    },
+    dirs::{DataDirPath, MaybePlatformPath},
+    utils::DbTool,
+};
 use clap::{Parser, Subcommand};
 use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;
@@ -10,13 +17,6 @@ use reth_db::{
     mdbx, open_db, open_db_read_only,
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
     Tables,
-};
-use reth_node_core::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
 };
 use reth_primitives::ChainSpec;
 use std::{

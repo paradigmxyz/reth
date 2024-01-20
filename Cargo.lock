@@ -5777,7 +5777,6 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-interfaces",
  "reth-node-api",
- "reth-node-core",
  "reth-primitives",
  "reth-provider",
  "reth-revm",

@@ -40,16 +40,15 @@ use reth_transaction_pool::{
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 use tracing::*;
 
-#[cfg(not(feature = "optimism"))]
-use reth_payload_builder::EthPayloadBuilderAttributes;
-
-use reth_node_core::{
+use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
 };
+#[cfg(not(feature = "optimism"))]
+use reth_payload_builder::EthPayloadBuilderAttributes;
 
 /// `reth debug build-block` command
 /// This debug routine requires that the node is positioned at the block before the target.

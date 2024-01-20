@@ -26,7 +26,7 @@ use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, info};
 
-use reth_node_core::{
+use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs,

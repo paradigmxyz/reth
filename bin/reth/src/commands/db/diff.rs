@@ -10,6 +10,10 @@ use std::{
 use crate::utils::DbTool;
 use clap::Parser;
 
+use crate::{
+    args::DatabaseArgs,
+    dirs::{DataDirPath, PlatformPath},
+};
 use reth_db::{
     cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
     AccountChangeSet, AccountHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
@@ -17,11 +21,6 @@ use reth_db::{
     HeaderNumbers, HeaderTD, Headers, PlainAccountState, PlainStorageState, PruneCheckpoints,
     Receipts, StorageChangeSet, StorageHistory, StoragesTrie, SyncStage, SyncStageProgress, Tables,
     TransactionBlock, Transactions, TxHashNumber, TxSenders,
-};
-
-use reth_node_core::{
-    args::DatabaseArgs,
-    dirs::{DataDirPath, PlatformPath},
 };
 use tracing::info;
 

@@ -1,6 +1,12 @@
 //! Command for debugging in-memory merkle trie calculation.
 
 use crate::{
+    args::{
+        get_secret_key,
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs, NetworkArgs,
+    },
+    dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
     utils::{get_single_body, get_single_header},
 };
@@ -25,15 +31,6 @@ use std::{
     sync::Arc,
 };
 use tracing::*;
-
-use reth_node_core::{
-    args::{
-        get_secret_key,
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, NetworkArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
-};
 
 /// `reth debug in-memory-merkle` command
 /// This debug routine requires that the node is positioned at the block before the target.

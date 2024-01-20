@@ -18,13 +18,17 @@
 use clap::Parser;
 use futures_util::stream::StreamExt;
 use mev_share_sse::{client::EventStream, EventClient};
-use reth::{cli::Cli, rpc::types::beacon::events::PayloadAttributesEvent, tasks::TaskSpawner};
 use std::net::{IpAddr, Ipv4Addr};
 use tracing::{info, warn};
 
-use reth::node_core::cli::{
-    components::RethNodeComponents,
-    ext::{RethCliExt, RethNodeCommandConfig},
+use reth::{
+    cli::{
+        components::RethNodeComponents,
+        ext::{RethCliExt, RethNodeCommandConfig},
+        Cli,
+    },
+    rpc::types::beacon::events::PayloadAttributesEvent,
+    tasks::TaskSpawner,
 };
 
 fn main() {

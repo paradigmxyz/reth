@@ -6,14 +6,13 @@ use reth_primitives::{BlockHashOrNumber, ChainSpec};
 use reth_provider::{BlockExecutionWriter, ProviderFactory};
 use std::{ops::RangeInclusive, sync::Arc};
 
-use reth_node_core::{
+use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
 };
-
 /// `reth stage unwind` command
 #[derive(Debug, Parser)]
 pub struct Command {

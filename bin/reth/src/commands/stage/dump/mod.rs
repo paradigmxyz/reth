@@ -1,6 +1,14 @@
 //! Database debugging tool
 
-use crate::utils::DbTool;
+use crate::{
+    dirs::{DataDirPath, MaybePlatformPath},
+    utils::DbTool,
+};
+
+use crate::args::{
+    utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+    DatabaseArgs,
+};
 use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO, database::Database, init_db, table::TableImporter, tables,
@@ -21,14 +29,6 @@ use execution::dump_execution_stage;
 
 mod merkle;
 use merkle::dump_merkle_stage;
-
-use reth_node_core::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
-};
 
 /// `reth dump-stage` command
 #[derive(Debug, Parser)]

@@ -1,4 +1,9 @@
-use crate::{init::init_genesis, runner::CliContext};
+use crate::{
+    args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+    dirs::{DataDirPath, MaybePlatformPath},
+    init::init_genesis,
+    runner::CliContext,
+};
 use clap::Parser;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
@@ -10,11 +15,6 @@ use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFacto
 use reth_trie::StateRoot;
 use std::{fs, sync::Arc};
 use tracing::*;
-
-use reth_node_core::{
-    args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-    dirs::{DataDirPath, MaybePlatformPath},
-};
 
 /// `reth recover storage-tries` command
 #[derive(Debug, Parser)]

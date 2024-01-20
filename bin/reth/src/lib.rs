@@ -28,9 +28,11 @@
 #![allow(dead_code)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+pub mod args;
 pub mod builder;
 pub mod cli;
 pub mod commands;
+pub mod dirs;
 pub mod init;
 pub mod prometheus_exporter;
 pub mod runner;
