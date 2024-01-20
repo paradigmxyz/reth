@@ -32,6 +32,9 @@ EF_TESTS_DIR := ./testing/ef-tests/ethereum-tests
 # The docker image name
 DOCKER_IMAGE_NAME ?= ghcr.io/paradigmxyz/reth
 
+# Features in reth/op-reth binary crate other than "ethereum" and "optimism"
+BIN_OTHER_FEATURES := asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs
+
 ##@ Help
 
 .PHONY: help
@@ -239,3 +242,39 @@ maxperf: ## Builds `reth` with the most aggressive optimisations.
 .PHONY: maxperf-no-asm
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc
+
+
+fmt:
+	cargo +nightly fmt
+
+lint-reth:
+	cargo +nightly clippy --workspace --bin "reth" --lib --examples --tests --benches --features "ethereum $(BIN_OTHER_FEATURES)" -- -D warnings
+
+lint-op-reth:
+	cargo +nightly clippy --workspace --bin "op-reth" --lib --examples --tests --benches --features "optimism $(BIN_OTHER_FEATURES)" -- -D warnings
+
+lint-other-targets:
+	cargo +nightly clippy --workspace --lib --examples --tests --benches --all-features -- -D warnings
+
+docs:
+	RUSTDOCFLAGS="--cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options -D warnings" cargo +nightly docs --document-private-items
+
+test-reth:
+	cargo test --workspace --bin "reth" --lib --examples --tests --benches --features "ethereum $(BIN_OTHER_FEATURES)"
+
+test-op-reth:
+	cargo test --workspace --bin "op-reth" --lib --examples --tests --benches --features "optimism $(BIN_OTHER_FEATURES)"
+
+test-other-targets:
+	cargo test --workspace --lib --examples --tests --benches --all-features
+
+
+pr:
+	make fmt && \
+	make lint-reth && \
+	make lint-op-reth && \
+	make lint-other-targets && \
+	make docs && \
+	make test-reth && \
+	make test-op-reth && \
+	make test-other-targets
