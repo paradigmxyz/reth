@@ -21,11 +21,12 @@ use reth_primitives::{
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,
 };
-
-use reth_revm::{
-    database::{StateProviderDatabase, SubState},
-    tracing::{js::JsInspector, FourByteInspector, TracingInspector, TracingInspectorConfig},
+use revm_inspectors::tracing::{
+    js::{JsInspector, TransactionContext},
+    FourByteInspector, TracingInspector, TracingInspectorConfig,
 };
+
+use reth_revm::database::{StateProviderDatabase, SubState};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
     trace::geth::{
@@ -34,17 +35,12 @@ use reth_rpc_types::{
     },
     BlockError, Bundle, CallRequest, RichBlock, StateContext,
 };
-use reth_tasks::TaskSpawner;
 use revm::{
     db::{CacheDB, EmptyDB},
     primitives::Env,
 };
-use revm_inspectors::tracing::{
-    js::{JsDbRequest, JsInspector, TransactionContext},
-    FourByteInspector, TracingInspector, TracingInspectorConfig,
-};
 
-use std::sync::Arc;
+use std::{f32::consts::E, hash::Hash, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
@@ -92,15 +88,20 @@ where
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
-
                 let mut transactions = transactions.into_iter().peekable();
                 while let Some(tx) = transactions.next() {
                     let tx_hash = tx.hash;
                     let tx = tx_env_with_recovered(&tx);
                     let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
-
-                    let (result, state_changes) =
-                        this.trace_transaction(opts.clone(), env, &mut db).map_err(|err| {
+                    let tx_context = TransactionContext::default();
+                    let (result, state_changes) = this
+                        .trace_transaction(
+                            opts.clone(),
+                            env,
+                            &mut db,
+                            Some(tx_context.with_tx_hash(tx_hash)),
+                        )
+                        .map_err(|err| {
                             results.push(TraceResult::Error {
                                 error: err.to_string(),
                                 tx_hash: Some(tx_hash),
@@ -223,7 +224,7 @@ where
 
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
                 // replay all transactions prior to the targeted transaction
-                replay_transactions_until(
+                let index = replay_transactions_until(
                     &mut db,
                     cfg.clone(),
                     block_env.clone(),
@@ -231,9 +232,30 @@ where
                     tx.hash,
                 )?;
 
+                let tx_context = TransactionContext::default();
                 let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
-
-                this.trace_transaction(opts, env, &mut db).map(|(trace, _)| trace)
+                if let Some(hash) = state_at.as_block_hash() {
+                    this.trace_transaction(
+                        opts,
+                        env,
+                        &mut db,
+                        Some(
+                            tx_context
+                                .with_tx_index(index)
+                                .with_block_hash(hash)
+                                .with_tx_hash(tx.hash),
+                        ),
+                    )
+                    .map(|(trace, _)| trace)
+                } else {
+                    this.trace_transaction(
+                        opts,
+                        env,
+                        &mut db,
+                        Some(tx_context.with_tx_index(index).with_tx_hash(tx.hash)),
+                    )
+                    .map(|(trace, _)| trace)
+                }
             })
             .await
     }
@@ -440,20 +462,58 @@ where
                             &mut db,
                             overrides,
                         )?;
+                        let tx_context = TransactionContext::default();
 
+                        let (trace, state) = if let Some(hash) = target_block.as_block_hash() {
+                            if let Some(index) = transaction_index.index() {
+                                let (trace, state) = this.trace_transaction(
+                                    tracing_options.clone(),
+                                    env,
+                                    &mut db,
+                                    Some(tx_context.with_block_hash(hash).with_tx_index(index)),
+                                )?;
 
-                        let (trace, state) =
-                            this.trace_transaction(tracing_options.clone(), env, &mut db)?;
+                                (trace, state)
+                            } else {
+                                let (trace, state) = this.trace_transaction(
+                                    tracing_options.clone(),
+                                    env,
+                                    &mut db,
+                                    Some(tx_context.with_block_hash(hash)),
+                                )?;
 
+                                (trace, state)
+                            }
+                        } else {
+                            if let Some(index) = transaction_index.index() {
+                                let (trace, state) = this.trace_transaction(
+                                    tracing_options.clone(),
+                                    env,
+                                    &mut db,
+                                    Some(tx_context.with_tx_index(index)),
+                                )?;
+
+                                (trace, state)
+                            } else {
+                                let (trace, state) = this.trace_transaction(
+                                    tracing_options.clone(),
+                                    env,
+                                    &mut db,
+                                    None,
+                                )?;
+
+                                (trace, state)
+                            }
+                        };
                         // If there is more transactions, commit the database
-                        // If there is no transactions, but more bundles, commit to the database too
+                        // If there is no transactions, but more bundles, commit to the
+                        // database too
                         if transactions.peek().is_some() || bundles.peek().is_some() {
                             db.commit(state);
                         }
                         results.push(trace);
+                        all_bundles.push(results.clone());
                     }
-
-                    all_bundles.push(results);
                 }
                 Ok(all_bundles)
             })
@@ -529,14 +589,22 @@ where
                 },
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
+                    if let Some(tx_context) = transaction_context {
+                        let mut inspector =
+                            JsInspector::with_transaction_context(code, config, tx_context)?;
+                        let (res, env, db) = inspect_and_return_db(db, env, &mut inspector)?;
 
+                        let state = res.state.clone();
+                        let result = inspector.json_result(res, &env, db)?;
+                        Ok((GethTrace::JS(result), state))
+                    } else {
+                        let mut inspector = JsInspector::new(code, config)?;
+                        let (res, env, db) = inspect_and_return_db(db, env, &mut inspector)?;
 
-                    let mut inspector = JsInspector::new(code, config)?;
-                    let (res, env, db) = inspect_and_return_db(db, env, &mut inspector)?;
-
-                    let state = res.state.clone();
-                    let result = inspector.json_result(res, &env, db)?;
-                    Ok((GethTrace::JS(result), state))
+                        let state = res.state.clone();
+                        let result = inspector.json_result(res, &env, db)?;
+                        Ok((GethTrace::JS(result), state))
+                    }
                 }
             }
         }

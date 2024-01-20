@@ -237,13 +237,13 @@ version = "0.1.0"
 source = "git+https://github.com/alloy-rs/alloy#61142b3fee367a9aee087d6cfac8e57abaaa2eb2"
 dependencies = [
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-rpc-types",
  "ethereum_ssz",
  "ethereum_ssz_derive",
  "jsonrpsee-types",
  "serde",
  "thiserror",
-
 ]
 
 [[package]]
@@ -5534,7 +5534,7 @@ version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5659e52e4ba6e07b2dad9f1158f578ef84a73762625ddb51536019f34d180eb"
 dependencies = [
- "bitflags 2.4.1",
+ "bitflags 2.4.2",
  "cassowary",
  "crossterm",
  "indoc",
