@@ -35,12 +35,9 @@ use reth_rpc_types::{
     },
     BlockError, Bundle, CallRequest, RichBlock, StateContext,
 };
-use revm::{
-    db::{CacheDB, EmptyDB},
-    primitives::Env,
-};
+use revm::{db::CacheDB, primitives::Env};
 
-use std::{f32::consts::E, hash::Hash, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
