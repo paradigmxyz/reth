@@ -379,6 +379,7 @@ where
 
     /// The debug_traceCallMany method lets you run an `eth_callMany` within the context of the
     /// given block execution using the first n transactions in the given block as base
+    #[allow(clippy::collapsible_else_if)]
     pub async fn debug_trace_call_many(
         &self,
         bundles: Vec<Bundle>,
