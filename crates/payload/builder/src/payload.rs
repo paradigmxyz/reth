@@ -76,10 +76,6 @@ impl EthBuiltPayload {
 }
 
 impl BuiltPayload for EthBuiltPayload {
-    fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self {
-        Self::new(id, block, fees)
-    }
-
     fn block(&self) -> &SealedBlock {
         &self.block
     }
