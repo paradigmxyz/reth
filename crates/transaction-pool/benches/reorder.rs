@@ -171,7 +171,7 @@ mod implementations {
 
     impl PartialEq for MockTransactionWithPriority {
         fn eq(&self, other: &Self) -> bool {
-            self.priority == &other.priority
+            self.priority == other.priority
         }
     }
 
