@@ -162,7 +162,7 @@ where
             blocking_task_pool,
             fee_history_cache,
             #[cfg(feature = "optimism")]
-            http_client: reqwest::Client::new(),
+            http_client: reqwest::Client::builder().use_rustls_tls().build().unwrap(),
             local_pending_block_sender,
         };
 

@@ -104,7 +104,7 @@ mod tests {
         }
 
         let mut hashed_state = HashedPostState::default();
-        hashed_state.insert_destroyed_account(destroyed_address_hashed);
+        hashed_state.insert_account(destroyed_address_hashed, None);
         hashed_state.insert_hashed_storage(destroyed_address_hashed, HashedStorage::new(true));
 
         let provider_rw = provider_factory.provider_rw().unwrap();

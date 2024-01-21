@@ -2,8 +2,8 @@ use crate::{
     eth::{
         error::{EthApiError, EthResult},
         revm_utils::{
-            clone_into_empty_db, inspect, inspect_and_return_db, prepare_call_env,
-            replay_transactions_until, transact, EvmOverrides,
+            inspect, inspect_and_return_db, prepare_call_env, replay_transactions_until, transact,
+            EvmOverrides,
         },
         EthTransactions, TransactionSource,
     },
@@ -15,10 +15,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
     revm::env::tx_env_with_recovered,
-    revm_primitives::{
-        db::{DatabaseCommit, DatabaseRef},
-        BlockEnv, CfgEnv,
-    },
+    revm_primitives::{db::DatabaseCommit, BlockEnv, CfgEnv},
     Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256,
 };
 use reth_provider::{
@@ -26,10 +23,7 @@ use reth_provider::{
 };
 use reth_revm::{
     database::{StateProviderDatabase, SubState},
-    tracing::{
-        js::{JsDbRequest, JsInspector},
-        FourByteInspector, TracingInspector, TracingInspectorConfig,
-    },
+    tracing::{js::JsInspector, FourByteInspector, TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
@@ -39,14 +33,9 @@ use reth_rpc_types::{
     },
     BlockError, Bundle, CallRequest, RichBlock, StateContext,
 };
-use reth_tasks::TaskSpawner;
-use revm::{
-    db::{CacheDB, EmptyDB},
-    primitives::Env,
-};
+use revm::{db::CacheDB, primitives::Env};
 use std::sync::Arc;
-use tokio::sync::{mpsc, AcquireError, OwnedSemaphorePermit};
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
 ///
@@ -59,14 +48,8 @@ pub struct DebugApi<Provider, Eth> {
 
 impl<Provider, Eth> DebugApi<Provider, Eth> {
     /// Create a new instance of the [DebugApi]
-    pub fn new(
-        provider: Provider,
-        eth: Eth,
-        task_spawner: Box<dyn TaskSpawner>,
-        blocking_task_guard: BlockingTaskGuard,
-    ) -> Self {
-        let inner =
-            Arc::new(DebugApiInner { provider, eth_api: eth, task_spawner, blocking_task_guard });
+    pub fn new(provider: Provider, eth: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
+        let inner = Arc::new(DebugApiInner { provider, eth_api: eth, blocking_task_guard });
         Self { inner }
     }
 }
@@ -106,7 +89,7 @@ where
                     let tx = tx_env_with_recovered(&tx);
                     let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
                     let (result, state_changes) =
-                        this.trace_transaction(opts.clone(), env, at, &mut db).map_err(|err| {
+                        this.trace_transaction(opts.clone(), env, &mut db).map_err(|err| {
                             results.push(TraceResult::Error {
                                 error: err.to_string(),
                                 tx_hash: Some(tx_hash),
@@ -238,7 +221,7 @@ where
                 )?;
 
                 let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
-                this.trace_transaction(opts, env, state_at, &mut db).map(|(trace, _)| trace)
+                this.trace_transaction(opts, env, &mut db).map(|(trace, _)| trace)
             })
             .await
     }
@@ -325,29 +308,16 @@ where
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
 
-                    // for JS tracing we need to setup all async work before we can start tracing
-                    // because JSTracer and all JS types are not Send
                     let (_, _, at) = self.inner.eth_api.evm_env_at(at).await?;
-                    let state = self.inner.eth_api.state_at(at)?;
-                    let db = CacheDB::new(StateProviderDatabase::new(state));
-                    let has_state_overrides = overrides.has_state();
-
-                    // If the caller provided state overrides we need to clone the DB so the js
-                    // service has access these modifications
-                    let mut maybe_override_db = None;
-                    if has_state_overrides {
-                        maybe_override_db = Some(clone_into_empty_db(&db));
-                    }
-
-                    let to_db_service = self.spawn_js_trace_service(at, maybe_override_db)?;
 
                     let res = self
                         .inner
                         .eth_api
                         .spawn_with_call_at(call, at, overrides, move |db, env| {
-                            let mut inspector = JsInspector::new(code, config, to_db_service)?;
-                            let (res, _) = inspect(db, env.clone(), &mut inspector)?;
-                            Ok(inspector.json_result(res, &env)?)
+                            let mut inspector = JsInspector::new(code, config)?;
+                            let (res, _, db) =
+                                inspect_and_return_db(db, env.clone(), &mut inspector)?;
+                            Ok(inspector.json_result(res, &env, &db)?)
                         })
                         .await?;
 
@@ -459,12 +429,8 @@ where
                             overrides,
                         )?;
 
-                        let (trace, state) = this.trace_transaction(
-                            tracing_options.clone(),
-                            env,
-                            target_block,
-                            &mut db,
-                        )?;
+                        let (trace, state) =
+                            this.trace_transaction(tracing_options.clone(), env, &mut db)?;
 
                         // If there is more transactions, commit the database
                         // If there is no transactions, but more bundles, commit to the database too
@@ -492,7 +458,6 @@ where
         &self,
         opts: GethDebugTracingOptions,
         env: Env,
-        at: BlockId,
         db: &mut SubState<StateProviderBox>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
@@ -551,18 +516,11 @@ where
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
 
-                    // We need to clone the database because the JS tracer will need to access the
-                    // current state via the spawned service
-                    let js_db = clone_into_empty_db(db);
-                    // we spawn the database service that will be used by the JS tracer
-                    // transaction because the service needs access to the committed state changes
-                    let to_db_service = self.spawn_js_trace_service(at, Some(js_db))?;
-
-                    let mut inspector = JsInspector::new(code, config, to_db_service)?;
-                    let (res, env) = inspect(db, env, &mut inspector)?;
+                    let mut inspector = JsInspector::new(code, config)?;
+                    let (res, env, db) = inspect_and_return_db(db, env, &mut inspector)?;
 
                     let state = res.state.clone();
-                    let result = inspector.json_result(res, &env)?;
+                    let result = inspector.json_result(res, &env, db)?;
                     Ok((GethTrace::JS(result), state))
                 }
             }
@@ -579,88 +537,6 @@ where
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
 
         Ok((frame.into(), res.state))
-    }
-
-    /// Spawns [Self::js_trace_db_service_task] on a new task and returns a channel to send requests
-    /// to it.
-    ///
-    /// Note: This blocks until the service is ready to receive requests.
-    fn spawn_js_trace_service(
-        &self,
-        at: BlockId,
-        db: Option<CacheDB<EmptyDB>>,
-    ) -> EthResult<mpsc::Sender<JsDbRequest>> {
-        let (to_db_service, rx) = mpsc::channel(1);
-        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-        let this = self.clone();
-        // this needs to be on a blocking task because it only does blocking work besides waiting
-        // for db requests
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
-            this.js_trace_db_service_task(at, rx, ready_tx, db).await
-        }));
-        // wait for initialization
-        ready_rx.recv().map_err(|_| {
-            EthApiError::InternalJsTracerError("js tracer initialization failed".to_string())
-        })??;
-        Ok(to_db_service)
-    }
-
-    /// A services that handles database requests issued from inside the JavaScript tracing engine.
-    ///
-    /// If this traces with modified state, this takes a `db` parameter that contains the modified
-    /// in memory state. This is required because [StateProviderBox] can not be cloned or shared
-    /// across threads.
-    async fn js_trace_db_service_task(
-        self,
-        at: BlockId,
-        rx: mpsc::Receiver<JsDbRequest>,
-        on_ready: std::sync::mpsc::Sender<EthResult<()>>,
-        db: Option<CacheDB<EmptyDB>>,
-    ) {
-        let state = match self.inner.eth_api.state_at(at) {
-            Ok(state) => {
-                let _ = on_ready.send(Ok(()));
-                state
-            }
-            Err(err) => {
-                let _ = on_ready.send(Err(err));
-                return
-            }
-        };
-
-        let db = if let Some(db) = db {
-            let CacheDB { accounts, contracts, logs, block_hashes, .. } = db;
-            CacheDB {
-                accounts,
-                contracts,
-                logs,
-                block_hashes,
-                db: StateProviderDatabase::new(state),
-            }
-        } else {
-            CacheDB::new(StateProviderDatabase::new(state))
-        };
-
-        let mut stream = ReceiverStream::new(rx);
-        while let Some(req) = stream.next().await {
-            match req {
-                JsDbRequest::Basic { address, resp } => {
-                    let acc = db.basic_ref(address).map_err(|err| err.to_string());
-                    let _ = resp.send(acc);
-                }
-                JsDbRequest::Code { code_hash, resp } => {
-                    let code = db
-                        .code_by_hash_ref(code_hash)
-                        .map(|code| code.bytecode)
-                        .map_err(|err| err.to_string());
-                    let _ = resp.send(code);
-                }
-                JsDbRequest::StorageAt { address, index, resp } => {
-                    let value = db.storage_ref(address, index).map_err(|err| err.to_string());
-                    let _ = resp.send(value);
-                }
-            }
-        }
     }
 }
 
@@ -1054,6 +930,4 @@ struct DebugApiInner<Provider, Eth> {
     eth_api: Eth,
     // restrict the number of concurrent calls to blocking calls
     blocking_task_guard: BlockingTaskGuard,
-    /// The type that can spawn tasks which would otherwise block.
-    task_spawner: Box<dyn TaskSpawner>,
 }
