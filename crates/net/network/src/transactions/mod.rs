@@ -1825,8 +1825,6 @@ mod tests {
         tx_fetcher.eth68_meta.insert(hash_other, MAX_FULL_TRANSACTIONS_PACKET_SIZE - 2); // a big tx
         tx_fetcher.buffered_hashes.insert(hash_other);
 
-        println!("buffered hashes {:?}", tx_fetcher.buffered_hashes);
-
         let (peer, mut to_mock_session_rx) = new_mock_session(peer_id, eth_version);
         tx_manager.peers.insert(peer_id, peer);
 
