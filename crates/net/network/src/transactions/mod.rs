@@ -1809,7 +1809,7 @@ mod tests {
         // load in reverse order so index 0 in seen_eth68_hashes and seen_eth68_hashes_sizes is
         // lru!
 
-        for i in 2..=0 {
+        for i in (0..3).rev() {
             tx_fetcher.unknown_hashes.insert(seen_eth68_hashes[i], (0, backups.clone()));
             tx_fetcher.eth68_meta.insert(seen_eth68_hashes[i], seen_eth68_hashes_sizes[i]);
             tx_fetcher.buffered_hashes.insert(seen_eth68_hashes[i]);

@@ -750,7 +750,7 @@ mod test {
         // load unseen hashes in reverse order so index 0 in seen_eth68_hashes and
         // seen_eth68_hashes_sizes is lru!
 
-        for i in 5..=0 {
+        for i in (0..6).rev() {
             tx_fetcher.unknown_hashes.insert(eth68_hashes[i], (0, default_cache()));
             tx_fetcher.eth68_meta.insert(eth68_hashes[i], eth68_hashes_sizes[i]);
         }
