@@ -17,14 +17,12 @@ use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnv},
-    Address, BlockId, BlockNumberOrTag, ChainInfo, Receipt, SealedBlockWithSenders, B256, U256,
-    U64,
+    Address, BlockId, BlockNumberOrTag, ChainInfo, Receipt, SealedBlock, SealedBlockWithSenders,
+    B256, U256, U64,
 };
 
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, LocalPendingBlockWatcherReceiver,
-    LocalPendingBlockWatcherSender, PendingBlockWatcherReceiver, StateProviderBox,
-    StateProviderFactory,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -36,7 +34,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot, watch, Mutex};
 
 mod block;
 mod call;
@@ -56,7 +54,7 @@ pub use transactions::{EthTransactions, TransactionSource};
 /// Type alias for a watch receiver that receives the recent pending block with receipts
 pub type LocalPendingBlockWatcherReceiver = watch::Receiver<Option<(SealedBlock, Vec<Receipt>)>>;
 /// Type alias for a watch sender that sends the recent local pending block with receipts
-pub type LocalPendingBlockWatcherSender = watch::Sender<Option<(SealedBlock, Vec<Receipt>)>>;
+type LocalPendingBlockWatcherSender = watch::Sender<Option<(SealedBlock, Vec<Receipt>)>>;
 
 /// `Eth` API trait.
 ///
@@ -358,9 +356,10 @@ where
                 expires_at: now + Duration::from_secs(3),
             });
 
-            let receipts = self.cache().get_receipts(pending_block.hash).await?.unwrap_or_default();
-            self.local_pending_block_sender()
-                .send_modify(|v| *v = Some((pending_block.block.clone(), receipts.to_vec())));
+            let receipts = this.cache().get_receipts(pending_block.hash).await?.unwrap_or_default();
+            let pending_block_clone = pending_block.block.clone();
+            this.local_pending_block_sender()
+                .send_modify(|v| *v = Some((pending_block_clone, receipts.to_vec())));
 
             Ok(Some(pending_block))
         })

@@ -42,6 +42,7 @@ strum = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 tracing.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 reth-tracing.workspace = true

@@ -1,13 +1,15 @@
 //! `eth_` PubSub RPC handler implementation
 
-use crate::{eth::logs_utils, result::invalid_params_rpc_err};
-use futures::{stream, StreamExt};
+use crate::{
+    eth::{api::LocalPendingBlockWatcherReceiver, logs_utils},
+    result::invalid_params_rpc_err,
+};
+use futures::StreamExt;
 use jsonrpsee::{server::SubscriptionMessage, PendingSubscriptionSink, SubscriptionSink};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{
-    BlockReader, CanonStateSubscriptions, EvmEnvProvider, LocalPendingBlockWatcherReceiver,
-    PendingBlockWatcherReceiver,
+    BlockReader, CanonStateSubscriptions, EvmEnvProvider, PendingBlockWatcherReceiver,
 };
 use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::{
@@ -367,7 +369,7 @@ where
                             })
                             .collect::<Vec<_>>()
                     })
-                    .unwrap_or_else(Vec::new);
+                    .unwrap_or_default();
                 futures::stream::iter(logs)
             },
         );
@@ -382,10 +384,10 @@ where
                             })
                             .collect::<Vec<_>>()
                     })
-                    .unwrap_or_else(Vec::new);
+                    .unwrap_or_default();
                 futures::stream::iter(logs)
             },
         );
-        stream::select(stream_local, stream_cl)
+        futures::stream::select_all(vec![stream_local.boxed(), stream_cl.boxed()])
     }
 }

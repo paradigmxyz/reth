@@ -92,8 +92,6 @@ comfy-table = "7.0"
 crossterm = "0.27.0"
 ratatui = "0.25.0"
 human_bytes = "0.4.1"
-
-# async
 tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
 futures.workspace = true
 pin-project.workspace = true
