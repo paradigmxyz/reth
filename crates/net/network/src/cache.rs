@@ -3,12 +3,7 @@ use derive_more::{Deref, DerefMut};
 use itertools::Itertools;
 use linked_hash_set::LinkedHashSet;
 use schnellru::{self, ByLength, Limiter, RandomState, Unlimited};
-use std::{
-    borrow::Borrow,
-    fmt,
-    hash::Hash,
-    num::NonZeroUsize,
-};
+use std::{borrow::Borrow, fmt, hash::Hash, num::NonZeroUsize};
 
 /// A minimal LRU cache based on a `LinkedHashSet` with limited capacity.
 ///
@@ -124,7 +119,13 @@ where
 
         debug_struct.field("limiter", self.limiter());
 
-        debug_struct.field("inner", &format_args!("Iter: {{{}}}", self.0.iter().map(|(k, v)| format!(" {k}: {v:?}")).format(",")));
+        debug_struct.field(
+            "inner",
+            &format_args!(
+                "Iter: {{{}}}",
+                self.0.iter().map(|(k, v)| format!(" {k}: {v:?}")).format(",")
+            ),
+        );
 
         debug_struct.finish()
     }
@@ -215,6 +216,6 @@ mod test {
         let value_2 = Value(22);
         cache.insert(key_2, value_2);
 
-        assert_eq!("LruMap { 2: Value(22), 1: Value(11) }", format!("{cache:?}"))
+        assert_eq!("LruMap { limiter: ByLength { max_length: 2 }, inner: Iter: { 2: Value(22), 1: Value(11)} }", format!("{cache:?}"))
     }
 }
