@@ -486,11 +486,6 @@ impl TransactionFetcher {
         );
 
         for hash in self.buffered_hashes.iter() {
-            debug_assert!(
-                self.unknown_hashes.peek(hash).is_some(),
-                "broken invariant `buffered-hashes` and `unknown-hashes`"
-            );
-
             // check if this peer has previously announced this hash to us
             if let Some((_, fallback_peers)) = self.unknown_hashes.peek(hash) {
                 if !fallback_peers.contains(&peer_id) {
