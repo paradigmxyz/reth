@@ -404,7 +404,7 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{
         basefee::calculate_next_block_base_fee, constants::ETHEREUM_BLOCK_GAS_LIMIT, BaseFeeParams,
-        Block, BlockNumberOrTag, Header, TransactionSigned, B256, U256,
+        Block, BlockNumberOrTag, Header, Receipt, SealedBlock, TransactionSigned, B256, U256,
     };
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
@@ -413,6 +413,7 @@ mod tests {
     use reth_rpc_api::EthApiServer;
     use reth_rpc_types::FeeHistory;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use tokio::sync::watch;
 
     fn build_test_eth_api<
         P: BlockReaderIdExt
@@ -430,6 +431,8 @@ mod tests {
 
         let fee_history_cache =
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
+        let initial_value: Option<(SealedBlock, Vec<Receipt>)> = None; // or some initial value
+        let (local_pending_block_watcher_tx, _) = watch::channel(initial_value);
 
         EthApi::new(
             provider.clone(),
@@ -440,6 +443,7 @@ mod tests {
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
+            local_pending_block_watcher_tx,
         )
     }
 

@@ -52,7 +52,8 @@ use crate::BlockingTaskPool;
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// Type alias for a watch receiver that receives the recent pending block with receipts
-pub type LocalPendingBlockWatcherReceiver = watch::Receiver<Option<(SealedBlock, Vec<Receipt>)>>;
+pub(crate) type LocalPendingBlockWatcherReceiver =
+    watch::Receiver<Option<(SealedBlock, Vec<Receipt>)>>;
 /// Type alias for a watch sender that sends the recent local pending block with receipts
 type LocalPendingBlockWatcherSender = watch::Sender<Option<(SealedBlock, Vec<Receipt>)>>;
 

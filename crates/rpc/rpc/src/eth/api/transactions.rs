@@ -1274,6 +1274,7 @@ mod tests {
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
+    use tokio::sync::watch;
 
     #[tokio::test]
     async fn send_raw_transaction() {
@@ -1285,6 +1286,9 @@ mod tests {
         let cache = EthStateCache::spawn(noop_provider, Default::default());
         let fee_history_cache =
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
+        let initial_value: Option<(SealedBlock, Vec<Receipt>)> = None; // or some initial value
+        let (local_pending_block_watcher_tx, _) = watch::channel(initial_value);
+
         let eth_api = EthApi::new(
             noop_provider,
             pool.clone(),
@@ -1294,6 +1298,7 @@ mod tests {
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
+            local_pending_block_watcher_tx,
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d
