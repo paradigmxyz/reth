@@ -375,7 +375,7 @@ impl TransactionFetcher {
         metrics_increment_egress_peer_channel_full: impl FnOnce(),
     ) -> Option<Vec<TxHash>> {
         let peer_id: PeerId = peer.request_tx.peer_id;
-        let msg_version = new_announced_hashes.get(0).map(|hash| {
+        let msg_version = new_announced_hashes.first().map(|hash| {
             self.eth68_meta.get(hash).map(|_| EthVersion::Eth68).unwrap_or(EthVersion::Eth66)
         });
 
