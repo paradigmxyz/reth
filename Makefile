@@ -256,6 +256,11 @@ lint-op-reth:
 lint-other-targets:
 	cargo +nightly clippy --workspace --lib --examples --tests --benches --all-features -- -D warnings
 
+lint:
+	make lint-reth && \
+	make lint-op-reth && \
+	make lint-other-targets
+
 docs:
 	RUSTDOCFLAGS="--cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options -D warnings" cargo +nightly docs --document-private-items
 
@@ -268,13 +273,13 @@ test-op-reth:
 test-other-targets:
 	cargo test --workspace --lib --examples --tests --benches --all-features
 
-
-pr:
-	make fmt && \
-	make lint-reth && \
-	make lint-op-reth && \
-	make lint-other-targets && \
-	make docs && \
+test:
 	make test-reth && \
 	make test-op-reth && \
 	make test-other-targets
+
+pr:
+	make fmt && \
+	make lint && \
+	make docs && \
+	make test
