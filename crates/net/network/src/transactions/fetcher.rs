@@ -504,10 +504,9 @@ impl TransactionFetcher {
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
                         hash=%hash,
-                        size=self.eth68_meta.peek(hash).expect("should find size in `eth68-meta`"),
                         acc_size_eth68_response=acc_size_eth68_response,
                         MAX_FULL_TRANSACTIONS_PACKET_SIZE=MAX_FULL_TRANSACTIONS_PACKET_SIZE,
-                        "found buffered hash for peer but can't fit it into request, request to peer full"
+                        "request to peer full"
                     );
 
                     break
