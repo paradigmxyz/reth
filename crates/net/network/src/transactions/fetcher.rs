@@ -718,7 +718,6 @@ mod test {
 
         let eth68_hashes = [
             B256::from_slice(&[1; 32]),
-            B256::from_slice(&[1; 32]),
             B256::from_slice(&[2; 32]),
             B256::from_slice(&[3; 32]),
             B256::from_slice(&[4; 32]),
