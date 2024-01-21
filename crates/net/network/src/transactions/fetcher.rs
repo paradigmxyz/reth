@@ -3,7 +3,6 @@ use crate::{
     message::PeerRequest,
 };
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
-use itertools::Itertools;
 use pin_project::pin_project;
 use reth_eth_wire::{EthVersion, GetPooledTransactions};
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
@@ -83,17 +82,10 @@ impl TransactionFetcher {
     }
 
     /// Updates peer's activity status upon a resolved [`GetPooledTxRequest`].
-    fn update_peer_activity(&mut self, resp: &GetPooledTxResponse) {
-        let GetPooledTxResponse { peer_id, .. } = resp;
-
-        debug_assert!(
-            self.active_peers.get(peer_id).is_some(),
-            "broken invariant `active-peers` and `inflight-requests`"
-        );
-
+    fn decrement_inflight_request_count_for(&mut self, peer_id: PeerId) {
         let remove = || -> bool {
-            if let Some(inflight_count) = self.active_peers.get(peer_id) {
-                if *inflight_count <= 1 {
+            if let Some(inflight_count) = self.active_peers.get(&peer_id) {
+                if *inflight_count <= MAX_CONCURRENT_TX_REQUESTS_PER_PEER {
                     return true
                 }
                 *inflight_count -= 1;
@@ -102,7 +94,7 @@ impl TransactionFetcher {
         }();
 
         if remove {
-            self.active_peers.remove(peer_id);
+            self.active_peers.remove(&peer_id);
         }
     }
 
@@ -170,13 +162,16 @@ impl TransactionFetcher {
     ///
     /// Returns `true` if hash is included in request. If there is still space in the respective
     /// response but not enough for the transaction of given hash, `false` is returned.
-    fn include_eth68_hash(&self, acc_size_response: &mut usize, eth68_hash: TxHash) -> bool {
+    fn include_eth68_hash(&self, acc_size_response: &mut usize, hash: TxHash) -> bool {
         debug_assert!(
-            self.eth68_meta.peek(&eth68_hash).is_some(),
-            "broken invariant `eth68-hash` and `eth68-meta`"
+            self.eth68_meta.peek(&hash).is_some(),
+            "can't find eth68 metadata for `%hash` that should be of version eth68, broken invariant `@eth68_meta` and `@self`,
+`%hash`: {},
+`@self`: {:?}",
+            hash, self
         );
 
-        if let Some(size) = self.eth68_meta.peek(&eth68_hash) {
+        if let Some(size) = self.eth68_meta.peek(&hash) {
             let next_acc_size = *acc_size_response + size;
 
             if next_acc_size <= MAX_FULL_TRANSACTIONS_PACKET_SIZE {
@@ -250,10 +245,13 @@ impl TransactionFetcher {
         let mut max_retried_hashes = vec![];
 
         for hash in hashes {
-            // todo: enforce by adding new type UnknownTxHash
+            // todo: enforce by adding new types UnknownTxHash66 and UnknownTxHash68
             debug_assert!(
                 self.unknown_hashes.peek(&hash).is_some(),
-                "only hashes that are confirmed as unknown should be buffered"
+                "`%hash` in `@buffered_hashes` that's not in `@unknown_hashes`, `@buffered_hashes` should be a subset of keys in `@unknown_hashes`, broken invariant `@buffered_hashes` and `@unknown_hashes`,
+`%hash`: {},
+`@self`: {:?}",
+                hash, self
             );
 
             let Some((retries, peers)) = self.unknown_hashes.get(&hash) else { return };
@@ -436,7 +434,6 @@ impl TransactionFetcher {
             metrics_increment_egress_peer_channel_full();
             return Some(new_announced_hashes)
         } else {
-            // remove requested hashes from buffered hashes
             debug_assert!(
                 || -> bool {
                     for hash in &new_announced_hashes {
@@ -446,7 +443,10 @@ impl TransactionFetcher {
                     }
                     true
                 }(),
-                "broken invariant `buffered-hashes` and `unknown-hashes`"
+                "`%new_announced_hashes` should been taken out of buffer before packing in a request, breaks invariant `@buffered_hashes` and `@inflight_requests`,
+`%new_announced_hashes`: {:?}, 
+`@self`: {:?}",
+                new_announced_hashes, self
             );
 
             // stores a new request future for the request
@@ -478,7 +478,11 @@ impl TransactionFetcher {
                 }
                 Some(acc_size) == acc_size_eth68_response
             },
-            "broken invariant `acc-eth68-size` and `hashes`"
+            "an eth68 request is being assembled and caller has miscalculated accumulated size of corresponding transactions response, broken invariant `%acc_size_eth68_response` and `%hashes`,
+`%acc_size_eth68_response`: {:?},
+`%hashes`: {:?},
+`@self`: {:?}",
+            acc_size_eth68_response, hashes, self
         );
 
         for hash in self.buffered_hashes.iter() {
@@ -525,8 +529,11 @@ impl TransactionFetcher {
             );
 
             debug_assert!(
-                self.unknown_hashes.peek(hash).is_some(),
-                "broken invariant `buffered-hashes` and `unknown-hashes`"
+                self.unknown_hashes.get(hash).is_some(),
+                "can't find buffered `%hash` in `@unknown_hashes`, `@buffered_hashes` should be a subset of keys in `@unknown_hashes`, broken invariant `@buffered_hashes` and `@unknown_hashes`,
+`%hash`: {},
+`@self`: {:?}",
+                hash, self
             );
 
             if let Some((_, fallback_peers)) = self.unknown_hashes.get(hash) {
@@ -554,7 +561,17 @@ impl Stream for TransactionFetcher {
         if let Poll::Ready(Some(response)) = res {
             // update peer activity, requests for buffered hashes can only be made to idle
             // fallback peers
-            self.update_peer_activity(&response);
+            let GetPooledTxResponse { peer_id, .. } = response;
+
+            debug_assert!(
+                self.active_peers.get(&peer_id).is_some(),
+                "`%peer_id` has been removed from `@active_peers` before inflight request(s) resolved, broken invariant `@active_peers` and `@inflight_requests`,
+`%peer_id`: {},
+`@self`: {:?}",
+                peer_id, self
+            );
+
+            self.decrement_inflight_request_count_for(peer_id);
 
             let GetPooledTxResponse { peer_id, mut requested_hashes, result } = response;
 

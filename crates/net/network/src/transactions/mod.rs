@@ -682,7 +682,11 @@ where
 
             debug_assert!(
                 self.peers.contains_key(&peer_id),
-                "broken invariant `peers` and `transaction-fetcher`"
+                "a dead peer has been returned as idle by `@pop_any_idle_peer`, broken invariant `@peers` and `@transaction_fetcher`,
+`%peer_id`: {:?},
+`@peers`: {:?},
+`@transaction_fetcher`: {:?}",
+                peer_id, self.peers, self.transaction_fetcher
             );
 
             // fill the request with other buffered hashes that have been announced by the peer
