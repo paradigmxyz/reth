@@ -34,7 +34,7 @@ pub enum MessageId {
 impl MessageId {
     /// Converts the byte that represents the message id to the enum.
     fn from_u8(msg: u8) -> Result<Self, u8> {
-        let msg = match msg {
+        Ok(match msg {
             1 => MessageId::Ping,
             2 => MessageId::Pong,
             3 => MessageId::FindNode,
@@ -42,19 +42,24 @@ impl MessageId {
             5 => MessageId::EnrRequest,
             6 => MessageId::EnrResponse,
             _ => return Err(msg),
-        };
-        Ok(msg)
+        })
     }
 }
 
-/// All message variants
+/// Enum representing various message types exchanged in the Discovery v4 protocol.
 #[derive(Debug, Eq, PartialEq)]
 pub enum Message {
+    /// Represents a ping message sent during liveness checks.
     Ping(Ping),
+    /// Represents a pong message, which is a reply to a PING message.
     Pong(Pong),
+    /// Represents a query for nodes in the given bucket.
     FindNode(FindNode),
+    /// Represents a neighbour message, providing information about nearby nodes.
     Neighbours(Neighbours),
+    /// Represents an ENR request message, a request for Ethereum Node Records (ENR) as per [EIP-778](https://eips.ethereum.org/EIPS/eip-778).
     EnrRequest(EnrRequest),
+    /// Represents an ENR response message, a response to an ENR request with Ethereum Node Records (ENR) as per [EIP-778](https://eips.ethereum.org/EIPS/eip-778).
     EnrResponse(EnrResponse),
 }
 
@@ -86,48 +91,40 @@ impl Message {
         let mut sig_bytes = datagram.split_off(B256::len_bytes());
         let mut payload = sig_bytes.split_off(secp256k1::constants::COMPACT_SIGNATURE_SIZE + 1);
 
+        // Put the message type at the beginning of the payload
+        payload.put_u8(self.msg_type() as u8);
+
+        // Match the message type and encode the corresponding message into the payload
         match self {
-            Message::Ping(message) => {
-                payload.put_u8(1);
-                message.encode(&mut payload);
-            }
-            Message::Pong(message) => {
-                payload.put_u8(2);
-                message.encode(&mut payload);
-            }
-            Message::FindNode(message) => {
-                payload.put_u8(3);
-                message.encode(&mut payload);
-            }
-            Message::Neighbours(message) => {
-                payload.put_u8(4);
-                message.encode(&mut payload);
-            }
-            Message::EnrRequest(message) => {
-                payload.put_u8(5);
-                message.encode(&mut payload);
-            }
-            Message::EnrResponse(message) => {
-                payload.put_u8(6);
-                message.encode(&mut payload);
-            }
+            Message::Ping(message) => message.encode(&mut payload),
+            Message::Pong(message) => message.encode(&mut payload),
+            Message::FindNode(message) => message.encode(&mut payload),
+            Message::Neighbours(message) => message.encode(&mut payload),
+            Message::EnrRequest(message) => message.encode(&mut payload),
+            Message::EnrResponse(message) => message.encode(&mut payload),
         }
 
+        // Sign the payload with the secret key using recoverable ECDSA
         let signature: RecoverableSignature = SECP256K1.sign_ecdsa_recoverable(
             &secp256k1::Message::from_slice(keccak256(&payload).as_ref())
                 .expect("is correct MESSAGE_SIZE; qed"),
             secret_key,
         );
 
+        // Serialize the signature and append it to the signature bytes
         let (rec, sig) = signature.serialize_compact();
         sig_bytes.extend_from_slice(&sig);
         sig_bytes.put_u8(rec.to_i32() as u8);
         sig_bytes.unsplit(payload);
 
+        // Calculate the hash of the signature bytes and append it to the datagram
         let hash = keccak256(&sig_bytes);
         datagram.extend_from_slice(hash.as_slice());
 
+        // Append the signature bytes to the datagram
         datagram.unsplit(sig_bytes);
+
+        // Return the frozen datagram and the hash
         (datagram.freeze(), hash)
     }
 
@@ -187,8 +184,11 @@ pub struct Packet {
 /// Represents the `from`, `to` fields in the packets
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
 pub struct NodeEndpoint {
+    /// The IP address of the network endpoint. It can be either IPv4 or IPv6.
     pub address: IpAddr,
+    /// The UDP port used for communication in the discovery protocol.
     pub udp_port: u16,
+    /// The TCP port used for communication in the RLPx protocol.
     pub tcp_port: u16,
 }
 
@@ -198,17 +198,28 @@ impl From<NodeRecord> for NodeEndpoint {
     }
 }
 
+impl NodeEndpoint {
+    /// Creates a new [`NodeEndpoint`] from a given UDP address and TCP port.
+    pub fn from_udp_address(udp_address: &std::net::SocketAddr, tcp_port: u16) -> Self {
+        NodeEndpoint { address: udp_address.ip(), udp_port: udp_address.port(), tcp_port }
+    }
+}
+
 /// A [FindNode packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#findnode-packet-0x03).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct FindNode {
+    /// The target node's ID, a 64-byte secp256k1 public key.
     pub id: PeerId,
+    /// The expiration timestamp of the packet, an absolute UNIX time stamp.
     pub expire: u64,
 }
 
 /// A [Neighbours packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#neighbors-packet-0x04).
 #[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct Neighbours {
+    /// The list of nodes containing IP, UDP port, TCP port, and node ID.
     pub nodes: Vec<NodeRecord>,
+    /// The expiration timestamp of the packet, an absolute UNIX time stamp.
     pub expire: u64,
 }
 
