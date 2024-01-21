@@ -151,7 +151,7 @@ impl TransactionFetcher {
         peer_id: PeerId,
     ) -> Vec<TxHash> {
         if hashes.len() < GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
-            self.fill_request_for_peer(hashes, peer_id, None);
+            self.fill_eth66_request_for_peer(hashes, peer_id);
             return vec![]
         }
         hashes.split_off(GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES)
@@ -225,7 +225,7 @@ impl TransactionFetcher {
         // all hashes included in request and there is still space
         // todo: compare free space with min tx size
         if acc_size_response < MAX_FULL_TRANSACTIONS_PACKET_SIZE {
-            self.fill_request_for_peer(hashes, peer_id, Some(acc_size_response));
+            self.fill_eth68_request_for_peer(hashes, peer_id, &mut acc_size_response);
         }
 
         surplus_hashes
@@ -461,77 +461,128 @@ impl TransactionFetcher {
         None
     }
 
-    /// Tries to fill request so that the respective tx response is at its size limit. It does so
-    /// by taking buffered hashes for which peer is listed as fallback peer. If this is an eth68
-    /// request, the accumulated size of transactions corresponding to parameter hashes, must also
-    /// be passed as parameter.
+    /// Tries to fill request with eth68 hashes so that the respective tx response is at its size
+    /// limit. It does so by taking buffered eth68 hashes for which peer is listed as fallback
+    /// peer. A mutable reference to a list of hashes to request is passed as parameter.
     ///
     /// Loops through buffered hashes and does:
     ///
-    /// 1. Checks if an eth68 or eth66 request is being assembled, based on if acc size is passed
-    /// as parameter.
-    /// 2.a. This is an eth68 request, check acc size against limit, if so stop looping.
-    /// 2.a.i. Check if this buffered hash is an eth68 hash, else skip to next iteration.
-    /// 2.a.ii. Check if hash can be included with respect to size metadata and acc size copy.
-    /// 2.b. This is an eth66 request, check hashes count in request, if max reached stop looping.
-    /// 3. Check if peer is fallback peer for hash and remove, else skip to next iteration.
-    /// 4. Add hash to hashes list parameter. Tis increases length (used in eth66 inclusion check).
+    /// 1. Check acc size against limit, if so stop looping.
+    /// 2. Check if this buffered hash is an eth68 hash, else skip to next iteration.
+    /// 3. Check if hash can be included with respect to size metadata and acc size copy.
+    /// 4. Check if peer is fallback peer for hash and remove, else skip to next iteration.
+    /// 4. Add hash to hashes list parameter.
     /// 5. Overwrite eth68 acc size with copy.
-    pub(super) fn fill_request_for_peer(
+    pub(super) fn fill_eth68_request_for_peer(
         &mut self,
         hashes: &mut Vec<TxHash>,
         peer_id: PeerId,
-        mut acc_size_eth68_response: Option<usize>,
+        acc_size_response: &mut usize,
     ) {
         debug_assert!(
-            acc_size_eth68_response.is_none() || {
+            {
                 let mut acc_size = 0;
                 for &hash in hashes.iter() {
                     _ = self.include_eth68_hash(&mut acc_size, hash);
                 }
-                Some(acc_size) == acc_size_eth68_response
+                acc_size == *acc_size_response
             },
-            "an eth68 request is being assembled and caller has miscalculated accumulated size of corresponding transactions response, broken invariant `%acc_size_eth68_response` and `%hashes`,
-`%acc_size_eth68_response`: {:?},
+            "an eth68 request is being assembled and caller has miscalculated accumulated size of corresponding transactions response, broken invariant `%acc_size_response` and `%hashes`,
+`%acc_size_response`: {:?},
 `%hashes`: {:?},
 `@self`: {:?}",
-            acc_size_eth68_response, hashes, self
+            acc_size_response, hashes, self
         );
-
-        let acc_size_eth68_response = &mut acc_size_eth68_response;
 
         for hash in self.buffered_hashes.iter() {
             // copy acc size
-            let mut next_eth68_acc_size = *acc_size_eth68_response;
+            let mut next_acc_size = *acc_size_response;
 
-            // 1. Checks if an eth68 or eth66 request is being assembled.
-            if let Some(acc_size) = next_eth68_acc_size.as_mut() {
-                // 2.a. This is an eth68 request, check acc size against limit, if so stop looping.
-                if *acc_size >= MAX_FULL_TRANSACTIONS_PACKET_SIZE {
+            // 1. Check acc size against limit, if so stop looping.
+            if next_acc_size >= MAX_FULL_TRANSACTIONS_PACKET_SIZE {
+                trace!(target: "net::tx",
+                    peer_id=format!("{peer_id:#}"),
+                    acc_size_eth68_response=acc_size_response, // no change acc size
+                    MAX_FULL_TRANSACTIONS_PACKET_SIZE=MAX_FULL_TRANSACTIONS_PACKET_SIZE,
+                    "request to peer full"
+                );
+
+                break
+            }
+            // 2. Check if this buffered hash is an eth68 hash, else skip to next iteration.
+            if self.eth68_meta.get(hash).is_none() {
+                continue
+            }
+            // 3. Check if hash can be included with respect to size metadata and acc size copy.
+            //
+            // mutates acc size copy
+            if !self.include_eth68_hash(&mut next_acc_size, *hash) {
+                continue
+            }
+
+            debug_assert!(
+                self.unknown_hashes.get(hash).is_some(),
+                "can't find buffered `%hash` in `@unknown_hashes`, `@buffered_hashes` should be a subset of keys in `@unknown_hashes`, broken invariant `@buffered_hashes` and `@unknown_hashes`,
+`%hash`: {},
+`@self`: {:?}",
+                hash, self
+            );
+
+            if let Some((_, fallback_peers)) = self.unknown_hashes.get(hash) {
+                // 4. Check if peer is fallback peer for hash and remove, else skip to next
+                // iteration.
+                //
+                // upgrade this peer from fallback peer, soon to be active peer with inflight
+                // request. since 1 retry per peer per tx hash on this tx fetcher layer, remove
+                // peer.
+                if fallback_peers.remove(&peer_id) {
+                    // 4. Add hash to hashes list parameter.
+                    hashes.push(*hash);
+                    // 5. Overwrite eth68 acc size with copy.
+                    *acc_size_response = next_acc_size;
+
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
-                        acc_size_eth68_response=acc_size_eth68_response, // no change acc size
+                        hash=%hash,
+                        acc_size_eth68_response=acc_size_response,
                         MAX_FULL_TRANSACTIONS_PACKET_SIZE=MAX_FULL_TRANSACTIONS_PACKET_SIZE,
-                        "request to peer full"
+                        "found buffered hash for request to peer"
                     );
+                }
+            }
+        }
 
-                    break
-                }
-                // 2.a.i. Check if this buffered hash is an eth68 hash.
-                if self.eth68_meta.get(hash).is_none() {
-                    continue
-                }
-                // 2.a.ii. Check if hash can be included with respect to size metadata and acc
-                // size copy.
-                //
-                // mutates acc size copy
-                if !self.include_eth68_hash(acc_size, *hash) {
-                    continue
-                }
+        // remove hashes that will be included in request from buffer
+        for hash in hashes {
+            self.buffered_hashes.remove(hash);
+        }
+    }
 
-            // 2.b. This is an eth66 request, check hashes count in request.
-            } else if hashes.len() >= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
+    /// Tries to fill request with eth66 hashes so that the respective tx response is at its size
+    /// limit. It does so by taking buffered hashes for which peer is listed as fallback peer. A
+    /// mutable reference to a list of hashes to request is passed as parameter.
+    ///
+    /// Loops through buffered hashes and does:
+    ///
+    /// 1. Check if this buffered hash is an eth66 hash, else skip to next iteration.
+    /// 2. Check hashes count in request, if max reached stop looping.
+    /// 3. Check if peer is fallback peer for hash and remove, else skip to next iteration.
+    /// 4. Add hash to hashes list parameter. This increases length i.e. hashes count.
+    ///
+    /// Removes hashes included in request from buffer.
+    pub(super) fn fill_eth66_request_for_peer(
+        &mut self,
+        hashes: &mut Vec<TxHash>,
+        peer_id: PeerId,
+    ) {
+        for hash in self.buffered_hashes.iter() {
+            // 1. Check hashes count in request.
+            if hashes.len() >= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
                 break
+            }
+            // 2. Check if this buffered hash is an eth66 hash.
+            if self.eth68_meta.get(hash).is_some() {
+                continue
             }
 
             debug_assert!(
@@ -547,18 +598,14 @@ impl TransactionFetcher {
                 //
                 // upgrade this peer from fallback peer, soon to be active peer with inflight
                 // request. since 1 retry per peer per tx hash on this tx fetcher layer, remove
-                /// peer.
+                // peer.
                 if fallback_peers.remove(&peer_id) {
-                    // 4. Add hash to hashes list parameter. This increases length (used in eth66
-                    // inclusion check).
+                    // 4. Add hash to hashes list parameter.
                     hashes.push(*hash);
-                    // 5. Overwrite eth68 acc size with copy.
-                    *acc_size_eth68_response = next_eth68_acc_size;
 
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
                         hash=%hash,
-                        acc_size_eth68_response=acc_size_eth68_response,
                         MAX_FULL_TRANSACTIONS_PACKET_SIZE=MAX_FULL_TRANSACTIONS_PACKET_SIZE,
                         "found buffered hash for request to peer"
                     );
