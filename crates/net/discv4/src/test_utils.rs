@@ -1,7 +1,5 @@
 //! Mock discovery support
 
-#![allow(missing_docs)]
-
 use crate::{
     proto::{FindNode, Message, Neighbours, NodeEndpoint, Packet, Ping, Pong},
     receive_loop, send_loop, Discv4, Discv4Config, Discv4Service, EgressSender, IngressEvent,
