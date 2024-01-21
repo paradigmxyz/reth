@@ -1,10 +1,11 @@
 use core::hash::BuildHasher;
 use derive_more::{Deref, DerefMut};
+use itertools::Itertools;
 use linked_hash_set::LinkedHashSet;
 use schnellru::{self, ByLength, Limiter, RandomState, Unlimited};
 use std::{
     borrow::Borrow,
-    fmt::{self, Write},
+    fmt,
     hash::Hash,
     num::NonZeroUsize,
 };
@@ -115,16 +116,16 @@ impl<K, V, L, S> fmt::Debug for LruMap<K, V, L, S>
 where
     K: Hash + PartialEq + fmt::Display,
     V: fmt::Debug,
-    L: Limiter<K, V>,
+    L: Limiter<K, V> + fmt::Debug,
     S: BuildHasher,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("LruMap");
-        for (k, v) in self.0.iter() {
-            let mut key_str = String::new();
-            write!(&mut key_str, "{k}")?;
-            debug_struct.field(&key_str, &v);
-        }
+
+        debug_struct.field("limiter", self.limiter());
+
+        debug_struct.field("inner", &format_args!("Iter: {{{}}}", self.0.iter().map(|(k, v)| format!(" {k}: {v:?}")).format(",")));
+
         debug_struct.finish()
     }
 }
