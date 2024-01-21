@@ -99,7 +99,10 @@ where
     }
 }
 
-impl<T> fmt::Debug for LruCache<T> where T: fmt::Debug + Hash + Eq {
+impl<T> fmt::Debug for LruCache<T>
+where
+    T: fmt::Debug + Hash + Eq,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("LruCache");
 
@@ -107,10 +110,7 @@ impl<T> fmt::Debug for LruCache<T> where T: fmt::Debug + Hash + Eq {
 
         debug_struct.field(
             "res_fn_iter",
-            &format_args!(
-                "Iter: {{{} }}",
-                self.iter().map(|k| format!(" {k:?}")).format(",")
-            ),
+            &format_args!("Iter: {{{} }}", self.iter().map(|k| format!(" {k:?}")).format(",")),
         );
 
         debug_struct.finish()
@@ -249,6 +249,9 @@ mod test {
         let key_2 = Key(2);
         cache.insert(key_2);
 
-        assert_eq!("LruCache { limit: 2, res_fn_iter: Iter: { Key(2), Key(1) } }", format!("{cache:?}"))
+        assert_eq!(
+            "LruCache { limit: 2, res_fn_iter: Iter: { Key(2), Key(1) } }",
+            format!("{cache:?}")
+        )
     }
 }

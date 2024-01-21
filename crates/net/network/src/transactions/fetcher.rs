@@ -501,7 +501,6 @@ impl TransactionFetcher {
             // if this request is for eth68 txns...
             if let Some(acc_size_eth68_response) = acc_size_eth68_response.as_mut() {
                 if *acc_size_eth68_response >= MAX_FULL_TRANSACTIONS_PACKET_SIZE {
-
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
                         hash=%hash,
@@ -748,9 +747,9 @@ mod test {
             1,
         ];
 
-        // load unseen hashes in reverse order so index 0 in seen_eth68_hashes and 
+        // load unseen hashes in reverse order so index 0 in seen_eth68_hashes and
         // seen_eth68_hashes_sizes is lru!
-        
+
         for i in 5..=0 {
             tx_fetcher.unknown_hashes.insert(eth68_hashes[i], (0, default_cache()));
             tx_fetcher.eth68_meta.insert(eth68_hashes[i], eth68_hashes_sizes[i]);
