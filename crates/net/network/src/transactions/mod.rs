@@ -1698,14 +1698,14 @@ mod tests {
         tx_manager.peers.insert(peer_id_1, peer_1);
 
         // hashes are seen and currently not inflight, with one fallback peer, and are buffered
-        // for first retry.
+        // for first retry in reverse order to make index 0 lru
         let retries = 1;
         let mut backups = default_cache();
         backups.insert(peer_id_1);
-        tx_fetcher.unknown_hashes.insert(seen_hashes[0], (retries, backups.clone()));
-        tx_fetcher.unknown_hashes.insert(seen_hashes[1], (retries, backups));
-        tx_fetcher.buffered_hashes.insert(seen_hashes[0]);
+        tx_fetcher.unknown_hashes.insert(seen_hashes[1], (retries, backups.clone()));
+        tx_fetcher.unknown_hashes.insert(seen_hashes[0], (retries, backups));
         tx_fetcher.buffered_hashes.insert(seen_hashes[1]);
+        tx_fetcher.buffered_hashes.insert(seen_hashes[0]);
 
         // peer_1 is idle
         assert!(tx_fetcher.is_idle(peer_id_1));
@@ -1787,6 +1787,8 @@ mod tests {
         let unseen_eth68_hashes = [B256::from_slice(&[1; 32]), B256::from_slice(&[2; 32])];
         let unseen_eth68_hashes_sizes =
             [MAX_FULL_TRANSACTIONS_PACKET_SIZE / 2, MAX_FULL_TRANSACTIONS_PACKET_SIZE / 2 - 4];
+        // hashes and sizes to buffer in reverse order so that seen_eth68_hashes[0] and 
+        // seen_eth68_hashes_sizes[0] are lru
         let seen_eth68_hashes =
             [B256::from_slice(&[3; 32]), B256::from_slice(&[4; 32]), B256::from_slice(&[5; 32])];
         let seen_eth68_hashes_sizes = [
@@ -1803,11 +1805,28 @@ mod tests {
         // for first try to fetch.
         let mut backups = default_cache();
         backups.insert(peer_id);
-        for i in 0..3 {
+
+        // load in reverse order so index 0 in seen_eth68_hashes and seen_eth68_hashes_sizes is 
+        // lru!
+        
+        for i in 2..=0 {
             tx_fetcher.unknown_hashes.insert(seen_eth68_hashes[i], (0, backups.clone()));
             tx_fetcher.eth68_meta.insert(seen_eth68_hashes[i], seen_eth68_hashes_sizes[i]);
             tx_fetcher.buffered_hashes.insert(seen_eth68_hashes[i]);
         }
+
+        // insert buffered hash for some other peer too, to verify response size accumulation and 
+        // selection from buffered hashes
+        let peer_id_other = PeerId::new([2; 64]);
+        let hash_other = B256::from_slice(&[6; 32]);
+        let mut backups = default_cache();
+        backups.insert(peer_id_other);
+        tx_fetcher.unknown_hashes.insert(hash_other, (0, backups));
+        tx_fetcher.eth68_meta.insert(hash_other, MAX_FULL_TRANSACTIONS_PACKET_SIZE - 2); // a big tx
+        tx_fetcher.buffered_hashes.insert(hash_other);
+
+        println!("buffered hashes {:?}", tx_fetcher.buffered_hashes);
+
 
         let (peer, mut to_mock_session_rx) = new_mock_session(peer_id, eth_version);
         tx_manager.peers.insert(peer_id, peer);
@@ -1823,9 +1842,9 @@ mod tests {
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
         // since hashes are unseen, length of unknown hashes increases
-        assert_eq!(tx_fetcher.unknown_hashes.len(), 5);
+        assert_eq!(tx_fetcher.unknown_hashes.len(), 6);
         // seen_eth68_hashes[1] should be taken out of buffer and packed into request
-        assert_eq!(tx_fetcher.buffered_hashes.len(), 2);
+        assert_eq!(tx_fetcher.buffered_hashes.len(), 3);
         assert!(tx_fetcher.buffered_hashes.contains(&seen_eth68_hashes[0]));
 
         // mock session of peer receives request

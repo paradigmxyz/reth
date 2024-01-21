@@ -486,15 +486,29 @@ impl TransactionFetcher {
         );
 
         for hash in self.buffered_hashes.iter() {
+            debug_assert!(
+                self.unknown_hashes.peek(hash).is_some(),
+                "broken invariant `buffered-hashes` and `unknown-hashes`"
+            );
+
+            // check if this peer has previously announced this hash to us
+            if let Some((_, fallback_peers)) = self.unknown_hashes.peek(hash) {
+                if !fallback_peers.contains(&peer_id) {
+                    continue
+                }
+            }
+
             // if this request is for eth68 txns...
             if let Some(acc_size_eth68_response) = acc_size_eth68_response.as_mut() {
                 if *acc_size_eth68_response >= MAX_FULL_TRANSACTIONS_PACKET_SIZE {
+
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
                         hash=%hash,
+                        size=self.eth68_meta.peek(hash).expect("should find size in `eth68-meta`"),
                         acc_size_eth68_response=acc_size_eth68_response,
                         MAX_FULL_TRANSACTIONS_PACKET_SIZE=MAX_FULL_TRANSACTIONS_PACKET_SIZE,
-                        "request to peer full"
+                        "found buffered hash for peer but can't fit it into request, request to peer full"
                     );
 
                     break
@@ -734,8 +748,10 @@ mod test {
             1,
         ];
 
-        // load unseen hashes
-        for i in 0..6 {
+        // load unseen hashes in reverse order so index 0 in seen_eth68_hashes and 
+        // seen_eth68_hashes_sizes is lru!
+        
+        for i in 5..=0 {
             tx_fetcher.unknown_hashes.insert(eth68_hashes[i], (0, default_cache()));
             tx_fetcher.eth68_meta.insert(eth68_hashes[i], eth68_hashes_sizes[i]);
         }
