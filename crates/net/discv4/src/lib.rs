@@ -48,7 +48,7 @@ use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque},
-    io,
+    env, io,
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     pin::Pin,
     rc::Rc,
@@ -426,6 +426,11 @@ impl Discv4 {
         self.send_to_service(Discv4Command::Terminated);
     }
 }
+
+// move method signatures from Discv4 here
+pub trait HandleDiscovery {}
+
+impl HandleDiscovery for Discv4 {}
 
 /// Manages discv4 peer discovery over UDP.
 #[must_use = "Stream does nothing unless polled"]
@@ -1672,21 +1677,25 @@ where
                             Message::Neighbours(mut msg) => {
                                 let nodes = &mut msg.nodes;
                                 if let Some(ref mut discv5) = self.discv5 {
-                                    let received_empty_nodes = nodes.is_empty();
-
-                                    if let Err(err) = discv5.filter_nodes(nodes) {
-                                        debug!(target: "discv4",
+                                    match discv5.filter_nodes(nodes) {
+                                        Err(err) => debug!(target: "discv4",
                                             src_id=format!("{:#}", src_id),
-                                            nodes=format!("[{:#}]", nodes.iter().format(", ")),
+                                            nodes=format!("[{}]", nodes.iter().format(", ")),
                                             err=?err,
                                             "failed to filter nodes against discv5 mirror"
-                                        );
-                                    }
-
-                                    if !received_empty_nodes && nodes.is_empty() {
-                                        trace!(target: "discv4", src_id=format!("{:#}", src_id), nodes=format!("[{:#}]", msg.nodes.iter().format(", ")), "dropping `Neighbours` response from peer, nodes connected over discv5");
+                                        ),
+                                        Ok(filtered_out_nodes) => {
+                                            if !filtered_out_nodes.is_empty() {
+                                                trace!(target: "discv4",
+                                                    src_id=format!("{:#}", src_id),
+                                                    filtered_out_nodes=format!("[{:#}]", filtered_out_nodes.iter().format(", ")), "filtered out peers from `Neighbours` response from peer, nodes connected over discv5"
+                                                );
+                                            }
+                                        }
                                     }
                                 }
+                                // anyhow let the message go down the usual pipeline, even with
+                                // empty nodes, so discv4 doesn't think it's broken
                                 self.on_neighbours(msg, remote_addr, src_id);
                                 Discv4Event::Neighbours
                             }
@@ -1754,7 +1763,7 @@ where
         local_node_record: NodeRecord,
         secret_key: SecretKey,
         config: Discv4Config,
-        discv5_kbuckets_change_tx: watch::Receiver<bool>,
+        discv5_kbuckets_change_tx: watch::Receiver<()>,
         discv5_kbuckets_keys_callback: F,
     ) -> Self {
         let mut discv4 = Self::new(socket, local_address, local_node_record, secret_key, config);
@@ -2214,21 +2223,24 @@ impl From<ForkId> for EnrForkIdEntry {
 
 pub trait MirrorDiscv5KBuckets {
     fn update_mirror(&mut self);
-    fn filter_nodes(&mut self, nodes: &mut Vec<NodeRecord>) -> Result<(), watch::error::RecvError>;
+    fn filter_nodes(
+        &mut self,
+        nodes: &mut Vec<NodeRecord>,
+    ) -> Result<Vec<PeerId>, watch::error::RecvError>;
 }
 
 #[derive(Debug)]
 pub struct Discv5KBucketsKeysMirror<F> {
     mirror: Vec<[u8; 32]>,
     callback: F,
-    change_tx: watch::Receiver<bool>,
+    change_tx: watch::Receiver<()>,
 }
 
 impl<F> Discv5KBucketsKeysMirror<F>
 where
     F: Send + Unpin,
 {
-    pub fn new(change_tx: watch::Receiver<bool>, callback: F) -> Self {
+    pub fn new(change_tx: watch::Receiver<()>, callback: F) -> Self {
         Self { mirror: Default::default(), callback, change_tx }
     }
 }
@@ -2241,14 +2253,29 @@ where
         self.mirror = (self.callback)();
     }
 
-    fn filter_nodes(&mut self, nodes: &mut Vec<NodeRecord>) -> Result<(), watch::error::RecvError> {
+    fn filter_nodes(
+        &mut self,
+        nodes: &mut Vec<NodeRecord>,
+    ) -> Result<Vec<PeerId>, watch::error::RecvError> {
         if self.change_tx.has_changed()? {
             self.update_mirror();
             self.change_tx.borrow_and_update();
         }
-        Ok(nodes.retain(|node|
+
+        let is_log_level_trace = is_log_level_trace();
+        let mut filtered_out = vec![];
+
+        Ok(nodes.retain(|node| {
             //todo: make peer_id into compressed public key
-            !self.mirror.contains(&node.id)))
+            let filter_out = self.mirror.contains(&node.id);
+            if filter_out && is_log_level_trace {
+                filtered_out.push(node.id);
+            }
+
+            filter_out
+        }));
+
+        Ok(filtered_out)
     }
 }
 
@@ -2262,8 +2289,16 @@ impl MirrorDiscv5KBuckets for Discv5Noop {
     fn filter_nodes(
         &mut self,
         _nodes: &mut Vec<NodeRecord>,
-    ) -> Result<(), watch::error::RecvError> {
-        Ok(())
+    ) -> Result<Vec<PeerId>, watch::error::RecvError> {
+        Ok(vec![])
+    }
+}
+
+fn is_log_level_trace() -> bool {
+    if let Ok(var) = env::var("RUST_LOG") {
+        var.to_lowercase() == "trace"
+    } else {
+        false
     }
 }
 
