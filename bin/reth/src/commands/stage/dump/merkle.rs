@@ -1,5 +1,5 @@
 use super::setup;
-use crate::utils::DbTool;
+use crate::node_core::utils::DbTool;
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
 use reth_primitives::{stage::StageCheckpoint, BlockNumber, ChainSpec, PruneModes};

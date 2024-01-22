@@ -1,26 +1,27 @@
 //! Support for customizing the node
 
-use super::cli::{components::RethRpcServerHandles, ext::DefaultRethNodeCommandConfig};
 use crate::{
-    args::{
-        get_secret_key, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RpcServerArgs, TxPoolArgs,
-    },
-    cli::{
-        components::RethNodeComponentsImpl,
-        config::{RethRpcConfig, RethTransactionPoolConfig},
-        db_type::{DatabaseBuilder, DatabaseInstance},
-        ext::{RethCliExt, RethNodeCommandConfig},
-    },
+    cli::db_type::{DatabaseBuilder, DatabaseInstance},
     commands::{
         debug_cmd::EngineApiStore,
         node::{cl_events::ConsensusLayerHealthEvents, events},
     },
-    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
-    init::init_genesis,
+    node_core::{
+        args::{
+            get_secret_key, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
+            PruningArgs, RpcServerArgs, TxPoolArgs,
+        },
+        cli::{
+            components::{RethNodeComponentsImpl, RethRpcServerHandles},
+            config::{RethRpcConfig, RethTransactionPoolConfig},
+            ext::{DefaultRethNodeCommandConfig, RethCliExt, RethNodeCommandConfig},
+        },
+        dirs::{ChainPath, DataDirPath, MaybePlatformPath},
+        init::init_genesis,
+        utils::{get_single_header, write_peers_to_file},
+        version::SHORT_VERSION,
+    },
     prometheus_exporter,
-    utils::{get_single_header, write_peers_to_file},
-    version::SHORT_VERSION,
 };
 use eyre::Context;
 use fdlimit::raise_fd_limit;
@@ -242,7 +243,7 @@ pub struct NodeConfig {
 
     /// Rollup related arguments
     #[cfg(feature = "optimism")]
-    pub rollup: crate::args::RollupArgs,
+    pub rollup: crate::node_core::args::RollupArgs,
 }
 
 impl NodeConfig {
@@ -264,7 +265,7 @@ impl NodeConfig {
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
             #[cfg(feature = "optimism")]
-            rollup: crate::args::RollupArgs::default(),
+            rollup: crate::node_core::args::RollupArgs::default(),
         };
 
         // set all ports to zero by default for test instances
@@ -358,7 +359,7 @@ impl NodeConfig {
 
     /// Set the rollup args for the node
     #[cfg(feature = "optimism")]
-    pub fn with_rollup(mut self, rollup: crate::args::RollupArgs) -> Self {
+    pub fn with_rollup(mut self, rollup: crate::node_core::args::RollupArgs) -> Self {
         self.rollup = rollup;
         self
     }
@@ -977,7 +978,7 @@ impl Default for NodeConfig {
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
             #[cfg(feature = "optimism")]
-            rollup: crate::args::RollupArgs::default(),
+            rollup: crate::node_core::args::RollupArgs::default(),
         }
     }
 }

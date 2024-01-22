@@ -1,5 +1,5 @@
 use super::tui::DbListTUI;
-use crate::utils::{DbTool, ListFilter};
+use crate::node_core::utils::{DbTool, ListFilter};
 use clap::Parser;
 use eyre::WrapErr;
 use reth_db::{database::Database, table::Table, DatabaseEnv, RawValue, TableViewer, Tables};

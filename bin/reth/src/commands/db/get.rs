@@ -1,4 +1,4 @@
-use crate::utils::DbTool;
+use crate::node_core::utils::DbTool;
 use clap::Parser;
 use reth_db::{
     database::Database,

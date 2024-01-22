@@ -13,9 +13,9 @@
 //! ```
 
 use reth::{
+    node_core::utils::db::open_db_read_only,
     primitives::ChainSpecBuilder,
     providers::{providers::BlockchainProvider, ProviderFactory},
-    utils::db::open_db_read_only,
 };
 // Bringing up the RPC
 use reth::rpc::builder::{

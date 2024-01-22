@@ -1,13 +1,12 @@
 //! Database debugging tool
 
-use crate::{
+use crate::node_core::{
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs,
+    },
     dirs::{DataDirPath, MaybePlatformPath},
     utils::DbTool,
-};
-
-use crate::args::{
-    utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-    DatabaseArgs,
 };
 use clap::Parser;
 use reth_db::{

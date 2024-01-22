@@ -1,6 +1,6 @@
 //! Database debugging tool
 
-use crate::{
+use crate::node_core::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, StageEnum,

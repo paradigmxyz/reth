@@ -2,8 +2,15 @@
 
 use crate::{
     commands::node::events::{handle_events, NodeEvent},
-    init::init_genesis,
-    version::SHORT_VERSION,
+    node_core::{
+        args::{
+            utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+            DatabaseArgs,
+        },
+        dirs::{DataDirPath, MaybePlatformPath},
+        init::init_genesis,
+        version::SHORT_VERSION,
+    },
 };
 use clap::Parser;
 use eyre::Context;
@@ -25,14 +32,6 @@ use reth_stages::{
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, info};
-
-use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
-};
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]

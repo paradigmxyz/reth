@@ -1,26 +1,25 @@
 //! CLI definition and entrypoint to executable
 
 use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        LogArgs,
-    },
-    cli::ext::RethCliExt,
     commands::{
         config_cmd, db, debug_cmd, import, init_cmd, node, p2p, recover, stage, test_vectors,
     },
+    node_core::{
+        args::{
+            utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+            LogArgs,
+        },
+        cli::ext::RethCliExt,
+        version::{LONG_VERSION, SHORT_VERSION},
+    },
     runner::CliRunner,
-    version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, Parser, Subcommand};
 use reth_primitives::ChainSpec;
 use reth_tracing::FileWorkerGuard;
 use std::sync::Arc;
 
-pub mod components;
-pub mod config;
 pub mod db_type;
-pub mod ext;
 /// The main reth cli interface.
 ///
 /// This is the entrypoint to the executable.
@@ -161,11 +160,9 @@ impl<Ext: RethCliExt> Commands<Ext> {
 
 #[cfg(test)]
 mod tests {
-    use clap::CommandFactory;
-
-    use crate::args::{utils::SUPPORTED_CHAINS, ColorMode};
-
     use super::*;
+    use crate::node_core::args::{utils::SUPPORTED_CHAINS, ColorMode};
+    use clap::CommandFactory;
 
     #[test]
     fn parse_color_mode() {

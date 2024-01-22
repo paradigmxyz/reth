@@ -1,19 +1,18 @@
 //! Command that initializes the node from a genesis file.
 
-use crate::init::init_genesis;
-use clap::Parser;
-use reth_db::init_db;
-use reth_primitives::ChainSpec;
-use std::sync::Arc;
-use tracing::info;
-
-use crate::{
+use crate::node_core::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
+    init::init_genesis,
 };
+use clap::Parser;
+use reth_db::init_db;
+use reth_primitives::ChainSpec;
+use std::sync::Arc;
+use tracing::info;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]

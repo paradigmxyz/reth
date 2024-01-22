@@ -2,6 +2,20 @@
 //!
 //! Starts the client
 
+use crate::{
+    builder::NodeConfig,
+    cli::db_type::DatabaseBuilder,
+    node_core::{
+        args::{
+            utils::{chain_help, genesis_value_parser, parse_socket_address, SUPPORTED_CHAINS},
+            DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
+            RpcServerArgs, TxPoolArgs,
+        },
+        cli::ext::RethCliExt,
+        dirs::{DataDirPath, MaybePlatformPath},
+    },
+    runner::CliContext,
+};
 use clap::{value_parser, Parser};
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_beacon_consensus::BeaconConsensus;
@@ -11,17 +25,6 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 pub mod cl_events;
 pub mod events;
-use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, parse_socket_address, SUPPORTED_CHAINS},
-        DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
-        RpcServerArgs, TxPoolArgs,
-    },
-    builder::NodeConfig,
-    cli::{db_type::DatabaseBuilder, ext::RethCliExt},
-    dirs::{DataDirPath, MaybePlatformPath},
-    runner::CliContext,
-};
 
 /// Start the node
 #[derive(Debug, Parser)]
@@ -115,7 +118,7 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     /// Rollup related arguments
     #[cfg(feature = "optimism")]
     #[clap(flatten)]
-    pub rollup: crate::args::RollupArgs,
+    pub rollup: crate::node_core::args::RollupArgs,
 
     /// Additional cli arguments
     #[clap(flatten)]
@@ -236,7 +239,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::args::utils::SUPPORTED_CHAINS;
+    use crate::node_core::args::utils::SUPPORTED_CHAINS;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use std::{
         net::{IpAddr, Ipv4Addr},

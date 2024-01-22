@@ -11,11 +11,11 @@
 use clap::Parser;
 use futures_util::StreamExt;
 use reth::{
-    cli::{
+    cli::Cli,
+    node_core::cli::{
         components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
         config::RethRpcConfig,
         ext::{RethCliExt, RethNodeCommandConfig},
-        Cli,
     },
     primitives::{Address, IntoRecoveredTransaction},
     rpc::{
