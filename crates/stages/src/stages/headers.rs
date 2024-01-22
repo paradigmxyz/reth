@@ -100,12 +100,13 @@ where
         let mut cursor_canonical = tx.cursor_write::<RawTable<tables::CanonicalHeaders>>()?;
         let mut cursor_td = tx.cursor_write::<tables::HeaderTD>()?;
 
-        // Find the latest total difficulty
         let mut last_header_number = tx
             .cursor_read::<tables::Headers>()?
             .last()?
             .map(|(_, header)| header.number)
             .unwrap_or_default();
+
+        // Find the latest total difficulty
         let mut td: U256 = cursor_td
             .seek_exact(last_header_number)?
             .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?
@@ -153,11 +154,12 @@ where
 
         // If we only have the genesis block hash, then we are at first sync, and we can remove it,
         // add it to the collector and use tx.append on all hashes.
-        if let Some((hash, 0)) = tx.cursor_read::<tables::HeaderNumbers>()?.last()? {
-            self.hash_collector.insert(hash, 0);
-
-            cursor_header_numbers.delete_current()?;
-            first_sync = true;
+        if let Some((hash, block_number)) = cursor_header_numbers.last()? {
+            if block_number.value()? == 0 {
+                self.hash_collector.insert(hash.key()?, 0);
+                cursor_header_numbers.delete_current()?;
+                first_sync = true;
+            }
         }
 
         // Since ETL sorts all entries by hashes, we are either appending (first sync) or inserting
