@@ -264,7 +264,7 @@ impl TransactionFetcher {
                 // peer in caller's context has requested hash and is hence not eligible as
                 // fallback peer.
                 if *retries >= MAX_REQUEST_RETRIES_PER_TX_HASH {
-                    let msg_version = || -> EthVersion {
+                    let msg_version = || {
                         self.eth68_meta
                             .peek(&hash)
                             .map(|_| EthVersion::Eth68)
@@ -334,7 +334,7 @@ impl TransactionFetcher {
                 return false
             }
 
-            let msg_version = || -> EthVersion { self.eth68_meta.peek(hash).map(|_| EthVersion::Eth68).unwrap_or(EthVersion::Eth66) };
+            let msg_version = || self.eth68_meta.peek(hash).map(|_| EthVersion::Eth68).unwrap_or(EthVersion::Eth66);
 
             // vacant entry
             trace!(target: "net::tx",
@@ -378,11 +378,7 @@ impl TransactionFetcher {
         metrics_increment_egress_peer_channel_full: impl FnOnce(),
     ) -> Option<Vec<TxHash>> {
         let peer_id: PeerId = peer.request_tx.peer_id;
-        let msg_version = new_announced_hashes.first().map(|hash| {
-            self.eth68_meta.get(hash).map(|_| EthVersion::Eth68).unwrap_or(EthVersion::Eth66)
-        });
-
-        let msg_version = || -> EthVersion {
+        let msg_version = || {
             new_announced_hashes
                 .first()
                 .map(|hash| {
@@ -598,15 +594,6 @@ impl TransactionFetcher {
             if self.eth68_meta.get(hash).is_some() {
                 continue
             }
-
-            trace!(target: "net::tx",
-                peer_id=format!("{peer_id:#}"),
-                hash=%hash,
-                size=self.eth68_meta.peek(hash),
-                acc_size_eth68_response=acc_size_eth68_response,
-                MAX_FULL_TRANSACTIONS_PACKET_SIZE=MAX_FULL_TRANSACTIONS_PACKET_SIZE,
-                "found buffered hash for request to peer"
-            );
 
             debug_assert!(
                 self.unknown_hashes.get(hash).is_some(),
