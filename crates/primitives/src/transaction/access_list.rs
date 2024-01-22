@@ -54,20 +54,6 @@ pub struct AccessList(
     pub Vec<AccessListItem>,
 );
 
-impl Deref for AccessList {
-    type Target = Vec<AccessListItem>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for AccessList {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
 impl AccessList {
     /// Converts the list into a vec, expected by revm
     pub fn flattened(&self) -> Vec<(Address, Vec<U256>)> {
@@ -140,6 +126,20 @@ impl AccessList {
             self.push(AccessListItem { address, storage_keys: Vec::new() });
             true
         }
+    }
+}
+
+impl Deref for AccessList {
+    type Target = Vec<AccessListItem>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for AccessList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
