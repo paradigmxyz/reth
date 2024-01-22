@@ -175,9 +175,7 @@ where
         headers: HeaderStage<Provider, H>,
         body_downloader: B,
     ) -> StageSetBuilder<DB> {
-        StageSetBuilder::default()
-            .add_stage(headers)
-            .add_stage(BodyStage::new(body_downloader))
+        StageSetBuilder::default().add_stage(headers).add_stage(BodyStage::new(body_downloader))
     }
 
     /// Create a new builder using the given bodies stage.

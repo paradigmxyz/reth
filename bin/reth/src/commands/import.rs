@@ -169,7 +169,8 @@ impl ImportCommand {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
-                ).set(SenderRecoveryStage {
+                )
+                .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,
                 })
                 .set(ExecutionStage::new(

@@ -5,7 +5,7 @@ use criterion::{
 };
 use pprof::criterion::{Output, PProfProfiler};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
-use reth_interfaces::test_utils::TestConsensus;
+
 use reth_primitives::stage::StageCheckpoint;
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TransactionLookupStage},
