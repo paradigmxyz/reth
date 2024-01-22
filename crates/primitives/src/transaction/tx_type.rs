@@ -46,7 +46,7 @@ pub enum TxType {
 
 impl TxType {
     /// Check if the transaction type has an access list.
-    pub fn has_access_list(&self) -> bool {
+    pub const fn has_access_list(&self) -> bool {
         match self {
             TxType::Legacy => false,
             TxType::EIP2930 | TxType::EIP1559 | TxType::EIP4844 => true,
