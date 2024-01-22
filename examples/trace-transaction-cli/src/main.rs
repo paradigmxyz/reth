@@ -25,7 +25,6 @@ use reth::{
     tasks::TaskSpawner,
     transaction_pool::TransactionPool,
 };
-
 use std::collections::HashSet;
 
 fn main() {
