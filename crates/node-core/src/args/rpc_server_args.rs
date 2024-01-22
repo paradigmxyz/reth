@@ -17,6 +17,7 @@ use clap::{
     Arg, Args, Command,
 };
 use futures::TryFutureExt;
+use rand::Rng;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_node_api::EngineTypes;
 use reth_provider::{
@@ -218,6 +219,49 @@ impl RpcServerArgs {
         // also adjust the ipc path by appending the instance number to the path used for the
         // endpoint
         self.ipcpath = format!("{}-{}", self.ipcpath, instance);
+    }
+
+    /// Set the http port to zero, to allow the OS to assign a random unused port when the rpc
+    /// server binds to a socket.
+    pub fn with_http_unused_port(mut self) -> Self {
+        self.http_port = 0;
+        self
+    }
+
+    /// Set the ws port to zero, to allow the OS to assign a random unused port when the rpc
+    /// server binds to a socket.
+    pub fn with_ws_unused_port(mut self) -> Self {
+        self.ws_port = 0;
+        self
+    }
+
+    /// Set the auth port to zero, to allow the OS to assign a random unused port when the rpc
+    /// server binds to a socket.
+    pub fn with_auth_unused_port(mut self) -> Self {
+        self.auth_port = 0;
+        self
+    }
+
+    /// Append a random string to the ipc path, to prevent possible collisions when multiple nodes
+    /// are being run on the same machine.
+    pub fn with_ipc_random_path(mut self) -> Self {
+        let random_string: String = rand::thread_rng()
+            .sample_iter(rand::distributions::Alphanumeric)
+            .take(8)
+            .map(char::from)
+            .collect();
+        self.ipcpath = format!("{}-{}", self.ipcpath, random_string);
+        self
+    }
+
+    /// Configure all ports to be set to a random unused port when bound, and set the IPC path to a
+    /// random path.
+    pub fn with_unused_ports(mut self) -> Self {
+        self = self.with_http_unused_port();
+        self = self.with_ws_unused_port();
+        self = self.with_auth_unused_port();
+        self = self.with_ipc_random_path();
+        self
     }
 
     /// Configures and launches _all_ servers.
