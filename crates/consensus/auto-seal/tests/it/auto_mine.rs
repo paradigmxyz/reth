@@ -1,4 +1,3 @@
-#![allow(unreachable_pub)]
 //! auto-mine consensus integration test
 
 use clap::Parser;
@@ -60,7 +59,7 @@ impl RethNodeCommandConfig for AutoMineConfig {
 /// process transactions.
 #[test]
 #[cfg_attr(feature = "optimism", ignore)]
-pub fn test_auto_mine() {
+pub(crate) fn test_auto_mine() {
     // create temp path for test
     let temp_path = tempfile::TempDir::new().expect("tempdir is okay").into_path();
     let datadir = temp_path.to_str().expect("temp path is okay");
