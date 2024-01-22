@@ -339,12 +339,11 @@ impl SealedBlock {
     pub fn ensure_transaction_root_valid(&self) -> Result<(), GotExpected<B256>> {
         let calculated_root = crate::proofs::calculate_transaction_root(&self.body);
 
-        if !(self.header.transactions_root == calculated_root) {
+        if self.header.transactions_root != calculated_root {
             return Err(GotExpected {
                 got: calculated_root,
                 expected: self.header.transactions_root,
-            }
-            .into())
+            })
         }
 
         Ok(())
