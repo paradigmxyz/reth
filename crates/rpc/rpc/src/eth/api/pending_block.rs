@@ -1,13 +1,10 @@
 //! Support for building a pending block via local txpool.
 
-use crate::eth::{
-    error::{EthApiError, EthResult},
-    revm_utils::FillableTransaction,
-};
+use crate::eth::error::{EthApiError, EthResult};
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs,
-    revm::compat::into_reth_log,
+    revm::{compat::into_reth_log, env::FillableTransaction},
     revm_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
     },

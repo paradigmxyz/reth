@@ -22,7 +22,7 @@ mod builder {
     use reth_primitives::{
         constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
         proofs,
-        revm::compat::into_reth_log,
+        revm::{compat::into_reth_log, env::FillableTransaction},
         Block, Hardfork, Header, IntoRecoveredTransaction, Receipt, Receipts, TxType,
         EMPTY_OMMER_ROOT_HASH, U256,
     };

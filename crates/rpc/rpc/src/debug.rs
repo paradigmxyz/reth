@@ -3,7 +3,7 @@ use crate::{
         error::{EthApiError, EthResult},
         revm_utils::{
             inspect, inspect_and_return_db, prepare_call_env, replay_transactions_until, transact,
-            EvmOverrides, FillableTransaction,
+            EvmOverrides,
         },
         EthTransactions, TransactionSource,
     },
@@ -14,7 +14,8 @@ use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
-    revm::env::tx_env_with_recovered, Address, Block, BlockId, BlockNumberOrTag, Bytes,
+    revm::env::FillableTransaction,
+    Address, Block, BlockId, BlockNumberOrTag, Bytes,
     TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use reth_provider::{

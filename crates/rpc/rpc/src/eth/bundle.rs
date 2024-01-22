@@ -3,7 +3,6 @@
 use crate::{
     eth::{
         error::{EthApiError, EthResult, RpcInvalidTransactionError},
-        revm_utils::TryFillableTransaction,
         utils::recover_raw_transaction,
         EthTransactions,
     },
@@ -12,6 +11,7 @@ use crate::{
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
     keccak256,
+    revm::env::TryFillableTransaction,
     revm_primitives::db::{DatabaseCommit, DatabaseRef},
     U256,
 };

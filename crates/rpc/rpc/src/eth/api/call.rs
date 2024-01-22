@@ -6,7 +6,7 @@ use crate::{
         revm_utils::{
             apply_state_overrides, build_call_evm_env, caller_gas_allowance,
             cap_tx_gas_limit_with_caller_allowance, get_precompiles, inspect, prepare_call_env,
-            transact, EvmOverrides, FillableTransaction,
+            transact, EvmOverrides,
         },
         EthTransactions,
     },
@@ -14,7 +14,7 @@ use crate::{
 };
 use reth_network_api::NetworkInfo;
 use reth_node_api::ConfigureEvmEnv;
-use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, U256};
+use reth_primitives::{revm::env::FillableTransaction, BlockId, BlockNumberOrTag, Bytes, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };

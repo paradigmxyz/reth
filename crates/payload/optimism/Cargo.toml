@@ -20,7 +20,6 @@ reth-provider.workspace = true
 reth-payload-builder.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-node-api.workspace = true
-reth-rpc.workspace = true
 
 # ethereum
 revm.workspace = true

@@ -1,13 +1,9 @@
 //! utilities for working with revm
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
-#[cfg(feature = "optimism")]
-use reth_primitives::revm::env::fill_op_tx_env;
-#[cfg(not(feature = "optimism"))]
-use reth_primitives::revm::env::fill_tx_env;
 use reth_primitives::{
-    revm::env::fill_tx_env_with_recovered, Address, TransactionSigned,
-    TransactionSignedEcRecovered, TxHash, B256, U256,
+    revm::env::TryFillableTransaction, Address,
+    B256, U256,
 };
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
@@ -60,98 +56,6 @@ impl EvmOverrides {
 impl From<Option<StateOverride>> for EvmOverrides {
     fn from(state: Option<StateOverride>) -> Self {
         Self::state(state)
-    }
-}
-
-/// Helper type to work with different transaction types when configuring the EVM env. This is
-/// the infallible version of `TryFillableTransaction`.
-pub trait FillableTransaction {
-    /// Returns the hash of the transaction.
-    fn hash(&self) -> TxHash;
-
-    /// Fill the transaction environment with the given transaction.
-    fn fill_tx_env(&self, tx_env: &mut TxEnv);
-
-    /// Create a new `TxEnv` instance using default values, then fill it with the given
-    /// transaction.
-    fn new_filled_tx_env(&self) -> TxEnv {
-        let mut tx_env = TxEnv::default();
-        self.fill_tx_env(&mut tx_env);
-        tx_env
-    }
-}
-
-impl<T> TryFillableTransaction for T
-where
-    T: FillableTransaction,
-{
-    fn hash(&self) -> TxHash {
-        self.hash()
-    }
-
-    fn try_fill_tx_env(&self, tx_env: &mut TxEnv) -> EthResult<()> {
-        self.fill_tx_env(tx_env);
-        Ok(())
-    }
-}
-
-/// Helper type to work with different transaction types when configuring the EVM env.
-///
-/// This is automatically implemented for all types that implement [FillableTransaction].
-///
-/// This makes it easier to handle errors.
-pub(crate) trait TryFillableTransaction {
-    /// Returns the hash of the transaction.
-    fn hash(&self) -> TxHash;
-
-    /// Fill the transaction environment with the given transaction.
-    fn try_fill_tx_env(&self, tx_env: &mut TxEnv) -> EthResult<()>;
-
-    /// Create a new `TxEnv` instance using default values, then fill it with the given
-    /// transaction.
-    fn try_new_filled_tx_env(&self) -> EthResult<TxEnv> {
-        let mut tx_env = TxEnv::default();
-        self.try_fill_tx_env(&mut tx_env)?;
-        Ok(tx_env)
-    }
-}
-
-impl FillableTransaction for TransactionSignedEcRecovered {
-    fn hash(&self) -> TxHash {
-        self.hash
-    }
-
-    fn fill_tx_env(&self, tx_env: &mut TxEnv) {
-        #[cfg(not(feature = "optimism"))]
-        fill_tx_env_with_recovered(tx_env, self);
-
-        #[cfg(feature = "optimism")]
-        {
-            let mut envelope_buf = Vec::with_capacity(self.length_without_header());
-            self.encode_enveloped(&mut envelope_buf);
-            fill_tx_env_with_recovered(tx_env, self, envelope_buf.into());
-        }
-    }
-}
-
-impl TryFillableTransaction for TransactionSigned {
-    fn hash(&self) -> TxHash {
-        self.hash
-    }
-
-    fn try_fill_tx_env(&self, tx_env: &mut TxEnv) -> EthResult<()> {
-        let signer =
-            self.recover_signer().ok_or_else(|| EthApiError::InvalidTransactionSignature)?;
-        #[cfg(not(feature = "optimism"))]
-        fill_tx_env(tx_env, self, signer);
-
-        #[cfg(feature = "optimism")]
-        {
-            let mut envelope_buf = Vec::with_capacity(self.length_without_header());
-            self.encode_enveloped(&mut envelope_buf);
-            fill_op_tx_env(tx_env, self, signer, envelope_buf.into());
-        }
-        Ok(())
     }
 }
 
@@ -259,7 +163,7 @@ where
             break
         }
 
-        tx.try_fill_tx_env(evm.tx_mut())?;
+        tx.try_fill_tx_env(evm.tx_mut()).map_err(|_| EthApiError::InvalidTransactionSignature)?;
         evm.transact_commit()?;
         index += 1;
     }
