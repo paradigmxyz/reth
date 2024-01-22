@@ -3,16 +3,14 @@
 //! Stage debugging tool
 
 use crate::{
-    node_core::{
-        args::{
-            get_secret_key,
-            utils::{chain_help, chain_spec_value_parser, SUPPORTED_CHAINS},
-            DatabaseArgs, NetworkArgs, StageEnum,
-        },
-        dirs::{DataDirPath, MaybePlatformPath},
-        version::SHORT_VERSION,
+    args::{
+        get_secret_key,
+        utils::{chain_help, chain_spec_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs, NetworkArgs, StageEnum,
     },
+    dirs::{DataDirPath, MaybePlatformPath},
     prometheus_exporter,
+    version::SHORT_VERSION,
 };
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;

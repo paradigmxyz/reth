@@ -4,20 +4,25 @@ use crate::{
     commands::{
         config_cmd, db, debug_cmd, import, init_cmd, node, p2p, recover, stage, test_vectors,
     },
-    node_core::{
         args::{
             utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
             LogArgs,
         },
         cli::ext::RethCliExt,
         version::{LONG_VERSION, SHORT_VERSION},
-    },
     runner::CliRunner,
 };
 use clap::{value_parser, Parser, Subcommand};
 use reth_primitives::ChainSpec;
 use reth_tracing::FileWorkerGuard;
 use std::sync::Arc;
+
+/// Re-export of the `reth_node_core` types specifically in the `cli` module.
+///
+/// This is re-exported because the types in `reth_node_core::cli` originally existed in
+/// `reth::cli` but were moved to the `reth_node_core` crate. This re-export avoids a breaking
+/// change.
+pub use crate::core::cli::*;
 
 pub mod db_type;
 /// The main reth cli interface.
