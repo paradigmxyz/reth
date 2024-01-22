@@ -1,5 +1,6 @@
 //! A real or test database type
 
+use crate::dirs::{ChainPath, DataDirPath, MaybePlatformPath};
 use alloy_chains::Chain;
 use reth_db::{
     init_db,
@@ -7,7 +8,6 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_interfaces::db::LogLevel;
-use crate::dirs::{ChainPath, DataDirPath, MaybePlatformPath};
 use std::{str::FromStr, sync::Arc};
 
 /// A type that represents either a _real_ (represented by a path), or _test_ database, which will
