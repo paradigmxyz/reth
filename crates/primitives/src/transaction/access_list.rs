@@ -2,7 +2,10 @@ use crate::{Address, B256};
 use alloy_primitives::U256;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::{main_codec, Compact};
-use std::mem;
+use std::{
+    mem,
+    ops::{Deref, DerefMut},
+};
 
 /// Represents a list of addresses and storage keys that a transaction plans to access.
 ///
@@ -51,6 +54,20 @@ pub struct AccessList(
     pub Vec<AccessListItem>,
 );
 
+impl Deref for AccessList {
+    type Target = Vec<AccessListItem>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for AccessList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 impl AccessList {
     /// Converts the list into a vec, expected by revm
     pub fn flattened(&self) -> Vec<(Address, Vec<U256>)> {
@@ -74,7 +91,7 @@ impl AccessList {
 
     /// Returns an iterator over the list's addresses and storage keys.
     pub fn flatten(&self) -> impl Iterator<Item = (Address, Vec<U256>)> + '_ {
-        self.0.iter().map(|item| {
+        self.iter().map(|item| {
             (
                 item.address,
                 item.storage_keys.iter().map(|slot| U256::from_be_bytes(slot.0)).collect(),
@@ -86,13 +103,13 @@ impl AccessList {
     #[inline]
     pub fn size(&self) -> usize {
         // take into account capacity
-        self.0.iter().map(AccessListItem::size).sum::<usize>() +
-            self.0.capacity() * mem::size_of::<AccessListItem>()
+        self.iter().map(AccessListItem::size).sum::<usize>() +
+            self.capacity() * mem::size_of::<AccessListItem>()
     }
 
     /// Returns the position of the given address in the access list, if present.
     pub fn index_of_address(&self, address: Address) -> Option<usize> {
-        self.0.iter().position(|item| item.address == address)
+        self.iter().position(|item| item.address == address)
     }
 
     /// Checks if a specific storage slot within an account is present in the access list.
@@ -105,20 +122,22 @@ impl AccessList {
 
     /// Checks if the access list contains the specified address.
     pub fn contains_address(&self, address: Address) -> bool {
-        self.0.iter().any(|item| item.address == address)
+        self.iter().any(|item| item.address == address)
     }
 
     /// Checks if the storage keys at the given index within an account are present in the access
     /// list.
     pub fn contains_storage_key_at_index(&self, slot: B256, index: usize) -> bool {
-        self.0[index].storage_keys.iter().any(|storage_key| *storage_key == slot)
+        self.get(index).map_or(false, |entry| {
+            entry.storage_keys.iter().any(|storage_key| *storage_key == slot)
+        })
     }
 
     /// Adds an address to the access list and returns `true` if the operation results in a change,
     /// indicating that the address was not previously present.
     pub fn add_address(&mut self, address: Address) -> bool {
         !self.contains_address(address) && {
-            self.0.push(AccessListItem { address, storage_keys: Vec::new() });
+            self.push(AccessListItem { address, storage_keys: Vec::new() });
             true
         }
     }
