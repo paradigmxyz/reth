@@ -20,7 +20,6 @@ use reth::cli::{
     ext::{RethCliExt, RethNodeCommandConfig},
     Cli,
 };
-
 use reth_transaction_pool::TransactionPool;
 
 fn main() {
