@@ -10,16 +10,16 @@ use std::sync::Arc;
 
 /// Factory for creating [EVMProcessor].
 #[derive(Clone, Debug)]
-pub struct EvmProcessorFactory<Env> {
+pub struct EvmProcessorFactory<EvmConfig> {
     chain_spec: Arc<ChainSpec>,
     stack: Option<InspectorStack>,
     /// Type that defines how the produced EVM should be configured.
-    evm_config: Env,
+    evm_config: EvmConfig,
 }
 
-impl<Env> EvmProcessorFactory<Env> {
+impl<EvmConfig> EvmProcessorFactory<EvmConfig> {
     /// Create new factory
-    pub fn new(chain_spec: Arc<ChainSpec>, evm_config: Env) -> Self {
+    pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
         Self { chain_spec, stack: None, evm_config }
     }
 
@@ -36,9 +36,9 @@ impl<Env> EvmProcessorFactory<Env> {
     }
 }
 
-impl<Env> ExecutorFactory for EvmProcessorFactory<Env>
+impl<EvmConfig> ExecutorFactory for EvmProcessorFactory<EvmConfig>
 where
-    Env: EvmEnvConfig + Send + Sync + Clone + 'static,
+    EvmConfig: EvmEnvConfig + Send + Sync + Clone + 'static,
 {
     fn with_state<'a, SP: StateProvider + 'a>(
         &'a self,

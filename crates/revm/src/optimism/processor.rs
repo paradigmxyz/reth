@@ -12,9 +12,9 @@ use revm::DatabaseCommit;
 use std::time::Instant;
 use tracing::{debug, trace};
 
-impl<'a, Env> BlockExecutor for EVMProcessor<'a, Env>
+impl<'a, EvmConfig> BlockExecutor for EVMProcessor<'a, EvmConfig>
 where
-    Env: EvmEnvConfig,
+    EvmConfig: EvmEnvConfig,
 {
     fn execute(
         &mut self,
