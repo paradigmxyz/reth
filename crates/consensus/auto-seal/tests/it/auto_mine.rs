@@ -2,6 +2,13 @@
 
 use clap::Parser;
 use jsonrpsee::{core::client::ClientT, http_client::HttpClientBuilder, rpc_params};
+
+use reth_primitives::{hex, revm_primitives::FixedBytes, ChainSpec, Genesis};
+use reth_provider::CanonStateSubscriptions;
+use reth_transaction_pool::TransactionPool;
+use std::{sync::Arc, time::Duration};
+use tokio::time::timeout;
+
 use reth::{
     cli::{
         components::RethNodeComponents,
@@ -11,11 +18,6 @@ use reth::{
     runner::CliRunner,
     tasks::TaskSpawner,
 };
-use reth_primitives::{hex, revm_primitives::FixedBytes, ChainSpec, Genesis};
-use reth_provider::CanonStateSubscriptions;
-use reth_transaction_pool::TransactionPool;
-use std::{sync::Arc, time::Duration};
-use tokio::time::timeout;
 
 #[derive(Debug)]
 struct AutoMineConfig;
