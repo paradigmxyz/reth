@@ -9,7 +9,6 @@ use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
 use schnellru::{ByLength, Unlimited};
 use std::{
-    env,
     num::NonZeroUsize,
     pin::Pin,
     task::{Context, Poll},
@@ -264,20 +263,19 @@ impl TransactionFetcher {
                 // peer in caller's context has requested hash and is hence not eligible as
                 // fallback peer.
                 if *retries >= MAX_REQUEST_RETRIES_PER_TX_HASH {
-                    if is_log_level_debug_or_trace() {
-                        let msg_version = self
-                            .eth68_meta
-                            .get(&hash)
+                    let msg_version = || -> EthVersion {
+                        self.eth68_meta
+                            .peek(&hash)
                             .map(|_| EthVersion::Eth68)
-                            .unwrap_or(EthVersion::Eth66);
+                            .unwrap_or(EthVersion::Eth66)
+                    };
 
-                        debug!(target: "net::tx",
-                            hash=%hash,
-                            retries=retries,
-                            msg_version=%msg_version,
-                            "retry limit for `GetPooledTransactions` requests reached for hash, dropping hash"
-                        );
-                    }
+                    debug!(target: "net::tx",
+                        hash=%hash,
+                        retries=retries,
+                        msg_version=%msg_version(),
+                        "retry limit for `GetPooledTransactions` requests reached for hash, dropping hash"
+                    );
 
                     max_retried_hashes.push(hash);
                     continue;
@@ -335,13 +333,13 @@ impl TransactionFetcher {
                 return false
             }
 
-            let msg_version = is_log_level_debug_or_trace().then(|| self.eth68_meta.get(hash).map(|_| EthVersion::Eth68).unwrap_or(EthVersion::Eth66));
+            let msg_version = || -> EthVersion { self.eth68_meta.peek(hash).map(|_| EthVersion::Eth68).unwrap_or(EthVersion::Eth66) };
 
             // vacant entry
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 hash=%hash,
-                msg_version=%msg_version.expect("should be set if log level trace"),
+                msg_version=%msg_version(),
                 "new hash seen in announcement by peer"
             );
 
@@ -355,7 +353,7 @@ impl TransactionFetcher {
                 debug!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
                     hash=%hash,
-                    msg_version=%msg_version.expect("should be set if log level debug"),
+                    msg_version=%msg_version(),
                     "failed to cache new announced hash from peer in schnellru::LruMap, dropping hash"
                 );
 
@@ -380,23 +378,23 @@ impl TransactionFetcher {
     ) -> Option<Vec<TxHash>> {
         let peer_id: PeerId = peer.request_tx.peer_id;
 
-        let msg_version = is_log_level_debug_or_trace().then(|| {
+        let msg_version = || -> EthVersion {
             new_announced_hashes
                 .first()
                 .map(|hash| {
                     self.eth68_meta
-                        .get(hash)
+                        .peek(hash)
                         .map(|_| EthVersion::Eth68)
                         .unwrap_or(EthVersion::Eth66)
                 })
                 .expect("`new_announced_hashes` shouldn't be empty")
-        });
+        };
 
         if self.active_peers.len() as u32 >= MAX_CONCURRENT_TX_REQUESTS {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 new_announced_hashes=?new_announced_hashes,
-                msg_version=%msg_version.expect("should be set if log level debug"),
+                msg_version=%msg_version(),
                 limit=MAX_CONCURRENT_TX_REQUESTS,
                 "limit for concurrent `GetPooledTransactions` requests reached, dropping request for hashes to peer"
             );
@@ -407,7 +405,7 @@ impl TransactionFetcher {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 new_announced_hashes=?new_announced_hashes,
-                msg_version=%msg_version.expect("should be set if log level debug"),
+                msg_version=%msg_version(),
                 "failed to cache active peer in schnellru::LruMap, dropping request to peer"
             );
             return Some(new_announced_hashes)
@@ -417,7 +415,7 @@ impl TransactionFetcher {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 new_announced_hashes=?new_announced_hashes,
-                msg_version=%msg_version.expect("should be set if log level debug"),
+                msg_version=%msg_version(),
                 limit=MAX_CONCURRENT_TX_REQUESTS_PER_PEER,
                 "limit for concurrent `GetPooledTransactions` requests per peer reached"
             );
@@ -710,15 +708,6 @@ impl Future for GetPooledTxRequestFut {
                 Poll::Pending
             }
         }
-    }
-}
-
-fn is_log_level_debug_or_trace() -> bool {
-    if let Ok(var) = env::var("RUST_LOG") {
-        let var = var.to_lowercase();
-        var == "debug" || var == "trace"
-    } else {
-        false
     }
 }
 
