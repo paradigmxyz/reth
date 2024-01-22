@@ -32,21 +32,28 @@ use tempfile::{NamedTempFile, TempDir};
 ///
 /// The data can later be iterated over in a sorted manner.
 #[derive(Debug)]
-pub struct Collector<'tmp, K, V>
+pub struct Collector<K, V>
 where
     K: Encode + Ord,
     V: Compress,
     <K as Encode>::Encoded: std::fmt::Debug,
     <V as Compress>::Compressed: std::fmt::Debug,
 {
-    dir: &'tmp TempDir,
-    buffer_size_bytes: usize,
+    /// Directory for temporary file storage
+    dir: TempDir,
+    /// Collection of temporary ETL files
     files: Vec<EtlFile>,
+    /// Current buffer size in bytes
+    buffer_size_bytes: usize,
+    /// Maximum buffer capacity in bytes, triggers flush when reached
     buffer_capacity_bytes: usize,
+    /// In-memory buffer storing encoded and compressed key-value pairs
     buffer: Vec<(<K as Encode>::Encoded, <V as Compress>::Compressed)>,
+    /// Total number of elements in the collector, including all files
+    len: usize,
 }
 
-impl<'tmp, K, V> Collector<'tmp, K, V>
+impl<K, V> Collector<K, V>
 where
     K: Key,
     V: Value,
@@ -56,14 +63,25 @@ where
     /// Create a new collector in a specific temporary directory with some capacity.
     ///
     /// Once the capacity (in bytes) is reached, the data is sorted and flushed to disk.
-    pub fn new(dir: &'tmp TempDir, buffer_capacity_bytes: usize) -> Self {
-        Self {
-            dir,
+    pub fn new(buffer_capacity_bytes: usize) -> Result<Self, std::io::Error> {
+        Ok(Self {
+            dir: tempfile::tempdir()?,
             buffer_size_bytes: 0,
             files: Vec::new(),
             buffer_capacity_bytes,
             buffer: Vec::new(),
-        }
+            len: 0,
+        })
+    }
+
+    /// Returns number of elements currently in the collector.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Returns `true` if there are currently no elements in the collector.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     /// Insert an entry into the collector.
@@ -75,6 +93,7 @@ where
         if self.buffer_size_bytes > self.buffer_capacity_bytes {
             self.flush();
         }
+        self.len += 1;
     }
 
     fn flush(&mut self) {
@@ -113,8 +132,18 @@ where
 /// An iterator over sorted data in a collection of ETL files.
 #[derive(Debug)]
 pub struct EtlIter<'a> {
+    /// Heap managing the next items to be iterated.
+    #[allow(clippy::type_complexity)]
     heap: BinaryHeap<(Reverse<(Vec<u8>, Vec<u8>)>, usize)>,
+    /// Reference to the vector of ETL files being iterated over.
     files: &'a mut Vec<EtlFile>,
+}
+
+impl<'a> EtlIter<'a> {
+    /// Peeks into the next element
+    pub fn peek(&self) -> Option<&(Vec<u8>, Vec<u8>)> {
+        self.heap.peek().map(|(Reverse(entry), _)| entry)
+    }
 }
 
 impl<'a> Iterator for EtlIter<'a> {
@@ -206,10 +235,9 @@ mod tests {
     #[test]
     fn etl_hashes() {
         let mut entries: Vec<_> =
-            (0..10_000).into_iter().map(|id| (TxHash::random(), id as TxNumber)).collect();
+            (0..10_000).map(|id| (TxHash::random(), id as TxNumber)).collect();
 
-        let temp_dir = tempfile::tempdir().unwrap();
-        let mut collector = Collector::new(&temp_dir, 1024);
+        let mut collector = Collector::new(1024).unwrap();
         for (k, v) in entries.clone() {
             collector.insert(k, v);
         }
