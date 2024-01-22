@@ -107,7 +107,7 @@ where
             .map(|(_, header)| header.number)
             .unwrap_or_default();
         let mut td: U256 = cursor_td
-            .seek_exact(dbg!(last_header_number))?
+            .seek_exact(last_header_number)?
             .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?
             .1
             .into();
@@ -227,28 +227,30 @@ where
         // let the downloader know what to sync
         self.downloader.update_sync_gap(gap.local_head, gap.target.clone());
 
-        let result = match ready!(self.downloader.poll_next_unpin(cx)) {
-            Some(Ok(headers)) => {
-                info!(target: "sync::stages::headers", len = headers.len(), "Received headers");
-                for header in headers {
-                    // Headers are downloaded in reverse, so if we reach here, we know we have
-                    // filled the gap.
-                    if header.number == local_head_number + 1 {
-                        self.is_etl_ready = true
-                    }
+        // We only want to stop once we have all the headers on ETL filespace (disk).
+        loop {
+            match ready!(self.downloader.poll_next_unpin(cx)) {
+                Some(Ok(headers)) => {
+                    info!(target: "sync::stages::headers", len = headers.len(), from = headers.first().map(|h|h.number), to = headers.last().map(|h|h.number), "Received headers");
+                    for header in headers {
+                        // Headers are downloaded in reverse, so if we reach here, we know we have
+                        // filled the gap.
+                        if header.number == local_head_number + 1 {
+                            self.is_etl_ready = true;
+                            return Poll::Ready(Ok(()))
+                        }
 
-                    self.hash_collector.insert(header.hash, header.number);
-                    self.header_collector.insert(header.number, header);
+                        self.hash_collector.insert(header.hash, header.number);
+                        self.header_collector.insert(header.number, header);
+                    }
                 }
-                Ok(())
+                Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
+                    error!(target: "sync::stages::headers", ?error, "Cannot attach header to head");
+                    return Poll::Ready(Err(StageError::DetachedHead { local_head, header, error }))
+                }
+                None => return Poll::Ready(Err(StageError::ChannelClosed)),
             }
-            Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
-                error!(target: "sync::stages::headers", ?error, "Cannot attach header to head");
-                Err(StageError::DetachedHead { local_head, header, error })
-            }
-            None => Err(StageError::ChannelClosed),
-        };
-        Poll::Ready(result)
+        }
     }
 
     /// Download the headers in reverse order (falling block numbers)
