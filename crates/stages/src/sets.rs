@@ -40,7 +40,7 @@ use crate::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-        StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
+        StorageHashingStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
@@ -62,7 +62,6 @@ use std::sync::Arc;
 ///
 /// This expands to the following series of stages:
 /// - [`HeaderStage`]
-/// - [`TotalDifficultyStage`]
 /// - [`BodyStage`]
 /// - [`SenderRecoveryStage`]
 /// - [`ExecutionStage`]
@@ -175,11 +174,9 @@ where
     pub fn builder_with_headers<DB: Database>(
         headers: HeaderStage<Provider, H>,
         body_downloader: B,
-        consensus: Arc<dyn Consensus>,
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(headers)
-            .add_stage(TotalDifficultyStage::new(consensus.clone()))
             .add_stage(BodyStage::new(body_downloader))
     }
 
@@ -193,7 +190,6 @@ where
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(HeaderStage::new(provider, header_downloader, mode, consensus.clone()))
-            .add_stage(TotalDifficultyStage::new(consensus.clone()))
             .add_stage(bodies)
     }
 }
@@ -213,7 +209,6 @@ where
                 self.header_mode,
                 self.consensus.clone(),
             ))
-            .add_stage(TotalDifficultyStage::new(self.consensus.clone()))
             .add_stage(BodyStage::new(self.body_downloader))
     }
 }

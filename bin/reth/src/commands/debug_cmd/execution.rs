@@ -31,7 +31,7 @@ use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainS
 use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     sets::DefaultStages,
-    stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage, TotalDifficultyStage},
+    stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
     Pipeline, StageSet,
 };
 use reth_tasks::TaskExecutor;
@@ -122,10 +122,6 @@ impl Command {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
-                )
-                .set(
-                    TotalDifficultyStage::new(consensus)
-                        .with_commit_threshold(stage_conf.total_difficulty.commit_threshold),
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
