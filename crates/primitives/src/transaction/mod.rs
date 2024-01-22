@@ -1882,4 +1882,19 @@ mod tests {
         let sender = tx.recover_signer().unwrap();
         assert_eq!(sender, address!("a12e1462d0ceD572f396F58B6E2D03894cD7C8a4"));
     }
+
+    // <https://github.com/alloy-rs/alloy/issues/141
+    // <https://etherscan.io/tx/0xce4dc6d7a7549a98ee3b071b67e970879ff51b5b95d1c340bacd80fa1e1aab31>
+    #[test]
+    fn recover_enveloped() {
+        let raw_tx = "02f86f0102843b9aca0085029e7822d68298f094d9e1459a7a482635700cbc20bbaf52d495ab9c9680841b55ba3ac080a0c199674fcb29f353693dd779c017823b954b3c69dffa3cd6b2a6ff7888798039a028ca912de909e7e6cdef9cdcaf24c54dd8c1032946dfa1d85c206b32a9064fe8";
+        let data = hex::decode(raw_tx).unwrap();
+        let tx = TransactionSigned::decode_enveloped(&mut data.as_slice()).unwrap();
+        let sender = tx.recover_signer().unwrap();
+        assert_eq!(sender, address!("001e2b7dE757bA469a57bF6b23d982458a07eFcE"));
+        assert_eq!(tx.to(), Some(address!("D9e1459A7A482635700cBc20BBAF52D495Ab9C96")));
+        assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
+        let encoded = tx.envelope_encoded();
+        assert_eq!(encoded.as_ref(), data.as_slice());
+    }
 }
