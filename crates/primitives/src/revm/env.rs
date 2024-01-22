@@ -1,55 +1,13 @@
 use crate::{
     constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
     recover_signer_unchecked,
-    revm::config::revm_spec,
-    revm_primitives::{AnalysisKind, BlockEnv, CfgEnv, Env, SpecId, TransactTo, TxEnv},
-    Address, Bytes, Chain, ChainSpec, Head, Header, Transaction, TransactionKind,
+    revm_primitives::{BlockEnv, Env, TransactTo, TxEnv},
+    Address, Bytes, Chain, ChainSpec, Header, Transaction, TransactionKind,
     TransactionSignedEcRecovered, B256, U256,
 };
 
 #[cfg(feature = "optimism")]
 use revm_primitives::OptimismFields;
-
-/// Convenience function to call both [fill_cfg_env] and [fill_block_env]
-pub fn fill_cfg_and_block_env(
-    cfg: &mut CfgEnv,
-    block_env: &mut BlockEnv,
-    chain_spec: &ChainSpec,
-    header: &Header,
-    total_difficulty: U256,
-) {
-    fill_cfg_env(cfg, chain_spec, header, total_difficulty);
-    let after_merge = cfg.spec_id >= SpecId::MERGE;
-    fill_block_env(block_env, chain_spec, header, after_merge);
-}
-
-/// Fill [CfgEnv] fields according to the chain spec and given header
-pub fn fill_cfg_env(
-    cfg_env: &mut CfgEnv,
-    chain_spec: &ChainSpec,
-    header: &Header,
-    total_difficulty: U256,
-) {
-    let spec_id = revm_spec(
-        chain_spec,
-        Head {
-            number: header.number,
-            timestamp: header.timestamp,
-            difficulty: header.difficulty,
-            total_difficulty,
-            hash: Default::default(),
-        },
-    );
-
-    cfg_env.chain_id = chain_spec.chain().id();
-    cfg_env.spec_id = spec_id;
-    cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
-
-    #[cfg(feature = "optimism")]
-    {
-        cfg_env.optimism = chain_spec.is_optimism();
-    }
-}
 
 /// Fill block environment from Block.
 pub fn fill_block_env(
@@ -362,30 +320,5 @@ pub fn fill_op_tx_env<T: AsRef<Transaction>>(
                 enveloped_tx: Some(envelope),
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[ignore]
-    fn test_fill_cfg_and_block_env() {
-        let mut cfg_env = CfgEnv::default();
-        let mut block_env = BlockEnv::default();
-        let header = Header::default();
-        let chain_spec = ChainSpec::default();
-        let total_difficulty = U256::ZERO;
-
-        fill_cfg_and_block_env(
-            &mut cfg_env,
-            &mut block_env,
-            &chain_spec,
-            &header,
-            total_difficulty,
-        );
-
-        assert_eq!(cfg_env.chain_id, chain_spec.chain().id());
     }
 }
