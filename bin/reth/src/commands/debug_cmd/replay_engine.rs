@@ -1,12 +1,10 @@
 use crate::{
-    node_core::{
-        args::{
-            get_secret_key,
-            utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-            DatabaseArgs, NetworkArgs,
-        },
-        dirs::{DataDirPath, MaybePlatformPath},
+    args::{
+        get_secret_key,
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs, NetworkArgs,
     },
+    dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
 };
 use clap::Parser;

@@ -1,17 +1,3 @@
-use crate::node_core::{
-    args::DatabaseArgs,
-    dirs::{DataDirPath, PlatformPath},
-    utils::DbTool,
-};
-use clap::Parser;
-use reth_db::{
-    cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
-    AccountChangeSet, AccountHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
-    BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnv, HashedAccount, HashedStorage,
-    HeaderNumbers, HeaderTD, Headers, PlainAccountState, PlainStorageState, PruneCheckpoints,
-    Receipts, StorageChangeSet, StorageHistory, StoragesTrie, SyncStage, SyncStageProgress, Tables,
-    TransactionBlock, Transactions, TxHashNumber, TxSenders,
-};
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -19,6 +5,22 @@ use std::{
     hash::Hash,
     io::Write,
     path::{Path, PathBuf},
+};
+
+use crate::utils::DbTool;
+use clap::Parser;
+
+use crate::{
+    args::DatabaseArgs,
+    dirs::{DataDirPath, PlatformPath},
+};
+use reth_db::{
+    cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
+    AccountChangeSet, AccountHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
+    BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnv, HashedAccount, HashedStorage,
+    HeaderNumbers, HeaderTD, Headers, PlainAccountState, PlainStorageState, PruneCheckpoints,
+    Receipts, StorageChangeSet, StorageHistory, StoragesTrie, SyncStage, SyncStageProgress, Tables,
+    TransactionBlock, Transactions, TxHashNumber, TxSenders,
 };
 use tracing::info;
 

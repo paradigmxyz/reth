@@ -19,10 +19,10 @@ use clap::Parser;
 use futures_util::stream::StreamExt;
 use mev_share_sse::{client::EventStream, EventClient};
 use reth::{
-    cli::Cli,
-    node_core::cli::{
+    cli::{
         components::RethNodeComponents,
         ext::{RethCliExt, RethNodeCommandConfig},
+        Cli,
     },
     rpc::types::beacon::events::PayloadAttributesEvent,
     tasks::TaskSpawner,

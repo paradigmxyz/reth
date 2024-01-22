@@ -1,6 +1,6 @@
 //! P2P Debugging tool
 
-use crate::node_core::{
+use crate::{
     args::{
         get_secret_key,
         utils::{chain_help, chain_spec_value_parser, hash_or_num_value_parser, SUPPORTED_CHAINS},

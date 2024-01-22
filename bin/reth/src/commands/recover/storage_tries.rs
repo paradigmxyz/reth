@@ -1,9 +1,7 @@
 use crate::{
-    node_core::{
-        args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        dirs::{DataDirPath, MaybePlatformPath},
-        init::init_genesis,
-    },
+    args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+    dirs::{DataDirPath, MaybePlatformPath},
+    init::init_genesis,
     runner::CliContext,
 };
 use clap::Parser;
