@@ -233,15 +233,17 @@ where
                 Some(Ok(headers)) => {
                     info!(target: "sync::stages::headers", len = headers.len(), from = headers.first().map(|h|h.number), to = headers.last().map(|h|h.number), "Received headers");
                     for header in headers {
+                        let header_number = header.number;
+
+                        self.hash_collector.insert(header.hash, header_number);
+                        self.header_collector.insert(header_number, header);
+
                         // Headers are downloaded in reverse, so if we reach here, we know we have
                         // filled the gap.
-                        if header.number == local_head_number + 1 {
+                        if header_number == local_head_number + 1 {
                             self.is_etl_ready = true;
                             return Poll::Ready(Ok(()))
                         }
-
-                        self.hash_collector.insert(header.hash, header.number);
-                        self.header_collector.insert(header.number, header);
                     }
                 }
                 Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
