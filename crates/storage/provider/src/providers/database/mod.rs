@@ -9,7 +9,12 @@ use crate::{
     HeaderSyncMode, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
+use reth_db::{
+    database::Database,
+    init_db,
+    models::{consensus::ConsensusBytes, StoredBlockBodyIndices},
+    DatabaseEnv,
+};
 use reth_interfaces::{db::LogLevel, provider::ProviderResult, RethError, RethResult};
 use reth_primitives::{
     snapshot::HighestSnapshots,
@@ -503,6 +508,10 @@ impl<DB: Database> ConsensusNumberReader for ProviderFactory<DB> {
 
     fn consensus_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
         self.provider()?.consensus_number(hash)
+    }
+
+    fn consensus_content(&self, hash: B256) -> ProviderResult<Option<ConsensusBytes>> {
+        self.provider()?.consensus_content(hash)
     }
 }
 

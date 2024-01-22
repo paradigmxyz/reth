@@ -41,6 +41,8 @@ use reth_primitives::{
     PruneSegment, Receipt, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
 };
 
+use self::models::consensus::ConsensusBytes;
+
 /// Enum for the types of tables present in libmdbx.
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum TableType {
@@ -51,7 +53,7 @@ pub enum TableType {
 }
 
 /// Number of tables that should be present inside database.
-pub const NUM_TABLES: usize = 27;
+pub const NUM_TABLES: usize = 28;
 
 /// The general purpose of this is to use with a combination of Tables enum,
 /// by implementing a `TableViewer` trait you can operate on db tables in an abstract way.
@@ -216,7 +218,8 @@ tables!([
             SyncStage,
             SyncStageProgress,
             PruneCheckpoints,
-            ConsensusNumber
+            ConsensusNumber,
+            ConsensusContent
         ]
     ),
     (
@@ -457,6 +460,11 @@ table!(
     ( ConsensusNumber ) BlockHash | BlockNumber
 );
 
+table!(
+    /// Stores the consensus number corresponding to a block hash.
+    ( ConsensusContent ) BlockHash | ConsensusBytes
+);
+
 /// Alias Types
 
 /// List with transaction numbers.
@@ -492,6 +500,7 @@ mod tests {
         (TableType::Table, SyncStageProgress::NAME),
         (TableType::Table, PruneCheckpoints::NAME),
         (TableType::Table, ConsensusNumber::NAME),
+        (TableType::Table, ConsensusContent::NAME),
         (TableType::DupSort, PlainStorageState::NAME),
         (TableType::DupSort, AccountChangeSet::NAME),
         (TableType::DupSort, StorageChangeSet::NAME),

@@ -1,5 +1,5 @@
 use crate::{ConsensusNumberReader, ConsensusNumberWriter, ProviderFactory};
-use reth_db::database::Database;
+use reth_db::{database::Database, models::consensus::ConsensusBytes};
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{BlockNumber, B256};
 
@@ -38,6 +38,11 @@ where
     fn consensus_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
         self.database.provider()?.consensus_number(hash)
     }
+
+    /// Gets the `BlockNumber` for the given hash. Returns `None` if no block with this hash exists.
+    fn consensus_content(&self, hash: B256) -> ProviderResult<Option<ConsensusBytes>> {
+        self.database.provider()?.consensus_content(hash)
+    }
 }
 
 impl<DB> ConsensusNumberWriter for ConsensusProvider<DB>
@@ -47,6 +52,12 @@ where
     fn save_consensus_number(&self, hash: B256, num: BlockNumber) -> ProviderResult<bool> {
         let provider = self.database.provider_rw()?;
         provider.save_consensus_number(hash, num)?;
+        provider.commit()
+    }
+
+    fn save_consensus_content(&self, hash: B256, ct: ConsensusBytes) -> ProviderResult<bool> {
+        let provider = self.database.provider_rw()?;
+        provider.save_consensus_content(hash, ct)?;
         provider.commit()
     }
 }

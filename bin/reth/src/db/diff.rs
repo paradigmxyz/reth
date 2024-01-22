@@ -17,10 +17,10 @@ use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
     AccountChangeSet, AccountHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
-    BlockWithdrawals, Bytecodes, CanonicalHeaders, ConsensusNumber, DatabaseEnv, HashedAccount,
-    HashedStorage, HeaderNumbers, HeaderTD, Headers, PlainAccountState, PlainStorageState,
-    PruneCheckpoints, Receipts, StorageChangeSet, StorageHistory, StoragesTrie, SyncStage,
-    SyncStageProgress, Tables, TransactionBlock, Transactions, TxHashNumber, TxSenders,
+    BlockWithdrawals, Bytecodes, CanonicalHeaders, ConsensusContent, ConsensusNumber, DatabaseEnv,
+    HashedAccount, HashedStorage, HeaderNumbers, HeaderTD, Headers, PlainAccountState,
+    PlainStorageState, PruneCheckpoints, Receipts, StorageChangeSet, StorageHistory, StoragesTrie,
+    SyncStage, SyncStageProgress, Tables, TransactionBlock, Transactions, TxHashNumber, TxSenders,
 };
 use tracing::info;
 
@@ -142,6 +142,9 @@ impl Command {
                 }
                 Tables::ConsensusNumber => {
                     find_diffs::<ConsensusNumber>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::ConsensusContent => {
+                    find_diffs::<ConsensusContent>(primary_tx, secondary_tx, output_dir)?
                 }
             };
         }
