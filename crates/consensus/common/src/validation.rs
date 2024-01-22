@@ -313,7 +313,7 @@ pub fn validate_header_regarding_parent(
     }
 
     // timestamp in past check
-    if child.timestamp <= parent.timestamp {
+    if child.header.is_timestamp_in_past(parent.timestamp) {
         return Err(ConsensusError::TimestampIsInPast {
             parent_timestamp: parent.timestamp,
             timestamp: child.timestamp,
