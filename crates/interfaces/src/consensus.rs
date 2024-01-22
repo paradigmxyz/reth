@@ -1,6 +1,6 @@
 use reth_primitives::{
-    BlockHash, BlockNumber, GotExpected, GotExpectedBoxed, Header, InvalidTransactionError,
-    SealedBlock, SealedHeader, B256, U256,
+    constants::MINIMUM_GAS_LIMIT, BlockHash, BlockNumber, GotExpected, GotExpectedBoxed, Header,
+    InvalidTransactionError, SealedBlock, SealedHeader, B256, U256,
 };
 use std::fmt::Debug;
 
@@ -166,6 +166,15 @@ pub enum ConsensusError {
     GasLimitInvalidDecrease {
         /// The parent gas limit.
         parent_gas_limit: u64,
+        /// The child gas limit.
+        child_gas_limit: u64,
+    },
+
+    /// Error indicating that the child gas limit is below the minimum allowed limit.
+    ///
+    /// This error occurs when the child gas limit is less than the specified minimum gas limit.
+    #[error("child gas limit {child_gas_limit} is below the minimum allowed limit ({MINIMUM_GAS_LIMIT})")]
+    GasLimitInvalidMinimum {
         /// The child gas limit.
         child_gas_limit: u64,
     },
