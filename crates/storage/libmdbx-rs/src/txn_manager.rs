@@ -258,7 +258,7 @@ mod read_transactions {
         use tempfile::tempdir;
 
         #[test]
-        fn txn_manager_read_transactions() {
+        fn txn_manager_read_transactions_duration_set() {
             const MAX_DURATION: Duration = Duration::from_secs(1);
 
             let dir = tempdir().unwrap();
@@ -311,6 +311,21 @@ mod read_transactions {
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
                 assert!(!read_transactions.aborted.contains(&tx_ptr));
             }
+        }
+
+        #[test]
+        fn txn_manager_read_transactions_duration_unbounded() {
+            let dir = tempdir().unwrap();
+            let env = Environment::builder()
+                .set_max_read_transaction_duration(MaxReadTransactionDuration::Unbounded)
+                .open(dir.path())
+                .unwrap();
+
+            assert!(env.txn_manager().read_transactions.is_none());
+
+            let tx = env.begin_ro_txn().unwrap();
+            sleep(READ_TRANSACTIONS_CHECK_INTERVAL);
+            assert!(tx.commit().is_ok())
         }
     }
 }
