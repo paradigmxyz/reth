@@ -192,7 +192,7 @@ where
         consensus: Arc<dyn Consensus>,
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
-            .add_stage(HeaderStage::new(provider, header_downloader, mode))
+            .add_stage(HeaderStage::new(provider, header_downloader, mode, consensus.clone()))
             .add_stage(TotalDifficultyStage::new(consensus.clone()))
             .add_stage(bodies)
     }
@@ -207,7 +207,12 @@ where
 {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
-            .add_stage(HeaderStage::new(self.provider, self.header_downloader, self.header_mode))
+            .add_stage(HeaderStage::new(
+                self.provider,
+                self.header_downloader,
+                self.header_mode,
+                self.consensus.clone(),
+            ))
             .add_stage(TotalDifficultyStage::new(self.consensus.clone()))
             .add_stage(BodyStage::new(self.body_downloader))
     }
