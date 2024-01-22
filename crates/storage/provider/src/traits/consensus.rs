@@ -1,4 +1,5 @@
 use auto_impl::auto_impl;
+use reth_db::models::consensus::ConsensusBytes;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, ChainInfo, B256};
 
@@ -13,6 +14,9 @@ pub trait ConsensusNumberReader: Send + Sync {
 
     /// Gets the `BlockNumber` for the given hash. Returns `None` if no block with this hash exists.
     fn consensus_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>>;
+
+    /// Gets the `BlockNumber` for the given hash. Returns `None` if no block with this hash exists.
+    fn consensus_content(&self, hash: B256) -> ProviderResult<Option<ConsensusBytes>>;
 }
 
 /// Client trait for getting important block numbers (such as the latest block number), converting
@@ -23,4 +27,7 @@ pub trait ConsensusNumberReader: Send + Sync {
 pub trait ConsensusNumberWriter: Send + Sync {
     /// Gets the `BlockNumber` for the given hash. Returns `None` if no block with this hash exists.
     fn save_consensus_number(&self, hash: B256, num: BlockNumber) -> ProviderResult<bool>;
+
+    /// Gets the `BlockNumber` for the given hash. Returns `None` if no block with this hash exists.
+    fn save_consensus_content(&self, hash: B256, ct: ConsensusBytes) -> ProviderResult<bool>;
 }

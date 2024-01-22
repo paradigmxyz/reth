@@ -11,6 +11,7 @@ use reth_primitives::{
 
 pub mod accounts;
 pub mod blocks;
+pub mod consensus;
 pub mod integer_list;
 pub mod sharded_key;
 pub mod storage_sharded_key;

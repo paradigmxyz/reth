@@ -19,8 +19,9 @@ use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::{
-        sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
-        ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
+        consensus::ConsensusBytes, sharded_key, storage_sharded_key::StorageShardedKey,
+        AccountBeforeTx, BlockNumberAddress, ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers,
+        StoredBlockWithdrawals,
     },
     table::{Table, TableRow},
     tables,
@@ -2525,12 +2526,23 @@ impl<TX: DbTx> ConsensusNumberReader for DatabaseProvider<TX> {
     fn consensus_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
         Ok(self.tx.get::<tables::ConsensusNumber>(hash)?)
     }
+
+    fn consensus_content(&self, hash: B256) -> ProviderResult<Option<ConsensusBytes>> {
+        let content = self.tx.get::<tables::ConsensusContent>(hash)?;
+        Ok(content)
+    }
 }
 
 impl<TX: DbTxMut> ConsensusNumberWriter for DatabaseProvider<TX> {
     /// Save stage checkpoint.
     fn save_consensus_number(&self, hash: B256, num: BlockNumber) -> ProviderResult<bool> {
         self.tx.put::<tables::ConsensusNumber>(hash, num)?;
+        Ok(true)
+    }
+
+    /// Save stage checkpoint.
+    fn save_consensus_content(&self, hash: B256, ct: ConsensusBytes) -> ProviderResult<bool> {
+        self.tx.put::<tables::ConsensusContent>(hash, ct)?;
         Ok(true)
     }
 }
