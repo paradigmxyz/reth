@@ -4,6 +4,11 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
     utils::DbTool,
 };
+
+use crate::args::{
+    utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+    DatabaseArgs,
+};
 use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO, database::Database, init_db, table::TableImporter, tables,
@@ -23,10 +28,6 @@ mod execution;
 use execution::dump_execution_stage;
 
 mod merkle;
-use crate::args::{
-    utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-    DatabaseArgs,
-};
 use merkle::dump_merkle_stage;
 
 /// `reth dump-stage` command

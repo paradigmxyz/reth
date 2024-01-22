@@ -693,16 +693,10 @@ where
             let Some(peer) = self.peers.get(&peer_id) else { return };
 
             let Some(hash) = hashes.first() else { return };
-            let mut eth68_size = self.transaction_fetcher.eth68_meta.get(hash).copied();
-            let msg_version = if let Some(ref mut size) = eth68_size {
-                self.transaction_fetcher.fill_eth68_request_for_peer(&mut hashes, peer_id, size);
-
-                EthVersion::Eth68
-            } else {
-                self.transaction_fetcher.fill_eth66_request_for_peer(&mut hashes, peer_id);
-
-                EthVersion::Eth66
-            };
+            let acc_eth68_size = self.transaction_fetcher.eth68_meta.get(hash).copied();
+            let msg_version =
+                acc_eth68_size.map(|_| EthVersion::Eth68).unwrap_or(EthVersion::Eth66);
+            self.transaction_fetcher.fill_request_for_peer(&mut hashes, peer_id, acc_eth68_size);
 
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
