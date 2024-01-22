@@ -16,9 +16,6 @@ use reth_rpc_types::{
 /// Represents a built payload type that contains a built [SealedBlock] and can be converted into
 /// engine API execution payloads.
 pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
-    /// Initializes the payload with the given initial block.
-    fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self;
-
     /// Returns the built block (sealed)
     fn block(&self) -> &SealedBlock;
 

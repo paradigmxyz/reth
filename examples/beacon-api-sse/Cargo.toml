@@ -14,5 +14,4 @@ serde_json.workspace = true
 tracing.workspace = true
 futures-util.workspace = true
 tokio = { workspace = true, features = ["time"] }
-
 mev-share-sse = {  version = "0.1.6" , default-features = false }

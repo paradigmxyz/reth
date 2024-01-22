@@ -1,13 +1,6 @@
 //! Command for debugging block building.
 
-use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
-    runner::CliContext,
-};
+use crate::runner::CliContext;
 use alloy_rlp::Decodable;
 use clap::Parser;
 use eyre::Context;
@@ -47,6 +40,13 @@ use reth_transaction_pool::{
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 use tracing::*;
 
+use crate::{
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs,
+    },
+    dirs::{DataDirPath, MaybePlatformPath},
+};
 #[cfg(not(feature = "optimism"))]
 use reth_payload_builder::EthPayloadBuilderAttributes;
 

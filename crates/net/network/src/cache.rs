@@ -1,13 +1,9 @@
 use core::hash::BuildHasher;
 use derive_more::{Deref, DerefMut};
+use itertools::Itertools;
 use linked_hash_set::LinkedHashSet;
 use schnellru::{self, ByLength, Limiter, RandomState, Unlimited};
-use std::{
-    borrow::Borrow,
-    fmt::{self, Write},
-    hash::Hash,
-    num::NonZeroUsize,
-};
+use std::{borrow::Borrow, fmt, hash::Hash, num::NonZeroUsize};
 
 /// A minimal LRU cache based on a `LinkedHashSet` with limited capacity.
 ///
@@ -115,16 +111,22 @@ impl<K, V, L, S> fmt::Debug for LruMap<K, V, L, S>
 where
     K: Hash + PartialEq + fmt::Display,
     V: fmt::Debug,
-    L: Limiter<K, V>,
+    L: Limiter<K, V> + fmt::Debug,
     S: BuildHasher,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("LruMap");
-        for (k, v) in self.0.iter() {
-            let mut key_str = String::new();
-            write!(&mut key_str, "{k}")?;
-            debug_struct.field(&key_str, &v);
-        }
+
+        debug_struct.field("limiter", self.limiter());
+
+        debug_struct.field(
+            "inner",
+            &format_args!(
+                "Iter: {{{}}}",
+                self.0.iter().map(|(k, v)| format!(" {k}: {v:?}")).format(",")
+            ),
+        );
+
         debug_struct.finish()
     }
 }
@@ -214,6 +216,6 @@ mod test {
         let value_2 = Value(22);
         cache.insert(key_2, value_2);
 
-        assert_eq!("LruMap { 2: Value(22), 1: Value(11) }", format!("{cache:?}"))
+        assert_eq!("LruMap { limiter: ByLength { max_length: 2 }, inner: Iter: { 2: Value(22), 1: Value(11)} }", format!("{cache:?}"))
     }
 }

@@ -23,7 +23,7 @@ pub mod constants;
 pub mod eip4844;
 mod error;
 pub mod fs;
-mod genesis;
+pub mod genesis;
 mod header;
 mod integer_list;
 mod log;
@@ -59,7 +59,7 @@ pub use constants::{
     KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
 pub use error::{GotExpected, GotExpectedBoxed};
-pub use genesis::{ChainConfig, Genesis, GenesisAccount, GenesisAllocator};
+pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use header::{Header, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
 pub use log::{logs_bloom, Log};
