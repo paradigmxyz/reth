@@ -18,8 +18,6 @@
 use clap::Parser;
 use futures_util::stream::StreamExt;
 use mev_share_sse::{client::EventStream, EventClient};
-use std::net::{IpAddr, Ipv4Addr};
-use tracing::{info, warn};
 use reth::{
     cli::{
         components::RethNodeComponents,
@@ -29,6 +27,8 @@ use reth::{
     rpc::types::beacon::events::PayloadAttributesEvent,
     tasks::TaskSpawner,
 };
+use std::net::{IpAddr, Ipv4Addr};
+use tracing::{info, warn};
 
 fn main() {
     Cli::<BeaconEventsExt>::parse().run().unwrap();
