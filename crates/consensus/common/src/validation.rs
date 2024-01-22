@@ -294,7 +294,7 @@ fn check_gas_limit(
             child_gas_limit: child.gas_limit,
         });
     }
-    // Check if the child gas limit is below the minimum allowed limit.
+    // Check if the child gas limit is below the minimum required limit.
     else if child.gas_limit < MINIMUM_GAS_LIMIT {
         return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit });
     }
