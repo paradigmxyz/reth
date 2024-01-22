@@ -21,7 +21,6 @@ pub mod components;
 pub mod config;
 pub mod db_type;
 pub mod ext;
-
 /// The main reth cli interface.
 ///
 /// This is the entrypoint to the executable.
