@@ -29,12 +29,9 @@ impl Account {
     /// After SpuriousDragon empty account is defined as account with nonce == 0 && balance == 0 &&
     /// bytecode = None.
     pub fn is_empty(&self) -> bool {
-        let is_bytecode_empty = match self.bytecode_hash {
-            None => true,
-            Some(hash) => hash == KECCAK_EMPTY,
-        };
-
-        self.nonce == 0 && self.balance.is_zero() && is_bytecode_empty
+        self.nonce == 0 &&
+            self.balance.is_zero() &&
+            self.bytecode_hash.map_or(true, |hash| hash == KECCAK_EMPTY)
     }
 
     /// Converts [GenesisAccount] to [Account] type
@@ -50,10 +47,7 @@ impl Account {
     /// Returns an account bytecode's hash.
     /// In case of no bytecode, returns [`KECCAK_EMPTY`].
     pub fn get_bytecode_hash(&self) -> B256 {
-        match self.bytecode_hash {
-            Some(hash) => hash,
-            None => KECCAK_EMPTY,
-        }
+        self.bytecode_hash.unwrap_or(KECCAK_EMPTY)
     }
 }
 
