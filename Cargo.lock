@@ -876,6 +876,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "bindgen"
+version = "0.69.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4c69fae65a523209d34240b60abe0c42d33d1045d445c0839d8a4894a736e2d"
+dependencies = [
+ "bitflags 2.4.2",
+ "cexpr",
+ "clang-sys",
+ "lazy_static",
+ "lazycell",
+ "peeking_take_while",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash",
+ "shlex",
+ "syn 2.0.48",
+]
+
+[[package]]
 name = "binout"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6261,7 +6281,7 @@ dependencies = [
 name = "reth-mdbx-sys"
 version = "0.1.0-alpha.15"
 dependencies = [
- "bindgen 0.68.1",
+ "bindgen 0.69.2",
  "cc",
  "libc",
 ]
