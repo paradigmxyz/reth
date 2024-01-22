@@ -35,7 +35,6 @@ use crate::{
     NetworkEvents, NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, Future, StreamExt};
-use itertools::Itertools;
 use reth_eth_wire::{
     EthVersion, GetPooledTransactions, NewPooledTransactionHashes, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, PooledTransactions, Transactions,
@@ -559,13 +558,14 @@ where
         };
 
         // message version decides how hashes are packed
-        // if this is a eth68 message, store eth68 tx metadata
-        if let Some(eth68_msg) = msg.as_eth68() {
-            for (&hash, (_type, size)) in eth68_msg.metadata_iter() {
-                self.transaction_fetcher.eth68_meta.insert(hash, size);
-            }
-        }
-        // extract hashes payload
+        let msg_version = msg.version();
+        // extract hashes payload, and sizes if version eth68
+        let sizes = msg.as_eth68().map(|eth68_msg| {
+            eth68_msg
+                .metadata_iter()
+                .map(|(&hash, (_type, size))| (hash, size))
+                .collect::<HashMap<_, _>>()
+        });
         let mut hashes = msg.into_hashes();
 
         // keep track of the transactions the peer knows
@@ -593,16 +593,27 @@ where
 
         debug!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            hashes=format!("[{:#}]", hashes.iter().format(", ")),
+            hashes=?hashes,
+            msg_version=?msg_version,
             "received previously unseen hashes in announcement from peer"
         );
+
+        if msg_version == EthVersion::Eth68 {
+            // cache size metadata of unseen hashes
+            for (hash, size) in sizes.expect("should be at least empty map") {
+                if hashes.contains(&hash) {
+                    self.transaction_fetcher.eth68_meta.insert(hash, size);
+                }
+            }
+        }
 
         // only send request for hashes to idle peer, otherwise buffer hashes storing peer as
         // fallback
         if !self.transaction_fetcher.is_idle(peer_id) {
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                hashes=format!("[{:#}]", hashes.iter().format(", ")),
+                hashes=?hashes,
+                msg_version=?msg_version,
                 "buffering hashes announced by busy peer"
             );
 
@@ -616,7 +627,8 @@ where
         if !surplus_hashes.is_empty() {
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                surplus_hashes=format!("{surplus_hashes:#?}"),
+                surplus_hashes=?surplus_hashes,
+                msg_version=?msg_version,
                 "some hashes in announcement from peer didn't fit in `GetPooledTransactions` request, buffering surplus hashes"
             );
 
@@ -625,7 +637,8 @@ where
 
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            hashes=format!("[{:#}]", hashes.iter().format(", ")),
+            hashes=?hashes,
+            msg_version=?msg_version,
             "sending hashes in `GetPooledTransactions` request to peer's session"
         );
 
@@ -641,7 +654,8 @@ where
         {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                hashes=format!("[{:#}]", failed_to_request_hashes.iter().format(", ")),
+                failed_to_request_hashes=?failed_to_request_hashes,
+                msg_version=?msg_version,
                 "sending `GetPooledTransactions` request to peer's session failed, buffering hashes"
             );
             self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
@@ -668,7 +682,11 @@ where
 
             debug_assert!(
                 self.peers.contains_key(&peer_id),
-                "broken invariant `peers` and `transaction-fetcher`"
+                "a dead peer has been returned as idle by `@pop_any_idle_peer`, broken invariant `@peers` and `@transaction_fetcher`,
+`%peer_id`: {:?},
+`@peers`: {:?},
+`@transaction_fetcher`: {:?}",
+                peer_id, self.peers, self.transaction_fetcher
             );
 
             // fill the request with other buffered hashes that have been announced by the peer
@@ -676,12 +694,14 @@ where
 
             let Some(hash) = hashes.first() else { return };
             let acc_eth68_size = self.transaction_fetcher.eth68_meta.get(hash).copied();
+            let msg_version =
+                acc_eth68_size.map(|_| EthVersion::Eth68).unwrap_or(EthVersion::Eth66);
             self.transaction_fetcher.fill_request_for_peer(&mut hashes, peer_id, acc_eth68_size);
 
-            trace!(
-                target: "net::tx",
+            trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                hashes=format!("[{:#}]", hashes.iter().format(", ")),
+                hashes=?hashes,
+                msg_version=?msg_version,
                 "requesting buffered hashes from idle peer"
             );
 
@@ -694,7 +714,8 @@ where
             {
                 debug!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
-                    hashes=format!("[{:#}]", failed_to_request_hashes.iter().format(", ")),
+                    failed_to_request_hashes=?failed_to_request_hashes,
+                    msg_version=?msg_version,
                     "failed sending request to peer's session, buffering hashes"
                 );
 
