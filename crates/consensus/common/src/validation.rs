@@ -401,33 +401,6 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider + WithdrawalsProvider
     Ok(parent.seal(block.parent_hash))
 }
 
-/// Full validation of block before execution.
-pub fn full_validation<Provider: HeaderProvider + AccountReader + WithdrawalsProvider>(
-    block: &SealedBlock,
-    provider: Provider,
-    chain_spec: &ChainSpec,
-) -> RethResult<()> {
-    validate_header_standalone(&block.header, chain_spec)?;
-    validate_block_standalone(block, chain_spec)?;
-    let parent = validate_block_regarding_chain(block, &provider)?;
-    validate_header_regarding_parent(&parent, &block.header, chain_spec)?;
-
-    // NOTE: depending on the need of the stages, recovery could be done in different place.
-    let transactions = block
-        .body
-        .iter()
-        .map(|tx| tx.try_ecrecovered().ok_or(ConsensusError::TransactionSignerRecoveryError))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    validate_all_transaction_regarding_block_and_nonces(
-        transactions.iter(),
-        &block.header,
-        provider,
-        chain_spec,
-    )?;
-    Ok(())
-}
-
 /// Validates that the EIP-4844 header fields are correct with respect to the parent block. This
 /// ensures that the `blob_gas_used` and `excess_blob_gas` fields exist in the child header, and
 /// that the `excess_blob_gas` field matches the expected `excess_blob_gas` calculated from the
@@ -699,26 +672,6 @@ mod tests {
         let body = Vec::new();
 
         (SealedBlock { header: header.seal_slow(), body, ommers, withdrawals: None }, parent)
-    }
-
-    #[test]
-    fn sanity_check() {
-        let (block, parent) = mock_block();
-        let provider = Provider::new(Some(parent));
-
-        assert_eq!(full_validation(&block, provider, &MAINNET), Ok(()), "Validation should pass");
-    }
-
-    #[test]
-    fn validate_known_block() {
-        let (block, _) = mock_block();
-        let provider = Provider::new_known();
-
-        assert_eq!(
-            full_validation(&block, provider, &MAINNET),
-            Err(ConsensusError::BlockKnown { hash: block.hash(), number: block.number }.into()),
-            "Should fail with error"
-        );
     }
 
     #[test]
