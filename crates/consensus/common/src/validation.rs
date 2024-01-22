@@ -219,12 +219,8 @@ pub fn validate_block_standalone(
     }
 
     // Check transaction root
-    // TODO(onbjerg): This should probably be accessible directly on [Block]
-    let transaction_root = reth_primitives::proofs::calculate_transaction_root(&block.body);
-    if block.header.transactions_root != transaction_root {
-        return Err(ConsensusError::BodyTransactionRootDiff(
-            GotExpected { got: transaction_root, expected: block.header.transactions_root }.into(),
-        ))
+    if let Err(error) = block.ensure_transaction_root_valid() {
+        return Err(ConsensusError::BodyTransactionRootDiff(error.into()));
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
