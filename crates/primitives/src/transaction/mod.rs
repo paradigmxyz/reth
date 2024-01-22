@@ -1883,7 +1883,7 @@ mod tests {
         assert_eq!(sender, address!("a12e1462d0ceD572f396F58B6E2D03894cD7C8a4"));
     }
 
-    // <https://github.com/alloy-rs/alloy/issues/141
+    // <https://github.com/alloy-rs/alloy/issues/141>
     // <https://etherscan.io/tx/0xce4dc6d7a7549a98ee3b071b67e970879ff51b5b95d1c340bacd80fa1e1aab31>
     #[test]
     fn recover_enveloped() {
