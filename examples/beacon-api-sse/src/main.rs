@@ -20,7 +20,6 @@ use futures_util::stream::StreamExt;
 use mev_share_sse::{client::EventStream, EventClient};
 use std::net::{IpAddr, Ipv4Addr};
 use tracing::{info, warn};
-
 use reth::{
     cli::{
         components::RethNodeComponents,
