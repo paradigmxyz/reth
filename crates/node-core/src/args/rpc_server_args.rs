@@ -379,6 +379,7 @@ impl RpcServerArgs {
     }
 
     /// Create Engine API server.
+    #[allow(clippy::too_many_arguments)]
     pub async fn start_auth_server<Provider, Pool, Network, Tasks, EngineT, EvmConfig>(
         &self,
         provider: Provider,

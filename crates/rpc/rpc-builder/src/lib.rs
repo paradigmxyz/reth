@@ -18,6 +18,7 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
+//! use reth_node_api::EvmEnvConfig;
 //! use reth_provider::{
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -27,11 +28,12 @@
 //! };
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
-//! pub async fn launch<Provider, Pool, Network, Events>(
+//! pub async fn launch<Provider, Pool, Network, Events, EvmConfig>(
 //!     provider: Provider,
 //!     pool: Pool,
 //!     network: Network,
 //!     events: Events,
+//!     evm_config: EvmConfig,
 //! ) where
 //!     Provider: AccountReader
 //!         + BlockReaderIdExt
@@ -45,6 +47,7 @@
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
+//!     EvmConfig: EvmEnvConfig + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -53,9 +56,15 @@
 //!         RethRpcModule::Eth,
 //!         RethRpcModule::Web3,
 //!     ]);
-//!     let transport_modules =
-//!         RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events)
-//!             .build(transports);
+//!     let transport_modules = RpcModuleBuilder::new(
+//!         provider,
+//!         pool,
+//!         network,
+//!         TokioTaskExecutor::default(),
+//!         events,
+//!         evm_config,
+//!     )
+//!     .build(transports);
 //!     let handle = RpcServerConfig::default()
 //!         .with_http(ServerBuilder::default())
 //!         .start(transport_modules)
@@ -69,7 +78,7 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_node_api::EngineTypes;
+//! use reth_node_api::{EngineTypes, EvmEnvConfig};
 //! use reth_provider::{
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -83,12 +92,13 @@
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //! use tokio::try_join;
-//! pub async fn launch<Provider, Pool, Network, Events, EngineApi, EngineT>(
+//! pub async fn launch<Provider, Pool, Network, Events, EngineApi, EngineT, EvmConfig>(
 //!     provider: Provider,
 //!     pool: Pool,
 //!     network: Network,
 //!     events: Events,
 //!     engine_api: EngineApi,
+//!     evm_config: EvmConfig,
 //! ) where
 //!     Provider: AccountReader
 //!         + BlockReaderIdExt
@@ -104,6 +114,7 @@
 //!     Events: CanonStateSubscriptions + Clone + 'static,
 //!     EngineApi: EngineApiServer<EngineT>,
 //!     EngineT: EngineTypes,
+//!     EvmConfig: EvmEnvConfig + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -112,8 +123,14 @@
 //!         RethRpcModule::Eth,
 //!         RethRpcModule::Web3,
 //!     ]);
-//!     let builder =
-//!         RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events);
+//!     let builder = RpcModuleBuilder::new(
+//!         provider,
+//!         pool,
+//!         network,
+//!         TokioTaskExecutor::default(),
+//!         events,
+//!         evm_config,
+//!     );
 //!
 //!     // configure the server modules
 //!     let (modules, auth_module, _registry) =
@@ -208,6 +225,7 @@ pub mod constants;
 mod metrics;
 
 /// Convenience function for starting a server in one step.
+#[allow(clippy::too_many_arguments)]
 pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig>(
     provider: Provider,
     pool: Pool,
@@ -689,6 +707,7 @@ impl RpcModuleSelection {
     /// Note: This will always create new instance of the module handlers and is therefor only
     /// recommended for launching standalone transports. If multiple transports need to be
     /// configured it's recommended to use the [RpcModuleBuilder].
+    #[allow(clippy::too_many_arguments)]
     pub fn standalone_module<Provider, Pool, Network, Tasks, Events, EvmConfig>(
         &self,
         provider: Provider,
