@@ -20,7 +20,7 @@ pub trait EvmEnvConfig: Send + Sync + Unpin + Clone {
     );
 
     /// Convenience function to call both [fill_cfg_env](EvmEnvConfig::fill_cfg_env) and
-    /// [fill_block_env](fill_block_env).
+    /// [fill_block_env].
     fn fill_cfg_and_block_env(
         cfg: &mut CfgEnv,
         block_env: &mut BlockEnv,
