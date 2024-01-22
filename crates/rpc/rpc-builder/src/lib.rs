@@ -150,7 +150,7 @@ use jsonrpsee::{
     server::{IdProvider, Server, ServerHandle},
     Methods, RpcModule,
 };
-use reth_node_api::EngineTypes;
+use reth_node_api::{EngineTypes, EvmEnvConfig};
 use serde::{Deserialize, Serialize, Serializer};
 use strum::{AsRefStr, EnumIter, EnumVariantNames, IntoStaticStr, ParseError, VariantNames};
 use tower::layer::util::{Identity, Stack};
@@ -207,7 +207,7 @@ pub mod constants;
 mod metrics;
 
 /// Convenience function for starting a server in one step.
-pub async fn launch<Provider, Pool, Network, Tasks, Events>(
+pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig>(
     provider: Provider,
     pool: Pool,
     network: Network,
@@ -215,6 +215,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events>(
     server_config: impl Into<RpcServerConfig>,
     executor: Tasks,
     events: Events,
+    evm_config: EvmConfig,
 ) -> Result<RpcServerHandle, RpcError>
 where
     Provider: BlockReaderIdExt
@@ -230,10 +231,11 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
+    EvmConfig: EvmEnvConfig + 'static,
 {
     let module_config = module_config.into();
     let server_config = server_config.into();
-    RpcModuleBuilder::new(provider, pool, network, executor, events)
+    RpcModuleBuilder::new(provider, pool, network, executor, events, evm_config)
         .build(module_config)
         .start_server(server_config)
         .await
@@ -243,7 +245,7 @@ where
 ///
 /// This is the main entrypoint and the easiest way to configure an RPC server.
 #[derive(Debug, Clone)]
-pub struct RpcModuleBuilder<Provider, Pool, Network, Tasks, Events> {
+pub struct RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig> {
     /// The Provider type to when creating all rpc handlers
     provider: Provider,
     /// The Pool type to when creating all rpc handlers
@@ -254,12 +256,14 @@ pub struct RpcModuleBuilder<Provider, Pool, Network, Tasks, Events> {
     executor: Tasks,
     /// Provides access to chain events, such as new blocks, required by pubsub.
     events: Events,
+    /// Defines how the EVM should be configured before execution.
+    evm_config: EvmConfig,
 }
 
 // === impl RpcBuilder ===
 
-impl<Provider, Pool, Network, Tasks, Events>
-    RpcModuleBuilder<Provider, Pool, Network, Tasks, Events>
+impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
+    RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig>
 {
     /// Create a new instance of the builder
     pub fn new(
@@ -268,26 +272,33 @@ impl<Provider, Pool, Network, Tasks, Events>
         network: Network,
         executor: Tasks,
         events: Events,
+        evm_config: EvmConfig,
     ) -> Self {
-        Self { provider, pool, network, executor, events }
+        Self { provider, pool, network, executor, events, evm_config }
     }
 
     /// Configure the provider instance.
-    pub fn with_provider<P>(self, provider: P) -> RpcModuleBuilder<P, Pool, Network, Tasks, Events>
+    pub fn with_provider<P>(
+        self,
+        provider: P,
+    ) -> RpcModuleBuilder<P, Pool, Network, Tasks, Events, EvmConfig>
     where
         P: BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     {
-        let Self { pool, network, executor, events, .. } = self;
-        RpcModuleBuilder { provider, network, pool, executor, events }
+        let Self { pool, network, executor, events, evm_config, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
     }
 
     /// Configure the transaction pool instance.
-    pub fn with_pool<P>(self, pool: P) -> RpcModuleBuilder<Provider, P, Network, Tasks, Events>
+    pub fn with_pool<P>(
+        self,
+        pool: P,
+    ) -> RpcModuleBuilder<Provider, P, Network, Tasks, Events, EvmConfig>
     where
         P: TransactionPool + 'static,
     {
-        let Self { provider, network, executor, events, .. } = self;
-        RpcModuleBuilder { provider, network, pool, executor, events }
+        let Self { provider, network, executor, events, evm_config, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
     }
 
     /// Configure a [NoopTransactionPool] instance.
@@ -297,24 +308,28 @@ impl<Provider, Pool, Network, Tasks, Events>
     /// requires a [TransactionPool] implementation.
     pub fn with_noop_pool(
         self,
-    ) -> RpcModuleBuilder<Provider, NoopTransactionPool, Network, Tasks, Events> {
-        let Self { provider, executor, events, network, .. } = self;
+    ) -> RpcModuleBuilder<Provider, NoopTransactionPool, Network, Tasks, Events, EvmConfig> {
+        let Self { provider, executor, events, network, evm_config, .. } = self;
         RpcModuleBuilder {
             provider,
             executor,
             events,
             network,
+            evm_config,
             pool: NoopTransactionPool::default(),
         }
     }
 
     /// Configure the network instance.
-    pub fn with_network<N>(self, network: N) -> RpcModuleBuilder<Provider, Pool, N, Tasks, Events>
+    pub fn with_network<N>(
+        self,
+        network: N,
+    ) -> RpcModuleBuilder<Provider, Pool, N, Tasks, Events, EvmConfig>
     where
         N: NetworkInfo + Peers + 'static,
     {
-        let Self { provider, pool, executor, events, .. } = self;
-        RpcModuleBuilder { provider, network, pool, executor, events }
+        let Self { provider, pool, executor, events, evm_config, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
     }
 
     /// Configure a [NoopNetwork] instance.
@@ -322,21 +337,30 @@ impl<Provider, Pool, Network, Tasks, Events>
     /// Caution: This will configure a network API that does abosultely nothing.
     /// This is only intended for allow easier setup of namespaces that depend on the [EthApi] which
     /// requires a [NetworkInfo] implementation.
-    pub fn with_noop_network(self) -> RpcModuleBuilder<Provider, Pool, NoopNetwork, Tasks, Events> {
-        let Self { provider, pool, executor, events, .. } = self;
-        RpcModuleBuilder { provider, pool, executor, events, network: NoopNetwork::default() }
+    pub fn with_noop_network(
+        self,
+    ) -> RpcModuleBuilder<Provider, Pool, NoopNetwork, Tasks, Events, EvmConfig> {
+        let Self { provider, pool, executor, events, evm_config, .. } = self;
+        RpcModuleBuilder {
+            provider,
+            pool,
+            executor,
+            events,
+            network: NoopNetwork::default(),
+            evm_config,
+        }
     }
 
     /// Configure the task executor to use for additional tasks.
     pub fn with_executor<T>(
         self,
         executor: T,
-    ) -> RpcModuleBuilder<Provider, Pool, Network, T, Events>
+    ) -> RpcModuleBuilder<Provider, Pool, Network, T, Events, EvmConfig>
     where
         T: TaskSpawner + 'static,
     {
-        let Self { pool, network, provider, events, .. } = self;
-        RpcModuleBuilder { provider, network, pool, executor, events }
+        let Self { pool, network, provider, events, evm_config, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
     }
 
     /// Configure [TokioTaskExecutor] as the task executor to use for additional tasks.
@@ -345,23 +369,33 @@ impl<Provider, Pool, Network, Tasks, Events>
     /// [TokioTaskExecutor].
     pub fn with_tokio_executor(
         self,
-    ) -> RpcModuleBuilder<Provider, Pool, Network, TokioTaskExecutor, Events> {
-        let Self { pool, network, provider, events, .. } = self;
-        RpcModuleBuilder { provider, network, pool, events, executor: TokioTaskExecutor::default() }
+    ) -> RpcModuleBuilder<Provider, Pool, Network, TokioTaskExecutor, Events, EvmConfig> {
+        let Self { pool, network, provider, events, evm_config, .. } = self;
+        RpcModuleBuilder {
+            provider,
+            network,
+            pool,
+            events,
+            executor: TokioTaskExecutor::default(),
+            evm_config,
+        }
     }
 
     /// Configure the event subscriber instance
-    pub fn with_events<E>(self, events: E) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, E>
+    pub fn with_events<E>(
+        self,
+        events: E,
+    ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, E, EvmConfig>
     where
         E: CanonStateSubscriptions + 'static,
     {
-        let Self { provider, pool, executor, network, .. } = self;
-        RpcModuleBuilder { provider, network, pool, executor, events }
+        let Self { provider, pool, executor, network, evm_config, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
     }
 }
 
-impl<Provider, Pool, Network, Tasks, Events>
-    RpcModuleBuilder<Provider, Pool, Network, Tasks, Events>
+impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
+    RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig>
 where
     Provider: BlockReaderIdExt
         + AccountReader
@@ -376,6 +410,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
+    EvmConfig: EvmEnvConfig + 'static,
 {
     /// Configures all [RpcModule]s specific to the given [TransportRpcModuleConfig] which can be
     /// used to start the transport server(s).
@@ -389,14 +424,14 @@ where
     ) -> (
         TransportRpcModules,
         AuthRpcModule,
-        RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
+        RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig>,
     )
     where
         EngineApi: EngineApiServer<EngineT>,
     {
         let mut modules = TransportRpcModules::default();
 
-        let Self { provider, pool, network, executor, events } = self;
+        let Self { provider, pool, network, executor, events, evm_config } = self;
 
         let TransportRpcModuleConfig { http, ws, ipc, config } = module_config.clone();
 
@@ -407,6 +442,7 @@ where
             executor,
             events,
             config.unwrap_or_default(),
+            evm_config,
         );
 
         modules.config = module_config;
@@ -445,9 +481,9 @@ where
     pub fn into_registry(
         self,
         config: RpcModuleConfig,
-    ) -> RethModuleRegistry<Provider, Pool, Network, Tasks, Events> {
-        let Self { provider, pool, network, executor, events } = self;
-        RethModuleRegistry::new(provider, pool, network, executor, events, config)
+    ) -> RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig> {
+        let Self { provider, pool, network, executor, events, evm_config } = self;
+        RethModuleRegistry::new(provider, pool, network, executor, events, config, evm_config)
     }
 
     /// Configures all [RpcModule]s specific to the given [TransportRpcModuleConfig] which can be
@@ -457,7 +493,7 @@ where
     pub fn build(self, module_config: TransportRpcModuleConfig) -> TransportRpcModules<()> {
         let mut modules = TransportRpcModules::default();
 
-        let Self { provider, pool, network, executor, events } = self;
+        let Self { provider, pool, network, executor, events, evm_config } = self;
 
         if !module_config.is_empty() {
             let TransportRpcModuleConfig { http, ws, ipc, config } = module_config.clone();
@@ -469,6 +505,7 @@ where
                 executor,
                 events,
                 config.unwrap_or_default(),
+                evm_config,
             );
 
             modules.config = module_config;
@@ -481,9 +518,9 @@ where
     }
 }
 
-impl Default for RpcModuleBuilder<(), (), (), (), ()> {
+impl Default for RpcModuleBuilder<(), (), (), (), (), ()> {
     fn default() -> Self {
-        RpcModuleBuilder::new((), (), (), (), ())
+        RpcModuleBuilder::new((), (), (), (), (), ())
     }
 }
 
@@ -639,7 +676,7 @@ impl RpcModuleSelection {
     /// Note: This will always create new instance of the module handlers and is therefor only
     /// recommended for launching standalone transports. If multiple transports need to be
     /// configured it's recommended to use the [RpcModuleBuilder].
-    pub fn standalone_module<Provider, Pool, Network, Tasks, Events>(
+    pub fn standalone_module<Provider, Pool, Network, Tasks, Events, EvmConfig>(
         &self,
         provider: Provider,
         pool: Pool,
@@ -647,6 +684,7 @@ impl RpcModuleSelection {
         executor: Tasks,
         events: Events,
         config: RpcModuleConfig,
+        evm_config: EvmConfig,
     ) -> RpcModule<()>
     where
         Provider: BlockReaderIdExt
@@ -662,9 +700,10 @@ impl RpcModuleSelection {
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         Events: CanonStateSubscriptions + Clone + 'static,
+        EvmConfig: EvmEnvConfig + 'static,
     {
         let mut registry =
-            RethModuleRegistry::new(provider, pool, network, executor, events, config);
+            RethModuleRegistry::new(provider, pool, network, executor, events, config, evm_config);
         registry.module_for(self)
     }
 
@@ -849,16 +888,18 @@ impl Serialize for RethRpcModule {
 
 /// A Helper type the holds instances of the configured modules.
 #[derive(Debug)]
-pub struct RethModuleRegistry<Provider, Pool, Network, Tasks, Events> {
+pub struct RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig> {
     provider: Provider,
     pool: Pool,
     network: Network,
     executor: Tasks,
     events: Events,
+    /// Defines how to configure the EVM before execution.
+    evm_config: EvmConfig,
     /// Additional settings for handlers.
     config: RpcModuleConfig,
     /// Holds a clone of all the eth namespace handlers
-    eth: Option<EthHandlers<Provider, Pool, Network, Events>>,
+    eth: Option<EthHandlers<Provider, Pool, Network, Events, EvmConfig>>,
     /// to put trace calls behind semaphore
     blocking_pool_guard: BlockingTaskGuard,
     /// Contains the [Methods] of a module
@@ -867,8 +908,8 @@ pub struct RethModuleRegistry<Provider, Pool, Network, Tasks, Events> {
 
 // === impl RethModuleRegistry ===
 
-impl<Provider, Pool, Network, Tasks, Events>
-    RethModuleRegistry<Provider, Pool, Network, Tasks, Events>
+impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
+    RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig>
 {
     /// Creates a new, empty instance.
     pub fn new(
@@ -878,11 +919,13 @@ impl<Provider, Pool, Network, Tasks, Events>
         executor: Tasks,
         events: Events,
         config: RpcModuleConfig,
+        evm_config: EvmConfig,
     ) -> Self {
         Self {
             provider,
             pool,
             network,
+            evm_config,
             eth: None,
             executor,
             modules: Default::default(),
@@ -927,8 +970,8 @@ impl<Provider, Pool, Network, Tasks, Events>
     }
 }
 
-impl<Provider, Pool, Network, Tasks, Events>
-    RethModuleRegistry<Provider, Pool, Network, Tasks, Events>
+impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
+    RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig>
 where
     Network: NetworkInfo + Peers + Clone + 'static,
 {
@@ -957,8 +1000,8 @@ where
     }
 }
 
-impl<Provider, Pool, Network, Tasks, Events>
-    RethModuleRegistry<Provider, Pool, Network, Tasks, Events>
+impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
+    RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig>
 where
     Provider: BlockReaderIdExt
         + AccountReader
@@ -973,6 +1016,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
+    EvmConfig: EvmEnvConfig + 'static,
 {
     /// Register Eth Namespace
     ///
@@ -1185,13 +1229,14 @@ where
     ///   - [FeeHistoryCache]
     fn with_eth<F, R>(&mut self, f: F) -> R
     where
-        F: FnOnce(&EthHandlers<Provider, Pool, Network, Events>) -> R,
+        F: FnOnce(&EthHandlers<Provider, Pool, Network, Events, EvmConfig>) -> R,
     {
         if self.eth.is_none() {
             let cache = EthStateCache::spawn_with(
                 self.provider.clone(),
                 self.config.eth.cache.clone(),
                 self.executor.clone(),
+                self.evm_config.clone(),
             );
             let gas_oracle = GasPriceOracle::new(
                 self.provider.clone(),
@@ -1234,6 +1279,7 @@ where
                 executor.clone(),
                 blocking_task_pool.clone(),
                 fee_history_cache,
+                self.evm_config.clone(),
             );
             let filter = EthFilter::new(
                 self.provider.clone(),
@@ -1262,7 +1308,7 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [Self::eth_api]
-    pub fn eth_handlers(&mut self) -> EthHandlers<Provider, Pool, Network, Events> {
+    pub fn eth_handlers(&mut self) -> EthHandlers<Provider, Pool, Network, Events, EvmConfig> {
         self.with_eth(|handlers| handlers.clone())
     }
 
@@ -1273,7 +1319,7 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime.
-    pub fn eth_api(&mut self) -> EthApi<Provider, Pool, Network> {
+    pub fn eth_api(&mut self) -> EthApi<Provider, Pool, Network, EvmConfig> {
         self.with_eth(|handlers| handlers.api.clone())
     }
 
@@ -1282,7 +1328,7 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [Self::eth_api]
-    pub fn trace_api(&mut self) -> TraceApi<Provider, EthApi<Provider, Pool, Network>> {
+    pub fn trace_api(&mut self) -> TraceApi<Provider, EthApi<Provider, Pool, Network, EvmConfig>> {
         let eth = self.eth_handlers();
         TraceApi::new(self.provider.clone(), eth.api, self.blocking_pool_guard.clone())
     }
@@ -1292,7 +1338,7 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [Self::eth_api]
-    pub fn bundle_api(&mut self) -> EthBundle<EthApi<Provider, Pool, Network>> {
+    pub fn bundle_api(&mut self) -> EthBundle<EthApi<Provider, Pool, Network, EvmConfig>> {
         let eth_api = self.eth_api();
         EthBundle::new(eth_api, self.blocking_pool_guard.clone())
     }
@@ -1302,7 +1348,7 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [Self::eth_api]
-    pub fn otterscan_api(&mut self) -> OtterscanApi<EthApi<Provider, Pool, Network>> {
+    pub fn otterscan_api(&mut self) -> OtterscanApi<EthApi<Provider, Pool, Network, EvmConfig>> {
         let eth_api = self.eth_api();
         OtterscanApi::new(eth_api)
     }
@@ -1312,7 +1358,7 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [Self::eth_api]
-    pub fn debug_api(&mut self) -> DebugApi<Provider, EthApi<Provider, Pool, Network>> {
+    pub fn debug_api(&mut self) -> DebugApi<Provider, EthApi<Provider, Pool, Network, EvmConfig>> {
         let eth_api = self.eth_api();
         DebugApi::new(self.provider.clone(), eth_api, self.blocking_pool_guard.clone())
     }
@@ -1322,7 +1368,7 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [Self::eth_api]
-    pub fn net_api(&mut self) -> NetApi<Network, EthApi<Provider, Pool, Network>> {
+    pub fn net_api(&mut self) -> NetApi<Network, EthApi<Provider, Pool, Network, EvmConfig>> {
         let eth_api = self.eth_api();
         NetApi::new(self.network.clone(), eth_api)
     }
