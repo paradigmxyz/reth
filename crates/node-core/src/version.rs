@@ -10,7 +10,7 @@
 /// ```text
 /// 0.1.0 (defa64b2)
 /// ```
-pub(crate) const SHORT_VERSION: &str =
+pub const SHORT_VERSION: &str =
     concat!(env!("CARGO_PKG_VERSION"), " (", env!("VERGEN_GIT_SHA"), ")");
 
 /// The long version information for reth.
@@ -28,7 +28,7 @@ pub(crate) const SHORT_VERSION: &str =
 /// Build Timestamp: 2023-05-19T01:47:19.815651705Z
 /// Build Features: jemalloc
 /// ```
-pub(crate) const LONG_VERSION: &str = const_str::concat!(
+pub const LONG_VERSION: &str = const_str::concat!(
     "Version: ",
     env!("CARGO_PKG_VERSION"),
     "\n",

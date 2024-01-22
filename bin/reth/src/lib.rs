@@ -28,16 +28,11 @@
 #![allow(dead_code)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub mod args;
 pub mod builder;
 pub mod cli;
 pub mod commands;
-pub mod dirs;
-pub mod init;
 pub mod prometheus_exporter;
 pub mod runner;
-pub mod utils;
-pub mod version;
 
 /// Re-exported payload related types
 pub mod payload {
@@ -46,8 +41,41 @@ pub mod payload {
 }
 
 /// Re-exported from `reth_node_core`.
-pub mod node_core {
+pub mod core {
     pub use reth_node_core::*;
+}
+
+/// Re-export of the `reth_node_core` types specifically in the `args` module.
+///
+/// This is re-exported because the types in `reth_node_core::args` originally existed in
+/// `reth::args` but were moved to the `reth_node_core` crate. This re-export avoids a breaking
+/// change.
+pub mod args {
+    pub use reth_node_core::args::*;
+}
+
+/// Re-exported from `reth_node_core`, also to prevent a breaking change. See the comment on
+/// the `reth_node_core::args` re-export for more details.
+pub mod version {
+    pub use reth_node_core::version::*;
+}
+
+/// Re-exported from `reth_node_core`, also to prevent a breaking change. See the comment on
+/// the `reth_node_core::args` re-export for more details.
+pub mod utils {
+    pub use reth_node_core::utils::*;
+}
+
+/// Re-exported from `reth_node_core`, also to prevent a breaking change. See the comment on
+/// the `reth_node_core::args` re-export for more details.
+pub mod init {
+    pub use reth_node_core::init::*;
+}
+
+/// Re-exported from `reth_node_core`, also to prevent a breaking change. See the comment on
+/// the `reth_node_core::args` re-export for more details.
+pub mod dirs {
+    pub use reth_node_core::dirs::*;
 }
 
 /// Re-exported from `reth_provider`.
