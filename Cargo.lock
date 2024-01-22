@@ -6662,6 +6662,8 @@ dependencies = [
  "reth-metrics",
  "reth-network",
  "reth-network-api",
+ "reth-node-api",
+ "reth-node-builder",
  "reth-primitives",
  "reth-provider",
  "reth-revm",

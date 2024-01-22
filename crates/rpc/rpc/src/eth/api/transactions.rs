@@ -14,6 +14,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use reth_network_api::NetworkInfo;
+use reth_node_api::EvmEnvConfig;
 use reth_primitives::{
     eip4844::calc_blob_gasprice,
     revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
@@ -307,12 +308,14 @@ pub trait EthTransactions: Send + Sync {
 }
 
 #[async_trait]
-impl<Provider, Pool, Network> EthTransactions for EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthTransactions
+    for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Pool: TransactionPool + Clone + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
+    EvmConfig: EvmEnvConfig + 'static,
 {
     fn call_gas_limit(&self) -> u64 {
         self.inner.gas_cap
@@ -869,12 +872,13 @@ where
 
 // === impl EthApi ===
 
-impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Pool: TransactionPool + Clone + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
+    EvmConfig: EvmEnvConfig + 'static,
 {
     /// Spawns the given closure on a new blocking tracing task
     async fn spawn_tracing_task_with<F, T>(&self, f: F) -> EthResult<T>
@@ -891,7 +895,7 @@ where
     }
 }
 
-impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
@@ -1017,12 +1021,13 @@ where
     }
 }
 
-impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Pool: TransactionPool + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
+    EvmConfig: EvmEnvConfig + 'static,
 {
     pub(crate) fn sign_request(
         &self,
@@ -1271,6 +1276,7 @@ mod tests {
         BlockingTaskPool, EthApi,
     };
     use reth_network_api::noop::NoopNetwork;
+    use reth_node_builder::EthEvmConfig;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
@@ -1282,7 +1288,8 @@ mod tests {
 
         let pool = testing_pool();
 
-        let cache = EthStateCache::spawn(noop_provider, Default::default());
+        let evm_config = EthEvmConfig::default();
+        let cache = EthStateCache::spawn(noop_provider, Default::default(), evm_config);
         let fee_history_cache =
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
         let eth_api = EthApi::new(
@@ -1294,6 +1301,7 @@ mod tests {
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
+            evm_config,
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d
