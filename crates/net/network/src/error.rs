@@ -43,6 +43,12 @@ pub enum NetworkError {
     /// IO error when creating the discovery service
     #[error("failed to launch discovery service: {0}")]
     Discovery(io::Error),
+    // todo: upstream error impl for discv5
+    /*
+    /// Error propagated from [`discv5::Discv5`].
+    #[error(transparent)]
+    Discv5(#[from] discv5::Error),
+    */
     /// Error when setting up the DNS resolver failed
     ///
     /// See also [DnsResolver](reth_dns_discovery::DnsResolver::from_system_conf)
@@ -62,6 +68,12 @@ impl NetworkError {
                 NetworkError::Io(err)
             }
         }
+    }
+
+    /// Converts a `&str` to a more descriptive `NetworkError::Discovery`.
+    pub fn custom_discovery(err_str: &str) -> Self {
+        let custom_err = io::Error::new(ErrorKind::Other, err_str);
+        Self::Discovery(custom_err)
     }
 }
 

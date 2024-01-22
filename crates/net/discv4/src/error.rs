@@ -1,6 +1,6 @@
 //! Error types that can occur in this crate.
 
-use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
+use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError, watch};
 
 /// Error thrown when decoding a UDP packet.
 #[derive(Debug, thiserror::Error)]
@@ -36,6 +36,12 @@ pub enum Discv4Error {
     /// Failed to receive a command response
     #[error(transparent)]
     Receive(#[from] RecvError),
+    /// Failed to receive state change update.
+    #[error("failed to receive update on state change of discv5 kbuckets")]
+    Discv5MirrorUpdateFailed(watch::error::RecvError),
+    /// Decoding a packet received over the network failed.
+    #[error(transparent)]
+    DecodePacketError(#[from] DecodePacketError),
 }
 
 impl<T> From<SendError<T>> for Discv4Error {

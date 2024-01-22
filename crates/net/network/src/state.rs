@@ -12,6 +12,7 @@ use crate::{
     peers::{PeerAction, PeersManager},
     FetchClient,
 };
+use futures::StreamExt;
 use rand::seq::SliceRandom;
 
 use reth_eth_wire::{
@@ -403,7 +404,7 @@ where
                 return Poll::Ready(message)
             }
 
-            while let Poll::Ready(discovery) = self.discovery.poll(cx) {
+            while let Poll::Ready(Some(discovery)) = self.discovery.poll_next_unpin(cx) {
                 self.on_discovery_event(discovery);
             }
 

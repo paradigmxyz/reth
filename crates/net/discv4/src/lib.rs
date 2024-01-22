@@ -44,10 +44,10 @@ use reth_primitives::{
     bytes::{Bytes, BytesMut},
     hex, ForkId, PeerId, B256,
 };
-use secp256k1::SecretKey;
+use secp256k1::{PublicKey, SecretKey};
 use std::{
     cell::RefCell,
-    collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque},
+    collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, HashSet, VecDeque},
     env, io,
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     pin::Pin,
@@ -242,11 +242,11 @@ impl Discv4 {
         mut local_node_record: NodeRecord,
         secret_key: SecretKey,
         config: Discv4Config,
-        discv5_kbuckets_change_tx: watch::Receiver<bool>,
+        discv5_kbuckets_change_rx: watch::Receiver<()>,
         discv5_kbuckets_keys_callback: F,
     ) -> io::Result<(Self, Discv4Service<Discv5KBucketsKeysMirror<F>>)>
     where
-        F: FnOnce() -> Vec<[u8; 32]> + Send + Unpin + 'static,
+        F: Fn() -> HashSet<PublicKey> + Send + Unpin + 'static,
         Discv5KBucketsKeysMirror<F>: MirrorDiscv5KBuckets,
     {
         let socket = UdpSocket::bind(local_address).await?;
@@ -260,7 +260,7 @@ impl Discv4 {
             local_node_record,
             secret_key,
             config,
-            discv5_kbuckets_change_tx,
+            discv5_kbuckets_change_rx,
             discv5_kbuckets_keys_callback,
         );
         let discv4 = service.handle();
@@ -427,10 +427,18 @@ impl Discv4 {
     }
 }
 
-// move method signatures from Discv4 here
-pub trait HandleDiscovery {}
+pub trait HandleDiscV4 {
+    fn add_node(&self, record: NodeRecord) -> bool {
+        false
+    }
+    fn set_eip868_rlp_pair(&self, key: Vec<u8>, rlp: Bytes) {}
+    fn set_eip868_rlp(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {}
+    fn ban(&self, node_id: PeerId, ip: IpAddr) {}
+    fn ban_ip(&self, ip: IpAddr) {}
+    fn on_discv4_update(&mut self, update: DiscoveryUpdate) {}
+}
 
-impl HandleDiscovery for Discv4 {}
+impl HandleDiscV4 for Discv4 {}
 
 /// Manages discv4 peer discovery over UDP.
 #[must_use = "Stream does nothing unless polled"]
@@ -1754,7 +1762,7 @@ where
 
 impl<F> Discv4Service<Discv5KBucketsKeysMirror<F>>
 where
-    F: FnOnce() -> Vec<[u8; 32]> + Send + Unpin + 'static,
+    F: FnOnce() -> HashSet<PublicKey> + Send + Unpin + 'static,
     Discv5KBucketsKeysMirror<F>: MirrorDiscv5KBuckets,
 {
     pub fn new_as_discv5_fallback(
@@ -2223,17 +2231,15 @@ impl From<ForkId> for EnrForkIdEntry {
 
 pub trait MirrorDiscv5KBuckets {
     fn update_mirror(&mut self);
-    fn filter_nodes(
-        &mut self,
-        nodes: &mut Vec<NodeRecord>,
-    ) -> Result<Vec<PeerId>, watch::error::RecvError>;
+    fn filter_nodes(&mut self, nodes: &mut Vec<NodeRecord>) -> Result<Vec<PeerId>, Discv4Error>;
 }
 
 #[derive(Debug)]
 pub struct Discv5KBucketsKeysMirror<F> {
-    mirror: Vec<[u8; 32]>,
+    mirror: HashSet<PublicKey>,
     callback: F,
     change_tx: watch::Receiver<()>,
+    is_log_level_trace: bool,
 }
 
 impl<F> Discv5KBucketsKeysMirror<F>
@@ -2241,40 +2247,44 @@ where
     F: Send + Unpin,
 {
     pub fn new(change_tx: watch::Receiver<()>, callback: F) -> Self {
-        Self { mirror: Default::default(), callback, change_tx }
+        let is_log_level_trace =
+            if let Ok(var) = env::var("RUST_LOG") { var.to_lowercase() == "trace" } else { false };
+
+        Self { mirror: Default::default(), callback, change_tx, is_log_level_trace }
     }
 }
 
 impl<F> MirrorDiscv5KBuckets for Discv5KBucketsKeysMirror<F>
 where
-    F: Fn() -> Vec<[u8; 32]> + Send + Unpin,
+    F: Fn() -> HashSet<PublicKey> + Send + Unpin,
 {
     fn update_mirror(&mut self) {
-        self.mirror = (self.callback)();
+        self.mirror = (self.callback)()
     }
 
-    fn filter_nodes(
-        &mut self,
-        nodes: &mut Vec<NodeRecord>,
-    ) -> Result<Vec<PeerId>, watch::error::RecvError> {
-        if self.change_tx.has_changed()? {
+    fn filter_nodes(&mut self, nodes: &mut Vec<NodeRecord>) -> Result<Vec<PeerId>, Discv4Error> {
+        if self.change_tx.has_changed().map_err(|e| Discv4Error::Discv5MirrorUpdateFailed(e))? {
             self.update_mirror();
             self.change_tx.borrow_and_update();
         }
 
-        let is_log_level_trace = is_log_level_trace();
         let mut filtered_out = vec![];
 
-        Ok(nodes.retain(|node| {
-            //todo: make peer_id into compressed public key
-            let filter_out = self.mirror.contains(&node.id);
-            if filter_out && is_log_level_trace {
+        nodes.retain(|node| {
+            let Ok(pk) = PublicKey::from_slice(node.id.as_ref()) else {
+                return false // wouldn't have passed message decoding if not correct length
+            };
+
+            let filter_out = self.mirror.contains(&pk);
+
+            if filter_out && self.is_log_level_trace {
                 filtered_out.push(node.id);
             }
 
             filter_out
-        }));
+        });
 
+        // empty unless in debug mode, just serves for tracing
         Ok(filtered_out)
     }
 }
@@ -2286,19 +2296,8 @@ unsafe impl Send for Discv5Noop {}
 
 impl MirrorDiscv5KBuckets for Discv5Noop {
     fn update_mirror(&mut self) {}
-    fn filter_nodes(
-        &mut self,
-        _nodes: &mut Vec<NodeRecord>,
-    ) -> Result<Vec<PeerId>, watch::error::RecvError> {
+    fn filter_nodes(&mut self, _nodes: &mut Vec<NodeRecord>) -> Result<Vec<PeerId>, Discv4Error> {
         Ok(vec![])
-    }
-}
-
-fn is_log_level_trace() -> bool {
-    if let Ok(var) = env::var("RUST_LOG") {
-        var.to_lowercase() == "trace"
-    } else {
-        false
     }
 }
 

@@ -24,6 +24,7 @@ reth-primitives.workspace = true
 reth-net-common.workspace = true
 reth-network-api.workspace = true
 reth-discv4.workspace = true
+reth-discv5.workspace = true
 reth-dns-discovery.workspace = true
 reth-eth-wire.workspace = true
 reth-ecies.workspace = true
@@ -67,6 +68,7 @@ derive_more.workspace = true
 schnellru.workspace = true
 itertools.workspace = true
 tempfile = { workspace = true, optional = true }
+smallvec.workspace = true
 
 # ethereum
 enr = { workspace = true, features = ["rust-secp256k1"], optional = true }

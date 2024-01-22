@@ -178,7 +178,7 @@ ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
 ethers-middleware = { version = "2.0", default-features = false }
-discv5 = { git = "https://github.com/sigp/discv5", rev = "f289bbd4c57d499bb1bdb393af3c249600a1c662" }
+discv5 = { version = "0.3" }
 igd = { git = "https://github.com/stevefan1999-personal/rust-igd", rev = "c2d1f83eb1612a462962453cb0703bc93258b173" }
 
 # js
@@ -209,6 +209,7 @@ once_cell = "1.17"
 syn = "2.0"
 ahash = "0.8.6"
 nybbles = "0.1"
+smallvec = "1.13.1"
 
 # proc-macros
 proc-macro2 = "1.0"
