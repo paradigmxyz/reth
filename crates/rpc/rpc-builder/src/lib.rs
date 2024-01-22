@@ -151,6 +151,7 @@ use jsonrpsee::{
     Methods, RpcModule,
 };
 use reth_node_api::{EngineTypes, EvmEnvConfig};
+use reth_node_builder::EthEvmConfig;
 use serde::{Deserialize, Serialize, Serializer};
 use strum::{AsRefStr, EnumIter, EnumVariantNames, IntoStaticStr, ParseError, VariantNames};
 use tower::layer::util::{Identity, Stack};
@@ -392,6 +393,18 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
         let Self { provider, pool, executor, network, evm_config, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
     }
+
+    /// Configure the evm configuration type
+    pub fn with_evm_config<E>(
+        self,
+        evm_config: E,
+    ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, E>
+    where
+        E: EvmEnvConfig + 'static,
+    {
+        let Self { provider, pool, executor, network, events, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
+    }
 }
 
 impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
@@ -518,9 +531,9 @@ where
     }
 }
 
-impl Default for RpcModuleBuilder<(), (), (), (), (), ()> {
+impl Default for RpcModuleBuilder<(), (), (), (), (), EthEvmConfig> {
     fn default() -> Self {
-        RpcModuleBuilder::new((), (), (), (), (), ())
+        RpcModuleBuilder::new((), (), (), (), (), EthEvmConfig::default())
     }
 }
 

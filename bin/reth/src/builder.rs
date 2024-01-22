@@ -216,6 +216,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             network_builder.handle(),
             executor.clone(),
             blockchain_db.clone(),
+            evm_config,
         );
 
         // allow network modifications
