@@ -21,9 +21,11 @@ use crate::{
     utils::{get_single_header, write_peers_to_file},
     version::SHORT_VERSION,
 };
-use eyre::Context;
+use core::future::Future;
+use eyre::WrapErr;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, stream, stream_select, StreamExt};
+use futures_util::FutureExt;
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
@@ -98,7 +100,9 @@ use secp256k1::SecretKey;
 use std::{
     net::{SocketAddr, SocketAddrV4},
     path::PathBuf,
+    pin::Pin,
     sync::Arc,
+    task::{Context, Poll},
 };
 use tokio::sync::{
     mpsc::{unbounded_channel, Receiver, UnboundedSender},
@@ -1356,10 +1360,10 @@ pub struct NodeHandle {
 
     /// The receiver half of the channel for the consensus engine.
     /// This can be used to wait for the consensus engine to exit.
-    consensus_engine_rx: oneshot::Receiver<Result<(), BeaconConsensusEngineError>>,
+    pub consensus_engine_rx: oneshot::Receiver<Result<(), BeaconConsensusEngineError>>,
 
     /// Flag indicating whether the node should be terminated after the pipeline sync.
-    terminate: bool,
+    pub terminate: bool,
 }
 
 impl NodeHandle {
@@ -1367,17 +1371,36 @@ impl NodeHandle {
     pub fn rpc_server_handles(&self) -> &RethRpcServerHandles {
         &self.rpc_server_handles
     }
+}
 
-    /// Waits for the node to exit, if it was configured to exit.
-    pub async fn wait_for_node_exit(self) -> eyre::Result<()> {
-        self.consensus_engine_rx.await??;
+/// A Future which resolves when the node exits
+#[derive(Debug)]
+pub struct NodeExitFuture {
+    /// The receiver half of the channel for the consensus engine.
+    /// This can be used to wait for the consensus engine to exit.
+    pub consensus_engine_rx: oneshot::Receiver<Result<(), BeaconConsensusEngineError>>,
 
-        if self.terminate {
-            Ok(())
-        } else {
-            // The pipeline has finished downloading blocks up to `--debug.tip` or
-            // `--debug.max-block`. Keep other node components alive for further usage.
-            futures::future::pending().await
+    /// Flag indicating whether the node should be terminated after the pipeline sync.
+    pub terminate: bool,
+}
+
+impl Future for NodeExitFuture {
+    type Output = eyre::Result<()>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let pin = self.get_mut();
+
+        match pin.consensus_engine_rx.poll_unpin(cx) {
+            Poll::Ready(Ok(res)) => {
+                res?;
+                if pin.terminate {
+                    Poll::Ready(Ok(()))
+                } else {
+                    Poll::Pending
+                }
+            }
+            Poll::Ready(Err(err)) => Poll::Ready(Err(err.into())),
+            Poll::Pending => Poll::Pending,
         }
     }
 }
