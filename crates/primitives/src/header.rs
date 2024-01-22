@@ -178,6 +178,8 @@ impl Header {
     }
 
     /// Checks if the block's timestamp is in the past compared to the parent block's timestamp.
+    ///
+    /// Note: This check is relevant only pre-merge.
     pub fn is_timestamp_in_past(&self, parent_timestamp: u64) -> bool {
         self.timestamp <= parent_timestamp
     }
@@ -185,7 +187,9 @@ impl Header {
     /// Checks if the block's timestamp is in the future based on the present timestamp.
     ///
     /// Clock can drift but this can be consensus issue.
-    pub fn is_timestamp_in_future(&self, present_timestamp: u64) -> bool {
+    ///
+    /// Note: This check is relevant only pre-merge.
+    pub fn exceeds_allowed_future_timestamp(&self, present_timestamp: u64) -> bool {
         self.timestamp > present_timestamp + ALLOWED_FUTURE_BLOCK_TIME_SECONDS
     }
 

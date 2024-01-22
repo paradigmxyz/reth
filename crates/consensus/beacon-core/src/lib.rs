@@ -88,7 +88,7 @@ impl Consensus for BeaconConsensus {
             let present_timestamp =
                 SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
 
-            if header.is_timestamp_in_future(present_timestamp) {
+            if header.exceeds_allowed_future_timestamp(present_timestamp) {
                 return Err(ConsensusError::TimestampIsInFuture {
                     timestamp: header.timestamp,
                     present_timestamp,
