@@ -19,6 +19,11 @@ pub(crate) enum TxnManagerMessage {
     Commit { tx: TxnPtr, sender: SyncSender<Result<(bool, CommitLatency)>> },
 }
 
+/// Manages transactions by doing two things:
+/// - Opening, aborting, and committing transactions using [TxnManager::send_message] with the
+///   corresponding [TxnManagerMessage]
+/// - Aborting long-lived read transactions (if the `read-tx-timeouts` feature is enabled and
+///   `TxnManager::with_max_read_transaction_duration` is called)
 #[derive(Debug)]
 pub(crate) struct TxnManager {
     sender: SyncSender<TxnManagerMessage>,
@@ -40,7 +45,14 @@ impl TxnManager {
         txn_manager
     }
 
+    /// Spawns a new thread with [std::thread::spawn] that listens to incoming [TxnManagerMessage]
+    /// messages, executes an FFI function, and returns the result on the provided channel.
+    ///
+    /// - [TxnManagerMessage::Begin] opens a new transaction with [ffi::mdbx_txn_begin_ex]
+    /// - [TxnManagerMessage::Abort] aborts a transaction with [ffi::mdbx_txn_abort]
+    /// - [TxnManagerMessage::Commit] commits a transaction with [ffi::mdbx_txn_commit_ex]
     fn start_message_listener(&self, env: EnvPtr, rx: Receiver<TxnManagerMessage>) {
+        let read_transactions = self.read_transactions.clone();
         std::thread::spawn(move || {
             #[allow(clippy::redundant_locals)]
             let env = env;
@@ -63,12 +75,32 @@ impl TxnManager {
                                     .map(|_| TxnPtr(txn)),
                                 )
                                 .unwrap();
+
+                            #[cfg(feature = "read-tx-timeouts")]
+                            {
+                                use crate::transaction::TransactionKind;
+
+                                if flags == crate::transaction::RO::OPEN_FLAGS {
+                                    if let Some(read_transactions) = &read_transactions {
+                                        read_transactions.add_active(txn);
+                                    }
+                                }
+                            }
                         }
                         TxnManagerMessage::Abort { tx, sender } => {
-                            let result = mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) });
-                            sender.send(result).unwrap();
+                            #[cfg(feature = "read-tx-timeouts")]
+                            if let Some(read_transactions) = &read_transactions {
+                                read_transactions.remove_active(tx.0);
+                            }
+
+                            sender.send(mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })).unwrap();
                         }
                         TxnManagerMessage::Commit { tx, sender } => {
+                            #[cfg(feature = "read-tx-timeouts")]
+                            if let Some(read_transactions) = &read_transactions {
+                                read_transactions.remove_active(tx.0);
+                            }
+
                             sender
                                 .send({
                                     let mut latency = CommitLatency::new();
@@ -101,9 +133,10 @@ mod read_transactions {
     };
     use tracing::{error, trace, warn};
 
-    const READ_TRANSACTIONS_CHECK_INTERVAL: Duration = Duration::from_millis(500);
+    const READ_TRANSACTIONS_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
     impl TxnManager {
+        /// Sets the maximum duration that a read transaction can be open.
         pub(crate) fn with_max_read_transaction_duration(
             mut self,
             duration: Duration,
@@ -115,12 +148,14 @@ mod read_transactions {
             self
         }
 
+        /// Adds a new transaction to the list of active read transactions.
         pub(crate) fn add_active_read_transaction(&self, ptr: *mut ffi::MDBX_txn) {
             if let Some(read_transactions) = &self.read_transactions {
                 read_transactions.add_active(ptr);
             }
         }
 
+        /// Removes a transaction from the list of active read transactions.
         pub(crate) fn remove_active_read_transaction(
             &self,
             ptr: *mut ffi::MDBX_txn,
@@ -128,6 +163,7 @@ mod read_transactions {
             self.read_transactions.as_ref()?.remove_active(ptr)
         }
 
+        /// Removes a transaction from the list of aborted read transactions.
         pub(crate) fn remove_aborted_read_transaction(
             &self,
             ptr: *mut ffi::MDBX_txn,
@@ -159,28 +195,40 @@ mod read_transactions {
             Self { max_duration, ..Default::default() }
         }
 
+        /// Adds a new transaction to the list of active read transactions.
         pub(crate) fn add_active(&self, ptr: *mut ffi::MDBX_txn) {
             let _ = self.active.insert(ptr as usize, Instant::now());
         }
 
+        /// Removes a transaction from the list of active read transactions.
         pub(crate) fn remove_active(&self, ptr: *mut ffi::MDBX_txn) -> Option<(usize, Instant)> {
             self.active.remove(&(ptr as usize))
         }
 
+        /// Adds a new transaction to the list of aborted read transactions.
         pub(crate) fn add_aborted(&self, ptr: *mut ffi::MDBX_txn) {
             self.aborted.insert(ptr as usize);
         }
 
+        /// Removes a transaction from the list of aborted read transactions.
         pub(crate) fn remove_aborted(&self, ptr: *mut ffi::MDBX_txn) -> Option<usize> {
             self.aborted.remove(&(ptr as usize))
         }
 
+        /// Spawns a new thread with [std::thread::spawn] that monitors the list of active read
+        /// transactions and aborts those that are open for longer than
+        /// `ReadTransactions.max_duration`.
+        ///
+        /// Aborted transaction pointers are placed into the list of aborted read transactions, and
+        /// removed from this list by [crate::error::mdbx_result_with_tx_kind] when the user tries
+        /// to use it.
         pub(super) fn start_monitor(self: Arc<Self>) {
             std::thread::spawn(move || {
                 let mut aborted_active = Vec::new();
 
                 loop {
                     let now = Instant::now();
+                    let mut max_active_transaction_duration = None;
 
                     // Iterate through active read transactions and abort those that's open for
                     // longer than `self.max_duration`.
@@ -201,6 +249,10 @@ mod read_transactions {
                             // Add the transaction to `aborted_active`. We can't remove it instantly
                             // from the list of active transactions, because we iterate through it.
                             aborted_active.push((ptr, duration, result.err()));
+                        } else {
+                            max_active_transaction_duration = Some(
+                                duration.max(max_active_transaction_duration.unwrap_or_default()),
+                            );
                         }
                     }
 
@@ -242,7 +294,13 @@ mod read_transactions {
                         );
                     }
 
-                    std::thread::sleep(READ_TRANSACTIONS_CHECK_INTERVAL);
+                    // Sleep not more than `READ_TRANSACTIONS_CHECK_INTERVAL`, but at least until
+                    // the closest deadline of an active read transaction
+                    let duration_until_closest_deadline =
+                        self.max_duration - max_active_transaction_duration.unwrap_or_default();
+                    std::thread::sleep(
+                        READ_TRANSACTIONS_CHECK_INTERVAL.min(duration_until_closest_deadline),
+                    );
                 }
             });
         }

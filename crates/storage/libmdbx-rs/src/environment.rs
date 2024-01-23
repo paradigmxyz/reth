@@ -21,7 +21,7 @@ use std::{
     time::Duration,
 };
 
-/// The default maximum number of readers for an environment.
+/// The default maximum duration of a read transaction.
 #[cfg(feature = "read-tx-timeouts")]
 const DEFAULT_MAX_READ_TRANSACTION_DURATION: Duration = Duration::from_secs(5 * 60);
 
