@@ -288,22 +288,13 @@ pub struct NewPooledTransactionHashes68 {
     /// instead use the [`Encodable`](alloy_rlp::Encodable) and [`Decodable`](alloy_rlp::Decodable)
     /// implementations for `&[u8]` instead, which encodes into a RLP string, and expects an RLP
     /// string when decoding.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(proptest::arbitrary::any::<u8>(), 100)")
-    )]
+  
     pub types: Vec<u8>,
     /// Transaction sizes for new transactions that have appeared on the network.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(proptest::arbitrary::any::<usize>(), 100)")
-    )]
+   
     pub sizes: Vec<usize>,
     /// Transaction hashes for new transactions that have appeared on the network.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(proptest::arbitrary::any::<B256>(), 100)")
-    )]
+   
     pub hashes: Vec<B256>,
 }
 

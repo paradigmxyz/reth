@@ -495,18 +495,5 @@ mod tests {
     }
 }
 
-// #[cfg(feature = "arbitrary")]
-// impl Arbitrary for NewPooledTransactionHashes68 {
-//     type Strategy = BoxedStrategy<Self>;
-//     type Parameters = ();
 
-//     fn arbitrary_with(_args: ()) -> Self::Strategy {
-//         (any::<usize>(), any::<u8>(), any::<usize>(), any::<B256>())
-//             .prop_map(|(size, type_val, size_val, hashes_val)| NewPooledTransactionHashes68 {
-//                 types: vec![type_val; size],
-//                 sizes: vec![size_val; size],
-//                 hashes: vec![hashes_val; size],
-//             })
-//             .boxed()
-//     }
-// }
+
