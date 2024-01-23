@@ -160,9 +160,6 @@ optimism = [
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
 
-[build-dependencies]
-vergen = { version = "8.0.0", features = ["build", "cargo", "git", "git2"] }
-
 [[bin]]
 name = "reth"
 path = "src/main.rs"
