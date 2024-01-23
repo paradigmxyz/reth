@@ -58,8 +58,13 @@ mod tests {
         // Ranges
         let row_count = 100u64;
         let range = 0..=(row_count - 1);
-        let segment_header =
-            SegmentHeader::new(range.clone(), range.clone(), SnapshotSegment::Headers);
+        let segment_header = SegmentHeader::new(
+            *range.clone().start(),
+            *range.clone().end(),
+            *range.clone().start(),
+            *range.clone().end(),
+            SnapshotSegment::Headers,
+        );
 
         // Data sources
         let factory = create_test_provider_factory();
