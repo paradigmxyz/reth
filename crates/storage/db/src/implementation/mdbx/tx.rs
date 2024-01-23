@@ -289,6 +289,7 @@ impl<K: TransactionKind> DbTx for Tx<K> {
             .entries())
     }
 
+    /// Disables backtrace recording for this read transaction when it's open for too long.
     fn disable_backtrace_on_long_read_transaction(&mut self) {
         if let Some(metrics_handler) = self.metrics_handler.as_mut() {
             metrics_handler.record_backtrace = false;
