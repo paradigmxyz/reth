@@ -18,6 +18,7 @@ use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEn
 use reth_interfaces::{consensus::Consensus, p2p::full_block::FullBlockClient};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
+
 use reth_primitives::{
     fs,
     stage::{StageCheckpoint, StageId},

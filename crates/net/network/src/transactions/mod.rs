@@ -35,7 +35,6 @@ use crate::{
     NetworkEvents, NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, Future, StreamExt};
-use itertools::Itertools;
 use reth_eth_wire::{
     EthVersion, GetPooledTransactions, NewPooledTransactionHashes, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, PooledTransactions, Transactions,
@@ -559,13 +558,14 @@ where
         };
 
         // message version decides how hashes are packed
-        // if this is a eth68 message, store eth68 tx metadata
-        if let Some(eth68_msg) = msg.as_eth68() {
-            for (&hash, (_type, size)) in eth68_msg.metadata_iter() {
-                self.transaction_fetcher.eth68_meta.insert(hash, size);
-            }
-        }
-        // extract hashes payload
+        let msg_version = msg.version();
+        // extract hashes payload, and sizes if version eth68
+        let sizes = msg.as_eth68().map(|eth68_msg| {
+            eth68_msg
+                .metadata_iter()
+                .map(|(&hash, (_type, size))| (hash, size))
+                .collect::<HashMap<_, _>>()
+        });
         let mut hashes = msg.into_hashes();
 
         // keep track of the transactions the peer knows
@@ -593,16 +593,27 @@ where
 
         debug!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            hashes=format!("[{:#}]", hashes.iter().format(", ")),
+            hashes=?hashes,
+            msg_version=%msg_version,
             "received previously unseen hashes in announcement from peer"
         );
+
+        if msg_version == EthVersion::Eth68 {
+            // cache size metadata of unseen hashes
+            for (hash, size) in sizes.expect("should be at least empty map") {
+                if hashes.contains(&hash) {
+                    self.transaction_fetcher.eth68_meta.insert(hash, size);
+                }
+            }
+        }
 
         // only send request for hashes to idle peer, otherwise buffer hashes storing peer as
         // fallback
         if !self.transaction_fetcher.is_idle(peer_id) {
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                hashes=format!("[{:#}]", hashes.iter().format(", ")),
+                hashes=?hashes,
+                msg_version=%msg_version,
                 "buffering hashes announced by busy peer"
             );
 
@@ -616,7 +627,8 @@ where
         if !surplus_hashes.is_empty() {
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                surplus_hashes=format!("{surplus_hashes:#?}"),
+                surplus_hashes=?surplus_hashes,
+                msg_version=%msg_version,
                 "some hashes in announcement from peer didn't fit in `GetPooledTransactions` request, buffering surplus hashes"
             );
 
@@ -625,7 +637,8 @@ where
 
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            hashes=format!("[{:#}]", hashes.iter().format(", ")),
+            hashes=?hashes,
+            msg_version=%msg_version,
             "sending hashes in `GetPooledTransactions` request to peer's session"
         );
 
@@ -641,7 +654,8 @@ where
         {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                hashes=format!("[{:#}]", failed_to_request_hashes.iter().format(", ")),
+                failed_to_request_hashes=?failed_to_request_hashes,
+                msg_version=%msg_version,
                 "sending `GetPooledTransactions` request to peer's session failed, buffering hashes"
             );
             self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
@@ -668,20 +682,30 @@ where
 
             debug_assert!(
                 self.peers.contains_key(&peer_id),
-                "broken invariant `peers` and `transaction-fetcher`"
+                "a dead peer has been returned as idle by `@pop_any_idle_peer`, broken invariant `@peers` and `@transaction_fetcher`,
+`%peer_id`: {:?},
+`@peers`: {:?},
+`@transaction_fetcher`: {:?}",
+                peer_id, self.peers, self.transaction_fetcher
             );
 
             // fill the request with other buffered hashes that have been announced by the peer
             let Some(peer) = self.peers.get(&peer_id) else { return };
 
             let Some(hash) = hashes.first() else { return };
-            let acc_eth68_size = self.transaction_fetcher.eth68_meta.get(hash).copied();
-            self.transaction_fetcher.fill_request_for_peer(&mut hashes, peer_id, acc_eth68_size);
+            let mut eth68_size = self.transaction_fetcher.eth68_meta.get(hash).copied();
+            if let Some(ref mut size) = eth68_size {
+                self.transaction_fetcher.fill_eth68_request_for_peer(&mut hashes, peer_id, size);
+            } else {
+                self.transaction_fetcher.fill_eth66_request_for_peer(&mut hashes, peer_id);
+            }
 
-            trace!(
-                target: "net::tx",
+            let msg_version = || eth68_size.map(|_| EthVersion::Eth68).unwrap_or(EthVersion::Eth66);
+
+            trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                hashes=format!("[{:#}]", hashes.iter().format(", ")),
+                hashes=?hashes,
+                msg_version=%msg_version(),
                 "requesting buffered hashes from idle peer"
             );
 
@@ -694,7 +718,8 @@ where
             {
                 debug!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
-                    hashes=format!("[{:#}]", failed_to_request_hashes.iter().format(", ")),
+                    failed_to_request_hashes=?failed_to_request_hashes,
+                    msg_version=%msg_version(),
                     "failed sending request to peer's session, buffering hashes"
                 );
 
@@ -1258,23 +1283,25 @@ mod tests {
     use super::*;
     use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
     use alloy_rlp::Decodable;
+    use fetcher::MAX_ALTERNATIVE_PEERS_PER_TX;
     use futures::FutureExt;
     use reth_interfaces::sync::{NetworkSyncUpdater, SyncState};
     use reth_network_api::NetworkInfo;
     use reth_primitives::hex;
     use reth_provider::test_utils::NoopProvider;
-
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use secp256k1::SecretKey;
     use std::{future::poll_fn, hash};
-
-    use fetcher::MAX_ALTERNATIVE_PEERS_PER_TX;
 
     async fn new_tx_manager() -> TransactionsManager<impl TransactionPool> {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
         let client = NoopProvider::default();
 
-        let config = NetworkConfigBuilder::new(secret_key).disable_discovery().build(client);
+        let config = NetworkConfigBuilder::new(secret_key)
+            // let OS choose port
+            .listener_port(0)
+            .disable_discovery()
+            .build(client);
 
         let pool = testing_pool();
 
@@ -1675,14 +1702,14 @@ mod tests {
         tx_manager.peers.insert(peer_id_1, peer_1);
 
         // hashes are seen and currently not inflight, with one fallback peer, and are buffered
-        // for first retry.
+        // for first retry in reverse order to make index 0 lru
         let retries = 1;
         let mut backups = default_cache();
         backups.insert(peer_id_1);
-        tx_fetcher.unknown_hashes.insert(seen_hashes[0], (retries, backups.clone()));
-        tx_fetcher.unknown_hashes.insert(seen_hashes[1], (retries, backups));
-        tx_fetcher.buffered_hashes.insert(seen_hashes[0]);
+        tx_fetcher.unknown_hashes.insert(seen_hashes[1], (retries, backups.clone()));
+        tx_fetcher.unknown_hashes.insert(seen_hashes[0], (retries, backups));
         tx_fetcher.buffered_hashes.insert(seen_hashes[1]);
+        tx_fetcher.buffered_hashes.insert(seen_hashes[0]);
 
         // peer_1 is idle
         assert!(tx_fetcher.is_idle(peer_id_1));
@@ -1764,6 +1791,8 @@ mod tests {
         let unseen_eth68_hashes = [B256::from_slice(&[1; 32]), B256::from_slice(&[2; 32])];
         let unseen_eth68_hashes_sizes =
             [MAX_FULL_TRANSACTIONS_PACKET_SIZE / 2, MAX_FULL_TRANSACTIONS_PACKET_SIZE / 2 - 4];
+        // hashes and sizes to buffer in reverse order so that seen_eth68_hashes[0] and
+        // seen_eth68_hashes_sizes[0] are lru
         let seen_eth68_hashes =
             [B256::from_slice(&[3; 32]), B256::from_slice(&[4; 32]), B256::from_slice(&[5; 32])];
         let seen_eth68_hashes_sizes = [
@@ -1780,11 +1809,25 @@ mod tests {
         // for first try to fetch.
         let mut backups = default_cache();
         backups.insert(peer_id);
-        for i in 0..3 {
+
+        // load in reverse order so index 0 in seen_eth68_hashes and seen_eth68_hashes_sizes is
+        // lru!
+
+        for i in (0..3).rev() {
             tx_fetcher.unknown_hashes.insert(seen_eth68_hashes[i], (0, backups.clone()));
             tx_fetcher.eth68_meta.insert(seen_eth68_hashes[i], seen_eth68_hashes_sizes[i]);
             tx_fetcher.buffered_hashes.insert(seen_eth68_hashes[i]);
         }
+
+        // insert buffered hash for some other peer too, to verify response size accumulation and
+        // selection from buffered hashes
+        let peer_id_other = PeerId::new([2; 64]);
+        let hash_other = B256::from_slice(&[6; 32]);
+        let mut backups = default_cache();
+        backups.insert(peer_id_other);
+        tx_fetcher.unknown_hashes.insert(hash_other, (0, backups));
+        tx_fetcher.eth68_meta.insert(hash_other, MAX_FULL_TRANSACTIONS_PACKET_SIZE - 2); // a big tx
+        tx_fetcher.buffered_hashes.insert(hash_other);
 
         let (peer, mut to_mock_session_rx) = new_mock_session(peer_id, eth_version);
         tx_manager.peers.insert(peer_id, peer);
@@ -1800,9 +1843,9 @@ mod tests {
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
         // since hashes are unseen, length of unknown hashes increases
-        assert_eq!(tx_fetcher.unknown_hashes.len(), 5);
+        assert_eq!(tx_fetcher.unknown_hashes.len(), 6);
         // seen_eth68_hashes[1] should be taken out of buffer and packed into request
-        assert_eq!(tx_fetcher.buffered_hashes.len(), 2);
+        assert_eq!(tx_fetcher.buffered_hashes.len(), 3);
         assert!(tx_fetcher.buffered_hashes.contains(&seen_eth68_hashes[0]));
 
         // mock session of peer receives request

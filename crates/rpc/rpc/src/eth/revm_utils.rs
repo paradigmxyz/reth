@@ -21,6 +21,9 @@ use revm_primitives::{
 };
 use tracing::trace;
 
+#[cfg(feature = "optimism")]
+use revm::primitives::{Bytes, OptimismFields};
+
 /// Helper type that bundles various overrides for EVM Execution.
 ///
 /// By `Default`, no overrides are included.
@@ -334,7 +337,7 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         blob_hashes: blob_versioned_hashes.unwrap_or_default(),
         max_fee_per_blob_gas,
         #[cfg(feature = "optimism")]
-        optimism: Default::default(),
+        optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
     };
 
     Ok(env)
