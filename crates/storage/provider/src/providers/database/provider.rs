@@ -1449,7 +1449,21 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                             .collect::<Result<Vec<_>, _>>()?
                     };
 
+                    // TODO: Check if TxSender is pruned or not.
+                    let prune_checkpoint =
+                        self.get_prune_checkpoint(PruneSegment::SenderRecovery)?;
+
+                    println!("prune_checkpoint: {:?}", prune_checkpoint);
+
+                    let start = std::time::Instant::now();
                     let senders = self.senders_by_tx_range(tx_range)?;
+                    let end = std::time::Instant::now();
+
+                    println!(
+                        "Time taken to get senders from db for range {:?}: {:?}",
+                        tx_range,
+                        end - start
+                    );
 
                     // If we are past shanghai, then all blocks should have a withdrawal list,
                     // even if empty
@@ -1470,7 +1484,9 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                         ommers_cursor.seek_exact(num)?.map(|(_, o)| o.ommers).unwrap_or_default()
                     };
 
-                    blocks.push(Block { header, body, ommers, withdrawals }.with_senders(senders));
+                    blocks.push(
+                        Block { header, body, ommers, withdrawals }.with_senders_unchecked(senders), // Manually recovers the signers if the number of senders != number of txs in the block.
+                    );
                 }
             }
         }
