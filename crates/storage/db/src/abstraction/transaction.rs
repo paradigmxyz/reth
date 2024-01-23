@@ -24,8 +24,8 @@ pub trait DbTx: Send + Sync {
     fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<T>, DatabaseError>;
     /// Returns number of entries in the table.
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError>;
-    /// Disables backtrace recording for this read transaction when it's open for too long.
-    fn disable_backtrace_on_long_read_transaction(&mut self);
+    /// Disables long-lived read transaction safety guarantees.
+    fn disable_long_read_transaction_safety(&mut self);
 }
 
 /// Read write transaction that allows writing to database
