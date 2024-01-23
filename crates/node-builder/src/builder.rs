@@ -1,6 +1,6 @@
 //! Customizable node builder.
 
-use crate::{components::NodeComponentsBuilder, node::FullNodeTypesAdapter};
+use std::{marker::PhantomData, sync::Arc};
 use reth_blockchain_tree::ShareableBlockchainTree;
 use reth_db::{
     database::Database,
@@ -10,7 +10,11 @@ use reth_node_api::node::NodeTypes;
 use reth_provider::providers::BlockchainProvider;
 use reth_revm::EvmProcessorFactory;
 use reth_tasks::TaskExecutor;
-use std::{marker::PhantomData, sync::Arc};
+use crate::{components::NodeComponentsBuilder, node::FullNodeTypesAdapter, NodeHandle};
+
+
+// TODO replace with node config
+type NodeConfig = ();
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.

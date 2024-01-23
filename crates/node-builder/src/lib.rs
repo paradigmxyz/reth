@@ -25,3 +25,7 @@ pub mod node;
 pub mod components;
 
 mod builder;
+mod handle;
+
+pub use builder::*;
+pub use handle::NodeHandle;
