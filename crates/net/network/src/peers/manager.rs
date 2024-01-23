@@ -114,6 +114,9 @@ pub struct PeersManager {
     last_tick: Instant,
     /// Maximum number of backoff attempts before we give up on a peer and dropping.
     max_backoff_count: u32,
+    /// Hibernate state of the network.
+    /// If true, the network will not attempt to fill any outbound slots.
+    hibernated: bool,
 }
 
 impl PeersManager {
@@ -166,6 +169,7 @@ impl PeersManager {
             connect_trusted_nodes_only,
             last_tick: Instant::now(),
             max_backoff_count,
+            hibernated: false,
         }
     }
 
@@ -688,9 +692,10 @@ impl PeersManager {
     fn fill_outbound_slots(&mut self) {
         self.tick();
 
-        // as long as there a slots available try to fill them with the best peers
+        // as long as there a slots available and not hibernated try to fill them with the best
+        // peers
         let mut new_outbound_dials = 1;
-        while self.connection_info.has_out_capacity() {
+        while self.connection_info.has_out_capacity() && !self.hibernated {
             let action = {
                 let (peer_id, peer) = match self.best_unconnected() {
                     Some(peer) => peer,
@@ -717,6 +722,11 @@ impl PeersManager {
                 break
             }
         }
+    }
+
+    /// Keeps track of the network hibernation state.
+    pub fn on_network_hibernation(&mut self) {
+        self.hibernated = true;
     }
 
     /// Advances the state.

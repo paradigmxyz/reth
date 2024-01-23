@@ -282,6 +282,12 @@ where
     pub(crate) fn is_shutting_down(&self) -> bool {
         matches!(self.net_connection_state, NetworkConnectionState::ShuttingDown)
     }
+
+    /// Set network connection state to `Hibernate` and updates the `PeerManager` state
+    pub(crate) fn on_hibernate_requested(&mut self) {
+        self.net_connection_state = NetworkConnectionState::Hibernate;
+        self.state_mut().peers_mut().on_network_hibernation();
+    }
 }
 
 impl<C> Stream for Swarm<C>
@@ -423,9 +429,12 @@ pub(crate) enum SwarmEvent {
 
 /// Represents the state of the connection of the node. If shutting down,
 /// new connections won't be established.
+/// When in hibernation mode, the node will not initiate new outbound connections. This is
+/// beneficial for sync stages that do not require a network connection.
 #[derive(Debug, Default)]
 pub(crate) enum NetworkConnectionState {
     #[default]
     Active,
     ShuttingDown,
+    Hibernate,
 }

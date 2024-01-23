@@ -152,6 +152,13 @@ impl NetworkHandle {
         rx.await
     }
 
+    /// Send message to hibernate node.
+    pub async fn hibernate(&self) -> Result<(), oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        self.send_message(NetworkHandleMessage::Hibernate(tx));
+        rx.await
+    }
+
     /// Whether tx gossip is disabled
     pub fn tx_gossip_disabled(&self) -> bool {
         self.inner.tx_gossip_disabled
@@ -432,6 +439,8 @@ pub(crate) enum NetworkHandleMessage {
     GetReputationById(PeerId, oneshot::Sender<Option<Reputation>>),
     /// Initiates a graceful shutdown of the network via a oneshot sender.
     Shutdown(oneshot::Sender<()>),
+    /// Initiates an hibernation of the network via a oneshot sender.
+    Hibernate(oneshot::Sender<()>),
     /// Adds a new listener for `DiscoveryEvent`.
     DiscoveryListener(UnboundedSender<DiscoveryEvent>),
     /// Adds an additional `RlpxSubProtocol`.
