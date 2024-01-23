@@ -1142,10 +1142,10 @@ mod tests {
 
     #[test]
     fn test_genesis_ensure_difficulty() {
-        let mut genesis_header = Header::default();
+        let genesis_header =
+            Header { difficulty: U256::from(2).pow(U256::from(34)), ..Default::default() };
 
         // Test with difficulty equal to 2^34 (should be Ok())
-        genesis_header.difficulty = U256::from(2).pow(U256::from(34));
         assert_eq!(
             genesis_header.ensure_difficulty_valid(
                 reth_ethereum_forks::Hardfork::GrayGlacier,
@@ -1155,9 +1155,9 @@ mod tests {
         );
 
         // Test with difficulty less than 2^34 (should result in an error)
-        genesis_header.difficulty = U256::from(1);
+        let genesis_header_wrong = Header { difficulty: U256::from(1), ..Default::default() };
         assert_eq!(
-            genesis_header.ensure_difficulty_valid(
+            genesis_header_wrong.ensure_difficulty_valid(
                 reth_ethereum_forks::Hardfork::GrayGlacier,
                 Header::default()
             ),
@@ -1167,18 +1167,20 @@ mod tests {
 
     #[test]
     fn test_post_merge_ensure_difficulty() {
-        let mut header = Header::default();
+        let header_post_merge = Header::default();
 
         // Test with difficulty equal to 0 (should be Ok())
         assert_eq!(
-            header.ensure_difficulty_valid(reth_ethereum_forks::Hardfork::Paris, Header::default()),
+            header_post_merge
+                .ensure_difficulty_valid(reth_ethereum_forks::Hardfork::Paris, Header::default()),
             Ok(())
         );
 
         // Test with difficulty not zero (should result in an error)
-        header.difficulty = U256::from(1);
+        let header_post_merge_wrong = Header { difficulty: U256::from(1), ..Default::default() };
         assert_eq!(
-            header.ensure_difficulty_valid(reth_ethereum_forks::Hardfork::Paris, Header::default()),
+            header_post_merge_wrong
+                .ensure_difficulty_valid(reth_ethereum_forks::Hardfork::Paris, Header::default()),
             Err(HeaderError::ProofOfStakeDifficulty)
         );
     }
@@ -1186,32 +1188,41 @@ mod tests {
     #[test]
     fn test_byzantium_difficulty() {
         // https://etherscan.io/block/6571534
-        let mut header = Header::default();
-        header.difficulty = U256::from_str("3173515550674968").unwrap();
-        header.number = 6571534;
-        header.timestamp = 1540295698;
+        let header = Header {
+            difficulty: U256::from_str("3173515550674968").unwrap(),
+            number: 6571534,
+            timestamp: 1540295698,
+            ..Default::default()
+        };
 
         // https://etherscan.io/block/6571533
-        let mut parent_header = Header::default();
-        parent_header.difficulty = U256::from_str("3189078633756766").unwrap();
-        parent_header.number = 6571533;
-        parent_header.timestamp = 1540295597;
+        let parent_header = Header {
+            difficulty: U256::from_str("3189078633756766").unwrap(),
+            number: 6571533,
+            timestamp: 1540295597,
+            ..Default::default()
+        };
 
         // Ensure that the block difficulty is valid under the Byzantium hardfork.
         assert_eq!(
-            header.ensure_difficulty_valid(
-                reth_ethereum_forks::Hardfork::Byzantium,
-                parent_header.clone()
-            ),
+            header.ensure_difficulty_valid(reth_ethereum_forks::Hardfork::Byzantium, parent_header),
             Ok(())
         );
 
         // Modify the timestamp of the parent header to create an invalid difficulty scenario.
-        parent_header.timestamp = 1540295497;
+        let parent_header_wrong = Header {
+            difficulty: U256::from_str("3189078633756766").unwrap(),
+            number: 6571533,
+            timestamp: 1540295497,
+            ..Default::default()
+        };
 
         // Ensure that an error is returned for invalid block difficulty under Byzantium hardfork.
         assert_eq!(
-            header.ensure_difficulty_valid(reth_ethereum_forks::Hardfork::Byzantium, parent_header),
+            header.ensure_difficulty_valid(
+                reth_ethereum_forks::Hardfork::Byzantium,
+                parent_header_wrong
+            ),
             Err(HeaderError::CanonicalDifficulty)
         );
     }
@@ -1219,34 +1230,43 @@ mod tests {
     #[test]
     fn test_muir_glacier_difficulty() {
         // https://etherscan.io/block/11571736
-        let mut header = Header::default();
-        header.difficulty = U256::from_str("3744489008130646").unwrap();
-        header.number = 11571736;
-        header.timestamp = 1609591015;
+        let header = Header {
+            difficulty: U256::from_str("3744489008130646").unwrap(),
+            number: 11571736,
+            timestamp: 1609591015,
+            ..Default::default()
+        };
 
         // https://etherscan.io/block/11571735
-        let mut parent_header = Header::default();
-        parent_header.difficulty = U256::from_str("3742661528292677").unwrap();
-        parent_header.number = 11571735;
-        parent_header.timestamp = 1609591013;
+        let parent_header = Header {
+            difficulty: U256::from_str("3742661528292677").unwrap(),
+            number: 11571735,
+            timestamp: 1609591013,
+            ..Default::default()
+        };
 
         // Ensure that the block difficulty is valid under the Muir Glacier hardfork.
         assert_eq!(
-            header.ensure_difficulty_valid(
-                reth_ethereum_forks::Hardfork::MuirGlacier,
-                parent_header.clone()
-            ),
+            header
+                .ensure_difficulty_valid(reth_ethereum_forks::Hardfork::MuirGlacier, parent_header),
             Ok(())
         );
 
         // Modify the difficulty of the parent header to create an invalid difficulty scenario.
-        parent_header.difficulty = U256::from_str("37426615282926770").unwrap();
+        let parent_header_wrong = Header {
+            difficulty: U256::from_str("37426615282926770").unwrap(),
+            number: 11571735,
+            timestamp: 1609591013,
+            ..Default::default()
+        };
 
         // Ensure that an error is returned for invalid block difficulty under Muir Glacier
         // hardfork.
         assert_eq!(
-            header
-                .ensure_difficulty_valid(reth_ethereum_forks::Hardfork::MuirGlacier, parent_header),
+            header.ensure_difficulty_valid(
+                reth_ethereum_forks::Hardfork::MuirGlacier,
+                parent_header_wrong
+            ),
             Err(HeaderError::CanonicalDifficulty)
         );
     }
