@@ -30,7 +30,6 @@ mod pool;
 /// The [ComponentsBuilder] is a generic implementation of this trait that can be used to customize
 /// certain components of the node using the builder pattern and defaults, e.g. Ethereum and
 /// Optimism.
-#[async_trait::async_trait]
 pub trait NodeComponentsBuilder<Node: FullNodeTypes> {
     /// The transaction pool to use.
     type Pool: TransactionPool;
@@ -38,7 +37,7 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes> {
     // TODO: any other components that are generic?
 
     /// Builds the components of the node.
-    async fn build_components(
+    fn build_components(
         self,
         context: BuilderContext<Node>,
     ) -> eyre::Result<NodeComponents<Node, Self::Pool>>;
@@ -157,7 +156,6 @@ where
 {
 }
 
-#[async_trait::async_trait]
 impl<Node, PoolB, PayloadB, NetworkB> NodeComponentsBuilder<Node>
     for ComponentsBuilder<Node, PoolB, PayloadB, NetworkB>
 where
@@ -168,9 +166,9 @@ where
 {
     type Pool = PoolB::Pool;
 
-    async fn build_components(
+    fn build_components(
         self,
-        mut context: BuilderContext<Node>,
+        context: BuilderContext<Node>,
     ) -> eyre::Result<NodeComponents<Node, Self::Pool>> {
         let Self { pool_builder, payload_builder, network_builder, _marker } = self;
 
