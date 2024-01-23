@@ -150,7 +150,15 @@ impl<DB, Provider, Pool, Network, Events, Tasks, EvmConfig>
         events: Events,
         evm_config: EvmConfig,
     ) -> Self {
-        Self { provider, pool, network, task_executor, events, evm_config, __phantom: std::marker::PhantomData }
+        Self {
+            provider,
+            pool,
+            network,
+            task_executor,
+            events,
+            evm_config,
+            __phantom: std::marker::PhantomData,
+        }
     }
 }
 
