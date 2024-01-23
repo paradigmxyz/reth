@@ -4,7 +4,10 @@ use crate::{
     ReceiptProvider, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
     WithdrawalsProvider,
 };
-use dashmap::{mapref::one::RefMut, DashMap};
+use dashmap::{
+    mapref::{entry::Entry as DashMapEntry, one::RefMut},
+    DashMap,
+};
 use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
@@ -415,7 +418,7 @@ impl SnapshotProvider {
 /// Helper trait to manage different [`SnapshotProviderRW`] of an `Arc<SnapshotProvider`
 pub trait SnapshotWriter {
     /// Returns a mutable reference to a [`SnapshotProviderRW`] of a [`SnapshotSegment`].
-    fn writer(
+    fn get_writer(
         &self,
         block: BlockNumber,
         segment: SnapshotSegment,
@@ -432,24 +435,24 @@ pub trait SnapshotWriter {
 }
 
 impl SnapshotWriter for Arc<SnapshotProvider> {
-    fn writer(
+    fn get_writer(
         &self,
         block: BlockNumber,
         segment: SnapshotSegment,
     ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>> {
-        if let Some(writer) = self.writers.get_mut(&segment) {
-            Ok(writer)
-        } else {
-            self.writers.insert(segment, SnapshotProviderRW::new(segment, block, self.clone())?);
-            Ok(self.writers.get_mut(&segment).expect("qed"))
-        }
+        Ok(match self.writers.entry(segment) {
+            DashMapEntry::Occupied(entry) => entry.into_ref(),
+            DashMapEntry::Vacant(entry) => {
+                entry.insert(SnapshotProviderRW::new(segment, block, self.clone())?)
+            }
+        })
     }
 
     fn latest_writer(
         &self,
         segment: SnapshotSegment,
     ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>> {
-        self.writer(self.get_highest_snapshot_block(segment).unwrap_or_default(), segment)
+        self.get_writer(self.get_highest_snapshot_block(segment).unwrap_or_default(), segment)
     }
 
     fn commit(&self) -> ProviderResult<()> {
