@@ -61,7 +61,7 @@ pub fn iter_snapshots(path: impl AsRef<Path>) -> Result<SortedSnapshots, NippyJa
                 &path.as_ref().join(segment.filename(&block_range, &tx_range)),
             )?;
 
-            if &tx_range != jar.user_header().tx_range() {
+            if tx_range != jar.user_header().tx_range() {
                 // TODO(joshie): rename
             }
 

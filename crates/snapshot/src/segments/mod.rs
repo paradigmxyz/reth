@@ -70,7 +70,13 @@ pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     let mut nippy_jar = NippyJar::new(
         COLUMNS,
         &directory.as_ref().join(segment.filename(&block_range, &tx_range).as_str()),
-        SegmentHeader::new(block_range, tx_range, segment),
+        SegmentHeader::new(
+            *block_range.start(),
+            *block_range.end(),
+            *tx_range.start(),
+            *tx_range.end(),
+            segment,
+        ),
     );
 
     nippy_jar = match segment_config.compression {

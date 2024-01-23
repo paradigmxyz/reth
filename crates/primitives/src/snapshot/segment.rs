@@ -136,10 +136,14 @@ impl SnapshotSegment {
 /// A segment header that contains information common to all segments. Used for storage.
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
 pub struct SegmentHeader {
-    /// Block range of the snapshot segment
-    block_range: RangeInclusive<BlockNumber>,
-    /// Transaction range of the snapshot segment
-    tx_range: RangeInclusive<TxNumber>,
+    /// Start block number of the snapshot segment
+    block_start: BlockNumber,
+    /// End block number of the snapshot segment
+    block_end: BlockNumber,
+    /// Start transaction number of the snapshot segment
+    tx_start: TxNumber,
+    /// End transaction number of the snapshot segment
+    tx_end: TxNumber,
     /// Segment type
     segment: SnapshotSegment,
 }
@@ -147,44 +151,51 @@ pub struct SegmentHeader {
 impl SegmentHeader {
     /// Returns [`SegmentHeader`].
     pub fn new(
-        block_range: RangeInclusive<BlockNumber>,
-        tx_range: RangeInclusive<TxNumber>,
+        block_start: BlockNumber,
+        block_end: BlockNumber,
+        tx_start: TxNumber,
+        tx_end: TxNumber,
         segment: SnapshotSegment,
     ) -> Self {
-        Self { block_range, tx_range, segment }
+        Self { block_start, block_end, tx_start, tx_end, segment }
     }
 
-    /// Returns the transaction range.
-    pub fn tx_range(&self) -> &RangeInclusive<TxNumber> {
-        &self.tx_range
-    }
-
-    /// Returns the block range.
-    pub fn block_range(&self) -> &RangeInclusive<BlockNumber> {
-        &self.block_range
-    }
-
-    /// Returns the first block number of the segment.
-    pub fn block_start(&self) -> BlockNumber {
-        *self.block_range.start()
-    }
-
-    /// Returns the last block number of the segment.
-    pub fn block_end(&self) -> BlockNumber {
-        *self.block_range.end()
-    }
-
-    /// Returns the first transaction number of the segment.
+    /// Returns the transaction start number.
     pub fn tx_start(&self) -> TxNumber {
-        *self.tx_range.start()
+        self.tx_start
     }
 
-    /// Returns the row offset which depends on whether the segment is block or transaction based.
+    /// Returns the transaction end number.
+    pub fn tx_end(&self) -> TxNumber {
+        self.tx_end
+    }
+
+    /// Returns the block start number.
+    pub fn block_start(&self) -> BlockNumber {
+        self.block_start
+    }
+
+    /// Returns the block end number.
+    pub fn block_end(&self) -> BlockNumber {
+        self.block_end
+    }
+
+    /// Returns the start number depending on whether the segment is block or transaction based.
     pub fn start(&self) -> u64 {
         match self.segment {
-            SnapshotSegment::Headers => self.block_start(),
-            SnapshotSegment::Transactions | SnapshotSegment::Receipts => self.tx_start(),
+            SnapshotSegment::Headers => self.block_start,
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => self.tx_start,
         }
+    }
+
+    /// Returns the transaction range as [`RangeInclusive`].
+    pub fn tx_range(&self) -> RangeInclusive<TxNumber> {
+        self.tx_start..=self.tx_end
+    }
+
+    /// Returns the block range as [`RangeInclusive`].
+    pub fn block_range(&self) -> RangeInclusive<BlockNumber> {
+        self.block_start..=self.block_end
     }
 }
 
