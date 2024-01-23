@@ -92,14 +92,8 @@ impl<'b, C> HashedPostStateAccountCursor<'b, C> {
                     Some((db_address, db_account))
                 }
             }
-            // If the database is empty, return the post state entry
-            (Some((post_state_address, post_state_account)), None) => {
-                Some((*post_state_address, *post_state_account))
-            }
-            // If the post state is empty, return the database entry
-            (None, Some((db_address, db_account))) => Some((db_address, db_account)),
-            // If both are empty, return None
-            (None, None) => None,
+            /// Return either non-empty entry
+            _ => post_state_item.copied().or(db_item),
         }
     }
 }
@@ -254,14 +248,10 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
                     Some(db_entry)
                 }
             }
-            // If the database is empty, return the post state entry
-            (Some((post_state_slot, post_state_value)), None) => {
-                Some(StorageEntry { key: *post_state_slot, value: *post_state_value })
+            /// Return either non-empty entry
+            _ => {
+                db_item.or(post_state_item.copied().map(|(key, value)| StorageEntry { key, value }))
             }
-            // If the post state is empty, return the database entry
-            (None, Some(db_entry)) => Some(db_entry),
-            // If both are empty, return None
-            (None, None) => None,
         }
     }
 }
