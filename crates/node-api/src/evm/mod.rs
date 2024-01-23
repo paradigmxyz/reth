@@ -1,5 +1,6 @@
 use reth_primitives::{revm::env::fill_block_env, Address, ChainSpec, Header, Transaction, U256};
-use revm_primitives::{BlockEnv, CfgEnv, SpecId, TxEnv};
+use revm::{primitives::{BlockEnv, CfgEnv, SpecId, TxEnv}, precompile::Precompiles};
+use reth_provider::PrunableBlockExecutor;
 
 /// This represents the set of methods used to configure the EVM before execution.
 pub trait EvmEnvConfig: Send + Sync + Unpin + Clone {
@@ -32,4 +33,22 @@ pub trait EvmEnvConfig: Send + Sync + Unpin + Clone {
         let after_merge = cfg.spec_id >= SpecId::MERGE;
         fill_block_env(block_env, chain_spec, header, after_merge);
     }
+}
+
+trait EvmConfig: EvmEnvConfig {
+    /// The type of executor used to execute transactions.
+    ///
+    /// This is at least an [ExecutorFactory] since the reth execution stage requires attaching a
+    /// [StateProvider] to an executor.
+    type Executor: PrunableBlockExecutor;
+
+    /// Modifies the executor
+
+    /// Returns the precompiles used in execution.
+    fn precompiles(&self) -> Precompiles;
+
+    /// Returns the executor that will be used to execute transactions.
+    fn executor(&self) -> Self::Executor;
+
+    // this is also where all the handlers will be added with EvmBuilder
 }

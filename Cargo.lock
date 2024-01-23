@@ -173,7 +173,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#53ef6c2dc9867f03320131ff0f25577502259138"
+source = "git+https://github.com/alloy-rs/alloy#9f4edbe6c3972eba225975042c528b7950fa9421"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
@@ -195,7 +195,7 @@ dependencies = [
 [[package]]
 name = "alloy-node-bindings"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#53ef6c2dc9867f03320131ff0f25577502259138"
+source = "git+https://github.com/alloy-rs/alloy#9f4edbe6c3972eba225975042c528b7950fa9421"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -256,7 +256,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-engine-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#53ef6c2dc9867f03320131ff0f25577502259138"
+source = "git+https://github.com/alloy-rs/alloy#9f4edbe6c3972eba225975042c528b7950fa9421"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -271,7 +271,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-trace-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#53ef6c2dc9867f03320131ff0f25577502259138"
+source = "git+https://github.com/alloy-rs/alloy#9f4edbe6c3972eba225975042c528b7950fa9421"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
@@ -282,14 +282,14 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#53ef6c2dc9867f03320131ff0f25577502259138"
+source = "git+https://github.com/alloy-rs/alloy#9f4edbe6c3972eba225975042c528b7950fa9421"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
  "ethereum_ssz",
  "ethereum_ssz_derive",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "jsonrpsee-types",
  "proptest",
  "proptest-derive",
@@ -307,7 +307,7 @@ dependencies = [
  "const-hex",
  "dunce",
  "heck",
- "indexmap 2.1.0",
+ "indexmap 2.2.1",
  "proc-macro-error",
  "proc-macro2",
  "quote",
@@ -708,11 +708,10 @@ dependencies = [
 
 [[package]]
 name = "auto_impl"
-version = "1.1.1"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "972d3215e2b5ab2408f98713bee04b8b8d2f915bfecfcb569e07a14edec1e1e1"
+checksum = "823b8bb275161044e2ac7a25879cb3e2480cb403e3943022c7c769c599b756aa"
 dependencies = [
- "proc-macro-error",
  "proc-macro2",
  "quote",
  "syn 2.0.48",
@@ -993,7 +992,7 @@ dependencies = [
  "bitflags 2.4.2",
  "boa_interner",
  "boa_macros",
- "indexmap 2.1.0",
+ "indexmap 2.2.1",
  "num-bigint",
  "rustc-hash",
 ]
@@ -1016,7 +1015,7 @@ dependencies = [
  "dashmap",
  "fast-float",
  "icu_normalizer",
- "indexmap 2.1.0",
+ "indexmap 2.2.1",
  "itertools 0.11.0",
  "num-bigint",
  "num-integer",
@@ -1072,7 +1071,7 @@ dependencies = [
  "boa_gc",
  "boa_macros",
  "hashbrown 0.14.3",
- "indexmap 2.1.0",
+ "indexmap 2.2.1",
  "once_cell",
  "phf",
  "rustc-hash",
@@ -2165,7 +2164,7 @@ dependencies = [
  "hex",
  "hkdf",
  "lazy_static",
- "lru 0.12.1",
+ "lru 0.12.2",
  "more-asserts",
  "parking_lot 0.11.2",
  "rand 0.8.5",
@@ -3133,7 +3132,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "http",
- "indexmap 2.1.0",
+ "indexmap 2.2.1",
  "slab",
  "tokio",
  "tokio-util",
@@ -3694,9 +3693,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.1.0"
+version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d530e1a18b1cb4c484e6e34556a0d948706958449fca0cab753d649f2bce3d1f"
+checksum = "433de089bd45971eecf4668ee0ee8f4cec17db4f8bd8f7bc3197a6ce37aa7d9b"
 dependencies = [
  "equivalent",
  "hashbrown 0.14.3",
@@ -3722,7 +3721,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "321f0f839cd44a4686e9504b0a62b4d69a50b62072144c71c68f5873c167b8d9"
 dependencies = [
  "ahash",
- "indexmap 2.1.0",
+ "indexmap 2.2.1",
  "is-terminal",
  "itoa",
  "log",
@@ -3811,9 +3810,9 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25db6b064527c5d482d0423354fcd07a89a2dfe07b67892e62411946db7f07b0"
+checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
 dependencies = [
  "either",
 ]
@@ -4237,9 +4236,9 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2994eeba8ed550fd9b47a0b38f0242bc3344e496483c6180b69139cc2fa5d1d7"
+checksum = "db2c024b41519440580066ba82aab04092b333e09066a5eb86c7c4890df31f22"
 dependencies = [
  "hashbrown 0.14.3",
 ]
@@ -5538,8 +5537,8 @@ dependencies = [
  "cassowary",
  "crossterm",
  "indoc",
- "itertools 0.12.0",
- "lru 0.12.1",
+ "itertools 0.12.1",
+ "lru 0.12.2",
  "paste",
  "stability",
  "strum",
@@ -5731,7 +5730,7 @@ dependencies = [
  "human_bytes",
  "humantime",
  "hyper",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "jemallocator",
  "jsonrpsee",
  "metrics",
@@ -6044,7 +6043,7 @@ dependencies = [
  "assert_matches",
  "futures",
  "futures-util",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "metrics",
  "pin-project",
  "rayon",
@@ -6208,7 +6207,7 @@ dependencies = [
  "criterion",
  "dashmap",
  "derive_more",
- "indexmap 2.1.0",
+ "indexmap 2.2.1",
  "libc",
  "libffi",
  "parking_lot 0.12.1",
@@ -6297,7 +6296,7 @@ dependencies = [
  "fnv",
  "futures",
  "humantime-serde",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "linked-hash-map",
  "linked_hash_set",
  "metrics",
@@ -6376,6 +6375,7 @@ dependencies = [
  "reth-payload-builder",
  "reth-primitives",
  "reth-rpc-types",
+ "revm",
  "revm-primitives",
  "serde",
  "thiserror",
@@ -6573,7 +6573,7 @@ dependencies = [
  "assert_matches",
  "auto_impl",
  "dashmap",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "metrics",
  "parking_lot 0.12.1",
  "pin-project",
@@ -6599,7 +6599,7 @@ name = "reth-prune"
 version = "0.1.0-alpha.16"
 dependencies = [
  "assert_matches",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "metrics",
  "rayon",
  "reth-config",
@@ -6793,7 +6793,7 @@ dependencies = [
  "bytes",
  "ethereum_ssz",
  "ethereum_ssz_derive",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "jsonrpsee-types",
  "proptest",
  "proptest-derive",
@@ -6847,7 +6847,7 @@ dependencies = [
  "auto_impl",
  "criterion",
  "futures-util",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "metrics",
  "num-traits",
  "paste",
@@ -6986,7 +6986,7 @@ dependencies = [
 [[package]]
 name = "revm-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/evm-inspectors#5ee90076f88e64a059e4c0c268929cf9ec91ed6d"
+source = "git+https://github.com/paradigmxyz/evm-inspectors#2cc9b32c4bf3e93a569b6c9af175cede3811b735"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-trace-types",
@@ -7546,9 +7546,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.112"
+version = "1.0.113"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d1bd37ce2324cf3bf85e5a25f96eb4baf0d5aa6eba43e7ae8958870c4ec48ed"
+checksum = "69801b70b1c3dac963ecb03a364ba0ceda9cf60c71cfe475e99864759c8b8a79"
 dependencies = [
  "itoa",
  "ryu",
@@ -7597,7 +7597,7 @@ dependencies = [
  "chrono",
  "hex",
  "indexmap 1.9.3",
- "indexmap 2.1.0",
+ "indexmap 2.2.1",
  "serde",
  "serde_json",
  "serde_with_macros",
@@ -8182,7 +8182,7 @@ checksum = "4da89cfe93508da3676114d5a15aa26e29aa88d5230e22bc5ea5f3c1f08ef5f6"
 dependencies = [
  "darling 0.20.3",
  "if_chain",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "once_cell",
  "prettyplease",
  "proc-macro2",
@@ -8197,7 +8197,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "17f9bc8c69f276df24e4d1c082e52ea057544495916c4aa0708b82e47f55f364"
 dependencies = [
  "darling 0.20.3",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "once_cell",
  "prettyplease",
  "proc-macro2",
@@ -8468,7 +8468,7 @@ version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
- "indexmap 2.1.0",
+ "indexmap 2.2.1",
  "toml_datetime",
  "winnow",
 ]
@@ -8479,7 +8479,7 @@ version = "0.20.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "70f427fce4d84c72b5b732388bf4a9f4531b53f74e2887e3ecb2481f68f66d81"
 dependencies = [
- "indexmap 2.1.0",
+ "indexmap 2.2.1",
  "toml_datetime",
  "winnow",
 ]
@@ -8490,7 +8490,7 @@ version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d34d383cd00a163b4a5b85053df514d45bc330f6de7737edfe0a93311d1eaa03"
 dependencies = [
- "indexmap 2.1.0",
+ "indexmap 2.2.1",
  "serde",
  "serde_spanned",
  "toml_datetime",
