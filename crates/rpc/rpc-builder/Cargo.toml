@@ -42,6 +42,8 @@ strum = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 tracing.workspace = true
+futures-util.workspace = true
+futures.workspace = true
 
 [dev-dependencies]
 reth-tracing.workspace = true
@@ -56,3 +58,4 @@ reth-node-builder.workspace = true
 
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 serde_json.workspace = true
+either = "1.9.0"

@@ -6636,6 +6636,9 @@ dependencies = [
 name = "reth-rpc-builder"
 version = "0.1.0-alpha.15"
 dependencies = [
+ "either",
+ "futures",
+ "futures-util",
  "hyper",
  "jsonrpsee",
  "metrics",

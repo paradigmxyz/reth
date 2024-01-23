@@ -137,35 +137,28 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use std::{
+    borrow::BorrowMut,
     collections::{HashMap, HashSet},
     fmt,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     str::FromStr,
-    time::{Duration, SystemTime, UNIX_EPOCH}, borrow::BorrowMut,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use hyper::{header::AUTHORIZATION, HeaderMap};
+use constants::*;
+use error::{RpcError, ServerKind};
+use futures::future::Either;
+use futures_util::{future::BoxFuture, FutureExt};
+use hyper::{header::AUTHORIZATION, Body, HeaderMap, Request, Response};
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
     server::{IdProvider, Server, ServerHandle},
     Methods, RpcModule,
 };
-use reth_node_api::EngineTypes;
-use serde::{Deserialize, Serialize, Serializer};
-use strum::{AsRefStr, EnumIter, EnumVariantNames, IntoStaticStr, ParseError, VariantNames};
-use tower::layer::util::{Identity, Stack};
-use tower::util::{option_layer,Either};
-use tower::{ServiceBuilder,Layer,Service};
-use tower_http::cors::CorsLayer;
-use std::future::Future;
-use tracing::{instrument, trace};
-use hyper::{Request, Response, Body};
-use std::pin::Pin;
-use constants::*;
-use error::{RpcError, ServerKind};
 use reth_ipc::server::IpcServer;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
+use reth_node_api::EngineTypes;
 use reth_provider::{
     AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -184,6 +177,15 @@ use reth_rpc::{
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
+use serde::{Deserialize, Serialize, Serializer};
+use std::{future::Future, pin::Pin};
+use strum::{AsRefStr, EnumIter, EnumVariantNames, IntoStaticStr, ParseError, VariantNames};
+use tower::{
+    layer::util::{Identity, Stack},
+    Layer, Service, ServiceBuilder,
+};
+use tower_http::cors::CorsLayer;
+use tracing::{instrument, trace};
 
 use crate::{
     auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics,
@@ -1621,7 +1623,9 @@ impl RpcServerConfig {
             ws_local_addr = Some(addr);
             ws_server = Some(server);
         }
-        // async fn build(builder: ServerBuilder,   server_kind: ServerKind,socket_addr: SocketAddr,metrics: RpcServerMetrics,cors_domains: Option<String>, jwt_secret: Option<JwtSecret>) -> Result<(Self,SocketAddr),RpcError> {
+        // async fn build(builder: ServerBuilder,   server_kind: ServerKind,socket_addr:
+        // SocketAddr,metrics: RpcServerMetrics,cors_domains: Option<String>, jwt_secret:
+        // Option<JwtSecret>) -> Result<(Self,SocketAddr),RpcError> {
 
         if let Some(builder) = self.http_server_config.take() {
             let builder = builder.http_only();
@@ -1923,40 +1927,77 @@ impl Default for WsHttpServers {
     }
 }
 
-
-enum WsHttpServerKind {
-    Server(Server<tower::layer::util::Stack<tower::util::Either<reth_rpc::AuthLayer<reth_rpc::JwtAuthValidator>, tower::layer::util::Identity>, tower::layer::util::Stack<tower::util::Either<std::result::Result<tower_http::cors::CorsLayer, cors::CorsDomainError>, tower::layer::util::Identity>, tower::layer::util::Identity>>, metrics::RpcServerMetrics>),
+pub struct WsHttpServerKind {
+    server: ServerOriginal,
 }
+
+type EitherServer = Either<
+    Either<
+        Server<Identity, RpcServerMetrics>,
+        Server<Stack<CorsLayer, Identity>, RpcServerMetrics>,
+    >,
+    Either<
+        Server<Stack<AuthLayer<JwtAuthValidator>, Identity>, RpcServerMetrics>,
+        Server<Stack<AuthLayer<JwtAuthValidator>, Stack<CorsLayer, Identity>>, RpcServerMetrics>,
+    >,
+>;
+
+type ServerOriginal = Server<
+    tower::layer::util::Stack<
+        tower::util::Either<
+            reth_rpc::AuthLayer<reth_rpc::JwtAuthValidator>,
+            tower::layer::util::Identity,
+        >,
+        tower::layer::util::Stack<
+            tower::util::Either<
+                std::result::Result<tower_http::cors::CorsLayer, cors::CorsDomainError>,
+                tower::layer::util::Identity,
+            >,
+            tower::layer::util::Identity,
+        >,
+    >,
+    metrics::RpcServerMetrics,
+>;
 
 // === impl WsHttpServerKind ===
 
 impl WsHttpServerKind {
     /// Starts the server and returns the handle
-    async fn start( self, module: RpcModule<()>) -> ServerHandle {
-        match self {
-            WsHttpServerKind::Server(server) => {
-                
-                
-               
-            },
-        }
-    }
+    // async fn start( self, module: RpcModule<()>) -> ServerHandle {
+
+    //   #6133  How to call start() ?
+
+    // }
 
     /// Builds the server according to the given config parameters.
     ///
     /// Returns the address of the started server.
-    async fn build(builder: ServerBuilder,   server_kind: ServerKind,socket_addr: SocketAddr,metrics: RpcServerMetrics,cors_domains: Option<String>, jwt_secret: Option<JwtSecret>) -> Result<(Self,SocketAddr),RpcError> {
+    async fn build(
+        builder: ServerBuilder,
+        server_kind: ServerKind,
+        socket_addr: SocketAddr,
+        metrics: RpcServerMetrics,
+        cors_domains: Option<String>,
+        jwt_secret: Option<JwtSecret>,
+    ) -> Result<(Self, SocketAddr), RpcError> {
         let secret_layer;
-            if let Some(secret) = jwt_secret{
-                secret_layer= Some(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
-            }
-            else{
-                secret_layer = None
-            }
-            let z = ServiceBuilder::new().option_layer( cors_domains.as_deref().map(cors::create_cors_layer) ).option_layer(secret_layer);
-            let server =(builder.set_middleware(z).set_logger(metrics).build(socket_addr).await.map_err(|err| RpcError::from_jsonrpsee_error(err, server_kind)))?;
-            let local_addr = server.local_addr()?;
-            Ok((WsHttpServerKind::Server(server) ,local_addr))
+        if let Some(secret) = jwt_secret {
+            secret_layer = Some(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+        } else {
+            secret_layer = None
+        }
+        let z = ServiceBuilder::new()
+            .option_layer(cors_domains.as_deref().map(cors::create_cors_layer))
+            .option_layer(secret_layer);
+        let server = (builder
+            .set_middleware(z)
+            .set_logger(metrics)
+            .build(socket_addr)
+            .await
+            .map_err(|err| RpcError::from_jsonrpsee_error(err, server_kind)))?;
+        let local_addr = server.local_addr()?;
+        // Determine the server type based on the parameters
+        Ok((WsHttpServerKind { server }, local_addr))
     }
 }
 
