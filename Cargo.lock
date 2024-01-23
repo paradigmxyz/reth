@@ -1503,7 +1503,7 @@ version = "7.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c64043d6c7b7a4c58e39e7efccfdea7b93d885a795d0c054a69dbbf4dd52686"
 dependencies = [
- "crossterm 0.27.0",
+ "crossterm",
  "strum",
  "strum_macros",
  "unicode-width",
@@ -1717,22 +1717,6 @@ name = "crossbeam-utils"
 version = "0.8.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "248e3bacc7dc6baa3b21e405ee045c3047101a49145e7e9eca583ab4c2ca5345"
-
-[[package]]
-name = "crossterm"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e64e6c0fbe2c17357405f7c758c1ef960fce08bdfb2c03d88d2a18d7e09c4b67"
-dependencies = [
- "bitflags 1.3.2",
- "crossterm_winapi",
- "libc",
- "mio",
- "parking_lot 0.12.1",
- "signal-hook",
- "signal-hook-mio",
- "winapi",
-]
 
 [[package]]
 name = "crossterm"
@@ -5594,7 +5578,7 @@ checksum = "a5659e52e4ba6e07b2dad9f1158f578ef84a73762625ddb51536019f34d180eb"
 dependencies = [
  "bitflags 2.4.2",
  "cassowary",
- "crossterm 0.27.0",
+ "crossterm",
  "indoc",
  "itertools 0.12.0",
  "lru 0.12.1",
@@ -5776,27 +5760,20 @@ dependencies = [
  "alloy-chains",
  "alloy-rlp",
  "aquamarine",
- "assert_matches",
- "async-trait",
  "backon",
- "boyer-moore-magiclen",
  "clap",
  "comfy-table",
  "confy",
- "const-str",
- "crossterm 0.27.0",
- "dirs-next",
+ "crossterm",
  "eyre",
  "fdlimit",
  "futures",
- "futures-util",
  "human_bytes",
  "humantime",
  "hyper",
  "itertools 0.12.0",
  "jemalloc-ctl",
  "jemallocator",
- "jsonrpsee",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-process",
@@ -5821,7 +5798,6 @@ dependencies = [
  "reth-ethereum-payload-builder",
  "reth-interfaces",
  "reth-metrics",
- "reth-net-nat",
  "reth-network",
  "reth-network-api",
  "reth-nippy-jar",
@@ -5851,9 +5827,7 @@ dependencies = [
  "secp256k1 0.27.0",
  "serde",
  "serde_json",
- "shellexpand",
  "tempfile",
- "thiserror",
  "tokio",
  "toml 0.8.8",
  "tracing",
@@ -6449,7 +6423,6 @@ version = "0.1.0-alpha.15"
 dependencies = [
  "reth-payload-builder",
  "reth-primitives",
- "reth-provider",
  "reth-rpc-types",
  "serde",
  "thiserror",
@@ -6459,15 +6432,10 @@ dependencies = [
 name = "reth-node-builder"
 version = "0.1.0-alpha.15"
 dependencies = [
- "async-trait",
- "eyre",
- "reth-network",
  "reth-node-api",
- "reth-node-core",
  "reth-payload-builder",
  "reth-primitives",
  "reth-rpc-types",
- "reth-transaction-pool",
  "serde",
 ]
 
@@ -6475,46 +6443,26 @@ dependencies = [
 name = "reth-node-core"
 version = "0.1.0-alpha.15"
 dependencies = [
- "alloy-chains",
  "alloy-rlp",
- "backon",
  "boyer-moore-magiclen",
  "clap",
- "comfy-table",
- "confy",
  "const-str",
- "crossterm 0.27.0",
  "dirs-next",
  "eyre",
- "fdlimit",
  "futures",
- "human_bytes",
  "humantime",
- "hyper",
- "itertools 0.12.0",
- "metrics",
- "metrics-exporter-prometheus",
- "metrics-process",
- "metrics-util",
- "once_cell",
- "pin-project",
- "pretty_assertions",
  "proptest",
  "rand 0.8.5",
- "rayon",
  "reth-basic-payload-builder",
  "reth-config",
  "reth-consensus-common",
  "reth-db",
  "reth-discv4",
- "reth-ethereum-payload-builder",
  "reth-interfaces",
- "reth-metrics",
  "reth-net-nat",
  "reth-network",
  "reth-network-api",
  "reth-node-api",
- "reth-optimism-payload-builder",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
@@ -6527,17 +6475,11 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
- "revm-inspectors",
  "secp256k1 0.27.0",
- "serde",
  "serde_json",
  "shellexpand",
- "tempfile",
  "thiserror",
- "tokio",
- "toml 0.8.8",
  "tracing",
- "tui",
  "vergen",
 ]
 
@@ -8840,19 +8782,6 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "termcolor",
-]
-
-[[package]]
-name = "tui"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccdd26cbd674007e649a272da4475fb666d3aa0ad0531da7136db6fab0e5bad1"
-dependencies = [
- "bitflags 1.3.2",
- "cassowary",
- "crossterm 0.25.0",
- "unicode-segmentation",
- "unicode-width",
 ]
 
 [[package]]

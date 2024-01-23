@@ -101,6 +101,7 @@ where
 }
 
 /// Wrapper over DB that implements many useful DB queries.
+#[derive(Debug)]
 pub struct DbTool<'a, DB: Database> {
     /// The database that the db tool will use.
     pub db: &'a DB,
