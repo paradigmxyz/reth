@@ -1,0 +1,88 @@
+[package]
+name = "reth-node-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+
+[lints]
+workspace = true
+
+
+[dependencies]
+# reth
+reth-primitives.workspace = true
+reth-db = { workspace = true, features = ["mdbx"] }
+reth-interfaces = { workspace = true, features = ["clap"] }
+reth-provider.workspace = true
+reth-network = { workspace = true, features = ["serde"] }
+reth-rpc-engine-api.workspace = true
+reth-rpc-builder.workspace = true
+reth-rpc.workspace = true
+reth-rpc-types.workspace = true
+reth-rpc-types-compat.workspace = true
+reth-rpc-api = { workspace = true, features = ["client"] }
+reth-transaction-pool.workspace = true
+reth-tracing.workspace = true
+reth-config.workspace = true
+reth-discv4.workspace = true
+reth-net-nat.workspace = true
+reth-network-api.workspace = true
+reth-node-api.workspace = true
+reth-tasks.workspace = true
+reth-payload-builder.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-consensus-common.workspace = true
+
+
+# misc
+boyer-moore-magiclen = "0.2.16"
+eyre.workspace = true
+clap = { workspace = true, features = ["derive"] }
+humantime = "2.1.0"
+thiserror.workspace = true
+const-str = "0.5.6"
+
+rand.workspace = true
+
+# io
+dirs-next = "2.0.0"
+shellexpand = "3.0.0"
+serde_json.workspace = true
+
+# tracing
+tracing.workspace = true
+
+# crypto
+alloy-rlp.workspace = true
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+
+# async
+futures.workspace = true
+
+[dev-dependencies]
+# test vectors generation
+proptest.workspace = true
+
+
+[features]
+optimism = [
+    "reth-primitives/optimism",
+    "reth-interfaces/optimism",
+    "reth-rpc/optimism",
+    "reth-rpc-engine-api/optimism",
+    "reth-transaction-pool/optimism",
+    "reth-provider/optimism",
+    "reth-network/optimism",
+    "reth-network-api/optimism",
+    "reth-payload-builder/optimism",
+    "reth-node-api/optimism",
+]
+
+
+
+[build-dependencies]
+vergen = { version = "8.0.0", features = ["build", "cargo", "git", "git2"] }

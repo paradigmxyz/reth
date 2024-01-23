@@ -16,8 +16,6 @@
 //!    `signature` is a 65-byte secp256k1 EC signature over the keccak256 hash of the record
 //! content, excluding the sig= part, encoded as URL-safe base64 (RFC-4648).
 
-#![allow(missing_docs)]
-
 use crate::error::{
     ParseDnsEntryError,
     ParseDnsEntryError::{FieldNotFound, UnknownEntry},
@@ -27,27 +25,33 @@ use data_encoding::{BASE32_NOPAD, BASE64URL_NOPAD};
 use enr::{Enr, EnrError, EnrKey, EnrKeyUnambiguous, EnrPublicKey};
 use reth_primitives::{hex, Bytes};
 use secp256k1::SecretKey;
+#[cfg(feature = "serde")]
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{
     fmt,
     hash::{Hash, Hasher},
     str::FromStr,
 };
 
-#[cfg(feature = "serde")]
-use serde_with::{DeserializeFromStr, SerializeDisplay};
-
+/// Prefix used for root entries in the ENR tree.
 const ROOT_V1_PREFIX: &str = "enrtree-root:v1";
+/// Prefix used for link entries in the ENR tree.
 const LINK_PREFIX: &str = "enrtree://";
+/// Prefix used for branch entries in the ENR tree.
 const BRANCH_PREFIX: &str = "enrtree-branch:";
+/// Prefix used for ENR entries in the ENR tree.
 const ENR_PREFIX: &str = "enr:";
 
-/// Represents all variants
+/// Represents all variants of DNS entries for Ethereum node lists.
 #[derive(Debug, Clone)]
-#[allow(missing_docs)]
 pub enum DnsEntry<K: EnrKeyUnambiguous> {
+    /// Represents a root entry in the DNS tree containing node records.
     Root(TreeRootEntry),
+    /// Represents a link entry in the DNS tree pointing to another node list.
     Link(LinkEntry<K>),
+    /// Represents a branch entry in the DNS tree containing hashes of subtree entries.
     Branch(BranchEntry),
+    /// Represents a leaf entry in the DNS tree containing a node record.
     Node(NodeEntry<K>),
 }
 
@@ -83,9 +87,13 @@ impl<K: EnrKeyUnambiguous> FromStr for DnsEntry<K> {
 /// Represents an `enr-root` hash of subtrees containing nodes and links.
 #[derive(Clone, Eq, PartialEq)]
 pub struct TreeRootEntry {
+    /// The `enr-root` hash.
     pub enr_root: String,
+    /// The root hash of the links.
     pub link_root: String,
+    /// The sequence number associated with the entry.
     pub sequence_number: u64,
+    /// The signature of the entry.
     pub signature: Bytes,
 }
 
@@ -171,9 +179,10 @@ impl fmt::Display for TreeRootEntry {
     }
 }
 
-/// A branch entry with base32 hashes
+/// Represents a branch entry in the DNS tree, containing base32 hashes of subtree entries.
 #[derive(Debug, Clone)]
 pub struct BranchEntry {
+    /// The list of base32-encoded hashes of subtree entries in the branch.
     pub children: Vec<String>,
 }
 
@@ -211,11 +220,8 @@ impl FromStr for BranchEntry {
     type Err = ParseDnsEntryError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(s) = s.strip_prefix(BRANCH_PREFIX) {
-            Self::parse_value(s)
-        } else {
-            Err(UnknownEntry(s.to_string()))
-        }
+        s.strip_prefix(BRANCH_PREFIX)
+            .map_or_else(|| Err(UnknownEntry(s.to_string())), Self::parse_value)
     }
 }
 
@@ -225,11 +231,13 @@ impl fmt::Display for BranchEntry {
     }
 }
 
-/// A link entry
+/// Represents a link entry in the DNS tree, facilitating federation and web-of-trust functionality.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(SerializeDisplay, DeserializeFromStr))]
 pub struct LinkEntry<K: EnrKeyUnambiguous = SecretKey> {
+    /// The domain associated with the link entry.
     pub domain: String,
+    /// The public key corresponding to the Ethereum Node Record (ENR) used for the link entry.
     pub pubkey: K::PublicKey,
 }
 
@@ -283,11 +291,8 @@ impl<K: EnrKeyUnambiguous> FromStr for LinkEntry<K> {
     type Err = ParseDnsEntryError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(s) = s.strip_prefix(LINK_PREFIX) {
-            Self::parse_value(s)
-        } else {
-            Err(UnknownEntry(s.to_string()))
-        }
+        s.strip_prefix(LINK_PREFIX)
+            .map_or_else(|| Err(UnknownEntry(s.to_string())), Self::parse_value)
     }
 }
 
@@ -303,9 +308,10 @@ impl<K: EnrKeyUnambiguous> fmt::Display for LinkEntry<K> {
     }
 }
 
-/// The actual [Enr] entry.
+/// Represents the actual Ethereum Node Record (ENR) entry in the DNS tree.
 #[derive(Debug, Clone)]
 pub struct NodeEntry<K: EnrKeyUnambiguous> {
+    /// The Ethereum Node Record (ENR) associated with the node entry.
     pub enr: Enr<K>,
 }
 
@@ -316,8 +322,7 @@ impl<K: EnrKeyUnambiguous> NodeEntry<K> {
     ///
     /// Caution: This assumes the prefix is already removed.
     fn parse_value(s: &str) -> ParseEntryResult<Self> {
-        let enr: Enr<K> = s.parse().map_err(ParseDnsEntryError::Other)?;
-        Ok(Self { enr })
+        Ok(Self { enr: s.parse().map_err(ParseDnsEntryError::Other)? })
     }
 }
 
@@ -325,11 +330,8 @@ impl<K: EnrKeyUnambiguous> FromStr for NodeEntry<K> {
     type Err = ParseDnsEntryError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(s) = s.strip_prefix(ENR_PREFIX) {
-            Self::parse_value(s)
-        } else {
-            Err(UnknownEntry(s.to_string()))
-        }
+        s.strip_prefix(ENR_PREFIX)
+            .map_or_else(|| Err(UnknownEntry(s.to_string())), Self::parse_value)
     }
 }
 

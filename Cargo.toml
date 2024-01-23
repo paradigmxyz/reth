@@ -37,6 +37,7 @@ members = [
     "crates/rpc/rpc-types/",
     "crates/rpc/rpc-types-compat/",
     "crates/node-builder/",
+    "crates/node-core/",
     "crates/node-api/",
     "crates/snapshot/",
     "crates/stages/",
@@ -76,7 +77,7 @@ rust.unused_must_use = "deny"
 rust.rust_2018_idioms = "deny"
 
 [workspace.package]
-version = "0.1.0-alpha.15"
+version = "0.1.0-alpha.16"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
@@ -115,6 +116,7 @@ reth-db = { path = "crates/storage/db" }
 reth-discv4 = { path = "crates/net/discv4" }
 reth-dns-discovery = { path = "crates/net/dns" }
 reth-node-builder = { path = "crates/node-builder" }
+reth-node-core = { path = "crates/node-core" }
 reth-node-api = { path = "crates/node-api" }
 reth-downloaders = { path = "crates/net/downloaders" }
 reth-ecies = { path = "crates/net/ecies" }
