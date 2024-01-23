@@ -2,8 +2,8 @@ use crate::{
     basefee::calculate_next_block_base_fee,
     constants::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH},
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
-    keccak256, Address, BaseFeeParams, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, B256,
-    B64, U256,
+    keccak256, Address, BaseFeeParams, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes,
+    Hardfork, B256, B64, U256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use bytes::{Buf, BufMut, BytesMut};
@@ -19,8 +19,20 @@ use std::{
 pub enum HeaderError {
     /// Represents an error when the block difficulty is too large.
     LargeDifficulty,
+
+    /// Represents an error when the difficulty of the first block does not match the expected
+    /// value.
+    FirstBlockDifficulty,
+
+    /// Represents an error when the block difficulty does not adhere to the canonical difficulty
+    /// rules.
+    CanonicalDifficulty,
+
     /// Represents an error when the block extradata is too large.
     LargeExtraData,
+
+    /// Represents an error related to proof-of-stake difficulty.
+    ProofOfStakeDifficulty,
 }
 
 /// Block header
@@ -153,13 +165,89 @@ impl Header {
 
     /// Performs a sanity check on the block difficulty field of the header.
     ///
-    /// # Errors
+    /// Ensures that the block difficulty adheres to Ethereum's canonical difficulty definition.
+    /// The canonical difficulty (`D(H)`) is determined based on Ethereum's block difficulty rules.
     ///
-    /// Returns an error if the block difficulty exceeds 80 bits.
-    pub fn ensure_difficulty_valid(&self) -> Result<(), HeaderError> {
-        if self.difficulty.bit_len() > 80 {
-            return Err(HeaderError::LargeDifficulty)
+    /// For detailed explanation, refer to the Ethereum Yellow Paper and relevant EIPs.
+    pub fn ensure_difficulty_valid(
+        &self,
+        hardfork: Hardfork,
+        parent_header: Header,
+    ) -> Result<(), HeaderError> {
+        // Check if the hardfork is Paris or later
+        if hardfork >= Hardfork::Paris {
+            // For Paris hardfork and later, ensure zero difficulty for proof of stake
+            if !self.is_zero_difficulty() {
+                return Err(HeaderError::ProofOfStakeDifficulty);
+            }
+            return Ok(());
+        } else {
+            // Check for large difficulty
+            if self.difficulty.bit_len() > 80 {
+                return Err(HeaderError::LargeDifficulty);
+            }
+
+            // Check for first block difficulty
+            if self.number == 0 {
+                if self.difficulty != U256::from(2).pow(U256::from(34)) {
+                    return Err(HeaderError::FirstBlockDifficulty);
+                }
+                return Ok(())
+            }
+
+            // Calculate adjustment factor
+            let x = parent_header.difficulty.checked_div(U256::from(2048)).unwrap();
+
+            // Determine y based on the presence of ommer blocks
+            let y = if parent_header.ommers_hash == EMPTY_OMMER_ROOT_HASH { 1 } else { 2 };
+
+            // Calculate the dynamic adjustment factor affecting block time
+            let zeta = std::cmp::max(
+                y as i64 - (self.timestamp as i64 - parent_header.timestamp as i64) / 9,
+                -99,
+            );
+
+            // Determine kappa based on hardfork phase
+            let kappa: i64 = if hardfork < Hardfork::Byzantium {
+                0
+            } else if Hardfork::Byzantium <= hardfork && hardfork < Hardfork::Constantinople {
+                3000000
+            } else if Hardfork::Constantinople <= hardfork && hardfork < Hardfork::MuirGlacier {
+                5000000
+            } else if Hardfork::MuirGlacier <= hardfork && hardfork < Hardfork::London {
+                9000000
+            } else if Hardfork::London <= hardfork && hardfork < Hardfork::ArrowGlacier {
+                9700000
+            } else if Hardfork::ArrowGlacier <= hardfork && hardfork < Hardfork::GrayGlacier {
+                10700000
+            } else {
+                11400000
+            };
+
+            // Calculate adjusted block number
+            let h_prime = std::cmp::max(self.number as i64 - kappa, 0);
+
+            // Calculate additional adjustment factors
+            let epsilon = 2_i64.pow(((h_prime / 100000) - 2).try_into().unwrap());
+
+            // Determine the expected difficulty
+            let expected_difficulty = U256::from(2).pow(U256::from(17)).max(
+                parent_header
+                    .difficulty
+                    .wrapping_add(x.wrapping_mul(if zeta < 0 {
+                        U256::from(-zeta).wrapping_neg()
+                    } else {
+                        U256::from(zeta)
+                    }))
+                    .wrapping_add(U256::from(epsilon)),
+            );
+
+            // Check if the calculated difficulty matches the expected difficulty
+            if self.difficulty.ne(&expected_difficulty) {
+                return Err(HeaderError::CanonicalDifficulty);
+            }
         }
+
         Ok(())
     }
 
@@ -171,8 +259,12 @@ impl Header {
     ///
     /// Returns an error if either the block difficulty exceeds 80 bits
     /// or if the extradata size is larger than 100 KB.
-    pub fn ensure_well_formed(&self) -> Result<(), HeaderError> {
-        self.ensure_difficulty_valid()?;
+    pub fn ensure_well_formed(
+        &self,
+        hardfork: Hardfork,
+        parent_header: Header,
+    ) -> Result<(), HeaderError> {
+        self.ensure_difficulty_valid(hardfork, parent_header)?;
         self.ensure_extradata_valid()?;
         Ok(())
     }
@@ -785,7 +877,9 @@ mod ethers_compat {
 #[cfg(test)]
 mod tests {
     use super::{Bytes, Decodable, Encodable, Header, B256};
-    use crate::{address, b256, bloom, bytes, hex, Address, HeadersDirection, U256};
+    use crate::{
+        address, b256, bloom, bytes, header::HeaderError, hex, Address, HeadersDirection, U256,
+    };
     use std::str::FromStr;
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
@@ -1044,5 +1138,116 @@ mod tests {
         let data = hex!("f90242a013a7ec98912f917b3e804654e37c9866092043c13eb8eab94eb64818e886cff5a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d4934794f97e180c050e5ab072211ad2c213eb5aee4df134a0ec229dbe85b0d3643ad0f471e6ec1a36bbc87deffbbd970762d22a53b35d068aa056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080830305988401c9c380808464c40d5499d883010c01846765746888676f312e32302e35856c696e7578a070ccadc40b16e2094954b1064749cc6fbac783c1712f1b271a8aac3eda2f232588000000000000000007a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421891122334455667788998401600000");
         Header::decode(&mut data.as_slice())
             .expect_err("blob_gas_used size should make this header decoding fail");
+    }
+
+    #[test]
+    fn test_genesis_ensure_difficulty() {
+        let mut genesis_header = Header::default();
+
+        // Test with difficulty equal to 2^34 (should be Ok())
+        genesis_header.difficulty = U256::from(2).pow(U256::from(34));
+        assert_eq!(
+            genesis_header.ensure_difficulty_valid(
+                reth_ethereum_forks::Hardfork::GrayGlacier,
+                Header::default()
+            ),
+            Ok(())
+        );
+
+        // Test with difficulty less than 2^34 (should result in an error)
+        genesis_header.difficulty = U256::from(1);
+        assert_eq!(
+            genesis_header.ensure_difficulty_valid(
+                reth_ethereum_forks::Hardfork::GrayGlacier,
+                Header::default()
+            ),
+            Err(HeaderError::FirstBlockDifficulty)
+        );
+    }
+
+    #[test]
+    fn test_post_merge_ensure_difficulty() {
+        let mut header = Header::default();
+
+        // Test with difficulty equal to 0 (should be Ok())
+        assert_eq!(
+            header.ensure_difficulty_valid(reth_ethereum_forks::Hardfork::Paris, Header::default()),
+            Ok(())
+        );
+
+        // Test with difficulty not zero (should result in an error)
+        header.difficulty = U256::from(1);
+        assert_eq!(
+            header.ensure_difficulty_valid(reth_ethereum_forks::Hardfork::Paris, Header::default()),
+            Err(HeaderError::ProofOfStakeDifficulty)
+        );
+    }
+
+    #[test]
+    fn test_byzantium_difficulty() {
+        // https://etherscan.io/block/6571534
+        let mut header = Header::default();
+        header.difficulty = U256::from_str("3173515550674968").unwrap();
+        header.number = 6571534;
+        header.timestamp = 1540295698;
+
+        // https://etherscan.io/block/6571533
+        let mut parent_header = Header::default();
+        parent_header.difficulty = U256::from_str("3189078633756766").unwrap();
+        parent_header.number = 6571533;
+        parent_header.timestamp = 1540295597;
+
+        // Ensure that the block difficulty is valid under the Byzantium hardfork.
+        assert_eq!(
+            header.ensure_difficulty_valid(
+                reth_ethereum_forks::Hardfork::Byzantium,
+                parent_header.clone()
+            ),
+            Ok(())
+        );
+
+        // Modify the timestamp of the parent header to create an invalid difficulty scenario.
+        parent_header.timestamp = 1540295497;
+
+        // Ensure that an error is returned for invalid block difficulty under Byzantium hardfork.
+        assert_eq!(
+            header.ensure_difficulty_valid(reth_ethereum_forks::Hardfork::Byzantium, parent_header),
+            Err(HeaderError::CanonicalDifficulty)
+        );
+    }
+
+    #[test]
+    fn test_muir_glacier_difficulty() {
+        // https://etherscan.io/block/11571736
+        let mut header = Header::default();
+        header.difficulty = U256::from_str("3744489008130646").unwrap();
+        header.number = 11571736;
+        header.timestamp = 1609591015;
+
+        // https://etherscan.io/block/11571735
+        let mut parent_header = Header::default();
+        parent_header.difficulty = U256::from_str("3742661528292677").unwrap();
+        parent_header.number = 11571735;
+        parent_header.timestamp = 1609591013;
+
+        // Ensure that the block difficulty is valid under the Muir Glacier hardfork.
+        assert_eq!(
+            header.ensure_difficulty_valid(
+                reth_ethereum_forks::Hardfork::MuirGlacier,
+                parent_header.clone()
+            ),
+            Ok(())
+        );
+
+        // Modify the difficulty of the parent header to create an invalid difficulty scenario.
+        parent_header.difficulty = U256::from_str("37426615282926770").unwrap();
+
+        // Ensure that an error is returned for invalid block difficulty under Muir Glacier
+        // hardfork.
+        assert_eq!(
+            header
+                .ensure_difficulty_valid(reth_ethereum_forks::Hardfork::MuirGlacier, parent_header),
+            Err(HeaderError::CanonicalDifficulty)
+        );
     }
 }
