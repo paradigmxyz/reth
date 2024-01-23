@@ -986,6 +986,7 @@ impl Default for NodeConfig {
 /// [NodeHandle].
 ///
 /// This also contains a path to a data dir that cannot be changed.
+#[derive(Debug)]
 pub struct NodeBuilderWithDatabase<DB> {
     /// The node config
     pub config: NodeConfig,
