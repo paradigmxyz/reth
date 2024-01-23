@@ -156,6 +156,9 @@ struct MetricsHandler<K: TransactionKind> {
     /// If `true`, the metric about transaction closing has already been recorded and we don't need
     /// to do anything on [Drop::drop].
     close_recorded: bool,
+    /// If `true`, the backtrace of transaction will be recorded and logged.
+    /// See [MetricsHandler::log_backtrace_on_long_read_transaction].
+    record_backtrace: bool,
     /// If `true`, the backtrace of transaction has already been recorded and logged.
     /// See [MetricsHandler::log_backtrace_on_long_read_transaction].
     backtrace_recorded: AtomicBool,
@@ -168,6 +171,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
             txn_id,
             start: Instant::now(),
             close_recorded: false,
+            record_backtrace: true,
             backtrace_recorded: AtomicBool::new(false),
             _marker: PhantomData,
         }
@@ -194,13 +198,14 @@ impl<K: TransactionKind> MetricsHandler<K> {
     }
 
     /// Logs the backtrace of current call if the duration that the read transaction has been open
-    /// is more than [LONG_TRANSACTION_DURATION].
+    /// is more than [LONG_TRANSACTION_DURATION] and `record_backtrace == true`.
     /// The backtrace is recorded and logged just once, guaranteed by `backtrace_recorded` atomic.
     ///
     /// NOTE: Backtrace is recorded using [Backtrace::force_capture], so `RUST_BACKTRACE` env var is
     /// not needed.
     fn log_backtrace_on_long_read_transaction(&self) {
-        if !self.backtrace_recorded.load(Ordering::Relaxed) &&
+        if self.record_backtrace &&
+            !self.backtrace_recorded.load(Ordering::Relaxed) &&
             self.transaction_mode().is_read_only()
         {
             let open_duration = self.start.elapsed();
@@ -282,6 +287,12 @@ impl<K: TransactionKind> DbTx for Tx<K> {
             .db_stat_with_dbi(self.get_dbi::<T>()?)
             .map_err(|e| DatabaseError::Stats(e.into()))?
             .entries())
+    }
+
+    fn disable_backtrace_on_long_read_transaction(&mut self) {
+        if let Some(metrics_handler) = self.metrics_handler.as_mut() {
+            metrics_handler.record_backtrace = false;
+        }
     }
 }
 

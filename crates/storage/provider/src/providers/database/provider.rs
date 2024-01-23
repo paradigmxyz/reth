@@ -246,6 +246,11 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             .collect::<Result<Vec<_>, DatabaseError>>()
     }
 
+    pub fn disable_backtrace_on_long_read_transaction(mut self) -> Self {
+        self.tx.disable_backtrace_on_long_read_transaction();
+        self
+    }
+
     /// Gets data within a specified range, potentially spanning different snapshots and database.
     ///
     /// # Arguments
