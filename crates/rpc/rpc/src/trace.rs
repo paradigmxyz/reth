@@ -103,7 +103,7 @@ where
             .eth_api
             .evm_env_at(block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)))
             .await?;
-        let tx = tx.into_ecrecovered_transaction().new_filled_tx_env();
+        let tx = tx.into_ecrecovered_transaction().tx_env();
         let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block, tx);
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);

@@ -25,7 +25,7 @@ mod builder {
         },
         eip4844::calculate_excess_blob_gas,
         proofs,
-        revm::{env::FillableTransaction},
+        revm::env::FillableTransaction,
         Block, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH, U256,
     };
     use reth_provider::{BundleStateWithReceipts, StateProviderFactory};

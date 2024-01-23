@@ -904,7 +904,7 @@ where
             replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;
 
             let env =
-                EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx.new_filled_tx_env());
+                EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx.tx_env());
 
             let mut inspector = TracingInspector::new(config);
             let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
@@ -987,7 +987,7 @@ where
                         block_number: Some(block_number),
                         base_fee: Some(base_fee),
                     };
-                    let tx_env = tx.new_filled_tx_env();
+                    let tx_env = tx.tx_env();
                     (tx_info, tx_env)
                 })
                 .peekable();

@@ -437,7 +437,6 @@ where
 
                     // Execute all transactions until index
                     for tx in transactions {
-                        let tx = tx.new_filled_tx_env();
                         let env = EnvWithHandlerCfg {
                             env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
                             handler_cfg: cfg.handler_cfg,

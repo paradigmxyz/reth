@@ -314,7 +314,7 @@ pub trait FillableTransaction {
 
     /// Create a new `TxEnv` instance using default values, then fill it with the given
     /// transaction.
-    fn new_filled_tx_env(&self) -> TxEnv {
+    fn tx_env(&self) -> TxEnv {
         let mut tx_env = TxEnv::default();
         self.fill_tx_env(&mut tx_env);
         tx_env

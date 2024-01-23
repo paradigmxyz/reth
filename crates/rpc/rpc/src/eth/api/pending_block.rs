@@ -132,7 +132,7 @@ impl PendingBlockEnv {
 
             // Configure the environment for the block.
             let env =
-                Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx.new_filled_tx_env());
+                Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx.tx_env());
 
             let mut evm = revm::Evm::builder().with_env(env).with_db(&mut db).build();
 

@@ -126,7 +126,7 @@ where
                 // to be replayed
                 let transactions = block.into_transactions_ecrecovered().take(num_txs);
                 for tx in transactions {
-                    let tx = tx.new_filled_tx_env();
+                    let tx = tx.tx_env();
                     let env =
                         EnvWithHandlerCfg::new_with_cfg_env(cfg.clone(), block_env.clone(), tx);
                     let (res, _) = transact(&mut db, env)?;
