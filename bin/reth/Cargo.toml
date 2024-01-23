@@ -43,7 +43,7 @@ reth-network-api.workspace = true
 reth-downloaders.workspace = true
 reth-tracing.workspace = true
 reth-tasks.workspace = true
-reth-optimism-payload-builder = { path = "../../crates/payload/optimism", optional = true }
+reth-optimism-payload-builder = { workspace = true, optional = true }
 reth-ethereum-payload-builder.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-validator.workspace = true

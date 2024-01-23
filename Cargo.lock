@@ -6449,6 +6449,7 @@ version = "0.1.0-alpha.15"
 dependencies = [
  "alloy-chains",
  "alloy-rlp",
+ "assert_matches",
  "clap",
  "confy",
  "const-str",
@@ -6458,6 +6459,7 @@ dependencies = [
  "futures",
  "humantime",
  "hyper",
+ "jsonrpsee",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-process",
@@ -6483,6 +6485,7 @@ dependencies = [
  "reth-network-api",
  "reth-node-api",
  "reth-node-builder",
+ "reth-optimism-payload-builder",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",

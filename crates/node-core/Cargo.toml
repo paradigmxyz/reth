@@ -47,6 +47,7 @@ reth-blockchain-tree.workspace = true
 revm-inspectors.workspace = true
 reth-snapshot.workspace = true
 reth-ethereum-payload-builder.workspace = true
+reth-optimism-payload-builder = { workspace = true, optional = true }
 
 # async
 tokio.workspace = true
@@ -94,6 +95,8 @@ futures.workspace = true
 # test vectors generation
 proptest.workspace = true
 tempfile.workspace = true
+jsonrpsee.workspace = true
+assert_matches.version = "1.5.0"
 
 [features]
 optimism = [
@@ -106,6 +109,8 @@ optimism = [
     "reth-network/optimism",
     "reth-network-api/optimism",
     "reth-payload-builder/optimism",
+    "reth-optimism-payload-builder/optimism",
+    "reth-ethereum-payload-builder/optimism",
     "reth-node-api/optimism",
 ]
 
