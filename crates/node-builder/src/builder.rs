@@ -95,7 +95,7 @@ where
     Types: NodeTypes,
     Components: NodeComponentsBuilder<FullNodeTypesAdapter<Types, RethFullProviderType<DB>>>,
 {
-    /// Launches the node.
+    /// Launches the node and returns a handle to it.
     pub async fn launch(mut self, executor: TaskExecutor) -> eyre::Result<NodeHandle> {
         todo!()
     }
@@ -131,5 +131,4 @@ where
 pub struct ComponentsState<Types, Builder> {
     _maker: PhantomData<Types>,
     builder: Builder,
-    // TODO add additional hooks for rpc, on_node_launched etc. here or in another state
 }
