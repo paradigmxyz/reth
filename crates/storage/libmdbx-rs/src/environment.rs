@@ -576,6 +576,8 @@ pub struct EnvironmentBuilder {
     #[cfg(not(windows))]
     handle_slow_readers: Option<HandleSlowReadersCallback>,
     #[cfg(feature = "read-tx-timeouts")]
+    /// The maximum duration of a read transaction. If [None], but the `read-tx-timeout` feature is
+    /// enabled, the default value of [DEFAULT_MAX_READ_TRANSACTION_DURATION] is used.
     max_read_transaction_duration: Option<read_transactions::MaxReadTransactionDuration>,
 }
 
