@@ -12,6 +12,8 @@ use reth_db::database_metrics::DatabaseMetrics;
 use reth_metrics::metrics::Unit;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
+use crate::version_metrics::record_version_metrics;
+
 pub(crate) trait Hook: Fn() + Send + Sync {}
 impl<T: Fn() + Send + Sync> Hook for T {}
 
@@ -104,6 +106,7 @@ where
     process.describe();
     describe_memory_stats();
     describe_io_stats();
+    record_version_metrics();
 
     Ok(())
 }

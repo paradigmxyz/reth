@@ -18,6 +18,7 @@ pub mod node_config;
 pub mod prometheus_exporter;
 pub mod utils;
 pub mod version;
+pub mod version_metrics;
 
 /// Re-exported from `reth_primitives`.
 pub mod primitives {
