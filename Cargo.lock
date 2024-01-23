@@ -5769,6 +5769,7 @@ dependencies = [
  "eyre",
  "fdlimit",
  "futures",
+ "futures-util",
  "human_bytes",
  "humantime",
  "hyper",

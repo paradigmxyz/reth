@@ -17,7 +17,7 @@ use crate::{
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
         RpcServerArgs, TxPoolArgs,
     },
-    builder::{NodeConfig, NodeExitFuture},
+    builder::NodeConfig,
     cli::{db_type::DatabaseBuilder, ext::RethCliExt},
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
@@ -215,13 +215,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         // launch the node
         let handle = node_config.launch::<Ext>(ext, executor).await?;
-
-        // wait for node exit
-        let node_exit_future = NodeExitFuture {
-            consensus_engine_rx: handle.consensus_engine_rx,
-            terminate: handle.terminate,
-        };
-        node_exit_future.await
+        handle.node_exit_future.await
     }
 
     /// Returns the [Consensus] instance to use.

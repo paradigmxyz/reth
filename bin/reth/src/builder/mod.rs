@@ -1317,12 +1317,11 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             .await?;
         }
 
+        // wait for node exit future
+        let node_exit_future = NodeExitFuture::new(rx, self.config.debug.terminate);
+
         // construct node handle and return
-        let node_handle = NodeHandle {
-            rpc_server_handles,
-            consensus_engine_rx: rx,
-            terminate: self.config.debug.terminate,
-        };
+        let node_handle = NodeHandle { rpc_server_handles, node_exit_future };
         Ok(node_handle)
     }
 
@@ -1361,12 +1360,9 @@ pub struct NodeHandle {
     /// The handles to the RPC servers
     rpc_server_handles: RethRpcServerHandles,
 
-    /// The receiver half of the channel for the consensus engine.
-    /// This can be used to wait for the consensus engine to exit.
-    pub consensus_engine_rx: oneshot::Receiver<Result<(), BeaconConsensusEngineError>>,
-
-    /// Flag indicating whether the node should be terminated after the pipeline sync.
-    pub terminate: bool,
+    /// A Future which waits node exit
+    /// See [`NodeExitFuture`]
+    pub node_exit_future: NodeExitFuture,
 }
 
 impl NodeHandle {
@@ -1381,29 +1377,42 @@ impl NodeHandle {
 pub struct NodeExitFuture {
     /// The receiver half of the channel for the consensus engine.
     /// This can be used to wait for the consensus engine to exit.
-    pub consensus_engine_rx: oneshot::Receiver<Result<(), BeaconConsensusEngineError>>,
+    consensus_engine_rx: Option<oneshot::Receiver<Result<(), BeaconConsensusEngineError>>>,
 
     /// Flag indicating whether the node should be terminated after the pipeline sync.
-    pub terminate: bool,
+    terminate: bool,
+}
+
+impl NodeExitFuture {
+    fn new(
+        consensus_engine_rx: oneshot::Receiver<Result<(), BeaconConsensusEngineError>>,
+        terminate: bool,
+    ) -> Self {
+        Self { consensus_engine_rx: Some(consensus_engine_rx), terminate }
+    }
 }
 
 impl Future for NodeExitFuture {
     type Output = eyre::Result<()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let pin = self.get_mut();
-
-        match pin.consensus_engine_rx.poll_unpin(cx) {
-            Poll::Ready(Ok(res)) => {
-                res?;
-                if pin.terminate {
-                    Poll::Ready(Ok(()))
-                } else {
-                    Poll::Pending
+        let this = self.get_mut();
+        if let Some(rx) = this.consensus_engine_rx.as_mut() {
+            match rx.poll_unpin(cx) {
+                Poll::Ready(Ok(res)) => {
+                    this.consensus_engine_rx.take();
+                    res?;
+                    if this.terminate {
+                        Poll::Ready(Ok(()))
+                    } else {
+                        Poll::Pending
+                    }
                 }
+                Poll::Ready(Err(err)) => Poll::Ready(Err(err.into())),
+                Poll::Pending => Poll::Pending,
             }
-            Poll::Ready(Err(err)) => Poll::Ready(Err(err.into())),
-            Poll::Pending => Poll::Pending,
+        } else {
+            Poll::Pending
         }
     }
 }
