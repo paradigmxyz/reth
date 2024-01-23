@@ -6256,6 +6256,7 @@ dependencies = [
  "bitflags 2.4.2",
  "byteorder",
  "criterion",
+ "dashmap",
  "derive_more",
  "indexmap 2.1.0",
  "libc",
@@ -6267,6 +6268,7 @@ dependencies = [
  "reth-mdbx-sys",
  "tempfile",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

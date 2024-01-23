@@ -16,7 +16,7 @@ workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-codecs.workspace = true
-reth-libmdbx = { workspace = true, optional = true, features = ["return-borrowed"] }
+reth-libmdbx = { workspace = true, optional = true, features = ["return-borrowed", "read-tx-timeouts"] }
 reth-nippy-jar.workspace = true
 reth-tracing.workspace = true
 
