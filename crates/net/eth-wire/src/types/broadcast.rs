@@ -6,13 +6,16 @@ use alloy_rlp::{
 };
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Block, Bytes, TransactionSigned, B256, U128};
+
+#[cfg(feature = "arbitrary")]
+use reth_primitives::TxType;
 use std::sync::Arc;
 
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 
 #[cfg(feature = "arbitrary")]
-use proptest::arbitrary::Arbitrary;
+use proptest::{arbitrary::Arbitrary, collection::vec};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -273,8 +276,8 @@ pub struct NewPooledTransactionHashes68 {
     /// the following way:
     ///  * `[type_0: B_1, type_1: B_1, ...]`
     ///
-    /// This would make it seem like the [`Encodable`](alloy_rlp::Encodable) and
-    /// [`Decodable`](alloy_rlp::Decodable) implementations should directly use a `Vec<u8>` for
+    /// This would make it seem like the [`Encodable`] and
+    /// [`Decodable`] implementations should directly use a `Vec<u8>` for
     /// encoding and decoding, because it looks like this field should be encoded as a _list_ of
     /// bytes.
     ///
@@ -285,16 +288,13 @@ pub struct NewPooledTransactionHashes68 {
     /// **not** a RLP list.
     ///
     /// Because of this, we do not directly use the `Vec<u8>` when encoding and decoding, and
-    /// instead use the [`Encodable`](alloy_rlp::Encodable) and [`Decodable`](alloy_rlp::Decodable)
+    /// instead use the [`Encodable`] and [`Decodable`]
     /// implementations for `&[u8]` instead, which encodes into a RLP string, and expects an RLP
     /// string when decoding.
-  
     pub types: Vec<u8>,
     /// Transaction sizes for new transactions that have appeared on the network.
-   
     pub sizes: Vec<usize>,
     /// Transaction hashes for new transactions that have appeared on the network.
-   
     pub hashes: Vec<B256>,
 }
 
@@ -304,13 +304,34 @@ impl Arbitrary for NewPooledTransactionHashes68 {
     type Parameters = ();
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
-        (any::<usize>(), any::<u8>(), any::<usize>(), any::<B256>())
-            .prop_map(|(size, type_val, size_val, hashes_val)| NewPooledTransactionHashes68 {
-                types: vec![type_val; size],
-                sizes: vec![size_val; size],
-                hashes: vec![hashes_val; size],
+        (vec(any::<TxType>(), 1..100), vec(any::<usize>(), 1..100), vec(any::<B256>(), 1..100))
+            .prop_map(|(types, sizes, hashes)| {
+                // Ensure the vectors have the same length
+                let min_length = *[types.len(), sizes.len(), hashes.len()].iter().min().unwrap();
+                NewPooledTransactionHashes68 {
+                    types: types
+                        .into_iter()
+                        .take(min_length)
+                        .map(tx_type_to_u8) // Convert TxType to u8
+                        .collect(),
+                    sizes: sizes.into_iter().take(min_length).collect(),
+                    hashes: hashes.into_iter().take(min_length).collect(),
+                }
             })
             .boxed()
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+fn tx_type_to_u8(tx_type: TxType) -> u8 {
+    // Example conversion logic
+    match tx_type {
+        TxType::Legacy => 1,
+        TxType::EIP2930 => 2,
+        TxType::EIP1559 => 3,
+        TxType::EIP4844 => 4,
+        #[cfg(feature = "optimism")]
+        TxType::DEPOSIT => 5,
     }
 }
 
