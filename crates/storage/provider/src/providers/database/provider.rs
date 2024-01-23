@@ -1459,11 +1459,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                     let senders = self.senders_by_tx_range(tx_range)?;
                     let end = std::time::Instant::now();
 
-                    println!(
-                        "Time taken to get senders from db for range {:?}: {:?}",
-                        tx_range,
-                        end - start
-                    );
+                    println!("Time taken to get senders from db: {:?}", end - start);
 
                     // If we are past shanghai, then all blocks should have a withdrawal list,
                     // even if empty
