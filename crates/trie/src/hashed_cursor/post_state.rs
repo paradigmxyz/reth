@@ -92,7 +92,7 @@ impl<'b, C> HashedPostStateAccountCursor<'b, C> {
                     Some((db_address, db_account))
                 }
             }
-            /// Return either non-empty entry
+            // Return either non-empty entry
             _ => post_state_item.copied().or(db_item),
         }
     }
@@ -248,7 +248,7 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
                     Some(db_entry)
                 }
             }
-            /// Return either non-empty entry
+            // Return either non-empty entry
             _ => {
                 db_item.or(post_state_item.copied().map(|(key, value)| StorageEntry { key, value }))
             }
