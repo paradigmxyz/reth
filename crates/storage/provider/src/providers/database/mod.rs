@@ -56,8 +56,6 @@ impl<DB: Clone> Clone for ProviderFactory<DB> {
     }
 }
 
-impl<DB: Database> ProviderFactory<DB> {}
-
 impl<DB> ProviderFactory<DB> {
     /// Create new database provider factory.
     pub fn new(db: DB, chain_spec: Arc<ChainSpec>) -> Self {
