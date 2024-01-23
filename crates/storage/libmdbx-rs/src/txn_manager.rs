@@ -173,7 +173,7 @@ mod read_transactions {
     }
 
     #[derive(Debug, Default)]
-    pub(crate) struct ReadTransactions {
+    pub(super) struct ReadTransactions {
         /// Maximum duration that a read transaction can be open until the
         /// [ReadTransactions::start_monitor] aborts it.
         max_duration: Duration,
@@ -196,22 +196,22 @@ mod read_transactions {
         }
 
         /// Adds a new transaction to the list of active read transactions.
-        pub(crate) fn add_active(&self, ptr: *mut ffi::MDBX_txn) {
+        pub(super) fn add_active(&self, ptr: *mut ffi::MDBX_txn) {
             let _ = self.active.insert(ptr as usize, Instant::now());
         }
 
         /// Removes a transaction from the list of active read transactions.
-        pub(crate) fn remove_active(&self, ptr: *mut ffi::MDBX_txn) -> Option<(usize, Instant)> {
+        pub(super) fn remove_active(&self, ptr: *mut ffi::MDBX_txn) -> Option<(usize, Instant)> {
             self.active.remove(&(ptr as usize))
         }
 
         /// Adds a new transaction to the list of aborted read transactions.
-        pub(crate) fn add_aborted(&self, ptr: *mut ffi::MDBX_txn) {
+        pub(super) fn add_aborted(&self, ptr: *mut ffi::MDBX_txn) {
             self.aborted.insert(ptr as usize);
         }
 
         /// Removes a transaction from the list of aborted read transactions.
-        pub(crate) fn remove_aborted(&self, ptr: *mut ffi::MDBX_txn) -> Option<usize> {
+        pub(super) fn remove_aborted(&self, ptr: *mut ffi::MDBX_txn) -> Option<usize> {
             self.aborted.remove(&(ptr as usize))
         }
 
