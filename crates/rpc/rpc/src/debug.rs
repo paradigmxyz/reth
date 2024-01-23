@@ -36,7 +36,6 @@ use reth_rpc_types::{
     BlockError, Bundle, CallRequest, RichBlock, StateContext,
 };
 use revm::{db::CacheDB, primitives::Env};
-use revm_primitives::db::components::state;
 
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
