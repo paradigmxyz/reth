@@ -11,7 +11,6 @@ use metrics_util::layers::{PrefixLayer, Stack};
 use reth_db::database_metrics::DatabaseMetrics;
 use reth_metrics::metrics::Unit;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
-
 use crate::version_metrics::record_version_metrics;
 
 pub(crate) trait Hook: Fn() + Send + Sync {}
