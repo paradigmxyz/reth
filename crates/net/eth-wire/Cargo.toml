@@ -36,7 +36,6 @@ pin-project.workspace = true
 tracing.workspace = true
 snap = "1.0.5"
 async-trait.workspace = true
-
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
@@ -47,8 +46,6 @@ reth-net-common.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-tracing.workspace = true
 ethers-core = { workspace = true, default-features = false }
-
-
 test-fuzz = "4"
 tokio-util = { workspace = true, features = ["io", "codec"] }
 rand.workspace = true

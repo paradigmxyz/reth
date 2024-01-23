@@ -4,13 +4,17 @@ use crate::{EthMessage, EthVersion};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
+#[cfg(feature = "arbitrary")]
+use proptest::arbitrary::Arbitrary;
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Block, Bytes, TransactionSigned, B256, U128};
 use std::sync::Arc;
-
+// use proptest::arbitrary::Arbitrary;
+// use proptest::prelude::Arbitrary;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-
 /// This informs peers of new blocks that have appeared on the network.
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -256,7 +260,6 @@ impl From<Vec<B256>> for NewPooledTransactionHashes66 {
 
 /// Same as [`NewPooledTransactionHashes66`] but extends that that beside the transaction hashes,
 /// the node sends the transaction types and their sizes (as defined in EIP-2718) as well.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NewPooledTransactionHashes68 {
@@ -283,23 +286,27 @@ pub struct NewPooledTransactionHashes68 {
     /// instead use the [`Encodable`](alloy_rlp::Encodable) and [`Decodable`](alloy_rlp::Decodable)
     /// implementations for `&[u8]` instead, which encodes into a RLP string, and expects an RLP
     /// string when decoding.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(proptest::arbitrary::any::<u8>(), 100)")
-    )]
     pub types: Vec<u8>,
     /// Transaction sizes for new transactions that have appeared on the network.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(proptest::arbitrary::any::<usize>(), 100)")
-    )]
     pub sizes: Vec<usize>,
     /// Transaction hashes for new transactions that have appeared on the network.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(proptest::arbitrary::any::<B256>(), 100)")
-    )]
     pub hashes: Vec<B256>,
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for NewPooledTransactionHashes68 {
+    type Strategy = BoxedStrategy<Self>;
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        (any::<usize>(), any::<u8>(), any::<usize>(), any::<B256>())
+            .prop_map(|(size, type_val, size_val, hashes_val)| NewPooledTransactionHashes68 {
+                types: vec![type_val; size],
+                sizes: vec![size_val; size],
+                hashes: vec![hashes_val; size],
+            })
+            .boxed()
+    }
 }
 
 impl NewPooledTransactionHashes68 {
