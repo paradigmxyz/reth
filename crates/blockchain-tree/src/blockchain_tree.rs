@@ -1180,7 +1180,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                     .provider()?
                     // State root calculation can take a while, and we're sure no write transaction
                     // will be open in parallel. See https://github.com/paradigmxyz/reth/issues/6168.
-                    .disable_backtrace_on_long_read_transaction();
+                    .disable_long_read_transaction_safety();
                 let (state_root, trie_updates) = hashed_state
                     .state_root_with_updates(provider.tx_ref())
                     .map_err(Into::<DatabaseError>::into)?;

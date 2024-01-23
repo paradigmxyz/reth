@@ -285,6 +285,14 @@ where
     pub fn cursor_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<K>> {
         Cursor::new(self.clone(), dbi)
     }
+
+    /// Disables a timeout for this read transaction.
+    #[cfg(feature = "read-tx-timeouts")]
+    pub fn disable_timeout(&self) {
+        if K::IS_READ_ONLY {
+            self.env().txn_manager().remove_active_read_transaction(self.txn());
+        }
+    }
 }
 
 impl<K> Clone for Transaction<K>
