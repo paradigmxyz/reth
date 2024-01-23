@@ -246,6 +246,17 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             .collect::<Result<Vec<_>, DatabaseError>>()
     }
 
+    /// Disables backtrace recording for the underlying read database transaction when it's open for
+    /// too long.
+    ///
+    /// CAUTION: In most of the cases, you want to keep backtraces on long read transactions
+    /// enabled. Use this only if you're sure that no write transaction is open in parallel, meaning
+    /// that Reth as a node is offline and not progressing.
+    pub fn disable_backtrace_on_long_read_transaction(mut self) -> Self {
+        self.tx.disable_backtrace_on_long_read_transaction();
+        self
+    }
+
     /// Gets data within a specified range, potentially spanning different snapshots and database.
     ///
     /// # Arguments
