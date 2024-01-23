@@ -316,6 +316,8 @@ where
         provider.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
         let unwound_headers = provider.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 
+        provider.unwind_table_by_num::<tables::HeaderTD>(input.unwind_to)?;
+
         let stage_checkpoint =
             input.checkpoint.headers_stage_checkpoint().map(|stage_checkpoint| HeadersCheckpoint {
                 block_range: stage_checkpoint.block_range,
@@ -418,10 +420,7 @@ mod tests {
                 let mut rng = generators::rng();
                 let start = input.checkpoint().block_number;
                 let head = random_header(&mut rng, start, None);
-                self.db.insert_headers(std::iter::once(&head))?;
-                // patch td table for `update_head` call
-                self.db
-                    .commit(|tx| Ok(tx.put::<tables::HeaderTD>(head.number, U256::ZERO.into())?))?;
+                self.db.insert_headers_with_td(std::iter::once(&head))?;
 
                 // use previous checkpoint as seed size
                 let end = input.target.unwrap_or_default() + 1;
@@ -445,8 +444,9 @@ mod tests {
                 match output {
                     Some(output) if output.checkpoint.block_number > initial_checkpoint => {
                         let provider = self.db.factory.provider()?;
-                        for block_num in (initial_checkpoint..output.checkpoint.block_number).rev()
-                        {
+                        let mut td = U256::ZERO;
+
+                        for block_num in initial_checkpoint..output.checkpoint.block_number {
                             // look up the header hash
                             let hash = provider.block_hash(block_num)?.expect("no header hash");
 
@@ -458,6 +458,13 @@ mod tests {
                             assert!(header.is_some());
                             let header = header.unwrap().seal_slow();
                             assert_eq!(header.hash(), hash);
+
+                            // validate the header total difficulty
+                            td += header.difficulty;
+                            assert_eq!(
+                                provider.header_td_by_number(block_num)?.map(Into::into),
+                                Some(td)
+                            );
                         }
                     }
                     _ => self.check_no_header_entry_above(initial_checkpoint)?,
@@ -511,6 +518,7 @@ mod tests {
                     .ensure_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
                 self.db.ensure_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
                 self.db.ensure_no_entry_above::<tables::Headers, _>(block, |key| key)?;
+                self.db.ensure_no_entry_above::<tables::HeaderTD, _>(block, |num| num)?;
                 Ok(())
             }
 
@@ -556,7 +564,10 @@ mod tests {
         }, done: true }) if block_number == tip.number &&
             from == checkpoint && to == previous_stage &&
             // -1 because we don't need to download the local head
-            processed == checkpoint + headers.len() as u64 - 1 && total == tip.number);
+            processed == checkpoint + headers.len() as u64 - 1 && total == tip.number
+            // +1 because of the seeded execution that inserts the first block
+            && previous_stage - checkpoint + 1  == runner.db().table::<tables::HeaderTD>().unwrap().len() as u64
+        );
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 }
