@@ -12,6 +12,10 @@ workspace = true
 
 [dependencies]
 # reth
+reth-blockchain-tree.workspace = true
+reth-provider.workspace = true
+reth-revm.workspace = true
+reth-db.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-network.workspace = true
