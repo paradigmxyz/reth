@@ -4,17 +4,19 @@ use crate::{EthMessage, EthVersion};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
-#[cfg(feature = "arbitrary")]
-use proptest::arbitrary::Arbitrary;
-#[cfg(feature = "arbitrary")]
-use proptest::prelude::*;
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Block, Bytes, TransactionSigned, B256, U128};
 use std::sync::Arc;
-// use proptest::arbitrary::Arbitrary;
-// use proptest::prelude::Arbitrary;
+
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
+
+#[cfg(feature = "arbitrary")]
+use proptest::arbitrary::Arbitrary;
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
 /// This informs peers of new blocks that have appeared on the network.
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -260,6 +262,7 @@ impl From<Vec<B256>> for NewPooledTransactionHashes66 {
 
 /// Same as [`NewPooledTransactionHashes66`] but extends that that beside the transaction hashes,
 /// the node sends the transaction types and their sizes (as defined in EIP-2718) as well.
+#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NewPooledTransactionHashes68 {
