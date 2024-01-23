@@ -246,14 +246,14 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             .collect::<Result<Vec<_>, DatabaseError>>()
     }
 
-    /// Disables backtrace recording for the underlying read database transaction when it's open for
-    /// too long.
+    /// Disables long-lived read transaction safety guarantees for leaks prevention and
+    /// observability improvements.
     ///
-    /// CAUTION: In most of the cases, you want to keep backtraces on long read transactions
+    /// CAUTION: In most of the cases, you want the safety guarantees for long read transactions
     /// enabled. Use this only if you're sure that no write transaction is open in parallel, meaning
     /// that Reth as a node is offline and not progressing.
-    pub fn disable_backtrace_on_long_read_transaction(mut self) -> Self {
-        self.tx.disable_backtrace_on_long_read_transaction();
+    pub fn disable_long_read_transaction_safety(mut self) -> Self {
+        self.tx.disable_long_read_transaction_safety();
         self
     }
 

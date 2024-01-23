@@ -76,10 +76,7 @@ impl<K: TransactionKind> Tx<K> {
         let dbi_handle = handles.get_mut(table as usize).expect("should exist");
         if dbi_handle.is_none() {
             *dbi_handle = Some(
-                self.inner
-                    .open_db(Some(T::NAME))
-                    .map_err(|e| DatabaseError::InitCursor(e.into()))?
-                    .dbi(),
+                self.inner.open_db(Some(T::NAME)).map_err(|e| DatabaseError::Open(e.into()))?.dbi(),
             );
         }
 
@@ -289,11 +286,14 @@ impl<K: TransactionKind> DbTx for Tx<K> {
             .entries())
     }
 
-    /// Disables backtrace recording for this read transaction when it's open for too long.
-    fn disable_backtrace_on_long_read_transaction(&mut self) {
+    /// Disables long-lived read transaction safety guarantees, such as backtrace recording and
+    /// timeout.
+    fn disable_long_read_transaction_safety(&mut self) {
         if let Some(metrics_handler) = self.metrics_handler.as_mut() {
             metrics_handler.record_backtrace = false;
         }
+
+        self.inner.disable_timeout();
     }
 }
 
@@ -351,5 +351,59 @@ impl DbTxMut for Tx<RW> {
 
     fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError> {
         self.new_cursor()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        database::Database,
+        mdbx::{tx::LONG_TRANSACTION_DURATION, DatabaseArguments},
+        tables,
+        transaction::DbTx,
+        DatabaseEnv, DatabaseEnvKind,
+    };
+    use reth_interfaces::db::DatabaseError;
+    use reth_libmdbx::MaxReadTransactionDuration;
+    use std::{sync::atomic::Ordering, thread::sleep, time::Duration};
+    use tempfile::tempdir;
+
+    #[test]
+    fn long_read_transaction_safety_disabled() {
+        const MAX_DURATION: Duration = Duration::from_secs(1);
+
+        let dir = tempdir().unwrap();
+        let args = DatabaseArguments::default()
+            .max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(MAX_DURATION)));
+        let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
+
+        let mut tx = db.tx().unwrap();
+        tx.disable_long_read_transaction_safety();
+        sleep(MAX_DURATION.max(LONG_TRANSACTION_DURATION));
+
+        assert_eq!(
+            tx.get::<tables::Transactions>(0).err(),
+            Some(DatabaseError::Open(reth_libmdbx::Error::NotFound.to_err_code()))
+        ); // Transaction is not timeout-ed
+        assert!(!tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed)); // Backtrace is not recorded
+    }
+
+    #[test]
+    fn long_read_transaction_safety_enabled() {
+        const MAX_DURATION: Duration = Duration::from_secs(1);
+
+        let dir = tempdir().unwrap();
+        let args = DatabaseArguments::default()
+            .max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(MAX_DURATION)));
+        let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
+
+        let tx = db.tx().unwrap();
+        sleep(MAX_DURATION.max(LONG_TRANSACTION_DURATION));
+
+        assert_eq!(
+            tx.get::<tables::Transactions>(0).err(),
+            Some(DatabaseError::Open(reth_libmdbx::Error::ReadTransactionAborted.to_err_code()))
+        ); // Transaction is timeout-ed
+        assert!(tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed)); // Backtrace is recorded
     }
 }

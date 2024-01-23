@@ -67,7 +67,7 @@ impl DbTx for TxMock {
         Ok(self._table.len())
     }
 
-    fn disable_backtrace_on_long_read_transaction(&mut self) {}
+    fn disable_long_read_transaction_safety(&mut self) {}
 }
 
 impl DbTxMut for TxMock {
