@@ -1,6 +1,6 @@
 use crate::{
     basefee::calculate_next_block_base_fee,
-    constants::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH},
+    constants::{ALLOWED_FUTURE_BLOCK_TIME_SECONDS, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH},
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
     keccak256, Address, BaseFeeParams, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, B256,
     B64, U256,
@@ -175,6 +175,22 @@ impl Header {
         self.ensure_difficulty_valid()?;
         self.ensure_extradata_valid()?;
         Ok(())
+    }
+
+    /// Checks if the block's timestamp is in the past compared to the parent block's timestamp.
+    ///
+    /// Note: This check is relevant only pre-merge.
+    pub fn is_timestamp_in_past(&self, parent_timestamp: u64) -> bool {
+        self.timestamp <= parent_timestamp
+    }
+
+    /// Checks if the block's timestamp is in the future based on the present timestamp.
+    ///
+    /// Clock can drift but this can be consensus issue.
+    ///
+    /// Note: This check is relevant only pre-merge.
+    pub fn exceeds_allowed_future_timestamp(&self, present_timestamp: u64) -> bool {
+        self.timestamp > present_timestamp + ALLOWED_FUTURE_BLOCK_TIME_SECONDS
     }
 
     /// Returns the parent block's number and hash

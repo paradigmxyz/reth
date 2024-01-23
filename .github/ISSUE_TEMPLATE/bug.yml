@@ -53,15 +53,11 @@ body:
         - Mac (Apple Silicon)
         - Windows (x86)
         - Windows (ARM)
-    validations:
-      required: false
   - type: input
     id: client-version
     attributes:
       label: What version/commit are you on?
-      description: This can be obtained with `reth --version` or `git rev-parse HEAD` if you've built Reth from source
-    validations:
-      required: false
+      description: This can be obtained with `reth --version`
   - type: textarea
     id: database-version
     attributes:

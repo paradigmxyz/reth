@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
@@ -124,7 +125,7 @@ fn txpool_truncate(c: &mut Criterion) {
 }
 
 fn truncate_pending(
-    group: &mut BenchmarkGroup<WallTime>,
+    group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
     seed: Vec<MockTransaction>,
     senders: usize,
@@ -159,7 +160,7 @@ fn truncate_pending(
 }
 
 fn truncate_parked(
-    group: &mut BenchmarkGroup<WallTime>,
+    group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
     seed: Vec<MockTransaction>,
     senders: usize,

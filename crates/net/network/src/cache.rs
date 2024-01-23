@@ -1,19 +1,15 @@
 use core::hash::BuildHasher;
 use derive_more::{Deref, DerefMut};
+use itertools::Itertools;
 use linked_hash_set::LinkedHashSet;
 use schnellru::{self, ByLength, Limiter, RandomState, Unlimited};
-use std::{
-    borrow::Borrow,
-    fmt::{self, Write},
-    hash::Hash,
-    num::NonZeroUsize,
-};
+use std::{borrow::Borrow, fmt, hash::Hash, num::NonZeroUsize};
 
 /// A minimal LRU cache based on a `LinkedHashSet` with limited capacity.
 ///
 /// If the length exceeds the set capacity, the oldest element will be removed
 /// In the limit, for each element inserted the oldest existing element will be removed.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LruCache<T: Hash + Eq> {
     limit: NonZeroUsize,
     inner: LinkedHashSet<T>,
@@ -42,7 +38,7 @@ impl<T: Hash + Eq> LruCache<T> {
     /// if one was evicted.
     pub fn insert_and_get_evicted(&mut self, entry: T) -> (bool, Option<T>) {
         if self.inner.insert(entry) {
-            if self.limit.get() == self.inner.len() {
+            if self.limit.get() < self.inner.len() {
                 // remove the oldest element in the set
                 return (true, self.remove_lru())
             }
@@ -74,9 +70,9 @@ impl<T: Hash + Eq> LruCache<T> {
         self.inner.contains(value)
     }
 
-    /// Returns an iterator over all cached entries
+    /// Returns an iterator over all cached entries in lru order
     pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
-        self.inner.iter()
+        self.inner.iter().rev()
     }
 
     /// Returns number of elements currently in cache.
@@ -103,6 +99,24 @@ where
     }
 }
 
+impl<T> fmt::Debug for LruCache<T>
+where
+    T: fmt::Debug + Hash + Eq,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug_struct = f.debug_struct("LruCache");
+
+        debug_struct.field("limit", &self.limit);
+
+        debug_struct.field(
+            "res_fn_iter",
+            &format_args!("Iter: {{{} }}", self.iter().map(|k| format!(" {k:?}")).format(",")),
+        );
+
+        debug_struct.finish()
+    }
+}
+
 /// Wrapper of [`schnellru::LruMap`] that implements [`fmt::Debug`].
 #[derive(Deref, DerefMut)]
 pub struct LruMap<K, V, L = ByLength, S = RandomState>(schnellru::LruMap<K, V, L, S>)
@@ -115,16 +129,22 @@ impl<K, V, L, S> fmt::Debug for LruMap<K, V, L, S>
 where
     K: Hash + PartialEq + fmt::Display,
     V: fmt::Debug,
-    L: Limiter<K, V>,
+    L: Limiter<K, V> + fmt::Debug,
     S: BuildHasher,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("LruMap");
-        for (k, v) in self.0.iter() {
-            let mut key_str = String::new();
-            write!(&mut key_str, "{k}")?;
-            debug_struct.field(&key_str, &v);
-        }
+
+        debug_struct.field("limiter", self.limiter());
+
+        debug_struct.field(
+            "res_fn_iter",
+            &format_args!(
+                "Iter: {{{} }}",
+                self.iter().map(|(k, v)| format!(" {k}: {v:?}")).format(",")
+            ),
+        );
+
         debug_struct.finish()
     }
 }
@@ -214,6 +234,24 @@ mod test {
         let value_2 = Value(22);
         cache.insert(key_2, value_2);
 
-        assert_eq!("LruMap { 2: Value(22), 1: Value(11) }", format!("{cache:?}"))
+        assert_eq!("LruMap { limiter: ByLength { max_length: 2 }, res_fn_iter: Iter: { 2: Value(22), 1: Value(11) } }", format!("{cache:?}"))
+    }
+
+    #[test]
+    #[allow(dead_code)]
+    fn test_debug_impl_lru_cache() {
+        #[derive(Debug, Hash, PartialEq, Eq)]
+        struct Key(i8);
+
+        let mut cache = LruCache::new(NonZeroUsize::new(2).unwrap());
+        let key_1 = Key(1);
+        cache.insert(key_1);
+        let key_2 = Key(2);
+        cache.insert(key_2);
+
+        assert_eq!(
+            "LruCache { limit: 2, res_fn_iter: Iter: { Key(2), Key(1) } }",
+            format!("{cache:?}")
+        )
     }
 }

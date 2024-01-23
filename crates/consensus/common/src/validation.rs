@@ -5,6 +5,7 @@ use reth_primitives::{
     constants::{
         self,
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
+        MINIMUM_GAS_LIMIT,
     },
     eip4844::calculate_excess_blob_gas,
     BlockNumber, ChainSpec, GotExpected, Hardfork, Header, InvalidTransactionError, SealedBlock,
@@ -218,12 +219,8 @@ pub fn validate_block_standalone(
     }
 
     // Check transaction root
-    // TODO(onbjerg): This should probably be accessible directly on [Block]
-    let transaction_root = reth_primitives::proofs::calculate_transaction_root(&block.body);
-    if block.header.transactions_root != transaction_root {
-        return Err(ConsensusError::BodyTransactionRootDiff(
-            GotExpected { got: transaction_root, expected: block.header.transactions_root }.into(),
-        ))
+    if let Err(error) = block.ensure_transaction_root_valid() {
+        return Err(ConsensusError::BodyTransactionRootDiff(error.into()));
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
@@ -257,36 +254,45 @@ pub fn validate_block_standalone(
     Ok(())
 }
 
-// Check gas limit, max diff between child/parent gas_limit should be  max_diff=parent_gas/1024
-// On Optimism, the gas limit can adjust instantly, so we skip this check if the optimism
-// flag is enabled in the chain spec.
+/// Checks the gas limit for consistency between parent and child headers.
+///
+/// The maximum allowable difference between child and parent gas limits is determined by the
+/// parent's gas limit divided by the elasticity multiplier (1024).
+///
+/// This check is skipped if the Optimism flag is enabled in the chain spec, as gas limits on
+/// Optimism can adjust instantly.
 #[inline(always)]
 fn check_gas_limit(
     parent: &SealedHeader,
     child: &SealedHeader,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
+    // Determine the parent gas limit, considering elasticity multiplier on the London fork.
     let mut parent_gas_limit = parent.gas_limit;
-
-    // By consensus, gas_limit is multiplied by elasticity (*2) on
-    // on exact block that hardfork happens.
     if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
         parent_gas_limit =
             parent.gas_limit * chain_spec.base_fee_params(child.timestamp).elasticity_multiplier;
     }
 
+    // Check for an increase in gas limit beyond the allowed threshold.
     if child.gas_limit > parent_gas_limit {
         if child.gas_limit - parent_gas_limit >= parent_gas_limit / 1024 {
             return Err(ConsensusError::GasLimitInvalidIncrease {
                 parent_gas_limit,
                 child_gas_limit: child.gas_limit,
-            })
+            });
         }
-    } else if parent_gas_limit - child.gas_limit >= parent_gas_limit / 1024 {
+    }
+    // Check for a decrease in gas limit beyond the allowed threshold.
+    else if parent_gas_limit - child.gas_limit >= parent_gas_limit / 1024 {
         return Err(ConsensusError::GasLimitInvalidDecrease {
             parent_gas_limit,
             child_gas_limit: child.gas_limit,
-        })
+        });
+    }
+    // Check if the child gas limit is below the minimum required limit.
+    else if child.gas_limit < MINIMUM_GAS_LIMIT {
+        return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit });
     }
 
     Ok(())
@@ -313,7 +319,7 @@ pub fn validate_header_regarding_parent(
     }
 
     // timestamp in past check
-    if child.timestamp <= parent.timestamp {
+    if child.header.is_timestamp_in_past(parent.timestamp) {
         return Err(ConsensusError::TimestampIsInPast {
             parent_timestamp: parent.timestamp,
             timestamp: child.timestamp,
@@ -389,33 +395,6 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider + WithdrawalsProvider
 
     // Return parent header.
     Ok(parent.seal(block.parent_hash))
-}
-
-/// Full validation of block before execution.
-pub fn full_validation<Provider: HeaderProvider + AccountReader + WithdrawalsProvider>(
-    block: &SealedBlock,
-    provider: Provider,
-    chain_spec: &ChainSpec,
-) -> RethResult<()> {
-    validate_header_standalone(&block.header, chain_spec)?;
-    validate_block_standalone(block, chain_spec)?;
-    let parent = validate_block_regarding_chain(block, &provider)?;
-    validate_header_regarding_parent(&parent, &block.header, chain_spec)?;
-
-    // NOTE: depending on the need of the stages, recovery could be done in different place.
-    let transactions = block
-        .body
-        .iter()
-        .map(|tx| tx.try_ecrecovered().ok_or(ConsensusError::TransactionSignerRecoveryError))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    validate_all_transaction_regarding_block_and_nonces(
-        transactions.iter(),
-        &block.header,
-        provider,
-        chain_spec,
-    )?;
-    Ok(())
 }
 
 /// Validates that the EIP-4844 header fields are correct with respect to the parent block. This
@@ -692,26 +671,6 @@ mod tests {
     }
 
     #[test]
-    fn sanity_check() {
-        let (block, parent) = mock_block();
-        let provider = Provider::new(Some(parent));
-
-        assert_eq!(full_validation(&block, provider, &MAINNET), Ok(()), "Validation should pass");
-    }
-
-    #[test]
-    fn validate_known_block() {
-        let (block, _) = mock_block();
-        let provider = Provider::new_known();
-
-        assert_eq!(
-            full_validation(&block, provider, &MAINNET),
-            Err(ConsensusError::BlockKnown { hash: block.hash(), number: block.number }.into()),
-            "Should fail with error"
-        );
-    }
-
-    #[test]
     fn sanity_tx_nonce_check() {
         let (block, _) = mock_block();
         let tx1 = mock_tx(0);
@@ -878,6 +837,24 @@ mod tests {
         let chain_spec = ChainSpec::default();
 
         assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
+    }
+
+    #[test]
+    fn test_gas_limit_below_minimum() {
+        let parent = SealedHeader {
+            header: Header { gas_limit: MINIMUM_GAS_LIMIT, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header { gas_limit: MINIMUM_GAS_LIMIT - 1, ..Default::default() },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(
+            check_gas_limit(&parent, &child, &chain_spec),
+            Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit })
+        );
     }
 
     #[test]

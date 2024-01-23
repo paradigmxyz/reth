@@ -26,7 +26,7 @@ alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie = { workspace = true, features = ["serde"] }
 ethers-core = { workspace = true, default-features = false, optional = true }
 nybbles = { version = "0.1.2", features = ["serde", "rlp"] }
-
+alloy-genesis.workspace = true
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
 

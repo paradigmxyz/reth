@@ -7,13 +7,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::utils::DbTool;
+use clap::Parser;
+
 use crate::{
     args::DatabaseArgs,
     dirs::{DataDirPath, PlatformPath},
-    utils::DbTool,
 };
-use clap::Parser;
-
 use reth_db::{
     cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
     AccountChangeSet, AccountHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
