@@ -36,6 +36,7 @@ use reth_rpc_types::{
     BlockError, Bundle, CallRequest, RichBlock, StateContext,
 };
 use revm::{db::CacheDB, primitives::Env};
+use revm_primitives::db::components::state;
 
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
@@ -229,30 +230,18 @@ where
                     tx.hash,
                 )?;
 
-                let tx_context = TransactionContext::default();
                 let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
-                if let Some(hash) = state_at.as_block_hash() {
-                    this.trace_transaction(
-                        opts,
-                        env,
-                        &mut db,
-                        Some(
-                            tx_context
-                                .with_tx_index(index)
-                                .with_block_hash(hash)
-                                .with_tx_hash(tx.hash),
-                        ),
-                    )
-                    .map(|(trace, _)| trace)
-                } else {
-                    this.trace_transaction(
-                        opts,
-                        env,
-                        &mut db,
-                        Some(tx_context.with_tx_index(index).with_tx_hash(tx.hash)),
-                    )
-                    .map(|(trace, _)| trace)
-                }
+                this.trace_transaction(
+                    opts,
+                    env,
+                    &mut db,
+                    Some(TransactionContext {
+                        block_hash: state_at.as_block_hash(),
+                        tx_index: Some(index),
+                        tx_hash: Some(tx.hash),
+                    }),
+                )
+                .map(|(trace, _)| trace)
             })
             .await
     }
@@ -460,58 +449,19 @@ where
                             &mut db,
                             overrides,
                         )?;
-                        let tx_context = TransactionContext::default();
 
-                        let (trace, state) = if let Some(hash) = target_block.as_block_hash() {
-                            if let Some(index) = transaction_index.index() {
-                                let (trace, state) = this.trace_transaction(
-                                    tracing_options.clone(),
-                                    env,
-                                    &mut db,
-                                    Some(tx_context.with_block_hash(hash).with_tx_index(index)),
-                                )?;
+                        let (trace, state) =
+                            this.trace_transaction(tracing_options.clone(), env, &mut db, None)?;
 
-                                (trace, state)
-                            } else {
-                                let (trace, state) = this.trace_transaction(
-                                    tracing_options.clone(),
-                                    env,
-                                    &mut db,
-                                    Some(tx_context.with_block_hash(hash)),
-                                )?;
-
-                                (trace, state)
-                            }
-                        } else {
-                            if let Some(index) = transaction_index.index() {
-                                let (trace, state) = this.trace_transaction(
-                                    tracing_options.clone(),
-                                    env,
-                                    &mut db,
-                                    Some(tx_context.with_tx_index(index)),
-                                )?;
-
-                                (trace, state)
-                            } else {
-                                let (trace, state) = this.trace_transaction(
-                                    tracing_options.clone(),
-                                    env,
-                                    &mut db,
-                                    None,
-                                )?;
-
-                                (trace, state)
-                            }
-                        };
                         // If there is more transactions, commit the database
-                        // If there is no transactions, but more bundles, commit to the
-                        // database too
+                        // If there is no transactions, but more bundles, commit to the database too
                         if transactions.peek().is_some() || bundles.peek().is_some() {
                             db.commit(state);
                         }
                         results.push(trace);
-                        all_bundles.push(results.clone());
                     }
+
+                    all_bundles.push(results);
                 }
                 Ok(all_bundles)
             })
@@ -587,22 +537,16 @@ where
                 },
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
-                    if let Some(tx_context) = transaction_context {
-                        let mut inspector =
-                            JsInspector::with_transaction_context(code, config, tx_context)?;
-                        let (res, env, db) = inspect_and_return_db(db, env, &mut inspector)?;
+                    let mut inspector = JsInspector::with_transaction_context(
+                        code,
+                        config,
+                        transaction_context.unwrap_or_default(),
+                    )?;
+                    let (res, env, db) = inspect_and_return_db(db, env, &mut inspector)?;
 
-                        let state = res.state.clone();
-                        let result = inspector.json_result(res, &env, db)?;
-                        Ok((GethTrace::JS(result), state))
-                    } else {
-                        let mut inspector = JsInspector::new(code, config)?;
-                        let (res, env, db) = inspect_and_return_db(db, env, &mut inspector)?;
-
-                        let state = res.state.clone();
-                        let result = inspector.json_result(res, &env, db)?;
-                        Ok((GethTrace::JS(result), state))
-                    }
+                    let state = res.state.clone();
+                    let result = inspector.json_result(res, &env, db)?;
+                    Ok((GethTrace::JS(result), state))
                 }
             }
         }
