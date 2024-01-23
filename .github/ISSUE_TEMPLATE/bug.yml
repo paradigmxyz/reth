@@ -53,18 +53,22 @@ body:
         - Mac (Apple Silicon)
         - Windows (x86)
         - Windows (ARM)
+    validations:
+      required: true
   - type: input
     id: client-version
     attributes:
       label: What version/commit are you on?
       description: This can be obtained with `reth --version`
+    validations:
+      required: true
   - type: textarea
     id: database-version
     attributes:
       label: What database version are you on?
       description: This can be obtained with `reth db version`
     validations:
-      required: false
+      required: true
   - type: dropdown
     id: node-type
     attributes:
@@ -74,7 +78,7 @@ body:
         - Full via --full flag
         - Pruned with custom reth.toml config
     validations:
-      required: false
+      required: true
   - type: textarea
     id: prune-config
     attributes:
