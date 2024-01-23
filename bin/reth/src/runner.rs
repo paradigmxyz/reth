@@ -108,6 +108,7 @@ impl AsyncCliRunner {
 }
 
 /// Additional context provided by the [CliRunner] when executing commands
+#[derive(Debug)]
 pub struct CliContext {
     /// Used to execute/spawn tasks
     pub task_executor: TaskExecutor,

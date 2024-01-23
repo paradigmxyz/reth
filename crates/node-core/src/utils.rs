@@ -101,14 +101,17 @@ where
 }
 
 /// Wrapper over DB that implements many useful DB queries.
+#[derive(Debug)]
 pub struct DbTool<'a, DB: Database> {
-    pub(crate) db: &'a DB,
-    pub(crate) chain: Arc<ChainSpec>,
+    /// The database that the db tool will use.
+    pub db: &'a DB,
+    /// The [ChainSpec] that the db tool will use.
+    pub chain: Arc<ChainSpec>,
 }
 
 impl<'a, DB: Database> DbTool<'a, DB> {
     /// Takes a DB where the tables have already been created.
-    pub(crate) fn new(db: &'a DB, chain: Arc<ChainSpec>) -> eyre::Result<Self> {
+    pub fn new(db: &'a DB, chain: Arc<ChainSpec>) -> eyre::Result<Self> {
         Ok(Self { db, chain })
     }
 

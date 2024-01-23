@@ -1,4 +1,5 @@
 //! Support for customizing the node
+
 use super::cli::{components::RethRpcServerHandles, ext::DefaultRethNodeCommandConfig};
 use crate::{
     args::{
@@ -65,6 +66,7 @@ use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_node_builder::EthEngineTypes;
 #[cfg(feature = "optimism")]
 use reth_node_builder::OptimismEngineTypes;
+
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
@@ -988,6 +990,7 @@ impl Default for NodeConfig {
 /// [NodeHandle].
 ///
 /// This also contains a path to a data dir that cannot be changed.
+#[derive(Debug)]
 pub struct NodeBuilderWithDatabase<DB> {
     /// The node config
     pub config: NodeConfig,
@@ -1089,13 +1092,13 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             )
             .await?;
 
-        let components = RethNodeComponentsImpl {
-            provider: blockchain_db.clone(),
-            pool: transaction_pool.clone(),
-            network: network_builder.handle(),
-            task_executor: executor.clone(),
-            events: blockchain_db.clone(),
-        };
+        let components = RethNodeComponentsImpl::new(
+            blockchain_db.clone(),
+            transaction_pool.clone(),
+            network_builder.handle(),
+            executor.clone(),
+            blockchain_db.clone(),
+        );
 
         // allow network modifications
         ext.configure_network(network_builder.network_mut(), &components)?;
@@ -1424,9 +1427,10 @@ impl Future for NodeExitFuture {
 ///     let (_handle, _manager) = spawn_node(builder).await.unwrap();
 /// }
 /// ```
+
 pub async fn spawn_node(config: NodeConfig) -> eyre::Result<(NodeHandle, TaskManager)> {
     let task_manager = TaskManager::current();
-    let ext = DefaultRethNodeCommandConfig;
+    let ext = DefaultRethNodeCommandConfig::default();
     Ok((config.launch::<()>(ext, task_manager.executor()).await?, task_manager))
 }
 
