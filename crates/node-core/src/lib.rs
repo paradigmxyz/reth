@@ -9,9 +9,14 @@
 #![warn(unused_crate_dependencies)]
 
 pub mod args;
+pub mod cl_events;
 pub mod cli;
 pub mod dirs;
+pub mod engine_api_store;
+pub mod events;
 pub mod init;
+pub mod node_config;
+pub mod prometheus_exporter;
 pub mod utils;
 pub mod version;
 

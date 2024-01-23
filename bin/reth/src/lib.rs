@@ -26,10 +26,8 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub mod builder;
 pub mod cli;
 pub mod commands;
-pub mod prometheus_exporter;
 pub mod runner;
 pub mod utils;
 
@@ -42,6 +40,16 @@ pub mod payload {
 /// Re-exported from `reth_node_core`.
 pub mod core {
     pub use reth_node_core::*;
+}
+
+/// Re-exported from `reth_node_core`.
+pub mod builder {
+    pub use reth_node_core::node_config::*;
+}
+
+/// Re-exported from `reth_node_core`.
+pub mod prometheus_exporter {
+    pub use reth_node_core::prometheus_exporter::*;
 }
 
 /// Re-export of the `reth_node_core` types specifically in the `args` module.

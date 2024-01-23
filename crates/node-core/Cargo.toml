@@ -36,7 +36,28 @@ reth-tasks.workspace = true
 reth-payload-builder.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-consensus-common.workspace = true
+reth-auto-seal-consensus.workspace = true
+reth-beacon-consensus.workspace = true
+reth-downloaders.workspace = true
+reth-node-builder.workspace = true
+reth-revm.workspace = true
+reth-stages.workspace = true
+reth-prune.workspace = true
+reth-blockchain-tree.workspace = true
+revm-inspectors.workspace = true
+reth-snapshot.workspace = true
+reth-ethereum-payload-builder.workspace = true
 
+# async
+tokio.workspace = true
+
+# metrics
+metrics-exporter-prometheus = "0.12.1"
+once_cell.workspace = true
+metrics-util = "0.15.0"
+metrics-process = "=1.0.14"
+metrics.workspace = true
+reth-metrics.workspace = true
 
 # misc
 eyre.workspace = true
@@ -44,19 +65,26 @@ clap = { workspace = true, features = ["derive"] }
 humantime = "2.1.0"
 thiserror.workspace = true
 const-str = "0.5.6"
-
 rand.workspace = true
+fdlimit = "0.3.0"
+pin-project.workspace = true
 
 # io
 dirs-next = "2.0.0"
 shellexpand = "3.0.0"
+confy.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+
+# http/rpc
+hyper = "0.14.25"
 
 # tracing
 tracing.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
+alloy-chains.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 # async
@@ -65,7 +93,7 @@ futures.workspace = true
 [dev-dependencies]
 # test vectors generation
 proptest.workspace = true
-
+tempfile.workspace = true
 
 [features]
 optimism = [
@@ -80,8 +108,6 @@ optimism = [
     "reth-payload-builder/optimism",
     "reth-node-api/optimism",
 ]
-
-
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "git2"] }
