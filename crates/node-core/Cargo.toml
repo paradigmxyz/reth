@@ -39,7 +39,6 @@ reth-consensus-common.workspace = true
 
 
 # misc
-boyer-moore-magiclen = "0.2.16"
 eyre.workspace = true
 clap = { workspace = true, features = ["derive"] }
 humantime = "2.1.0"

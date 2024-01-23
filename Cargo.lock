@@ -5762,6 +5762,7 @@ dependencies = [
  "aquamarine",
  "assert_matches",
  "backon",
+ "boyer-moore-magiclen",
  "clap",
  "comfy-table",
  "confy",
@@ -6448,7 +6449,6 @@ name = "reth-node-core"
 version = "0.1.0-alpha.15"
 dependencies = [
  "alloy-rlp",
- "boyer-moore-magiclen",
  "clap",
  "const-str",
  "dirs-next",
