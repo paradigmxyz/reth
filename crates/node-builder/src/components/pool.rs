@@ -13,10 +13,11 @@ pub trait PoolBuilder<Node: FullNodeTypes> {
     fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool>;
 }
 
-impl<Node: FullNodeTypes, F, Pool> PoolBuilder<Node> for F
+impl<Node, F, Pool> PoolBuilder<Node> for F
 where
-    F: FnOnce(&BuilderContext<Node>) -> eyre::Result<Pool>,
+    Node: FullNodeTypes,
     Pool: TransactionPool,
+    F: FnOnce(&BuilderContext<Node>) -> eyre::Result<Pool>,
 {
     type Pool = Pool;
 

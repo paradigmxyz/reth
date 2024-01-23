@@ -15,10 +15,11 @@ pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool> {
     ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>>;
 }
 
-impl<Node: FullNodeTypes, F, Pool> PayloadServiceBuilder<Node, Pool> for F
+impl<Node, F, Pool> PayloadServiceBuilder<Node, Pool> for F
 where
-    F: FnOnce(&BuilderContext<Node>, Pool) -> eyre::Result<PayloadBuilderHandle<Node::Engine>>,
+    Node: FullNodeTypes,
     Pool: TransactionPool,
+    F: FnOnce(&BuilderContext<Node>, Pool) -> eyre::Result<PayloadBuilderHandle<Node::Engine>>,
 {
     fn spawn_payload_service(
         self,

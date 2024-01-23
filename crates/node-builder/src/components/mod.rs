@@ -34,13 +34,27 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes> {
     /// The transaction pool to use.
     type Pool: TransactionPool;
 
-    // TODO: any other components that are generic?
-
     /// Builds the components of the node.
     fn build_components(
         self,
-        context: BuilderContext<Node>,
+        context: &BuilderContext<Node>,
     ) -> eyre::Result<NodeComponents<Node, Self::Pool>>;
+}
+
+impl<Node, F, Pool> NodeComponentsBuilder<Node> for F
+where
+    Node: FullNodeTypes,
+    F: FnOnce(&BuilderContext<Node>) -> eyre::Result<NodeComponents<Node, Pool>>,
+    Pool: TransactionPool,
+{
+    type Pool = Pool;
+
+    fn build_components(
+        self,
+        ctx: &BuilderContext<Node>,
+    ) -> eyre::Result<NodeComponents<Node, Pool>> {
+        self(ctx)
+    }
 }
 
 /// Captures the necessary context for building the components of the node.
@@ -114,7 +128,12 @@ impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, N
         Types: FullNodeTypes,
     {
         let Self { pool_builder, payload_builder, network_builder, _marker } = self;
-        ComponentsBuilder { pool_builder, payload_builder, network_builder, _marker }
+        ComponentsBuilder {
+            pool_builder,
+            payload_builder,
+            network_builder,
+            _marker: Default::default(),
+        }
     }
 }
 
@@ -177,13 +196,13 @@ where
 
     fn build_components(
         self,
-        context: BuilderContext<Node>,
+        context: &BuilderContext<Node>,
     ) -> eyre::Result<NodeComponents<Node, Self::Pool>> {
         let Self { pool_builder, payload_builder, network_builder, _marker } = self;
 
-        let pool = pool_builder.build_pool(&context)?;
-        let network = network_builder.build_network(&context, pool.clone())?;
-        let payload_builder = payload_builder.spawn_payload_service(&context, pool.clone())?;
+        let pool = pool_builder.build_pool(context)?;
+        let network = network_builder.build_network(context, pool.clone())?;
+        let payload_builder = payload_builder.spawn_payload_service(context, pool.clone())?;
 
         Ok(NodeComponents { transaction_pool: pool, network, payload_builder })
     }

@@ -11,10 +11,11 @@ pub trait NetworkBuilder<Node: FullNodeTypes, Pool: TransactionPool> {
     fn build_network(self, ctx: &BuilderContext<Node>, pool: Pool) -> eyre::Result<NetworkHandle>;
 }
 
-impl<Node: FullNodeTypes, F, Pool> NetworkBuilder<Node, Pool> for F
+impl<Node, F, Pool> NetworkBuilder<Node, Pool> for F
 where
-    F: FnOnce(&BuilderContext<Node>, Pool) -> eyre::Result<NetworkHandle>,
+    Node: FullNodeTypes,
     Pool: TransactionPool,
+    F: FnOnce(&BuilderContext<Node>, Pool) -> eyre::Result<NetworkHandle>,
 {
     fn build_network(self, ctx: &BuilderContext<Node>, pool: Pool) -> eyre::Result<NetworkHandle> {
         self(ctx, pool)
