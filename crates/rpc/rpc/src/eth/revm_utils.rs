@@ -10,7 +10,7 @@ use reth_rpc_types::{
     BlockOverrides, CallRequest,
 };
 use revm::{
-    db::{CacheDB, EmptyDB},
+    db::CacheDB,
     precompile::{Precompiles, SpecId as PrecompilesSpecId},
     primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId, TransactTo, TxEnv},
     Database, Inspector,
@@ -20,6 +20,9 @@ use revm_primitives::{
     Bytecode,
 };
 use tracing::trace;
+
+#[cfg(feature = "optimism")]
+use revm::primitives::{Bytes, OptimismFields};
 
 /// Helper type that bundles various overrides for EVM Execution.
 ///
@@ -332,7 +335,7 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         blob_hashes: blob_versioned_hashes.unwrap_or_default(),
         max_fee_per_blob_gas,
         #[cfg(feature = "optimism")]
-        optimism: Default::default(),
+        optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
     };
 
     Ok(env)
@@ -585,22 +588,6 @@ where
     };
 
     Ok(())
-}
-
-/// This clones and transforms the given [CacheDB] with an arbitrary [DatabaseRef] into a new
-/// [CacheDB] with [EmptyDB] as the database type
-#[inline]
-pub(crate) fn clone_into_empty_db<DB>(db: &CacheDB<DB>) -> CacheDB<EmptyDB>
-where
-    DB: DatabaseRef,
-{
-    CacheDB {
-        accounts: db.accounts.clone(),
-        contracts: db.contracts.clone(),
-        logs: db.logs.clone(),
-        block_hashes: db.block_hashes.clone(),
-        db: Default::default(),
-    }
 }
 
 #[cfg(test)]

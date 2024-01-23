@@ -10,7 +10,10 @@
 /// Exports commonly used concrete instances of the [EngineTypes](reth_node_api::EngineTypes)
 /// trait.
 pub mod engine;
-pub use engine::{EthEngineTypes, OptimismEngineTypes};
+pub use engine::EthEngineTypes;
+
+#[cfg(feature = "optimism")]
+pub use engine::OptimismEngineTypes;
 
 /// Node event hooks.
 pub mod hooks;

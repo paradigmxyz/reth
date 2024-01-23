@@ -23,3 +23,6 @@ reth-transaction-pool.workspace = true
 async-trait.workspace = true
 eyre.workspace = true
 serde.workspace = true
+
+[features]
+optimism = ["reth-node-api/optimism"]

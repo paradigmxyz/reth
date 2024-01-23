@@ -1,12 +1,7 @@
 //! Command that initializes the node by importing a chain from a file.
 
 use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
     commands::node::events::{handle_events, NodeEvent},
-    dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
     version::SHORT_VERSION,
 };
@@ -30,6 +25,14 @@ use reth_stages::{
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, info};
+
+use crate::{
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs,
+    },
+    dirs::{DataDirPath, MaybePlatformPath},
+};
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
@@ -183,6 +186,7 @@ impl ImportCommand {
                         max_blocks: config.stages.execution.max_blocks,
                         max_changes: config.stages.execution.max_changes,
                         max_cumulative_gas: config.stages.execution.max_cumulative_gas,
+                        max_duration: config.stages.execution.max_duration,
                     },
                     config
                         .stages

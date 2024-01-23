@@ -124,6 +124,14 @@ pub enum NewPooledTransactionHashes {
 // === impl NewPooledTransactionHashes ===
 
 impl NewPooledTransactionHashes {
+    /// Returns the message [`EthVersion`].
+    pub fn version(&self) -> EthVersion {
+        match self {
+            NewPooledTransactionHashes::Eth66(_) => EthVersion::Eth66,
+            NewPooledTransactionHashes::Eth68(_) => EthVersion::Eth68,
+        }
+    }
+
     /// Returns `true` if the payload is valid for the given version
     pub fn is_valid_for_version(&self, version: EthVersion) -> bool {
         match self {
@@ -141,6 +149,14 @@ impl NewPooledTransactionHashes {
         match self {
             NewPooledTransactionHashes::Eth66(msg) => msg.0.iter(),
             NewPooledTransactionHashes::Eth68(msg) => msg.hashes.iter(),
+        }
+    }
+
+    /// Returns a mutable reference to transaction hashes.
+    pub fn hashes_mut(&mut self) -> &mut Vec<B256> {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => &mut msg.0,
+            NewPooledTransactionHashes::Eth68(msg) => &mut msg.hashes,
         }
     }
 
@@ -186,6 +202,15 @@ impl NewPooledTransactionHashes {
         match self {
             NewPooledTransactionHashes::Eth66(msg) => msg.0.len(),
             NewPooledTransactionHashes::Eth68(msg) => msg.hashes.len(),
+        }
+    }
+
+    /// Returns an iterator over tx hashes zipped with corresponding eth68 metadata if this is
+    /// an eth68 message.
+    pub fn as_eth68(&self) -> Option<&NewPooledTransactionHashes68> {
+        match self {
+            NewPooledTransactionHashes::Eth66(_) => None,
+            NewPooledTransactionHashes::Eth68(msg) => Some(msg),
         }
     }
 }
@@ -258,11 +283,30 @@ pub struct NewPooledTransactionHashes68 {
     /// instead use the [`Encodable`](alloy_rlp::Encodable) and [`Decodable`](alloy_rlp::Decodable)
     /// implementations for `&[u8]` instead, which encodes into a RLP string, and expects an RLP
     /// string when decoding.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(strategy = "proptest::collection::vec(proptest::arbitrary::any::<u8>(), 100)")
+    )]
     pub types: Vec<u8>,
     /// Transaction sizes for new transactions that have appeared on the network.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(strategy = "proptest::collection::vec(proptest::arbitrary::any::<usize>(), 100)")
+    )]
     pub sizes: Vec<usize>,
     /// Transaction hashes for new transactions that have appeared on the network.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(strategy = "proptest::collection::vec(proptest::arbitrary::any::<B256>(), 100)")
+    )]
     pub hashes: Vec<B256>,
+}
+
+impl NewPooledTransactionHashes68 {
+    /// Returns an iterator over tx hashes zipped with corresponding metadata.
+    pub fn metadata_iter(&self) -> impl Iterator<Item = (&B256, (u8, usize))> {
+        self.hashes.iter().zip(self.types.iter().copied().zip(self.sizes.iter().copied()))
+    }
 }
 
 impl Encodable for NewPooledTransactionHashes68 {
@@ -310,7 +354,26 @@ impl Decodable for NewPooledTransactionHashes68 {
         }
 
         let encodable = EncodableNewPooledTransactionHashes68::decode(buf)?;
-        Ok(Self { types: encodable.types.into(), sizes: encodable.sizes, hashes: encodable.hashes })
+        let msg = Self {
+            types: encodable.types.into(),
+            sizes: encodable.sizes,
+            hashes: encodable.hashes,
+        };
+
+        if msg.hashes.len() != msg.types.len() {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: msg.hashes.len(),
+                got: msg.types.len(),
+            })
+        }
+        if msg.hashes.len() != msg.sizes.len() {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: msg.hashes.len(),
+                got: msg.sizes.len(),
+            })
+        }
+
+        Ok(msg)
     }
 }
 

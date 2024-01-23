@@ -16,11 +16,14 @@ mod builder {
         commit_withdrawals, is_better_payload, pre_block_beacon_root_contract_call, BuildArguments,
         BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
     };
+    use reth_node_api::PayloadBuilderAttributes;
     use reth_payload_builder::{
-        error::PayloadBuilderError, BuiltPayload, EthPayloadBuilderAttributes,
+        error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
     };
     use reth_primitives::{
-        constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
+        constants::{
+            eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
+        },
         eip4844::calculate_excess_blob_gas,
         proofs,
         revm::{compat::into_reth_log, env::tx_env_with_recovered},
@@ -34,7 +37,7 @@ mod builder {
         primitives::{EVMError, Env, InvalidTransaction, ResultAndState},
         DatabaseCommit, State,
     };
-    use tracing::{debug, trace};
+    use tracing::{debug, trace, warn};
 
     /// Ethereum payload builder
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -48,12 +51,106 @@ mod builder {
         Pool: TransactionPool,
     {
         type Attributes = EthPayloadBuilderAttributes;
+        type BuiltPayload = EthBuiltPayload;
 
         fn try_build(
             &self,
-            args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes>,
-        ) -> Result<BuildOutcome, PayloadBuilderError> {
+            args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
+        ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
             default_ethereum_payload_builder(args)
+        }
+
+        fn build_empty_payload(
+            client: &Client,
+            config: PayloadConfig<Self::Attributes>,
+        ) -> Result<EthBuiltPayload, PayloadBuilderError>
+        where
+            Client: StateProviderFactory,
+        {
+            let extra_data = config.extra_data();
+            let PayloadConfig {
+                initialized_block_env,
+                parent_block,
+                attributes,
+                chain_spec,
+                initialized_cfg,
+                ..
+            } = config;
+
+            debug!(target: "payload_builder", parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building empty payload");
+
+            let state = client.state_by_block_hash(parent_block.hash).map_err(|err| {
+                warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to get state for empty payload");
+                err
+            })?;
+            let mut db = State::builder()
+                .with_database_boxed(Box::new(StateProviderDatabase::new(&state)))
+                .with_bundle_update()
+                .build();
+
+            let base_fee = initialized_block_env.basefee.to::<u64>();
+            let block_number = initialized_block_env.number.to::<u64>();
+            let block_gas_limit: u64 =
+                initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
+
+            // apply eip-4788 pre block contract call
+            pre_block_beacon_root_contract_call(
+                &mut db,
+                &chain_spec,
+                block_number,
+                &initialized_cfg,
+                &initialized_block_env,
+                &attributes,
+            ).map_err(|err| {
+                warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to apply beacon root contract call for empty payload");
+                err
+            })?;
+
+            let WithdrawalsOutcome { withdrawals_root, withdrawals } =
+                commit_withdrawals(&mut db, &chain_spec, attributes.timestamp(), attributes.withdrawals().clone()).map_err(|err| {
+                    warn!(target: "payload_builder", parent_hash=%parent_block.hash,?err,  "failed to commit withdrawals for empty payload");
+                    err
+                })?;
+
+            // merge all transitions into bundle state, this would apply the withdrawal balance
+            // changes and 4788 contract call
+            db.merge_transitions(BundleRetention::PlainState);
+
+            // calculate the state root
+            let bundle_state =
+                BundleStateWithReceipts::new(db.take_bundle(), Receipts::new(), block_number);
+            let state_root = state.state_root(&bundle_state).map_err(|err| {
+                warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to calculate state root for empty payload");
+                err
+            })?;
+
+            let header = Header {
+                parent_hash: parent_block.hash,
+                ommers_hash: EMPTY_OMMER_ROOT_HASH,
+                beneficiary: initialized_block_env.coinbase,
+                state_root,
+                transactions_root: EMPTY_TRANSACTIONS,
+                withdrawals_root,
+                receipts_root: EMPTY_RECEIPTS,
+                logs_bloom: Default::default(),
+                timestamp: attributes.timestamp(),
+                mix_hash: attributes.prev_randao(),
+                nonce: BEACON_NONCE,
+                base_fee_per_gas: Some(base_fee),
+                number: parent_block.number + 1,
+                gas_limit: block_gas_limit,
+                difficulty: U256::ZERO,
+                gas_used: 0,
+                extra_data,
+                blob_gas_used: None,
+                excess_blob_gas: None,
+                parent_beacon_block_root: attributes.parent_beacon_block_root(),
+            };
+
+            let block = Block { header, body: vec![], ommers: vec![], withdrawals };
+            let sealed_block = block.seal_slow();
+
+            Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO))
         }
     }
 
@@ -64,8 +161,8 @@ mod builder {
     /// a result indicating success with the payload or an error in case of failure.
     #[inline]
     pub fn default_ethereum_payload_builder<Pool, Client>(
-        args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes>,
-    ) -> Result<BuildOutcome, PayloadBuilderError>
+        args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
+    ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
     where
         Client: StateProviderFactory,
         Pool: TransactionPool,
@@ -218,7 +315,7 @@ mod builder {
         }
 
         // check if we have a better block
-        if !is_better_payload(best_payload.as_deref(), total_fees) {
+        if !is_better_payload(best_payload.as_ref(), total_fees) {
             // can skip building the block
             return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
         }
@@ -298,7 +395,7 @@ mod builder {
         let sealed_block = block.seal_slow();
         debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
-        let mut payload = BuiltPayload::new(attributes.id, sealed_block, total_fees);
+        let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees);
 
         // extend the payload with the blob sidecars from the executed txs
         payload.extend_sidecars(blob_sidecars);

@@ -14,10 +14,12 @@ pub mod components;
 ///
 /// Notably contains the [EngineTypes] trait and implementations for ethereum mainnet types.
 pub mod engine;
+#[cfg(feature = "optimism")]
+pub use engine::optimism_validate_version_specific_fields;
 pub use engine::{
     validate_payload_timestamp, validate_version_specific_fields, validate_withdrawals_presence,
-    AttributesValidationError, EngineApiMessageVersion, EngineTypes, PayloadAttributes,
-    PayloadBuilderAttributes, PayloadOrAttributes,
+    AttributesValidationError, BuiltPayload, EngineApiMessageVersion, EngineTypes,
+    PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
 };
 
 /// Traits and types for the node's EVM.

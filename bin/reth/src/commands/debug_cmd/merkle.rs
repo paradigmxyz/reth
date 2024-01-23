@@ -18,6 +18,7 @@ use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEn
 use reth_interfaces::{consensus::Consensus, p2p::full_block::FullBlockClient};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
+
 use reth_primitives::{
     fs,
     stage::{StageCheckpoint, StageId},
@@ -205,6 +206,7 @@ impl Command {
                 max_blocks: Some(1),
                 max_changes: None,
                 max_cumulative_gas: None,
+                max_duration: None,
             },
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::all(),

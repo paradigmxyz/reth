@@ -27,6 +27,7 @@ use reth_interfaces::{
 };
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
+
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, B256};
 use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
@@ -136,6 +137,7 @@ impl Command {
                         max_blocks: None,
                         max_changes: None,
                         max_cumulative_gas: None,
+                        max_duration: None,
                     },
                     stage_conf
                         .merkle

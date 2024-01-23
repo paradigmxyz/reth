@@ -15,8 +15,9 @@ workspace = true
 # ethereum
 alloy-rlp = { workspace = true, features = ["arrayvec", "derive"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp", "serde"] }
-alloy-rpc-types.workspace = true
+alloy-rpc-types = { workspace = true, features = ["jsonrpsee-types"] }
 alloy-rpc-trace-types.workspace = true
+alloy-rpc-engine-types = { workspace = true, features = ["jsonrpsee-types"] }
 ethereum_ssz_derive = { version = "0.5", optional = true }
 ethereum_ssz = { version = "0.5", optional = true }
 
@@ -41,7 +42,7 @@ proptest-derive = { workspace = true, optional = true }
 [features]
 default = ["jsonrpsee-types"]
 arbitrary = ["dep:arbitrary", "dep:proptest-derive", "dep:proptest", "alloy-primitives/arbitrary", "alloy-rpc-types/arbitrary"]
-ssz = ["dep:ethereum_ssz" ,"dep:ethereum_ssz_derive", "alloy-primitives/ssz", "alloy-rpc-types/ssz"]
+ssz = ["dep:ethereum_ssz" ,"dep:ethereum_ssz_derive", "alloy-primitives/ssz", "alloy-rpc-types/ssz", "alloy-rpc-engine-types/ssz"]
 optimism = []
 
 

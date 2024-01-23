@@ -37,6 +37,7 @@ members = [
     "crates/rpc/rpc-types/",
     "crates/rpc/rpc-types-compat/",
     "crates/node-builder/",
+    "crates/node-core/",
     "crates/node-api/",
     "crates/snapshot/",
     "crates/stages/",
@@ -76,7 +77,7 @@ rust.unused_must_use = "deny"
 rust.rust_2018_idioms = "deny"
 
 [workspace.package]
-version = "0.1.0-alpha.14"
+version = "0.1.0-alpha.15"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
@@ -115,6 +116,7 @@ reth-db = { path = "crates/storage/db" }
 reth-discv4 = { path = "crates/net/discv4" }
 reth-dns-discovery = { path = "crates/net/dns" }
 reth-node-builder = { path = "crates/node-builder" }
+reth-node-core = { path = "crates/node-core" }
 reth-node-api = { path = "crates/node-api" }
 reth-downloaders = { path = "crates/net/downloaders" }
 reth-ecies = { path = "crates/net/ecies" }
@@ -169,13 +171,17 @@ alloy-primitives = "0.6"
 alloy-dyn-abi = "0.6"
 alloy-sol-types = "0.6"
 alloy-rlp = "0.3"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", features = ["jsonrpsee-types"] }
-alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy" }
 alloy-trie = "0.2"
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy" }
+alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy" }
+alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy"}
+alloy-node-bindings = {git = "https://github.com/alloy-rs/alloy"}
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
 ethers-middleware = { version = "2.0", default-features = false }
+
 discv5 = { git = "https://github.com/sigp/discv5", rev = "f289bbd4c57d499bb1bdb393af3c249600a1c662" }
 igd = { git = "https://github.com/stevefan1999-personal/rust-igd", rev = "c2d1f83eb1612a462962453cb0703bc93258b173" }
 
