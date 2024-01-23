@@ -233,6 +233,8 @@ impl SnapshotProvider {
     /// `self.map`.
     ///
     /// Any entry higher than `segment_max_block` will be deleted from the previous structures.
+    ///
+    /// If `segment_max_block` is None it means there's no static file for this segment.
     pub fn update_index(
         &self,
         segment: SnapshotSegment,
