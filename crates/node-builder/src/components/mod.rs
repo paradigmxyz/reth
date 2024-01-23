@@ -107,7 +107,16 @@ pub struct ComponentsBuilder<Node, PoolB, PayloadB, NetworkB> {
     _marker: PhantomData<Node>,
 }
 
-// TODO add default impl for ethereum/optimism
+impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB> {
+    /// Configures the node types.
+    pub fn node_types<Types>(self) -> ComponentsBuilder<Types, PoolB, PayloadB, NetworkB>
+    where
+        Types: FullNodeTypes,
+    {
+        let Self { pool_builder, payload_builder, network_builder, _marker } = self;
+        ComponentsBuilder { pool_builder, payload_builder, network_builder, _marker }
+    }
+}
 
 impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB>
 where
@@ -180,7 +189,16 @@ where
     }
 }
 
-// TODO add default impl for ethereum/optimism
+impl Default for ComponentsBuilder<(), (), (), ()> {
+    fn default() -> Self {
+        Self {
+            pool_builder: (),
+            payload_builder: (),
+            network_builder: (),
+            _marker: Default::default(),
+        }
+    }
+}
 
 /// All the components of the node.
 ///
