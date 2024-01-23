@@ -4,13 +4,17 @@ use crate::{EthMessage, EthVersion};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
+#[cfg(feature = "arbitrary")]
+use proptest::arbitrary::Arbitrary;
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Block, Bytes, TransactionSigned, B256, U128};
 use std::sync::Arc;
-
+// use proptest::arbitrary::Arbitrary;
+// use proptest::prelude::Arbitrary;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-
 /// This informs peers of new blocks that have appeared on the network.
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -124,6 +128,14 @@ pub enum NewPooledTransactionHashes {
 // === impl NewPooledTransactionHashes ===
 
 impl NewPooledTransactionHashes {
+    /// Returns the message [`EthVersion`].
+    pub fn version(&self) -> EthVersion {
+        match self {
+            NewPooledTransactionHashes::Eth66(_) => EthVersion::Eth66,
+            NewPooledTransactionHashes::Eth68(_) => EthVersion::Eth68,
+        }
+    }
+
     /// Returns `true` if the payload is valid for the given version
     pub fn is_valid_for_version(&self, version: EthVersion) -> bool {
         match self {
@@ -248,7 +260,6 @@ impl From<Vec<B256>> for NewPooledTransactionHashes66 {
 
 /// Same as [`NewPooledTransactionHashes66`] but extends that that beside the transaction hashes,
 /// the node sends the transaction types and their sizes (as defined in EIP-2718) as well.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NewPooledTransactionHashes68 {
@@ -280,6 +291,22 @@ pub struct NewPooledTransactionHashes68 {
     pub sizes: Vec<usize>,
     /// Transaction hashes for new transactions that have appeared on the network.
     pub hashes: Vec<B256>,
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for NewPooledTransactionHashes68 {
+    type Strategy = BoxedStrategy<Self>;
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        (any::<usize>(), any::<u8>(), any::<usize>(), any::<B256>())
+            .prop_map(|(size, type_val, size_val, hashes_val)| NewPooledTransactionHashes68 {
+                types: vec![type_val; size],
+                sizes: vec![size_val; size],
+                hashes: vec![hashes_val; size],
+            })
+            .boxed()
+    }
 }
 
 impl NewPooledTransactionHashes68 {
@@ -334,7 +361,26 @@ impl Decodable for NewPooledTransactionHashes68 {
         }
 
         let encodable = EncodableNewPooledTransactionHashes68::decode(buf)?;
-        Ok(Self { types: encodable.types.into(), sizes: encodable.sizes, hashes: encodable.hashes })
+        let msg = Self {
+            types: encodable.types.into(),
+            sizes: encodable.sizes,
+            hashes: encodable.hashes,
+        };
+
+        if msg.hashes.len() != msg.types.len() {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: msg.hashes.len(),
+                got: msg.types.len(),
+            })
+        }
+        if msg.hashes.len() != msg.sizes.len() {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: msg.hashes.len(),
+                got: msg.sizes.len(),
+            })
+        }
+
+        Ok(msg)
     }
 }
 
