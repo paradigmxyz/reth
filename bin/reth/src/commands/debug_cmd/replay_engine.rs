@@ -4,15 +4,14 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs,
     },
+    core::engine_api_store::{EngineApiStore, StoredEngineApiMessage},
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
 };
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_beacon_consensus::{
-    hooks::EngineHooks, BeaconConsensus, BeaconConsensusEngine, BeaconEngineMessage,
-};
+use reth_beacon_consensus::{hooks::EngineHooks, BeaconConsensus, BeaconConsensusEngine};
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
@@ -21,37 +20,24 @@ use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_interfaces::consensus::Consensus;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_node_api::EngineTypes;
 #[cfg(not(feature = "optimism"))]
 use reth_node_builder::EthEngineTypes;
 #[cfg(feature = "optimism")]
 use reth_node_builder::OptimismEngineTypes;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{
-    fs::{self},
-    ChainSpec,
-};
+use reth_primitives::{fs, ChainSpec};
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory};
 use reth_revm::EvmProcessorFactory;
-use reth_rpc_types::{
-    engine::{CancunPayloadFields, ForkchoiceState},
-    ExecutionPayload,
-};
 use reth_stages::Pipeline;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::noop::NoopTransactionPool;
-use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
     net::{SocketAddr, SocketAddrV4},
     path::PathBuf,
     sync::Arc,
-    time::{Duration, SystemTime},
+    time::Duration,
 };
-use tokio::sync::{
-    mpsc::{self, UnboundedReceiver, UnboundedSender},
-    oneshot,
-};
+use tokio::sync::{mpsc, oneshot};
 use tracing::*;
 
 /// `reth debug replay-engine` command
@@ -255,99 +241,5 @@ impl Command {
         };
 
         Ok(())
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-enum StoredEngineApiMessage<Attributes> {
-    ForkchoiceUpdated { state: ForkchoiceState, payload_attrs: Option<Attributes> },
-    NewPayload { payload: ExecutionPayload, cancun_fields: Option<CancunPayloadFields> },
-}
-
-#[derive(Debug)]
-pub(crate) struct EngineApiStore {
-    path: PathBuf,
-}
-
-impl EngineApiStore {
-    pub(crate) fn new(path: PathBuf) -> Self {
-        Self { path }
-    }
-
-    fn on_message<Engine>(
-        &self,
-        msg: &BeaconEngineMessage<Engine>,
-        received_at: SystemTime,
-    ) -> eyre::Result<()>
-    where
-        Engine: EngineTypes,
-    {
-        fs::create_dir_all(&self.path)?; // ensure that store path had been created
-        let timestamp = received_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
-        match msg {
-            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx: _tx } => {
-                let filename = format!("{}-fcu-{}.json", timestamp, state.head_block_hash);
-                fs::write(
-                    self.path.join(filename),
-                    serde_json::to_vec(&StoredEngineApiMessage::ForkchoiceUpdated {
-                        state: *state,
-                        payload_attrs: payload_attrs.clone(),
-                    })?,
-                )?;
-            }
-            BeaconEngineMessage::NewPayload { payload, cancun_fields, tx: _tx } => {
-                let filename = format!("{}-new_payload-{}.json", timestamp, payload.block_hash());
-                fs::write(
-                    self.path.join(filename),
-                    serde_json::to_vec(
-                        &StoredEngineApiMessage::<Engine::PayloadAttributes>::NewPayload {
-                            payload: payload.clone(),
-                            cancun_fields: cancun_fields.clone(),
-                        },
-                    )?,
-                )?;
-            }
-            // noop
-            BeaconEngineMessage::TransitionConfigurationExchanged |
-            BeaconEngineMessage::EventListener(_) => (),
-        };
-        Ok(())
-    }
-
-    pub(crate) fn engine_messages_iter(&self) -> eyre::Result<impl Iterator<Item = PathBuf>> {
-        let mut filenames_by_ts = BTreeMap::<u64, Vec<PathBuf>>::default();
-        for entry in fs::read_dir(&self.path)? {
-            let entry = entry?;
-            let filename = entry.file_name();
-            if let Some(filename) = filename.to_str().filter(|n| n.ends_with(".json")) {
-                if let Some(Ok(timestamp)) = filename.split('-').next().map(|n| n.parse::<u64>()) {
-                    filenames_by_ts.entry(timestamp).or_default().push(entry.path());
-                    tracing::debug!(target: "engine::store", timestamp, filename, "Queued engine API message");
-                } else {
-                    tracing::warn!(target: "engine::store", %filename, "Could not parse timestamp from filename")
-                }
-            } else {
-                tracing::warn!(target: "engine::store", ?filename, "Skipping non json file");
-            }
-        }
-        Ok(filenames_by_ts.into_iter().flat_map(|(_, paths)| paths))
-    }
-
-    pub(crate) async fn intercept<Engine>(
-        self,
-        mut rx: UnboundedReceiver<BeaconEngineMessage<Engine>>,
-        to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
-    ) where
-        Engine: EngineTypes,
-        BeaconEngineMessage<Engine>: std::fmt::Debug,
-    {
-        loop {
-            let Some(msg) = rx.recv().await else { break };
-            if let Err(error) = self.on_message(&msg, SystemTime::now()) {
-                error!(target: "engine::intercept", ?msg, %error, "Error handling Engine API message");
-            }
-            let _ = to_engine.send(msg);
-        }
     }
 }
