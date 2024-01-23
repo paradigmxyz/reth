@@ -19,6 +19,7 @@ reth-primitives.workspace = true
 reth-payload-builder.workspace = true
 reth-rpc-types.workspace = true
 reth-transaction-pool.workspace = true
+reth-tasks.workspace = true
 
 # misc
 async-trait.workspace = true

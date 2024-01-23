@@ -5,12 +5,12 @@ use reth_transaction_pool::{blobstore::InMemoryBlobStore, TransactionPool};
 use std::marker::PhantomData;
 
 /// A type that knows how to build the transaction pool.
-#[async_trait::async_trait]
 pub trait PoolBuilder<Node: FullNodeTypes>: Send {
     /// The transaction pool to build.
     type Pool: TransactionPool;
 
-    async fn build_pool(self, ctx: BuilderContext<Node>) -> eyre::Result<Self::Pool>;
+    /// Creates the transaction pool.
+    fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool>;
 }
 
 /// A basic [PoolBuilder] for an ethereum node.

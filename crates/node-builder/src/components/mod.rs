@@ -7,20 +7,20 @@
 //!
 //! Components depend on a fully type configured node: [FullNodeTypes].
 
+pub use network::*;
+pub use payload::*;
+pub use pool::*;
 use reth_network::NetworkHandle;
 use reth_node_api::node::FullNodeTypes;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::Head;
+use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
 use std::marker::PhantomData;
 
 mod network;
 mod payload;
 mod pool;
-
-pub use network::*;
-pub use payload::*;
-pub use pool::*;
 
 /// A type that configures all the customizable components of the node and knows how to build them.
 ///
@@ -45,14 +45,14 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes> {
 }
 
 /// Captures the necessary context for building the components of the node.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BuilderContext<Node: FullNodeTypes> {
     /// The current head of the blockchain at launch.
     head: Head,
     /// The configured provider to interact with the blockchain.
     provider: Node::Provider,
 
-    task_manager: (),
+    executor: TaskExecutor,
 
     // TODO maybe combine this with provider
     events: (),
@@ -115,11 +115,12 @@ where
     Node: FullNodeTypes,
 {
     /// Configures the pool builder.
-    pub fn pool<PB>(self, _pool: PB) -> ComponentsBuilder<Node, PB, PayloadB, NetworkB>
+    pub fn pool<PB>(self, pool_builder: PB) -> ComponentsBuilder<Node, PB, PayloadB, NetworkB>
     where
         PB: PoolBuilder<Node>,
     {
-        todo!()
+        let Self { payload_builder, network_builder, _marker, .. } = self;
+        ComponentsBuilder { pool_builder, payload_builder, network_builder, _marker }
     }
 }
 
@@ -128,6 +129,23 @@ where
     Node: FullNodeTypes,
     PoolB: PoolBuilder<Node>,
 {
+    /// Configures the network builder.
+    pub fn network<NB>(self, network_builder: NB) -> ComponentsBuilder<Node, PoolB, PayloadB, NB>
+    where
+        NB: NetworkBuilder<Node, PoolB::Pool>,
+    {
+        let Self { payload_builder, pool_builder, _marker, .. } = self;
+        ComponentsBuilder { pool_builder, payload_builder, network_builder, _marker }
+    }
+
+    /// Configures the payload builder.
+    pub fn payload<PB>(self, payload_builder: PB) -> ComponentsBuilder<Node, PoolB, PB, NetworkB>
+    where
+        PB: PayloadServiceBuilder<Node, PoolB::Pool>,
+    {
+        let Self { pool_builder, network_builder, _marker, .. } = self;
+        ComponentsBuilder { pool_builder, payload_builder, network_builder, _marker }
+    }
 }
 
 impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB>
@@ -152,15 +170,15 @@ where
 
     async fn build_components(
         self,
-        _context: BuilderContext<Node>,
+        mut context: BuilderContext<Node>,
     ) -> eyre::Result<NodeComponents<Node, Self::Pool>> {
-        let Self { pool_builder: _, payload_builder: _, network_builder: _, _marker } = self;
+        let Self { pool_builder, payload_builder, network_builder, _marker } = self;
 
-        todo!()
-        // let pool = self.pool_builder.build_pool().await?;
-        // let network = self.network_builder.build_network().await?;
-        // let payload_builder = self.payload_builder.spawn_payload_service().await?;
-        // Ok(NodeComponents { transaction_pool: pool, network, payload_builder })
+        let pool = pool_builder.build_pool(&context)?;
+        let network = network_builder.build_network(&context, pool.clone())?;
+        let payload_builder = payload_builder.spawn_payload_service(&context, pool.clone())?;
+
+        Ok(NodeComponents { transaction_pool: pool, network, payload_builder })
     }
 }
 

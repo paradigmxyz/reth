@@ -5760,6 +5760,8 @@ dependencies = [
  "alloy-chains",
  "alloy-rlp",
  "aquamarine",
+ "assert_matches",
+ "async-trait",
  "backon",
  "clap",
  "comfy-table",
@@ -5774,6 +5776,7 @@ dependencies = [
  "itertools 0.12.0",
  "jemalloc-ctl",
  "jemallocator",
+ "jsonrpsee",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-process",
@@ -6423,6 +6426,7 @@ version = "0.1.0-alpha.15"
 dependencies = [
  "reth-payload-builder",
  "reth-primitives",
+ "reth-provider",
  "reth-rpc-types",
  "serde",
  "thiserror",
@@ -6432,10 +6436,16 @@ dependencies = [
 name = "reth-node-builder"
 version = "0.1.0-alpha.15"
 dependencies = [
+ "async-trait",
+ "eyre",
+ "reth-network",
  "reth-node-api",
+ "reth-node-core",
  "reth-payload-builder",
  "reth-primitives",
  "reth-rpc-types",
+ "reth-tasks",
+ "reth-transaction-pool",
  "serde",
 ]
 
