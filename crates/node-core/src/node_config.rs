@@ -1,22 +1,20 @@
 //! Support for customizing the node
 
-use super::cli::{components::RethRpcServerHandles, ext::DefaultRethNodeCommandConfig};
 use crate::{
     args::{
         get_secret_key, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
         PruningArgs, RpcServerArgs, TxPoolArgs,
     },
+    cl_events::ConsensusLayerHealthEvents,
     cli::{
-        components::RethNodeComponentsImpl,
+        components::{RethNodeComponentsImpl, RethRpcServerHandles},
         config::{RethRpcConfig, RethTransactionPoolConfig},
         db_type::{DatabaseBuilder, DatabaseInstance},
-        ext::{RethCliExt, RethNodeCommandConfig},
-    },
-    commands::{
-        debug_cmd::EngineApiStore,
-        node::{cl_events::ConsensusLayerHealthEvents, events},
+        ext::{DefaultRethNodeCommandConfig, RethCliExt, RethNodeCommandConfig},
     },
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
+    engine_api_store::EngineApiStore,
+    events,
     init::init_genesis,
     prometheus_exporter,
     utils::{get_single_header, write_peers_to_file},
@@ -119,8 +117,8 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// # Example
 /// ```rust
 /// # use reth_tasks::{TaskManager, TaskSpawner};
-/// # use reth::{
-/// #     builder::NodeConfig,
+/// # use reth_node_core::{
+/// #     node_config::NodeConfig,
 /// #     cli::{
 /// #         ext::DefaultRethNodeCommandConfig,
 /// #     },
@@ -153,8 +151,8 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// # Example
 /// ```rust
 /// # use reth_tasks::{TaskManager, TaskSpawner};
-/// # use reth::{
-/// #     builder::NodeConfig,
+/// # use reth_node_core::{
+/// #     node_config::NodeConfig,
 /// #     cli::{
 /// #         ext::DefaultRethNodeCommandConfig,
 /// #     },
@@ -368,8 +366,8 @@ impl NodeConfig {
     /// # Example
     /// ```rust
     /// # use reth_tasks::{TaskManager, TaskSpawner};
-    /// # use reth::builder::NodeConfig;
-    /// # use reth::cli::{
+    /// # use reth_node_core::node_config::NodeConfig;
+    /// # use reth_node_core::cli::{
     /// #     ext::DefaultRethNodeCommandConfig,
     /// # };
     /// # use tokio::runtime::Handle;
@@ -1088,13 +1086,13 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             )
             .await?;
 
-        let components = RethNodeComponentsImpl {
-            provider: blockchain_db.clone(),
-            pool: transaction_pool.clone(),
-            network: network_builder.handle(),
-            task_executor: executor.clone(),
-            events: blockchain_db.clone(),
-        };
+        let components = RethNodeComponentsImpl::new(
+            blockchain_db.clone(),
+            transaction_pool.clone(),
+            network_builder.handle(),
+            executor.clone(),
+            blockchain_db.clone(),
+        );
 
         // allow network modifications
         ext.configure_network(network_builder.network_mut(), &components)?;
@@ -1390,8 +1388,8 @@ impl NodeHandle {
 ///
 /// # Example
 /// ```
-/// # use reth::{
-/// #     builder::{NodeConfig, spawn_node},
+/// # use reth_node_core::{
+/// #     node_config::{NodeConfig, spawn_node},
 /// #     args::RpcServerArgs,
 /// # };
 /// async fn t() {
@@ -1404,7 +1402,6 @@ impl NodeHandle {
 ///     let (_handle, _manager) = spawn_node(builder).await.unwrap();
 /// }
 /// ```
-
 pub async fn spawn_node(config: NodeConfig) -> eyre::Result<(NodeHandle, TaskManager)> {
     let task_manager = TaskManager::current();
     let ext = DefaultRethNodeCommandConfig::default();

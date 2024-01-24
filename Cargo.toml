@@ -77,7 +77,7 @@ rust.unused_must_use = "deny"
 rust.rust_2018_idioms = "deny"
 
 [workspace.package]
-version = "0.1.0-alpha.15"
+version = "0.1.0-alpha.16"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
@@ -123,6 +123,7 @@ reth-ecies = { path = "crates/net/ecies" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-ethereum-forks = { path = "crates/ethereum-forks" }
 reth-ethereum-payload-builder = { path = "crates/payload/ethereum" }
+reth-optimism-payload-builder = { path = "crates/payload/optimism" }
 reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
@@ -163,7 +164,7 @@ revm = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", feat
 revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", features = [
     "std",
 ], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors"}
 
 # eth
 alloy-chains = {version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
@@ -257,6 +258,7 @@ pprof = "0.13"
 proptest = "1.4"
 proptest-derive = "0.4"
 serial_test = "2"
+similar-asserts = "1.5.0"
 
 [workspace.metadata.cargo-udeps.ignore]
 # ignored because this is mutually exclusive with the optimism payload builder via feature flags
