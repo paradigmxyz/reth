@@ -119,8 +119,10 @@ where
         // order
 
         let interval = total_headers / 10;
-        for (index, header) in self.header_collector.iter().unwrap().enumerate() {
-            let (number, header_buf) = header.unwrap();
+        for (index, header) in
+            self.header_collector.iter()?.enumerate()
+        {
+            let (number, header_buf) = header?;
 
             if index > 0 && index % interval == 0 {
                 info!(target: "sync::stages::headers", progress = ((index as f64 / total_headers as f64) * 100.0).round(), "writing headers");
@@ -172,8 +174,15 @@ where
 
         // Since ETL sorts all entries by hashes, we are either appending (first sync) or inserting
         // in order (further syncs).
-        for hash_to_number in self.hash_collector.iter().unwrap() {
-            let (hash, number) = hash_to_number.unwrap();
+        for (index, hash_to_number) in
+            self.hash_collector.iter()?.enumerate()
+        {
+            let (hash, number) = hash_to_number?;
+
+            if index > 0 && index % interval == 0 {
+                info!(target: "sync::stages::headers", progress = ((index as f64 / total_headers as f64) * 100.0).round(), "writing headers hash index");
+            }
+
             if first_sync {
                 cursor_header_numbers.append(
                     RawKey::<BlockHash>::from_vec(hash),
