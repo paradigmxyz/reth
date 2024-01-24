@@ -109,7 +109,6 @@ similar-asserts.workspace = true
 humantime = "2.1.0"
 itertools.workspace = true
 rayon.workspace = true
-futures-util.workspace = true
 boyer-moore-magiclen = "0.2.16"
 
 [target.'cfg(not(windows))'.dependencies]
