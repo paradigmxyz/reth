@@ -1,5 +1,6 @@
 mod consensus;
 mod engine_api;
+mod engine_pbft;
 mod error;
 mod task;
 mod timing;
@@ -8,6 +9,7 @@ use crate::engine_api::{
     http::HttpJsonRpc,
 };
 pub use consensus::ClayerConsensusEngine;
+use engine_api::ApiService;
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_interfaces::{
@@ -22,8 +24,8 @@ use reth_primitives::{
     SealedBlock, SealedHeader, TransactionSigned, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts,
-    CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory,
+    BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts, CanonChainTracker,
+    CanonStateNotificationSender, Chain, StateProviderFactory,
 };
 use reth_revm::{
     database::StateProviderDatabase, db::states::bundle_state::BundleRetention,
@@ -60,6 +62,19 @@ pub fn create_auth_api(jwt_key: JwtKey) -> HttpJsonRpc {
 
     let auth = Auth::new(jwt_key, None, None);
     let api = match HttpJsonRpc::new_with_auth(execution_url, auth, execution_timeout_multiplier) {
+        Ok(api) => api,
+        Err(e) => {
+            panic!("Failed to create execution api. Error: {:?}", e);
+        }
+    };
+    api
+}
+
+pub fn create_api() -> HttpJsonRpc {
+    let execution_url = Url::from_str(DEFAULT_EXECUTION_ENDPOINT).unwrap();
+    let execution_timeout_multiplier = Option::from(1);
+
+    let api = match HttpJsonRpc::new(execution_url, execution_timeout_multiplier) {
         Ok(api) => api,
         Err(e) => {
             panic!("Failed to create execution api. Error: {:?}", e);

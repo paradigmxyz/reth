@@ -1,181 +1,270 @@
 //! Implementation of consensus layer messages[ClayerConsensusMessage]
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
-
 use reth_primitives::{
     bytes::{Buf, BufMut},
-    keccak256, public_key_to_address, Bytes, B256,
+    hex, keccak256, public_key_to_address, Address, Block, Bloom, Bytes, PeerId, Withdrawal, B256,
+    U256,
 };
-use secp256k1::{PublicKey, SecretKey};
-
-use crate::{prepare::Prepare, preprepare::PrePrepare, signature::VerifySignatureError};
+use secp256k1::PublicKey;
 
 use super::signature::ClayerSignature;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Consensus layer message body
+/// Consensus layer message header
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct ClayerConsensusMessageBody {
+pub struct ClayerConsensusMessageHeader {
     /// consensus type
-    pub ctype: u8,
-    /// consensus body
-    pub body: Bytes,
-}
-
-impl ClayerConsensusMessageBody {
-    /// Compute the hash of the message
-    pub fn hash_slow(&self) -> B256 {
-        let mut out = bytes::BytesMut::new();
-        self.encode(&mut out);
-        keccak256(&out)
-    }
+    pub message_type: u8,
+    /// consensus message hash
+    pub content_hash: B256,
+    /// node peer id
+    pub signer_id: PeerId,
 }
 
 /// Consensus layer message
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ClayerConsensusMessage {
-    /// consensus body
-    pub body: ClayerConsensusMessageBody,
+    /// header bytes
+    pub header_bytes: Bytes,
     /// consensus signature
-    pub signature: ClayerSignature,
-    /// public key serialize
-    pub author: Bytes,
+    pub header_signature: ClayerSignature,
+    /// message body
+    pub message_bytes: Bytes,
 }
 
-// /// Consensus layer message
-// #[derive_arbitrary(rlp)]
-// #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
-// #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-// pub struct ClayerConsensusMessage {
-//     /// consensus type
-//     pub ctype: u8,
-//     /// consensus body
-//     pub body: Bytes,
-//     /// consensus signature
-//     pub signature: ClayerSignature,
-//     /// public key serialize
-//     pub author: Bytes,
-// }
-
-impl ClayerConsensusMessage {
-    /// Create new message from [PrePrepare]
-    pub fn from_pre_prepare(
-        sk: SecretKey,
-        msg: &PrePrepare,
-    ) -> std::result::Result<ClayerConsensusMessage, VerifySignatureError> {
-        let body = ClayerConsensusMessageBody {
-            ctype: ClayerMessageID::PrePrepare as u8,
-            body: msg.as_bytes(),
-        };
-
-        let signature_hash = body.hash_slow();
-        let signature = ClayerSignature::sign_hash(sk, signature_hash)?;
-        let pk = sk.public_key(secp256k1::SECP256K1);
-        let author = Bytes::copy_from_slice(&pk.serialize());
-        Ok(Self { body, signature, author })
-    }
-
-    /// Create new message from [Prepare]
-    pub fn from_prepare(
-        sk: SecretKey,
-        msg: &Prepare,
-    ) -> std::result::Result<ClayerConsensusMessage, VerifySignatureError> {
-        let body = ClayerConsensusMessageBody {
-            ctype: ClayerMessageID::Prepare as u8,
-            body: msg.as_bytes(),
-        };
-        let signature_hash = body.hash_slow();
-        let signature = ClayerSignature::sign_hash(sk, signature_hash)?;
-        let pk = sk.public_key(secp256k1::SECP256K1);
-        let author = Bytes::copy_from_slice(&pk.serialize());
-        Ok(Self { body, signature, author })
-    }
-
-    /// Create new message from [Commit]
-    pub fn from_commit(
-        sk: SecretKey,
-        msg: &Prepare,
-    ) -> std::result::Result<ClayerConsensusMessage, VerifySignatureError> {
-        let body = ClayerConsensusMessageBody {
-            ctype: ClayerMessageID::Commit as u8,
-            body: msg.as_bytes(),
-        };
-        let signature_hash = body.hash_slow();
-        let signature = ClayerSignature::sign_hash(sk, signature_hash)?;
-        let pk = sk.public_key(secp256k1::SECP256K1);
-        let author = Bytes::copy_from_slice(&pk.serialize());
-        Ok(Self { body, signature, author })
-    }
-
-    // pub fn ctype(&self) -> ClayerMessageID {
-    //     ClayerMessageID::try_from(self.body.ctype)
-    // }
-
-    /// Verify message
-    pub fn verify(&self) -> std::result::Result<bool, VerifySignatureError> {
-        let signature_hash = self.body.hash_slow();
-        let recovered = match self.signature.recover_signer(signature_hash) {
-            Some(addr) => addr,
-            None => return Err(VerifySignatureError::VerifyError),
-        };
-
-        let pk = PublicKey::from_slice(&self.author);
-        let pk = pk.map_err(|_| VerifySignatureError::VerifyError)?;
-        let expected = public_key_to_address(pk);
-        Ok(recovered == expected)
-    }
-}
-
-/// Represents message IDs for eth protocol messages.
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Represents all common information used in a PBFT message
+#[derive_arbitrary(rlp)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum ClayerMessageID {
-    /// Pre-prepare message
-    PrePrepare = 0x00,
-    /// Prepare message
-    Prepare = 0x01,
-    /// Commit message
-    Commit = 0x02,
+pub struct PbftMessageInfo {
+    /// pbft message type
+    pub ptype: u8,
+    /// pbft view number
+    pub view: u64,
+    /// pbft sequence number
+    pub seq_num: u64,
+    /// node id
+    pub signer_id: PeerId,
 }
 
-impl Encodable for ClayerMessageID {
-    fn encode(&self, out: &mut dyn BufMut) {
-        out.put_u8(*self as u8);
-    }
-    fn length(&self) -> usize {
-        1
+impl std::fmt::Display for PbftMessageInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "(type: {:?}, view: {:?}, seq_num: {:?}, signer_id: {:?})",
+            PbftMessageType::from(self.ptype),
+            self.view,
+            self.seq_num,
+            hex::encode(self.signer_id.clone()),
+        )
     }
 }
 
-impl Decodable for ClayerMessageID {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let id = buf.first().ok_or(alloy_rlp::Error::InputTooShort)?;
-        let id = match id {
-            0x00 => ClayerMessageID::PrePrepare,
-            0x01 => ClayerMessageID::Prepare,
-            0x02 => ClayerMessageID::Commit,
-            _ => return Err(alloy_rlp::Error::Custom("Invalid message ID")),
+/// Consensus message
+#[derive_arbitrary(rlp)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PbftMessage {
+    /// pbft info
+    pub info: PbftMessageInfo,
+    /// pbft block hash
+    pub block_id: B256,
+}
+
+/// Consensus layer message[Prepare]
+#[derive_arbitrary(rlp)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PbftSignedVote {
+    /// header bytes
+    pub header_bytes: Bytes,
+    /// consensus signature
+    pub header_signature: ClayerSignature,
+    /// message body
+    pub message_bytes: Bytes,
+}
+
+/// Consensus message seal
+#[derive_arbitrary(rlp)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PbftSeal {
+    /// pbft info
+    pub info: PbftMessageInfo,
+    /// pbft block hash
+    pub block_id: B256,
+    /// a list of Commit votes to prove the block commit (must contain at least 2f votes)
+    pub commit_votes: Vec<PbftSignedVote>,
+}
+
+/// Consensus message new view
+#[derive_arbitrary(rlp)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PbftNewView {
+    /// pbft info
+    pub info: PbftMessageInfo,
+    /// a list of Commit votes to prove the block commit (must contain at least 2f votes)
+    pub view_changes: Vec<PbftSignedVote>,
+}
+
+// Messages related to PBFT consensus
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd)]
+pub enum PbftMessageType {
+    Unset = 0x00,
+    /// Basic message types for the multicast protocol
+    PrePrepare = 0x01,
+    Prepare = 0x02,
+    Commit = 0x03,
+
+    /// Auxiliary PBFT messages
+    NewView = 0x04,
+    ViewChange = 0x05,
+    SealRequest = 0x06,
+    Seal = 0x07,
+}
+
+impl std::fmt::Display for PbftMessageType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let txt = match self {
+            PbftMessageType::PrePrepare => "PrePrepare",
+            PbftMessageType::Prepare => "Prepare",
+            PbftMessageType::Commit => "Commit",
+            PbftMessageType::NewView => "NewView",
+            PbftMessageType::ViewChange => "ViewChange",
+            PbftMessageType::SealRequest => "SealRequest",
+            PbftMessageType::Seal => "Seal",
+            PbftMessageType::Unset => "Unset",
         };
-        buf.advance(1);
-        Ok(id)
+        write!(f, "{}", txt)
     }
 }
 
-impl TryFrom<usize> for ClayerMessageID {
-    type Error = &'static str;
-
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
+impl From<u8> for PbftMessageType {
+    fn from(value: u8) -> Self {
         match value {
-            0x00 => Ok(ClayerMessageID::PrePrepare),
-            0x01 => Ok(ClayerMessageID::Prepare),
-            0x02 => Ok(ClayerMessageID::Commit),
-            _ => Err("Invalid message ID"),
+            0x01 => PbftMessageType::PrePrepare,
+            0x02 => PbftMessageType::Prepare,
+            0x03 => PbftMessageType::Commit,
+            0x04 => PbftMessageType::NewView,
+            0x05 => PbftMessageType::ViewChange,
+            0x06 => PbftMessageType::SealRequest,
+            0x07 => PbftMessageType::Seal,
+            _ => PbftMessageType::Unset,
         }
     }
+}
+
+///
+#[derive_arbitrary(rlp)]
+#[derive(Clone, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ClayerBlock {
+    /// block
+    pub block: ClayerExecutionPayload,
+    /// node peer id
+    pub signer_id: PeerId,
+    /// seal
+    pub seal_bytes: Bytes,
+}
+
+impl ClayerBlock {
+    /// Create a new `ClayerBlock`
+    pub fn new(block: ClayerExecutionPayload) -> Self {
+        ClayerBlock { signer_id: PeerId::default(), seal_bytes: Bytes::default(), block }
+    }
+
+    /// Get the block id, call hash_slow for performance
+    pub fn block_id(&self) -> B256 {
+        self.block.block_hash.clone()
+    }
+
+    /// Get the previous block
+    pub fn previous_id(&self) -> B256 {
+        self.block.parent_hash.clone()
+    }
+
+    /// Get the block number
+    pub fn block_num(&self) -> u64 {
+        self.block.block_number
+    }
+}
+
+impl std::hash::Hash for ClayerBlock {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.block.hash(state);
+        self.seal_bytes.hash(state);
+        self.signer_id.hash(state);
+    }
+}
+
+impl std::fmt::Debug for ClayerBlock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ClayerBlock(block_num: {:?}, block_id: {:?}, previous_id: {:?}, signer_id: {:?}",
+            self.block_num(),
+            self.block_id(),
+            self.previous_id(),
+            self.signer_id,
+        )
+    }
+}
+
+impl std::fmt::Display for ClayerBlock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ClayerBlock(block_num: {:?}, block_id: {:?}, previous_id: {:?}, signer_id: {:?}",
+            self.block_num(),
+            self.block_id(),
+            self.previous_id(),
+            self.signer_id,
+        )
+    }
+}
+
+/// ======================================================================================================================
+
+#[derive_arbitrary(rlp)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ClayerExecutionPayload {
+    ///
+    pub parent_hash: B256,
+    ///
+    pub fee_recipient: Address,
+    ///
+    pub state_root: B256,
+    ///
+    pub receipts_root: B256,
+    ///
+    pub logs_bloom: Bloom,
+    ///
+    pub prev_randao: B256,
+    ///
+    pub block_number: u64,
+    ///
+    pub gas_limit: u64,
+    ///
+    pub gas_used: u64,
+    ///
+    pub timestamp: u64,
+    ///
+    pub extra_data: Bytes,
+    ///
+    pub base_fee_per_gas: U256,
+    ///
+    pub block_hash: B256,
+    ///
+    pub transactions: Vec<Bytes>,
+    ///
+    pub withdrawals: Vec<Withdrawal>,
 }

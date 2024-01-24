@@ -1,6 +1,11 @@
-use crate::error::{PrettyReqwestError, RpcError};
+use crate::{
+    error::{PrettyReqwestError, RpcError},
+    ClStorage,
+};
 use alloy_primitives::{B256, U256};
+use chrono::format;
 use reqwest::StatusCode;
+use reth_provider::BlockReaderIdExt;
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadInputV2, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes,
@@ -162,4 +167,107 @@ pub async fn new_payload(
     let response = api.new_payload_v2(input).await?;
 
     Ok(response)
+}
+
+#[derive(Debug)]
+pub enum ApiServiceError {
+    ApiError(String),
+    InvalidState(String),
+    UnknownBlock(String),
+    UnknownPeer(String),
+    NoChainHead,
+    BlockNotReady,
+}
+
+impl std::fmt::Display for ApiServiceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct ApiService {
+    api: Arc<HttpJsonRpc>,
+}
+
+impl ApiService {
+    pub fn new(api: Arc<HttpJsonRpc>) -> Self {
+        Self { api }
+    }
+
+    /// Initialize a new block built on the block with the given previous id and
+    /// begin adding batches to it. If no previous id is specified, the current
+    /// head will be used.
+    pub fn initialize_block(&mut self, previous_id: Option<B256>) -> Result<(), ApiServiceError> {
+        // let block_id = if let Some(block_id) = previous_id {
+        //     block_id
+        // } else {
+        //     let last_block_hash = match self.api.get_block_by_number("latest".to_string()).await {
+        //         Ok(x) => {
+        //             if let Some(execution_block) = x {
+        //                 execution_block.block_hash
+        //             } else {
+        //                 return Err(ApiServiceError::UnknownBlock(
+        //                     "get block return none".to_string(),
+        //                 ));
+        //             }
+        //         }
+        //         Err(e) => {
+        //             return Err(ApiServiceError::ApiError(format!(
+        //                 "get block by number error: {:?}",
+        //                 e
+        //             )));
+        //         }
+        //     };
+        //     last_block_hash
+        // };
+
+        // let forkchoice_updated_result = match forkchoice_updated(&self.api, block_id.clone()).await
+        // {
+        //     Ok(x) => x,
+        //     Err(e) => {
+        //         return Err(ApiServiceError::ApiError(format!("forkchoice_updated: {:?}", e)));
+        //     }
+        // };
+        // if !forkchoice_updated_result.payload_status.status.is_valid() {
+        //     return Err(ApiServiceError::BlockNotReady);
+        // }
+
+        Ok(())
+    }
+
+    /// Stop adding batches to the current block and return a summary of its
+    /// contents.
+    pub fn summarize_block(&mut self) -> Result<Vec<u8>, ApiServiceError> {
+        Ok(vec![])
+    }
+
+    /// Insert the given consensus data into the block and sign it. If this call is successful, the
+    /// consensus engine will receive the block afterwards.
+    pub fn finalize_block(
+        &mut self,
+        data: reth_primitives::Bytes,
+    ) -> Result<B256, ApiServiceError> {
+        Ok(B256::ZERO)
+    }
+
+    /// Stop adding batches to the current block and abandon it.
+    pub fn cancel_block(&mut self) -> Result<(), ApiServiceError> {
+        Ok(())
+    }
+
+    /// Update the prioritization of blocks to check
+    pub fn check_blocks(&mut self, priority: Vec<B256>) -> Result<(), ApiServiceError> {
+        Ok(())
+    }
+
+    /// Update the block that should be committed
+    pub fn commit_block(&mut self, block_id: B256) -> Result<(), ApiServiceError> {
+        Ok(())
+    }
+
+    /// Mark this block as invalid from the perspective of consensus
+    pub fn fail_block(&mut self, block_id: B256) -> Result<(), ApiServiceError> {
+        Ok(())
+    }
 }

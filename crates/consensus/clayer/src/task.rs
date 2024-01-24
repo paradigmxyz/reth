@@ -1,4 +1,6 @@
-use crate::engine_api::{forkchoice_updated, forkchoice_updated_with_attributes, new_payload};
+use crate::engine_api::{
+    forkchoice_updated, forkchoice_updated_with_attributes, new_payload, ApiService,
+};
 use crate::{consensus::ClayerConsensusEngine, engine_api::http::HttpJsonRpc, timing, ClStorage};
 use alloy_primitives::B256;
 use futures_util::{future::BoxFuture, FutureExt};
@@ -70,6 +72,7 @@ impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
         consensus_engine: ClayerConsensusEngine,
         storages: CDB,
     ) -> Self {
+        consensus_engine.set_service(ApiService::new(api.clone()));
         Self {
             chain_spec,
             client,
@@ -107,10 +110,6 @@ where
             if let Poll::Ready(x) = this.block_publishing_ticker.poll(cx) {
                 info!(target:"consensus::cl", "Attempting publish block");
                 this.queued.push_back(x);
-            }
-
-            if let Some(data) = this.consensus_engine.pop_cache() {
-                info!(target:"consensus::cl","trace-consensus ========= received consensus: {}",hex::encode(data));
             }
 
             let mut rng = rand::thread_rng();
@@ -160,10 +159,6 @@ where
                 // define task
                 this.insert_task = Some(Box::pin(async move {
                     let self_id = network.peer_id();
-                    info!(target:"consensus::cl","trace-consensus =========  broadcast_consensus: {}",hex::encode(self_id));
-                    consensus_engine.broadcast_consensus(reth_primitives::Bytes::copy_from_slice(
-                        self_id.as_slice(),
-                    ));
                     if !is_validator {
                         return events;
                     }

@@ -19,6 +19,8 @@ pub const JSONRPC_VERSION: &str = "2.0";
 
 pub const RETURN_FULL_TRANSACTION_OBJECTS: bool = false;
 
+pub const ETH_BLOCK_NUMBER: &str = "eth_blockNumber";
+pub const ETH_BLOCK_NUMBER_TIMEOUT: Duration = Duration::from_secs(1);
 pub const ETH_GET_BLOCK_BY_NUMBER: &str = "eth_getBlockByNumber";
 pub const ETH_GET_BLOCK_BY_NUMBER_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -68,6 +70,12 @@ pub struct HttpJsonRpc {
     pub url: Url,
     pub execution_timeout_multiplier: u32,
     auth: Option<Auth>,
+}
+
+impl Default for HttpJsonRpc {
+    fn default() -> Self {
+        Self::new(Url::parse("http://127.0.0.1:8551/").unwrap(), None).unwrap()
+    }
 }
 
 impl HttpJsonRpc {
@@ -157,6 +165,16 @@ impl HttpJsonRpc {
             Some(false) => Ok(()),
             _ => Err(ClRpcError::IsSyncing),
         }
+    }
+
+    pub async fn block_number(&self) -> Result<U256, ClRpcError> {
+        let params = json!([]);
+        self.rpc_request(
+            ETH_BLOCK_NUMBER,
+            params,
+            ETH_BLOCK_NUMBER_TIMEOUT * self.execution_timeout_multiplier,
+        )
+        .await
     }
 
     pub async fn get_block_by_number<'a>(
@@ -367,8 +385,13 @@ impl HttpJsonRpc {
 
 #[cfg(test)]
 mod test {
+    use crate::{
+        create_api, create_auth_api,
+        engine_api::{auth::JwtKey, ExecutionPayloadWrapperV2},
+    };
     use alloy_primitives::{Address, B256, U256};
     use reth_interfaces::consensus::ForkchoiceState;
+    use reth_rpc::JwtSecret;
     use reth_rpc_types::{
         engine::{
             ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadFieldV2,
@@ -376,10 +399,37 @@ mod test {
         },
         ExecutionPayloadV2,
     };
+    use secp256k1::SecretKey;
     use serde_json::json;
     use std::{convert::TryFrom, path::PathBuf, str::FromStr};
 
-    use crate::{create_auth_api, engine_api::ExecutionPayloadWrapperV2};
+    #[tokio::test]
+    async fn block_number() {
+        let secret =
+            JwtSecret::from_hex("d7068d842c0a42948c293d35c0cd7d9c95ce5e9558fd675c0f6a4b159235428e")
+                .unwrap();
+        let jwt_key = JwtKey::from_slice(secret.as_bytes()).unwrap();
+        let api = create_auth_api(jwt_key);
+        let block_number = match api.block_number().await {
+            Ok(result) => {
+                println!("block_number {}", result);
+                result
+            }
+            Err(e) => panic!("block_number error"),
+        };
+
+        match api.get_block_by_number("latest".to_string()).await {
+            Ok(x) => {
+                if let Some(b) = x {
+                    println!("block hash {:?}", b.block_hash);
+                }
+            }
+            Err(e) => {
+                panic!("get_block_by_number error",);
+            }
+        }
+    }
+
     #[tokio::test]
     async fn forkchoice_updated() {
         // let secret_file = PathBuf::from_str("/work/data/dev1/jwt.hex").unwrap();

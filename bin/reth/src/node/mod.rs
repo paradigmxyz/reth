@@ -377,7 +377,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         self.ext.configure_network(network_builder.network_mut(), &components)?;
 
         // launch network
-        let clayer_consensus = ClayerConsensusEngine::new(self.clayer.mine);
+        let clayer_consensus = ClayerConsensusEngine::new(self.clayer.mine, secret_key);
         let network = self.start_network(
             network_builder,
             &ctx.task_executor,

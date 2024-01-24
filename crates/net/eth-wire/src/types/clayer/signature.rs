@@ -1,10 +1,11 @@
 //! Implementation of consensus layer messages[ClayerSignature]
 use alloy_rlp::{Decodable, Encodable};
-// use derive_more::{AsRef, Deref};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{sign_message, Address, Signature, B256};
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
+
+// use super::message::ClayerConsensusMessageError;
 
 /// Consensus layer signature
 #[derive_arbitrary(rlp)]
@@ -27,36 +28,22 @@ impl Decodable for ClayerSignature {
     }
 }
 
-impl ClayerSignature {
-    /// Create new signature
-    pub fn sign_hash(
-        sk: SecretKey,
-        signature_hash: B256,
-    ) -> std::result::Result<ClayerSignature, VerifySignatureError> {
-        let signature = sign_message(B256::from_slice(&sk.secret_bytes()[..]), signature_hash);
-        let signature = signature.map_err(|_| VerifySignatureError::CouldNotSign)?;
-        Ok(Self { 0: signature })
-    }
+// impl ClayerSignature {
+//     /// Create new signature
+//     pub fn sign_hash(
+//         sk: SecretKey,
+//         signature_hash: B256,
+//     ) -> std::result::Result<ClayerSignature, ClayerConsensusMessageError> {
+//         let signature = sign_message(B256::from_slice(&sk.secret_bytes()[..]), signature_hash);
+//         let signature = signature.map_err(|_| ClayerConsensusMessageError::CouldNotSign)?;
+//         Ok(Self { 0: signature })
+//     }
 
-    /// Recover signer from signature and hash.
-    pub fn recover_signer(&self, hash: B256) -> Option<Address> {
-        self.0.recover_signer(hash)
-    }
-}
-
-/// Errors returned from a sign request.
-#[derive(Debug, thiserror::Error)]
-pub enum VerifySignatureError {
-    /// Error occured while trying to sign data.
-    #[error("could not sign")]
-    CouldNotSign,
-    /// Error occured while trying to verify the sign.
-    #[error("signature verification failed")]
-    VerifyError,
-    /// Error occured while trying to recover the signer.
-    #[error("recover signer failed")]
-    RecoverError,
-}
+//     /// Recover signer from signature and hash.
+//     pub fn recover_signer(&self, hash: B256) -> Option<Address> {
+//         self.0.recover_signer(hash)
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

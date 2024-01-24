@@ -36,7 +36,7 @@ pub struct NetworkClayerManager<Consensus> {
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     consensus_events: UnboundedReceiverStream<NetworkConsensusEvent>,
     /// Incoming commands from [`ConsensussHandle`].
-    pending_consensuses: ReceiverStream<reth_primitives::Bytes>,
+    pending_consensuses: ReceiverStream<(Vec<PeerId>, reth_primitives::Bytes)>,
 }
 
 impl<Consensus: ClayerConsensus> NetworkClayerManager<Consensus> {
@@ -92,15 +92,17 @@ where
         match event {
             NetworkConsensusEvent::IncomingConsensus { peer_id, msg } => {
                 debug!(target: "net::consensus", ?peer_id, "received consensus broadcast");
-                self.clayer.push_cache(msg.0.clone());
+                self.clayer.push_received_cache(peer_id, msg.0.clone());
             }
         }
     }
 
-    fn propagate_consensus(&mut self, data: reth_primitives::Bytes) {
+    fn propagate_consensus(&mut self, peers: Vec<PeerId>, data: reth_primitives::Bytes) {
         for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
             // send full transactions
-            self.network.send_consensus(*peer_id, data.clone());
+            if peers.contains(peer_id) {
+                self.network.send_consensus(*peer_id, data.clone());
+            }
         }
     }
 }
@@ -127,8 +129,8 @@ where
             this.on_network_consensus_event(event);
         }
 
-        while let Poll::Ready(Some(data)) = this.pending_consensuses.poll_next_unpin(cx) {
-            this.propagate_consensus(data);
+        while let Poll::Ready(Some((peers, data))) = this.pending_consensuses.poll_next_unpin(cx) {
+            this.propagate_consensus(peers, data);
         }
 
         Poll::Pending

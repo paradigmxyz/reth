@@ -1,9 +1,8 @@
 //! Implementation of consensus layer messages
-pub mod commit;
 pub mod message;
-pub mod prepare;
-pub mod preprepare;
+pub use message::*;
 pub mod signature;
+pub use signature::*;
 
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
@@ -17,82 +16,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ClayerConsensusMsg(pub Bytes);
-
-// ///
-// #[derive_arbitrary(rlp)]
-// #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
-// #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-// pub struct ViewChange {
-//     ///
-//     pub view: u64,
-//     ///
-//     pub sequence: u64,
-//     ///
-//     pub peer_id: PeerId,
-// }
-
-// ///
-// #[derive_arbitrary(rlp)]
-// #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
-// #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-// pub struct PrepareProof {
-//     ///
-//     pub preprepare: PrePrepare,
-//     ///
-//     pub prepares: Vec<Prepare>,
-// }
-
-// ///
-// #[derive_arbitrary(rlp)]
-// #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
-// #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-// pub struct ViewChange {
-//     ///
-//     pub new_view: u64,
-//     ///
-//     pub prepares: PrepareProof,
-// }
-
-// ///
-// #[derive_arbitrary(rlp)]
-// #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
-// #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-// pub struct NewView {
-//     ///
-//     pub view: u64,
-//     ///
-//     pub view_changes: Vec<ViewChange>,
-//     ///
-//     pub pre_prepares: Vec<PrePrepare>,
-// }
-
-// ///
-// #[derive_arbitrary(rlp)]
-// #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
-// #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-// pub struct GetProposal {
-//     ///
-//     pub view: u64,
-//     ///
-//     pub sequence: u64,
-//     ///
-//     pub digest: B256,
-// }
-
-// ///
-// #[derive_arbitrary(rlp)]
-// #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
-// #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-// pub struct Proposal {
-//     ///
-//     pub view: u64,
-//     ///
-//     pub sequence: u64,
-//     ///
-//     pub digest: B256,
-//     ///
-//     pub request: Bytes,
-// }
 
 #[cfg(test)]
 mod tests {

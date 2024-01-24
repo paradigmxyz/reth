@@ -30,7 +30,7 @@ pub fn pk2id(pk: &PublicKey) -> PeerId {
 
 /// Converts a [PeerId] to a [secp256k1::PublicKey] by prepending the [PeerId] bytes with the
 /// SECP256K1_TAG_PUBKEY_UNCOMPRESSED tag.
-pub(crate) fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
+pub fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
     // NOTE: B512 is used as a PeerId not because it represents a hash, but because 512 bits is
     // enough to represent an uncompressed public key.
     let mut s = [0u8; 65];
