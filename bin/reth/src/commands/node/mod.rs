@@ -6,6 +6,7 @@ use clap::{value_parser, Parser};
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_interfaces::consensus::Consensus;
+use reth_node_builder::builder::launch_from_config;
 use reth_primitives::ChainSpec;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
@@ -222,7 +223,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let executor = ctx.task_executor;
 
         // launch the node
-        let handle = node_config.launch::<Ext>(ext, executor).await?;
+        let handle = launch_from_config::<Ext>(node_config,ext, executor).await?;
+
         handle.wait_for_node_exit().await
     }
 

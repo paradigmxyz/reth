@@ -14,3 +14,6 @@ pub use engine::EthEngineTypes;
 
 #[cfg(feature = "optimism")]
 pub use engine::OptimismEngineTypes;
+
+/// Exports a type that can be used to spawn reth instances and reth node handles.
+pub mod builder;
