@@ -1,6 +1,6 @@
 //! Prometheus exporter
 
-use crate::version_metrics::record_version_metrics;
+use crate::metrics::version_metrics::record_version_metrics;
 use eyre::WrapErr;
 use hyper::{
     service::{make_service_fn, service_fn},
