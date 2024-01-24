@@ -1430,7 +1430,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         let mut withdrawals_cursor = self.tx.cursor_read::<tables::BlockWithdrawals>()?;
         let mut block_body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
-
+        let mut senders_cursor = self.tx.cursor_read::<tables::TxSenders>()?;
         for num in range {
             if let Some((_, header)) = headers_cursor.seek_exact(num)? {
                 // If the body indices are not found, this means that the transactions either do
@@ -1445,11 +1445,9 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                     } else {
                         tx_cursor
                             .walk_range(tx_range.clone())?
-                            .map(|result| result.map(|(_, tx)| tx.into()))
+                            .map(|result| result.map(|(tx_number, tx)| (tx_number, tx.with_hash())))
                             .collect::<Result<Vec<_>, _>>()?
                     };
-
-                    let senders = self.senders_by_tx_range(tx_range)?;
 
                     // If we are past shanghai, then all blocks should have a withdrawal list,
                     // even if empty
@@ -1470,7 +1468,71 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                         ommers_cursor.seek_exact(num)?.map(|(_, o)| o.ommers).unwrap_or_default()
                     };
 
-                    blocks.push(Block { header, body, ommers, withdrawals }.with_senders(senders));
+                    // Walking range to get the TxNumber along with the Address.
+                    let mut senders =
+                        senders_cursor.walk_range(tx_range)?.collect::<Result<Vec<_>, _>>()?;
+
+                    // This approach is similar to what is done in
+                    // `get_take_block_transaction_range`.
+                    if senders.len() != body.len() {
+                        let missing_len = body.len() - senders.len();
+                        senders.reserve(missing_len);
+
+                        let mut missing_senders = Vec::with_capacity(missing_len);
+
+                        // Recover the missing senders by tracking the index of body.
+                        {
+                            let mut senders = senders.iter().peekable();
+
+                            for (i, (tx_number, tx)) in body.iter().enumerate() {
+                                if let Some((sender_tx_number, _)) = senders.peek() {
+                                    if sender_tx_number == tx_number {
+                                        // If current sender's `TxNumber` matches current
+                                        // transaction's
+                                        // `TxNumber`, advance the senders iterator.
+                                        senders.next();
+                                    } else {
+                                        // If current sender's `TxNumber` doesn't match current
+                                        // transaction's
+                                        // `TxNumber`, add it to missing senders.
+                                        missing_senders.push((i, tx_number, tx));
+                                    }
+                                } else {
+                                    // If there's no more senders left, but we're still iterating
+                                    // over transactions, add
+                                    // them to missing senders
+                                    missing_senders.push((i, tx_number, tx));
+                                }
+                            }
+                        }
+
+                        // Recover the missing senders
+                        let recovered_senders = TransactionSigned::recover_signers(
+                            missing_senders.iter().map(|(_, _, tx)| *tx).collect::<Vec<_>>(),
+                            missing_senders.len(),
+                        )
+                        .ok_or(ProviderError::SenderRecoveryError)?;
+
+                        // Insert the recovered senders into the senders list
+                        for ((i, tx_number, _), sender) in
+                            missing_senders.into_iter().zip(recovered_senders)
+                        {
+                            // Insert will put recovered senders at necessary positions and shift
+                            // the rest
+                            senders.insert(i, (*tx_number, sender));
+                        }
+                    }
+                    blocks.push(
+                        Block {
+                            header,
+                            body: body.into_iter().map(|(_, tx)| tx).collect(),
+                            ommers,
+                            withdrawals,
+                        }
+                        .with_senders_unchecked(
+                            senders.into_iter().map(|(_, sender)| sender).collect(),
+                        ),
+                    )
                 }
             }
         }
