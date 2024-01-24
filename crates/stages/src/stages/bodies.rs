@@ -134,8 +134,14 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             .unwrap_or_default();
 
         match next_snapshot_tx_num.cmp(&next_tx_num) {
+            // If static files are ahead, then we didn't reach the database commit in a previous
+            // stage run. So, our only solution is to unwind the static files and proceed from the
+            // database expected height.
             Ordering::Greater => snapshotter
                 .prune_transactions(next_snapshot_tx_num - next_tx_num, from_block - 1)?,
+            // If static files are behind, then there was some corruption or loss of files. This
+            // error will trigger an unwind, that will bring the database to the same height as the
+            // static files.
             Ordering::Less => {
                 let last_block = snapshot_provider
                     .get_highest_snapshot_block(SnapshotSegment::Transactions)

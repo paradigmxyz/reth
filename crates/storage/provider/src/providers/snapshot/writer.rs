@@ -242,19 +242,19 @@ impl<'a> SnapshotProviderRW<'a> {
         self.append_with_tx_number(SnapshotSegment::Receipts, tx_num, receipt)
     }
 
-    /// Prunes `to_delete` number of transactions from snapshots.
+    /// Removes the last `number` of transactions from static files.
     ///
     /// # Note
     /// Commits to the configuration file at the end.
     pub fn prune_transactions(
         &mut self,
-        to_delete: u64,
+        number: u64,
         last_block: BlockNumber,
     ) -> ProviderResult<()> {
         let segment = SnapshotSegment::Transactions;
         debug_assert!(self.writer.user_header().segment() == segment);
 
-        self.truncate(segment, to_delete, Some(last_block))
+        self.truncate(segment, number, Some(last_block))
     }
 
     /// Prunes `to_delete` number of receipts from snapshots.
