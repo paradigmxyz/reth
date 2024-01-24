@@ -88,7 +88,7 @@ where
     /// Write downloaded headers to the given transaction from ETL.
     ///
     /// Writes to the following tables:
-    /// [`tables::Headers`],[`tables::CanonicalHeaders`],[`tables::HeaderTD`] and
+    /// [`tables::Headers`], [`tables::CanonicalHeaders`], [`tables::HeaderTD`] and
     /// [`tables::HeaderNumbers`].
     fn write_headers<DB: Database>(
         &mut self,
@@ -233,7 +233,7 @@ where
         loop {
             match ready!(self.downloader.poll_next_unpin(cx)) {
                 Some(Ok(headers)) => {
-                    info!(target: "sync::stages::headers", len = headers.len(), from = headers.first().map(|h|h.number), to = headers.last().map(|h|h.number), "Received headers");
+                    info!(target: "sync::stages::headers", len = headers.len(), from = headers.first().map(|h| h.number), to = headers.last().map(|h| h.number), "Received headers");
                     for header in headers {
                         let header_number = header.number;
 
