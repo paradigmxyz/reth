@@ -88,7 +88,7 @@ where
     /// Write downloaded headers to the given transaction from ETL.
     ///
     /// Writes to the following tables:
-    /// [`tables::Headers`],[`tables::CanonicalHeaders`],[`tables::HeaderTD`] and
+    /// [`tables::Headers`], [`tables::CanonicalHeaders`], [`tables::HeaderTD`] and
     /// [`tables::HeaderNumbers`].
     fn write_headers<DB: Database>(
         &mut self,
