@@ -4,6 +4,7 @@ use crate::dirs::{ChainPath, DataDirPath, MaybePlatformPath};
 use alloy_chains::Chain;
 use reth_db::{
     init_db,
+    mdbx::DatabaseArguments,
     test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv,
 };
@@ -54,7 +55,10 @@ impl DatabaseBuilder {
                 let db_path = data_dir.db_path();
 
                 tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-                let db = Arc::new(init_db(db_path.clone(), log_level)?.with_metrics());
+                let db = Arc::new(
+                    init_db(db_path.clone(), DatabaseArguments::default().log_level(log_level))?
+                        .with_metrics(),
+                );
                 Ok(DatabaseInstance::Real { db, data_dir })
             }
         }
