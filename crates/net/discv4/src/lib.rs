@@ -37,10 +37,7 @@ use discv5::{
     },
     ConnectionDirection, ConnectionState,
 };
-use enr::{
-    k256::elliptic_curve::zeroize::{DefaultIsZeroes, Zeroize},
-    Enr, EnrBuilder,
-};
+use enr::{Enr, EnrBuilder};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
@@ -48,10 +45,9 @@ use reth_primitives::{
     bytes::{Bytes, BytesMut},
     hex, ForkId, PeerId, B256,
 };
-use secp256k1::{ffi::CPtr, PublicKey, SecretKey};
+use secp256k1::{PublicKey, SecretKey};
 use smallvec::{smallvec, SmallVec};
 use std::{
-    borrow::BorrowMut,
     cell::RefCell,
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, HashSet, VecDeque},
     env, io,
@@ -2304,7 +2300,7 @@ where
         &mut self,
         nodes: &mut Vec<NodeRecord>,
     ) -> Result<SmallVec<[PeerId; 3]>, Discv4Error> {
-        if self.change_tx.has_changed().map_err(|e| Discv4Error::Discv5MirrorUpdateFailed(e))? {
+        if self.change_tx.has_changed().map_err(Discv4Error::Discv5MirrorUpdateFailed)? {
             self.update_mirror();
             self.change_tx.borrow_and_update();
         }
