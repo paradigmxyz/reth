@@ -1492,6 +1492,36 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_node_exit_future_terminate_true() {
+        let (tx, rx) = oneshot::channel::<Result<(), BeaconConsensusEngineError>>();
+
+        let _ = tx.send(Ok(()));
+
+        let node_exit_future = NodeExitFuture::new(rx, true);
+
+        let res = node_exit_future.await;
+
+        assert!(res.is_ok());
+    }
+
+    use std::time::Duration;
+    use tokio::time::timeout;
+    #[tokio::test]
+    async fn test_node_exit_future() {
+        let (tx, rx) = oneshot::channel::<Result<(), BeaconConsensusEngineError>>();
+
+        let _ = tx.send(Ok(()));
+
+        let node_exit_future = NodeExitFuture::new(rx, false);
+        match timeout(Duration::from_millis(100), node_exit_future).await {
+            Ok(_) => panic!("future shouldn't be resolved"),
+            Err(_) => {
+                println!("termination flag is set to FALSE so future expectadly didn't resolve")
+            }
+        }
+    }
+
     #[cfg(feature = "optimism")]
     #[tokio::test]
     async fn optimism_pre_canyon_no_withdrawals_valid() {
