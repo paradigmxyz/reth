@@ -2269,7 +2269,7 @@ pub trait MirrorDiscv5KBuckets {
     fn filter_nodes(
         &mut self,
         nodes: &mut Vec<NodeRecord>,
-    ) -> Result<SmallVec<[PeerId; 4]>, Discv4Error>;
+    ) -> Result<SmallVec<[PeerId; 3]>, Discv4Error>;
 }
 
 #[derive(Debug)]
@@ -2303,7 +2303,7 @@ where
     fn filter_nodes(
         &mut self,
         nodes: &mut Vec<NodeRecord>,
-    ) -> Result<SmallVec<[PeerId; 4]>, Discv4Error> {
+    ) -> Result<SmallVec<[PeerId; 3]>, Discv4Error> {
         if self.change_tx.has_changed().map_err(|e| Discv4Error::Discv5MirrorUpdateFailed(e))? {
             self.update_mirror();
             self.change_tx.borrow_and_update();
@@ -2340,7 +2340,7 @@ impl MirrorDiscv5KBuckets for Discv5KbucketsNoop {
     fn filter_nodes(
         &mut self,
         _nodes: &mut Vec<NodeRecord>,
-    ) -> Result<SmallVec<[PeerId; 4]>, Discv4Error> {
+    ) -> Result<SmallVec<[PeerId; 3]>, Discv4Error> {
         Ok(smallvec!())
     }
 }
