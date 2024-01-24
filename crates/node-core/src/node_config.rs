@@ -1504,7 +1504,7 @@ mod tests {
     use std::time::Duration;
     use tokio::time::timeout;
     #[tokio::test]
-    async fn test_node_exit_future() {
+    async fn test_node_exit_future_terminate_false() {
         let (tx, rx) = oneshot::channel::<Result<(), BeaconConsensusEngineError>>();
 
         let _ = tx.send(Ok(()));
