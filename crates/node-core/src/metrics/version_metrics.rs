@@ -13,6 +13,6 @@ const LABELS: [(&str, &str); 6] = [
 ];
 
 /// This exposes reth's version information over prometheus.
-pub fn record_version_metrics() {
+pub fn register_version_metrics() {
     register_gauge!("info", &LABELS);
 }
