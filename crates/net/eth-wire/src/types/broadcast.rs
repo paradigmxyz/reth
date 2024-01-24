@@ -324,14 +324,13 @@ impl Arbitrary for NewPooledTransactionHashes68 {
 
 #[cfg(feature = "arbitrary")]
 fn tx_type_to_u8(tx_type: TxType) -> u8 {
-    // Example conversion logic
     match tx_type {
-        TxType::Legacy => 1,
-        TxType::EIP2930 => 2,
-        TxType::EIP1559 => 3,
-        TxType::EIP4844 => 4,
+        TxType::Legacy => 0,
+        TxType::EIP2930 => 1,
+        TxType::EIP1559 => 2,
+        TxType::EIP4844 => 3,
         #[cfg(feature = "optimism")]
-        TxType::DEPOSIT => 5,
+        TxType::DEPOSIT => 4,
     }
 }
 
