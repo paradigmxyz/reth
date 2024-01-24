@@ -1432,10 +1432,10 @@ version = "0.1.0-alpha.16"
 dependencies = [
  "convert_case 0.6.0",
  "parity-scale-codec",
- "pretty_assertions",
  "proc-macro2",
  "quote",
  "serde",
+ "similar-asserts",
  "syn 2.0.48",
 ]
 
@@ -2068,12 +2068,6 @@ dependencies = [
  "rustc_version 0.4.0",
  "syn 1.0.109",
 ]
-
-[[package]]
-name = "diff"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 
 [[package]]
 name = "difflib"
@@ -5262,16 +5256,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pretty_assertions"
-version = "1.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af7cee1a6c8a5b9208b3cb1061f10c0cb689087b3d8ce85fb9d2dd7a29b6ba66"
-dependencies = [
- "diff",
- "yansi",
-]
-
-[[package]]
 name = "prettyplease"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5782,7 +5766,6 @@ dependencies = [
  "metrics-util",
  "once_cell",
  "pin-project",
- "pretty_assertions",
  "proptest",
  "rand 0.8.5",
  "ratatui",
@@ -5828,6 +5811,7 @@ dependencies = [
  "secp256k1 0.27.0",
  "serde",
  "serde_json",
+ "similar-asserts",
  "tempfile",
  "tokio",
  "toml 0.8.8",
@@ -6034,7 +6018,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "vergen",
 ]
 
 [[package]]
@@ -7004,7 +6987,6 @@ dependencies = [
  "criterion",
  "derive_more",
  "once_cell",
- "pretty_assertions",
  "proptest",
  "reth-db",
  "reth-interfaces",
@@ -7012,6 +6994,7 @@ dependencies = [
  "reth-provider",
  "revm",
  "serde_json",
+ "similar-asserts",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -9451,12 +9434,6 @@ checksum = "d7d8a75eaf6557bb84a65ace8609883db44a29951042ada9b393151532e41fcb"
 dependencies = [
  "xml-rs",
 ]
-
-[[package]]
-name = "yansi"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09041cd90cf85f7f8b2df60c646f853b7f535ce68f85244eb6731cf89fa498ec"
 
 [[package]]
 name = "yoke"

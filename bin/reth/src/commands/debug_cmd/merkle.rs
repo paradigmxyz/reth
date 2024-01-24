@@ -311,7 +311,7 @@ impl Command {
                 {
                     match (incremental_account_trie_iter.next(), clean_account_trie_iter.next()) {
                         (Some(incremental), Some(clean)) => {
-                            pretty_assertions::assert_eq!(
+                            similar_asserts::assert_eq!(
                                 incremental.0,
                                 clean.0,
                                 "Nibbles don't match"
@@ -364,7 +364,7 @@ impl Command {
                     }
                 }
 
-                pretty_assertions::assert_eq!(
+                similar_asserts::assert_eq!(
                     (
                         incremental_account_mismatched,
                         first_mismatched_storage.as_ref().map(|(incremental, _)| incremental)
