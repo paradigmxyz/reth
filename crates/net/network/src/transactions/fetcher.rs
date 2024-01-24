@@ -206,7 +206,7 @@ impl TransactionFetcher {
         if let Some(hash) = hashes.first() {
             if let Some(size) = self.eth68_meta.get(hash) {
                 if *size >= FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT {
-                    return hashes.drain(1..).collect::<Vec<_>>()
+                    return hashes.split_off(1)
                 }
             }
         }
