@@ -304,7 +304,16 @@ impl Arbitrary for NewPooledTransactionHashes68 {
     type Parameters = ();
 
     fn arbitrary_with(_args: ()) -> Self::Strategy {
-        (vec(any::<TxType>(), 1..100), vec(any::<usize>(), 1..100), vec(any::<B256>(), 1..100))
+        (
+            vec(any::<TxType>(), 1..100),
+            vec(
+                proptest::num::usize::ANY.prop_map(|x| x % 131072), /* Map the usize values to
+                                                                     * the range 0..
+                                                                     * 131072(0x20000) */
+                1..100,
+            ),
+            vec(any::<B256>(), 1..100),
+        )
             .prop_map(|(types, sizes, hashes)| {
                 // Ensure the vectors have the same length
                 let min_length = *[types.len(), sizes.len(), hashes.len()].iter().min().unwrap();
