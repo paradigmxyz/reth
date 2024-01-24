@@ -83,10 +83,11 @@ where
         self.inner
             .eth_api
             .spawn_with_state_at_block(at, move |state| {
+                let block_hash = at.as_block_hash();
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
-                let mut transactions = transactions.into_iter().peekable();
-                for (index, tx) in transactions.clone().enumerate() {
+                let mut transactions = transactions.into_iter().enumerate().peekable();
+                while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
                     let tx = tx_env_with_recovered(&tx);
                     let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
@@ -96,7 +97,7 @@ where
                             env,
                             &mut db,
                             Some(TransactionContext {
-                                block_hash: at.as_block_hash(),
+                                block_hash,
                                 tx_hash: Some(tx_hash),
                                 tx_index: Some(index),
                             }),
@@ -213,6 +214,7 @@ where
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
         let state_at: BlockId = block.parent_hash.into();
+        let block_hash = block.hash;
         let block_txs = block.body;
 
         let this = self.clone();
@@ -238,7 +240,7 @@ where
                     env,
                     &mut db,
                     Some(TransactionContext {
-                        block_hash: state_at.as_block_hash(),
+                        block_hash: Some(block_hash),
                         tx_index: Some(index),
                         tx_hash: Some(tx.hash),
                     }),
