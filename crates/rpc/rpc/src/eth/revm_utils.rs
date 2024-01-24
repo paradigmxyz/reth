@@ -169,6 +169,7 @@ where
 /// _runtime_ db ([CacheDB]).
 ///
 /// Note: This assumes the target transaction is in the given iterator.
+/// Returns the index of the target transaction in the given iterator.
 pub(crate) fn replay_transactions_until<DB, I, Tx>(
     db: &mut CacheDB<DB>,
     cfg: CfgEnv,
