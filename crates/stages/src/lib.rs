@@ -52,6 +52,7 @@
 //!         bodies_downloader,
 //!         executor_factory,
 //!     ))
+//!     .unwrap()
 //!     .build(provider_factory);
 //! ```
 //!
