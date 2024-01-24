@@ -222,17 +222,17 @@ impl<'a> SnapshotProviderRW<'a> {
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn append_header(
         &mut self,
-        hash: BlockHash,
         header: Header,
         terminal_difficulty: U256,
+        hash: BlockHash,
     ) -> ProviderResult<BlockNumber> {
         debug_assert!(self.writer.user_header().segment() == SnapshotSegment::Headers);
 
         self.writer.user_header_mut().increment_block();
 
-        self.append_column(hash)?;
         self.append_column(header)?;
         self.append_column(terminal_difficulty)?;
+        self.append_column(hash)?;
 
         Ok(self.writer.user_header().block_end())
     }
