@@ -321,25 +321,13 @@ impl Arbitrary for NewPooledTransactionHashes68 {
                     types: types
                         .into_iter()
                         .take(min_length)
-                        .map(tx_type_to_u8) // Convert TxType to u8
+                        .map(|tx_type| tx_type as u8) // Convert TxType to u8
                         .collect(),
                     sizes: sizes.into_iter().take(min_length).collect(),
                     hashes: hashes.into_iter().take(min_length).collect(),
                 }
             })
             .boxed()
-    }
-}
-
-#[cfg(feature = "arbitrary")]
-fn tx_type_to_u8(tx_type: TxType) -> u8 {
-    match tx_type {
-        TxType::Legacy => 0,
-        TxType::EIP2930 => 1,
-        TxType::EIP1559 => 2,
-        TxType::EIP4844 => 3,
-        #[cfg(feature = "optimism")]
-        TxType::DEPOSIT => 4,
     }
 }
 
