@@ -115,9 +115,9 @@ impl AppendableChain {
         EF: ExecutorFactory,
     {
         let parent_number = block.number - 1;
-        let parent = self.blocks().get(&parent_number).ok_or_else(|| {
-            BlockchainTreeError::BlockNumberNotFoundInChain { block_number: parent_number }
-        })?;
+        let parent = self.blocks().get(&parent_number).ok_or(
+            BlockchainTreeError::BlockNumberNotFoundInChain { block_number: parent_number },
+        )?;
 
         let mut state = self.state().clone();
 

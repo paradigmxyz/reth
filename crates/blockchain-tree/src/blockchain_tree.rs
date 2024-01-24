@@ -364,9 +364,9 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             .fork(Hardfork::Paris)
             .active_at_ttd(parent_td, U256::ZERO)
         {
-            return Err(BlockExecutionError::Validation(
-                BlockValidationError::BlockPreMerge { hash: block.hash }.into(),
-            )
+            return Err(BlockExecutionError::Validation(BlockValidationError::BlockPreMerge {
+                hash: block.hash,
+            })
             .into())
         }
 
