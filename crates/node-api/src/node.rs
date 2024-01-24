@@ -17,5 +17,5 @@ pub trait FullNodeTypes: NodeTypes + 'static {
     /// Underlying database type.
     type DB: Database + Clone + 'static;
     /// The provider type used to interact with the node.
-    type Provider: FullProvider;
+    type Provider: FullProvider<Self::DB>;
 }

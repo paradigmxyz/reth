@@ -33,7 +33,7 @@ where
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
     Types: NodeTypes,
-    Provider: FullProvider,
+    Provider: FullProvider<DB>,
     DB: Database + Clone + 'static,
 {
     type DB = DB;

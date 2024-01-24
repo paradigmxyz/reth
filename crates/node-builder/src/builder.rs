@@ -22,7 +22,7 @@ use std::{marker::PhantomData, sync::Arc};
 // Note: we need to hardcode this because custom components might depend on it in associated types.
 // TODO: this will eventually depend on node primitive types and evm
 type RethFullProviderType<DB> =
-    BlockchainProvider<Arc<DB>, ShareableBlockchainTree<Arc<DB>, EvmProcessorFactory>>;
+    BlockchainProvider<DB, ShareableBlockchainTree<DB, EvmProcessorFactory>>;
 
 /// Declaratively construct a node.
 ///
@@ -73,7 +73,7 @@ where
 impl<DB, Types> NodeBuilder<DB, TypesState<Types, DB>>
 where
     Types: NodeTypes,
-    DB: Database + Clone + 'static,
+    DB: Database + Clone + Unpin + 'static,
 {
     /// Configures the node's components.
     pub fn with_components<Builder>(
@@ -114,7 +114,7 @@ impl<DB, Types, Components>
         >,
     >
 where
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + 'static,
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     Types: NodeTypes,
     Components: NodeComponentsBuilder<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>>,
 {
