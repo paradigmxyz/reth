@@ -173,7 +173,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#42778ba44fbf9fdcfd44de81436f65d73e70ede2"
+source = "git+https://github.com/alloy-rs/alloy#269d9028b057592186d225faa18a7aaed7120027"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
@@ -195,7 +195,7 @@ dependencies = [
 [[package]]
 name = "alloy-node-bindings"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#42778ba44fbf9fdcfd44de81436f65d73e70ede2"
+source = "git+https://github.com/alloy-rs/alloy#269d9028b057592186d225faa18a7aaed7120027"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -256,7 +256,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-engine-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#42778ba44fbf9fdcfd44de81436f65d73e70ede2"
+source = "git+https://github.com/alloy-rs/alloy#269d9028b057592186d225faa18a7aaed7120027"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -271,7 +271,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-trace-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#42778ba44fbf9fdcfd44de81436f65d73e70ede2"
+source = "git+https://github.com/alloy-rs/alloy#269d9028b057592186d225faa18a7aaed7120027"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
@@ -282,7 +282,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#42778ba44fbf9fdcfd44de81436f65d73e70ede2"
+source = "git+https://github.com/alloy-rs/alloy#269d9028b057592186d225faa18a7aaed7120027"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -686,14 +686,13 @@ dependencies = [
 
 [[package]]
 name = "attohttpc"
-version = "0.16.3"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdb8867f378f33f78a811a8eb9bf108ad99430d7aad43315dd9319c827ef6247"
+checksum = "8d9a9bf8b79a749ee0b911b91b671cc2b6c670bdbc7e3dfd537576ddc94bb2a2"
 dependencies = [
  "http",
  "log",
  "url",
- "wildmatch",
 ]
 
 [[package]]
@@ -1292,9 +1291,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "chrono"
-version = "0.4.31"
+version = "0.4.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f2c685bad3eb3d45a01354cedb7d5faa66194d1d58ba6e267a8de788f79db38"
+checksum = "41daef31d7a747c5c847246f36de49ced6f7403b4cdabc807a97b5cc184cda7a"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
@@ -1302,7 +1301,7 @@ dependencies = [
  "num-traits",
  "serde",
  "wasm-bindgen",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.0",
 ]
 
 [[package]]
@@ -3595,10 +3594,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb56e1aa765b4b4f3aadfab769793b7087bb03a4ea4920644a6d238e2df5b9ed"
 
 [[package]]
-name = "igd"
-version = "0.12.0"
-source = "git+https://github.com/stevefan1999-personal/rust-igd?rev=c2d1f83eb1612a462962453cb0703bc93258b173#c2d1f83eb1612a462962453cb0703bc93258b173"
+name = "igd-next"
+version = "0.14.3"
+source = "git+https://github.com/dariusc93/rust-igd#2b268064c70e62cfea26952436630ea898d3b922"
 dependencies = [
+ "async-trait",
  "attohttpc",
  "bytes",
  "futures",
@@ -5300,9 +5300,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.76"
+version = "1.0.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95fc56cda0b5c3325f5fbbd7ff9fda9e02bb00bb3dac51252d2f1bfa1cb8cc8c"
+checksum = "e2422ad645d89c99f8f3e6b88a9fdeca7fabeac836b1002371c4367c8f984aae"
 dependencies = [
  "unicode-ident",
 ]
@@ -5600,13 +5600,13 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.10.2"
+version = "1.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "380b951a9c5e80ddfd6136919eef32310721aa4aacd4889a8d39124b026ab343"
+checksum = "b62dbe01f0b06f9d8dc7d49e05a0785f153b00b2c227856282f671e0318c9b15"
 dependencies = [
  "aho-corasick 1.1.2",
  "memchr",
- "regex-automata 0.4.3",
+ "regex-automata 0.4.4",
  "regex-syntax 0.8.2",
 ]
 
@@ -5621,9 +5621,9 @@ dependencies = [
 
 [[package]]
 name = "regex-automata"
-version = "0.4.3"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f804c7828047e88b2d32e2d7fe5a105da8ee3264f01902f796c8e067dc2483f"
+checksum = "3b7fa1134405e2ec9353fd416b17f8dacd46c473d7d3fd1cf202706a14eb792a"
 dependencies = [
  "aho-corasick 1.1.2",
  "memchr",
@@ -6258,7 +6258,7 @@ dependencies = [
 name = "reth-net-nat"
 version = "0.1.0-alpha.16"
 dependencies = [
- "igd",
+ "igd-next",
  "pin-project-lite",
  "public-ip",
  "reth-tracing",
@@ -7577,9 +7577,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.5.0"
+version = "3.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f58c3a1b3e418f61c25b2aeb43fc6c95eaa252b8cecdda67f401943e9e08d33f"
+checksum = "f5c9fdb6b00a489875b22efd4b78fe2b363b72265cc5f6eb2e2b9ee270e6140c"
 dependencies = [
  "base64 0.21.7",
  "chrono",
@@ -7594,9 +7594,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.5.0"
+version = "3.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2068b437a31fc68f25dd7edc296b078f04b45145c199d8eed9866e45f1ff274"
+checksum = "dbff351eb4b33600a2e138dfa0b10b65a238ea8ff8fb2387c422c5022a3e8298"
 dependencies = [
  "darling 0.20.3",
  "proc-macro2",
@@ -9170,12 +9170,6 @@ name = "widestring"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "653f141f39ec16bba3c5abe400a0c60da7468261cc2cbf36805022876bc721a8"
-
-[[package]]
-name = "wildmatch"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f44b95f62d34113cf558c93511ac93027e03e9c29a60dd0fd70e6e025c7270a"
 
 [[package]]
 name = "winapi"
