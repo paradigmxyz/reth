@@ -7,8 +7,6 @@ use alloy_rlp::{
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Block, Bytes, TransactionSigned, B256, U128};
 
-#[cfg(feature = "arbitrary")]
-use reth_primitives::TxType;
 use std::sync::Arc;
 
 #[cfg(feature = "arbitrary")]
@@ -300,9 +298,7 @@ pub struct NewPooledTransactionHashes68 {
 
 #[cfg(feature = "arbitrary")]
 impl Arbitrary for NewPooledTransactionHashes68 {
-    type Strategy = BoxedStrategy<Self>;
     type Parameters = ();
-
     fn arbitrary_with(_args: ()) -> Self::Strategy {
         // Generate a single random length for all vectors
         let vec_length = any::<usize>().prop_map(|x| x % 100 + 1); // Lengths between 1 and 100
@@ -310,23 +306,24 @@ impl Arbitrary for NewPooledTransactionHashes68 {
         vec_length
             .prop_flat_map(|len| {
                 // Use the generated length to create vectors of TxType, usize, and B256
-                let types_vec = vec(any::<TxType>(), len..=len);
-                let sizes_vec = vec(proptest::num::usize::ANY.prop_map(|x| x % 131072), len..=len); /* Map the usize values to
-                * the range 0..
-                * 131072(0x20000) */
+                let types_vec =
+                    vec(any::<reth_primitives::TxType>().prop_map(|ty| ty as u8), len..=len);
+
+                // Map the usize values to the range 0..131072(0x20000)
+                let sizes_vec = vec(proptest::num::usize::ANY.prop_map(|x| x % 131072), len..=len);
                 let hashes_vec = vec(any::<B256>(), len..=len);
 
                 (types_vec, sizes_vec, hashes_vec)
             })
-            .prop_map(|(types, sizes, hashes)| {
-                NewPooledTransactionHashes68 {
-                    types: types.into_iter().map(|tx_type| tx_type as u8).collect(),
-                    sizes,
-                    hashes,
-                }
+            .prop_map(|(types, sizes, hashes)| NewPooledTransactionHashes68 {
+                types,
+                sizes,
+                hashes,
             })
             .boxed()
     }
+
+    type Strategy = BoxedStrategy<Self>;
 }
 
 impl NewPooledTransactionHashes68 {
