@@ -1567,7 +1567,7 @@ mod tests {
         let genesis = data.genesis;
 
         // test pops execution results from vector, so order is from last to first.
-        let externals = setup_externals(vec![exec2.clone(), exec1.clone(), exec2, exec1]);
+        let externals = setup_externals(vec![exec2.clone(), exec2, exec1]);
 
         // last finalized block would be number 9.
         setup_genesis(&externals.provider_factory, genesis);
