@@ -85,18 +85,20 @@ where
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
-                let mut transactions = transactions.into_iter().peekable();
-                while let Some(tx) = transactions.next() {
+                for (index, tx) in transactions.iter().enumerate() {
                     let tx_hash = tx.hash;
                     let tx = tx_env_with_recovered(&tx);
                     let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
-                    let tx_context = TransactionContext::default();
                     let (result, state_changes) = this
                         .trace_transaction(
                             opts.clone(),
                             env,
                             &mut db,
-                            Some(tx_context.with_tx_hash(tx_hash)),
+                            Some(TransactionContext {
+                                block_hash: at.as_block_hash(),
+                                tx_hash: Some(tx_hash),
+                                tx_index: Some(index),
+                            }),
                         )
                         .map_err(|err| {
                             results.push(TraceResult::Error {
@@ -107,10 +109,11 @@ where
                         })?;
 
                     results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
-                    if transactions.peek().is_some() {
-                        // need to apply the state changes of this transaction before executing the
-                        // next transaction
-                        db.commit(state_changes)
+                    // Check if there are more transactions to process
+                    if index < transactions.len() - 1 {
+                        // Apply the state changes of this transaction before executing the next
+                        // transaction
+                        db.commit(state_changes);
                     }
                 }
 
