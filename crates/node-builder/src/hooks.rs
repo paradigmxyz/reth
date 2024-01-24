@@ -96,8 +96,8 @@ pub trait OnNodeStartedHook<Node> {
 }
 
 impl<Node, F> OnNodeStartedHook<Node> for F
-    where
-        F: FnOnce(FullNode<Node>) -> eyre::Result<()>,
+where
+    F: FnOnce(FullNode<Node>) -> eyre::Result<()>,
 {
     fn on_event(self, node: FullNode<Node>) -> eyre::Result<()> {
         self(node)
