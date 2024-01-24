@@ -1515,9 +1515,9 @@ mod tests {
 
         let node_exit_future = NodeExitFuture::new(rx, false);
         match timeout(Duration::from_millis(100), node_exit_future).await {
-            Ok(_) => panic!("future shouldn't be resolved"),
+            Ok(_) => panic!("terminations flag was set to FALSE - future shouldn't be resolved"),
             Err(_) => {
-                println!("termination flag is set to FALSE so future expectadly didn't resolve")
+                println!("termination flag was set to FALSE - future expectadly didn't resolve")
             }
         }
     }
