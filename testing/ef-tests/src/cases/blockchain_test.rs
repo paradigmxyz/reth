@@ -9,7 +9,7 @@ use reth_db::test_utils::create_test_rw_db;
 use reth_primitives::{BlockBody, SealedBlock};
 use reth_provider::{BlockWriter, HashingWriter, ProviderFactory};
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
-use std::{collections::BTreeMap, fs::{self, OpenOptions}, path::Path, sync::Arc};
+use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 /// A handler for the blockchain test suite.
 #[derive(Debug)]
@@ -63,7 +63,7 @@ impl Case for BlockchainTestCase {
         }
 
         // Iterate through test cases, filtering by the network type to exclude specific forks.
-        for (name, case) in self.tests.iter().filter(|(name, case)| {
+        for (name, case) in self.tests.iter().filter(|(_name, case)| {
             matches!(
                 case.network,
                 ForkSpec::Merge
@@ -115,16 +115,11 @@ impl Case for BlockchainTestCase {
                     for (&address, account) in state.iter() {
                         account.assert_db(address, provider.tx_ref())?;
                     }
-                    
+
                     // Check state root against the provider's database.
                     {
                         // Insert state hashes into the provider based on the expected state root.
                         let last_block = last_block.clone().unwrap_or_default();
-
-                        // println!("------------------------------------------");
-                        // println!("Test: {}", name);
-                        // println!("Expected state root: {:?}", last_block.state_root);
-                        // println!("------------------------------------------");
 
                         match provider
                             .insert_hashes(0..=last_block.number, last_block.hash, last_block.state_root) {
@@ -132,7 +127,6 @@ impl Case for BlockchainTestCase {
                                 Err(e) => {
                                     println!("------------------------------------------");
                                     println!("Test {} failed state_root check", name);
-                                    println!("Expected state root: {:?}", last_block.state_root);
                                     println!("Error: {:?}", e);
                                     println!("------------------------------------------");
                                 },
@@ -146,47 +140,13 @@ impl Case for BlockchainTestCase {
                 }
                 (None, Some(expected_state_root)) => {
                     // Insert state hashes into the provider based on the expected state root.
-                    let last_block = last_block.clone().unwrap_or_default();
-
-                    // println!("------------------------------------------");
-                    // println!("Test: {}", name);
-                    // println!("Expected state root: {:?}", expected_state_root);
-                    // println!("Actual state root: {:?}", last_block.state_root);
-                    // println!("------------------------------------------");
-
-                    match provider
-                    .insert_hashes(0..=last_block.number, last_block.hash, last_block.state_root) {
-                        Ok(()) => (),
-                        Err(e) => {
-                            println!("------------------------------------------");
-                            println!("Test {} failed state_root check", name);
-                            println!("Expected state root: {:?}", expected_state_root);
-                            println!("Error: {:?}", e);
-                            println!("------------------------------------------");
-                        },
-                    }
-
-                    // provider
-                    //     .insert_hashes(0..=last_block.number, last_block.hash, *expected_state_root)
-                    //     .map_err(|err| Error::RethError(err.into()))?;
+                    let last_block = last_block.unwrap_or_default();
+                    provider
+                        .insert_hashes(0..=last_block.number, last_block.hash, *expected_state_root)
+                        .map_err(|err| Error::RethError(err.into()))?;
                 }
                 _ => return Err(Error::MissingPostState),
             }
-
-            // let mut file = OpenOptions::new()
-            //     .write(true)
-            //     .append(true)
-            //     .create(true)
-            //     .open("../test_reth.csv")
-            //     .unwrap();
-
-            // use std::io::Write;
-
-
-            // let last_block = last_block.clone().unwrap_or_default();
-            // let entry = format!("{}, {}, {}\n", name, last_block.hash, last_block.state_root );
-
-            // file.write_all(entry.as_bytes()).expect("write failed");
 
             // Drop the provider without committing to the database.
             drop(provider);
@@ -205,12 +165,6 @@ impl Case for BlockchainTestCase {
 pub fn should_skip(path: &Path) -> bool {
     let path_str = path.to_str().expect("Path is not valid UTF-8");
     let name = path.file_name().unwrap().to_str().unwrap();
-
-    // if !path_str.contains("BlockchainTests/GeneralStateTests/VMTests/vmIOandFlowOperations/gas.json") {
-    //     return true
-    // };
-
-
     matches!(
         name,
         // funky test with `bigint 0x00` value in json :) not possible to happen on mainnet and require
