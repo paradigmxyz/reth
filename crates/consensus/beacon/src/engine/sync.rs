@@ -459,6 +459,7 @@ mod tests {
             let (tip_tx, _tip_rx) = watch::channel(B256::default());
             let mut pipeline = Pipeline::builder()
                 .add_stages(TestStages::new(self.pipeline_exec_outputs, Default::default()))
+                .unwrap()
                 .with_tip_sender(tip_tx);
 
             if let Some(max_block) = self.max_block {

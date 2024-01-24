@@ -1,4 +1,4 @@
-use crate::{pipeline::BoxedStage, MetricEventsSender, Pipeline, Stage, StageSet};
+use crate::{pipeline::BoxedStage, MetricEventsSender, Pipeline, Stage, StageError, StageSet};
 use reth_db::database::Database;
 use reth_primitives::{stage::StageId, BlockNumber, B256};
 use reth_provider::ProviderFactory;
@@ -39,11 +39,11 @@ where
     /// To customize the stages in the set (reorder, disable, insert a stage) call
     /// [`builder`][StageSet::builder] on the set which will convert it to a
     /// [`StageSetBuilder`][crate::StageSetBuilder].
-    pub fn add_stages<Set: StageSet<DB>>(mut self, set: Set) -> Self {
-        for stage in set.builder().build() {
+    pub fn add_stages<Set: StageSet<DB>>(mut self, set: Set) -> Result<Self, StageError> {
+        for stage in set.builder()?.build() {
             self.stages.push(stage);
         }
-        self
+        Ok(self)
     }
 
     /// Set the target block.

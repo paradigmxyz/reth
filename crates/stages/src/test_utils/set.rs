@@ -19,11 +19,11 @@ impl TestStages {
 }
 
 impl<DB: Database> StageSet<DB> for TestStages {
-    fn builder(self) -> StageSetBuilder<DB> {
-        StageSetBuilder::default().add_stage(
+    fn builder(self) -> Result<StageSetBuilder<DB>, StageError> {
+        Ok(StageSetBuilder::default().add_stage(
             TestStage::new(TEST_STAGE_ID)
                 .with_exec(self.exec_outputs)
                 .with_unwind(self.unwind_outputs),
-        )
+        ))
     }
 }

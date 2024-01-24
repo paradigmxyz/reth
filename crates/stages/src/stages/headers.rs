@@ -72,17 +72,17 @@ where
         downloader: Downloader,
         mode: HeaderSyncMode,
         consensus: Arc<dyn Consensus>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, StageError> {
+        Ok(Self {
             provider: database,
             downloader,
             mode,
             consensus,
             sync_gap: None,
-            hash_collector: Collector::new(100 * (1024 * 1024)).unwrap(),
-            header_collector: Collector::new(100 * (1024 * 1024)).unwrap(),
+            hash_collector: Collector::new(100 * (1024 * 1024))?,
+            header_collector: Collector::new(100 * (1024 * 1024))?,
             is_etl_ready: false,
-        }
+        })
     }
 
     /// Write downloaded headers to the given transaction from ETL.
@@ -119,9 +119,7 @@ where
         // order
 
         let interval = total_headers / 10;
-        for (index, header) in
-            self.header_collector.iter()?.enumerate()
-        {
+        for (index, header) in self.header_collector.iter()?.enumerate() {
             let (number, header_buf) = header?;
 
             if index > 0 && index % interval == 0 {
@@ -174,9 +172,7 @@ where
 
         // Since ETL sorts all entries by hashes, we are either appending (first sync) or inserting
         // in order (further syncs).
-        for (index, hash_to_number) in
-            self.hash_collector.iter()?.enumerate()
-        {
+        for (index, hash_to_number) in self.hash_collector.iter()?.enumerate() {
             let (hash, number) = hash_to_number?;
 
             if index > 0 && index % interval == 0 {
@@ -426,6 +422,7 @@ mod tests {
                     HeaderSyncMode::Tip(self.channel.1.clone()),
                     self.consensus.clone(),
                 )
+                .unwrap()
             }
         }
 

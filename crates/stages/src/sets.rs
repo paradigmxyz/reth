@@ -42,7 +42,7 @@ use crate::{
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TransactionLookupStage,
     },
-    StageSet, StageSetBuilder,
+    StageError, StageSet, StageSetBuilder,
 };
 use reth_db::database::Database;
 use reth_interfaces::{
@@ -115,8 +115,8 @@ where
     pub fn add_offline_stages<DB: Database>(
         default_offline: StageSetBuilder<DB>,
         executor_factory: EF,
-    ) -> StageSetBuilder<DB> {
-        default_offline.add_set(OfflineStages::new(executor_factory)).add_stage(FinishStage)
+    ) -> Result<StageSetBuilder<DB>, StageError> {
+        Ok(default_offline.add_set(OfflineStages::new(executor_factory))?.add_stage(FinishStage))
     }
 }
 
@@ -128,8 +128,8 @@ where
     B: BodyDownloader + 'static,
     EF: ExecutorFactory,
 {
-    fn builder(self) -> StageSetBuilder<DB> {
-        Self::add_offline_stages(self.online.builder(), self.executor_factory)
+    fn builder(self) -> Result<StageSetBuilder<DB>, StageError> {
+        Self::add_offline_stages(self.online.builder()?, self.executor_factory)
     }
 }
 
@@ -185,10 +185,10 @@ where
         mode: HeaderSyncMode,
         header_downloader: H,
         consensus: Arc<dyn Consensus>,
-    ) -> StageSetBuilder<DB> {
-        StageSetBuilder::default()
-            .add_stage(HeaderStage::new(provider, header_downloader, mode, consensus.clone()))
-            .add_stage(bodies)
+    ) -> Result<StageSetBuilder<DB>, StageError> {
+        Ok(StageSetBuilder::default()
+            .add_stage(HeaderStage::new(provider, header_downloader, mode, consensus.clone())?)
+            .add_stage(bodies))
     }
 }
 
@@ -199,15 +199,15 @@ where
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
 {
-    fn builder(self) -> StageSetBuilder<DB> {
-        StageSetBuilder::default()
+    fn builder(self) -> Result<StageSetBuilder<DB>, StageError> {
+        Ok(StageSetBuilder::default()
             .add_stage(HeaderStage::new(
                 self.provider,
                 self.header_downloader,
                 self.header_mode,
                 self.consensus.clone(),
-            ))
-            .add_stage(BodyStage::new(self.body_downloader))
+            )?)
+            .add_stage(BodyStage::new(self.body_downloader)))
     }
 }
 
@@ -233,10 +233,10 @@ impl<EF: ExecutorFactory> OfflineStages<EF> {
 }
 
 impl<EF: ExecutorFactory, DB: Database> StageSet<DB> for OfflineStages<EF> {
-    fn builder(self) -> StageSetBuilder<DB> {
+    fn builder(self) -> Result<StageSetBuilder<DB>, StageError> {
         ExecutionStages::new(self.executor_factory)
-            .builder()
-            .add_set(HashingStages)
+            .builder()?
+            .add_set(HashingStages)?
             .add_set(HistoryIndexingStages)
     }
 }
@@ -257,10 +257,10 @@ impl<EF: ExecutorFactory + 'static> ExecutionStages<EF> {
 }
 
 impl<EF: ExecutorFactory, DB: Database> StageSet<DB> for ExecutionStages<EF> {
-    fn builder(self) -> StageSetBuilder<DB> {
-        StageSetBuilder::default()
+    fn builder(self) -> Result<StageSetBuilder<DB>, StageError> {
+        Ok(StageSetBuilder::default()
             .add_stage(SenderRecoveryStage::default())
-            .add_stage(ExecutionStage::new_with_factory(self.executor_factory))
+            .add_stage(ExecutionStage::new_with_factory(self.executor_factory)))
     }
 }
 
@@ -270,12 +270,12 @@ impl<EF: ExecutorFactory, DB: Database> StageSet<DB> for ExecutionStages<EF> {
 pub struct HashingStages;
 
 impl<DB: Database> StageSet<DB> for HashingStages {
-    fn builder(self) -> StageSetBuilder<DB> {
-        StageSetBuilder::default()
+    fn builder(self) -> Result<StageSetBuilder<DB>, StageError> {
+        Ok(StageSetBuilder::default()
             .add_stage(MerkleStage::default_unwind())
             .add_stage(AccountHashingStage::default())
             .add_stage(StorageHashingStage::default())
-            .add_stage(MerkleStage::default_execution())
+            .add_stage(MerkleStage::default_execution()))
     }
 }
 
@@ -285,10 +285,10 @@ impl<DB: Database> StageSet<DB> for HashingStages {
 pub struct HistoryIndexingStages;
 
 impl<DB: Database> StageSet<DB> for HistoryIndexingStages {
-    fn builder(self) -> StageSetBuilder<DB> {
-        StageSetBuilder::default()
+    fn builder(self) -> Result<StageSetBuilder<DB>, StageError> {
+        Ok(StageSetBuilder::default()
             .add_stage(TransactionLookupStage::default())
             .add_stage(IndexStorageHistoryStage::default())
-            .add_stage(IndexAccountHistoryStage::default())
+            .add_stage(IndexAccountHistoryStage::default()))
     }
 }

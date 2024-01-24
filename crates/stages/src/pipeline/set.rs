@@ -1,4 +1,4 @@
-use crate::Stage;
+use crate::{Stage, StageError};
 use reth_db::database::Database;
 use reth_primitives::stage::StageId;
 use std::{
@@ -14,15 +14,15 @@ use std::{
 /// Individual stages in the set can be added, removed and overridden using [`StageSetBuilder`].
 pub trait StageSet<DB: Database>: Sized {
     /// Configures the stages in the set.
-    fn builder(self) -> StageSetBuilder<DB>;
+    fn builder(self) -> Result<StageSetBuilder<DB>, StageError>;
 
     /// Overrides the given [`Stage`], if it is in this set.
     ///
     /// # Panics
     ///
     /// Panics if the [`Stage`] is not in this set.
-    fn set<S: Stage<DB> + 'static>(self, stage: S) -> StageSetBuilder<DB> {
-        self.builder().set(stage)
+    fn set<S: Stage<DB> + 'static>(self, stage: S) -> Result<StageSetBuilder<DB>, StageError> {
+        Ok(self.builder()?.set(stage))
     }
 }
 
@@ -119,13 +119,13 @@ where
     ///
     /// If a stage is in both sets, it is removed from its previous place in this set. Because of
     /// this, it is advisable to merge sets first and re-order stages after if needed.
-    pub fn add_set<Set: StageSet<DB>>(mut self, set: Set) -> Self {
-        for stage in set.builder().build() {
+    pub fn add_set<Set: StageSet<DB>>(mut self, set: Set) -> Result<Self, StageError> {
+        for stage in set.builder()?.build() {
             let target_index = self.order.len();
             self.order.push(stage.id());
             self.upsert_stage_state(stage, target_index);
         }
-        self
+        Ok(self)
     }
 
     /// Adds the given [`Stage`] before the stage with the given [`StageId`].
@@ -215,7 +215,7 @@ where
 }
 
 impl<DB: Database> StageSet<DB> for StageSetBuilder<DB> {
-    fn builder(self) -> StageSetBuilder<DB> {
-        self
+    fn builder(self) -> Result<StageSetBuilder<DB>, StageError> {
+        Ok(self)
     }
 }
