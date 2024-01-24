@@ -2,7 +2,7 @@ use crate::node::FullNode;
 use std::fmt;
 
 /// Container for all the configurable hook functions.
-pub struct NodeHooks<Node> {
+pub(crate) struct NodeHooks<Node> {
     pub(crate) on_component_initialized: Box<dyn OnComponentInitializedHook<Node>>,
     pub(crate) on_node_started: Box<dyn OnNodeStartedHook<Node>>,
     _marker: std::marker::PhantomData<Node>,

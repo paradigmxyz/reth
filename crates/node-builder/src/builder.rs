@@ -76,27 +76,32 @@ where
     DB: Database + Clone + Unpin + 'static,
 {
     /// Configures the node's components.
-    pub fn with_components<Builder>(
+    pub fn with_components<Components>(
         self,
-        builder: Builder,
+        components_builder: Components,
     ) -> NodeBuilder<
         DB,
         ComponentsState<
             Types,
-            Builder,
+            Components,
             FullNodeComponentsAdapter<
                 FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
-                Builder::Pool,
+                Components::Pool,
             >,
         >,
     >
     where
-        Builder: NodeComponentsBuilder<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>>,
+        Components:
+            NodeComponentsBuilder<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>>,
     {
         NodeBuilder {
             config: self.config,
             database: self.database,
-            state: ComponentsState { _maker: Default::default(), builder, hooks: NodeHooks::new() },
+            state: ComponentsState {
+                _maker: Default::default(),
+                components_builder,
+                hooks: NodeHooks::new(),
+            },
         }
     }
 }
@@ -220,9 +225,13 @@ where
 /// The state of the node builder process after the node's components have been configured.
 ///
 /// With this state all types and components of the node are known and the node can be launched.
+///
+/// Additionally, this state captures additional hooks that are called at specific points in the
+/// node's launch lifecycle.
 #[derive(Debug)]
-pub struct ComponentsState<Types, Builder, FullNode> {
+pub struct ComponentsState<Types, Components, FullNode> {
     _maker: PhantomData<Types>,
-    builder: Builder,
+    components_builder: Components,
+    /// Additional NodeHooks that are called at specific points in the node's launch lifecycle.
     hooks: NodeHooks<FullNode>,
 }
