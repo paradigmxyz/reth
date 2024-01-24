@@ -24,8 +24,6 @@ use std::sync::Arc;
 /// change.
 pub use crate::core::cli::*;
 
-pub mod db_type;
-
 /// The main reth cli interface.
 ///
 /// This is the entrypoint to the executable.

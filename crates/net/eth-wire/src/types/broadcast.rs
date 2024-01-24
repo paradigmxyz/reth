@@ -6,7 +6,14 @@ use alloy_rlp::{
 };
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Block, Bytes, TransactionSigned, B256, U128};
+
 use std::sync::Arc;
+
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
+
+#[cfg(feature = "arbitrary")]
+use proptest::{arbitrary::Arbitrary, collection::vec};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -256,7 +263,6 @@ impl From<Vec<B256>> for NewPooledTransactionHashes66 {
 
 /// Same as [`NewPooledTransactionHashes66`] but extends that that beside the transaction hashes,
 /// the node sends the transaction types and their sizes (as defined in EIP-2718) as well.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NewPooledTransactionHashes68 {
@@ -268,8 +274,8 @@ pub struct NewPooledTransactionHashes68 {
     /// the following way:
     ///  * `[type_0: B_1, type_1: B_1, ...]`
     ///
-    /// This would make it seem like the [`Encodable`](alloy_rlp::Encodable) and
-    /// [`Decodable`](alloy_rlp::Decodable) implementations should directly use a `Vec<u8>` for
+    /// This would make it seem like the [`Encodable`] and
+    /// [`Decodable`] implementations should directly use a `Vec<u8>` for
     /// encoding and decoding, because it looks like this field should be encoded as a _list_ of
     /// bytes.
     ///
@@ -280,26 +286,44 @@ pub struct NewPooledTransactionHashes68 {
     /// **not** a RLP list.
     ///
     /// Because of this, we do not directly use the `Vec<u8>` when encoding and decoding, and
-    /// instead use the [`Encodable`](alloy_rlp::Encodable) and [`Decodable`](alloy_rlp::Decodable)
+    /// instead use the [`Encodable`] and [`Decodable`]
     /// implementations for `&[u8]` instead, which encodes into a RLP string, and expects an RLP
     /// string when decoding.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(proptest::arbitrary::any::<u8>(), 100)")
-    )]
     pub types: Vec<u8>,
     /// Transaction sizes for new transactions that have appeared on the network.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(proptest::arbitrary::any::<usize>(), 100)")
-    )]
     pub sizes: Vec<usize>,
     /// Transaction hashes for new transactions that have appeared on the network.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(proptest::arbitrary::any::<B256>(), 100)")
-    )]
     pub hashes: Vec<B256>,
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for NewPooledTransactionHashes68 {
+    type Parameters = ();
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        // Generate a single random length for all vectors
+        let vec_length = any::<usize>().prop_map(|x| x % 100 + 1); // Lengths between 1 and 100
+
+        vec_length
+            .prop_flat_map(|len| {
+                // Use the generated length to create vectors of TxType, usize, and B256
+                let types_vec =
+                    vec(any::<reth_primitives::TxType>().prop_map(|ty| ty as u8), len..=len);
+
+                // Map the usize values to the range 0..131072(0x20000)
+                let sizes_vec = vec(proptest::num::usize::ANY.prop_map(|x| x % 131072), len..=len);
+                let hashes_vec = vec(any::<B256>(), len..=len);
+
+                (types_vec, sizes_vec, hashes_vec)
+            })
+            .prop_map(|(types, sizes, hashes)| NewPooledTransactionHashes68 {
+                types,
+                sizes,
+                hashes,
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
 
 impl NewPooledTransactionHashes68 {

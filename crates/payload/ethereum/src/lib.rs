@@ -16,7 +16,6 @@ mod builder {
         commit_withdrawals, is_better_payload, pre_block_beacon_root_contract_call, BuildArguments,
         BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
     };
-    use reth_node_api::PayloadBuilderAttributes;
     use reth_payload_builder::{
         error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
     };
@@ -63,10 +62,7 @@ mod builder {
         fn build_empty_payload(
             client: &Client,
             config: PayloadConfig<Self::Attributes>,
-        ) -> Result<EthBuiltPayload, PayloadBuilderError>
-        where
-            Client: StateProviderFactory,
-        {
+        ) -> Result<EthBuiltPayload, PayloadBuilderError> {
             let extra_data = config.extra_data();
             let PayloadConfig {
                 initialized_block_env,
@@ -107,8 +103,8 @@ mod builder {
             })?;
 
             let WithdrawalsOutcome { withdrawals_root, withdrawals } =
-                commit_withdrawals(&mut db, &chain_spec, attributes.timestamp(), attributes.withdrawals().clone()).map_err(|err| {
-                    warn!(target: "payload_builder", parent_hash=%parent_block.hash,?err,  "failed to commit withdrawals for empty payload");
+                commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals.clone()).map_err(|err| {
+                    warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to commit withdrawals for empty payload");
                     err
                 })?;
 
@@ -133,8 +129,8 @@ mod builder {
                 withdrawals_root,
                 receipts_root: EMPTY_RECEIPTS,
                 logs_bloom: Default::default(),
-                timestamp: attributes.timestamp(),
-                mix_hash: attributes.prev_randao(),
+                timestamp: attributes.timestamp,
+                mix_hash: attributes.prev_randao,
                 nonce: BEACON_NONCE,
                 base_fee_per_gas: Some(base_fee),
                 number: parent_block.number + 1,
@@ -144,7 +140,7 @@ mod builder {
                 extra_data,
                 blob_gas_used: None,
                 excess_blob_gas: None,
-                parent_beacon_block_root: attributes.parent_beacon_block_root(),
+                parent_beacon_block_root: attributes.parent_beacon_block_root,
             };
 
             let block = Block { header, body: vec![], ommers: vec![], withdrawals };

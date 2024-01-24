@@ -27,6 +27,7 @@ reth-tasks.workspace = true
 reth-consensus-common.workspace = true
 reth-rpc-types-compat.workspace = true
 lazy_static = "*"
+revm-inspectors.workspace = true
 
 # eth
 alloy-rlp.workspace = true
