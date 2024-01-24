@@ -16,7 +16,7 @@ use crate::{
     engine_api_store::EngineApiStore,
     events,
     init::init_genesis,
-    prometheus_exporter,
+    metrics::prometheus_exporter,
     utils::{get_single_header, write_peers_to_file},
     version::SHORT_VERSION,
 };
