@@ -559,7 +559,7 @@ impl Decodable for Header {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SealedHeader {
     /// Locked Header hash.
-    pub hash: B256,
+    pub hash: BlockHash,
     /// Locked Header fields.
     pub header: Header,
 }
