@@ -113,7 +113,6 @@ impl Command {
                             factory.clone(),
                             snap_segments::Receipts::new(*compression, filters),
                         )?,
-                        SnapshotSegment::HeadersTD => todo!(),
                     }
                 }
             }
@@ -146,7 +145,6 @@ impl Command {
                         InclusionFilter::Cuckoo,
                         phf,
                     )?,
-                    SnapshotSegment::HeadersTD => todo!(),
                 }
             }
         }
