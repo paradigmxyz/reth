@@ -46,6 +46,7 @@ where
     Node: FullNodeTypes,
     Pool: TransactionPool + 'static,
 {
+    type DB = Node::DB;
     type Provider = Node::Provider;
 }
 

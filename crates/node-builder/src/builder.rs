@@ -2,7 +2,7 @@
 
 use crate::{
     components::{FullNodeComponentsAdapter, NodeComponentsBuilder},
-    hooks::NodeHooks,
+    hooks::{NodeHooks, OnComponentInitializedHook, OnNodeStartedHook},
     node::{FullNode, FullNodeTypesAdapter},
     NodeHandle,
 };
@@ -17,7 +17,6 @@ use reth_provider::providers::BlockchainProvider;
 use reth_revm::EvmProcessorFactory;
 use reth_tasks::TaskExecutor;
 use std::{marker::PhantomData, sync::Arc};
-use crate::hooks::{OnComponentInitializedHook, OnNodeStartedHook};
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -63,7 +62,7 @@ impl<DB> NodeBuilder<DB, InitState> {
 
 impl<DB> NodeBuilder<DB, InitState>
 where
-    DB: Database,
+    DB: Database + Clone + 'static,
 {
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> NodeBuilder<DB, TypesState<T, DB>> {
@@ -74,7 +73,7 @@ where
 impl<DB, Types> NodeBuilder<DB, TypesState<Types, DB>>
 where
     Types: NodeTypes,
-    DB: Database + 'static,
+    DB: Database + Clone + 'static,
 {
     /// Configures the node's components.
     pub fn with_components<Builder>(
@@ -86,13 +85,13 @@ where
             Types,
             Builder,
             FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, RethFullProviderType<DB>>,
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                 Builder::Pool,
             >,
         >,
     >
     where
-        Builder: NodeComponentsBuilder<FullNodeTypesAdapter<Types, RethFullProviderType<DB>>>,
+        Builder: NodeComponentsBuilder<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>>,
     {
         NodeBuilder {
             config: self.config,
@@ -109,7 +108,7 @@ impl<DB, Types, Components>
             Types,
             Components,
             FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, RethFullProviderType<DB>>,
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                 Components::Pool,
             >,
         >,
@@ -117,16 +116,17 @@ impl<DB, Types, Components>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + 'static,
     Types: NodeTypes,
-    Components: NodeComponentsBuilder<FullNodeTypesAdapter<Types, RethFullProviderType<DB>>>,
+    Components: NodeComponentsBuilder<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>>,
 {
-
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(mut self, hook: F) -> Self
-        where
-            F: OnComponentInitializedHook<FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, RethFullProviderType<DB>>,
-                Components::Pool,
-            >> + 'static,
+    where
+        F: OnComponentInitializedHook<
+                FullNodeComponentsAdapter<
+                    FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
+                    Components::Pool,
+                >,
+            > + 'static,
     {
         self.state.hooks.set_on_component_initialized(hook);
         self
@@ -134,16 +134,17 @@ where
 
     /// Sets the hook that is run once the node has started.
     pub fn on_node_started<F>(mut self, hook: F) -> Self
-        where
-            F: OnNodeStartedHook<FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, RethFullProviderType<DB>>,
-                Components::Pool,
-            >> + 'static,
+    where
+        F: OnNodeStartedHook<
+                FullNodeComponentsAdapter<
+                    FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
+                    Components::Pool,
+                >,
+            > + 'static,
     {
         self.state.hooks.set_on_node_started(hook);
         self
     }
-
 
     /// Launches the node and returns a handle to it.
     pub async fn launch(self, _executor: TaskExecutor) -> eyre::Result<NodeHandle> {
@@ -202,14 +203,14 @@ pub struct InitState;
 #[derive(Debug)]
 pub struct TypesState<Types, DB>
 where
-    DB: Database,
+    DB: Database + Clone + 'static,
 {
-    adapter: FullNodeTypesAdapter<Types, RethFullProviderType<DB>>,
+    adapter: FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
 }
 
 impl<Types, DB> Default for TypesState<Types, DB>
 where
-    DB: Database,
+    DB: Database + Clone + 'static,
 {
     fn default() -> Self {
         Self { adapter: Default::default() }
