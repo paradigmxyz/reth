@@ -164,7 +164,7 @@ revm = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", feat
 revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", features = [
     "std",
 ], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors"}
 
 # eth
 alloy-chains = {version = "0.1", feature = ["serde", "rlp", "arbitrary"] }

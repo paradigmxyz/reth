@@ -169,13 +169,14 @@ where
 /// _runtime_ db ([CacheDB]).
 ///
 /// Note: This assumes the target transaction is in the given iterator.
+/// Returns the index of the target transaction in the given iterator.
 pub(crate) fn replay_transactions_until<DB, I, Tx>(
     db: &mut CacheDB<DB>,
     cfg: CfgEnv,
     block_env: BlockEnv,
     transactions: I,
     target_tx_hash: B256,
-) -> EthResult<()>
+) -> Result<usize, EthApiError>
 where
     DB: DatabaseRef,
     EthApiError: From<<DB as DatabaseRef>::Error>,
@@ -185,6 +186,7 @@ where
     let env = Env { cfg, block: block_env, tx: TxEnv::default() };
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
+    let mut index = 0;
     for tx in transactions.into_iter() {
         if tx.hash() == target_tx_hash {
             // reached the target transaction
@@ -193,9 +195,10 @@ where
 
         tx.try_fill_tx_env(&mut evm.env.tx)?;
         let res = evm.transact()?;
-        evm.db.as_mut().expect("is set").commit(res.state)
+        evm.db.as_mut().expect("is set").commit(res.state);
+        index += 1;
     }
-    Ok(())
+    Ok(index)
 }
 
 /// Prepares the [Env] for execution.
