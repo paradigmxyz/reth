@@ -133,7 +133,6 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     /// * if block is inside database returns [BlockStatus::Valid].
     /// * if block is inside buffer returns [BlockStatus::Disconnected].
     /// * if block is part of the canonical returns [BlockStatus::Valid].
-    /// * if block is part of a side chain returns [BlockStatus::Accepted]. TODO:
     ///
     /// Returns an error if
     ///    - an error occurred while reading from the database.
@@ -822,7 +821,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         for block in include_blocks.into_iter() {
             // dont fail on error, just ignore the block.
             let _ = self
-                .try_insert_validated_block(block, BlockValidationKind::SkipStateRootValidation) // TODO: change validation kind?
+                .try_insert_validated_block(block, BlockValidationKind::SkipStateRootValidation)
                 .map_err(|err| {
                     debug!(
                         target: "blockchain_tree", ?err,
