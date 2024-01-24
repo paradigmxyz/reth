@@ -18,9 +18,6 @@ pub struct HighestSnapshots {
     /// Highest snapshotted block of headers, inclusive.
     /// If [`None`], no snapshot is available.
     pub headers: Option<BlockNumber>,
-    /// Highest snapshotted block of headers total difficulty, inclusive.
-    /// If [`None`], no snapshot is available.
-    pub headers_td: Option<BlockNumber>,
     /// Highest snapshotted block of receipts, inclusive.
     /// If [`None`], no snapshot is available.
     pub receipts: Option<BlockNumber>,
@@ -34,7 +31,6 @@ impl HighestSnapshots {
     pub fn highest(&self, segment: SnapshotSegment) -> Option<BlockNumber> {
         match segment {
             SnapshotSegment::Headers => self.headers,
-            SnapshotSegment::HeadersTD => self.headers_td,
             SnapshotSegment::Transactions => self.transactions,
             SnapshotSegment::Receipts => self.receipts,
         }
@@ -44,7 +40,6 @@ impl HighestSnapshots {
     pub fn as_mut(&mut self, segment: SnapshotSegment) -> &mut Option<BlockNumber> {
         match segment {
             SnapshotSegment::Headers => &mut self.headers,
-            SnapshotSegment::HeadersTD => &mut self.headers_td,
             SnapshotSegment::Transactions => &mut self.transactions,
             SnapshotSegment::Receipts => &mut self.receipts,
         }

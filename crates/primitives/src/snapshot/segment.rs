@@ -27,11 +27,8 @@ use strum::{AsRefStr, EnumIter, EnumString};
 /// Segment of the data that can be snapshotted.
 pub enum SnapshotSegment {
     #[strum(serialize = "headers")]
-    /// Snapshot segment responsible for the `CanonicalHeaders`, `Headers` tables.
+    /// Snapshot segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables.
     Headers,
-    #[strum(serialize = "headerstd")]
-    /// Snapshot segment responsible for the `HeaderTD` tables.
-    HeadersTD,
     #[strum(serialize = "transactions")]
     /// Snapshot segment responsible for the `Transactions` table.
     Transactions,
@@ -53,7 +50,6 @@ impl SnapshotSegment {
 
         match self {
             SnapshotSegment::Headers => default_config,
-            SnapshotSegment::HeadersTD => default_config,
             SnapshotSegment::Transactions => default_config,
             SnapshotSegment::Receipts => default_config,
         }
@@ -186,7 +182,7 @@ impl SegmentHeader {
     /// Returns the row offset which depends on whether the segment is block or transaction based.
     pub fn start(&self) -> u64 {
         match self.segment {
-            SnapshotSegment::Headers | SnapshotSegment::HeadersTD => self.block_start(),
+            SnapshotSegment::Headers => self.block_start(),
             SnapshotSegment::Transactions | SnapshotSegment::Receipts => self.tx_start(),
         }
     }

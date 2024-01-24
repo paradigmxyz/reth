@@ -327,9 +327,7 @@ impl SnapshotProvider {
         P: FnMut(&T) -> bool,
     {
         let get_provider = |start: u64| match segment {
-            SnapshotSegment::Headers | SnapshotSegment::HeadersTD => {
-                self.get_segment_provider_from_block(segment, start, None)
-            }
+            SnapshotSegment::Headers => self.get_segment_provider_from_block(segment, start, None),
             SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
                 self.get_segment_provider_from_transaction(segment, start, None)
             }
