@@ -59,6 +59,7 @@ jobs:
   test:
     continue-on-error: ${{ matrix.experimental }}
     strategy:
+      fail-fast: false
       matrix:
         experimental: [true]
         sim: [ethereum/rpc, smoke/genesis, smoke/network, ethereum/sync]
@@ -178,7 +179,6 @@ jobs:
           - sim: pyspec
             include: [frontier/]
             experimental: true
-      fail-fast: false
     needs: prepare
     name: run
     runs-on:
@@ -221,3 +221,7 @@ jobs:
         if: ${{ failure() }}
         run: |
           cat hivetests/workspace/logs/reth/client-*.log
+
+      - name: Report job failure
+        if: ${{ failure() }}
+        run: exit 1
