@@ -15,7 +15,7 @@ use alloc::vec::Vec;
 pub use codecs_derive::*;
 
 use alloy_primitives::{Address, Bloom, Bytes, B256, B512, U256};
-use bytes::{Buf, BufMut};
+use bytes::Buf;
 
 /// Trait that implements the `Compact` codec.
 ///
@@ -337,32 +337,6 @@ impl Compact for bool {
         (len != 0, buf)
     }
 }
-
-macro_rules! impl_compact_for_tuple {
-    ($($ty:ident)+) => {
-        #[allow(non_snake_case)]
-        impl<$($ty: Compact),+> Compact for ($($ty,)+) {
-            fn to_compact<B>(self, buf: &mut B) -> usize
-            where
-                B: BufMut + AsMut<[u8]>,
-            {
-                let ($($ty,)+) = self;
-                $($ty.to_compact(buf) +)+ 0
-            }
-
-            fn from_compact(buf: &[u8], _: usize) -> (Self, &[u8]) {
-                $(
-                    let ($ty, buf) = $ty::from_compact(buf, buf.len());
-                )+
-                (($($ty,)+), buf)
-            }
-        }
-    };
-}
-
-impl_compact_for_tuple!(T1);
-impl_compact_for_tuple!(T1 T2);
-impl_compact_for_tuple!(T1 T2 T3);
 
 fn encode_varuint<B>(mut n: usize, buf: &mut B)
 where

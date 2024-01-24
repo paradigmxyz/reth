@@ -195,28 +195,6 @@ impl<'a> SnapshotProviderRW<'a> {
         Ok(())
     }
 
-    /// Appends to block number-based snapshot file.
-    ///
-    /// Returns the current [`BlockNumber`] as seen in the static file.
-    fn append_with_block_number<V: Compact>(
-        &mut self,
-        segment: SnapshotSegment,
-        block_number: BlockNumber,
-        value: V,
-    ) -> ProviderResult<TxNumber> {
-        debug_assert!(self.writer.user_header().segment() == segment);
-
-        if self.writer.user_header().block_range().is_none() {
-            self.writer.user_header_mut().set_block_range(block_number..=block_number);
-        } else {
-            self.writer.user_header_mut().increment_block();
-        }
-
-        self.append_column(value)?;
-
-        Ok(self.writer.user_header().block_end())
-    }
-
     /// Appends to tx number-based snapshot file.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
@@ -244,16 +222,19 @@ impl<'a> SnapshotProviderRW<'a> {
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn append_header(
         &mut self,
-        block_number: BlockNumber,
         hash: BlockHash,
         header: Header,
         terminal_difficulty: U256,
     ) -> ProviderResult<BlockNumber> {
-        self.append_with_block_number(
-            SnapshotSegment::Headers,
-            block_number,
-            (hash, header, terminal_difficulty),
-        )
+        debug_assert!(self.writer.user_header().segment() == SnapshotSegment::Headers);
+
+        self.writer.user_header_mut().increment_block();
+
+        self.append_column(hash)?;
+        self.append_column(header)?;
+        self.append_column(terminal_difficulty)?;
+
+        Ok(self.writer.user_header().block_end())
     }
 
     /// Appends transaction to snapshot file.
