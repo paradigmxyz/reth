@@ -23,8 +23,7 @@ use crate::{
 use core::future::Future;
 use eyre::WrapErr;
 use fdlimit::raise_fd_limit;
-use futures::{future::Either, stream, stream_select, StreamExt};
-use futures_util::FutureExt;
+use futures::{future::Either, stream, stream_select, FutureExt, StreamExt};
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
