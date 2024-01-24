@@ -94,7 +94,9 @@ where
         &mut self,
         tx: &<DB as Database>::TXMut,
     ) -> Result<BlockNumber, StageError> {
-        trace!(target: "sync::stages::headers", len = self.header_collector.len(), "writing headers");
+        let total_headers = self.header_collector.len();
+
+        info!(target: "sync::stages::headers", len = total_headers, "writing headers");
 
         let mut cursor_header = tx.cursor_write::<RawTable<tables::Headers>>()?;
         let mut cursor_canonical = tx.cursor_write::<RawTable<tables::CanonicalHeaders>>()?;
@@ -115,8 +117,14 @@ where
 
         // Although headers were downloaded in reverse order, the collector iterates it in ascending
         // order
-        for header in self.header_collector.iter().unwrap() {
+
+        let interval = total_headers / 10;
+        for (index, header) in self.header_collector.iter().unwrap().enumerate() {
             let (number, header_buf) = header.unwrap();
+
+            if index > 0 && index % interval == 0 {
+                info!(target: "sync::stages::headers", progress = ((index as f64 / total_headers as f64) * 100.0).round(), "writing headers");
+            }
 
             let (sealed_header, _) = SealedHeader::from_compact(&header_buf, header_buf.len());
             let (header, header_hash) = sealed_header.split();
@@ -147,7 +155,7 @@ where
             cursor_header.append(RawKey::<BlockNumber>::from_vec(number), header.into())?;
         }
 
-        trace!(target: "sync::stages::headers", len = self.hash_collector.len(), "writing header hashes");
+        info!(target: "sync::stages::headers", len = total_headers, "writing header hash index");
 
         let mut cursor_header_numbers = tx.cursor_write::<RawTable<tables::HeaderNumbers>>()?;
         let mut first_sync = false;
