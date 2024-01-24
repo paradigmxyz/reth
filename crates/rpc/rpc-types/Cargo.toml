@@ -53,4 +53,4 @@ arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-derive.workspace = true
 rand.workspace = true
-similar-asserts = "1.4"
+similar-asserts.workspace = true
