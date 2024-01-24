@@ -1,6 +1,6 @@
 //! Customizable node builder.
 
-use std::{marker::PhantomData, sync::Arc};
+use crate::{components::NodeComponentsBuilder, node::FullNodeTypesAdapter, NodeHandle};
 use reth_blockchain_tree::ShareableBlockchainTree;
 use reth_db::{
     database::Database,
@@ -10,8 +10,7 @@ use reth_node_api::node::NodeTypes;
 use reth_provider::providers::BlockchainProvider;
 use reth_revm::EvmProcessorFactory;
 use reth_tasks::TaskExecutor;
-use crate::{components::NodeComponentsBuilder, node::FullNodeTypesAdapter, NodeHandle};
-
+use std::{marker::PhantomData, sync::Arc};
 
 // TODO replace with node config
 type NodeConfig = ();
@@ -73,7 +72,7 @@ where
     Types: NodeTypes,
     DB: Database + 'static,
 {
-    // /// Configures the node's components.
+    /// Configures the node's components.
     pub fn with_components<Builder>(
         self,
         builder: Builder,
@@ -96,7 +95,7 @@ where
     Components: NodeComponentsBuilder<FullNodeTypesAdapter<Types, RethFullProviderType<DB>>>,
 {
     /// Launches the node and returns a handle to it.
-    pub async fn launch(mut self, executor: TaskExecutor) -> eyre::Result<NodeHandle> {
+    pub async fn launch(self, _executor: TaskExecutor) -> eyre::Result<NodeHandle> {
         todo!()
     }
 }

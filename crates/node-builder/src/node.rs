@@ -34,3 +34,10 @@ where
 {
     type Provider = Provider;
 }
+
+/// The launched node with all components including RPC handlers.
+#[derive(Debug)]
+pub struct FullNode<Node> {
+    node: Node,
+    // TODO add rpc handlers
+}

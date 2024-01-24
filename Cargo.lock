@@ -5712,6 +5712,7 @@ dependencies = [
  "alloy-rlp",
  "aquamarine",
  "assert_matches",
+ "async-trait",
  "backon",
  "boyer-moore-magiclen",
  "clap",
@@ -6363,9 +6364,12 @@ dependencies = [
 name = "reth-node-api"
 version = "0.1.0-alpha.16"
 dependencies = [
+ "reth-network",
  "reth-payload-builder",
  "reth-primitives",
+ "reth-provider",
  "reth-rpc-types",
+ "reth-transaction-pool",
  "serde",
  "thiserror",
 ]
@@ -6374,10 +6378,20 @@ dependencies = [
 name = "reth-node-builder"
 version = "0.1.0-alpha.16"
 dependencies = [
+ "async-trait",
+ "eyre",
+ "reth-blockchain-tree",
+ "reth-db",
+ "reth-network",
  "reth-node-api",
+ "reth-node-core",
  "reth-payload-builder",
  "reth-primitives",
+ "reth-provider",
+ "reth-revm",
  "reth-rpc-types",
+ "reth-tasks",
+ "reth-transaction-pool",
  "serde",
 ]
 
@@ -6425,7 +6439,6 @@ dependencies = [
  "reth-network",
  "reth-network-api",
  "reth-node-api",
- "reth-node-builder",
  "reth-optimism-payload-builder",
  "reth-payload-builder",
  "reth-primitives",

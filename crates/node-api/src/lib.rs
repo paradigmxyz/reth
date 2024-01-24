@@ -7,9 +7,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-/// Traits and types for the node's components.
-pub mod components;
-
 /// Traits, validation methods, and helper types used to abstract over engine types.
 ///
 /// Notably contains the [EngineTypes] trait and implementations for ethereum mainnet types.
