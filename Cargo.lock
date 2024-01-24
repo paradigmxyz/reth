@@ -685,15 +685,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "atomic-polyfill"
-version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cf2bce30dfe09ef0bfaef228b9d414faaf7e563035494d7fe092dba54b300f4"
-dependencies = [
- "critical-section",
-]
-
-[[package]]
 name = "attohttpc"
 version = "0.16.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3167,15 +3158,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d23bd4e7b5eda0d0f3a307e8b381fdc8ba9000f26fbe912250c0a4cc3956364a"
 
 [[package]]
-name = "hash32"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0c35f58762feb77d74ebe43bdbc3210f09be9fe6742234d573bacc26ed92b67"
-dependencies = [
- "byteorder",
-]
-
-[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3227,20 +3209,6 @@ checksum = "765c9198f173dd59ce26ff9f95ef0aafd0a0fe01fb9d72841bc5066a4c06511d"
 dependencies = [
  "byteorder",
  "num-traits",
-]
-
-[[package]]
-name = "heapless"
-version = "0.7.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdc6457c0eb62c71aac4bc17216026d8410337c4126773b9c5daba343f17964f"
-dependencies = [
- "atomic-polyfill",
- "hash32",
- "rustc_version 0.4.0",
- "serde",
- "spin 0.9.8",
- "stable_deref_trait",
 ]
 
 [[package]]
@@ -5193,7 +5161,6 @@ checksum = "a55c51ee6c0db07e68448e336cf8ea4131a620edefebf9893e759b2d793420f8"
 dependencies = [
  "cobs",
  "embedded-io",
- "heapless",
  "serde",
 ]
 
@@ -5959,7 +5926,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "serde",
- "test-fuzz",
+ "test-fuzz 4.0.5",
 ]
 
 [[package]]
@@ -5997,15 +5964,11 @@ version = "0.1.0-alpha.16"
 dependencies = [
  "arbitrary",
  "assert_matches",
- "async-trait",
  "bytes",
  "criterion",
  "derive_more",
  "eyre",
- "futures",
- "heapless",
  "iai",
- "itertools 0.12.0",
  "metrics",
  "modular-bitfield",
  "once_cell",
@@ -6013,12 +5976,10 @@ dependencies = [
  "parity-scale-codec",
  "parking_lot 0.12.1",
  "paste",
- "postcard",
  "pprof",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
- "rayon",
  "reth-codecs",
  "reth-interfaces",
  "reth-libmdbx",
@@ -6026,15 +5987,11 @@ dependencies = [
  "reth-nippy-jar",
  "reth-primitives",
  "reth-tracing",
- "secp256k1 0.27.0",
  "serde",
  "serde_json",
  "tempfile",
- "test-fuzz",
+ "test-fuzz 5.0.0",
  "thiserror",
- "tokio",
- "tokio-stream",
- "vergen",
 ]
 
 [[package]]
@@ -6171,7 +6128,7 @@ dependencies = [
  "secp256k1 0.27.0",
  "serde",
  "snap",
- "test-fuzz",
+ "test-fuzz 4.0.5",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -6609,7 +6566,7 @@ dependencies = [
  "strum",
  "sucds 0.6.0",
  "tempfile",
- "test-fuzz",
+ "test-fuzz 4.0.5",
  "thiserror",
  "toml 0.8.8",
  "tracing",
@@ -7933,9 +7890,6 @@ name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
-dependencies = [
- "lock_api",
-]
 
 [[package]]
 name = "spki"
@@ -8184,9 +8138,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "470137c4c87413dd450bef3d516e6bf88a6dfc70e3f5e359dedbc7f9fc6992b3"
 dependencies = [
  "serde",
- "test-fuzz-internal",
- "test-fuzz-macro",
- "test-fuzz-runtime",
+ "test-fuzz-internal 4.0.5",
+ "test-fuzz-macro 4.0.5",
+ "test-fuzz-runtime 4.0.5",
+]
+
+[[package]]
+name = "test-fuzz"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b139530208017f9d5a113784ed09cf1b8b22dee95eb99d51d89af1a3c2d6594e"
+dependencies = [
+ "serde",
+ "test-fuzz-internal 5.0.0",
+ "test-fuzz-macro 5.0.0",
+ "test-fuzz-runtime 5.0.0",
 ]
 
 [[package]]
@@ -8194,6 +8160,17 @@ name = "test-fuzz-internal"
 version = "4.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9dc636f7d25fd41828408b08931216b93a4d18454a72e2d55d78bc3b78dc167e"
+dependencies = [
+ "bincode",
+ "cargo_metadata",
+ "serde",
+]
+
+[[package]]
+name = "test-fuzz-internal"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16e78ed8148311b6a02578dee5fd77600bf8805b77b2cb8382a9435348080985"
 dependencies = [
  "bincode",
  "cargo_metadata",
@@ -8217,6 +8194,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-fuzz-macro"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17f9bc8c69f276df24e4d1c082e52ea057544495916c4aa0708b82e47f55f364"
+dependencies = [
+ "darling 0.20.3",
+ "itertools 0.12.0",
+ "once_cell",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.48",
+]
+
+[[package]]
 name = "test-fuzz-runtime"
 version = "4.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8226,7 +8218,20 @@ dependencies = [
  "num-traits",
  "serde",
  "sha-1 0.10.1",
- "test-fuzz-internal",
+ "test-fuzz-internal 4.0.5",
+]
+
+[[package]]
+name = "test-fuzz-runtime"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b657ccc932fde05dbac5c460bffa40809937adaa5558863fe8174526e1b3bc9"
+dependencies = [
+ "hex",
+ "num-traits",
+ "serde",
+ "sha1",
+ "test-fuzz-internal 5.0.0",
 ]
 
 [[package]]
