@@ -1,6 +1,6 @@
 //! Payload service component for the node builder.
 
-use crate::components::BuilderContext;
+use crate::BuilderContext;
 use reth_node_api::node::FullNodeTypes;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_transaction_pool::TransactionPool;

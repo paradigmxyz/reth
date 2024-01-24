@@ -6,14 +6,12 @@ use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
-use reth_node_api::node::NodeTypes;
+use reth_node_api::node::{FullNodeTypes, NodeTypes};
+use reth_node_core::{node_config::NodeConfig, primitives::Head};
 use reth_provider::providers::BlockchainProvider;
 use reth_revm::EvmProcessorFactory;
 use reth_tasks::TaskExecutor;
 use std::{marker::PhantomData, sync::Arc};
-
-// TODO replace with node config
-type NodeConfig = ();
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -96,8 +94,50 @@ where
 {
     /// Launches the node and returns a handle to it.
     pub async fn launch(self, _executor: TaskExecutor) -> eyre::Result<NodeHandle> {
+        // 1. create the `BuilderContext`
+        // 2. build the components
+        // 3. build/customize rpc
+        // 4. apply hooks
+
         todo!()
     }
+}
+
+/// Captures the necessary context for building the components of the node.
+#[derive(Debug)]
+pub struct BuilderContext<Node: FullNodeTypes> {
+    /// The current head of the blockchain at launch.
+    head: Head,
+    /// The configured provider to interact with the blockchain.
+    provider: Node::Provider,
+
+    executor: TaskExecutor,
+
+    // TODO maybe combine this with provider
+    events: (),
+
+    /// The data dir of the node.
+    data_dir: (),
+    /// The config of the node
+    config: NodeConfig,
+}
+
+impl<Node: FullNodeTypes> BuilderContext<Node> {
+    pub fn provider(&self) -> &Node::Provider {
+        &self.provider
+    }
+
+    /// Returns the current head of the blockchain at launch.
+    pub fn head(&self) -> Head {
+        self.head
+    }
+
+    /// Returns the data dir of the node.
+    pub fn data_dir(&self) -> &() {
+        &self.data_dir
+    }
+
+    // TODO read only helper methods to access the config traits (cli args)
 }
 
 /// The initial state of the node builder process.

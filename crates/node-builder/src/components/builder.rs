@@ -1,8 +1,10 @@
 //! A generic [NodeComponentsBuilder]
 
-use crate::components::{
-    BuilderContext, NetworkBuilder, NodeComponents, NodeComponentsBuilder, PayloadServiceBuilder,
-    PoolBuilder,
+use crate::{
+    components::{
+        NetworkBuilder, NodeComponents, NodeComponentsBuilder, PayloadServiceBuilder, PoolBuilder,
+    },
+    BuilderContext,
 };
 use reth_node_api::node::FullNodeTypes;
 use std::marker::PhantomData;

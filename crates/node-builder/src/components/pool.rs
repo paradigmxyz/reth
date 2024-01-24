@@ -1,5 +1,5 @@
 //! Pool component for the node builder.
-use crate::components::BuilderContext;
+use crate::BuilderContext;
 use reth_node_api::node::FullNodeTypes;
 use reth_transaction_pool::{blobstore::InMemoryBlobStore, TransactionPool};
 use std::marker::PhantomData;

@@ -13,11 +13,7 @@ pub use payload::*;
 pub use pool::*;
 use reth_network::NetworkHandle;
 use reth_node_api::node::FullNodeTypes;
-use reth_node_core::node_config::NodeConfig;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_primitives::Head;
-use reth_tasks::TaskExecutor;
-
 pub use traits::*;
 
 mod builder;
@@ -25,43 +21,6 @@ mod network;
 mod payload;
 mod pool;
 mod traits;
-
-/// Captures the necessary context for building the components of the node.
-#[derive(Debug)]
-pub struct BuilderContext<Node: FullNodeTypes> {
-    /// The current head of the blockchain at launch.
-    head: Head,
-    /// The configured provider to interact with the blockchain.
-    provider: Node::Provider,
-
-    executor: TaskExecutor,
-
-    // TODO maybe combine this with provider
-    events: (),
-
-    /// The data dir of the node.
-    data_dir: (),
-    /// The config of the node
-    config: NodeConfig,
-}
-
-impl<Node: FullNodeTypes> BuilderContext<Node> {
-    pub fn provider(&self) -> &Node::Provider {
-        &self.provider
-    }
-
-    /// Returns the current head of the blockchain at launch.
-    pub fn head(&self) -> Head {
-        self.head
-    }
-
-    /// Returns the data dir of the node.
-    pub fn data_dir(&self) -> &() {
-        &self.data_dir
-    }
-
-    // TODO read only helper methods to access the config traits (cli args)
-}
 
 /// All the components of the node.
 ///

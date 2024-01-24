@@ -1,6 +1,6 @@
 //! Network component for the node builder.
 
-use crate::components::BuilderContext;
+use crate::BuilderContext;
 use reth_network::NetworkHandle;
 use reth_node_api::node::FullNodeTypes;
 use reth_transaction_pool::TransactionPool;
