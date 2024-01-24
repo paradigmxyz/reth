@@ -85,7 +85,8 @@ where
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
-                for (index, tx) in transactions.iter().enumerate() {
+                let mut transactions = transactions.into_iter().peekable();
+                for (index, tx) in transactions.clone().enumerate() {
                     let tx_hash = tx.hash;
                     let tx = tx_env_with_recovered(&tx);
                     let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
@@ -109,11 +110,10 @@ where
                         })?;
 
                     results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
-                    // Check if there are more transactions to process
-                    if index < transactions.len() - 1 {
-                        // Apply the state changes of this transaction before executing the next
-                        // transaction
-                        db.commit(state_changes);
+                    if transactions.peek().is_some() {
+                        // need to apply the state changes of this transaction before executing the
+                        // next transaction
+                        db.commit(state_changes)
                     }
                 }
 
@@ -370,7 +370,6 @@ where
 
     /// The debug_traceCallMany method lets you run an `eth_callMany` within the context of the
     /// given block execution using the first n transactions in the given block as base
-    #[allow(clippy::collapsible_else_if)]
     pub async fn debug_trace_call_many(
         &self,
         bundles: Vec<Bundle>,
