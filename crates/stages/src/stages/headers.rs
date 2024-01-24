@@ -201,7 +201,7 @@ where
     ) -> Poll<Result<(), StageError>> {
         let current_checkpoint = input.checkpoint();
 
-        // Return if stage has already completed the gap
+        // Return if stage has already completed the gap on the ETL files
         if self.is_etl_ready {
             return Poll::Ready(Ok(()))
         }
@@ -266,9 +266,9 @@ where
     ) -> Result<ExecOutput, StageError> {
         let current_checkpoint = input.checkpoint();
 
-        let gap = self.sync_gap.clone().ok_or(StageError::MissingSyncGap)?;
-        if gap.is_closed() {
-            return Ok(ExecOutput::done(current_checkpoint))
+        if self.sync_gap.as_ref().ok_or(StageError::MissingSyncGap)?.is_closed() {
+            self.is_etl_ready = false;
+            return Ok(ExecOutput::done(current_checkpoint));
         }
 
         // We should be here only after we have downloaded all headers into the disk buffer (ETL).
