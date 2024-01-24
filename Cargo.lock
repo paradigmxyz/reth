@@ -6034,7 +6034,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "vergen",
 ]
 
 [[package]]
