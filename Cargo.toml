@@ -85,15 +85,21 @@ homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
 exclude = [".github/"]
 
-# Like release, but with full debug symbols. Useful for e.g. `perf`.
-[profile.debug-fast]
-inherits = "release"
-debug = true
-
 # Meant for testing - all optimizations, but with debug assertions and overflow checks.
 [profile.hivetests]
 inherits = "test"
 opt-level = 3
+lto = "thin"
+
+[profile.release]
+lto = "thin"
+strip = "debuginfo"
+
+# Like release, but with full debug symbols. Useful for e.g. `perf`.
+[profile.debug-fast]
+inherits = "release"
+strip = "none"
+debug = true
 
 [profile.maxperf]
 inherits = "release"
@@ -164,10 +170,10 @@ revm = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", feat
 revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", features = [
     "std",
 ], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors"}
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors" }
 
 # eth
-alloy-chains = {version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
+alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
 alloy-primitives = "0.6"
 alloy-dyn-abi = "0.6"
 alloy-sol-types = "0.6"
@@ -176,8 +182,8 @@ alloy-trie = "0.2"
 alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy" }
 alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy" }
 alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy"}
-alloy-node-bindings = {git = "https://github.com/alloy-rs/alloy"}
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy" }
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
