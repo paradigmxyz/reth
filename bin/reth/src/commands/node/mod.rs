@@ -215,7 +215,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         // launch the node
         let handle = node_config.launch::<Ext>(ext, executor).await?;
-        handle.node_exit_future.await
+        handle.wait_for_node_exit().await
     }
 
     /// Returns the [Consensus] instance to use.

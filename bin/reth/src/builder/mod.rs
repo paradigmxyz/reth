@@ -66,6 +66,7 @@ use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_node_builder::EthEngineTypes;
 #[cfg(feature = "optimism")]
 use reth_node_builder::OptimismEngineTypes;
+use std::task::ready;
 
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{
@@ -1362,13 +1363,18 @@ pub struct NodeHandle {
 
     /// A Future which waits node exit
     /// See [`NodeExitFuture`]
-    pub node_exit_future: NodeExitFuture,
+    node_exit_future: NodeExitFuture,
 }
 
 impl NodeHandle {
     /// Returns the [RethRpcServerHandles] for this node.
     pub fn rpc_server_handles(&self) -> &RethRpcServerHandles {
         &self.rpc_server_handles
+    }
+
+    /// Waits for the node to exit. Uses [`NodeExitFuture`]
+    pub async fn wait_for_node_exit(self) -> eyre::Result<()> {
+        self.node_exit_future.await
     }
 }
 
@@ -1398,8 +1404,8 @@ impl Future for NodeExitFuture {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         if let Some(rx) = this.consensus_engine_rx.as_mut() {
-            match rx.poll_unpin(cx) {
-                Poll::Ready(Ok(res)) => {
+            match ready!(rx.poll_unpin(cx)) {
+                Ok(res) => {
                     this.consensus_engine_rx.take();
                     res?;
                     if this.terminate {
@@ -1408,8 +1414,7 @@ impl Future for NodeExitFuture {
                         Poll::Pending
                     }
                 }
-                Poll::Ready(Err(err)) => Poll::Ready(Err(err.into())),
-                Poll::Pending => Poll::Pending,
+                Err(err) => Poll::Ready(Err(err.into())),
             }
         } else {
             Poll::Pending
