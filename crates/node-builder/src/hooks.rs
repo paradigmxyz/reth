@@ -61,7 +61,7 @@ impl Default for NodeHooks<()> {
     }
 }
 
-impl fmt::Debug for NodeHooks<()> {
+impl<Node> fmt::Debug for NodeHooks<Node> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("NodeHooks")
             .field("on_component_initialized", &"...")

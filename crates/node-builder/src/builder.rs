@@ -1,6 +1,11 @@
 //! Customizable node builder.
 
-use crate::{components::NodeComponentsBuilder, node::FullNodeTypesAdapter, NodeHandle};
+use crate::{
+    components::{FullNodeComponentsAdapter, NodeComponentsBuilder},
+    hooks::NodeHooks,
+    node::{FullNode, FullNodeTypesAdapter},
+    NodeHandle,
+};
 use reth_blockchain_tree::ShareableBlockchainTree;
 use reth_db::{
     database::Database,
@@ -74,19 +79,40 @@ where
     pub fn with_components<Builder>(
         self,
         builder: Builder,
-    ) -> NodeBuilder<DB, ComponentsState<Types, Builder>>
+    ) -> NodeBuilder<
+        DB,
+        ComponentsState<
+            Types,
+            Builder,
+            FullNodeComponentsAdapter<
+                FullNodeTypesAdapter<Types, RethFullProviderType<DB>>,
+                Builder::Pool,
+            >,
+        >,
+    >
     where
         Builder: NodeComponentsBuilder<FullNodeTypesAdapter<Types, RethFullProviderType<DB>>>,
     {
         NodeBuilder {
             config: self.config,
             database: self.database,
-            state: ComponentsState { _maker: Default::default(), builder },
+            state: ComponentsState { _maker: Default::default(), builder, hooks: NodeHooks::new() },
         }
     }
 }
 
-impl<DB, Types, Components> NodeBuilder<DB, ComponentsState<Types, Components>>
+impl<DB, Types, Components>
+    NodeBuilder<
+        DB,
+        ComponentsState<
+            Types,
+            Components,
+            FullNodeComponentsAdapter<
+                FullNodeTypesAdapter<Types, RethFullProviderType<DB>>,
+                Components::Pool,
+            >,
+        >,
+    >
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + 'static,
     Types: NodeTypes,
@@ -167,7 +193,8 @@ where
 ///
 /// With this state all types and components of the node are known and the node can be launched.
 #[derive(Debug)]
-pub struct ComponentsState<Types, Builder> {
+pub struct ComponentsState<Types, Builder, FullNode> {
     _maker: PhantomData<Types>,
     builder: Builder,
+    hooks: NodeHooks<FullNode>,
 }
