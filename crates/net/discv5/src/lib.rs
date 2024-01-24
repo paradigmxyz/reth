@@ -41,8 +41,7 @@ pub enum DiscoveryUpdateV5 {
     V4(DiscoveryUpdate),
 }
 
-#[pin_project]
-pub struct UpdateStream<S>(#[pin] S);
+pub struct UpdateStream<S>(S);
 
 impl<S, I> Stream for UpdateStream<S>
 where
@@ -56,27 +55,13 @@ where
     }
 }
 
-#[pin_project]
-pub struct MergedUpdateStream<S>(#[pin] S);
-
-impl<S> Stream for MergedUpdateStream<S>
-where
-    S: Stream<Item = DiscoveryUpdateV5> + Unpin,
-{
-    type Item = DiscoveryUpdateV5;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.0.poll_next_unpin(cx)
-    }
-}
-
 /// Returns a [`discv5::Event`] stream, that supports downgrading to discv4.
 pub fn merge_discovery_streams(
     discv5_event_stream: mpsc::Receiver<discv5::Discv5Event>,
     discv4_update_stream: ReceiverStream<DiscoveryUpdate>,
-) -> MergedUpdateStream<impl Stream<Item = DiscoveryUpdateV5>> {
+) -> impl Stream<Item = DiscoveryUpdateV5> + Unpin {
     let discv5_event_stream = UpdateStream(ReceiverStream::new(discv5_event_stream));
     let discv4_update_stream = UpdateStream(discv4_update_stream);
 
-    MergedUpdateStream(discv5_event_stream.merge(discv4_update_stream))
+    discv5_event_stream.merge(discv4_update_stream)
 }
