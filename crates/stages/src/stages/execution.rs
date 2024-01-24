@@ -125,7 +125,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // We only append receipts to static files if there is no pruning or filtering configured
         // for receipts.
-        let snapshotter = maybe_snapshotter(&self.prune_modes, provider, start_block)?;
+        let snapshotter = try_prepare_snapshotter(&self.prune_modes, provider, start_block)?;
 
         // Build executor
         let mut executor =
@@ -424,10 +424,10 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
 
         // Unwind all receipts for transactions in the block range
-        match maybe_snapshotter(&self.prune_modes, provider, *range.start())? {
+        match try_prepare_snapshotter(&self.prune_modes, provider, *range.start())? {
             Some(_) => {
-                // `maybe_snapshotter` already prunes receipts if it detects that there are more
-                // elements in the static files than expected.
+                // `try_prepare_snapshotter` already prunes receipts if it detects that there are
+                // more elements in the static files than expected.
                 if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
                     for block_number in range {
                         stage_checkpoint.progress.processed -= provider
@@ -438,6 +438,9 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
                 }
             }
             None => {
+                // `try_prepare_snapshotter` returning None means that the node has some kind of
+                // filtering/pruning enabled. In this case static files are not used, and falls back
+                // to database.
                 let mut cursor = tx.cursor_write::<tables::Receipts>()?;
                 let mut reverse_walker = cursor.walk_back(None)?;
 
@@ -511,8 +514,10 @@ impl ExecutionStageThresholds {
 /// returns the snapshotter for saving/pruning receipts to/from static files.
 ///
 /// Additionally, performs a consistency check between the expected highest receipt and the highest
-/// receipt in the static file to detect any unexpected shutdown.
-fn maybe_snapshotter<'a, 'b, DB: Database>(
+/// receipt in the static file to detect any unexpected shutdown. **If the height is higher** on the
+/// static file it **unwinds the static file. If the height is lower** it triggers an **unwind on
+/// the database** until both heights match.
+fn try_prepare_snapshotter<'a, 'b, DB: Database>(
     prune_modes: &PruneModes,
     provider: &'b DatabaseProviderRW<DB>,
     start_block: u64,
