@@ -427,7 +427,10 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         match try_prepare_snapshotter(&self.prune_modes, provider, *range.start())? {
             Some(_) => {
                 // `try_prepare_snapshotter` already prunes receipts if it detects that there are
-                // more elements in the static files than expected.
+                // more elements in the static files than expected by block `range.start()`,
+                // effectively unwinding it.
+
+                // Update the checkpoint.
                 if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
                     for block_number in range {
                         stage_checkpoint.progress.processed -= provider
