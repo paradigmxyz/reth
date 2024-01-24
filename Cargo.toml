@@ -167,7 +167,7 @@ revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_fr
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors"}
 
 # eth
-alloy-chains = {version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
+alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
 alloy-primitives = "0.6"
 alloy-dyn-abi = "0.6"
 alloy-sol-types = "0.6"
@@ -185,7 +185,7 @@ ethers-middleware = { version = "2.0", default-features = false }
 
 discv5 = { git = "https://github.com/sigp/discv5", rev = "f289bbd4c57d499bb1bdb393af3c249600a1c662" }
 # Fork of rust-igd with ipv6 support
-igd-next = { git = "https://github.com/dariusc93/rust-igd", rev = "2b268064c70e62cfea26952436630ea898d3b922" }
+igd-next = "0.14.3"
 
 # js
 boa_engine = "0.17"
