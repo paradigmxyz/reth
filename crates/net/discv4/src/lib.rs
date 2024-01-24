@@ -45,6 +45,7 @@ use reth_primitives::{
     hex, ForkId, PeerId, B256,
 };
 use secp256k1::{PublicKey, SecretKey};
+use smallvec::{smallvec, SmallVec};
 use std::{
     cell::RefCell,
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, HashSet, VecDeque},
@@ -429,13 +430,23 @@ impl Discv4 {
 
 pub trait HandleDiscV4 {
     fn add_node(&self, record: NodeRecord) -> bool {
-        false
+        todo!()
     }
-    fn set_eip868_rlp_pair(&self, key: Vec<u8>, rlp: Bytes) {}
-    fn set_eip868_rlp(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {}
-    fn ban(&self, node_id: PeerId, ip: IpAddr) {}
-    fn ban_ip(&self, ip: IpAddr) {}
-    fn on_discv4_update(&mut self, update: DiscoveryUpdate) {}
+    fn set_eip868_rlp_pair(&self, key: Vec<u8>, rlp: Bytes) {
+        todo!()
+    }
+    fn set_eip868_rlp(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {
+        todo!()
+    }
+    fn ban(&self, node_id: PeerId, ip: IpAddr) {
+        todo!()
+    }
+    fn ban_ip(&self, ip: IpAddr) {
+        todo!()
+    }
+    fn on_discv4_update(&mut self, update: DiscoveryUpdate) {
+        todo!()
+    }
 }
 
 impl HandleDiscV4 for Discv4 {}
@@ -2231,7 +2242,7 @@ impl From<ForkId> for EnrForkIdEntry {
 
 pub trait MirrorDiscv5KBuckets {
     fn update_mirror(&mut self);
-    fn filter_nodes(&mut self, nodes: &mut Vec<NodeRecord>) -> Result<Vec<PeerId>, Discv4Error>;
+    fn filter_nodes(&mut self, nodes: &mut Vec<NodeRecord>) -> Result<SmallVec<[PeerId; 4]>, Discv4Error>;
 }
 
 #[derive(Debug)]
@@ -2262,13 +2273,13 @@ where
         self.mirror = (self.callback)()
     }
 
-    fn filter_nodes(&mut self, nodes: &mut Vec<NodeRecord>) -> Result<Vec<PeerId>, Discv4Error> {
+    fn filter_nodes(&mut self, nodes: &mut Vec<NodeRecord>) -> Result<SmallVec<[PeerId; 4]>, Discv4Error> {
         if self.change_tx.has_changed().map_err(|e| Discv4Error::Discv5MirrorUpdateFailed(e))? {
             self.update_mirror();
             self.change_tx.borrow_and_update();
         }
 
-        let mut filtered_out = vec![];
+        let mut filtered_out = smallvec!();
 
         nodes.retain(|node| {
             let Ok(pk) = PublicKey::from_slice(node.id.as_ref()) else {
@@ -2296,8 +2307,8 @@ unsafe impl Send for Discv5Noop {}
 
 impl MirrorDiscv5KBuckets for Discv5Noop {
     fn update_mirror(&mut self) {}
-    fn filter_nodes(&mut self, _nodes: &mut Vec<NodeRecord>) -> Result<Vec<PeerId>, Discv4Error> {
-        Ok(vec![])
+    fn filter_nodes(&mut self, _nodes: &mut Vec<NodeRecord>) -> Result<SmallVec<[PeerId; 4]>, Discv4Error> {
+        Ok(smallvec!())
     }
 }
 

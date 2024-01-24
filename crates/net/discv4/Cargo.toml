@@ -35,6 +35,7 @@ rand = { workspace = true, optional = true }
 generic-array = "0.14"
 serde = { workspace = true, optional = true }
 itertools.workspace = true
+smallvec.workspace = true
 
 [dev-dependencies]
 rand.workspace = true

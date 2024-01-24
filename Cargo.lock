@@ -6104,6 +6104,7 @@ dependencies = [
  "rlp",
  "secp256k1 0.27.0",
  "serde",
+ "smallvec",
  "thiserror",
  "tokio",
  "tokio-stream",
