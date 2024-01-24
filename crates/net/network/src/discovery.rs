@@ -11,11 +11,7 @@ use discv5::{
 };
 use futures::StreamExt;
 use parking_lot::RwLock;
-use pin_project::pin_project;
-use reth_discv4::{
-    DiscoveryUpdate, Discv4, Discv4Config, Discv4Service, Discv5KBucketsKeysMirror, EnrForkIdEntry,
-    HandleDiscV4,
-};
+use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry, HandleDiscV4};
 use reth_discv5::{self, DiscoveryUpdateV5, Discv5};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,

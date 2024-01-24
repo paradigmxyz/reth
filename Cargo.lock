@@ -6091,6 +6091,7 @@ name = "reth-discv4"
 version = "0.1.0-alpha.15"
 dependencies = [
  "alloy-rlp",
+ "derive_more",
  "discv5",
  "enr",
  "generic-array",
