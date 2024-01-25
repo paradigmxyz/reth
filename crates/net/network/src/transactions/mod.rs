@@ -65,8 +65,10 @@ use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
 
 mod fetcher;
+mod validation;
 
 use fetcher::{FetchEvent, TransactionFetcher};
+pub use validation::*;
 
 /// Cache limit of transactions to keep track of for a single peer.
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;

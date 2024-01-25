@@ -45,6 +45,9 @@ pub enum TxType {
 }
 
 impl TxType {
+    /// The max type reserved by an EIP.
+    pub const MAX_RESERVED_EIP: TxType = Self::EIP4844;
+
     /// Check if the transaction type has an access list.
     pub const fn has_access_list(&self) -> bool {
         match self {
@@ -52,6 +55,30 @@ impl TxType {
             TxType::EIP2930 | TxType::EIP1559 | TxType::EIP4844 => true,
             #[cfg(feature = "optimism")]
             TxType::DEPOSIT => false,
+        }
+    }
+
+    /// Returns the max size for a transaction type.
+    pub const fn max_encoded_tx_length(&self) -> usize {
+        match self {
+            TxType::Legacy => usize::pow(2, 20),  // todo: set limit
+            TxType::EIP2930 => usize::pow(2, 20), // todo: set limit
+            TxType::EIP1559 => usize::pow(2, 20), // todo: set limit
+            TxType::EIP4844 => usize::pow(2, 20),
+            #[cfg(feature = "optimism")]
+            TxType::DEPOSIT => usize::pow(2, 20), // todo: set limit
+        }
+    }
+
+    /// Returns the min size for a transaction type.
+    pub const fn min_encoded_tx_length(&self) -> usize {
+        match self {
+            TxType::Legacy => 1,  // todo: set limit
+            TxType::EIP2930 => 1, // todo: set limit
+            TxType::EIP1559 => 1, // todo: set limit
+            TxType::EIP4844 => 1,
+            #[cfg(feature = "optimism")]
+            TxType::DEPOSIT => 1, // todo: set limit
         }
     }
 }
@@ -72,6 +99,29 @@ impl From<TxType> for u8 {
 impl From<TxType> for U8 {
     fn from(value: TxType) -> Self {
         U8::from(u8::from(value))
+    }
+}
+
+impl TryFrom<u8> for TxType {
+    type Error = &'static str;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        #[cfg(feature = "optimism")]
+        if value == TxType::DEPOSIT as u8 {
+            return Ok(TxType::DEPOSIT)
+        }
+
+        if value == TxType::Legacy as u8 {
+            return Ok(TxType::Legacy)
+        } else if value == TxType::EIP2930 as u8 {
+            return Ok(TxType::EIP2930)
+        } else if value == TxType::EIP1559 as u8 {
+            return Ok(TxType::EIP1559)
+        } else if value == TxType::EIP4844 as u8 {
+            return Ok(TxType::EIP4844)
+        }
+
+        Err("invalid tx type")
     }
 }
 
