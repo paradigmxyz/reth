@@ -107,13 +107,13 @@ op-node \
 ```
 
 [l1-el-spec]: https://github.com/ethereum/execution-specs
-[rollup-node-spec]: https://github.com/ethereum-optimism/optimism/blob/develop/specs/rollup-node.md
+[rollup-node-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/rollup-node.md
 [op-geth-forkdiff]: https://op-geth.optimism.io
 [sequencer]: https://github.com/ethereum-optimism/optimism/blob/develop/specs/introduction.md#sequencers
-[op-stack-spec]: https://github.com/ethereum-optimism/optimism/tree/develop/specs
-[l2-el-spec]: https://github.com/ethereum-optimism/optimism/blob/develop/specs/exec-engine.md
-[deposit-spec]: https://github.com/ethereum-optimism/optimism/blob/develop/specs/deposits.md
-[derivation-spec]: https://github.com/ethereum-optimism/optimism/blob/develop/specs/derivation.md
+[op-stack-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs
+[l2-el-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/exec-engine.md
+[deposit-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/deposits.md
+[derivation-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/derivation.md
 
 [op-node-docker]: https://console.cloud.google.com/artifacts/docker/oplabs-tools-artifacts/us/images/op-node
 
