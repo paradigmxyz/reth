@@ -184,9 +184,8 @@ impl SnapshotProvider {
         self.snapshots_max_block
             .read()
             .get(&segment)
-            .into_iter()
-            .find(|max| **max >= block)
-            .map(|block| find_fixed_range(*block))
+            .filter(|max| **max >= block)
+            .map(|_| find_fixed_range(block))
     }
 
     /// Gets a snapshot segment's fixed block range from the provider inner
