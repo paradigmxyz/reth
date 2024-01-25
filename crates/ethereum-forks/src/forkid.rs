@@ -182,19 +182,17 @@ impl ForkFilter {
     where
         F: IntoIterator<Item = ForkFilterKey>,
     {
-        // Convert the genesis hash to a `ForkHash`.
         let genesis_fork_hash = ForkHash::from(genesis_hash);
+        let mut forks = forks.into_iter().collect::<BTreeSet<_>>();
+        forks.remove(&ForkFilterKey::Time(0));
+        forks.remove(&ForkFilterKey::Block(0));
 
-        // Process and filter forks based on criteria.
         let forks = forks
             .into_iter()
-            .filter(|key| {
-                key != &ForkFilterKey::Time(0) &&
-                    key != &ForkFilterKey::Block(0) &&
-                    match key {
-                        ForkFilterKey::Block(_) => true,
-                        ForkFilterKey::Time(time) => *time > genesis_timestamp,
-                    }
+            // filter out forks that are pre-genesis by timestamp
+            .filter(|key| match key {
+                ForkFilterKey::Block(_) => true,
+                ForkFilterKey::Time(time) => *time > genesis_timestamp,
             })
             .collect::<BTreeSet<_>>()
             .into_iter()
