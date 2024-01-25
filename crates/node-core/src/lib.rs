@@ -14,10 +14,13 @@ pub mod dirs;
 pub mod engine_api_store;
 pub mod events;
 pub mod init;
+pub mod metrics;
 pub mod node_config;
-pub mod prometheus_exporter;
 pub mod utils;
 pub mod version;
+
+// Re-export for backwards compatibility.
+pub use metrics::prometheus_exporter;
 
 /// Re-exported from `reth_primitives`.
 pub mod primitives {

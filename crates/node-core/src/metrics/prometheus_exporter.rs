@@ -1,5 +1,6 @@
 //! Prometheus exporter
 
+use crate::metrics::version_metrics::register_version_metrics;
 use eyre::WrapErr;
 use hyper::{
     service::{make_service_fn, service_fn},
@@ -104,6 +105,7 @@ where
     process.describe();
     describe_memory_stats();
     describe_io_stats();
+    register_version_metrics();
 
     Ok(())
 }
