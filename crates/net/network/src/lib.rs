@@ -142,16 +142,16 @@ pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
 pub use network::{NetworkEvents, NetworkHandle, NetworkProtocols};
 pub use peers::PeersConfig;
+pub use reth_discv4::Discv4;
+pub use reth_discv5::{DiscoveryUpdateV5, Discv5, MergedUpdateStream};
+pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
 pub use session::{
     ActiveSessionHandle, ActiveSessionMessage, Direction, PeerInfo, PendingSessionEvent,
     PendingSessionHandle, PendingSessionHandshakeError, SessionCommand, SessionEvent, SessionId,
     SessionLimits, SessionManager, SessionsConfig,
 };
 
-pub use reth_discv5::{DiscoveryUpdateV5, Discv5};
-pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
-
-/// Discovery using [`reth_discv4::Discv4`].
+/// Discovery using [`Discv4`].
 //#[cfg(not(feature = "discv5"))]
 //type Discovery = Discv4;
 
@@ -162,6 +162,6 @@ impl<S> StreamDiscv5 for S where
 {
 }
 
-/// Discovery using [`reth_discv5::Discv5`].
+/// Discovery using [`reth_discv5::Discv5`], which supports downgrading to [`Discv4`].
 //#[cfg(feature = "discv5")]
-pub type Discovery = Disc<Discv5, Box<dyn StreamDiscv5>>;
+pub type Discovery = Disc<Discv5, MergedUpdateStream>;

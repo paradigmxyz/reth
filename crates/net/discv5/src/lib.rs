@@ -8,11 +8,14 @@ use std::{
 };
 
 use derive_more::From;
-use futures::{Stream, StreamExt};
+use futures::{
+    stream::{select, Select},
+    Stream, StreamExt,
+};
 use parking_lot::RwLock;
 use reth_discv4::{DiscoveryUpdate, Discv4, HandleDiscovery};
 use tokio::sync::{mpsc, watch};
-use tokio_stream::{wrappers::ReceiverStream, StreamExt as TokioStreamExt};
+use tokio_stream::wrappers::ReceiverStream;
 
 /// Reth Discv5 type, wraps [`discv5::Discv5`] supporting downgrade to [`Discv4`].
 pub struct Discv5 {
@@ -80,14 +83,24 @@ where
     }
 }
 
-/// Returns a merged stream for  [`discv5::Discv5Event`] stream, that supports downgrading to
-/// discv4.
+/// A stream that polls update streams from [`discv5::Discv5`] and [`Discv4`] in round-robin
+/// fashion.
+pub type MergedUpdateStream = Select<
+    UpdateStream<ReceiverStream<discv5::Discv5Event>>,
+    UpdateStream<ReceiverStream<DiscoveryUpdate>>,
+>;
+
+/// Returns a merged stream of [`discv5::Discv5Event`]s and [`DiscoveryUpdate`]s, that supports
+/// downgrading to discv4.
 pub fn merge_discovery_streams(
     discv5_event_stream: mpsc::Receiver<discv5::Discv5Event>,
     discv4_update_stream: ReceiverStream<DiscoveryUpdate>,
-) -> impl Stream<Item = DiscoveryUpdateV5> + Unpin {
+) -> Select<
+    UpdateStream<ReceiverStream<discv5::Discv5Event>>,
+    UpdateStream<ReceiverStream<DiscoveryUpdate>>,
+> {
     let discv5_event_stream = UpdateStream(ReceiverStream::new(discv5_event_stream));
     let discv4_update_stream = UpdateStream(discv4_update_stream);
 
-    discv5_event_stream.merge(discv4_update_stream)
+    select(discv5_event_stream, discv4_update_stream)
 }

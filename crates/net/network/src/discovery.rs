@@ -5,15 +5,11 @@ use crate::{
     manager::DiscoveredEvent,
     StreamDiscv5,
 };
-use discv5::{
-    self,
-    enr::{CombinedKey, EnrBuilder},
-    ListenConfig,
-};
+use discv5;
 use futures::StreamExt;
 use parking_lot::RwLock;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry, HandleDiscovery};
-use reth_discv5::{self, DiscoveryUpdateV5, Discv5};
+use reth_discv5::{self, DiscoveryUpdateV5, Discv5, MergedUpdateStream};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
@@ -248,38 +244,77 @@ impl<S> Discovery<Discv5, S> {
     fn on_discv5_update(&mut self, update: discv5::Discv5Event) -> Result<(), NetworkError> {
         use discv5::Discv5Event::*;
         match update {
-            Discovered(_enr) => {
-                todo!()
-            }
-            EnrAdded { .. } => {} // duplicate of `NodeInserted`, not used in discv5 codebase
-            NodeInserted { node_id: _, replaced: _ } => {
-                // If peer is not behind symmetric nat, likely to end up in discv5 kbuckets if we
-                // get an incoming connection from it. This emits a `SessionEstablished` event. If
-                // the peer is behind a symmetric nat, i.e. has an uncontactable enr, it won't end
-                // up in our discv5 kbuckets we may have a double connection to it, once on discv5
-                // and once on discv4. Nonetheless, if the peer behind a symmetric nat is running
-                // this implementation too, it will make sure that it doesn’t connect to us on
-                // discv4, since we are probably in its discv5 kbuckets (if we have contactable
-                // enr). We don’t have a `SessionEnded` event in discv5::Discv5, so basing the
-                // nodes filter in discv4 on `SessionEstablished` instead of `NodeInserted` is
-                // risky, since we will negatively effect discv4’s connectivity with time that
-                // way. For now we are happy with basing it on kbuckets.
+            Discovered(enr) => {
+                // covers DiscoveryUpdate::Added(_) and DiscoveryUpdate::DiscoveredAtCapacity(_)
 
+                // node has been discovered as part of a query. discv5::Discv5Config sets
+                // `report_discovered_peers` to true by default.
+
+                self.try_insert_enr_into_discovered_nodes(enr)?;
+            }
+            EnrAdded { .. } => {
+                // not used in discv5 codebase
+            }
+            NodeInserted { replaced, .. } => {
+                // covers DiscoveryUpdate::Added(_) and DiscoveryUpdate::Removed(_)
+
+                if let Some(node_id) = replaced {
+                    let id = into_uncompressed_id(node_id).map_err(|_| {
+                        NetworkError::custom_discovery(
+                            "conversion from discv5 node id to pk failed",
+                        )
+                    })?;
+
+                    self.discovered_nodes.remove(&id);
+                };
+
+                // notify discv4 that a node has been inserted,
                 if let Some(disc) = &self.disc {
                     disc.notify_discv4_of_kbuckets_update()
                         .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?
                 }
             }
-            SessionEstablished(_enr, _socket_addr) => {
-                todo!()
+            SessionEstablished(enr, _remote_socket) => {
+                // covers DiscoveryUpdate::Added(_) and DiscoveryUpdate::DiscoveredAtCapacity(_)
+
+                // node has been discovered unrelated to a query, e.g. an incoming connection to
+                // discv5
+
+                // todo: notify discv4 also for nodes that don't make it into kbuckets? e.g. nodes
+                // behind symmetric nat
+
+                self.try_insert_enr_into_discovered_nodes(enr)?;
             }
-            SocketUpdated(_socket_addr) => {
-                todo!()
-            }
-            TalkRequest(_talk_req) => {
-                todo!()
-            }
+            SocketUpdated(_socket_addr) => {}
+            TalkRequest(_talk_req) => {}
         }
+
+        Ok(())
+    }
+
+    fn try_insert_enr_into_discovered_nodes(
+        &mut self,
+        enr: discv5::Enr,
+    ) -> Result<(), NetworkError> {
+        // todo: get correct ip mode for this node
+        let Some(udp_socket_ipv4) = discv5::IpMode::Ip4.get_contactable_addr(&enr) else {
+            return Ok(())
+        };
+        // todo: get port v6 with respect to ip mode of this node
+        let Some(tcp_port_ipv4) = enr.tcp4() else { return Ok(()) };
+
+        let id = into_uncompressed_id(enr.node_id()).map_err(|_| {
+            NetworkError::custom_discovery("conversion from discv5 node id to pk failed")
+        })?;
+
+        let record = NodeRecord {
+            address: udp_socket_ipv4.ip(),
+            tcp_port: tcp_port_ipv4,
+            udp_port: udp_socket_ipv4.port(),
+            id,
+        };
+
+        self.on_node_record_update(record, None);
 
         Ok(())
     }
@@ -338,7 +373,7 @@ impl<S> fmt::Debug for Discovery<Discv5, S> {
     }
 }
 
-impl Discovery<Discv5, Box<dyn StreamDiscv5>> {
+impl Discovery<Discv5, MergedUpdateStream> {
     /// Spawns the discovery service.
     ///
     /// This will spawn [`discv5::Discv5`] and [`Discv4`] each onto their own new task and establish
@@ -354,10 +389,11 @@ impl Discovery<Discv5, Box<dyn StreamDiscv5>> {
         //
         // get the discv5 addr
         let mut discv5_addresses: SmallVec<[SocketAddr; 2]> = smallvec!();
+        use discv5::ListenConfig::*;
         match discv5_config.listen_config {
-            ListenConfig::Ipv4 { ip, port } => discv5_addresses.push((ip, port).into()),
-            ListenConfig::Ipv6 { ip, port } => discv5_addresses.push((ip, port).into()),
-            ListenConfig::DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
+            Ipv4 { ip, port } => discv5_addresses.push((ip, port).into()),
+            Ipv6 { ip, port } => discv5_addresses.push((ip, port).into()),
+            DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
                 discv5_addresses.push((ipv4, ipv4_port).into());
                 discv5_addresses.push((ipv6, ipv6_port).into());
             }
@@ -375,10 +411,10 @@ impl Discovery<Discv5, Box<dyn StreamDiscv5>> {
 
         // make enr for discv5
         let mut sk_copy = *sk.as_ref();
-        let sk_discv5_wrapper = CombinedKey::secp256k1_from_bytes(&mut sk_copy)
+        let sk_discv5_wrapper = discv5::enr::CombinedKey::secp256k1_from_bytes(&mut sk_copy)
             .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
         let enr = {
-            let mut builder = EnrBuilder::new("v4");
+            let mut builder = discv5::enr::EnrBuilder::new("v4");
             builder.ip(discv5_addresses[0].ip());
             builder.udp4(discv5_addresses[0].port());
             if let Some(ipv6) = discv5_addresses.get(1) {
@@ -416,15 +452,20 @@ impl Discovery<Discv5, Box<dyn StreamDiscv5>> {
             // nodes.
             let discv5 = Arc::new(RwLock::new(discv5));
             let discv5_ref = discv5.clone();
-            let kbuckets_callback = move || {
-                discv5_ref
-                    .read()
-                    .table_entries_id()
-                    .into_iter()
-                    .map(|pk_compressed_bytes| {
-                        PublicKey::from_slice(&pk_compressed_bytes.raw()).expect("todo")
-                    })
-                    .collect::<HashSet<_>>()
+            let kbuckets_callback = move || -> Result<HashSet<PeerId>, secp256k1::Error> {
+                let keys = discv5_ref.read().table_entries_id();
+
+                let mut discv5_kbucket_keys = HashSet::new();
+
+                for node_id in keys {
+                    let pk_compressed_bytes = node_id.raw();
+                    let pk = PublicKey::from_slice(&pk_compressed_bytes)?;
+                    let pk_uncompressed_bytes =
+                        PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+                    discv5_kbucket_keys.insert(pk_uncompressed_bytes);
+                }
+
+                Ok(discv5_kbucket_keys)
             };
             // channel which will tell discv4 that discv5 has updated its kbuckets
             let (discv5_kbuckets_change_tx, discv5_kbuckets_change_rx) = watch::channel(());
@@ -459,7 +500,6 @@ impl Discovery<Discv5, Box<dyn StreamDiscv5>> {
 
             // combined update stream
             let disc_updates = reth_discv5::merge_discovery_streams(discv5_updates, discv4_updates);
-            let disc_updates = Box::new(disc_updates) as Box<dyn StreamDiscv5>;
 
             // discv5 and discv4 are running like usual, only that discv4 will filter out
             // nodes already connected over discv5 identified by their public key
@@ -506,6 +546,13 @@ pub(crate) fn new_dns(
     let dns_disc_service = service.spawn();
 
     Ok((Some(dns_disc), Some(dns_discovery_updates), Some(dns_disc_service)))
+}
+
+pub fn into_uncompressed_id(node_id: discv5::enr::NodeId) -> Result<PeerId, secp256k1::Error> {
+    let pk_compressed_bytes = node_id.raw();
+    let pk = PublicKey::from_slice(&pk_compressed_bytes)?;
+
+    Ok(PeerId::from_slice(&pk.serialize_uncompressed()[1..]))
 }
 
 #[cfg(test)]

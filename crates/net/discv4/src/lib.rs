@@ -38,6 +38,7 @@ use discv5::{
     ConnectionDirection, ConnectionState,
 };
 use enr::{Enr, EnrBuilder};
+use error::MirrorUpdateError;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
@@ -45,7 +46,7 @@ use reth_primitives::{
     bytes::{Bytes, BytesMut},
     hex, ForkId, PeerId, B256,
 };
-use secp256k1::{PublicKey, SecretKey};
+use secp256k1::SecretKey;
 use smallvec::{smallvec, SmallVec};
 use std::{
     cell::RefCell,
@@ -250,7 +251,7 @@ impl Discv4 {
         primary_kbuckets_keys_callback: F,
     ) -> io::Result<(Self, Discv4Service<KBucketsKeysMirror<F>>)>
     where
-        F: Fn() -> HashSet<PublicKey> + Send + Unpin + 'static,
+        F: Fn() -> Result<HashSet<PeerId>, secp256k1::Error> + Send + Unpin + 'static,
         KBucketsKeysMirror<F>: MirrorPrimaryKBuckets,
     {
         let socket = UdpSocket::bind(local_address).await?;
@@ -1811,7 +1812,7 @@ where
 
 impl<F> Discv4Service<KBucketsKeysMirror<F>>
 where
-    F: FnOnce() -> HashSet<PublicKey> + Unpin + Send + 'static,
+    F: FnOnce() -> Result<HashSet<PeerId>, secp256k1::Error> + Unpin + Send + 'static,
     KBucketsKeysMirror<F>: MirrorPrimaryKBuckets,
 {
     /// Returns a new [`Discv4Service`] that uses the [`MirrorPrimaryKBuckets`] interface.
@@ -2279,7 +2280,7 @@ impl From<ForkId> for EnrForkIdEntry {
 /// Mirrors another favoured node's kbuckets.
 pub trait MirrorPrimaryKBuckets {
     /// Updates mirror of the primary kbuckets.
-    fn update_mirror(&mut self);
+    fn update_mirror(&mut self) -> Result<(), Discv4Error>;
     /// Filters nodes passed as parameter against the mirror of the primary kbuckets.
     fn filter_nodes(
         &mut self,
@@ -2291,7 +2292,7 @@ pub trait MirrorPrimaryKBuckets {
 #[derive(Debug)]
 pub struct KBucketsKeysMirror<F> {
     /// Mirror of keys in the kbuckets table.
-    mirror: HashSet<PublicKey>,
+    mirror: HashSet<PeerId>,
     /// Callback to update the mirror to match the source kbuckets.
     update_callback: F,
     /// Channel that notifies of change in source kbuckets.
@@ -2303,7 +2304,7 @@ pub struct KBucketsKeysMirror<F> {
 
 impl<F> KBucketsKeysMirror<F>
 where
-    F: FnOnce() -> HashSet<PublicKey> + Unpin + Send,
+    F: FnOnce() -> Result<HashSet<PeerId>, secp256k1::Error> + Unpin + Send,
 {
     /// Returns a new [KBucketsKeysMirror].
     pub fn new(change_tx: watch::Receiver<()>, callback: F) -> Self {
@@ -2321,29 +2322,32 @@ where
 
 impl<F> MirrorPrimaryKBuckets for KBucketsKeysMirror<F>
 where
-    F: Fn() -> HashSet<PublicKey>,
+    F: Fn() -> Result<HashSet<PeerId>, secp256k1::Error>,
 {
-    fn update_mirror(&mut self) {
+    fn update_mirror(&mut self) -> Result<(), Discv4Error> {
         self.mirror = (self.update_callback)()
+            .map_err(<secp256k1::Error as Into<MirrorUpdateError>>::into)?;
+
+        Ok(())
     }
 
     fn filter_nodes(
         &mut self,
         nodes: &mut Vec<NodeRecord>,
     ) -> Result<SmallVec<[PeerId; 3]>, Discv4Error> {
-        if self.change_tx.has_changed().map_err(Discv4Error::MirrorUpdateFailed)? {
-            self.update_mirror();
+        if self
+            .change_tx
+            .has_changed()
+            .map_err(<watch::error::RecvError as Into<MirrorUpdateError>>::into)?
+        {
+            self.update_mirror()?;
             self.change_tx.borrow_and_update();
         }
 
         let mut filtered_out = smallvec!();
 
         nodes.retain(|node| {
-            let Ok(pk) = PublicKey::from_slice(node.id.as_ref()) else {
-                return false // wouldn't have passed message decoding if not correct length
-            };
-
-            let filter_out = self.mirror.contains(&pk);
+            let filter_out = self.mirror.contains(&node.id);
 
             if filter_out && self.is_log_level_trace {
                 filtered_out.push(node.id);
@@ -2362,7 +2366,9 @@ where
 pub struct Noop;
 
 impl MirrorPrimaryKBuckets for Noop {
-    fn update_mirror(&mut self) {}
+    fn update_mirror(&mut self) -> Result<(), Discv4Error> {
+        Ok(())
+    }
     fn filter_nodes(
         &mut self,
         _nodes: &mut Vec<NodeRecord>,
