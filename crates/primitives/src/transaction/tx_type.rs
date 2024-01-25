@@ -44,6 +44,18 @@ pub enum TxType {
     DEPOSIT = 126_isize,
 }
 
+impl TxType {
+    /// Check if the transaction type has an access list.
+    pub const fn has_access_list(&self) -> bool {
+        match self {
+            TxType::Legacy => false,
+            TxType::EIP2930 | TxType::EIP1559 | TxType::EIP4844 => true,
+            #[cfg(feature = "optimism")]
+            TxType::DEPOSIT => false,
+        }
+    }
+}
+
 impl From<TxType> for u8 {
     fn from(value: TxType) -> Self {
         match value {

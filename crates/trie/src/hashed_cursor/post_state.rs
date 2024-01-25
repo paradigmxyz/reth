@@ -92,14 +92,8 @@ impl<'b, C> HashedPostStateAccountCursor<'b, C> {
                     Some((db_address, db_account))
                 }
             }
-            // If the database is empty, return the post state entry
-            (Some((post_state_address, post_state_account)), None) => {
-                Some((*post_state_address, *post_state_account))
-            }
-            // If the post state is empty, return the database entry
-            (None, Some((db_address, db_account))) => Some((db_address, db_account)),
-            // If both are empty, return None
-            (None, None) => None,
+            // Return either non-empty entry
+            _ => post_state_item.copied().or(db_item),
         }
     }
 }
@@ -254,14 +248,10 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
                     Some(db_entry)
                 }
             }
-            // If the database is empty, return the post state entry
-            (Some((post_state_slot, post_state_value)), None) => {
-                Some(StorageEntry { key: *post_state_slot, value: *post_state_value })
+            // Return either non-empty entry
+            _ => {
+                db_item.or(post_state_item.copied().map(|(key, value)| StorageEntry { key, value }))
             }
-            // If the post state is empty, return the database entry
-            (None, Some(db_entry)) => Some(db_entry),
-            // If both are empty, return None
-            (None, None) => None,
         }
     }
 }
@@ -280,7 +270,7 @@ where
                 // If the storage has been wiped at any point
                 storage.wiped &&
                     // and the current storage does not contain any non-zero values 
-                    storage.non_zero_valued_storage.is_empty()
+                    storage.non_zero_valued_slots.is_empty()
             }
             None => self.cursor.seek_exact(key)?.is_none(),
         };
@@ -304,12 +294,11 @@ where
         if let Some(storage) = self.post_state.storages.get(&account) {
             debug_assert!(storage.sorted, "`HashedStorage` must be pre-sorted");
 
-            post_state_entry = storage.non_zero_valued_storage.get(self.post_state_storage_index);
+            post_state_entry = storage.non_zero_valued_slots.get(self.post_state_storage_index);
 
             while post_state_entry.map(|(slot, _)| slot < &subkey).unwrap_or_default() {
                 self.post_state_storage_index += 1;
-                post_state_entry =
-                    storage.non_zero_valued_storage.get(self.post_state_storage_index);
+                post_state_entry = storage.non_zero_valued_slots.get(self.post_state_storage_index);
             }
         }
 
@@ -384,11 +373,10 @@ where
         if let Some(storage) = self.post_state.storages.get(&account) {
             debug_assert!(storage.sorted, "`HashedStorage` must be pre-sorted");
 
-            post_state_entry = storage.non_zero_valued_storage.get(self.post_state_storage_index);
+            post_state_entry = storage.non_zero_valued_slots.get(self.post_state_storage_index);
             while post_state_entry.map(|(slot, _)| slot <= last_slot).unwrap_or_default() {
                 self.post_state_storage_index += 1;
-                post_state_entry =
-                    storage.non_zero_valued_storage.get(self.post_state_storage_index);
+                post_state_entry = storage.non_zero_valued_slots.get(self.post_state_storage_index);
             }
         }
 

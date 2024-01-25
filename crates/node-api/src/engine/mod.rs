@@ -15,7 +15,8 @@
 //! Once traits are implemented and custom types are defined, the [EngineTypes] trait can be
 //! implemented:
 //! ```no_run
-//! # use reth_rpc_types::engine::{PayloadAttributes as EthPayloadAttributes, PayloadId, Withdrawal};
+//! # use reth_rpc_types::engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
+//! # use reth_rpc_types::Withdrawal;
 //! # use reth_primitives::{B256, ChainSpec, Address};
 //! # use reth_node_api::{EngineTypes, EngineApiMessageVersion, validate_version_specific_fields, AttributesValidationError, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes};
 //! # use reth_payload_builder::{EthPayloadBuilderAttributes, EthBuiltPayload};
