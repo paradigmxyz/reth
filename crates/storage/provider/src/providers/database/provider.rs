@@ -1644,20 +1644,29 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
-        self.get_range_with_snapshot(
-            SnapshotSegment::Transactions,
-            to_range(range),
-            |snapshot, range, _| snapshot.raw_transactions_by_tx_range(range),
-            |range, _| {
-                self.cursor_collect_with_capacity(
-                    &mut self.tx.cursor_read::<RawTable<tables::Transactions>>()?,
-                    RawKey::new(range.start)..RawKey::new(range.end),
-                    range_size_hint(&range).unwrap_or(0),
-                    |_, v| Ok(v),
-                )
-            },
-            |_| true,
+        let range = to_range(range);
+        self.cursor_collect_with_capacity(
+            &mut self.tx.cursor_read::<RawTable<tables::Transactions>>()?,
+            RawKey::new(range.start)..RawKey::new(range.end),
+            range_size_hint(&range).unwrap_or(0),
+            |_, v| Ok(v),
         )
+
+        // TODO(alexey): uncomment to query from snapshots
+        // self.get_range_with_snapshot(
+        //     SnapshotSegment::Transactions,
+        //     to_range(range),
+        //     |snapshot, range, _| snapshot.raw_transactions_by_tx_range(range),
+        //     |range, _| {
+        //         self.cursor_collect_with_capacity(
+        //             &mut self.tx.cursor_read::<RawTable<tables::Transactions>>()?,
+        //             RawKey::new(range.start)..RawKey::new(range.end),
+        //             range_size_hint(&range).unwrap_or(0),
+        //             |_, v| Ok(v),
+        //         )
+        //     },
+        //     |_| true,
+        // )
     }
 
     fn senders_by_tx_range(
