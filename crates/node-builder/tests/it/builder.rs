@@ -11,7 +11,8 @@ fn test_basic_setup() {
     let builder = NodeBuilder::new(config)
         .with_database(db)
         .with_types::<EthereumNode>()
-        .with_components(EthereumNode::components())
+        .with_components(EthereumNode::components().map_pool(|pool| pool))
+        .map_components(|components| components.map_network(|network| network))
         .on_node_started(|ctx| {
             println!("Node started");
             Ok(())

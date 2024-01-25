@@ -149,6 +149,38 @@ where
         }
     }
 
+    /// Resets the setup process to the components stage.
+    ///
+    /// CAUTION: All previously configured hooks will be lost.
+    pub fn fuse_components<C>(
+        self,
+        components_builder: C,
+    ) -> NodeBuilder<
+        DB,
+        ComponentsState<
+            Types,
+            C,
+            FullNodeComponentsAdapter<
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
+                C::Pool,
+            >,
+        >,
+    >
+    where
+        C: NodeComponentsBuilder<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>>,
+    {
+        NodeBuilder {
+            config: self.config,
+            database: self.database,
+            state: ComponentsState {
+                _maker: Default::default(),
+                components_builder,
+                hooks: NodeHooks::new(),
+                rpc: RpcHooks::new(),
+            },
+        }
+    }
+
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(mut self, hook: F) -> Self
     where
@@ -219,7 +251,17 @@ where
     }
 
     /// Launches the node and returns a handle to it.
-    pub async fn launch(self, _executor: TaskExecutor) -> eyre::Result<NodeHandle> {
+    pub async fn launch(
+        self,
+        _executor: TaskExecutor,
+    ) -> eyre::Result<
+        NodeHandle<
+            FullNodeComponentsAdapter<
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
+                Components::Pool,
+            >,
+        >,
+    > {
         // 1. create the `BuilderContext`
         // 2. build the components
         // 3. build/customize rpc
