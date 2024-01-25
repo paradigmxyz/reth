@@ -132,7 +132,7 @@ where
             }
         }
 
-        for (i, &index) in indices_to_remove.iter().enumerate() {
+        for (i, &index) in indices_to_remove.iter().rev().enumerate() {
             msg.hashes.remove(index - i);
             msg.types.remove(index - i);
             msg.sizes.remove(index - i);
