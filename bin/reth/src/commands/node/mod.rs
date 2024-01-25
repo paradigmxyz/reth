@@ -9,15 +9,8 @@ use reth_interfaces::consensus::Consensus;
 use reth_primitives::ChainSpec;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
-/// Re-export from `reth_node_core` for backwards compatibility.
-pub mod events {
-    pub use crate::core::events::*;
-}
-
-/// Re-export from `reth_node_core` for backwards compatibility.
-pub mod cl_events {
-    pub use crate::core::cl_events::*;
-}
+pub mod cl_events;
+pub mod events;
 
 use crate::{
     args::{

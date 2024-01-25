@@ -1,6 +1,6 @@
 //! Support for handling events emitted by node components.
 
-use crate::cl_events::ConsensusLayerHealthEvent;
+use crate::commands::node::cl_events::ConsensusLayerHealthEvent;
 use futures::Stream;
 use reth_beacon_consensus::BeaconConsensusEngineEvent;
 use reth_db::{database::Database, database_metrics::DatabaseMetadata};

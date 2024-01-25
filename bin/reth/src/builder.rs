@@ -1,3 +1,4 @@
+use crate::commands::node::{cl_events::ConsensusLayerHealthEvents, events};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, stream, stream_select, StreamExt};
@@ -20,7 +21,6 @@ use reth_node_builder::EthEngineTypes;
 #[cfg(feature = "optimism")]
 use reth_node_builder::OptimismEngineTypes;
 use reth_node_core::{
-    cl_events::ConsensusLayerHealthEvents,
     cli::{
         components::{RethNodeComponentsImpl, RethRpcServerHandles},
         config::RethRpcConfig,
@@ -29,7 +29,6 @@ use reth_node_core::{
     },
     dirs::{ChainPath, DataDirPath},
     engine_api_store::EngineApiStore,
-    events,
     init::init_genesis,
     version::SHORT_VERSION,
 };
