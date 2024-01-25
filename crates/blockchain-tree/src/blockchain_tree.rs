@@ -1519,7 +1519,7 @@ mod tests {
 
         assert_eq!(
             tree.insert_block(canonical_block_1.clone(), BlockValidationKind::Exhaustive).unwrap(),
-            InsertPayloadOk::Inserted(BlockStatus::Valid)
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
         );
 
         assert_eq!(
@@ -1529,12 +1529,12 @@ mod tests {
 
         assert_eq!(
             tree.insert_block(canonical_block_2.clone(), BlockValidationKind::Exhaustive).unwrap(),
-            InsertPayloadOk::Inserted(BlockStatus::Valid)
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
         );
 
         assert_eq!(
             tree.insert_block(sidechain_block_1.clone(), BlockValidationKind::Exhaustive).unwrap(),
-            InsertPayloadOk::Inserted(BlockStatus::Valid)
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::HistoricalFork))
         );
 
         assert_eq!(
@@ -1549,7 +1549,7 @@ mod tests {
 
         assert_eq!(
             tree.insert_block(sidechain_block_2.clone(), BlockValidationKind::Exhaustive).unwrap(),
-            InsertPayloadOk::Inserted(BlockStatus::Valid)
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::HistoricalFork))
         );
 
         assert_eq!(
@@ -1559,7 +1559,7 @@ mod tests {
 
         assert_eq!(
             tree.insert_block(canonical_block_3.clone(), BlockValidationKind::Exhaustive).unwrap(),
-            InsertPayloadOk::Inserted(BlockStatus::Valid)
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::HistoricalFork))
         );
 
         assert_eq!(
@@ -1592,12 +1592,12 @@ mod tests {
 
         assert_eq!(
             tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
-            InsertPayloadOk::Inserted(BlockStatus::Valid)
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
         );
 
         assert_eq!(
             tree.insert_block(block2.clone(), BlockValidationKind::Exhaustive).unwrap(),
-            InsertPayloadOk::Inserted(BlockStatus::Valid)
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
         );
 
         // we have one chain that has two blocks.
@@ -1622,7 +1622,7 @@ mod tests {
 
         assert_eq!(
             tree.insert_block(block2a.clone(), BlockValidationKind::Exhaustive).unwrap(),
-            InsertPayloadOk::Inserted(BlockStatus::Valid)
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::HistoricalFork))
         );
 
         // fork chain.
@@ -1715,7 +1715,7 @@ mod tests {
         // insert block1 and buffered block2 is inserted
         assert_eq!(
             tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
-            InsertPayloadOk::Inserted(BlockStatus::Valid)
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
         );
 
         // Buffered blocks: []
@@ -1738,13 +1738,13 @@ mod tests {
         // already inserted block will `InsertPayloadOk::AlreadySeen(_)`
         assert_eq!(
             tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
-            InsertPayloadOk::AlreadySeen(BlockStatus::Valid)
+            InsertPayloadOk::AlreadySeen(BlockStatus::Valid(BlockAttachment::Canonical))
         );
 
         // block two is already inserted.
         assert_eq!(
             tree.insert_block(block2.clone(), BlockValidationKind::Exhaustive).unwrap(),
-            InsertPayloadOk::AlreadySeen(BlockStatus::Valid)
+            InsertPayloadOk::AlreadySeen(BlockStatus::Valid(BlockAttachment::Canonical))
         );
 
         // make block1 canonical
@@ -1784,7 +1784,7 @@ mod tests {
         // reinsert two blocks that point to canonical chain
         assert_eq!(
             tree.insert_block(block1a.clone(), BlockValidationKind::Exhaustive).unwrap(),
-            InsertPayloadOk::Inserted(BlockStatus::Valid)
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::HistoricalFork))
         );
 
         TreeTester::default()
@@ -1799,7 +1799,7 @@ mod tests {
 
         assert_eq!(
             tree.insert_block(block2a.clone(), BlockValidationKind::Exhaustive).unwrap(),
-            InsertPayloadOk::Inserted(BlockStatus::Valid)
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::HistoricalFork))
         );
         // Trie state:
         // b2   b2a (side chain)
@@ -2001,7 +2001,10 @@ mod tests {
         // update canonical block to b2, this would make b2a be removed
         assert_eq!(tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(12), Ok(()));
 
-        assert_eq!(tree.is_block_known(block2.num_hash()).unwrap(), Some(BlockStatus::Valid));
+        assert_eq!(
+            tree.is_block_known(block2.num_hash()).unwrap(),
+            Some(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
 
         // Trie state:
         // b2 (finalized)
