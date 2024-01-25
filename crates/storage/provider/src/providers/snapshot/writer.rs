@@ -1,10 +1,11 @@
-use super::{SnapshotProvider, BLOCKS_PER_SNAPSHOT};
+use super::SnapshotProvider;
 use reth_codecs::Compact;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
     snapshot::{find_fixed_range, SegmentHeader},
-    BlockNumber, Receipt, SnapshotSegment, TransactionSignedNoHash, TxNumber,
+    BlockHash, BlockNumber, Header, Receipt, SnapshotSegment, TransactionSignedNoHash, TxNumber,
+    U256,
 };
 use std::{ops::Deref, path::PathBuf, sync::Arc};
 
@@ -33,7 +34,7 @@ impl<'a> SnapshotProviderRW<'a> {
         block: u64,
         reader: Arc<SnapshotProvider>,
     ) -> ProviderResult<(NippyJarWriter<'a, SegmentHeader>, PathBuf)> {
-        let block_range = find_fixed_range(BLOCKS_PER_SNAPSHOT, block);
+        let block_range = find_fixed_range(block);
         let (jar, path) =
             match reader.get_segment_provider_from_block(segment, *block_range.start(), None) {
                 Ok(provider) => {
@@ -88,7 +89,7 @@ impl<'a> SnapshotProviderRW<'a> {
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn increment_block(&mut self, segment: SnapshotSegment) -> ProviderResult<BlockNumber> {
         let last_block = self.writer.user_header().block_end();
-        let writer_range_end = *find_fixed_range(BLOCKS_PER_SNAPSHOT, last_block).end();
+        let writer_range_end = *find_fixed_range(last_block).end();
 
         // We have finished the previous snapshot and must freeze it
         if last_block + 1 > writer_range_end {
@@ -103,8 +104,7 @@ impl<'a> SnapshotProviderRW<'a> {
             match segment {
                 SnapshotSegment::Headers => todo!(),
                 SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
-                    let block_start =
-                        *find_fixed_range(BLOCKS_PER_SNAPSHOT, last_block + 1).start();
+                    let block_start = *find_fixed_range(last_block + 1).start();
                     *self.writer.user_header_mut() =
                         SegmentHeader::new(block_start..=block_start, None, segment)
                 }
@@ -217,6 +217,26 @@ impl<'a> SnapshotProviderRW<'a> {
         Ok(self.writer.user_header().tx_end())
     }
 
+    /// Appends header to snapshot file.
+    ///
+    /// Returns the current [`BlockNumber`] as seen in the static file.
+    pub fn append_header(
+        &mut self,
+        header: Header,
+        terminal_difficulty: U256,
+        hash: BlockHash,
+    ) -> ProviderResult<BlockNumber> {
+        debug_assert!(self.writer.user_header().segment() == SnapshotSegment::Headers);
+
+        self.writer.user_header_mut().increment_block();
+
+        self.append_column(header)?;
+        self.append_column(terminal_difficulty)?;
+        self.append_column(hash)?;
+
+        Ok(self.writer.user_header().block_end())
+    }
+
     /// Appends transaction to snapshot file.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
@@ -239,19 +259,19 @@ impl<'a> SnapshotProviderRW<'a> {
         self.append_with_tx_number(SnapshotSegment::Receipts, tx_num, receipt)
     }
 
-    /// Prunes `to_delete` number of transactions from snapshots.
+    /// Removes the last `number` of transactions from static files.
     ///
     /// # Note
     /// Commits to the configuration file at the end.
     pub fn prune_transactions(
         &mut self,
-        to_delete: u64,
+        number: u64,
         last_block: BlockNumber,
     ) -> ProviderResult<()> {
         let segment = SnapshotSegment::Transactions;
         debug_assert!(self.writer.user_header().segment() == segment);
 
-        self.truncate(segment, to_delete, Some(last_block))
+        self.truncate(segment, number, Some(last_block))
     }
 
     #[cfg(any(test, feature = "test-utils"))]

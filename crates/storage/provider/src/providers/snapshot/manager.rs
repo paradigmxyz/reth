@@ -4,7 +4,10 @@ use crate::{
     ReceiptProvider, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
     WithdrawalsProvider,
 };
-use dashmap::{mapref::one::RefMut, DashMap};
+use dashmap::{
+    mapref::{entry::Entry as DashMapEntry, one::RefMut},
+    DashMap,
+};
 use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
@@ -28,7 +31,7 @@ use std::{
 
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a snapshot range.
-type SegmentRanges = HashMap<SnapshotSegment, BTreeMap<u64, RangeInclusive<u64>>>;
+type SegmentRanges = HashMap<SnapshotSegment, BTreeMap<TxNumber, RangeInclusive<BlockNumber>>>;
 
 /// [`SnapshotProvider`] manages all existing [`SnapshotJarProvider`].
 #[derive(Debug, Default)]
@@ -113,17 +116,18 @@ impl SnapshotProvider {
         // If we have a path, then get the block range from its name.
         // Otherwise, check `self.available_snapshots`
         let block_range = match path {
-            Some(path) => {
-                SnapshotSegment::parse_filename(path.file_name().ok_or_else(|| {
-                    ProviderError::MissingSnapshotPath(segment, path.to_path_buf())
-                })?)
-                .and_then(|(parsed_segment, block_range)| {
-                    if parsed_segment == segment {
-                        return Some(block_range)
-                    }
-                    None
-                })
-            }
+            Some(path) => SnapshotSegment::parse_filename(
+                &path
+                    .file_name()
+                    .ok_or_else(|| ProviderError::MissingSnapshotPath(segment, path.to_path_buf()))?
+                    .to_string_lossy(),
+            )
+            .and_then(|(parsed_segment, block_range)| {
+                if parsed_segment == segment {
+                    return Some(block_range)
+                }
+                None
+            }),
             None => fn_range(),
         };
 
@@ -182,7 +186,7 @@ impl SnapshotProvider {
             .get(&segment)
             .into_iter()
             .find(|max| **max >= block)
-            .map(|block| find_fixed_range(BLOCKS_PER_SNAPSHOT, *block))
+            .map(|block| find_fixed_range(*block))
     }
 
     /// Gets a snapshot segment's fixed block range from the provider inner
@@ -206,15 +210,18 @@ impl SnapshotProvider {
             }
             let tx_start = snapshots_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
             if tx_start <= tx {
-                return Some(find_fixed_range(BLOCKS_PER_SNAPSHOT, *block_range.end()))
+                return Some(find_fixed_range(*block_range.end()))
             }
         }
         None
     }
 
-    /// Updates the inner transaction and block index alongside the internal `self.map`.
+    /// Updates the inner transaction and block indexes alongside the internal cached providers in
+    /// `self.map`.
     ///
     /// Any entry higher than `segment_max_block` will be deleted from the previous structures.
+    ///
+    /// If `segment_max_block` is None it means there's no static file for this segment.
     pub fn update_index(
         &self,
         segment: SnapshotSegment,
@@ -227,7 +234,7 @@ impl SnapshotProvider {
             Some(segment_max_block) => {
                 // Update the max block for the segment
                 max_block.insert(segment, segment_max_block);
-                let fixed_range = find_fixed_range(BLOCKS_PER_SNAPSHOT, segment_max_block);
+                let fixed_range = find_fixed_range(segment_max_block);
 
                 let jar = NippyJar::<SegmentHeader>::load(
                     &self.path.join(segment.filename(&fixed_range)),
@@ -237,15 +244,26 @@ impl SnapshotProvider {
                 // block_start than our current static file.
                 if let Some(tx_range) = jar.user_header().tx_range() {
                     let tx_end = *tx_range.end();
-                    let block_range = jar.user_header().block_range().clone();
 
+                    // Current block range has the same block start as `fixed_range``, but block end
+                    // might be different if we are still filling this static file.
+                    let current_block_range = jar.user_header().block_range();
+
+                    // Considering that `update_index` is called when we either append/truncate, we
+                    // are sure that we are handling the latest data points.
+                    //
+                    // Here we remove every entry of the index that has a block start higher or
+                    // equal than our current one. This is important in the case
+                    // that we prune a lot of rows resulting in a file (and thus
+                    // a higher block range) deletion.
                     tx_index
                         .entry(segment)
                         .and_modify(|index| {
-                            index.retain(|_, range| range.start() < fixed_range.start());
-                            index.insert(tx_end, block_range.clone());
+                            index
+                                .retain(|_, block_range| block_range.start() < fixed_range.start());
+                            index.insert(tx_end, current_block_range.clone());
                         })
-                        .or_insert_with(|| BTreeMap::from([(tx_end, block_range)]));
+                        .or_insert_with(|| BTreeMap::from([(tx_end, current_block_range)]));
                 }
 
                 // Update the cached provider.
@@ -326,7 +344,7 @@ impl SnapshotProvider {
         func: impl Fn(SnapshotJarProvider<'_>) -> ProviderResult<Option<T>>,
     ) -> ProviderResult<Option<T>> {
         if let Some(highest_block) = self.get_highest_snapshot_block(segment) {
-            let mut range = find_fixed_range(BLOCKS_PER_SNAPSHOT, highest_block);
+            let mut range = find_fixed_range(highest_block);
             while *range.end() > 0 {
                 if let Some(res) = func(self.get_or_create_jar_provider(segment, &range)?)? {
                     return Ok(Some(res))
@@ -398,7 +416,7 @@ impl SnapshotProvider {
 /// Helper trait to manage different [`SnapshotProviderRW`] of an `Arc<SnapshotProvider`
 pub trait SnapshotWriter {
     /// Returns a mutable reference to a [`SnapshotProviderRW`] of a [`SnapshotSegment`].
-    fn writer(
+    fn get_writer(
         &self,
         block: BlockNumber,
         segment: SnapshotSegment,
@@ -415,24 +433,24 @@ pub trait SnapshotWriter {
 }
 
 impl SnapshotWriter for Arc<SnapshotProvider> {
-    fn writer(
+    fn get_writer(
         &self,
         block: BlockNumber,
         segment: SnapshotSegment,
     ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>> {
-        if let Some(writer) = self.writers.get_mut(&segment) {
-            Ok(writer)
-        } else {
-            self.writers.insert(segment, SnapshotProviderRW::new(segment, block, self.clone())?);
-            Ok(self.writers.get_mut(&segment).expect("qed"))
-        }
+        Ok(match self.writers.entry(segment) {
+            DashMapEntry::Occupied(entry) => entry.into_ref(),
+            DashMapEntry::Vacant(entry) => {
+                entry.insert(SnapshotProviderRW::new(segment, block, self.clone())?)
+            }
+        })
     }
 
     fn latest_writer(
         &self,
         segment: SnapshotSegment,
     ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>> {
-        self.writer(self.get_highest_snapshot_block(segment).unwrap_or_default(), segment)
+        self.get_writer(self.get_highest_snapshot_block(segment).unwrap_or_default(), segment)
     }
 
     fn commit(&self) -> ProviderResult<()> {

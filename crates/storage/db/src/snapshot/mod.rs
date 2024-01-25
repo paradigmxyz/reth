@@ -41,11 +41,12 @@ pub fn iter_snapshots(path: impl AsRef<Path>) -> Result<SortedSnapshots, NippyJa
 
     for entry in entries {
         if entry.metadata().map_or(false, |metadata| metadata.is_file()) {
-            if let Some((segment, _)) = SnapshotSegment::parse_filename(&entry.file_name()) {
+            if let Some((segment, _)) =
+                SnapshotSegment::parse_filename(&entry.file_name().to_string_lossy())
+            {
                 let jar = NippyJar::<SegmentHeader>::load(&entry.path())?;
 
-                let ranges =
-                    (jar.user_header().block_range().clone(), jar.user_header().tx_range());
+                let ranges = (jar.user_header().block_range(), jar.user_header().tx_range());
 
                 match static_files.entry(segment) {
                     Entry::Occupied(mut entry) => {

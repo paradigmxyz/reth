@@ -77,14 +77,16 @@ pub enum StageError {
     #[error("invalid download response: {0}")]
     Download(#[from] DownloadError),
     /// Database is ahead of snapshot data.
-    #[error("missing snapshot data from block number: {number}", number = block.number)]
+    #[error("missing snapshot data for block number: {number}", number = block.number)]
     MissingSnapshotData {
         /// Starting block with  missing data.
         block: Box<SealedHeader>,
+        /// Snapshot segment
+        segment: SnapshotSegment,
     },
     /// Unrecoverable inconsistency error related to a transaction number in a static file segment.
     #[error(
-        "inconsistent transaction number on {segment}. db: {database} static_file: {static_file}"
+        "inconsistent transaction number for {segment}. db: {database}, static_file: {static_file}"
     )]
     InconsistentTxNumber {
         /// Snapshot segment where this error was encountered.
@@ -95,7 +97,7 @@ pub enum StageError {
         static_file: TxNumber,
     },
     /// Unrecoverable inconsistency error related to a block number in a static file segment.
-    #[error("inconsistent block number on {segment}. db: {database} static_file: {static_file}")]
+    #[error("inconsistent block number for {segment}. db: {database}, static_file: {static_file}")]
     InconsistentBlockNumber {
         /// Snapshot segment where this error was encountered.
         segment: SnapshotSegment,

@@ -122,7 +122,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // Get id for the next tx_num of zero if there are no transactions.
         let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
 
-        let snapshot_provider = provider.snapshot_provider.as_ref().expect("should exist");
+        let snapshot_provider = provider.snapshot_provider().expect("should exist");
         let mut snapshotter =
             snapshot_provider.writer(from_block, SnapshotSegment::Transactions)?;
 
@@ -134,8 +134,14 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             .unwrap_or_default();
 
         match next_snapshot_tx_num.cmp(&next_tx_num) {
+            // If static files are ahead, then we didn't reach the database commit in a previous
+            // stage run. So, our only solution is to unwind the static files and proceed from the
+            // database expected height.
             Ordering::Greater => snapshotter
                 .prune_transactions(next_snapshot_tx_num - next_tx_num, from_block - 1)?,
+            // If static files are behind, then there was some corruption or loss of files. This
+            // error will trigger an unwind, that will bring the database to the same height as the
+            // static files.
             Ordering::Less => {
                 let last_block = snapshot_provider
                     .get_highest_snapshot_block(SnapshotSegment::Transactions)
@@ -145,7 +151,10 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                     tx.get::<tables::Headers>(last_block + 1)?.unwrap_or_default().seal_slow(),
                 );
 
-                return Err(StageError::MissingSnapshotData { block: missing_block })
+                return Err(StageError::MissingSnapshotData {
+                    block: missing_block,
+                    segment: SnapshotSegment::Transactions,
+                })
             }
             Ordering::Equal => {}
         }
@@ -254,7 +263,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     ) -> Result<UnwindOutput, StageError> {
         self.buffer.take();
 
-        let snapshot_provider = provider.snapshot_provider.as_ref().expect("should exist");
+        let snapshot_provider = provider.snapshot_provider().expect("should exist");
         let tx = provider.tx_ref();
         // Cursors to unwind bodies, ommers
         let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
@@ -311,7 +320,10 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 tx.get::<tables::Headers>(last_block + 1)?.unwrap_or_default().seal_slow(),
             );
 
-            return Err(StageError::MissingSnapshotData { block: missing_block })
+            return Err(StageError::MissingSnapshotData {
+                block: missing_block,
+                segment: SnapshotSegment::Transactions,
+            })
         }
 
         // Unwinds static file
