@@ -73,9 +73,9 @@ pub fn init_genesis<DB: Database>(
     // Insert header
     {
         let tx = provider_rw.tx_mut();
-        insert_genesis_header::<DB>(&tx, chain.clone())?;
+        insert_genesis_header::<DB>(tx, chain.clone())?;
 
-        insert_genesis_state::<DB>(&tx, genesis)?;
+        insert_genesis_state::<DB>(tx, genesis)?;
 
         // insert sync stage
         for stage in StageId::ALL.iter() {
@@ -222,18 +222,17 @@ mod tests {
     use super::*;
 
     use reth_db::{
+        cursor::DbCursorRO,
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         table::{Table, TableRow},
-        test_utils::create_test_rw_db,
+        transaction::DbTx,
         DatabaseEnv,
     };
     use reth_primitives::{
         Address, Chain, ForkTimestamps, Genesis, GenesisAccount, IntegerList, GOERLI,
         GOERLI_GENESIS_HASH, MAINNET, MAINNET_GENESIS_HASH, SEPOLIA, SEPOLIA_GENESIS_HASH,
     };
-    use reth_provider::test_utils::{
-        create_test_provider_factory, create_test_provider_factory_with_chain_spec,
-    };
+    use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
     use std::collections::HashMap;
 
     fn collect_table_entries<DB, T>(
@@ -324,11 +323,7 @@ mod tests {
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(factory.clone(), chain_spec).unwrap();
 
-        let tx = factory
-            .provider()
-            .expect("failed to init provider")
-            .tx_ref()
-            .expect("failed to init tx");
+        let tx = factory.provider().expect("failed to init provider").tx_ref();
 
         assert_eq!(
             collect_table_entries::<Arc<DatabaseEnv>, tables::AccountHistory>(&tx)
