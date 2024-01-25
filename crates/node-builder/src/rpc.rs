@@ -50,7 +50,7 @@ impl<Node: FullNodeComponents> RpcHooks<Node> {
         self
     }
 
-    /// Sets the hook that is run once the rpc server is started.
+    /// Sets the hook that is run to configure the rpc modules.
     pub(crate) fn set_extend_rpc_modules<F>(&mut self, hook: F) -> &mut Self
     where
         F: ExtendRpcModules<Node> + 'static,
@@ -59,7 +59,7 @@ impl<Node: FullNodeComponents> RpcHooks<Node> {
         self
     }
 
-    /// Sets the hook that is run once the rpc server is started.
+    /// Sets the hook that is run to configure the rpc modules.
     pub(crate) fn extend_rpc_modules<F>(mut self, hook: F) -> Self
     where
         F: ExtendRpcModules<Node> + 'static,

@@ -1,7 +1,7 @@
 use reth_db::database::Database;
 use reth_provider::{
-    AccountReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    EvmEnvProvider, StateProviderFactory,
+    AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
+    DatabaseProviderFactory, EvmEnvProvider, StateProviderFactory,
 };
 
 /// Helper trait to unify all provider traits for simplicity.
@@ -13,6 +13,7 @@ pub trait FullProvider<DB: Database>:
     + EvmEnvProvider
     + ChainSpecProvider
     + ChangeSetReader
+    + CanonStateSubscriptions
     + Clone
     + Unpin
     + 'static
@@ -27,6 +28,7 @@ impl<T, DB: Database> FullProvider<DB> for T where
         + EvmEnvProvider
         + ChainSpecProvider
         + ChangeSetReader
+        + CanonStateSubscriptions
         + Clone
         + Unpin
         + 'static

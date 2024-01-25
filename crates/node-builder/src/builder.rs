@@ -4,7 +4,7 @@ use crate::{
     components::{FullNodeComponents, FullNodeComponentsAdapter, NodeComponentsBuilder},
     hooks::{NodeHooks, OnComponentInitializedHook, OnNodeStartedHook},
     node::FullNodeTypesAdapter,
-    rpc::RpcHooks,
+    rpc::{ExtendRpcModules, OnRpcStarted, RpcHooks},
     NodeHandle,
 };
 use reth_blockchain_tree::ShareableBlockchainTree;
@@ -154,6 +154,34 @@ where
             > + 'static,
     {
         self.state.hooks.set_on_node_started(hook);
+        self
+    }
+
+    /// Sets the hook that is run once the rpc server is started.
+    pub fn on_rpc_started<F>(mut self, hook: F) -> Self
+    where
+        F: OnRpcStarted<
+                FullNodeComponentsAdapter<
+                    FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
+                    Components::Pool,
+                >,
+            > + 'static,
+    {
+        self.state.rpc.set_on_rpc_started(hook);
+        self
+    }
+
+    /// Sets the hook that is run to configure the rpc modules.
+    pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
+    where
+        F: ExtendRpcModules<
+                FullNodeComponentsAdapter<
+                    FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
+                    Components::Pool,
+                >,
+            > + 'static,
+    {
+        self.state.rpc.set_extend_rpc_modules(hook);
         self
     }
 
