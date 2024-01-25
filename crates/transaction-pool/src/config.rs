@@ -110,7 +110,7 @@ impl Default for PriceBumpConfig {
 
 /// Configuration options for the locally received transactions:
 /// [TransactionOrigin::Local](crate::TransactionOrigin)
-#[derive(Debug, Clone, Eq, PartialEq, Default)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LocalTransactionConfig {
     /// Apply no exemptions to the locally received transactions.
     ///
@@ -121,6 +121,18 @@ pub struct LocalTransactionConfig {
     pub no_exemptions: bool,
     /// Addresses that will be considered as local . Above exemptions apply
     pub local_addresses: HashSet<Address>,
+    /// Flag indicating whether local transactions should be propagated.
+    pub propagate_local_transactions: bool,
+}
+
+impl Default for LocalTransactionConfig {
+    fn default() -> Self {
+        Self {
+            no_exemptions: false,
+            local_addresses: HashSet::default(),
+            propagate_local_transactions: true,
+        }
+    }
 }
 
 impl LocalTransactionConfig {
