@@ -12,7 +12,7 @@ use jsonrpsee::{
     Methods,
 };
 use reth_network_api::{NetworkInfo, Peers};
-use reth_node_api::EngineTypes;
+use reth_node_api::{EngineTypes, EvmEnvConfig};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
     StateProviderFactory,
@@ -35,7 +35,7 @@ use std::{
 
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
-pub async fn launch<Provider, Pool, Network, Tasks, EngineApi, EngineT>(
+pub async fn launch<Provider, Pool, Network, Tasks, EngineApi, EngineT, EvmConfig>(
     provider: Provider,
     pool: Pool,
     network: Network,
@@ -43,6 +43,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, EngineApi, EngineT>(
     engine_api: EngineApi,
     socket_addr: SocketAddr,
     secret: JwtSecret,
+    evm_config: EvmConfig,
 ) -> Result<AuthServerHandle, RpcError>
 where
     Provider: BlockReaderIdExt
@@ -59,10 +60,15 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     EngineT: EngineTypes,
     EngineApi: EngineApiServer<EngineT>,
+    EvmConfig: EvmEnvConfig + 'static,
 {
     // spawn a new cache task
-    let eth_cache =
-        EthStateCache::spawn_with(provider.clone(), Default::default(), executor.clone());
+    let eth_cache = EthStateCache::spawn_with(
+        provider.clone(),
+        Default::default(),
+        executor.clone(),
+        evm_config.clone(),
+    );
 
     let gas_oracle = GasPriceOracle::new(provider.clone(), Default::default(), eth_cache.clone());
 
@@ -78,6 +84,7 @@ where
         Box::new(executor.clone()),
         BlockingTaskPool::build().expect("failed to build tracing pool"),
         fee_history_cache,
+        evm_config,
     );
     let config = EthFilterConfig::default()
         .max_logs_per_response(DEFAULT_MAX_LOGS_PER_RESPONSE)
@@ -88,8 +95,8 @@ where
 }
 
 /// Configure and launch a _standalone_ auth server with existing EthApi implementation.
-pub async fn launch_with_eth_api<Provider, Pool, Network, EngineApi, EngineT>(
-    eth_api: EthApi<Provider, Pool, Network>,
+pub async fn launch_with_eth_api<Provider, Pool, Network, EngineApi, EngineT, EvmConfig>(
+    eth_api: EthApi<Provider, Pool, Network, EvmConfig>,
     eth_filter: EthFilter<Provider, Pool>,
     engine_api: EngineApi,
     socket_addr: SocketAddr,
@@ -108,6 +115,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     EngineT: EngineTypes,
     EngineApi: EngineApiServer<EngineT>,
+    EvmConfig: EvmEnvConfig + 'static,
 {
     // Configure the module and start the server.
     let mut module = RpcModule::new(());
