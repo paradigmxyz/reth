@@ -4,17 +4,19 @@ use crate::{
 };
 use alloy_primitives::{B256, U256};
 use chrono::format;
+use crossbeam_channel::bounded;
 use reqwest::StatusCode;
 use reth_provider::BlockReaderIdExt;
 use reth_rpc_types::{
     engine::{
-        ExecutionPayloadInputV2, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes,
+        ExecutionPayloadInputV2, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadId,
         PayloadStatus,
     },
     ExecutionPayloadV2,
 };
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use self::http::HttpJsonRpc;
 
@@ -170,7 +172,16 @@ pub async fn new_payload(
 }
 
 #[derive(Debug)]
+enum AsyncResultType {
+    BlockId(B256),
+    PayloadId(PayloadId),
+}
+
+#[derive(Debug)]
 pub enum ApiServiceError {
+    Ok(AsyncResultType),
+    MismatchAsyncResultType,
+    Timeout(String),
     ApiError(String),
     InvalidState(String),
     UnknownBlock(String),
@@ -185,61 +196,170 @@ impl std::fmt::Display for ApiServiceError {
     }
 }
 
+#[derive(Clone)]
+pub struct PayloadPair {
+    pub payload_id: PayloadId,
+    pub block_id: Option<B256>,
+}
+
 #[derive(Clone, Default)]
 pub struct ApiService {
     api: Arc<HttpJsonRpc>,
+    executor: TokioTaskExecutor,
+    latest_committed_id: Option<B256>,
+    /// key previous_id, value:PayloadPair(payload_id,block_id)
+    pairs: HashMap<B256, PayloadPair>,
 }
 
 impl ApiService {
     pub fn new(api: Arc<HttpJsonRpc>) -> Self {
-        Self { api }
+        Self {
+            api,
+            executor: TokioTaskExecutor::default(),
+            latest_committed_id: None,
+            pairs: HashMap::new(),
+        }
     }
 
     /// Initialize a new block built on the block with the given previous id and
     /// begin adding batches to it. If no previous id is specified, the current
     /// head will be used.
     pub fn initialize_block(&mut self, previous_id: Option<B256>) -> Result<(), ApiServiceError> {
-        // let block_id = if let Some(block_id) = previous_id {
-        //     block_id
-        // } else {
-        //     let last_block_hash = match self.api.get_block_by_number("latest".to_string()).await {
-        //         Ok(x) => {
-        //             if let Some(execution_block) = x {
-        //                 execution_block.block_hash
-        //             } else {
-        //                 return Err(ApiServiceError::UnknownBlock(
-        //                     "get block return none".to_string(),
-        //                 ));
-        //             }
-        //         }
-        //         Err(e) => {
-        //             return Err(ApiServiceError::ApiError(format!(
-        //                 "get block by number error: {:?}",
-        //                 e
-        //             )));
-        //         }
-        //     };
-        //     last_block_hash
-        // };
+        let api = self.api.clone();
+        let (s, r) = crossbeam_channel::bounded(0);
 
-        // let forkchoice_updated_result = match forkchoice_updated(&self.api, block_id.clone()).await
-        // {
-        //     Ok(x) => x,
-        //     Err(e) => {
-        //         return Err(ApiServiceError::ApiError(format!("forkchoice_updated: {:?}", e)));
-        //     }
-        // };
-        // if !forkchoice_updated_result.payload_status.status.is_valid() {
-        //     return Err(ApiServiceError::BlockNotReady);
-        // }
+        self.executor.spawn_blocking(Box::pin(async move {
+            let block_id = if let Some(block_id) = previous_id {
+                block_id
+            } else {
+                let last_block_hash = match api.get_block_by_number("latest".to_string()).await {
+                    Ok(x) => {
+                        if let Some(execution_block) = x {
+                            execution_block.block_hash
+                        } else {
+                            // return Err(ApiServiceError::UnknownBlock(
+                            //     "get block return none".to_string(),
+                            // ));
+                            tracing::error!(target:"consensus::cl","ApiService::initialize_block::get_block_by_number return None");
+                            let _ = s.try_send(ApiServiceError::UnknownBlock(
+                                "get block return none".to_string(),
+                            ));
+                            return;
+                        }
+                    }
+                    Err(e) => {
+                        // return Err(ApiServiceError::ApiError(format!(
+                        //     "get block by number error: {:?}",
+                        //     e
+                        // )));
+                        tracing::error!(target:"consensus::cl","ApiService::initialize_block::get_block_by_number return error: {:?}", e);
+                        let _ = s.try_send(ApiServiceError::ApiError(format!(
+                            "get block by number error: {:?}",
+                            e
+                        )));
+                        return;
+                    }
+                };
+                last_block_hash
+            };
 
-        Ok(())
+            let forkchoice_updated_result = match forkchoice_updated(&api, block_id.clone()).await {
+                Ok(x) => x,
+                Err(e) => {
+                    // return Err(ApiServiceError::ApiError(format!("forkchoice_updated: {:?}", e)));
+                    tracing::error!(target:"consensus::cl","ApiService::initialize_block::forkchoice_updated return(error: {:?})", e);
+                    let _ = s.try_send(ApiServiceError::ApiError(format!(
+                        "forkchoice_updated: {:?}",
+                        e
+                    )));
+                    return;
+                }
+            };
+            if !forkchoice_updated_result.payload_status.status.is_valid() {
+                // return Err(ApiServiceError::BlockNotReady);
+                tracing::error!(target:"consensus::cl","ApiService::initialize_block::forkchoice_updated return(not valid)");
+                let _ = s.try_send(ApiServiceError::BlockNotReady);
+                return;
+            }
+            let _ = s.try_send(ApiServiceError::Ok(AsyncResultType::BlockId(block_id)));
+        }));
+
+        let r = r.recv_timeout(std::time::Duration::from_secs(3));
+        match r {
+            Ok(x) => {
+                if let ApiServiceError::Ok(id) = x {
+                    match id {
+                        AsyncResultType::BlockId(id) => {
+                            self.latest_committed_id = Some(id);
+                            return Ok(());
+                        }
+                        _ => {
+                            return Err(ApiServiceError::MismatchAsyncResultType);
+                        }
+                    }
+                } else {
+                    return Err(x);
+                }
+            }
+            Err(_) => {
+                return Err(ApiServiceError::Timeout("initialize_block".to_string()));
+            }
+        }
     }
 
     /// Stop adding batches to the current block and return a summary of its
     /// contents.
-    pub fn summarize_block(&mut self) -> Result<Vec<u8>, ApiServiceError> {
-        Ok(vec![])
+    pub fn summarize_block(&mut self) -> Result<(), ApiServiceError> {
+        let previous_id = match self.latest_committed_id {
+            Some(id) => id,
+            None => {
+                tracing::error!(target:"consensus::cl","ApiService::summarize_block previous_id is None");
+                return Err(ApiServiceError::NoChainHead);
+            }
+        };
+
+        let api = self.api.clone();
+        let (s, r) = crossbeam_channel::bounded(0);
+        self.executor.spawn_blocking(Box::pin(async move {
+            let forkchoice_updated_result =
+                match forkchoice_updated_with_attributes(&api, previous_id).await {
+                    Ok(x) => x,
+                    Err(e) => {
+                        tracing::error!(target:"consensus::cl","ApiService::summarize_block::forkchoice_updated_with_attributes return(error: {:?})", e);
+                        let _ = s.try_send(ApiServiceError::ApiError(format!(
+                            "forkchoice_updated_with_attributes: {:?}",
+                            e
+                        )));
+                        return;
+                    }
+                };
+
+            if !forkchoice_updated_result.payload_status.status.is_valid() {
+                tracing::error!(target:"consensus::cl","ApiService::summarize_block::forkchoice_updated_with_attributes return(not valid)");
+                let _ = s.try_send(ApiServiceError::BlockNotReady);
+                return;
+            }else{
+                if let Some(payload_id) = &forkchoice_updated_result.payload_id{
+                    // let data = payload_id.serialize();
+                }else{
+
+                }
+            }
+        }));
+
+        let r = r.recv_timeout(std::time::Duration::from_secs(3));
+        match r {
+            Ok(x) => {
+                if let ApiServiceError::Ok(_) = x {
+                    return Ok(());
+                } else {
+                    return Err(x);
+                }
+            }
+            Err(_) => {
+                return Err(ApiServiceError::Timeout("summarize_block".to_string()));
+            }
+        }
     }
 
     /// Insert the given consensus data into the block and sign it. If this call is successful, the
@@ -248,7 +368,23 @@ impl ApiService {
         &mut self,
         data: reth_primitives::Bytes,
     ) -> Result<B256, ApiServiceError> {
-        Ok(B256::ZERO)
+        let api = self.api.clone();
+        let (s, r) = crossbeam_channel::bounded(0);
+        self.executor.spawn_blocking(Box::pin(async move {}));
+
+        let r = r.recv_timeout(std::time::Duration::from_secs(3));
+        match r {
+            Ok(x) => {
+                if let ApiServiceError::Ok(_) = x {
+                    return Ok(B256::ZERO);
+                } else {
+                    return Err(x);
+                }
+            }
+            Err(_) => {
+                return Err(ApiServiceError::Timeout("initialize_block".to_string()));
+            }
+        }
     }
 
     /// Stop adding batches to the current block and abandon it.
@@ -263,7 +399,23 @@ impl ApiService {
 
     /// Update the block that should be committed
     pub fn commit_block(&mut self, block_id: B256) -> Result<(), ApiServiceError> {
-        Ok(())
+        let api = self.api.clone();
+        let (s, r) = crossbeam_channel::bounded(0);
+        self.executor.spawn_blocking(Box::pin(async move {}));
+
+        let r = r.recv_timeout(std::time::Duration::from_secs(3));
+        match r {
+            Ok(x) => {
+                if let ApiServiceError::Ok(_) = x {
+                    return Ok(());
+                } else {
+                    return Err(x);
+                }
+            }
+            Err(_) => {
+                return Err(ApiServiceError::Timeout("initialize_block".to_string()));
+            }
+        }
     }
 
     /// Mark this block as invalid from the perspective of consensus
