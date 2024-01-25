@@ -120,8 +120,6 @@ where
     block_gas_limit: u64,
     /// Minimum priority fee to enforce for acceptance into the pool.
     minimum_priority_fee: Option<u128>,
-    /// Toggle to determine if a local transaction should be propagated
-    propagate_local_transactions: bool,
     /// Stores the setup and parameters needed for validating KZG proofs.
     kzg_settings: Arc<KzgSettings>,
     /// How to handle [TransactionOrigin::Local](TransactionOrigin) transactions.
@@ -441,7 +439,9 @@ where
             // by this point assume all external transactions should be propagated
             propagate: match origin {
                 TransactionOrigin::External => true,
-                TransactionOrigin::Local => self.propagate_local_transactions,
+                TransactionOrigin::Local => {
+                    self.local_transactions_config.propagate_local_transactions
+                }
                 TransactionOrigin::Private => false,
             },
         }
@@ -481,8 +481,6 @@ pub struct EthTransactionValidatorBuilder {
     ///
     /// Default is 1
     additional_tasks: usize,
-    /// Toggle to determine if a local transaction should be propagated
-    propagate_local_transactions: bool,
 
     /// Stores the setup and parameters needed for validating KZG proofs.
     kzg_settings: Arc<KzgSettings>,
@@ -501,8 +499,6 @@ impl EthTransactionValidatorBuilder {
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             minimum_priority_fee: None,
             additional_tasks: 1,
-            // default to true, can potentially take this as a param in the future
-            propagate_local_transactions: true,
             kzg_settings: Arc::clone(&MAINNET_KZG_TRUSTED_SETUP),
             local_transactions_config: Default::default(),
 
@@ -578,24 +574,6 @@ impl EthTransactionValidatorBuilder {
         self
     }
 
-    /// Sets toggle to propagate transactions received locally by this client (e.g
-    /// transactions from eth_sendTransaction to this nodes' RPC server)
-    ///
-    ///  If set to false, only transactions received by network peers (via
-    /// p2p) will be marked as propagated in the local transaction pool and returned on a
-    /// GetPooledTransactions p2p request
-    pub fn set_propagate_local_transactions(mut self, propagate_local_txs: bool) -> Self {
-        self.propagate_local_transactions = propagate_local_txs;
-        self
-    }
-    /// Disables propagating transactions received locally by this client
-    ///
-    /// For more information, check docs for set_propagate_local_transactions
-    pub fn no_local_transaction_propagation(mut self) -> Self {
-        self.propagate_local_transactions = false;
-        self
-    }
-
     /// Sets a minimum priority fee that's enforced for acceptance into the pool.
     pub fn with_minimum_priority_fee(mut self, minimum_priority_fee: u128) -> Self {
         self.minimum_priority_fee = Some(minimum_priority_fee);
@@ -636,7 +614,6 @@ impl EthTransactionValidatorBuilder {
             eip4844,
             block_gas_limit,
             minimum_priority_fee,
-            propagate_local_transactions,
             kzg_settings,
             local_transactions_config,
             ..
@@ -654,7 +631,6 @@ impl EthTransactionValidatorBuilder {
             eip4844,
             block_gas_limit,
             minimum_priority_fee,
-            propagate_local_transactions,
             blob_store: Box::new(blob_store),
             kzg_settings,
             local_transactions_config,
