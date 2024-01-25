@@ -262,6 +262,7 @@ where
             >,
         >,
     > {
+        // 0. blockchain provider setup
         // 1. create the `BuilderContext`
         // 2. build the components
         // 3. build/customize rpc
