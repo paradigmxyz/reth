@@ -271,8 +271,8 @@ pub enum OrderBy {
 }
 
 /// Query for the GET `/relay/v1/data/bidtraces/builder_blocks_received` endpoint.
-/// This endpoint provides BidTraces for the builder block submission for a given slot (that were
-/// verified successfully).
+/// This endpoint provides BidTraces for builder block submissions that match the query and were
+/// verified successfully.
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuilderBlocksReceivedQuery {
     /// A specific slot
@@ -287,6 +287,9 @@ pub struct BuilderBlocksReceivedQuery {
     /// Search for a specific EL block number
     #[serde(skip_serializing_if = "Option::is_none")]
     pub block_number: Option<u64>,
+    /// Search for a specific builder public key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub builder_pubkey: Option<BlsPublicKey>,
 }
 
 impl BuilderBlocksReceivedQuery {
@@ -311,6 +314,12 @@ impl BuilderBlocksReceivedQuery {
     /// Sets the specific EL block number
     pub fn block_number(mut self, block_number: u64) -> Self {
         self.block_number = Some(block_number);
+        self
+    }
+
+    /// Sets the specific builder public key
+    pub fn builder_pubkey(mut self, builder_pubkey: BlsPublicKey) -> Self {
+        self.builder_pubkey = Some(builder_pubkey);
         self
     }
 }
