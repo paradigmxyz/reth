@@ -1447,6 +1447,7 @@ pub async fn spawn_node(config: NodeConfig) -> eyre::Result<(NodeHandle, TaskMan
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::future::poll_fn;
     use reth_primitives::U256;
     use reth_rpc_api::EthApiClient;
 
@@ -1501,7 +1502,6 @@ mod tests {
         assert!(res.is_ok());
     }
 
-    use futures::future::poll_fn;
     #[tokio::test]
     async fn test_node_exit_future_terminate_false() {
         let (tx, rx) = oneshot::channel::<Result<(), BeaconConsensusEngineError>>();
