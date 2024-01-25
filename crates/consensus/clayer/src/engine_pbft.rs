@@ -24,10 +24,6 @@ pub enum ConsensusEvent {
     PeerConnected(PeerId),
     PeerDisconnected(PeerId),
     PeerMessage(ClayerConsensusMessage, PeerId),
-    BlockNew(ClayerBlock),
-    BlockValid(B256),
-    BlockInvalid(B256),
-    BlockCommit(B256),
 }
 
 fn handle_consensus_event(
@@ -36,10 +32,10 @@ fn handle_consensus_event(
     state: &mut PbftState,
 ) -> Result<bool, PbftError> {
     match incoming_event {
-        ConsensusEvent::BlockNew(block) => consensus.on_block_new(block, state)?,
-        ConsensusEvent::BlockValid(block_id) => consensus.on_block_valid(block_id, state)?,
-        ConsensusEvent::BlockInvalid(block_id) => consensus.on_block_invalid(block_id)?,
-        ConsensusEvent::BlockCommit(block_id) => consensus.on_block_commit(block_id, state)?,
+        // ConsensusEvent::BlockNew(block) => consensus.on_block_new(block, state)?,
+        // ConsensusEvent::BlockValid(block_id) => consensus.on_block_valid(block_id, state)?,
+        // ConsensusEvent::BlockInvalid(block_id) => consensus.on_block_invalid(block_id)?,
+        // ConsensusEvent::BlockCommit(block_id) => consensus.on_block_commit(block_id, state)?,
         ConsensusEvent::PeerMessage(message, peer_id) => {
             let header: ClayerConsensusMessageHeader =
                 ClayerConsensusMessageHeader::decode(&mut message.header_bytes.to_vec().as_slice())

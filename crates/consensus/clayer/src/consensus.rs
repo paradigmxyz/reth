@@ -21,8 +21,9 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use reth_ecies::util::id2pk;
 use reth_eth_wire::{
-    ClayerBlock, ClayerConsensusMessage, ClayerConsensusMessageHeader, ClayerSignature,
-    PbftMessage, PbftMessageInfo, PbftMessageType, PbftNewView, PbftSeal, PbftSignedVote,
+    ClayerBlock, ClayerConsensusMessage, ClayerConsensusMessageHeader, ClayerExecutionPayload,
+    ClayerSignature, PbftMessage, PbftMessageInfo, PbftMessageType, PbftNewView, PbftSeal,
+    PbftSignedVote,
 };
 use reth_interfaces::clayer::ClayerConsensus;
 use reth_primitives::{public_key_to_address, sign_message, B256};
@@ -38,7 +39,7 @@ use tokio::sync::{
 use tracing::*;
 
 use crate::{
-    engine_api::ApiService,
+    engine_api::{ApiService, ExecutionPayloadWrapperV2},
     timing::{retry_until_ok, Timeout},
 };
 
@@ -247,6 +248,7 @@ impl ClayerConsensusEngineInner {
             PbftMessageType::NewView => self.handle_new_view(&msg, state)?,
             PbftMessageType::SealRequest => self.handle_seal_request(msg, state)?,
             PbftMessageType::Seal => self.handle_seal_response(&msg, state)?,
+            PbftMessageType::BlockNew => self.handle_block_new(msg, state)?,
             _ => warn!("Received message with unknown type: {:?}", msg_type),
         }
 
@@ -447,6 +449,8 @@ impl ClayerConsensusEngineInner {
                 state.switch_phase(PbftPhase::Finishing(false))?;
                 // Stop the commit timeout, since the network has agreed to commit the block
                 state.commit_timeout.stop();
+
+                self.on_block_commit(block_id, state)?;
             }
         }
 
@@ -758,6 +762,8 @@ impl ClayerConsensusEngineInner {
             )
         })?;
 
+        self.on_block_valid(block.block_id(), state)?;
+
         Ok(())
     }
 
@@ -825,7 +831,7 @@ impl ClayerConsensusEngineInner {
         if block.block_num() > state.seq_num && !is_waiting {
             self.catchup(state, &seal, true)?;
         } else if block.block_num() == state.seq_num {
-            if block.signer_id == state.id && state.is_primary() {
+            if block.info.signer_id == state.id && state.is_primary() {
                 // This is the next block and this node is the primary; broadcast PrePrepare
                 // messages
                 info!(target: "consensus::cl","Broadcasting PrePrepares");
@@ -1502,10 +1508,13 @@ impl ClayerConsensusEngineInner {
             self.build_seal(state)?.encode(&mut msg_out);
             msg_out
         };
-        let data = reth_primitives::Bytes::copy_from_slice(&data);
+        let seal_bytes = reth_primitives::Bytes::copy_from_slice(&data);
 
-        match self.service.finalize_block(data) {
-            Ok(block_id) => {
+        match self.service.finalize_block() {
+            Ok(execution_payload) => {
+                let block_id = execution_payload.execution_payload.payload_inner.block_hash;
+                let payload = Self::convert_execution_payload(&execution_payload);
+                self.broadcast_block_new(state.view, state.seq_num, payload, seal_bytes, state)?;
                 info!(target: "consensus::cl","{}: Publishing block {}", state, hex::encode(block_id));
                 Ok(())
             }
@@ -1559,6 +1568,28 @@ impl ClayerConsensusEngineInner {
         trace!(target: "consensus::cl","{}: Created PBFT message: {:?}", state, msg);
 
         self.broadcast_message(ParsedMessage::from_pbft_message(msg)?, state)
+    }
+
+    fn broadcast_block_new(
+        &mut self,
+        view: u64,
+        seq_num: u64,
+        payload: ClayerExecutionPayload,
+        seal_bytes: reth_primitives::Bytes,
+        state: &mut PbftState,
+    ) -> Result<(), PbftError> {
+        let info = PbftMessageInfo {
+            ptype: PbftMessageType::BlockNew as u8,
+            view,
+            seq_num,
+            signer_id: state.id.clone(),
+        };
+
+        let msg: ClayerBlock = ClayerBlock { info, block: payload, seal_bytes };
+
+        trace!(target: "consensus::cl","{}: Created BlockNew message: {:?}", state, msg);
+
+        self.broadcast_message(ParsedMessage::from_block_new_message(msg)?, state)
     }
 
     /// Broadcast the specified message to all of the node's peers, including itself
@@ -1689,5 +1720,47 @@ impl ClayerConsensusEngineInner {
             B256::ZERO,
             state,
         )
+    }
+
+    fn handle_block_new(
+        &mut self,
+        msg: ParsedMessage,
+        state: &mut PbftState,
+    ) -> Result<(), PbftError> {
+        let block = msg.get_block_new().clone();
+        self.on_block_new(block, state)?;
+        Ok(())
+    }
+
+    fn convert_execution_payload(payload: &ExecutionPayloadWrapperV2) -> ClayerExecutionPayload {
+        let p = &payload.execution_payload.payload_inner;
+        let withdrawals = payload
+            .execution_payload
+            .withdrawals
+            .iter()
+            .map(|w| reth_primitives::Withdrawal {
+                index: w.index,
+                validator_index: w.validator_index,
+                address: w.address,
+                amount: w.amount,
+            })
+            .collect::<Vec<_>>();
+        ClayerExecutionPayload {
+            parent_hash: p.parent_hash,
+            fee_recipient: p.fee_recipient,
+            state_root: p.state_root,
+            receipts_root: p.receipts_root,
+            logs_bloom: p.logs_bloom,
+            prev_randao: p.prev_randao,
+            block_number: p.block_number,
+            gas_limit: p.gas_limit,
+            gas_used: p.gas_used,
+            timestamp: p.timestamp,
+            extra_data: p.extra_data.clone(),
+            base_fee_per_gas: p.base_fee_per_gas,
+            block_hash: p.block_hash,
+            transactions: p.transactions.clone(),
+            withdrawals,
+        }
     }
 }

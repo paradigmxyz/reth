@@ -174,7 +174,8 @@ pub async fn new_payload(
 #[derive(Debug)]
 enum AsyncResultType {
     BlockId(B256),
-    PayloadId(PayloadId),
+    ForkchoiceUpdated(ForkchoiceUpdated),
+    ExecutionPayload(ExecutionPayloadWrapperV2),
 }
 
 #[derive(Debug)]
@@ -199,7 +200,7 @@ impl std::fmt::Display for ApiServiceError {
 #[derive(Clone)]
 pub struct PayloadPair {
     pub payload_id: PayloadId,
-    pub block_id: Option<B256>,
+    pub execution_payload: Option<ExecutionPayloadWrapperV2>,
 }
 
 #[derive(Clone, Default)]
@@ -207,8 +208,10 @@ pub struct ApiService {
     api: Arc<HttpJsonRpc>,
     executor: TokioTaskExecutor,
     latest_committed_id: Option<B256>,
-    /// key previous_id, value:PayloadPair(payload_id,block_id)
-    pairs: HashMap<B256, PayloadPair>,
+    /// key latest_committed_id, value:payload_id
+    next_payload_id_pairs: HashMap<B256, PayloadId>,
+    /// key proposing block_id, value:ExecutionPayloadWrapperV2
+    proposing_payload_pairs: HashMap<B256, (PayloadId, ExecutionPayloadWrapperV2)>,
 }
 
 impl ApiService {
@@ -217,7 +220,8 @@ impl ApiService {
             api,
             executor: TokioTaskExecutor::default(),
             latest_committed_id: None,
-            pairs: HashMap::new(),
+            next_payload_id_pairs: HashMap::new(),
+            proposing_payload_pairs: HashMap::new(),
         }
     }
 
@@ -333,25 +337,46 @@ impl ApiService {
                         return;
                     }
                 };
+            let _ = s.try_send(ApiServiceError::Ok(AsyncResultType::ForkchoiceUpdated(forkchoice_updated_result)));
 
-            if !forkchoice_updated_result.payload_status.status.is_valid() {
-                tracing::error!(target:"consensus::cl","ApiService::summarize_block::forkchoice_updated_with_attributes return(not valid)");
-                let _ = s.try_send(ApiServiceError::BlockNotReady);
-                return;
-            }else{
-                if let Some(payload_id) = &forkchoice_updated_result.payload_id{
-                    // let data = payload_id.serialize();
-                }else{
-
-                }
-            }
+            // if !forkchoice_updated_result.payload_status.status.is_valid() {
+            //     tracing::error!(target:"consensus::cl","ApiService::summarize_block::forkchoice_updated_with_attributes return(not valid)");
+            //     let _ = s.try_send(ApiServiceError::BlockNotReady);
+            //     return;
+            // }else{
+            //     if let Some(payload_id) = &forkchoice_updated_result.payload_id{
+            //         let _ = s.try_send(ApiServiceError::Ok(AsyncResultType::PayloadId(payload_id.clone())));
+            //     }else{
+            //         tracing::error!(target:"consensus::cl","ApiService::summarize_block::forkchoice_updated_with_attributes payload_id is None");
+            //         let _ = s.try_send(ApiServiceError::BlockNotReady);
+            //     }
+            // }
         }));
 
         let r = r.recv_timeout(std::time::Duration::from_secs(3));
         match r {
             Ok(x) => {
-                if let ApiServiceError::Ok(_) = x {
-                    return Ok(());
+                if let ApiServiceError::Ok(result) = x {
+                    match result {
+                        AsyncResultType::ForkchoiceUpdated(forkchoice_updated) => {
+                            if !forkchoice_updated.payload_status.status.is_valid() {
+                                tracing::error!(target:"consensus::cl","ApiService::summarize_block::forkchoice_updated_with_attributes return(not valid)");
+                                return Err(ApiServiceError::BlockNotReady);
+                            } else {
+                                if let Some(payload_id) = &forkchoice_updated.payload_id {
+                                    self.next_payload_id_pairs
+                                        .insert(previous_id, payload_id.clone());
+                                    return Ok(());
+                                } else {
+                                    tracing::error!(target:"consensus::cl","ApiService::summarize_block::forkchoice_updated_with_attributes payload_id is None");
+                                    return Err(ApiServiceError::BlockNotReady);
+                                }
+                            }
+                        }
+                        _ => {
+                            return Err(ApiServiceError::MismatchAsyncResultType);
+                        }
+                    }
                 } else {
                     return Err(x);
                 }
@@ -364,25 +389,71 @@ impl ApiService {
 
     /// Insert the given consensus data into the block and sign it. If this call is successful, the
     /// consensus engine will receive the block afterwards.
-    pub fn finalize_block(
-        &mut self,
-        data: reth_primitives::Bytes,
-    ) -> Result<B256, ApiServiceError> {
+    pub fn finalize_block(&mut self) -> Result<ExecutionPayloadWrapperV2, ApiServiceError> {
+        let (previous_id, payload_id) = match self.latest_committed_id {
+            Some(id) => {
+                if let Some(payload_id) = self.next_payload_id_pairs.get(&id) {
+                    (id, payload_id.clone())
+                } else {
+                    tracing::error!(target:"consensus::cl","ApiService::finalize_block payload_id is None");
+                    return Err(ApiServiceError::BlockNotReady);
+                }
+            }
+            None => {
+                tracing::error!(target:"consensus::cl","ApiService::finalize_block previous_id is None");
+                return Err(ApiServiceError::NoChainHead);
+            }
+        };
+
         let api = self.api.clone();
         let (s, r) = crossbeam_channel::bounded(0);
-        self.executor.spawn_blocking(Box::pin(async move {}));
+        self.executor.spawn_blocking(Box::pin(async move {
+            match api.get_payload_v2(payload_id).await {
+                Ok(x) => {
+                    let _ = s.try_send(ApiServiceError::Ok(AsyncResultType::ExecutionPayload(x)));
+                    return;
+                },
+                Err(e) => {
+                    tracing::error!(target:"consensus::cl","ApiService::finalize_block::get_payload_v2 return(error: {:?})", e);
+                    let _ = s.try_send(ApiServiceError::ApiError(format!(
+                        "get_payload_v2: {:?}",
+                        e
+                    )));
+                    return;
+                }
+            };
+        }));
 
         let r = r.recv_timeout(std::time::Duration::from_secs(3));
         match r {
             Ok(x) => {
-                if let ApiServiceError::Ok(_) = x {
-                    return Ok(B256::ZERO);
+                if let ApiServiceError::Ok(result) = x {
+                    match result {
+                        AsyncResultType::ExecutionPayload(playload) => {
+                            let block_id = playload.execution_payload.payload_inner.block_hash;
+                            let last_block_id =
+                                playload.execution_payload.payload_inner.parent_hash;
+
+                            // check parent_hash consistent
+                            if last_block_id != previous_id {
+                                panic!("TODO: check parent_hash consistent");
+                            }
+
+                            self.proposing_payload_pairs
+                                .insert(block_id, (payload_id, playload.clone()));
+
+                            return Ok(playload);
+                        }
+                        _ => {
+                            return Err(ApiServiceError::MismatchAsyncResultType);
+                        }
+                    }
                 } else {
                     return Err(x);
                 }
             }
             Err(_) => {
-                return Err(ApiServiceError::Timeout("initialize_block".to_string()));
+                return Err(ApiServiceError::Timeout("finalize_block".to_string()));
             }
         }
     }
@@ -399,21 +470,63 @@ impl ApiService {
 
     /// Update the block that should be committed
     pub fn commit_block(&mut self, block_id: B256) -> Result<(), ApiServiceError> {
+        let (payload_id, execution_payload) = match self.proposing_payload_pairs.get(&block_id) {
+            Some(payload) => payload.clone(),
+            None => {
+                return Err(ApiServiceError::BlockNotReady);
+            }
+        };
+
         let api = self.api.clone();
         let (s, r) = crossbeam_channel::bounded(0);
-        self.executor.spawn_blocking(Box::pin(async move {}));
+        self.executor.spawn_blocking(Box::pin(async move {
+            let payload_status = match new_payload(&api, execution_payload).await {
+                Ok(x) =>x,
+                Err(e) => {
+                    tracing::error!(target:"consensus::cl","ApiService::commit_block::new_payload return(error: {:?})", e);
+                    let _ = s.try_send(ApiServiceError::ApiError(format!(
+                        "new_payload: {:?}",
+                        e
+                    )));
+                    return;
+                }
+            };
+            let _ = s.try_send(ApiServiceError::Ok(AsyncResultType::ForkchoiceUpdated(ForkchoiceUpdated{
+                payload_status,
+                payload_id: Some(payload_id),
+            })));
+        }));
 
         let r = r.recv_timeout(std::time::Duration::from_secs(3));
         match r {
             Ok(x) => {
-                if let ApiServiceError::Ok(_) = x {
-                    return Ok(());
+                if let ApiServiceError::Ok(result) = x {
+                    match result {
+                        AsyncResultType::ForkchoiceUpdated(forkchoice_updated) => {
+                            if forkchoice_updated.payload_status.status.is_valid() {
+                                if let Some(latest_valid_hash) =
+                                    &forkchoice_updated.payload_status.latest_valid_hash
+                                {
+                                    return Ok(());
+                                } else {
+                                    tracing::error!(target:"consensus::cl","ApiService::commit_block::new_payload latest_valid_hash is None");
+                                    return Err(ApiServiceError::BlockNotReady);
+                                }
+                            } else {
+                                tracing::error!(target:"consensus::cl","ApiService::commit_block::new_payload return(not valid)");
+                                return Err(ApiServiceError::BlockNotReady);
+                            }
+                        }
+                        _ => {
+                            return Err(ApiServiceError::MismatchAsyncResultType);
+                        }
+                    }
                 } else {
                     return Err(x);
                 }
             }
             Err(_) => {
-                return Err(ApiServiceError::Timeout("initialize_block".to_string()));
+                return Err(ApiServiceError::Timeout("commit_block".to_string()));
             }
         }
     }

@@ -170,18 +170,18 @@ impl From<u8> for PbftMessageType {
 #[derive(Clone, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ClayerBlock {
+    /// info
+    pub info: PbftMessageInfo,
     /// block
     pub block: ClayerExecutionPayload,
-    /// node peer id
-    pub signer_id: PeerId,
     /// seal
     pub seal_bytes: Bytes,
 }
 
 impl ClayerBlock {
     /// Create a new `ClayerBlock`
-    pub fn new(block: ClayerExecutionPayload) -> Self {
-        ClayerBlock { signer_id: PeerId::default(), seal_bytes: Bytes::default(), block }
+    pub fn new(info: PbftMessageInfo, block: ClayerExecutionPayload, seal_bytes: Bytes) -> Self {
+        ClayerBlock { info, block, seal_bytes }
     }
 
     /// Get the block id, call hash_slow for performance
@@ -204,7 +204,7 @@ impl std::hash::Hash for ClayerBlock {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.block.hash(state);
         self.seal_bytes.hash(state);
-        self.signer_id.hash(state);
+        self.info.hash(state);
     }
 }
 
@@ -216,7 +216,7 @@ impl std::fmt::Debug for ClayerBlock {
             self.block_num(),
             self.block_id(),
             self.previous_id(),
-            self.signer_id,
+            self.info.signer_id,
         )
     }
 }
@@ -229,7 +229,7 @@ impl std::fmt::Display for ClayerBlock {
             self.block_num(),
             self.block_id(),
             self.previous_id(),
-            self.signer_id,
+            self.info.signer_id,
         )
     }
 }
