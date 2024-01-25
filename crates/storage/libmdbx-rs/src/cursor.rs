@@ -1,5 +1,5 @@
 use crate::{
-    error::{mdbx_result, Error, Result},
+    error::{mdbx_result, mdbx_result_with_tx_kind, Error, Result},
     flags::*,
     mdbx_try_optional,
     transaction::{TransactionKind, RW},
@@ -30,7 +30,11 @@ where
     pub(crate) fn new(txn: Transaction<K>, dbi: ffi::MDBX_dbi) -> Result<Self> {
         let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
         unsafe {
-            mdbx_result(txn.txn_execute(|txn| ffi::mdbx_cursor_open(txn, dbi, &mut cursor)))?;
+            mdbx_result_with_tx_kind::<K>(
+                txn.txn_execute(|txn| ffi::mdbx_cursor_open(txn, dbi, &mut cursor)),
+                txn.txn(),
+                txn.env().txn_manager(),
+            )?;
         }
         Ok(Self { txn, cursor })
     }
@@ -43,7 +47,7 @@ where
 
             let s = Self { txn: other.txn.clone(), cursor };
 
-            mdbx_result(res)?;
+            mdbx_result_with_tx_kind::<K>(res, s.txn.txn(), s.txn.env().txn_manager())?;
 
             Ok(s)
         }
@@ -91,12 +95,11 @@ where
             let key_ptr = key_val.iov_base;
             let data_ptr = data_val.iov_base;
             self.txn.txn_execute(|txn| {
-                let v = mdbx_result(ffi::mdbx_cursor_get(
-                    self.cursor,
-                    &mut key_val,
-                    &mut data_val,
-                    op,
-                ))?;
+                let v = mdbx_result_with_tx_kind::<K>(
+                    ffi::mdbx_cursor_get(self.cursor, &mut key_val, &mut data_val, op),
+                    txn,
+                    self.txn.env().txn_manager(),
+                )?;
                 assert_ne!(data_ptr, data_val.iov_base);
                 let key_out = {
                     // MDBX wrote in new key

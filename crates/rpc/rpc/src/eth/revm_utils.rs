@@ -10,7 +10,7 @@ use reth_rpc_types::{
     BlockOverrides, CallRequest,
 };
 use revm::{
-    db::{CacheDB, EmptyDB},
+    db::CacheDB,
     precompile::{Precompiles, SpecId as PrecompilesSpecId},
     primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId, TransactTo, TxEnv},
     Database, Inspector,
@@ -20,6 +20,9 @@ use revm_primitives::{
     Bytecode,
 };
 use tracing::trace;
+
+#[cfg(feature = "optimism")]
+use revm::primitives::{Bytes, OptimismFields};
 
 /// Helper type that bundles various overrides for EVM Execution.
 ///
@@ -166,13 +169,14 @@ where
 /// _runtime_ db ([CacheDB]).
 ///
 /// Note: This assumes the target transaction is in the given iterator.
+/// Returns the index of the target transaction in the given iterator.
 pub(crate) fn replay_transactions_until<DB, I, Tx>(
     db: &mut CacheDB<DB>,
     cfg: CfgEnv,
     block_env: BlockEnv,
     transactions: I,
     target_tx_hash: B256,
-) -> EthResult<()>
+) -> Result<usize, EthApiError>
 where
     DB: DatabaseRef,
     EthApiError: From<<DB as DatabaseRef>::Error>,
@@ -182,6 +186,7 @@ where
     let env = Env { cfg, block: block_env, tx: TxEnv::default() };
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
+    let mut index = 0;
     for tx in transactions.into_iter() {
         if tx.hash() == target_tx_hash {
             // reached the target transaction
@@ -190,9 +195,10 @@ where
 
         tx.try_fill_tx_env(&mut evm.env.tx)?;
         let res = evm.transact()?;
-        evm.db.as_mut().expect("is set").commit(res.state)
+        evm.db.as_mut().expect("is set").commit(res.state);
+        index += 1;
     }
-    Ok(())
+    Ok(index)
 }
 
 /// Prepares the [Env] for execution.
@@ -332,7 +338,7 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         blob_hashes: blob_versioned_hashes.unwrap_or_default(),
         max_fee_per_blob_gas,
         #[cfg(feature = "optimism")]
-        optimism: Default::default(),
+        optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
     };
 
     Ok(env)
@@ -585,22 +591,6 @@ where
     };
 
     Ok(())
-}
-
-/// This clones and transforms the given [CacheDB] with an arbitrary [DatabaseRef] into a new
-/// [CacheDB] with [EmptyDB] as the database type
-#[inline]
-pub(crate) fn clone_into_empty_db<DB>(db: &CacheDB<DB>) -> CacheDB<EmptyDB>
-where
-    DB: DatabaseRef,
-{
-    CacheDB {
-        accounts: db.accounts.clone(),
-        contracts: db.contracts.clone(),
-        logs: db.logs.clone(),
-        block_hashes: db.block_hashes.clone(),
-        db: Default::default(),
-    }
 }
 
 #[cfg(test)]

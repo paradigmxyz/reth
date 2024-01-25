@@ -92,14 +92,8 @@ impl<'b, C> HashedPostStateAccountCursor<'b, C> {
                     Some((db_address, db_account))
                 }
             }
-            // If the database is empty, return the post state entry
-            (Some((post_state_address, post_state_account)), None) => {
-                Some((*post_state_address, *post_state_account))
-            }
-            // If the post state is empty, return the database entry
-            (None, Some((db_address, db_account))) => Some((db_address, db_account)),
-            // If both are empty, return None
-            (None, None) => None,
+            // Return either non-empty entry
+            _ => post_state_item.copied().or(db_item),
         }
     }
 }
@@ -254,14 +248,10 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
                     Some(db_entry)
                 }
             }
-            // If the database is empty, return the post state entry
-            (Some((post_state_slot, post_state_value)), None) => {
-                Some(StorageEntry { key: *post_state_slot, value: *post_state_value })
+            // Return either non-empty entry
+            _ => {
+                db_item.or(post_state_item.copied().map(|(key, value)| StorageEntry { key, value }))
             }
-            // If the post state is empty, return the database entry
-            (None, Some(db_entry)) => Some(db_entry),
-            // If both are empty, return None
-            (None, None) => None,
         }
     }
 }
@@ -453,7 +443,7 @@ mod tests {
 
         let mut hashed_post_state = HashedPostState::default();
         for (hashed_address, account) in &accounts {
-            hashed_post_state.insert_account(*hashed_address, *account);
+            hashed_post_state.insert_account(*hashed_address, Some(*account));
         }
         hashed_post_state.sort();
 
@@ -499,7 +489,7 @@ mod tests {
 
         let mut hashed_post_state = HashedPostState::default();
         for (hashed_address, account) in accounts.iter().filter(|x| x.0[31] % 2 != 0) {
-            hashed_post_state.insert_account(*hashed_address, *account);
+            hashed_post_state.insert_account(*hashed_address, Some(*account));
         }
         hashed_post_state.sort();
 
@@ -526,11 +516,9 @@ mod tests {
 
         let mut hashed_post_state = HashedPostState::default();
         for (hashed_address, account) in accounts.iter().filter(|x| x.0[31] % 2 != 0) {
-            if removed_keys.contains(hashed_address) {
-                hashed_post_state.insert_destroyed_account(*hashed_address);
-            } else {
-                hashed_post_state.insert_account(*hashed_address, *account);
-            }
+            let account_info =
+                if removed_keys.contains(hashed_address) { None } else { Some(*account) };
+            hashed_post_state.insert_account(*hashed_address, account_info)
         }
         hashed_post_state.sort();
 
@@ -557,7 +545,7 @@ mod tests {
 
         let mut hashed_post_state = HashedPostState::default();
         for (hashed_address, account) in &accounts {
-            hashed_post_state.insert_account(*hashed_address, *account);
+            hashed_post_state.insert_account(*hashed_address, Some(*account));
         }
         hashed_post_state.sort();
 
@@ -579,11 +567,7 @@ mod tests {
 
                 let mut hashed_post_state = HashedPostState::default();
                 for (hashed_address, account) in &post_state_accounts {
-                    if let Some(account) = account {
-                        hashed_post_state.insert_account(*hashed_address, *account);
-                    } else {
-                        hashed_post_state.insert_destroyed_account(*hashed_address);
-                    }
+                    hashed_post_state.insert_account(*hashed_address, *account);
                 }
                 hashed_post_state.sort();
 
@@ -659,7 +643,7 @@ mod tests {
         {
             let wiped = true;
             let mut hashed_storage = HashedStorage::new(wiped);
-            hashed_storage.insert_storage(B256::random(), U256::ZERO);
+            hashed_storage.insert_slot(B256::random(), U256::ZERO);
 
             let mut hashed_post_state = HashedPostState::default();
             hashed_post_state.insert_hashed_storage(address, hashed_storage);
@@ -674,7 +658,7 @@ mod tests {
         {
             let wiped = true;
             let mut hashed_storage = HashedStorage::new(wiped);
-            hashed_storage.insert_storage(B256::random(), U256::from(1));
+            hashed_storage.insert_slot(B256::random(), U256::from(1));
 
             let mut hashed_post_state = HashedPostState::default();
             hashed_post_state.insert_hashed_storage(address, hashed_storage);
@@ -710,7 +694,7 @@ mod tests {
         let wiped = false;
         let mut hashed_storage = HashedStorage::new(wiped);
         for (slot, value) in post_state_storage.iter() {
-            hashed_storage.insert_storage(*slot, *value);
+            hashed_storage.insert_slot(*slot, *value);
         }
 
         let mut hashed_post_state = HashedPostState::default();
@@ -746,7 +730,7 @@ mod tests {
         let wiped = false;
         let mut hashed_storage = HashedStorage::new(wiped);
         for (slot, value) in post_state_storage.iter() {
-            hashed_storage.insert_storage(*slot, *value);
+            hashed_storage.insert_slot(*slot, *value);
         }
 
         let mut hashed_post_state = HashedPostState::default();
@@ -784,7 +768,7 @@ mod tests {
         let wiped = true;
         let mut hashed_storage = HashedStorage::new(wiped);
         for (slot, value) in post_state_storage.iter() {
-            hashed_storage.insert_storage(*slot, *value);
+            hashed_storage.insert_slot(*slot, *value);
         }
 
         let mut hashed_post_state = HashedPostState::default();
@@ -819,7 +803,7 @@ mod tests {
         let wiped = false;
         let mut hashed_storage = HashedStorage::new(wiped);
         for (slot, value) in storage.iter() {
-            hashed_storage.insert_storage(*slot, *value);
+            hashed_storage.insert_slot(*slot, *value);
         }
 
         let mut hashed_post_state = HashedPostState::default();
@@ -856,7 +840,7 @@ mod tests {
             for (address, (wiped, storage)) in &post_state_storages {
                 let mut hashed_storage = HashedStorage::new(*wiped);
                 for (slot, value) in storage {
-                    hashed_storage.insert_storage(*slot, *value);
+                    hashed_storage.insert_slot(*slot, *value);
                 }
                 hashed_post_state.insert_hashed_storage(*address, hashed_storage);
             }
