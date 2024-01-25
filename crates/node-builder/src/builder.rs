@@ -1,6 +1,12 @@
 //! Customizable node builder.
 
-use std::marker::PhantomData;
+use crate::{
+    components::{FullNodeComponents, FullNodeComponentsAdapter, NodeComponentsBuilder},
+    hooks::NodeHooks,
+    node::{FullNode, FullNodeTypesAdapter},
+    rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
+    NodeHandle,
+};
 use reth_blockchain_tree::ShareableBlockchainTree;
 use reth_db::{
     database::Database,
@@ -8,20 +14,20 @@ use reth_db::{
 };
 use reth_node_api::node::{FullNodeTypes, NodeTypes};
 use reth_node_core::{
+    cli::config::RethTransactionPoolConfig,
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
-    primitives::Head,
+    primitives::{kzg::KzgSettings, Head},
 };
-use reth_provider::providers::BlockchainProvider;
+use reth_primitives::{
+    constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
+    ChainSpec,
+};
+use reth_provider::{providers::BlockchainProvider, ChainSpecProvider};
 use reth_revm::EvmProcessorFactory;
 use reth_tasks::TaskExecutor;
-use crate::{
-    components::{FullNodeComponents, FullNodeComponentsAdapter, NodeComponentsBuilder},
-    hooks::NodeHooks,
-    node::{FullNode, FullNodeTypesAdapter},
-    NodeHandle,
-    rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
-};
+use reth_transaction_pool::PoolConfig;
+use std::{marker::PhantomData, sync::Arc};
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -129,6 +135,20 @@ where
     Types: NodeTypes,
     Components: NodeComponentsBuilder<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>>,
 {
+    /// Apply a function to the components builder.
+    pub fn map_components(self, f: impl FnOnce(Components) -> Components) -> Self {
+        Self {
+            config: self.config,
+            database: self.database,
+            state: ComponentsState {
+                _maker: Default::default(),
+                components_builder: f(self.state.components_builder),
+                hooks: self.state.hooks,
+                rpc: self.state.rpc,
+            },
+        }
+    }
+
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(mut self, hook: F) -> Self
     where
@@ -258,6 +278,28 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// This can be used to execute async tasks or functions during the setup.
     pub fn executor(&self) -> &TaskExecutor {
         &self.executor
+    }
+
+    /// Returns the chain spec of the node.
+    pub fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.provider().chain_spec()
+    }
+
+    /// Returns the transaction pool config of the node.
+    pub fn pool_config(&self) -> PoolConfig {
+        self.config().txpool.pool_config()
+    }
+
+    /// Loads the trusted setup params from a given file path or falls back to
+    /// `MAINNET_KZG_TRUSTED_SETUP`.
+    pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
+        if let Some(ref trusted_setup_file) = self.config().trusted_setup_file {
+            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
+                .map_err(LoadKzgSettingsError::KzgError)?;
+            Ok(Arc::new(trusted_setup))
+        } else {
+            Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
+        }
     }
 }
 
