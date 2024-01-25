@@ -50,6 +50,36 @@ impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, N
             _marker: Default::default(),
         }
     }
+
+    /// Apply a function to the pool builder.
+    pub fn map_pool(self, f: impl FnOnce(PoolB) -> PoolB) -> Self {
+        Self {
+            pool_builder: f(self.pool_builder),
+            payload_builder: self.payload_builder,
+            network_builder: self.network_builder,
+            _marker: self._marker,
+        }
+    }
+
+    /// Apply a function to the payload builder.
+    pub fn map_payload(self, f: impl FnOnce(PayloadB) -> PayloadB) -> Self {
+        Self {
+            pool_builder: self.pool_builder,
+            payload_builder: f(self.payload_builder),
+            network_builder: self.network_builder,
+            _marker: self._marker,
+        }
+    }
+
+    /// Apply a function to the network builder.
+    pub fn map_network(self, f: impl FnOnce(NetworkB) -> NetworkB) -> Self {
+        Self {
+            pool_builder: self.pool_builder,
+            payload_builder: self.payload_builder,
+            network_builder: f(self.network_builder),
+            _marker: self._marker,
+        }
+    }
 }
 
 impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB>

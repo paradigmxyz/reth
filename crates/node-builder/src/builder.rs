@@ -1,12 +1,6 @@
 //! Customizable node builder.
 
-use crate::{
-    components::{FullNodeComponents, FullNodeComponentsAdapter, NodeComponentsBuilder},
-    hooks::{NodeHooks, OnComponentInitializedHook, OnNodeStartedHook},
-    node::FullNodeTypesAdapter,
-    rpc::{ExtendRpcModules, OnRpcStarted, RpcHooks},
-    NodeHandle,
-};
+use std::marker::PhantomData;
 use reth_blockchain_tree::ShareableBlockchainTree;
 use reth_db::{
     database::Database,
@@ -21,7 +15,13 @@ use reth_node_core::{
 use reth_provider::providers::BlockchainProvider;
 use reth_revm::EvmProcessorFactory;
 use reth_tasks::TaskExecutor;
-use std::marker::PhantomData;
+use crate::{
+    components::{FullNodeComponents, FullNodeComponentsAdapter, NodeComponentsBuilder},
+    hooks::NodeHooks,
+    node::{FullNode, FullNodeTypesAdapter},
+    NodeHandle,
+    rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
+};
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -132,12 +132,13 @@ where
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(mut self, hook: F) -> Self
     where
-        F: OnComponentInitializedHook<
+        F: FnOnce(
                 FullNodeComponentsAdapter<
                     FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                     Components::Pool,
                 >,
-            > + 'static,
+            ) -> eyre::Result<()>
+            + 'static,
     {
         self.state.hooks.set_on_component_initialized(hook);
         self
@@ -146,12 +147,15 @@ where
     /// Sets the hook that is run once the node has started.
     pub fn on_node_started<F>(mut self, hook: F) -> Self
     where
-        F: OnNodeStartedHook<
-                FullNodeComponentsAdapter<
-                    FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
-                    Components::Pool,
+        F: FnOnce(
+                FullNode<
+                    FullNodeComponentsAdapter<
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
+                        Components::Pool,
+                    >,
                 >,
-            > + 'static,
+            ) -> eyre::Result<()>
+            + 'static,
     {
         self.state.hooks.set_on_node_started(hook);
         self
@@ -160,12 +164,17 @@ where
     /// Sets the hook that is run once the rpc server is started.
     pub fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
-        F: OnRpcStarted<
-                FullNodeComponentsAdapter<
-                    FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
-                    Components::Pool,
+        F: FnOnce(
+                RpcContext<
+                    '_,
+                    FullNodeComponentsAdapter<
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
+                        Components::Pool,
+                    >,
                 >,
-            > + 'static,
+                RethRpcServerHandles,
+            ) -> eyre::Result<()>
+            + 'static,
     {
         self.state.rpc.set_on_rpc_started(hook);
         self
@@ -174,12 +183,16 @@ where
     /// Sets the hook that is run to configure the rpc modules.
     pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
     where
-        F: ExtendRpcModules<
-                FullNodeComponentsAdapter<
-                    FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
-                    Components::Pool,
+        F: FnOnce(
+                RpcContext<
+                    '_,
+                    FullNodeComponentsAdapter<
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
+                        Components::Pool,
+                    >,
                 >,
-            > + 'static,
+            ) -> eyre::Result<()>
+            + 'static,
     {
         self.state.rpc.set_extend_rpc_modules(hook);
         self
