@@ -83,6 +83,8 @@ impl PeersHandle {
 /// The [`PeersManager`] will be notified on peer related changes
 #[derive(Debug)]
 pub struct PeersManager {
+    /// Total maximum peers
+    //pub max_total_peers: Option<usize>,
     /// All peers known to the network
     peers: HashMap<PeerId, Peer>,
     /// Copy of the sender half, so new [`PeersHandle`] can be created on demand.
@@ -216,6 +218,11 @@ impl PeersManager {
         &mut self,
         addr: IpAddr,
     ) -> Result<(), InboundConnectionError> {
+        if let Some(max_total) = self.connection_info.max_total_peers {
+            if self.peers.len() >= max_total {
+                return Err(InboundConnectionError::ExceedsLimit(max_total));
+            }
+        }
         if self.ban_list.is_banned_ip(&addr) {
             return Err(InboundConnectionError::IpBanned)
         }
@@ -291,6 +298,7 @@ impl PeersManager {
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
             }
         }
+        log::info!("Incoming connection established with peer {}: {}", peer_id, addr);
     }
 
     /// Bans the peer temporarily with the configured ban timeout
@@ -808,6 +816,8 @@ pub struct ConnectionInfo {
     /// Maximum allowed concurrent outbound dials.
     #[cfg_attr(feature = "serde", serde(default))]
     max_concurrent_outbound_dials: usize,
+    // Total maximum peers
+    max_total_peers: Option<usize>,
 }
 
 // === impl ConnectionInfo ===
@@ -856,6 +866,7 @@ impl Default for ConnectionInfo {
             max_outbound: DEFAULT_MAX_PEERS_OUTBOUND,
             max_inbound: DEFAULT_MAX_PEERS_INBOUND,
             max_concurrent_outbound_dials: DEFAULT_MAX_CONCURRENT_DIALS,
+            max_total_peers: 0,
         }
     }
 }
@@ -1154,6 +1165,11 @@ impl Default for PeersConfig {
 }
 
 impl PeersConfig {
+    /// set max_total_peers
+    pub fn with_max_total_peers(mut self, max_peers: usize) -> Self {
+        self.connection_info.max_total_peers = Some(max_peers);
+        self
+    }
     /// A set of peer_ids and ip addr that we want to never connect to
     pub fn with_ban_list(mut self, ban_list: BanList) -> Self {
         self.ban_list = ban_list;
