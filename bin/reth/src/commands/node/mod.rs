@@ -223,8 +223,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         // launch the node
         let handle = node_config.launch::<Ext>(ext, executor).await?;
-
-        // wait for node exit
         handle.wait_for_node_exit().await
     }
 
