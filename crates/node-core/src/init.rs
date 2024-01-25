@@ -1,10 +1,6 @@
 //! Reth genesis initialization utility functions.
 
-use reth_db::{
-    database::Database,
-    tables,
-    transaction::{DbTx, DbTxMut},
-};
+use reth_db::{database::Database, tables, transaction::DbTxMut};
 use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
 use reth_primitives::{
     stage::StageId, Account, Bytecode, ChainSpec, Receipts, StorageEntry, B256, U256,
@@ -46,16 +42,14 @@ impl From<DatabaseError> for InitDatabaseError {
 
 /// Write the genesis block if it has not already been written
 pub fn init_genesis<DB: Database>(
-    db: Arc<DB>,
+    provider_factory: ProviderFactory<DB>,
     chain: Arc<ChainSpec>,
 ) -> Result<B256, InitDatabaseError> {
     let genesis = chain.genesis();
 
     let hash = chain.genesis_hash();
 
-    let factory = ProviderFactory::new(&db, chain.clone());
-
-    let provider = factory.provider()?;
+    let provider = provider_factory.provider()?;
     if let Some(db_hash) = provider.block_hash(0)? {
         if db_hash == hash {
             debug!("Genesis already written, skipping.");
@@ -72,23 +66,25 @@ pub fn init_genesis<DB: Database>(
     debug!("Writing genesis block.");
 
     // use transaction to insert genesis header
-    let provider_rw = factory.provider_rw()?;
+    let mut provider_rw = provider_factory.provider_rw()?;
     insert_genesis_hashes(&provider_rw, genesis)?;
     insert_genesis_history(&provider_rw, genesis)?;
-    provider_rw.commit()?;
 
     // Insert header
-    let tx = db.tx_mut()?;
-    insert_genesis_header::<DB>(&tx, chain.clone())?;
+    {
+        let tx = provider_rw.tx_mut();
+        insert_genesis_header::<DB>(&tx, chain.clone())?;
 
-    insert_genesis_state::<DB>(&tx, genesis)?;
+        insert_genesis_state::<DB>(&tx, genesis)?;
 
-    // insert sync stage
-    for stage in StageId::ALL.iter() {
-        tx.put::<tables::SyncStage>(stage.to_string(), Default::default())?;
+        // insert sync stage
+        for stage in StageId::ALL.iter() {
+            tx.put::<tables::SyncStage>(stage.to_string(), Default::default())?;
+        }
     }
 
-    tx.commit()?;
+    provider_rw.commit()?;
+
     Ok(hash)
 }
 
@@ -160,7 +156,7 @@ pub fn insert_genesis_state<DB: Database>(
 
 /// Inserts hashes for the genesis state.
 pub fn insert_genesis_hashes<DB: Database>(
-    provider: &DatabaseProviderRW<&DB>,
+    provider: &DatabaseProviderRW<DB>,
     genesis: &reth_primitives::Genesis,
 ) -> ProviderResult<()> {
     // insert and hash accounts to hashing table
@@ -187,7 +183,7 @@ pub fn insert_genesis_hashes<DB: Database>(
 
 /// Inserts history indices for genesis accounts and storage.
 pub fn insert_genesis_history<DB: Database>(
-    provider: &DatabaseProviderRW<&DB>,
+    provider: &DatabaseProviderRW<DB>,
     genesis: &reth_primitives::Genesis,
 ) -> ProviderResult<()> {
     let account_transitions =
