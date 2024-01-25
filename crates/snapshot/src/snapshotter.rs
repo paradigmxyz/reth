@@ -131,10 +131,9 @@ impl<DB: Database> Snapshotter<DB> {
     ) -> RethResult<SnapshotTargets> {
         let highest_snapshots = self.snapshot_provider.get_highest_snapshots();
 
-        // TODO(alexey): snapshot headers and receipts
+        // TODO(alexey): snapshot receipts
         let targets = SnapshotTargets {
-            headers: None,
-            // headers: self.get_snapshot_target(highest_snapshots.headers, finalized_block_number),
+            headers: self.get_snapshot_target(highest_snapshots.headers, finalized_block_number),
             receipts: None,
             // receipts: self.get_snapshot_target(highest_snapshots.receipts,
             // finalized_block_number),
