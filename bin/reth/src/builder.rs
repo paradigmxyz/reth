@@ -25,9 +25,9 @@ use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::NetworkEvents;
 use reth_network_api::{NetworkInfo, PeersInfo};
 #[cfg(not(feature = "optimism"))]
-use reth_node_builder::EthEngineTypes;
+use reth_node_builder::{EthEngineTypes, EthEvmConfig};
 #[cfg(feature = "optimism")]
-use reth_node_builder::OptimismEngineTypes;
+use reth_node_builder::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_node_core::{
     cli::{
         components::{RethNodeComponentsImpl, RethRpcServerHandles},
@@ -162,6 +162,14 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             .prune_config(Arc::clone(&self.config.chain))?
             .or(config.prune.clone());
 
+        // TODO: stateful node builder should be able to remove cfgs here
+        #[cfg(feature = "optimism")]
+        let evm_config = OptimismEvmConfig::default();
+
+        // The default payload builder is implemented on the unit type.
+        #[cfg(not(feature = "optimism"))]
+        let evm_config = EthEvmConfig::default();
+
         // configure blockchain tree
         let tree_config = BlockchainTreeConfig::default();
         let tree = self.config.build_blockchain_tree(
@@ -170,6 +178,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             prune_config.clone(),
             sync_metrics_tx.clone(),
             tree_config,
+            evm_config,
         )?;
         let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = ShareableBlockchainTree::new(tree);
@@ -207,6 +216,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             network_builder.handle(),
             executor.clone(),
             blockchain_db.clone(),
+            evm_config,
         );
 
         // allow network modifications
@@ -272,6 +282,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
                 consensus_engine_tx.clone(),
                 canon_state_notification_sender,
                 mining_mode,
+                evm_config,
             )
             .build();
 
@@ -286,6 +297,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
+                    evm_config,
                 )
                 .await?;
 
@@ -307,6 +319,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
+                    evm_config,
                 )
                 .await?;
 

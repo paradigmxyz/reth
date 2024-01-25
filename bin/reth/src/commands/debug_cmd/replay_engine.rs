@@ -21,9 +21,9 @@ use reth_interfaces::consensus::Consensus;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 #[cfg(not(feature = "optimism"))]
-use reth_node_builder::EthEngineTypes;
+use reth_node_builder::{EthEngineTypes, EthEvmConfig};
 #[cfg(feature = "optimism")]
-use reth_node_builder::OptimismEngineTypes;
+use reth_node_builder::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{fs, ChainSpec};
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory};
@@ -125,11 +125,17 @@ impl Command {
 
         let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
 
+        #[cfg(not(feature = "optimism"))]
+        let evm_config = EthEvmConfig::default();
+
+        #[cfg(feature = "optimism")]
+        let evm_config = OptimismEvmConfig::default();
+
         // Configure blockchain tree
         let tree_externals = TreeExternals::new(
             provider_factory.clone(),
             Arc::clone(&consensus),
-            EvmProcessorFactory::new(self.chain.clone()),
+            EvmProcessorFactory::new(self.chain.clone(), evm_config),
         );
         let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
         let blockchain_tree = ShareableBlockchainTree::new(tree);

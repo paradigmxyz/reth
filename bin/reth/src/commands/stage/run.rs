@@ -17,7 +17,7 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::{init_db, mdbx::DatabaseArguments};
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-
+use reth_node_builder::EthEvmConfig;
 use reth_primitives::ChainSpec;
 use reth_provider::{ProviderFactory, StageCheckpointReader};
 use reth_stages::{
@@ -198,7 +198,10 @@ impl Command {
                 }
                 StageEnum::Senders => (Box::new(SenderRecoveryStage::new(batch_size)), None),
                 StageEnum::Execution => {
-                    let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
+                    let factory = reth_revm::EvmProcessorFactory::new(
+                        self.chain.clone(),
+                        EthEvmConfig::default(),
+                    );
                     (
                         Box::new(ExecutionStage::new(
                             factory,

@@ -3,6 +3,7 @@
 use reth_db::database::Database;
 use reth_network::{NetworkEvents, NetworkProtocols};
 use reth_network_api::{NetworkInfo, Peers};
+use reth_node_api::EvmEnvConfig;
 use reth_primitives::ChainSpec;
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
@@ -59,6 +60,8 @@ pub trait RethNodeComponents: Clone + Send + Sync + 'static {
     type Events: CanonStateSubscriptions + Clone + 'static;
     /// The type that is used to spawn tasks.
     type Tasks: TaskSpawner + Clone + Unpin + 'static;
+    /// The type that defines how to configure the EVM before execution.
+    type EvmConfig: EvmEnvConfig + 'static;
 
     /// Returns the instance of the provider
     fn provider(&self) -> Self::Provider;
@@ -74,6 +77,9 @@ pub trait RethNodeComponents: Clone + Send + Sync + 'static {
 
     /// Returns the instance of the events subscription handler.
     fn events(&self) -> Self::Events;
+
+    /// Returns the instance of the EVM config.
+    fn evm_config(&self) -> Self::EvmConfig;
 
     /// Helper function to return the chain spec.
     fn chain_spec(&self) -> Arc<ChainSpec> {
@@ -98,6 +104,7 @@ pub struct RethRpcComponents<'a, Reth: RethNodeComponents> {
         Reth::Network,
         Reth::Tasks,
         Reth::Events,
+        Reth::EvmConfig,
     >,
     /// Holds installed modules per transport type.
     ///
@@ -114,7 +121,7 @@ pub struct RethRpcComponents<'a, Reth: RethNodeComponents> {
 ///
 /// Represents components required for the Reth node.
 #[derive(Clone, Debug)]
-pub struct RethNodeComponentsImpl<DB, Provider, Pool, Network, Events, Tasks> {
+pub struct RethNodeComponentsImpl<DB, Provider, Pool, Network, Events, Tasks, EvmConfig> {
     /// Represents underlying database type.
     __phantom: PhantomData<DB>,
     /// Represents the provider instance.
@@ -127,10 +134,12 @@ pub struct RethNodeComponentsImpl<DB, Provider, Pool, Network, Events, Tasks> {
     pub task_executor: Tasks,
     /// Represents the events subscription handler instance.
     pub events: Events,
+    /// Represents the type that is used to configure the EVM before execution.
+    pub evm_config: EvmConfig,
 }
 
-impl<DB, Provider, Pool, Network, Events, Tasks>
-    RethNodeComponentsImpl<DB, Provider, Pool, Network, Events, Tasks>
+impl<DB, Provider, Pool, Network, Events, Tasks, EvmConfig>
+    RethNodeComponentsImpl<DB, Provider, Pool, Network, Events, Tasks, EvmConfig>
 {
     /// Create new instance of the node components.
     pub fn new(
@@ -139,13 +148,22 @@ impl<DB, Provider, Pool, Network, Events, Tasks>
         network: Network,
         task_executor: Tasks,
         events: Events,
+        evm_config: EvmConfig,
     ) -> Self {
-        Self { provider, pool, network, task_executor, events, __phantom: std::marker::PhantomData }
+        Self {
+            provider,
+            pool,
+            network,
+            task_executor,
+            events,
+            evm_config,
+            __phantom: std::marker::PhantomData,
+        }
     }
 }
 
-impl<DB, Provider, Pool, Network, Events, Tasks> RethNodeComponents
-    for RethNodeComponentsImpl<DB, Provider, Pool, Network, Events, Tasks>
+impl<DB, Provider, Pool, Network, Events, Tasks, EvmConfig> RethNodeComponents
+    for RethNodeComponentsImpl<DB, Provider, Pool, Network, Events, Tasks, EvmConfig>
 where
     DB: Database + Clone + Unpin + 'static,
     Provider: FullProvider<DB> + Clone + 'static,
@@ -153,6 +171,7 @@ where
     Pool: TransactionPool + Clone + Unpin + 'static,
     Network: NetworkInfo + Peers + NetworkProtocols + NetworkEvents + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
+    EvmConfig: EvmEnvConfig + 'static,
 {
     type DB = DB;
     type Provider = Provider;
@@ -160,6 +179,7 @@ where
     type Network = Network;
     type Events = Events;
     type Tasks = Tasks;
+    type EvmConfig = EvmConfig;
 
     fn provider(&self) -> Self::Provider {
         self.provider.clone()
@@ -179,6 +199,10 @@ where
 
     fn events(&self) -> Self::Events {
         self.events.clone()
+    }
+
+    fn evm_config(&self) -> Self::EvmConfig {
+        self.evm_config.clone()
     }
 }
 
