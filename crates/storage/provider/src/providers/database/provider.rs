@@ -144,7 +144,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         self.cursor_collect_with_capacity(cursor, range, capacity, |_, v| f(v))
     }
 
-    fn cursor_collect_with_capacity<T: Table<Key = u64>, R>(
+    fn cursor_collect_with_capacity<T: Table, R>(
         &self,
         cursor: &mut impl DbCursorRO<T>,
         range: impl RangeBounds<T::Key>,
@@ -1649,11 +1649,12 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
             to_range(range),
             |snapshot, range, _| snapshot.raw_transactions_by_tx_range(range),
             |range, _| {
-                self.tx
-                    .cursor_read::<RawTable<tables::Transactions>>()?
-                    .walk_range(RawKey::new(range.start)..RawKey::new(range.end))?
-                    .map(|entry| Ok(entry?.1))
-                    .try_collect()
+                self.cursor_collect_with_capacity(
+                    &mut self.tx.cursor_read::<RawTable<tables::Transactions>>()?,
+                    RawKey::new(range.start)..RawKey::new(range.end),
+                    range_size_hint(&range).unwrap_or(0),
+                    |_, v| Ok(v),
+                )
             },
             |_| true,
         )
