@@ -1501,21 +1501,19 @@ mod tests {
         assert!(res.is_ok());
     }
 
-    use std::time::Duration;
-    use tokio::time::timeout;
+    use futures::future::poll_fn;
     #[tokio::test]
     async fn test_node_exit_future_terminate_false() {
         let (tx, rx) = oneshot::channel::<Result<(), BeaconConsensusEngineError>>();
 
         let _ = tx.send(Ok(()));
 
-        let node_exit_future = NodeExitFuture::new(rx, false);
-        match timeout(Duration::from_millis(100), node_exit_future).await {
-            Ok(_) => panic!("terminations flag was set to FALSE - future shouldn't be resolved"),
-            Err(_) => {
-                println!("termination flag was set to FALSE - future expectadly didn't resolve")
-            }
-        }
+        let mut node_exit_future = NodeExitFuture::new(rx, false);
+        poll_fn(|cx| {
+            assert!(node_exit_future.poll_unpin(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
     }
 
     #[cfg(feature = "optimism")]
