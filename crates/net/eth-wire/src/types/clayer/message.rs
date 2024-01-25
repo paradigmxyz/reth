@@ -130,6 +130,8 @@ pub enum PbftMessageType {
     SealRequest = 0x06,
     Seal = 0x07,
     BlockNew = 0x08,
+
+    AnnounceBlock = 0x09,
 }
 
 impl std::fmt::Display for PbftMessageType {
@@ -144,6 +146,7 @@ impl std::fmt::Display for PbftMessageType {
             PbftMessageType::SealRequest => "SealRequest",
             PbftMessageType::Seal => "Seal",
             PbftMessageType::BlockNew => "BlockNew",
+            PbftMessageType::AnnounceBlock => "AnnounceBlock",
         };
         write!(f, "{}", txt)
     }
@@ -160,6 +163,7 @@ impl From<u8> for PbftMessageType {
             0x06 => PbftMessageType::SealRequest,
             0x07 => PbftMessageType::Seal,
             0x08 => PbftMessageType::BlockNew,
+            0x09 => PbftMessageType::AnnounceBlock,
             _ => PbftMessageType::Unset,
         }
     }
