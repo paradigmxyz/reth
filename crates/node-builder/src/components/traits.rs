@@ -12,9 +12,6 @@ pub trait FullNodeComponents: FullNodeTypes + 'static {
     /// The transaction pool of the node.
     type Pool: TransactionPool;
 
-    /// The events type used to create subscriptions.
-    // type Events: CanonStateSubscriptions + Clone + 'static;
-
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
 
@@ -28,7 +25,7 @@ pub trait FullNodeComponents: FullNodeTypes + 'static {
     fn payload_builder(&self) -> &PayloadBuilderHandle<Self::Engine>;
 
     /// Returns the task executor.
-    fn tasks(&self) -> &TaskExecutor;
+    fn executor(&self) -> &TaskExecutor;
 }
 
 /// A type that encapsulates all the components of the node.
@@ -83,7 +80,7 @@ where
         &self.payload_builder
     }
 
-    fn tasks(&self) -> &TaskExecutor {
+    fn executor(&self) -> &TaskExecutor {
         &self.tasks
     }
 }
@@ -98,7 +95,7 @@ where
 /// Optimism.
 pub trait NodeComponentsBuilder<Node: FullNodeTypes> {
     /// The transaction pool to use.
-    type Pool: TransactionPool;
+    type Pool: TransactionPool + 'static;
 
     /// Builds the components of the node.
     fn build_components(
@@ -111,7 +108,7 @@ impl<Node, F, Pool> NodeComponentsBuilder<Node> for F
 where
     Node: FullNodeTypes,
     F: FnOnce(&BuilderContext<Node>) -> eyre::Result<NodeComponents<Node, Pool>>,
-    Pool: TransactionPool,
+    Pool: TransactionPool + 'static,
 {
     type Pool = Pool;
 

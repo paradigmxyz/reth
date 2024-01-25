@@ -1,9 +1,10 @@
 //! Customizable node builder.
 
 use crate::{
-    components::{FullNodeComponentsAdapter, NodeComponentsBuilder},
+    components::{FullNodeComponents, FullNodeComponentsAdapter, NodeComponentsBuilder},
     hooks::{NodeHooks, OnComponentInitializedHook, OnNodeStartedHook},
-    node::{FullNodeTypesAdapter},
+    node::FullNodeTypesAdapter,
+    rpc::RpcHooks,
     NodeHandle,
 };
 use reth_blockchain_tree::ShareableBlockchainTree;
@@ -12,11 +13,15 @@ use reth_db::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
 use reth_node_api::node::{FullNodeTypes, NodeTypes};
-use reth_node_core::{node_config::NodeConfig, primitives::Head};
+use reth_node_core::{
+    dirs::{ChainPath, DataDirPath},
+    node_config::NodeConfig,
+    primitives::Head,
+};
 use reth_provider::providers::BlockchainProvider;
 use reth_revm::EvmProcessorFactory;
 use reth_tasks::TaskExecutor;
-use std::{marker::PhantomData};
+use std::marker::PhantomData;
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -101,6 +106,7 @@ where
                 _maker: Default::default(),
                 components_builder,
                 hooks: NodeHooks::new(),
+                rpc: RpcHooks::new(),
             },
         }
     }
@@ -169,14 +175,10 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     head: Head,
     /// The configured provider to interact with the blockchain.
     provider: Node::Provider,
-
+    /// The executor of the node.
     executor: TaskExecutor,
-
-    // TODO maybe combine this with provider
-    events: (),
-
     /// The data dir of the node.
-    data_dir: (),
+    data_dir: ChainPath<DataDirPath>,
     /// The config of the node
     config: NodeConfig,
 }
@@ -192,11 +194,18 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 
     /// Returns the data dir of the node.
-    pub fn data_dir(&self) -> &() {
+    ///
+    /// This gives access to all relevant files and directories of the node's datadir.
+    pub fn data_dir(&self) -> &ChainPath<DataDirPath> {
         &self.data_dir
     }
 
-    // TODO read only helper methods to access the config traits (cli args)
+    /// Returns the executor of the node.
+    ///
+    /// This can be used to execute async tasks or functions during the setup.
+    pub fn executor(&self) -> &TaskExecutor {
+        &self.executor
+    }
 }
 
 /// The initial state of the node builder process.
@@ -229,9 +238,10 @@ where
 /// Additionally, this state captures additional hooks that are called at specific points in the
 /// node's launch lifecycle.
 #[derive(Debug)]
-pub struct ComponentsState<Types, Components, FullNode> {
+pub struct ComponentsState<Types, Components, FullNode: FullNodeComponents> {
     _maker: PhantomData<Types>,
     components_builder: Components,
     /// Additional NodeHooks that are called at specific points in the node's launch lifecycle.
     hooks: NodeHooks<FullNode>,
+    rpc: RpcHooks<FullNode>,
 }

@@ -12,8 +12,8 @@ impl<Node> NodeHooks<Node> {
     /// Creates a new, empty [NodeHooks] instance for the given node type.
     pub(crate) fn new() -> Self {
         Self {
-            on_component_initialized: Box::<NoopNodeEventHook>::default(),
-            on_node_started: Box::<NoopNodeEventHook>::default(),
+            on_component_initialized: Box::<()>::default(),
+            on_node_started: Box::<()>::default(),
             _marker: Default::default(),
         }
     }
@@ -104,18 +104,13 @@ where
     }
 }
 
-/// A [OnComponentInitializedHook] that does nothing.
-#[derive(Debug, Clone, Default)]
-#[non_exhaustive]
-pub struct NoopNodeEventHook;
-
-impl<Node> OnComponentInitializedHook<Node> for NoopNodeEventHook {
+impl<Node> OnComponentInitializedHook<Node> for () {
     fn on_event(self, _node: Node) -> eyre::Result<()> {
         Ok(())
     }
 }
 
-impl<Node> OnNodeStartedHook<Node> for NoopNodeEventHook {
+impl<Node> OnNodeStartedHook<Node> for () {
     fn on_event(self, _node: FullNode<Node>) -> eyre::Result<()> {
         Ok(())
     }
