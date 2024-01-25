@@ -320,13 +320,14 @@ mod tests {
             ..Default::default()
         });
 
-        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(factory.clone(), chain_spec).unwrap();
 
-        let tx = factory.provider().expect("failed to init provider").tx_ref();
+        let provider = factory.provider().expect("failed to init provider");
+        let tx = provider.tx_ref();
 
         assert_eq!(
-            collect_table_entries::<Arc<DatabaseEnv>, tables::AccountHistory>(&tx)
+            collect_table_entries::<Arc<DatabaseEnv>, tables::AccountHistory>(tx)
                 .expect("failed to collect"),
             vec![
                 (ShardedKey::new(address_with_balance, u64::MAX), IntegerList::new([0]).unwrap()),
@@ -335,7 +336,7 @@ mod tests {
         );
 
         assert_eq!(
-            collect_table_entries::<Arc<DatabaseEnv>, tables::StorageHistory>(&tx)
+            collect_table_entries::<Arc<DatabaseEnv>, tables::StorageHistory>(tx)
                 .expect("failed to collect"),
             vec![(
                 StorageShardedKey::new(address_with_storage, storage_key, u64::MAX),
