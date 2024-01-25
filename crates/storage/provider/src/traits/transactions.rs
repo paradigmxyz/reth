@@ -1,11 +1,11 @@
 use crate::{BlockNumReader, BlockReader};
+use reth_db::RawValue;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     Address, BlockHashOrNumber, BlockNumber, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber,
 };
 use std::ops::{Range, RangeBounds, RangeInclusive};
-use reth_db::RawValue;
 
 ///  Client trait for fetching [TransactionSigned] related data.
 #[auto_impl::auto_impl(&, Arc)]
