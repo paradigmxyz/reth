@@ -86,7 +86,7 @@ impl AppendableChain {
             canonical_fork,
         };
 
-        let (bundle_state, _) = Self::validate_and_execute(
+        let (bundle_state, trie_updates) = Self::validate_and_execute(
             block.clone(),
             parent_header,
             state_provider,
@@ -95,7 +95,7 @@ impl AppendableChain {
             block_validation_kind,
         )?;
 
-        Ok(Self { chain: Chain::new(vec![block], bundle_state, None) })
+        Ok(Self { chain: Chain::new(vec![block], bundle_state, trie_updates) })
     }
 
     /// Create a new chain that forks off of an existing sidechain.
