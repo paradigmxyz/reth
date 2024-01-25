@@ -239,31 +239,33 @@ impl Discv4 {
         Ok((discv4, service))
     }
 
-    pub async fn bind_as_discv5_fallback<F>(
+    /// Returns a new [`Discv4Service`] that uses the [`MirrorPrimaryKBuckets`] interface to act
+    /// as a secondary discovery service.
+    pub async fn bind_as_secondary_disc_node<F>(
         local_address: SocketAddr,
         mut local_node_record: NodeRecord,
         secret_key: SecretKey,
         config: Discv4Config,
-        discv5_kbuckets_change_rx: watch::Receiver<()>,
-        discv5_kbuckets_keys_callback: F,
-    ) -> io::Result<(Self, Discv4Service<Discv5KBucketsKeysMirror<F>>)>
+        primary_kbuckets_change_rx: watch::Receiver<()>,
+        primary_kbuckets_keys_callback: F,
+    ) -> io::Result<(Self, Discv4Service<KBucketsKeysMirror<F>>)>
     where
         F: Fn() -> HashSet<PublicKey> + Send + Unpin + 'static,
-        Discv5KBucketsKeysMirror<F>: MirrorDiscv5KBuckets,
+        KBucketsKeysMirror<F>: MirrorPrimaryKBuckets,
     {
         let socket = UdpSocket::bind(local_address).await?;
         let local_addr = socket.local_addr()?;
         local_node_record.udp_port = local_addr.port();
         trace!(target: "discv4",  ?local_addr,"opened UDP socket");
 
-        let service = Discv4Service::new_as_discv5_fallback(
+        let service = Discv4Service::new_as_secondary_discovery_node(
             socket,
             local_addr,
             local_node_record,
             secret_key,
             config,
-            discv5_kbuckets_change_rx,
-            discv5_kbuckets_keys_callback,
+            primary_kbuckets_change_rx,
+            primary_kbuckets_keys_callback,
         );
         let discv4 = service.handle();
         Ok((discv4, service))
@@ -429,39 +431,55 @@ impl Discv4 {
     }
 }
 
-pub trait HandleDiscV4 {
-    fn add_node(&self, record: NodeRecord) -> bool {
+/// Essential interface for interacting with discv4.
+pub trait HandleDiscovery {
+    /// Adds the node to the table, if it is not already present.
+    fn add_node(&self, _record: NodeRecord) -> bool {
         todo!()
     }
-    fn set_eip868_rlp_pair(&self, key: Vec<u8>, rlp: Bytes) {
+    /// Sets the pair in the EIP-868 [`Enr`] of the node.
+    ///
+    /// If the key already exists, this will update it.
+    ///
+    /// CAUTION: The value **must** be rlp encoded
+    fn set_eip868_rlp_pair(&self, _key: Vec<u8>, _rlp: Bytes) {
         todo!()
     }
-    fn set_eip868_rlp(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {
+    /// Sets the pair in the EIP-868 [`Enr`] of the node.
+    ///
+    /// If the key already exists, this will update it.
+    fn set_eip868_rlp(&self, _key: Vec<u8>, _value: impl alloy_rlp::Encodable) {
         todo!()
     }
-    fn ban(&self, node_id: PeerId, ip: IpAddr) {
+    /// Adds the peer and id to the ban list.
+    ///
+    /// This will prevent any future inclusion in the table
+    fn ban(&self, _node_id: PeerId, _ip: IpAddr) {
         todo!()
     }
-    fn ban_ip(&self, ip: IpAddr) {
-        todo!()
-    }
-    fn on_discv4_update(&mut self, update: DiscoveryUpdate) {
+    /// Adds the ip to the ban list.
+    ///
+    /// This will prevent any future inclusion in the table
+    fn ban_ip(&self, _ip: IpAddr) {
         todo!()
     }
 }
 
-impl HandleDiscV4 for Discv4 {}
+impl HandleDiscovery for Discv4 {}
 
 /// Manages discv4 peer discovery over UDP.
 #[must_use = "Stream does nothing unless polled"]
 #[allow(missing_debug_implementations)]
 #[derive(Deref, DerefMut)]
-pub struct Discv4Service<M = Discv5KbucketsNoop> {
+pub struct Discv4Service<M = Noop> {
+    /// Holds data of the discv4 service.
     #[deref]
     #[deref_mut]
     inner: Discv4ServiceInner,
-    /// Mirrors discv5 kbuckets. Set if node is run with discv5, to support downgrading to discv4.
-    discv5: Option<M>,
+    /// Mirrors some primary kbuckets if configured, and filters nodes received in [`Neighbours`]
+    /// responses against them. Will be set if the node is ran alongside iscv5, to support
+    /// downgrading to discv4.
+    neighbours_filter: Option<M>,
 }
 
 /// Hold data necessary to manage discv4 peer discovery over UDP.
@@ -535,7 +553,7 @@ pub struct Discv4ServiceInner {
 
 impl<M> Discv4Service<M>
 where
-    M: MirrorDiscv5KBuckets + Unpin + Send + 'static,
+    M: MirrorPrimaryKBuckets + Unpin + Send + 'static,
 {
     /// Create a new instance for a bound [`UdpSocket`].
     pub(crate) fn new(
@@ -637,7 +655,7 @@ where
                 received_pongs: Default::default(),
                 expire_interval: tokio::time::interval(EXPIRE_DURATION),
             },
-            discv5: None,
+            neighbours_filter: None,
         }
     }
 
@@ -1715,19 +1733,19 @@ where
                             }
                             Message::Neighbours(mut msg) => {
                                 let nodes = &mut msg.nodes;
-                                if let Some(ref mut discv5) = self.discv5 {
-                                    match discv5.filter_nodes(nodes) {
+                                if let Some(ref mut neighbours_filter) = self.neighbours_filter {
+                                    match neighbours_filter.filter_nodes(nodes) {
                                         Err(err) => debug!(target: "discv4",
                                             src_id=format!("{:#}", src_id),
                                             nodes=format!("[{}]", nodes.iter().format(", ")),
                                             err=?err,
-                                            "failed to filter nodes against discv5 mirror"
+                                            "failed to filter nodes against primary kbuckets mirror"
                                         ),
                                         Ok(filtered_out_nodes) => {
                                             if !filtered_out_nodes.is_empty() {
                                                 trace!(target: "discv4",
                                                     src_id=format!("{:#}", src_id),
-                                                    filtered_out_nodes=format!("[{:#}]", filtered_out_nodes.iter().format(", ")), "filtered out peers from `Neighbours` response from peer, nodes connected over discv5"
+                                                    filtered_out_nodes=format!("[{:#}]", filtered_out_nodes.iter().format(", ")), "filtered out peers from `Neighbours` response from peer, nodes connected over primary discovery network"
                                                 );
                                             }
                                         }
@@ -1776,7 +1794,7 @@ where
 /// Endless future impl
 impl<M> Stream for Discv4Service<M>
 where
-    M: MirrorDiscv5KBuckets + Unpin + Send + 'static,
+    M: MirrorPrimaryKBuckets + Unpin + Send + 'static,
 {
     type Item = Discv4Event;
 
@@ -1791,24 +1809,25 @@ where
     }
 }
 
-impl<F> Discv4Service<Discv5KBucketsKeysMirror<F>>
+impl<F> Discv4Service<KBucketsKeysMirror<F>>
 where
-    F: FnOnce() -> HashSet<PublicKey> + Send + Unpin + 'static,
-    Discv5KBucketsKeysMirror<F>: MirrorDiscv5KBuckets,
+    F: FnOnce() -> HashSet<PublicKey> + Unpin + Send + 'static,
+    KBucketsKeysMirror<F>: MirrorPrimaryKBuckets,
 {
-    pub fn new_as_discv5_fallback(
+    /// Returns a new [`Discv4Service`] that uses the [`MirrorPrimaryKBuckets`] interface.
+    pub fn new_as_secondary_discovery_node(
         socket: UdpSocket,
         local_address: SocketAddr,
         local_node_record: NodeRecord,
         secret_key: SecretKey,
         config: Discv4Config,
-        discv5_kbuckets_change_tx: watch::Receiver<()>,
-        discv5_kbuckets_keys_callback: F,
+        primary_kbuckets_change_tx: watch::Receiver<()>,
+        primary_kbuckets_keys_callback: F,
     ) -> Self {
         let mut discv4 = Self::new(socket, local_address, local_node_record, secret_key, config);
-        discv4.discv5 = Some(Discv5KBucketsKeysMirror::new(
-            discv5_kbuckets_change_tx,
-            discv5_kbuckets_keys_callback,
+        discv4.neighbours_filter = Some(KBucketsKeysMirror::new(
+            primary_kbuckets_change_tx,
+            primary_kbuckets_keys_callback,
         ));
 
         discv4
@@ -1828,9 +1847,6 @@ pub enum Discv4Event {
     FindNode,
     /// A `Neighbours` message was handled.
     Neighbours,
-    /// A `Neighbours` message was dropped, since all nodes in message were found in discv5. This
-    /// event only occurs if discv5 is ran to support downgrading to discv4.
-    NeighboursDropped,
     /// A `EnrRequest` message was handled.
     EnrRequest,
     /// A `EnrResponse` message was handled.
@@ -2260,47 +2276,62 @@ impl From<ForkId> for EnrForkIdEntry {
     }
 }
 
-pub trait MirrorDiscv5KBuckets {
+/// Mirrors another favoured node's kbuckets.
+pub trait MirrorPrimaryKBuckets {
+    /// Updates mirror of the primary kbuckets.
     fn update_mirror(&mut self);
+    /// Filters nodes passed as parameter against the mirror of the primary kbuckets.
     fn filter_nodes(
         &mut self,
         nodes: &mut Vec<NodeRecord>,
     ) -> Result<SmallVec<[PeerId; 3]>, Discv4Error>;
 }
 
+/// Mirror of keys in a kbucket table.
 #[derive(Debug)]
-pub struct Discv5KBucketsKeysMirror<F> {
+pub struct KBucketsKeysMirror<F> {
+    /// Mirror of keys in the kbuckets table.
     mirror: HashSet<PublicKey>,
-    callback: F,
+    /// Callback to update the mirror to match the source kbuckets.
+    update_callback: F,
+    /// Channel that notifies of change in source kbuckets.
     change_tx: watch::Receiver<()>,
+    /// Reads the configured log level at start up.
+    #[doc(hidden)]
     is_log_level_trace: bool,
 }
 
-impl<F> Discv5KBucketsKeysMirror<F>
+impl<F> KBucketsKeysMirror<F>
 where
-    F: Send + Unpin,
+    F: FnOnce() -> HashSet<PublicKey> + Unpin + Send,
 {
+    /// Returns a new [KBucketsKeysMirror].
     pub fn new(change_tx: watch::Receiver<()>, callback: F) -> Self {
         let is_log_level_trace =
             if let Ok(var) = env::var("RUST_LOG") { var.to_lowercase() == "trace" } else { false };
 
-        Self { mirror: Default::default(), callback, change_tx, is_log_level_trace }
+        Self {
+            mirror: Default::default(),
+            update_callback: callback,
+            change_tx,
+            is_log_level_trace,
+        }
     }
 }
 
-impl<F> MirrorDiscv5KBuckets for Discv5KBucketsKeysMirror<F>
+impl<F> MirrorPrimaryKBuckets for KBucketsKeysMirror<F>
 where
-    F: Fn() -> HashSet<PublicKey> + Send + Unpin,
+    F: Fn() -> HashSet<PublicKey>,
 {
     fn update_mirror(&mut self) {
-        self.mirror = (self.callback)()
+        self.mirror = (self.update_callback)()
     }
 
     fn filter_nodes(
         &mut self,
         nodes: &mut Vec<NodeRecord>,
     ) -> Result<SmallVec<[PeerId; 3]>, Discv4Error> {
-        if self.change_tx.has_changed().map_err(Discv4Error::Discv5MirrorUpdateFailed)? {
+        if self.change_tx.has_changed().map_err(Discv4Error::MirrorUpdateFailed)? {
             self.update_mirror();
             self.change_tx.borrow_and_update();
         }
@@ -2326,12 +2357,11 @@ where
     }
 }
 
+#[doc(hidden)]
 #[derive(Debug)]
-pub struct Discv5KbucketsNoop;
+pub struct Noop;
 
-unsafe impl Send for Discv5KbucketsNoop {}
-
-impl MirrorDiscv5KBuckets for Discv5KbucketsNoop {
+impl MirrorPrimaryKBuckets for Noop {
     fn update_mirror(&mut self) {}
     fn filter_nodes(
         &mut self,

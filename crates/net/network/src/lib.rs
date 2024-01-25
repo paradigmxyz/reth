@@ -151,13 +151,17 @@ pub use session::{
 pub use reth_discv5::{DiscoveryUpdateV5, Discv5};
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
 
+/// Discovery using [`reth_discv4::Discv4`].
 //#[cfg(not(feature = "discv5"))]
 //type Discovery = Discv4;
 
+/// Auto trait for discv5 update stream.
 pub trait StreamDiscv5: futures::Stream<Item = DiscoveryUpdateV5> + Unpin + Send + 'static {}
 impl<S> StreamDiscv5 for S where
     S: futures::Stream<Item = DiscoveryUpdateV5> + Unpin + Send + 'static
 {
 }
+
+/// Discovery using [`reth_discv5::Discv5`].
 //#[cfg(feature = "discv5")]
 pub type Discovery = Disc<Discv5, Box<dyn StreamDiscv5>>;

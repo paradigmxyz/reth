@@ -37,8 +37,8 @@ pub enum Discv4Error {
     #[error(transparent)]
     Receive(#[from] RecvError),
     /// Failed to receive state change update.
-    #[error("failed to receive update on state change of discv5 kbuckets")]
-    Discv5MirrorUpdateFailed(watch::error::RecvError),
+    #[error("failed to receive update on state change of primary kbuckets")]
+    MirrorUpdateFailed(watch::error::RecvError),
     /// Decoding a packet received over the network failed.
     #[error(transparent)]
     DecodePacketError(#[from] DecodePacketError),
