@@ -51,12 +51,9 @@ impl SnapshotTargets {
         .iter()
         .all(|(target_block_range, highest_snapshotted_block)| {
             target_block_range.map_or(true, |target_block_range| {
-                highest_snapshotted_block.map_or(
-                    *target_block_range.start() == 1,
-                    |highest_snapshotted_block| {
-                        *target_block_range.start() == highest_snapshotted_block + 1
-                    },
-                )
+                *target_block_range.start() ==
+                    highest_snapshotted_block
+                        .map_or(0, |highest_snapshotted_block| highest_snapshotted_block + 1)
             })
         })
     }
@@ -158,7 +155,7 @@ impl<DB: Database> Snapshotter<DB> {
         highest_snapshot: Option<BlockNumber>,
         finalized_block_number: BlockNumber,
     ) -> Option<RangeInclusive<BlockNumber>> {
-        let range = highest_snapshot.unwrap_or_default() + 1..=finalized_block_number;
+        let range = highest_snapshot.map_or(0, |block| block + 1)..=finalized_block_number;
         (!range.is_empty()).then_some(range)
     }
 }
@@ -180,8 +177,8 @@ mod tests {
 
         let db = TestStageDB::default();
 
-        let blocks = random_block_range(&mut rng, 1..=3, B256::ZERO, 2..3);
-        db.insert_blocks(blocks.iter(), Some(1)).expect("insert blocks");
+        let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3);
+        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let snapshots_dir = tempfile::TempDir::new().unwrap();
         let provider_factory = db
@@ -195,7 +192,7 @@ mod tests {
         let targets = snapshotter.get_snapshot_targets(1).expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets { headers: Some(1..=1), receipts: None, transactions: Some(1..=1) }
+            SnapshotTargets { headers: Some(0..=1), receipts: None, transactions: Some(0..=1) }
         );
         assert_matches!(snapshotter.run(targets), Ok(_));
         assert_eq!(
