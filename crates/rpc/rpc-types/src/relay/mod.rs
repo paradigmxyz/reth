@@ -70,11 +70,9 @@ pub struct BidTrace {
     /// The hash of the block.
     pub block_hash: B256,
     /// The public key of the builder.
-    #[serde(rename = "builder_pubkey")]
-    pub builder_public_key: BlsPublicKey,
+    pub builder_pubkey: BlsPublicKey,
     /// The public key of the proposer.
-    #[serde(rename = "proposer_pubkey")]
-    pub proposer_pubic_key: BlsPublicKey,
+    pub proposer_pubkey: BlsPublicKey,
     /// The recipient of the proposer's fee.
     pub proposer_fee_recipient: Address,
     /// The gas limit associated with the block.
