@@ -12,11 +12,9 @@ mod state;
 use reth_rpc_types::PeerId;
 pub use state::*;
 mod test_helpers;
-pub use test_helpers::*;
 mod validators;
-pub use validators::*;
 
-use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use alloy_rlp::{Decodable, Encodable};
 use itertools::Itertools;
 use parking_lot::RwLock;
 use reth_ecies::util::id2pk;
@@ -27,7 +25,7 @@ use reth_eth_wire::{
 };
 use reth_interfaces::clayer::ClayerConsensus;
 use reth_primitives::{public_key_to_address, sign_message, B256};
-use secp256k1::{Message, PublicKey, SecretKey, SECP256K1};
+use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use std::{
     collections::{HashSet, VecDeque},
     sync::Arc,
@@ -40,7 +38,7 @@ use tracing::*;
 
 use crate::{
     engine_api::{ApiService, ExecutionPayloadWrapperV2},
-    timing::{retry_until_ok, Timeout},
+    timing::Timeout,
 };
 
 pub struct ClayerConsensusEngine {
@@ -256,6 +254,7 @@ impl ClayerConsensusEngineInner {
             PbftMessageType::NewView => self.handle_new_view(&msg, state)?,
             PbftMessageType::SealRequest => self.handle_seal_request(msg, state)?,
             PbftMessageType::Seal => self.handle_seal_response(&msg, state)?,
+            PbftMessageType::BlockNew => self.handle_block_new(msg, state)?,
             _ => warn!("Received message with unknown type: {:?}", msg_type),
         }
 
@@ -1193,7 +1192,7 @@ impl ClayerConsensusEngineInner {
                 ))
             })?;
 
-        let mut seal = PbftSeal {
+        let seal = PbftSeal {
             info: PbftMessageInfo {
                 ptype: PbftMessageType::Seal as u8,
                 view,
@@ -1397,7 +1396,6 @@ impl ClayerConsensusEngineInner {
 
         // Get the previous ID of the block this seal is supposed to prove so it can be used to
         // verify the seal
-        // 得到 seal.block_id块的previous_id 即祖父块的ID
         let proven_block_previous_id = self
             .msg_log
             .get_block_with_id(seal.block_id)
