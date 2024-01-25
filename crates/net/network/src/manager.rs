@@ -16,23 +16,9 @@
 //! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the RLPx session.
 
 use crate::{
-    config::NetworkConfig,
-    discovery::Discovery,
-    error::{NetworkError, ServiceKind},
-    eth_requests::IncomingEthRequest,
-    import::{BlockImport, BlockImportOutcome, BlockValidation},
-    listener::ConnectionListener,
-    message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
-    metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
-    network::{NetworkHandle, NetworkHandleMessage},
-    peers::{PeersHandle, PeersManager},
-    protocol::IntoRlpxSubProtocol,
-    session::SessionManager,
-    state::NetworkState,
-    swarm::{NetworkConnectionState, Swarm, SwarmEvent},
-    transactions::NetworkTransactionEvent,
-    FetchClient, NetworkBuilder,
+    config::NetworkConfig, discovery::{self, into_discv5_with_stream_trait_obj}, error::{NetworkError, ServiceKind}, eth_requests::IncomingEthRequest, import::{BlockImport, BlockImportOutcome, BlockValidation}, listener::ConnectionListener, message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender}, metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE}, network::{NetworkHandle, NetworkHandleMessage}, peers::{PeersHandle, PeersManager}, protocol::IntoRlpxSubProtocol, session::SessionManager, state::NetworkState, swarm::{NetworkConnectionState, Swarm, SwarmEvent}, transactions::NetworkTransactionEvent, Discovery, FetchClient, NetworkBuilder, StreamDiscv5
 };
+use discv5::ListenConfig;
 use futures::{pin_mut, Future, StreamExt};
 use parking_lot::Mutex;
 use reth_eth_wire::{
@@ -49,7 +35,7 @@ use reth_tasks::shutdown::GracefulShutdown;
 use reth_tokio_util::EventListeners;
 use secp256k1::SecretKey;
 use std::{
-    net::SocketAddr,
+    net::{Ipv4Addr, SocketAddr},
     pin::Pin,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -196,9 +182,18 @@ where
             disc_config
         });
 
-        let discovery =
-            Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config)
-                .await?;
+        let Some(discv4_config) = discovery_v4_config else {
+            return Err(NetworkError::custom_discovery("missing discv4 config needed to start reth_discv5"))
+        };
+        let discovery = discovery::new_discv5(
+            discovery_addr,
+            secret_key,
+            (discv4_config, discv5::Discv5ConfigBuilder::new(discv5::ListenConfig::Ipv4{ip: Ipv4Addr::UNSPECIFIED.into(), port: 9001}).build()),
+            dns_discovery_config,
+        )
+        .await?;
+
+        let discovery = into_discv5_with_stream_trait_obj(discovery);
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
 

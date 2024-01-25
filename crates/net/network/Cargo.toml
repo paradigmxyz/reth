@@ -116,6 +116,7 @@ optimism = [
     "reth-network-api/optimism",
     "reth-rpc-types/optimism",
 ]
+discv5 = []
 
 [[bench]]
 name = "bench"

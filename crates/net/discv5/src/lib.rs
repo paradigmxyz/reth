@@ -1,14 +1,14 @@
 use std::{
+    fmt,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
 };
 
-use derive_more::{Deref, DerefMut, From};
+use derive_more::From;
 use discv5;
 use futures::{Stream, StreamExt};
 use parking_lot::RwLock;
-use pin_project::pin_project;
 use reth_discv4::{DiscoveryUpdate, Discv4, HandleDiscV4};
 use tokio::sync::{mpsc, watch};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt as TokioStreamExt};
@@ -35,12 +35,25 @@ impl Discv5 {
 
 impl HandleDiscV4 for Discv5 {}
 
-#[derive(From)]
+impl fmt::Debug for Discv5 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug_struct = f.debug_struct("Discv5");
+
+        debug_struct.field("discv5", &"{ .. }");
+        debug_struct.field("discv4", &self.discv4);
+        debug_struct.field("discv5_kbuckets_change_tx", &self.discv5_kbuckets_change_tx);
+
+        debug_struct.finish()
+    }
+}
+
+#[derive(Debug, From)]
 pub enum DiscoveryUpdateV5 {
     V5(discv5::Discv5Event),
     V4(DiscoveryUpdate),
 }
 
+#[derive(Debug)]
 pub struct UpdateStream<S>(S);
 
 impl<S, I> Stream for UpdateStream<S>

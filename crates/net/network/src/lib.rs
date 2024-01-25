@@ -136,7 +136,7 @@ pub mod transactions;
 
 pub use builder::NetworkBuilder;
 pub use config::{NetworkConfig, NetworkConfigBuilder};
-pub use discovery::{Discovery, DiscoveryEvent};
+pub use discovery::{Discovery as Disc, DiscoveryEvent};
 pub use fetch::FetchClient;
 pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
@@ -149,3 +149,12 @@ pub use session::{
 };
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
+pub use reth_discv5::{Discv5, DiscoveryUpdateV5};
+
+//#[cfg(not(feature = "discv5"))]
+//type Discovery = Discv4;
+
+pub trait StreamDiscv5: futures::Stream<Item = DiscoveryUpdateV5> + Unpin {}
+impl<S> StreamDiscv5 for S where S: futures::Stream<Item = DiscoveryUpdateV5> + Unpin {}
+//#[cfg(feature = "discv5")]
+pub type Discovery<S = &'static dyn StreamDiscv5> = Disc<Discv5, S>;

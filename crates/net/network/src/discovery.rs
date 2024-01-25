@@ -2,7 +2,7 @@
 
 use crate::{
     error::{NetworkError, ServiceKind},
-    manager::DiscoveredEvent,
+    manager::DiscoveredEvent, StreamDiscv5
 };
 use discv5::{
     self,
@@ -27,18 +27,13 @@ use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tracing::info;
 
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
-    net::{IpAddr, SocketAddr},
-    pin::{pin, Pin},
-    sync::Arc,
-    task::{Context, Poll},
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque}, fmt, net::{IpAddr, SocketAddr}, pin::Pin, sync::Arc, task::{Context, Poll}
 };
 
 /// An abstraction over the configured discovery protocol.
 ///
 /// Listens for new discovered nodes and emits events for discovered nodes and their
 /// address.
-#[derive(Debug)]
 pub struct Discovery<D = Discv4, S = ReceiverStream<DiscoveryUpdate>> {
     /// All nodes discovered via discovery protocol.
     ///
@@ -228,10 +223,22 @@ impl Stream for Discovery {
     }
 }
 
-impl<S> Discovery<Discv5, S>
-where
-    S: Stream<Item = DiscoveryUpdateV5>,
-{
+impl fmt::Debug for Discovery {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug_struct = f.debug_struct("Discovery<Discv5>");
+
+        debug_struct.field("discovered_nodes", &self.discovered_nodes);
+        debug_struct.field("local_enr", &self.local_enr);
+        debug_struct.field("disc", &self.disc);
+        debug_struct.field("dns_discovery_updates", &self.dns_discovery_updates);
+        debug_struct.field("queued_events", &self.queued_events);
+        debug_struct.field("discovery_listeners", &self.discovery_listeners);
+
+        debug_struct.finish()
+    }
+}
+
+impl<S> Discovery<Discv5, S> {
     fn on_discv5_update(&mut self, update: discv5::Discv5Event) -> Result<(), NetworkError> {
         use discv5::Discv5Event::*;
         match update {
@@ -263,10 +270,7 @@ where
     }
 }
 
-impl<S> Stream for Discovery<Discv5, S>
-where
-    S: Stream<Item = DiscoveryUpdateV5> + Unpin,
-{
+impl Stream for Discovery<Discv5, &'static dyn StreamDiscv5> {
     type Item = DiscoveryEvent;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -301,6 +305,38 @@ where
     }
 }
 
+impl<S> fmt::Debug for Discovery<Discv5, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug_struct = f.debug_struct("Discovery<Discv5>");
+
+        debug_struct.field("discovered_nodes", &self.discovered_nodes);
+        debug_struct.field("local_enr", &self.local_enr);
+        debug_struct.field("disc", &self.disc);
+        debug_struct.field("dns_discovery_updates", &"{ .. }");
+        debug_struct.field("queued_events", &self.queued_events);
+        debug_struct.field("discovery_listeners", &self.discovery_listeners);
+
+        debug_struct.finish()
+    }
+}
+
+pub fn into_discv5_with_stream_trait_obj(value: Discovery<Discv5, impl StreamDiscv5>) -> Discovery<Discv5, &'static dyn StreamDiscv5> {
+    let disc_updates = value.disc_updates.map(|stream| &stream as &'static dyn StreamDiscv5);
+
+        Discovery {
+            discovered_nodes: value.discovered_nodes,
+            local_enr: value.local_enr,
+            disc: value.disc,
+            disc_updates,
+            _disc_service: value._disc_service,
+            _dns_discovery: value._dns_discovery,
+            dns_discovery_updates: value.dns_discovery_updates,
+            _dns_disc_service: value._dns_disc_service,
+            queued_events: value.queued_events,
+            discovery_listeners: value.discovery_listeners,
+        }
+}
+
 /// Spawns the discovery service.
 ///
 /// This will spawn the [`reth_discv5::Discv5`] onto a new task and establish a listener
@@ -310,7 +346,7 @@ pub async fn new_discv5(
     sk: SecretKey,
     (discv4_config, discv5_config): (Discv4Config, discv5::Discv5Config),
     dns_discovery_config: Option<DnsDiscoveryConfig>,
-) -> Result<Discovery<Discv5, impl Stream<Item = DiscoveryUpdateV5>>, NetworkError> {
+) -> Result<Discovery<Discv5, impl StreamDiscv5>, NetworkError> {
     //
     // 1. one port per discovery node
     //
