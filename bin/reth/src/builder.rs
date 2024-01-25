@@ -1,6 +1,9 @@
-use crate::commands::{
-    debug_cmd::engine_api_store::EngineApiStore,
-    node::{cl_events::ConsensusLayerHealthEvents, events},
+use crate::{
+    commands::{
+        debug_cmd::engine_api_store::EngineApiStore,
+        node::{cl_events::ConsensusLayerHealthEvents, events},
+    },
+    init::init_genesis,
 };
 use eyre::Context;
 use fdlimit::raise_fd_limit;
@@ -31,7 +34,6 @@ use reth_node_core::{
         ext::{DefaultRethNodeCommandConfig, RethCliExt, RethNodeCommandConfig},
     },
     dirs::{ChainPath, DataDirPath},
-    init::init_genesis,
     version::SHORT_VERSION,
 };
 use reth_payload_builder::PayloadBuilderHandle;

@@ -5786,6 +5786,7 @@ dependencies = [
  "serde_json",
  "similar-asserts",
  "tempfile",
+ "thiserror",
  "tokio",
  "toml 0.8.8",
  "tracing",

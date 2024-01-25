@@ -28,8 +28,10 @@
 
 pub mod cli;
 pub mod commands;
+pub mod init;
 pub mod runner;
 pub mod utils;
+pub mod builder;
 
 /// Re-exported payload related types
 pub mod payload {
@@ -41,9 +43,6 @@ pub mod payload {
 pub mod core {
     pub use reth_node_core::*;
 }
-
-/// Re-exported from `reth_node_core`.
-pub mod builder;
 
 /// Re-exported from `reth_node_core`.
 pub mod prometheus_exporter {
@@ -63,12 +62,6 @@ pub mod args {
 /// the `reth_node_core::args` re-export for more details.
 pub mod version {
     pub use reth_node_core::version::*;
-}
-
-/// Re-exported from `reth_node_core`, also to prevent a breaking change. See the comment on
-/// the `reth_node_core::args` re-export for more details.
-pub mod init {
-    pub use reth_node_core::init::*;
 }
 
 /// Re-exported from `reth_node_core`, also to prevent a breaking change. See the comment on
