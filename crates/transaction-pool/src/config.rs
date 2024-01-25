@@ -158,4 +158,15 @@ impl LocalTransactionConfig {
         }
         origin.is_local() || self.contains_local_address(sender)
     }
+
+    /// Sets toggle to propagate transactions received locally by this client (e.g
+    /// transactions from eth_sendTransaction to this nodes' RPC server)
+    ///
+    /// If set to false, only transactions received by network peers (via
+    /// p2p) will be marked as propagated in the local transaction pool and returned on a
+    /// GetPooledTransactions p2p request
+    pub fn set_propagate_local_transactions(mut self, propagate_local_txs: bool) -> Self {
+        self.propagate_local_transactions = propagate_local_txs;
+        self
+    }
 }
