@@ -194,6 +194,13 @@ where
 
         todo!()
     }
+
+    /// Check that the builder can be launched
+    ///
+    /// This is useful when writing tests to ensure that the builder is configured correctly.
+    pub fn check_launch(self) -> Self {
+        self
+    }
 }
 
 /// Captures the necessary context for building the components of the node.
@@ -219,6 +226,11 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Returns the current head of the blockchain at launch.
     pub fn head(&self) -> Head {
         self.head
+    }
+
+    /// Returns the config of the node.
+    pub fn config(&self) -> &NodeConfig {
+        &self.config
     }
 
     /// Returns the data dir of the node.

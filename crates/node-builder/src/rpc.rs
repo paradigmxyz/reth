@@ -2,9 +2,12 @@
 
 use crate::{components::FullNodeComponents, hooks::NodeHooks, BuilderContext};
 use reth_network::NetworkHandle;
-use reth_node_core::rpc::builder::{
-    auth::{AuthRpcModule, AuthServerHandle},
-    RethModuleRegistry, RpcServerHandle, TransportRpcModules,
+use reth_node_core::{
+    node_config::NodeConfig,
+    rpc::builder::{
+        auth::{AuthRpcModule, AuthServerHandle},
+        RethModuleRegistry, RpcServerHandle, TransportRpcModules,
+    },
 };
 use reth_tasks::TaskExecutor;
 use std::fmt;
@@ -135,7 +138,7 @@ impl<Node: FullNodeComponents> ExtendRpcModules<Node> for () {
 /// This can be used to access installed modules, or create commonly used handlers like
 /// [reth_rpc::EthApi], and ultimately merge additional rpc handler into the configured transport
 /// modules [TransportRpcModules] as well as configured authenticated methods [AuthRpcModule].
-pub(crate) struct RpcContext<'a, Node: FullNodeComponents> {
+pub struct RpcContext<'a, Node: FullNodeComponents> {
     /// The node components.
     pub(crate) node: Node,
 
@@ -146,7 +149,7 @@ pub(crate) struct RpcContext<'a, Node: FullNodeComponents> {
     ///
     /// This provides easy access to rpc handlers, such as [RethModuleRegistry::eth_api].
     // TODO simplify registry trait bounds
-    pub(crate) registry: &'a mut RethModuleRegistry<
+    pub registry: &'a mut RethModuleRegistry<
         Node::Provider,
         Node::Pool,
         NetworkHandle,
@@ -157,9 +160,20 @@ pub(crate) struct RpcContext<'a, Node: FullNodeComponents> {
     ///
     /// This can be used to merge additional modules into the configured transports (http, ipc,
     /// ws). See [TransportRpcModules::merge_configured]
-    pub(crate) modules: &'a mut TransportRpcModules,
+    pub modules: &'a mut TransportRpcModules,
     /// Holds jwt authenticated rpc module.
     ///
     /// This can be used to merge additional modules into the configured authenticated methods
-    pub(crate) auth_module: &'a mut AuthRpcModule,
+    pub auth_module: &'a mut AuthRpcModule,
+}
+
+impl<'a, Node: FullNodeComponents> RpcContext<'a, Node> {
+    pub fn config(&self) -> &NodeConfig {
+        &self.inner.config()
+    }
+
+    /// Returns a reference to the configured node.
+    pub fn node(&self) -> &Node {
+        &self.node
+    }
 }

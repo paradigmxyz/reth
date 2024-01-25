@@ -30,3 +30,5 @@ pub mod rpc;
 
 pub use builder::*;
 pub use handle::NodeHandle;
+
+pub mod ethereum;

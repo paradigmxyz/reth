@@ -30,5 +30,8 @@ async-trait.workspace = true
 eyre.workspace = true
 serde.workspace = true
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
+
 [features]
 optimism = ["reth-node-api/optimism"]
