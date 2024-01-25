@@ -147,7 +147,7 @@ impl<DB, Provider, Pool, Network, Events, Tasks>
 impl<DB, Provider, Pool, Network, Events, Tasks> RethNodeComponents
     for RethNodeComponentsImpl<DB, Provider, Pool, Network, Events, Tasks>
 where
-    DB: Database + Clone + 'static,
+    DB: Database + Clone + Unpin + 'static,
     Provider: FullProvider<DB> + Clone + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + Unpin + 'static,
