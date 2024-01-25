@@ -58,6 +58,7 @@ pub struct Announcement68Filter<N = LayerOne>(N);
 
 /// L1 Network.
 #[derive(Debug, Display, Default)]
+#[non_exhaustive]
 pub struct LayerOne;
 
 impl ValidateTx68 for LayerOne {
