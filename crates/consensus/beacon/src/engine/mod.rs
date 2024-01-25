@@ -1461,7 +1461,7 @@ where
     /// Attempt to form a new canonical chain based on the current sync target.
     ///
     /// This is invoked when we successfully __downloaded__ a new block from the network which
-    /// resulted in either [BlockStatus::Accepted] or [BlockStatus::Valid].
+    /// resulted in [BlockStatus::Valid].
     ///
     /// Note: This will not succeed if the sync target has changed since the block download request
     /// was issued and the new target is still disconnected and additional missing blocks are
