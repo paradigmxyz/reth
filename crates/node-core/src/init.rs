@@ -1,7 +1,6 @@
 //! Reth genesis initialization utility functions.
 
 use reth_db::{
-    cursor::DbCursorRO,
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
@@ -12,8 +11,8 @@ use reth_primitives::{
 };
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
-    BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown,
-    ProviderError, ProviderFactory,
+    BlockHashReader, BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HistoryWriter,
+    OriginalValuesKnown, ProviderError, ProviderFactory,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -54,8 +53,10 @@ pub fn init_genesis<DB: Database>(
 
     let hash = chain.genesis_hash();
 
-    let tx = db.tx()?;
-    if let Some((_, db_hash)) = tx.cursor_read::<tables::CanonicalHeaders>()?.first()? {
+    let factory = ProviderFactory::new(&db, chain.clone());
+
+    let provider = factory.provider()?;
+    if let Some(db_hash) = provider.block_hash(0)? {
         if db_hash == hash {
             debug!("Genesis already written, skipping.");
             return Ok(hash)
@@ -67,11 +68,10 @@ pub fn init_genesis<DB: Database>(
         })
     }
 
-    drop(tx);
+    drop(provider);
     debug!("Writing genesis block.");
 
     // use transaction to insert genesis header
-    let factory = ProviderFactory::new(&db, chain.clone());
     let provider_rw = factory.provider_rw()?;
     insert_genesis_hashes(&provider_rw, genesis)?;
     insert_genesis_history(&provider_rw, genesis)?;
