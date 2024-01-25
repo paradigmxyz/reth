@@ -74,7 +74,7 @@ pub struct BidTrace {
     pub builder_public_key: BlsPublicKey,
     /// The public key of the proposer.
     #[serde(rename = "proposer_pubkey")]
-    pub proposer_public_key: BlsPublicKey,
+    pub proposer_pubic_key: BlsPublicKey,
     /// The recipient of the proposer's fee.
     pub proposer_fee_recipient: Address,
     /// The gas limit associated with the block.
@@ -197,9 +197,12 @@ pub struct ProposerPayloadsDeliveredQuery {
     /// Search for a specific EL block number
     #[serde(skip_serializing_if = "Option::is_none")]
     pub block_number: Option<u64>,
-    /// filter results by a proposer public key
+    /// Filter results by a proposer public key
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub proposer_key: Option<BlsPublicKey>,
+    pub proposer_pubkey: Option<BlsPublicKey>,
+    /// Filter results by a builder public key
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub builder_pubkey: Option<BlsPublicKey>,
     /// How to order results
     #[serde(skip_serializing_if = "Option::is_none")]
     pub order_by: Option<OrderBy>,
@@ -231,8 +234,14 @@ impl ProposerPayloadsDeliveredQuery {
     }
 
     /// Sets the proposer public key
-    pub fn proposer_key(mut self, proposer_key: BlsPublicKey) -> Self {
-        self.proposer_key = Some(proposer_key);
+    pub fn proposer_pubkey(mut self, proposer_pubkey: BlsPublicKey) -> Self {
+        self.proposer_pubkey = Some(proposer_pubkey);
+        self
+    }
+
+    /// Sets the builder public key
+    pub fn builder_pubkey(mut self, builder_pubkey: BlsPublicKey) -> Self {
+        self.builder_pubkey = Some(builder_pubkey);
         self
     }
 
