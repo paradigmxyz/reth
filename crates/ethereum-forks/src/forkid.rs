@@ -92,7 +92,7 @@ impl PartialOrd for ForkFilterKey {
 impl Ord for ForkFilterKey {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
-            (ForkFilterKey::Block(a), ForkFilterKey::Block(b)) => a.cmp(b),
+            (ForkFilterKey::Block(a), ForkFilterKey::Block(b)) |
             (ForkFilterKey::Time(a), ForkFilterKey::Time(b)) => a.cmp(b),
             (ForkFilterKey::Block(_), ForkFilterKey::Time(_)) => Ordering::Less,
             _ => Ordering::Greater,
@@ -182,18 +182,22 @@ impl ForkFilter {
     where
         F: IntoIterator<Item = ForkFilterKey>,
     {
+        // Convert the genesis hash to a `ForkHash`.
         let genesis_fork_hash = ForkHash::from(genesis_hash);
-        let mut forks = forks.into_iter().collect::<BTreeSet<_>>();
-        forks.remove(&ForkFilterKey::Time(0));
-        forks.remove(&ForkFilterKey::Block(0));
 
+        // Process and filter forks based on criteria.
         let forks = forks
             .into_iter()
-            // filter out forks that are pre-genesis by timestamp
-            .filter(|key| match key {
-                ForkFilterKey::Block(_) => true,
-                ForkFilterKey::Time(time) => *time > genesis_timestamp,
+            .filter(|key| {
+                key != &ForkFilterKey::Time(0) &&
+                    key != &ForkFilterKey::Block(0) &&
+                    match key {
+                        ForkFilterKey::Block(_) => true,
+                        ForkFilterKey::Time(time) => *time > genesis_timestamp,
+                    }
             })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
             .fold(
                 (BTreeMap::from([(ForkFilterKey::Block(0), genesis_fork_hash)]), genesis_fork_hash),
                 |(mut acc, base_hash), key| {
@@ -204,8 +208,10 @@ impl ForkFilter {
             )
             .0;
 
+        // Compute cache based on filtered forks and the current head.
         let cache = Cache::compute_cache(&forks, head);
 
+        // Create and return a new `ForkFilter`.
         Self { forks, head, cache }
     }
 
@@ -224,16 +230,14 @@ impl ForkFilter {
             head_in_past || head_in_future
         };
 
-        let mut transition = None;
-
         // recompute the cache
-        if recompute_cache {
+        let transition = if recompute_cache {
             let past = self.current();
-
             self.cache = Cache::compute_cache(&self.forks, head);
-
-            transition = Some(ForkTransition { current: self.current(), past })
-        }
+            Some(ForkTransition { current: self.current(), past })
+        } else {
+            None
+        };
 
         self.head = head;
 
@@ -347,19 +351,23 @@ struct Cache {
 impl Cache {
     /// Compute cache.
     fn compute_cache(forks: &BTreeMap<ForkFilterKey, ForkHash>, head: Head) -> Self {
+        // Prepare vectors to store past and future forks.
         let mut past = Vec::with_capacity(forks.len());
         let mut future = Vec::with_capacity(forks.len());
 
+        // Initialize variables to track the epoch range.
         let mut epoch_start = ForkFilterKey::Block(0);
         let mut epoch_end = None;
+
+        // Iterate through forks and categorize them into past and future.
         for (key, hash) in forks {
-            let active = if let ForkFilterKey::Block(block) = key {
-                *block <= head.number
-            } else if let ForkFilterKey::Time(time) = key {
-                *time <= head.timestamp
-            } else {
-                unreachable!()
+            // Check if the fork is active based on its type (Block or Time).
+            let active = match key {
+                ForkFilterKey::Block(block) => *block <= head.number,
+                ForkFilterKey::Time(time) => *time <= head.timestamp,
             };
+
+            // Categorize forks into past or future based on activity.
             if active {
                 epoch_start = *key;
                 past.push((*key, *hash));
@@ -371,11 +379,13 @@ impl Cache {
             }
         }
 
+        // Create ForkId using the last past fork's hash and the next epoch start.
         let fork_id = ForkId {
             hash: past.last().expect("there is always at least one - genesis - fork hash; qed").1,
             next: epoch_end.unwrap_or(ForkFilterKey::Block(0)).into(),
         };
 
+        // Return the computed cache.
         Self { epoch_start, epoch_end, past, future, fork_id }
     }
 }
