@@ -67,9 +67,7 @@ use secp256k1::SecretKey;
 use std::{
     net::{SocketAddr, SocketAddrV4},
     path::PathBuf,
-    pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
 };
 use tokio::sync::{
     mpsc::{Receiver, UnboundedSender},

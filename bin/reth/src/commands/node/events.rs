@@ -466,7 +466,7 @@ impl Display for Eta {
 
 #[cfg(test)]
 mod tests {
-    use crate::events::Eta;
+    use super::*;
     use std::time::{Duration, Instant};
 
     #[test]
