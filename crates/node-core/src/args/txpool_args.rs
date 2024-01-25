@@ -51,8 +51,8 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.locals")]
     pub locals: Vec<Address>,
     /// Flag to toggle local transaction propagation.
-    #[arg(long = "txpool.propagate-local-transactions", default_value_t = true)]
-    pub propagate_local_transactions: bool,
+    #[arg(long = "txpool.no-local-transactions-propagation")]
+    pub no_local_transactions_propagation: bool,
 }
 
 impl Default for TxPoolArgs {
@@ -69,7 +69,7 @@ impl Default for TxPoolArgs {
             blob_transaction_price_bump: REPLACE_BLOB_PRICE_BUMP,
             no_locals: false,
             locals: Default::default(),
-            propagate_local_transactions: true,
+            no_local_transactions_propagation: false,
         }
     }
 }
@@ -81,7 +81,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             local_transactions_config: LocalTransactionConfig {
                 no_exemptions: self.no_locals,
                 local_addresses: self.locals.clone().into_iter().collect(),
-                propagate_local_transactions: self.propagate_local_transactions,
+                propagate_local_transactions: !self.no_local_transactions_propagation,
             },
             pending_limit: SubPoolLimit {
                 max_txs: self.pending_max_count,
