@@ -5,6 +5,7 @@ use reth_db::{
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
+    RawValue,
 };
 use reth_interfaces::consensus;
 use reth_primitives::{
@@ -83,7 +84,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         let mut senders_cursor = tx.cursor_write::<tables::TxSenders>()?;
 
         // Query the transactions from both database and static files
-        let transactions = provider.transactions_by_tx_range(tx_range.clone())?;
+        let transactions = provider.raw_transactions_by_tx_range(tx_range.clone())?;
 
         // Iterate over transactions in chunks
         info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
@@ -185,9 +186,11 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 }
 
 fn recover_sender(
-    (tx_id, tx): (TxNumber, TransactionSignedNoHash),
+    (tx_id, tx): (TxNumber, RawValue<TransactionSignedNoHash>),
     rlp_buf: &mut Vec<u8>,
 ) -> Result<(u64, Address), Box<SenderRecoveryStageError>> {
+    let tx = tx.value().expect("value to be formated");
+
     tx.transaction.encode_without_signature(rlp_buf);
 
     // We call [Signature::recover_signer_unchecked] because transactions run in the pipeline are

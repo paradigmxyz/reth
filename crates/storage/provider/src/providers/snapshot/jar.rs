@@ -5,7 +5,8 @@ use crate::{
 };
 use reth_db::{
     codecs::CompactU256,
-    snapshot::{HeaderMask, ReceiptMask, SnapshotCursor, TransactionMask},
+    snapshot::{ColumnSelectorOne, HeaderMask, ReceiptMask, SnapshotCursor, TransactionMask},
+    RawValue,
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
@@ -264,6 +265,25 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
             .cursor()?
             .get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())?
             .and_then(|tx| tx.recover_signer()))
+    }
+
+    fn raw_transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
+        let range = to_range(range);
+        let mut cursor = self.cursor()?;
+        let mut txes = Vec::with_capacity((range.end - range.start) as usize);
+
+        for num in range {
+            if let Some(tx) =
+                cursor.get(num.into(), <TransactionMask<TransactionSignedNoHash>>::MASK)?
+            {
+                txes.push(RawValue::new_raw(tx[0]));
+            }
+        }
+
+        Ok(txes)
     }
 }
 

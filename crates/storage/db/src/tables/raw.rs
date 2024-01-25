@@ -114,6 +114,11 @@ impl<V: Value> RawValue<V> {
         Self { value: V::compress(value).into(), _phantom: std::marker::PhantomData }
     }
 
+    /// Create new raw value from raw compressed value
+    pub fn new_raw(value: impl AsRef<[u8]>) -> Self {
+        Self { value: value.as_ref().to_vec(), _phantom: std::marker::PhantomData }
+    }
+
     /// Returns the decompressed value.
     pub fn value(&self) -> Result<V, DatabaseError> {
         V::decompress(&self.value)

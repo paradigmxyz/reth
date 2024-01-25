@@ -24,7 +24,7 @@ use reth_db::{
     table::{Table, TableRow},
     tables,
     transaction::{DbTx, DbTxMut},
-    BlockNumberList, DatabaseError,
+    BlockNumberList, DatabaseError, RawKey, RawTable, RawValue,
 };
 use reth_interfaces::{
     p2p::headers::downloader::SyncTarget,
@@ -1637,6 +1637,25 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         self.transactions_by_tx_range_with_cursor(
             range,
             &mut self.tx.cursor_read::<tables::Transactions>()?,
+        )
+    }
+
+    fn raw_transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
+        self.get_range_with_snapshot(
+            SnapshotSegment::Transactions,
+            to_range(range),
+            |snapshot, range, _| snapshot.raw_transactions_by_tx_range(range),
+            |range, _| {
+                self.tx
+                    .cursor_read::<RawTable<tables::Transactions>>()?
+                    .walk_range(RawKey::new(range.start)..RawKey::new(range.end))?
+                    .map(|entry| Ok(entry?.1))
+                    .try_collect()
+            },
+            |_| true,
         )
     }
 

@@ -9,9 +9,11 @@ use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
     models::StoredBlockBodyIndices,
-    snapshot::{iter_snapshots, HeaderMask, ReceiptMask, SnapshotCursor, TransactionMask},
+    snapshot::{
+        iter_snapshots, ColumnSelectorOne, HeaderMask, ReceiptMask, SnapshotCursor, TransactionMask,
+    },
     table::Table,
-    tables,
+    tables, RawValue,
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
@@ -576,12 +578,28 @@ impl TransactionsProvider for SnapshotProvider {
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<reth_primitives::TransactionSignedNoHash>> {
+    ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
         self.fetch_range(
             SnapshotSegment::Transactions,
             to_range(range),
             |cursor, number| {
                 cursor.get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())
+            },
+            |_| true,
+        )
+    }
+
+    fn raw_transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
+        self.fetch_range(
+            SnapshotSegment::Transactions,
+            to_range(range),
+            |cursor, number| {
+                cursor.get(number.into(), <TransactionMask<TransactionSignedNoHash>>::MASK).map(
+                    |result| result.map(|row| RawValue::<TransactionSignedNoHash>::new_raw(row[0])),
+                )
             },
             |_| true,
         )

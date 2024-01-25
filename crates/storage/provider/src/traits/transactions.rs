@@ -5,6 +5,7 @@ use reth_primitives::{
     TransactionSignedNoHash, TxHash, TxNumber,
 };
 use std::ops::{Range, RangeBounds, RangeInclusive};
+use reth_db::RawValue;
 
 ///  Client trait for fetching [TransactionSigned] related data.
 #[auto_impl::auto_impl(&, Arc)]
@@ -54,6 +55,12 @@ pub trait TransactionsProvider: BlockNumReader + Send + Sync {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<TransactionSignedNoHash>>;
+
+    /// Get raw transactions by tx range.
+    fn raw_transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>>;
 
     /// Get Senders from a tx range.
     fn senders_by_tx_range(
