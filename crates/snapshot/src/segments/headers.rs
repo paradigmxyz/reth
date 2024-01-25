@@ -51,7 +51,7 @@ impl<DB: Database> Segment<DB> for Headers {
 
             snapshot_writer.append_header(header, header_td.0, canonical_header)?;
         }
-        snapshot_writer.increment_block(SnapshotSegment::Transactions)?;
+        snapshot_writer.increment_block(SnapshotSegment::Headers)?;
 
         Ok(())
     }
