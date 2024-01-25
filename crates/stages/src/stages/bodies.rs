@@ -124,7 +124,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
         let snapshot_provider = provider.snapshot_provider().expect("should exist");
         let mut snapshotter =
-            snapshot_provider.writer(from_block, SnapshotSegment::Transactions)?;
+            snapshot_provider.get_writer(from_block, SnapshotSegment::Transactions)?;
 
         // Make sure Transactions static file is at the same height. If it's further, this
         // input execution was interrupted previously and we need to unwind the static file.
@@ -677,7 +677,7 @@ mod tests {
                     {
                         let tx = self.db.factory.provider_rw()?.into_tx();
                         let mut snapshotter =
-                            snapshot_provider.writer(start, SnapshotSegment::Transactions)?;
+                            snapshot_provider.get_writer(start, SnapshotSegment::Transactions)?;
 
                         let body = StoredBlockBodyIndices {
                             first_tx_num: 0,
