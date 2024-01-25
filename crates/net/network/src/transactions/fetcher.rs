@@ -339,13 +339,18 @@ impl TransactionFetcher {
                 for peer_id in ended_sessions {
                     backups.remove(&peer_id);
                 }
-                backups.insert(peer_id);
+
+                // might receive hash in more than one announcement from same peer within time 
+                // frame it takes to successfully fetch it
+                if !backups.contains(&peer_id) {
+                    backups.insert(peer_id);
+                }
                 return false
             }
 
+            // vacant entry
             let msg_version = || self.eth68_meta.peek(hash).map(|_| EthVersion::Eth68).unwrap_or(EthVersion::Eth66);
 
-            // vacant entry
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 hash=%hash,
