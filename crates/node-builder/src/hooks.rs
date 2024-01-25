@@ -10,7 +10,7 @@ pub(crate) struct NodeHooks<Node> {
 
 impl<Node> NodeHooks<Node> {
     /// Creates a new, empty [NodeHooks] instance for the given node type.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             on_component_initialized: Box::<NoopNodeEventHook>::default(),
             on_node_started: Box::<NoopNodeEventHook>::default(),
@@ -19,7 +19,7 @@ impl<Node> NodeHooks<Node> {
     }
 
     /// Sets the hook that is run once the node's components are initialized.
-    pub fn set_on_component_initialized<F>(&mut self, hook: F) -> &mut Self
+    pub(crate) fn set_on_component_initialized<F>(&mut self, hook: F) -> &mut Self
     where
         F: OnComponentInitializedHook<Node> + 'static,
     {
@@ -28,7 +28,7 @@ impl<Node> NodeHooks<Node> {
     }
 
     /// Sets the hook that is run once the node's components are initialized.
-    pub fn on_component_initialized<F>(mut self, hook: F) -> Self
+    pub(crate) fn on_component_initialized<F>(mut self, hook: F) -> Self
     where
         F: OnComponentInitializedHook<Node> + 'static,
     {
@@ -37,7 +37,7 @@ impl<Node> NodeHooks<Node> {
     }
 
     /// Sets the hook that is run once the node has started.
-    pub fn set_on_node_started<F>(&mut self, hook: F) -> &mut Self
+    pub(crate) fn set_on_node_started<F>(&mut self, hook: F) -> &mut Self
     where
         F: OnNodeStartedHook<Node> + 'static,
     {
@@ -46,7 +46,7 @@ impl<Node> NodeHooks<Node> {
     }
 
     /// Sets the hook that is run once the node has started.
-    pub fn on_node_started<F>(mut self, hook: F) -> Self
+    pub(crate) fn on_node_started<F>(mut self, hook: F) -> Self
     where
         F: OnNodeStartedHook<Node> + 'static,
     {

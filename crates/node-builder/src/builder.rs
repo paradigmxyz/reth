@@ -3,7 +3,7 @@
 use crate::{
     components::{FullNodeComponentsAdapter, NodeComponentsBuilder},
     hooks::{NodeHooks, OnComponentInitializedHook, OnNodeStartedHook},
-    node::{FullNode, FullNodeTypesAdapter},
+    node::{FullNodeTypesAdapter},
     NodeHandle,
 };
 use reth_blockchain_tree::ShareableBlockchainTree;
@@ -16,7 +16,7 @@ use reth_node_core::{node_config::NodeConfig, primitives::Head};
 use reth_provider::providers::BlockchainProvider;
 use reth_revm::EvmProcessorFactory;
 use reth_tasks::TaskExecutor;
-use std::{marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData};
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.

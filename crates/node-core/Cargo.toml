@@ -39,7 +39,7 @@ reth-consensus-common.workspace = true
 reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
 reth-downloaders.workspace = true
-reth-node-builder.workspace = true
+#reth-node-builder.workspace = true
 reth-revm.workspace = true
 reth-stages.workspace = true
 reth-prune.workspace = true
@@ -116,7 +116,7 @@ optimism = [
     "reth-network/optimism",
     "reth-network-api/optimism",
     "reth-payload-builder/optimism",
-    "reth-node-builder/optimism",
+#    "reth-node-builder/optimism",
     "reth-rpc-types/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-auto-seal-consensus/optimism",
