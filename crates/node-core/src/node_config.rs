@@ -5,24 +5,15 @@ use crate::{
         get_secret_key, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
         PruningArgs, RpcServerArgs, TxPoolArgs,
     },
-    cli::{
-        config::{RethRpcConfig, RethTransactionPoolConfig},
-        db_type::{DatabaseBuilder},
-        ext::{RethCliExt, RethNodeCommandConfig},
-    },
+    cli::{config::RethTransactionPoolConfig, db_type::DatabaseBuilder},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     metrics::prometheus_exporter,
     utils::{get_single_header, write_peers_to_file},
 };
-use eyre::Context;
-
-use futures::{StreamExt};
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
 use reth_auto_seal_consensus::{AutoSealConsensus, MiningMode};
-use reth_beacon_consensus::{
-    BeaconConsensus,
-};
+use reth_beacon_consensus::BeaconConsensus;
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree,
 };
@@ -30,10 +21,7 @@ use reth_config::{
     config::{PruneConfig, StageConfig},
     Config,
 };
-use reth_db::{
-    database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
-};
+use reth_db::{database::Database, database_metrics::DatabaseMetrics};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -47,24 +35,19 @@ use reth_interfaces::{
     },
     RethResult,
 };
-use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle, NetworkManager};
-use reth_network_api::{NetworkInfo, PeersInfo};
-
+use reth_network::{NetworkBuilder, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     kzg::KzgSettings,
     stage::StageId,
-    BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, TxHash, B256,
-    MAINNET,
+    BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, TxHash, B256, MAINNET,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader,
     BlockchainTreePendingStateProvider, CanonStateSubscriptions, HeaderProvider, HeaderSyncMode,
     ProviderFactory, StageCheckpointReader,
 };
-
 use reth_revm::EvmProcessorFactory;
-
 use reth_stages::{
     prelude::*,
     stages::{
@@ -74,7 +57,7 @@ use reth_stages::{
     },
     MetricEvent,
 };
-use reth_tasks::{TaskExecutor};
+use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
     TransactionValidationTaskExecutor,
@@ -89,7 +72,8 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::{
-    mpsc::{Receiver, UnboundedSender}, watch,
+    mpsc::{Receiver, UnboundedSender},
+    watch,
 };
 use tracing::*;
 
@@ -106,9 +90,6 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// # use reth_tasks::{TaskManager, TaskSpawner};
 /// # use reth_node_core::{
 /// #     node_config::NodeConfig,
-/// #     cli::{
-/// #         ext::DefaultRethNodeCommandConfig,
-/// #     },
 /// #     args::RpcServerArgs,
 /// # };
 /// # use reth_rpc_builder::RpcModuleSelection;
@@ -126,9 +107,6 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 ///     let mut rpc = RpcServerArgs::default().with_http().with_ws();
 ///     rpc.http_api = Some(RpcModuleSelection::All);
 ///     let builder = builder.with_rpc(rpc);
-///
-///     let ext = DefaultRethNodeCommandConfig::default();
-///     let handle = builder.launch::<()>(ext, executor).await.unwrap();
 /// }
 /// ```
 ///
@@ -140,9 +118,6 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// # use reth_tasks::{TaskManager, TaskSpawner};
 /// # use reth_node_core::{
 /// #     node_config::NodeConfig,
-/// #     cli::{
-/// #         ext::DefaultRethNodeCommandConfig,
-/// #     },
 /// #     args::RpcServerArgs,
 /// # };
 /// # use reth_rpc_builder::RpcModuleSelection;
@@ -160,9 +135,6 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 ///     let mut rpc = RpcServerArgs::default().with_http().with_ws();
 ///     rpc.http_api = Some(RpcModuleSelection::All);
 ///     let builder = builder.with_rpc(rpc);
-///
-///     let ext = DefaultRethNodeCommandConfig::default();
-///     let handle = builder.launch::<()>(ext, executor).await.unwrap();
 /// }
 /// ```
 #[derive(Debug)]
@@ -600,10 +572,12 @@ impl NodeConfig {
         }
     }
 
+    /// Installs the prometheus recorder.
     pub fn install_prometheus_recorder(&self) -> eyre::Result<PrometheusHandle> {
         Ok(PROMETHEUS_RECORDER_HANDLE.clone())
     }
 
+    /// Serves the prometheus endpoint over HTTP with the given database and prometheus handle.
     pub async fn start_metrics_endpoint<Metrics>(
         &self,
         prometheus_handle: PrometheusHandle,
@@ -739,6 +713,7 @@ impl NodeConfig {
         }
     }
 
+    /// Builds the [NetworkConfig] with the given [ProviderFactory].
     pub fn load_network_config<DB: Database>(
         &self,
         config: &Config,
@@ -775,6 +750,7 @@ impl NodeConfig {
         cfg_builder.build(provider_factory)
     }
 
+    /// Builds the [Pipeline] with the given [ProviderFactory] and downloaders.
     #[allow(clippy::too_many_arguments)]
     pub async fn build_pipeline<DB, H, B>(
         &self,

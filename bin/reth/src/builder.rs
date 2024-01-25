@@ -1,81 +1,51 @@
+use eyre::Context;
+use fdlimit::raise_fd_limit;
+use futures::{future::Either, stream, stream_select, StreamExt};
+use reth_auto_seal_consensus::AutoSealBuilder;
+use reth_beacon_consensus::{
+    hooks::{EngineHooks, PruneHook},
+    BeaconConsensusEngine, BeaconConsensusEngineError, MIN_BLOCKS_FOR_PIPELINE_RUN,
+};
+use reth_blockchain_tree::{config::BlockchainTreeConfig, ShareableBlockchainTree};
+use reth_config::Config;
+use reth_db::{
+    database::Database,
+    database_metrics::{DatabaseMetadata, DatabaseMetrics},
+};
+use reth_interfaces::p2p::either::EitherDownloader;
+use reth_network::NetworkEvents;
+use reth_network_api::{NetworkInfo, PeersInfo};
+#[cfg(not(feature = "optimism"))]
+use reth_node_builder::EthEngineTypes;
+#[cfg(feature = "optimism")]
+use reth_node_builder::OptimismEngineTypes;
 use reth_node_core::{
+    cl_events::ConsensusLayerHealthEvents,
     cli::{
         components::{RethNodeComponentsImpl, RethRpcServerHandles},
         config::RethRpcConfig,
         db_type::DatabaseInstance,
         ext::{DefaultRethNodeCommandConfig, RethCliExt, RethNodeCommandConfig},
     },
-    cl_events::ConsensusLayerHealthEvents,
-    version::SHORT_VERSION,
     dirs::{ChainPath, DataDirPath},
     engine_api_store::EngineApiStore,
     events,
-    init::init_genesis, node_config::NodeConfig,
+    init::init_genesis,
+    version::SHORT_VERSION,
 };
-use eyre::Context;
-use fdlimit::raise_fd_limit;
-use futures::{future::Either, stream, stream_select, StreamExt};
-
-
-use reth_auto_seal_consensus::{AutoSealBuilder};
-use reth_beacon_consensus::{
-    hooks::{EngineHooks, PruneHook}, BeaconConsensusEngine, BeaconConsensusEngineError,
-    MIN_BLOCKS_FOR_PIPELINE_RUN,
-};
-use reth_blockchain_tree::{
-    config::BlockchainTreeConfig, ShareableBlockchainTree,
-};
-use reth_config::{
-    Config,
-};
-use reth_db::{
-    database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
-};
-use reth_primitives::{DisplayHardforks};
-
-use reth_interfaces::{
-    blockchain_tree::BlockchainTreeEngine,
-    consensus::Consensus,
-    p2p::{
-        bodies::{client::BodiesClient, downloader::BodyDownloader},
-        either::EitherDownloader,
-        headers::{client::HeadersClient, downloader::HeaderDownloader},
-    },
-};
-use reth_network::{NetworkEvents};
-use reth_network_api::{NetworkInfo, PeersInfo};
-#[cfg(not(feature = "optimism"))]
-use crate::EthEngineTypes;
-#[cfg(feature = "optimism")]
-use crate::OptimismEngineTypes;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader,
-    BlockchainTreePendingStateProvider, CanonStateSubscriptions, HeaderProvider,
-    ProviderFactory, StageCheckpointReader,
-};
+use reth_primitives::DisplayHardforks;
+use reth_provider::{providers::BlockchainProvider, ProviderFactory};
 use reth_prune::PrunerBuilder;
-
 use reth_rpc_engine_api::EngineApi;
-use reth_stages::{
-    prelude::*,
-};
 use reth_tasks::{TaskExecutor, TaskManager};
-use reth_transaction_pool::{
-    TransactionPool,
-};
-
-
-use std::{
-    path::PathBuf,
-    sync::Arc,
-};
-use tokio::sync::{
-    mpsc::{unbounded_channel},
-    oneshot,
-};
+use reth_transaction_pool::TransactionPool;
+use std::{path::PathBuf, sync::Arc};
+use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tracing::*;
+
+/// Re-export `NodeConfig` from `reth_node_core`.
+pub use reth_node_core::node_config::NodeConfig;
 
 /// Launches the node, also adding any RPC extensions passed.
 ///
@@ -87,6 +57,7 @@ use tracing::*;
 /// #     ext::DefaultRethNodeCommandConfig,
 /// # };
 /// # use tokio::runtime::Handle;
+/// # use reth::builder::launch_from_config;
 ///
 /// async fn t() {
 ///     let handle = Handle::current();
@@ -94,7 +65,7 @@ use tracing::*;
 ///     let executor = manager.executor();
 ///     let builder = NodeConfig::default();
 ///     let ext = DefaultRethNodeCommandConfig::default();
-///     let handle = builder.launch::<()>(ext, executor).await.unwrap();
+///     let handle = launch_from_config::<()>(builder, ext, executor).await.unwrap();
 /// }
 /// ```
 pub async fn launch_from_config<E: RethCliExt>(
@@ -118,7 +89,6 @@ pub async fn launch_from_config<E: RethCliExt>(
         }
     }
 }
-
 
 /// A version of the [NodeConfig] that has an installed database. This is used to construct the
 /// [NodeHandle].
@@ -529,9 +499,10 @@ impl NodeHandle {
 /// # Example
 /// ```
 /// # use reth_node_core::{
-/// #     node_config::{NodeConfig, spawn_node},
+/// #     node_config::NodeConfig,
 /// #     args::RpcServerArgs,
 /// # };
+/// # use reth::builder::spawn_node;
 /// async fn t() {
 ///     // Create a node builder with an http rpc server enabled
 ///     let rpc_args = RpcServerArgs::default().with_http();

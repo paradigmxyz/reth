@@ -43,9 +43,7 @@ pub mod core {
 }
 
 /// Re-exported from `reth_node_core`.
-pub mod builder {
-    pub use reth_node_core::node_config::*;
-}
+pub mod builder;
 
 /// Re-exported from `reth_node_core`.
 pub mod prometheus_exporter {
