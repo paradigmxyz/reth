@@ -188,6 +188,14 @@ impl ClayerConsensusEngineInner {
         self.service = service;
     }
 
+    fn service(&mut self) -> &ApiService {
+        &self.service
+    }
+
+    fn service_mut(&mut self) -> &mut ApiService {
+        &mut self.service
+    }
+
     fn parse_massage(
         &mut self,
         data: reth_primitives::Bytes,
@@ -247,6 +255,7 @@ impl ClayerConsensusEngineInner {
             PbftMessageType::NewView => self.handle_new_view(&msg, state)?,
             PbftMessageType::SealRequest => self.handle_seal_request(msg, state)?,
             PbftMessageType::Seal => self.handle_seal_response(&msg, state)?,
+            PbftMessageType::AnnounceBlock => self.handle_announceblock_response(&msg)?,
             _ => warn!("Received message with unknown type: {:?}", msg_type),
         }
 
@@ -448,6 +457,15 @@ impl ClayerConsensusEngineInner {
                 // Stop the commit timeout, since the network has agreed to commit the block
                 state.commit_timeout.stop();
             }
+
+            //broadcast new block hash
+            self.broadcast_pbft_message(
+                state.view,
+                state.seq_num,
+                PbftMessageType::AnnounceBlock,
+                block_id,
+                state,
+            )?;
         }
 
         Ok(())
@@ -676,6 +694,20 @@ impl ClayerConsensusEngineInner {
 
         // Catch up
         self.catchup(state, seal, false)
+    }
+
+    /// Handle a `announceblock` message
+    ///announceblock
+    fn handle_announceblock_response(&mut self, msg: &ParsedMessage) -> Result<(), PbftError> {
+        let blockhash = msg.get_block_id();
+
+        //self.broadcast_consensus(peers, data)
+        match self.service_mut().announce_block(blockhash) {
+            Ok(_) => Ok(()),
+            Err(_e) => {
+                Err(PbftError::ServiceError("announceblock".to_string(), "error".to_string()))
+            }
+        }
     }
 
     /// Handle a `BlockNew` update from the Validator
