@@ -539,7 +539,7 @@ where
     fn on_new_pooled_transaction_hashes(
         &mut self,
         peer_id: PeerId,
-        msg: NewPooledTransactionHashes,
+        mut msg: NewPooledTransactionHashes,
     ) {
         // If the node is initially syncing, ignore transactions
         if self.network.is_initially_syncing() {
@@ -556,19 +556,23 @@ where
                 msg=?msg,
                 "discarding announcement from inactive peer"
             );
+
             return
         };
 
-        // message version decides how hashes are packed
-        let msg_version = msg.version();
-        // extract hashes payload, and sizes if version eth68
-        let sizes = msg.as_eth68().map(|eth68_msg| {
-            eth68_msg
-                .metadata_iter()
-                .map(|(&hash, (_type, size))| (hash, size))
-                .collect::<HashMap<_, _>>()
-        });
-        let mut hashes = msg.into_hashes();
+        // extract metadata from payload if this an eth68 msg, since filters that follow mutate
+        // hashes vec and hashes map 1-1 with an index in size and types
+        let mut eth68_sizes = msg
+            .as_eth68()
+            .map(|eth68_msg| {
+                eth68_msg
+                    .metadata_iter()
+                    .map(|(&hash, (_type, size))| (hash, size))
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+
+        let hashes = msg.hashes_mut();
 
         // keep track of the transactions the peer knows
         let mut num_already_seen = 0;
@@ -579,15 +583,34 @@ where
         }
 
         // filter out known hashes, those txns have already been successfully fetched
-        self.pool.retain_unknown(&mut hashes);
+        self.pool.retain_unknown(hashes);
         if hashes.is_empty() {
             // nothing to request
             return
         }
+
+        // update sizes list to match hashes if is an eth 68 message (otherwise empty map)
+        eth68_sizes.retain(|hash, _| hashes.contains(hash));
+
+        // filter out invalid `(ty, size, hash)` entries if this is an eth68 announcement
+        if let Some(eth68_msg) = msg.as_eth68_mut() {
+            // validate eth68 message
+            if let FilterOutcome::ReportPeer =
+                self.transaction_fetcher.eth68_filter_valid.filter_valid_entries(eth68_msg)
+            {
+                self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement68);
+            }
+        }
+
+        let msg_version = msg.version();
+        // destruct message type
+        let mut hashes = msg.into_hashes();
+
         // filter out already seen unknown hashes, for those hashes add the peer as fallback
-        let peers = &self.peers;
-        self.transaction_fetcher
-            .filter_unseen_hashes(&mut hashes, peer_id, |peer_id| peers.contains_key(&peer_id));
+        self.transaction_fetcher.filter_unseen_hashes(&mut hashes, peer_id, |peer_id| {
+            self.peers.contains_key(&peer_id)
+        });
+
         if hashes.is_empty() {
             // nothing to request
             return
@@ -602,7 +625,7 @@ where
 
         if msg_version == EthVersion::Eth68 {
             // cache size metadata of unseen hashes
-            for (hash, size) in sizes.expect("should be at least empty map") {
+            for (hash, size) in eth68_sizes {
                 if hashes.contains(&hash) {
                     self.transaction_fetcher.eth68_meta.insert(hash, size);
                 }

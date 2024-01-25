@@ -212,9 +212,16 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns an iterator over tx hashes zipped with corresponding eth68 metadata if this is
-    /// an eth68 message.
+    /// Returns an immutable reference to the inner type if this an eth68 announcement.
     pub fn as_eth68(&self) -> Option<&NewPooledTransactionHashes68> {
+        match self {
+            NewPooledTransactionHashes::Eth66(_) => None,
+            NewPooledTransactionHashes::Eth68(msg) => Some(msg),
+        }
+    }
+
+    /// Returns a mutable reference to the inner type if this an eth68 announcement.
+    pub fn as_eth68_mut(&mut self) -> Option<&mut NewPooledTransactionHashes68> {
         match self {
             NewPooledTransactionHashes::Eth66(_) => None,
             NewPooledTransactionHashes::Eth68(msg) => Some(msg),

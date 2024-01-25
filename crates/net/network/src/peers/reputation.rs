@@ -78,6 +78,7 @@ impl ReputationChangeWeights {
             ReputationChangeKind::Dropped => self.dropped.into(),
             ReputationChangeKind::Reset => DEFAULT_REPUTATION.into(),
             ReputationChangeKind::Other(val) => val.into(),
+            ReputationChangeKind::BadAnnouncement68 => DEFAULT_REPUTATION.into(), // todo: set val
         }
     }
 }
