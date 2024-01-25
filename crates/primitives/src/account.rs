@@ -18,6 +18,8 @@ pub struct Account {
     pub balance: U256,
     /// Hash of the account's bytecode.
     pub bytecode_hash: Option<B256>,
+    /// Reference counter
+    pub counter: u64
 }
 
 impl Account {
