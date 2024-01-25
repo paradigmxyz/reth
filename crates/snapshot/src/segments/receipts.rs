@@ -29,7 +29,7 @@ impl<DB: Database> Segment<DB> for Receipts {
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
         let mut snapshot_writer =
-            snapshot_provider.writer(*block_range.start(), SnapshotSegment::Receipts)?;
+            snapshot_provider.get_writer(*block_range.start(), SnapshotSegment::Receipts)?;
 
         for block in block_range {
             let block_body_indices = provider
