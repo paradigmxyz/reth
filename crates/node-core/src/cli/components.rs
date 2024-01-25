@@ -48,7 +48,7 @@ impl<T, DB: Database> FullProvider<DB> for T where
 /// The trait that is implemented for the Node command.
 pub trait RethNodeComponents: Clone + Send + Sync + 'static {
     /// Underlying database type.
-    type DB: Database + Clone + 'static;
+    type DB: Database + Clone + Unpin + 'static;
     /// The Provider type that is provided by the node itself
     type Provider: FullProvider<Self::DB>;
     /// The transaction pool type
