@@ -172,7 +172,7 @@ pub async fn new_payload(
 }
 
 #[derive(Debug)]
-enum AsyncResultType {
+pub enum AsyncResultType {
     BlockId(B256),
     ForkchoiceUpdated(ForkchoiceUpdated),
     ExecutionPayload(ExecutionPayloadWrapperV2),
@@ -533,6 +533,16 @@ impl ApiService {
 
     /// Mark this block as invalid from the perspective of consensus
     pub fn fail_block(&mut self, block_id: B256) -> Result<(), ApiServiceError> {
+        Ok(())
+    }
+
+    pub fn announce_block(&mut self, block_id: B256) -> Result<(), ApiServiceError> {
+        //broadcast new block hash after commit
+        Ok(())
+    }
+
+    pub fn sync_block(&mut self, block_id: B256) -> Result<(), ApiServiceError> {
+        //broadcast new block hash after commit
         Ok(())
     }
 }
