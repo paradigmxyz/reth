@@ -1,4 +1,7 @@
-use crate::commands::node::{cl_events::ConsensusLayerHealthEvents, events};
+use crate::commands::{
+    debug_cmd::engine_api_store::EngineApiStore,
+    node::{cl_events::ConsensusLayerHealthEvents, events},
+};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, stream, stream_select, StreamExt};
@@ -28,7 +31,6 @@ use reth_node_core::{
         ext::{DefaultRethNodeCommandConfig, RethCliExt, RethNodeCommandConfig},
     },
     dirs::{ChainPath, DataDirPath},
-    engine_api_store::EngineApiStore,
     init::init_genesis,
     version::SHORT_VERSION,
 };

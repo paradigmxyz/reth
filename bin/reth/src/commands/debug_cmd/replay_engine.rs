@@ -4,7 +4,7 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs,
     },
-    core::engine_api_store::{EngineApiStore, StoredEngineApiMessage},
+    commands::debug_cmd::engine_api_store::{EngineApiStore, StoredEngineApiMessage},
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
 };
