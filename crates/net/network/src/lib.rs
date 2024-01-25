@@ -148,13 +148,16 @@ pub use session::{
     SessionLimits, SessionManager, SessionsConfig,
 };
 
+pub use reth_discv5::{DiscoveryUpdateV5, Discv5};
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
-pub use reth_discv5::{Discv5, DiscoveryUpdateV5};
 
 //#[cfg(not(feature = "discv5"))]
 //type Discovery = Discv4;
 
-pub trait StreamDiscv5: futures::Stream<Item = DiscoveryUpdateV5> + Unpin {}
-impl<S> StreamDiscv5 for S where S: futures::Stream<Item = DiscoveryUpdateV5> + Unpin {}
+pub trait StreamDiscv5: futures::Stream<Item = DiscoveryUpdateV5> + Unpin + Send + 'static {}
+impl<S> StreamDiscv5 for S where
+    S: futures::Stream<Item = DiscoveryUpdateV5> + Unpin + Send + 'static
+{
+}
 //#[cfg(feature = "discv5")]
-pub type Discovery<S = &'static dyn StreamDiscv5> = Disc<Discv5, S>;
+pub type Discovery = Disc<Discv5, Box<dyn StreamDiscv5>>;

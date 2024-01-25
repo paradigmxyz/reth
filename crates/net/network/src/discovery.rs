@@ -2,7 +2,8 @@
 
 use crate::{
     error::{NetworkError, ServiceKind},
-    manager::DiscoveredEvent, StreamDiscv5
+    manager::DiscoveredEvent,
+    StreamDiscv5,
 };
 use discv5::{
     self,
@@ -27,7 +28,12 @@ use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tracing::info;
 
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet, VecDeque}, fmt, net::{IpAddr, SocketAddr}, pin::Pin, sync::Arc, task::{Context, Poll}
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    fmt,
+    net::{IpAddr, SocketAddr},
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
 };
 
 /// An abstraction over the configured discovery protocol.
@@ -270,7 +276,34 @@ impl<S> Discovery<Discv5, S> {
     }
 }
 
-impl Stream for Discovery<Discv5, &'static dyn StreamDiscv5> {
+impl<S> Discovery<Discv5, S>
+where
+    S: StreamDiscv5,
+{
+    #[must_use]
+    pub fn into_discv5_with_boxed_update_stream(self) -> Discovery<Discv5, Box<dyn StreamDiscv5>> {
+        let disc_updates =
+            self.disc_updates.map(|stream| Box::new(stream) as Box<dyn StreamDiscv5>);
+
+        Discovery {
+            discovered_nodes: self.discovered_nodes,
+            local_enr: self.local_enr,
+            disc: self.disc,
+            disc_updates,
+            _disc_service: self._disc_service,
+            _dns_discovery: self._dns_discovery,
+            dns_discovery_updates: self.dns_discovery_updates,
+            _dns_disc_service: self._dns_disc_service,
+            queued_events: self.queued_events,
+            discovery_listeners: self.discovery_listeners,
+        }
+    }
+}
+
+impl<S> Stream for Discovery<Discv5, S>
+where
+    S: StreamDiscv5,
+{
     type Item = DiscoveryEvent;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -318,23 +351,6 @@ impl<S> fmt::Debug for Discovery<Discv5, S> {
 
         debug_struct.finish()
     }
-}
-
-pub fn into_discv5_with_stream_trait_obj(value: Discovery<Discv5, impl StreamDiscv5>) -> Discovery<Discv5, &'static dyn StreamDiscv5> {
-    let disc_updates = value.disc_updates.map(|stream| &stream as &'static dyn StreamDiscv5);
-
-        Discovery {
-            discovered_nodes: value.discovered_nodes,
-            local_enr: value.local_enr,
-            disc: value.disc,
-            disc_updates,
-            _disc_service: value._disc_service,
-            _dns_discovery: value._dns_discovery,
-            dns_discovery_updates: value.dns_discovery_updates,
-            _dns_disc_service: value._dns_disc_service,
-            queued_events: value.queued_events,
-            discovery_listeners: value.discovery_listeners,
-        }
 }
 
 /// Spawns the discovery service.
@@ -504,7 +520,7 @@ pub(crate) fn new_dns(
 }
 
 #[cfg(test)]
-impl Discovery {
+impl<D, S> Discovery<D, S> {
     /// Returns a Discovery instance that does nothing and is intended for testing purposes.
     ///
     /// NOTE: This instance does nothing

@@ -2,7 +2,6 @@
 
 use crate::{
     cache::LruCache,
-    Discovery, DiscoveryEvent,
     fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
     manager::DiscoveredEvent,
     message::{
@@ -10,7 +9,7 @@ use crate::{
         PeerResponseResult,
     },
     peers::{PeerAction, PeersManager},
-    FetchClient,
+    Discovery, DiscoveryEvent, FetchClient,
 };
 use futures::StreamExt;
 use rand::seq::SliceRandom;
@@ -529,8 +528,8 @@ pub(crate) enum StateAction {
 #[cfg(test)]
 mod tests {
     use crate::{
-        Discovery, fetch::StateFetcher, message::PeerRequestSender, peers::PeersManager,
-        state::NetworkState, PeerRequest,
+        fetch::StateFetcher, message::PeerRequestSender, peers::PeersManager, state::NetworkState,
+        Discovery, PeerRequest,
     };
     use reth_eth_wire::{
         capability::{Capabilities, Capability},
