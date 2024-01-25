@@ -30,6 +30,10 @@ where
     fn next(&mut self) -> Result<Option<(B256, Account)>, reth_db::DatabaseError> {
         self.next()
     }
+
+    fn current(&mut self) -> Result<Option<(B256, Account)>, reth_db::DatabaseError> {
+        self.current()
+    }
 }
 
 impl<C> HashedStorageCursor for C
