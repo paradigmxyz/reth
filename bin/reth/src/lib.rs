@@ -26,12 +26,12 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+pub mod builder;
 pub mod cli;
 pub mod commands;
 pub mod init;
 pub mod runner;
 pub mod utils;
-pub mod builder;
 
 /// Re-exported payload related types
 pub mod payload {

@@ -62,8 +62,8 @@ reth-metrics.workspace = true
 eyre.workspace = true
 clap = { workspace = true, features = ["derive"] }
 humantime = "2.1.0"
-const-str = "0.5.6"
 thiserror.workspace = true
+const-str = "0.5.6"
 rand.workspace = true
 pin-project.workspace = true
 

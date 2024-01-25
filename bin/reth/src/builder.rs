@@ -1,3 +1,5 @@
+//! Contains types and methods that can be used to launch a node based off of a [NodeConfig].
+
 use crate::{
     commands::{
         debug_cmd::engine_api_store::EngineApiStore,
