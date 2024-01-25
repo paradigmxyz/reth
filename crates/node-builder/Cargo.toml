@@ -12,66 +12,38 @@ workspace = true
 
 [dependencies]
 # reth
-reth-node-core.workspace = true
 reth-primitives.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-interfaces = { workspace = true, features = ["clap"] }
 reth-provider.workspace = true
-reth-network = { workspace = true, features = ["serde"] }
-reth-rpc-engine-api.workspace = true
-reth-rpc-builder.workspace = true
-reth-rpc.workspace = true
 reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
-reth-rpc-api = { workspace = true, features = ["client"] }
 reth-transaction-pool.workspace = true
 reth-tracing.workspace = true
-reth-config.workspace = true
 reth-discv4.workspace = true
 reth-net-nat.workspace = true
 reth-network-api.workspace = true
 reth-node-api.workspace = true
 reth-tasks.workspace = true
 reth-payload-builder.workspace = true
-reth-basic-payload-builder.workspace = true
-reth-consensus-common.workspace = true
-reth-auto-seal-consensus.workspace = true
-reth-beacon-consensus.workspace = true
-reth-downloaders.workspace = true
-reth-revm.workspace = true
-reth-stages.workspace = true
-reth-prune.workspace = true
-reth-blockchain-tree.workspace = true
-revm-inspectors.workspace = true
-reth-snapshot.workspace = true
-reth-ethereum-payload-builder.workspace = true
 reth-optimism-payload-builder = { workspace = true, optional = true }
 
 # async
 tokio.workspace = true
 
 # metrics
-metrics-exporter-prometheus = "0.12.1"
 once_cell.workspace = true
-metrics-util = "0.15.0"
-metrics-process = "=1.0.14"
 metrics.workspace = true
 reth-metrics.workspace = true
 
 # misc
 eyre.workspace = true
 clap = { workspace = true, features = ["derive"] }
-humantime = "2.1.0"
 thiserror.workspace = true
-const-str = "0.5.6"
 rand.workspace = true
-fdlimit = "0.3.0"
 pin-project.workspace = true
 
 # io
-dirs-next = "2.0.0"
-shellexpand = "3.0.0"
-confy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
@@ -93,21 +65,12 @@ futures.workspace = true
 optimism = [
     "reth-primitives/optimism",
     "reth-interfaces/optimism",
-    "reth-rpc/optimism",
-    "reth-rpc-engine-api/optimism",
     "reth-transaction-pool/optimism",
     "reth-provider/optimism",
-    "reth-network/optimism",
     "reth-network-api/optimism",
     "reth-payload-builder/optimism",
     "reth-rpc-types/optimism",
     "reth-rpc-types-compat/optimism",
-    "reth-auto-seal-consensus/optimism",
-    "reth-consensus-common/optimism",
-    "reth-blockchain-tree/optimism",
-    "reth-beacon-consensus/optimism",
     "reth-optimism-payload-builder/optimism",
-    "reth-ethereum-payload-builder/optimism",
     "reth-node-api/optimism",
-    "reth-node-core/optimism",
 ]
