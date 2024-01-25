@@ -219,7 +219,7 @@ pub enum BlockAttachment {
 impl BlockAttachment {
     /// Returns `true` if the block is canonical or a descendant of the canonical head.
     #[inline]
-    pub fn is_canonical(&self) -> bool {
+    pub const fn is_canonical(&self) -> bool {
         matches!(self, BlockAttachment::Canonical)
     }
 }
