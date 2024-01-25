@@ -1263,14 +1263,19 @@ where
         let mut latest_valid_hash = None;
         let block = Arc::new(block);
         let status = match status {
-            InsertPayloadOk::Inserted(BlockStatus::Valid) => {
+            InsertPayloadOk::Inserted(BlockStatus::Valid(attachment)) => {
                 latest_valid_hash = Some(block_hash);
-                self.listeners.notify(BeaconConsensusEngineEvent::CanonicalBlockAdded(block));
+                let event = if attachment.is_canonical() {
+                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block)
+                } else {
+                    BeaconConsensusEngineEvent::ForkBlockAdded(block)
+                };
+                self.listeners.notify(event);
                 PayloadStatusEnum::Valid
             }
-            InsertPayloadOk::Inserted(BlockStatus::Accepted) => {
-                self.listeners.notify(BeaconConsensusEngineEvent::ForkBlockAdded(block));
-                PayloadStatusEnum::Accepted
+            InsertPayloadOk::AlreadySeen(BlockStatus::Valid(_)) => {
+                latest_valid_hash = Some(block_hash);
+                PayloadStatusEnum::Valid
             }
             InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
             InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
@@ -1284,11 +1289,6 @@ where
                 // not known to be invalid, but we don't know anything else
                 PayloadStatusEnum::Syncing
             }
-            InsertPayloadOk::AlreadySeen(BlockStatus::Valid) => {
-                latest_valid_hash = Some(block_hash);
-                PayloadStatusEnum::Valid
-            }
-            InsertPayloadOk::AlreadySeen(BlockStatus::Accepted) => PayloadStatusEnum::Accepted,
         };
         Ok(PayloadStatus::new(status, latest_valid_hash))
     }
@@ -1351,20 +1351,14 @@ where
     ///
     /// ## [BlockStatus::Valid]
     ///
-    /// The block is connected to the current canonical head and is valid.
-    /// If the engine is still SYNCING, then we can try again to make the chain canonical.
-    ///
-    /// ## [BlockStatus::Accepted]
-    ///
-    /// All ancestors are known, but the block is not connected to the current canonical _head_. If
-    /// the block is an ancestor of the current forkchoice head, then we can try again to make the
-    /// chain canonical, which would trigger a reorg in this case since the new head is therefore
-    /// not connected to the current head.
+    /// The block is connected to the current canonical chain and is valid.
+    /// If the block is an ancestor of the current forkchoice head, then we can try again to make
+    /// the chain canonical.
     ///
     /// ## [BlockStatus::Disconnected]
     ///
-    /// The block is not connected to the canonical head, and we need to download the missing parent
-    /// first.
+    /// The block is not connected to the canonical chain, and we need to download the missing
+    /// parent first.
     ///
     /// ## Insert Error
     ///
@@ -1386,12 +1380,10 @@ where
         {
             Ok(status) => {
                 match status {
-                    InsertPayloadOk::Inserted(BlockStatus::Valid) => {
-                        // block is connected to the current canonical head and is valid.
-                        self.try_make_sync_target_canonical(downloaded_num_hash);
-                    }
-                    InsertPayloadOk::Inserted(BlockStatus::Accepted) => {
-                        // block is connected to the canonical chain, but not the current head
+                    InsertPayloadOk::Inserted(BlockStatus::Valid(_)) => {
+                        // block is connected to the canonical chain and is valid.
+                        // if it's not connected to current canonical head, the state root
+                        // has not been validated.
                         self.try_make_sync_target_canonical(downloaded_num_hash);
                     }
                     InsertPayloadOk::Inserted(BlockStatus::Disconnected {
@@ -1469,7 +1461,7 @@ where
     /// Attempt to form a new canonical chain based on the current sync target.
     ///
     /// This is invoked when we successfully __downloaded__ a new block from the network which
-    /// resulted in either [BlockStatus::Accepted] or [BlockStatus::Valid].
+    /// resulted in [BlockStatus::Valid].
     ///
     /// Note: This will not succeed if the sync target has changed since the block download request
     /// was issued and the new target is still disconnected and additional missing blocks are
