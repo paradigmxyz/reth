@@ -2,7 +2,6 @@
 
 use crate::{
     canonical_chain::CanonicalChain,
-    chain::BlockKind,
     metrics::{MakeCanonicalAction, MakeCanonicalDurationsRecorder, TreeMetrics},
     state::{BlockChainId, TreeState},
     AppendableChain, BlockIndices, BlockchainTreeConfig, BundleStateData, TreeExternals,
@@ -11,7 +10,7 @@ use reth_db::{database::Database, DatabaseError};
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
-        BlockStatus, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
+        BlockAttachment, BlockStatus, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
     },
     consensus::{Consensus, ConsensusError},
     executor::{BlockExecutionError, BlockValidationError},
@@ -146,12 +145,12 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         if block.number <= last_finalized_block {
             // check if block is canonical
             if self.is_block_hash_canonical(&block.hash)? {
-                return Ok(Some(BlockStatus::Valid))
+                return Ok(Some(BlockStatus::Valid(BlockAttachment::Canonical)))
             }
 
             // check if block is inside database
             if self.externals.provider_factory.provider()?.block_number(block.hash)?.is_some() {
-                return Ok(Some(BlockStatus::Valid))
+                return Ok(Some(BlockStatus::Valid(BlockAttachment::Canonical)))
             }
 
             return Err(BlockchainTreeError::PendingBlockIsFinalized {
@@ -161,8 +160,13 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         }
 
         // check if block is part of canonical chain
-        if self.is_block_hash_canonical(&block.hash)? || self.is_block_inside_chain(&block) {
-            return Ok(Some(BlockStatus::Valid))
+        if self.is_block_hash_canonical(&block.hash)? {
+            return Ok(Some(BlockStatus::Valid(BlockAttachment::Canonical)))
+        }
+
+        // is block inside chain
+        if let Some(attachment) = self.is_block_inside_chain(&block) {
+            return Ok(Some(BlockStatus::Valid(attachment)))
         }
 
         // check if block is disconnected
@@ -376,10 +380,10 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
         let canonical_chain = self.canonical_chain();
 
-        let block_kind = if block.parent_hash == canonical_chain.tip().hash {
-            BlockKind::ExtendsCanonicalHead
+        let block_attachment = if block.parent_hash == canonical_chain.tip().hash {
+            BlockAttachment::Canonical
         } else {
-            BlockKind::ForksHistoricalBlock
+            BlockAttachment::HistoricalFork
         };
 
         let chain = AppendableChain::new_canonical_fork(
@@ -388,19 +392,14 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             canonical_chain.inner(),
             parent,
             &self.externals,
-            block_kind,
+            block_attachment,
             block_validation_kind,
         )?;
 
         self.insert_chain(chain);
         self.try_connect_buffered_blocks(block_num_hash);
 
-        let status = if block_validation_kind.is_exhaustive() {
-            BlockStatus::Valid
-        } else {
-            BlockStatus::Accepted
-        };
-        Ok(status)
+        Ok(BlockStatus::Valid(block_attachment))
     }
 
     /// Try inserting a block into the given side chain.
@@ -433,12 +432,12 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         let canonical_chain = self.state.block_indices.canonical_chain();
 
         // append the block if it is continuing the side chain.
-        if chain_tip == block.parent_hash {
+        let block_attachment = if chain_tip == block.parent_hash {
             // check if the chain extends the currently tracked canonical head
-            let block_kind = if canonical_fork.hash == canonical_chain.tip().hash {
-                BlockKind::ExtendsCanonicalHead
+            let block_attachment = if canonical_fork.hash == canonical_chain.tip().hash {
+                BlockAttachment::Canonical
             } else {
-                BlockKind::ForksHistoricalBlock
+                BlockAttachment::HistoricalFork
             };
 
             debug!(target: "blockchain_tree", "Appending block to side chain");
@@ -450,11 +449,12 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 canonical_chain.inner(),
                 &self.externals,
                 canonical_fork,
-                block_kind,
+                block_attachment,
                 block_validation_kind,
             )?;
 
             self.block_indices_mut().insert_non_fork_block(block_number, block_hash, chain_id);
+            block_attachment
         } else {
             debug!(target: "blockchain_tree", ?canonical_fork, "Starting new fork from side chain");
             // the block starts a new fork
@@ -467,17 +467,13 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 block_validation_kind,
             )?;
             self.insert_chain(chain);
-        }
+            BlockAttachment::HistoricalFork
+        };
 
         // After we inserted the block, we try to connect any buffered blocks
         self.try_connect_buffered_blocks(block_num_hash);
 
-        let status = if block_validation_kind.is_exhaustive() {
-            BlockStatus::Valid
-        } else {
-            BlockStatus::Accepted
-        };
-        Ok(status)
+        Ok(BlockStatus::Valid(block_attachment))
     }
 
     /// Get all block hashes from a sidechain that are not part of the canonical chain.
@@ -665,10 +661,24 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         Ok(())
     }
 
-    /// Returns `true` if block is found inside the tree.
+    /// Check if block is found inside chain and its attachment.
+    ///
+    /// if it is canonical or extends the canonical chain, return [BlockAttachment::Canonical]
+    /// if it does not extend the canonical chain, return [BlockAttachment::HistoricalFork]
     #[track_caller]
-    fn is_block_inside_chain(&self, block: &BlockNumHash) -> bool {
-        self.block_indices().get_blocks_chain_id(&block.hash).is_some()
+    fn is_block_inside_chain(&self, block: &BlockNumHash) -> Option<BlockAttachment> {
+        // check if block known and is already in the tree
+        if let Some(chain_id) = self.block_indices().get_blocks_chain_id(&block.hash) {
+            // find the canonical fork of this chain
+            let canonical_fork = self.canonical_fork(chain_id).expect("Chain id is valid");
+            // if the block's chain extends canonical chain
+            return if canonical_fork == self.block_indices().canonical_tip() {
+                Some(BlockAttachment::Canonical)
+            } else {
+                Some(BlockAttachment::HistoricalFork)
+            }
+        }
+        None
     }
 
     /// Insert a block (with recovered senders) into the tree.

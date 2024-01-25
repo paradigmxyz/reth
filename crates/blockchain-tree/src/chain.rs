@@ -9,7 +9,7 @@ use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, InsertBlockErrorKind},
-        BlockValidationKind,
+        BlockAttachment, BlockValidationKind,
     },
     consensus::{Consensus, ConsensusError},
     RethResult,
@@ -61,7 +61,7 @@ impl AppendableChain {
 
     /// Create a new chain that forks off of the canonical chain.
     ///
-    /// if [BlockValidationKind::Exhaustive] is specified,  the method will verify the state root of
+    /// if [BlockValidationKind::Exhaustive] is specified, the method will verify the state root of
     /// the block.
     pub fn new_canonical_fork<DB, EF>(
         block: SealedBlockWithSenders,
@@ -69,7 +69,7 @@ impl AppendableChain {
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
         externals: &TreeExternals<DB, EF>,
-        block_kind: BlockKind,
+        block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
     ) -> Result<Self, InsertBlockErrorKind>
     where
@@ -91,7 +91,7 @@ impl AppendableChain {
             parent_header,
             state_provider,
             externals,
-            block_kind,
+            block_attachment,
             block_validation_kind,
         )?;
 
@@ -136,7 +136,7 @@ impl AppendableChain {
             parent,
             bundle_state_data,
             externals,
-            BlockKind::ForksHistoricalBlock,
+            BlockAttachment::HistoricalFork,
             block_validation_kind,
         )?;
         // extending will also optimize few things, mostly related to selfdestruct and wiping of
@@ -159,15 +159,15 @@ impl AppendableChain {
     /// Note: State root validation is limited to blocks that extend the canonical chain and is
     /// optional, see [BlockValidationKind]. So this function takes two parameters to determine
     /// if the state can and should be validated.
-    ///   - [BlockKind] represents if the block extends the canonical chain, and thus if the state
-    ///     root __can__ be validated.
+    ///   - [BlockAttachment] represents if the block extends the canonical chain, and thus we can
+    ///     cache the trie state updates.
     ///   - [BlockValidationKind] determines if the state root __should__ be validated.
     fn validate_and_execute<BSDP, DB, EF>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
         bundle_state_data_provider: BSDP,
         externals: &TreeExternals<DB, EF>,
-        block_kind: BlockKind,
+        block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
     ) -> RethResult<(BundleStateWithReceipts, Option<TrieUpdates>)>
     where
@@ -194,7 +194,7 @@ impl AppendableChain {
         // validation was requested.
         if block_validation_kind.is_exhaustive() {
             // check state root
-            let (state_root, trie_updates) = if block_kind.extends_canonical_head() {
+            let (state_root, trie_updates) = if block_attachment.is_canonical() {
                 provider
                     .state_root_with_updates(&bundle_state)
                     .map(|(root, updates)| (root, Some(updates)))?
@@ -234,7 +234,7 @@ impl AppendableChain {
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         externals: &TreeExternals<DB, EF>,
         canonical_fork: ForkBlock,
-        block_kind: BlockKind,
+        block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
     ) -> Result<(), InsertBlockErrorKind>
     where
@@ -255,35 +255,12 @@ impl AppendableChain {
             parent_block,
             bundle_state_data,
             externals,
-            block_kind,
+            block_attachment,
             block_validation_kind,
         )?;
         // extend the state.
         self.chain.append_block(block, block_state, trie_updates);
 
         Ok(())
-    }
-}
-
-/// Represents what kind of block is being executed and validated.
-///
-/// This is required because the state root check can only be performed if the targeted block can be
-/// traced back to the canonical __head__.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BlockKind {
-    /// The `block` is a descendant of the canonical head:
-    ///
-    ///    [`head..(block.parent)*,block`]
-    ExtendsCanonicalHead,
-    /// The block can be traced back to an ancestor of the canonical head: a historical block, but
-    /// this chain does __not__ include the canonical head.
-    ForksHistoricalBlock,
-}
-
-impl BlockKind {
-    /// Returns `true` if the block is a descendant of the canonical head.
-    #[inline]
-    pub(crate) fn extends_canonical_head(&self) -> bool {
-        matches!(self, BlockKind::ExtendsCanonicalHead)
     }
 }
