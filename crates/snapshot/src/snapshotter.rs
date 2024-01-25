@@ -195,29 +195,29 @@ mod tests {
         let targets = snapshotter.get_snapshot_targets(1).expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets { headers: None, receipts: None, transactions: Some(1..=1) }
+            SnapshotTargets { headers: Some(1..=1), receipts: None, transactions: Some(1..=1) }
         );
         assert_matches!(snapshotter.run(targets), Ok(_));
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: None, receipts: None, transactions: Some(1) }
+            HighestSnapshots { headers: Some(1), receipts: None, transactions: Some(1) }
         );
 
         let targets = snapshotter.get_snapshot_targets(3).expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets { headers: None, receipts: None, transactions: Some(2..=3) }
+            SnapshotTargets { headers: Some(2..=3), receipts: None, transactions: Some(2..=3) }
         );
         assert_matches!(snapshotter.run(targets), Ok(_));
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: None, receipts: None, transactions: Some(3) }
+            HighestSnapshots { headers: Some(3), receipts: None, transactions: Some(3) }
         );
 
         let targets = snapshotter.get_snapshot_targets(4).expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets { headers: None, receipts: None, transactions: Some(4..=4) }
+            SnapshotTargets { headers: Some(4..=4), receipts: None, transactions: Some(4..=4) }
         );
         assert_matches!(
             snapshotter.run(targets),
@@ -225,7 +225,7 @@ mod tests {
         );
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: None, receipts: None, transactions: Some(3) }
+            HighestSnapshots { headers: Some(3), receipts: None, transactions: Some(3) }
         );
     }
 }
