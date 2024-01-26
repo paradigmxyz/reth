@@ -6157,6 +6157,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-etl"
+version = "0.1.0-alpha.16"
+dependencies = [
+ "reth-db",
+ "reth-primitives",
+ "tempfile",
+]
+
+[[package]]
 name = "reth-interfaces"
 version = "0.1.0-alpha.16"
 dependencies = [
@@ -6856,6 +6865,7 @@ dependencies = [
  "reth-db",
  "reth-downloaders",
  "reth-eth-wire",
+ "reth-etl",
  "reth-interfaces",
  "reth-metrics",
  "reth-primitives",
@@ -6866,6 +6876,7 @@ dependencies = [
  "revm",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",

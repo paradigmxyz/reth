@@ -5,10 +5,10 @@ use criterion::{
 };
 use pprof::criterion::{Output, PProfProfiler};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
-use reth_interfaces::test_utils::TestConsensus;
+
 use reth_primitives::stage::StageCheckpoint;
 use reth_stages::{
-    stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
+    stages::{MerkleStage, SenderRecoveryStage, TransactionLookupStage},
     test_utils::TestStageDB,
     ExecInput, Stage, StageExt, UnwindInput,
 };
@@ -20,7 +20,7 @@ use setup::StageRange;
 criterion_group! {
     name = benches;
     config = Criterion::default().with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
-    targets = transaction_lookup, account_hashing, senders, total_difficulty, merkle
+    targets = transaction_lookup, account_hashing, senders, merkle
 }
 criterion_main!(benches);
 
@@ -70,23 +70,6 @@ fn transaction_lookup(c: &mut Criterion) {
         stage,
         0..DEFAULT_NUM_BLOCKS,
         "TransactionLookup".to_string(),
-    );
-}
-
-fn total_difficulty(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Stages");
-    group.measurement_time(std::time::Duration::from_millis(2000));
-    group.warm_up_time(std::time::Duration::from_millis(2000));
-    // don't need to run each stage for that many times
-    group.sample_size(10);
-    let stage = TotalDifficultyStage::new(Arc::new(TestConsensus::default()));
-
-    measure_stage(
-        &mut group,
-        setup::stage_unwind,
-        stage,
-        0..DEFAULT_NUM_BLOCKS,
-        "TotalDifficulty".to_string(),
     );
 }
 
