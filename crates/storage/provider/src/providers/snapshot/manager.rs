@@ -7,10 +7,7 @@ use crate::{
     ReceiptProvider, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
     WithdrawalsProvider,
 };
-use dashmap::{
-    mapref::{entry::Entry as DashMapEntry, one::RefMut},
-    DashMap,
-};
+use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,

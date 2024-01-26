@@ -1,4 +1,4 @@
-use super::{SnapshotProvider, BLOCKS_PER_SNAPSHOT};
+use super::SnapshotProvider;
 use dashmap::mapref::one::RefMut;
 use reth_codecs::Compact;
 use reth_interfaces::provider::{ProviderError, ProviderResult};

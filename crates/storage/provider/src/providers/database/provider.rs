@@ -108,9 +108,9 @@ pub struct DatabaseProvider<TX> {
 }
 
 impl<TX> DatabaseProvider<TX> {
-    /// Returns snapshot provider
-    pub fn snapshot_provider(&self) -> Option<Arc<SnapshotProvider>> {
-        self.snapshot_provider.clone()
+    /// Returns a snapshot provider reference
+    pub fn snapshot_provider(&self) -> Option<&Arc<SnapshotProvider>> {
+        self.snapshot_provider.as_ref()
     }
 }
 

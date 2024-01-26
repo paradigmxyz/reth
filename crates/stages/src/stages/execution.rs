@@ -542,8 +542,8 @@ where
         .unwrap_or(0);
 
     // Get next expected receipt number in static files
-    let snapshot_provider = provider.snapshot_provider.as_ref().expect("should exist");
-    let mut snapshotter = snapshot_provider.writer(start_block, SnapshotSegment::Receipts)?;
+    let snapshot_provider = provider.snapshot_provider().expect("should exist");
+    let mut snapshotter = snapshot_provider.get_writer(start_block, SnapshotSegment::Receipts)?;
     let next_snapshot_receipt_num = snapshotter
         .get_highest_snapshot_tx(SnapshotSegment::Receipts)
         .map(|num| num + 1)
@@ -565,7 +565,10 @@ where
                 tx.get::<tables::Headers>(last_block + 1)?.unwrap_or_default().seal_slow(),
             );
 
-            return Err(StageError::MissingSnapshotData { block: missing_block })
+            return Err(StageError::MissingSnapshotData {
+                block: missing_block,
+                segment: SnapshotSegment::Receipts,
+            })
         }
         Ordering::Equal => {}
     }
