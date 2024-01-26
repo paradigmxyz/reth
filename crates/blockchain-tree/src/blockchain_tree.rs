@@ -643,18 +643,18 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         {
             error!(
                 ?block,
-                "Failed to validate total difficulty for block {}: {e:?}", block.header.hash
+                "Failed to validate total difficulty for block {}: {e}", block.header.hash
             );
             return Err(e)
         }
 
         if let Err(e) = self.externals.consensus.validate_header(block) {
-            error!(?block, "Failed to validate header {}: {e:?}", block.header.hash);
+            error!(?block, "Failed to validate header {}: {e}", block.header.hash);
             return Err(e)
         }
 
         if let Err(e) = self.externals.consensus.validate_block(block) {
-            error!(?block, "Failed to validate block {}: {e:?}", block.header.hash);
+            error!(?block, "Failed to validate block {}: {e}", block.header.hash);
             return Err(e)
         }
 
