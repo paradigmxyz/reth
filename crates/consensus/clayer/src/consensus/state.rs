@@ -60,7 +60,7 @@ pub struct PbftState {
     pub view: u64,
 
     /// The block ID of the node's current chain head
-    pub last_commit_block_id: B256,
+    pub chain_head: B256,
 
     /// Current phase of the algorithm
     pub phase: PbftPhase,
@@ -134,7 +134,7 @@ impl PbftState {
             kp,
             seq_num: head_block_num + 1,
             view: 0,
-            last_commit_block_id: B256::default(),
+            chain_head: B256::default(),
             phase: PbftPhase::PrePreparing,
             mode: PbftMode::Normal,
             f,

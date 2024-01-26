@@ -473,6 +473,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             let jwt_secret = self.rpc.auth_jwt_secret(default_jwt_path)?;
             let mut task = ConsensusBuilder::new(
                 jwt_secret.as_bytes(),
+                secret_key,
                 Arc::clone(&self.chain),
                 blockchain_db.clone(),
                 transaction_pool.clone(),

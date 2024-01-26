@@ -9,6 +9,7 @@ use crate::engine_api::{
     http::HttpJsonRpc,
 };
 pub use consensus::ClayerConsensusEngine;
+use consensus::{clayer_block_from_genesis, PbftConfig, PbftState};
 use engine_api::ApiService;
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_interfaces::consensus::ForkchoiceState;
@@ -31,8 +32,10 @@ use reth_revm::{
     database::StateProviderDatabase, db::states::bundle_state::BundleRetention,
     processor::EVMProcessor, State,
 };
+use reth_rpc_types::{BlockId, BlockNumberOrTag};
 use reth_stages::PipelineEvent;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
+use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
     collections::VecDeque,
@@ -349,6 +352,8 @@ pub struct ConsensusBuilder<Client, Pool, CDB> {
     network: NetworkHandle,
     consensus: ClayerConsensusEngine,
     storages: CDB,
+    config: PbftConfig,
+    state: PbftState,
 }
 
 impl<Client, Pool: TransactionPool, CDB> ConsensusBuilder<Client, Pool, CDB>
@@ -357,7 +362,8 @@ where
 {
     /// Creates a new builder instance to configure all parts.
     pub fn new(
-        secret: &[u8],
+        jwt_key_bytes: &[u8],
+        secret: SecretKey,
         chain_spec: Arc<ChainSpec>,
         client: Client,
         pool: Pool,
@@ -370,9 +376,17 @@ where
             .ok()
             .flatten()
             .unwrap_or_else(|| chain_spec.sealed_genesis_header());
+        let block = match client.block_by_id(BlockId::Number(BlockNumberOrTag::Latest)) {
+            Ok(Some(block)) => block,
+            _ => panic!("Failed to get latest block"),
+        };
+        if latest_header.number == 0 {}
 
-        let jwt_key = JwtKey::from_slice(secret).unwrap();
+        let jwt_key = JwtKey::from_slice(jwt_key_bytes).unwrap();
         let api = create_auth_api(jwt_key);
+        let config = PbftConfig::new();
+        let mut state = PbftState::new(secret, latest_header.number, &config);
+        clayer_consensus.initialize(clayer_block_from_genesis(&latest_header), &config, &mut state);
         Self {
             chain_spec,
             storage: ClStorage::new(latest_header),
@@ -382,12 +396,25 @@ where
             network,
             consensus: clayer_consensus,
             storages,
+            config,
+            state,
         }
     }
     /// Consumes the type and returns all components
     #[track_caller]
     pub fn build(self) -> ClTask<Client, Pool, CDB> {
-        let Self { chain_spec, client, pool, storage, api, network, consensus, storages } = self;
+        let Self {
+            chain_spec,
+            client,
+            pool,
+            storage,
+            api,
+            network,
+            consensus,
+            storages,
+            config,
+            state,
+        } = self;
         let task = ClTask::new(
             Arc::clone(&chain_spec),
             storage,
@@ -397,6 +424,8 @@ where
             network.clone(),
             consensus,
             storages,
+            config,
+            state,
         );
         task
     }

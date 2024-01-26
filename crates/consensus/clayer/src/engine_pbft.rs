@@ -26,7 +26,29 @@ pub enum ConsensusEvent {
     PeerMessage(ClayerConsensusMessage, PeerId),
 }
 
-fn handle_consensus_event(
+pub fn parse_consensus_message(
+    bytes: &reth_primitives::Bytes,
+) -> Result<ClayerConsensusMessage, PbftError> {
+    ClayerConsensusMessage::decode(&mut bytes.to_vec().as_slice()).map_err(|err| {
+        PbftError::SerializationError(
+            "Error parsing ClayerConsensusMessage message".into(),
+            err.to_string(),
+        )
+    })
+}
+
+fn parse_consensus_message_header(
+    bytes: &reth_primitives::Bytes,
+) -> Result<ClayerConsensusMessageHeader, PbftError> {
+    ClayerConsensusMessageHeader::decode(&mut bytes.to_vec().as_slice()).map_err(|err| {
+        PbftError::SerializationError(
+            "Error parsing ClayerConsensusMessageHeader message".into(),
+            err.to_string(),
+        )
+    })
+}
+
+pub fn handle_consensus_event(
     consensus: &mut ClayerConsensusEngine,
     incoming_event: ConsensusEvent,
     state: &mut PbftState,
@@ -38,13 +60,7 @@ fn handle_consensus_event(
         // ConsensusEvent::BlockCommit(block_id) => consensus.on_block_commit(block_id, state)?,
         ConsensusEvent::PeerMessage(message, peer_id) => {
             let header: ClayerConsensusMessageHeader =
-                ClayerConsensusMessageHeader::decode(&mut message.header_bytes.to_vec().as_slice())
-                    .map_err(|err| {
-                        PbftError::SerializationError(
-                            "Error parsing header from vote".into(),
-                            err.to_string(),
-                        )
-                    })?;
+                parse_consensus_message_header(&message.header_bytes)?;
             let verified_signer_id = header.signer_id.clone();
             let parsed_message = ParsedMessage::from_peer_message(message, state.id.as_slice())?;
             let pbft_signer_id = parsed_message.info().signer_id;
@@ -57,12 +73,12 @@ fn handle_consensus_event(
             }
             consensus.on_peer_message(parsed_message, state)?
         }
-        ConsensusEvent::PeerConnected(info) => {
-            // info!("Received PeerConnected message with peer info: {:?}", info);
-            // node.on_peer_connected(info.peer_id, state)?
+        ConsensusEvent::PeerConnected(peer_id) => {
+            info!(target: "consensus::cl","Received PeerConnected message with peer ID: {:?}", peer_id);
+            consensus.on_peer_connected(peer_id, state)?
         }
-        ConsensusEvent::PeerDisconnected(id) => {
-            info!(target: "consensus::cl","Received PeerDisconnected for peer ID: {:?}", id);
+        ConsensusEvent::PeerDisconnected(peer_id) => {
+            info!(target: "consensus::cl","Received PeerDisconnected for peer ID: {:?}", peer_id);
         }
     }
 

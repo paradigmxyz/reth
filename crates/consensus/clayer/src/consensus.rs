@@ -9,6 +9,7 @@ pub use message::*;
 mod pbft_error;
 pub use pbft_error::*;
 mod state;
+use reqwest::header;
 use reth_rpc_types::PeerId;
 pub use state::*;
 mod test_helpers;
@@ -19,12 +20,12 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use reth_ecies::util::id2pk;
 use reth_eth_wire::{
-    ClayerBlock, ClayerConsensusMessage, ClayerConsensusMessageHeader, ClayerExecutionPayload,
-    ClayerSignature, PbftMessage, PbftMessageInfo, PbftMessageType, PbftNewView, PbftSeal,
-    PbftSignedVote,
+    BlockHeaders, ClayerBlock, ClayerConsensusMessage, ClayerConsensusMessageHeader,
+    ClayerExecutionPayload, ClayerSignature, PbftMessage, PbftMessageInfo, PbftMessageType,
+    PbftNewView, PbftSeal, PbftSignedVote,
 };
 use reth_interfaces::clayer::ClayerConsensus;
-use reth_primitives::{public_key_to_address, sign_message, B256};
+use reth_primitives::{public_key_to_address, sign_message, SealedHeader, B256};
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use std::{
     collections::{HashSet, VecDeque},
@@ -53,14 +54,13 @@ impl Clone for ClayerConsensusEngine {
 
 impl ClayerConsensusEngine {
     pub fn new(is_validator: bool, secret_key: SecretKey) -> Self {
-        let config = PbftConfig::new();
         Self {
-            inner: Arc::new(RwLock::new(ClayerConsensusEngineInner::new(
-                is_validator,
-                secret_key,
-                &config,
-            ))),
+            inner: Arc::new(RwLock::new(ClayerConsensusEngineInner::new(is_validator, secret_key))),
         }
+    }
+
+    pub fn initialize(&self, block: ClayerBlock, config: &PbftConfig, state: &mut PbftState) {
+        self.inner.write().initialize(block, config, state);
     }
 
     pub fn is_validator(&self) -> bool {
@@ -113,6 +113,43 @@ impl ClayerConsensusEngine {
     ) -> Result<(), PbftError> {
         self.inner.write().on_block_commit(block_id, state)
     }
+
+    /// Check to see if the idle timeout has expired
+    pub fn check_idle_timeout_expired(&mut self, state: &mut PbftState) -> bool {
+        self.inner.write().check_idle_timeout_expired(state)
+    }
+
+    /// Start the idle timeout
+    pub fn start_idle_timeout(&self, state: &mut PbftState) {
+        self.inner.write().start_idle_timeout(state)
+    }
+
+    /// Check to see if the commit timeout has expired
+    pub fn check_commit_timeout_expired(&mut self, state: &mut PbftState) -> bool {
+        self.inner.write().check_commit_timeout_expired(state)
+    }
+
+    /// Start the commit timeout
+    pub fn start_commit_timeout(&self, state: &mut PbftState) {
+        self.inner.write().start_commit_timeout(state)
+    }
+
+    /// Check to see if the view change timeout has expired
+    pub fn check_view_change_timeout_expired(&mut self, state: &mut PbftState) -> bool {
+        self.inner.write().check_view_change_timeout_expired(state)
+    }
+
+    pub fn start_view_change(&mut self, state: &mut PbftState, view: u64) -> Result<(), PbftError> {
+        self.inner.write().start_view_change(state, view)
+    }
+
+    pub fn on_peer_connected(
+        &mut self,
+        peer_id: PeerId,
+        state: &mut PbftState,
+    ) -> Result<(), PbftError> {
+        self.inner.write().on_peer_connected(peer_id, state)
+    }
 }
 
 impl ClayerConsensus for ClayerConsensusEngine {
@@ -129,6 +166,15 @@ impl ClayerConsensus for ClayerConsensusEngine {
     fn pop_received_cache(&self) -> Option<(PeerId, reth_primitives::Bytes)> {
         self.inner.write().pop_received_cache()
     }
+
+    /// push network event(PeerConnected, PeerDisconnected)
+    fn push_network_event(&self, peer_id: PeerId, connect: bool) {
+        self.inner.write().push_network_event(peer_id, connect);
+    }
+    /// pop network event(PeerConnected, PeerDisconnected)
+    fn pop_network_event(&self) -> Option<(PeerId, bool)> {
+        self.inner.write().pop_network_event()
+    }
     /// broadcast consensus
     fn broadcast_consensus(&self, peers: Vec<PeerId>, data: reth_primitives::Bytes) {
         self.inner.read().broadcast_consensus(peers, data);
@@ -142,19 +188,54 @@ pub struct ClayerConsensusEngineInner {
     pub msg_log: PbftLog,
     service: ApiService,
     queued: VecDeque<(PeerId, reth_primitives::Bytes)>,
+    network_queued: VecDeque<(PeerId, bool)>,
+    active_peers: HashSet<PeerId>,
     sender: Option<Sender<(Vec<PeerId>, reth_primitives::Bytes)>>,
 }
 
 impl ClayerConsensusEngineInner {
-    pub fn new(is_validator: bool, secret_key: SecretKey, config: &PbftConfig) -> Self {
-        let msg_log = PbftLog::new(config);
+    pub fn new(is_validator: bool, secret_key: SecretKey) -> Self {
         Self {
             is_validator,
             signer_id: secret_key.public_key(SECP256K1),
-            msg_log,
+            msg_log: PbftLog::default(),
             service: ApiService::default(),
             queued: VecDeque::default(),
+            network_queued: VecDeque::default(),
+            active_peers: HashSet::default(),
             sender: None,
+        }
+    }
+
+    pub fn initialize(&mut self, block: ClayerBlock, config: &PbftConfig, state: &mut PbftState) {
+        // Add chain head to log and update state
+        self.msg_log.resize_log(&config);
+        self.msg_log.add_validated_block(block.clone());
+        state.chain_head = block.block_id();
+
+        // If starting up from a non-genesis block, the node may need to perform some special
+        // actions
+        if block.block_num() > 0 {
+            // If starting up with a block that has a consensus seal, update the view to match
+            if let Ok(seal) = PbftSeal::decode(&mut block.seal_bytes.to_vec().as_slice()) {
+                state.view = seal.info.view;
+                info!(target: "consensus::cl","Updated view to {} on startup", state.view);
+            }
+
+            // If connected to any peers already, send bootstrap commit messages to them
+            let connected_peers: Vec<PeerId> = self.active_peers.iter().cloned().collect();
+            for peer_id in connected_peers {
+                self.broadcast_bootstrap_commit(peer_id, state).unwrap_or_else(|err| {
+                    error!("Failed to broadcast bootstrap commit due to error: {}", err)
+                });
+            }
+        }
+
+        // Primary initializes a block
+        if state.is_primary() {
+            self.service.initialize_block(None).unwrap_or_else(|err| {
+                error!("Couldn't initialize block on startup due to error: {}", err)
+            });
         }
     }
 
@@ -170,6 +251,20 @@ impl ClayerConsensusEngineInner {
 
     fn pop_received_cache(&mut self) -> Option<(PeerId, reth_primitives::Bytes)> {
         self.queued.pop_front()
+    }
+
+    /// push network event(PeerConnected, PeerDisconnected)
+    fn push_network_event(&mut self, peer_id: PeerId, connect: bool) {
+        self.network_queued.push_back((peer_id, connect));
+        if connect {
+            self.active_peers.insert(peer_id);
+        } else {
+            self.active_peers.remove(&peer_id);
+        }
+    }
+    /// pop network event(PeerConnected, PeerDisconnected)
+    fn pop_network_event(&mut self) -> Option<(PeerId, bool)> {
+        self.network_queued.pop_front()
     }
 
     fn broadcast_consensus(&self, peers: Vec<PeerId>, data: reth_primitives::Bytes) {
@@ -985,7 +1080,7 @@ impl ClayerConsensusEngineInner {
         state.seq_num += 1;
         state.mode = PbftMode::Normal;
         state.phase = PbftPhase::PrePreparing;
-        state.last_commit_block_id = block_id.clone();
+        state.chain_head = block_id.clone();
 
         // If node(s) are waiting for a seal to commit the last block, send it now
         let requesters = self
@@ -1138,6 +1233,106 @@ impl ClayerConsensusEngineInner {
                 }
             }
         }
+
+        Ok(())
+    }
+
+    /// Handle a `PeerConnected` update from the Validator
+    ///
+    /// A peer has just connected to this node. Send a bootstrap commit message if the peer is part
+    /// of the network and the node isn't at the genesis block.
+    pub fn on_peer_connected(
+        &mut self,
+        peer_id: PeerId,
+        state: &mut PbftState,
+    ) -> Result<(), PbftError> {
+        // Ignore if the peer is not a member of the PBFT network or the chain head is block 0
+        if !state.validators.contains(&peer_id) || state.seq_num == 0 {
+            return Ok(());
+        }
+
+        self.broadcast_bootstrap_commit(peer_id, state)
+    }
+
+    /// When the whole network is starting "fresh" from a non-genesis block, none of the nodes will
+    /// have the `Commit` messages necessary to build the consensus seal for the last committed
+    /// block (the chain head). To bootstrap the network in this scenario, all nodes will send a
+    /// `Commit` message for their chain head whenever one of the PBFT members connects; when
+    /// > 2f + 1 nodes have connected and received these `Commit` messages, the nodes will be able
+    /// to build a seal using the messages.
+    fn broadcast_bootstrap_commit(
+        &mut self,
+        peer_id: PeerId,
+        state: &mut PbftState,
+    ) -> Result<(), PbftError> {
+        // The network must agree on a single view number for the Commit messages, so the view
+        // of the chain head's predecessor is used. For block 1 this is view 0; otherwise, it's the
+        // view of the block's consensus seal
+        let view = if state.seq_num == 1 {
+            0
+        } else {
+            self.msg_log
+                .get_block_with_id(state.chain_head)
+                .ok_or_else(|| {
+                    PbftError::InternalError(format!(
+                        "Node does not have chain head ({:?}) in its log",
+                        state.chain_head
+                    ))
+                })
+                .and_then(|block| {
+                    PbftSeal::decode(&mut block.seal_bytes.to_vec().as_slice()).map_err(|err| {
+                        PbftError::SerializationError(
+                            "Error parsing seal from chain head".into(),
+                            err.to_string(),
+                        )
+                    })
+                })?
+                .info
+                .view
+        };
+
+        // Construct the commit message for the chain head and send it to the connected peer
+
+        let info = PbftMessageInfo {
+            ptype: PbftMessageType::Commit as u8,
+            view,
+            seq_num: state.seq_num - 1,
+            signer_id: state.id.clone(),
+        };
+        let commit = PbftMessage { info, block_id: state.chain_head.clone() };
+
+        let mut msg_out = vec![];
+        commit.encode(&mut msg_out);
+        let message_bytes = reth_primitives::Bytes::copy_from_slice(msg_out.as_slice());
+
+        //create header
+        let header = ClayerConsensusMessageHeader {
+            message_type: commit.info.ptype,
+            content_hash: keccak256(&message_bytes),
+            signer_id: state.id.clone(),
+        };
+        let mut header_out = vec![];
+        header.encode(&mut header_out);
+        let header_bytes = reth_primitives::Bytes::copy_from_slice(header_out.as_slice());
+
+        //sign header
+        let signature_hash = keccak256(&header_bytes);
+        let signature =
+            sign_message(B256::from_slice(&state.kp.secret_bytes()[..]), signature_hash).map_err(
+                |err| PbftError::SigningError(format!("signing header error: {}", err.to_string())),
+            )?;
+
+        let clayer_msg = ClayerConsensusMessage {
+            header_bytes,
+            header_signature: ClayerSignature(signature),
+            message_bytes,
+        };
+        let mut msg_out = vec![];
+        clayer_msg.encode(&mut msg_out);
+        let msg_bytes = reth_primitives::Bytes::copy_from_slice(msg_out.as_slice());
+
+        // Send the seal to the requester
+        self.broadcast_consensus(vec![peer_id.clone()], msg_bytes);
 
         Ok(())
     }
@@ -1541,7 +1736,7 @@ impl ClayerConsensusEngineInner {
         match self.service.finalize_block() {
             Ok(execution_payload) => {
                 let block_id = execution_payload.execution_payload.payload_inner.block_hash;
-                let payload = Self::convert_execution_payload(&execution_payload);
+                let payload = execution_payload_from_payload(&execution_payload);
                 self.broadcast_block_new(state.view, state.seq_num, payload, seal_bytes, state)?;
                 info!(target: "consensus::cl","{}: Publishing block {}", state, hex::encode(block_id));
                 Ok(())
@@ -1759,36 +1954,102 @@ impl ClayerConsensusEngineInner {
         self.on_block_new(block, state)?;
         Ok(())
     }
+}
 
-    fn convert_execution_payload(payload: &ExecutionPayloadWrapperV2) -> ClayerExecutionPayload {
-        let p = &payload.execution_payload.payload_inner;
-        let withdrawals = payload
-            .execution_payload
-            .withdrawals
-            .iter()
-            .map(|w| reth_primitives::Withdrawal {
-                index: w.index,
-                validator_index: w.validator_index,
-                address: w.address,
-                amount: w.amount,
-            })
-            .collect::<Vec<_>>();
-        ClayerExecutionPayload {
-            parent_hash: p.parent_hash,
-            fee_recipient: p.fee_recipient,
-            state_root: p.state_root,
-            receipts_root: p.receipts_root,
-            logs_bloom: p.logs_bloom,
-            prev_randao: p.prev_randao,
-            block_number: p.block_number,
-            gas_limit: p.gas_limit,
-            gas_used: p.gas_used,
-            timestamp: p.timestamp,
-            extra_data: p.extra_data.clone(),
-            base_fee_per_gas: p.base_fee_per_gas,
-            block_hash: p.block_hash,
-            transactions: p.transactions.clone(),
-            withdrawals,
-        }
+fn execution_payload_from_payload(payload: &ExecutionPayloadWrapperV2) -> ClayerExecutionPayload {
+    let p = &payload.execution_payload.payload_inner;
+    let withdrawals = payload
+        .execution_payload
+        .withdrawals
+        .iter()
+        .map(|w| reth_primitives::Withdrawal {
+            index: w.index,
+            validator_index: w.validator_index,
+            address: w.address,
+            amount: w.amount,
+        })
+        .collect::<Vec<_>>();
+    ClayerExecutionPayload {
+        parent_hash: p.parent_hash,
+        fee_recipient: p.fee_recipient,
+        state_root: p.state_root,
+        receipts_root: p.receipts_root,
+        logs_bloom: p.logs_bloom,
+        prev_randao: p.prev_randao,
+        block_number: p.block_number,
+        gas_limit: p.gas_limit,
+        gas_used: p.gas_used,
+        timestamp: p.timestamp,
+        extra_data: p.extra_data.clone(),
+        base_fee_per_gas: p.base_fee_per_gas,
+        block_hash: p.block_hash,
+        transactions: p.transactions.clone(),
+        withdrawals,
+    }
+}
+
+pub fn clayer_block_from_genesis(genesis_header: &SealedHeader) -> ClayerBlock {
+    let block = ClayerExecutionPayload {
+        parent_hash: genesis_header.parent_hash,
+        fee_recipient: reth_primitives::Address::ZERO,
+        state_root: genesis_header.state_root,
+        receipts_root: genesis_header.receipts_root,
+        logs_bloom: genesis_header.logs_bloom,
+        prev_randao: B256::ZERO,
+        block_number: genesis_header.number,
+        gas_limit: genesis_header.gas_limit,
+        gas_used: genesis_header.gas_used,
+        timestamp: genesis_header.timestamp,
+        extra_data: genesis_header.extra_data.clone(),
+        base_fee_per_gas: if let Some(base_fee_per_gas) = genesis_header.base_fee_per_gas {
+            reth_primitives::U256::from(base_fee_per_gas)
+        } else {
+            reth_primitives::U256::from(0)
+        },
+        block_hash: genesis_header.hash,
+        transactions: Vec::new(),
+        withdrawals: Vec::new(),
+    };
+    let info = PbftMessageInfo {
+        ptype: PbftMessageType::BlockNew as u8,
+        view: 0,
+        seq_num: 0,
+        signer_id: PeerId::default(),
+    };
+
+    ClayerBlock { info, block, seal_bytes: reth_primitives::Bytes::default() }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::B256;
+
+    #[test]
+    fn test_bytes_default() {
+        let b = reth_primitives::Bytes::default();
+
+        println!("{}  {}", reth_primitives::Bytes::default(), b.is_empty());
+    }
+
+    #[test]
+    fn test_peer_id_default() {
+        let p = reth_primitives::PeerId::default();
+        let p1 = reth_rpc_types::PeerId::default();
+
+        println!("{} {}", reth_primitives::PeerId::default(), p.is_zero());
+
+        println!("{} {}", reth_rpc_types::PeerId::default(), p1.is_zero());
+    }
+
+    #[test]
+    fn test_address_default() {
+        let a = reth_primitives::Address::default();
+        println!("{} {}", reth_primitives::Address::default(), a.is_zero());
+    }
+
+    #[test]
+    fn test_b256_default() {
+        let b = B256::default();
+        println!("{} {}", B256::default(), b.is_zero());
     }
 }

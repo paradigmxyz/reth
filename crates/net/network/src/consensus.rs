@@ -74,6 +74,7 @@ where
             NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
                 self.peers.remove(&peer_id);
+                self.clayer.push_network_event(peer_id, false);
             }
             NetworkEvent::SessionEstablished {
                 peer_id, client_version, messages, version, ..
@@ -83,6 +84,7 @@ where
                     peer_id,
                     ConsensusPeer { request_tx: messages, version, client_version },
                 );
+                self.clayer.push_network_event(peer_id, true);
             }
             _ => {}
         }
@@ -99,9 +101,12 @@ where
 
     fn propagate_consensus(&mut self, peers: Vec<PeerId>, data: reth_primitives::Bytes) {
         for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
-            // send full transactions
-            if peers.contains(peer_id) {
+            if peers.is_empty() {
                 self.network.send_consensus(*peer_id, data.clone());
+            } else {
+                if peers.contains(peer_id) {
+                    self.network.send_consensus(*peer_id, data.clone());
+                }
             }
         }
     }

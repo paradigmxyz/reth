@@ -3,7 +3,7 @@ use super::PbftConfig;
 use reth_eth_wire::{ClayerBlock, PbftMessageInfo, PbftMessageType};
 use reth_primitives::{Block, Bytes, Signature, B256};
 use std::collections::{HashMap, HashSet};
-use std::fmt;
+use std::{default, fmt};
 use tracing::trace;
 
 pub struct PbftLog {
@@ -12,6 +12,17 @@ pub struct PbftLog {
     messages: HashSet<ParsedMessage>,
     /// Maximum log size
     max_log_size: u64,
+}
+
+impl Default for PbftLog {
+    fn default() -> Self {
+        PbftLog {
+            unvalidated_blocks: HashMap::new(),
+            blocks: HashSet::new(),
+            messages: HashSet::new(),
+            max_log_size: 1000,
+        }
+    }
 }
 
 impl fmt::Display for PbftLog {
@@ -44,6 +55,10 @@ impl PbftLog {
             messages: HashSet::new(),
             max_log_size: config.max_log_size,
         }
+    }
+
+    pub fn resize_log(&mut self, config: &PbftConfig) {
+        self.max_log_size = config.max_log_size;
     }
 
     /// Add an already validated `Block` to the log

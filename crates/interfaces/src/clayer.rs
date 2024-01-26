@@ -11,6 +11,10 @@ pub trait ClayerConsensus: Send + Sync + Clone {
     fn push_received_cache(&self, peer_id: PeerId, data: reth_primitives::Bytes);
     /// pop data received from network out cache
     fn pop_received_cache(&self) -> Option<(PeerId, reth_primitives::Bytes)>;
+    /// push network event(PeerConnected, PeerDisconnected)
+    fn push_network_event(&self, peer_id: PeerId, connect: bool);
+    /// pop network event(PeerConnected, PeerDisconnected)
+    fn pop_network_event(&self) -> Option<(PeerId, bool)>;
     /// broadcast consensus
     fn broadcast_consensus(&self, peers: Vec<PeerId>, data: reth_primitives::Bytes);
 }
