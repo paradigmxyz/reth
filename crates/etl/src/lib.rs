@@ -20,6 +20,7 @@ use std::{
     collections::BinaryHeap,
     io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::Path,
+    sync::Arc,
 };
 
 use reth_db::table::{Compress, Encode, Key, Value};
@@ -40,7 +41,7 @@ where
     <V as Compress>::Compressed: std::fmt::Debug,
 {
     /// Directory for temporary file storage
-    dir: TempDir,
+    dir: Arc<TempDir>,
     /// Collection of temporary ETL files
     files: Vec<EtlFile>,
     /// Current buffer size in bytes
@@ -63,15 +64,15 @@ where
     /// Create a new collector in a specific temporary directory with some capacity.
     ///
     /// Once the capacity (in bytes) is reached, the data is sorted and flushed to disk.
-    pub fn new(buffer_capacity_bytes: usize) -> Result<Self, std::io::Error> {
-        Ok(Self {
-            dir: tempfile::tempdir()?,
+    pub fn new(dir: Arc<TempDir>, buffer_capacity_bytes: usize) -> Self {
+        Self {
+            dir,
             buffer_size_bytes: 0,
             files: Vec::new(),
             buffer_capacity_bytes,
             buffer: Vec::new(),
             len: 0,
-        })
+        }
     }
 
     /// Returns number of elements currently in the collector.
@@ -229,6 +230,7 @@ impl EtlFile {
 #[cfg(test)]
 mod tests {
     use reth_primitives::{TxHash, TxNumber};
+    use tempfile::TempDir;
 
     use super::*;
 
@@ -237,7 +239,7 @@ mod tests {
         let mut entries: Vec<_> =
             (0..10_000).map(|id| (TxHash::random(), id as TxNumber)).collect();
 
-        let mut collector = Collector::new(1024).unwrap();
+        let mut collector = Collector::new(Arc::new(TempDir::new().unwrap()), 1024);
         for (k, v) in entries.clone() {
             collector.insert(k, v);
         }

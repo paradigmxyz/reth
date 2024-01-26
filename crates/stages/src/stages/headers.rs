@@ -25,6 +25,7 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
+use tempfile::TempDir;
 use tracing::*;
 
 /// The headers stage.
@@ -72,6 +73,7 @@ where
         downloader: Downloader,
         mode: HeaderSyncMode,
         consensus: Arc<dyn Consensus>,
+        tempdir: Arc<TempDir>,
     ) -> Self {
         Self {
             provider: database,
@@ -79,8 +81,8 @@ where
             mode,
             consensus,
             sync_gap: None,
-            hash_collector: Collector::new(100 * (1024 * 1024)).unwrap(),
-            header_collector: Collector::new(100 * (1024 * 1024)).unwrap(),
+            hash_collector: Collector::new(tempdir.clone(), 100 * (1024 * 1024)),
+            header_collector: Collector::new(tempdir, 100 * (1024 * 1024)),
             is_etl_ready: false,
         }
     }
@@ -378,6 +380,7 @@ mod tests {
         use reth_primitives::U256;
         use reth_provider::{BlockHashReader, BlockNumReader, HeaderProvider};
         use std::sync::Arc;
+        use tempfile::TempDir;
         use tokio::sync::watch;
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
@@ -421,6 +424,7 @@ mod tests {
                     (*self.downloader_factory)(),
                     HeaderSyncMode::Tip(self.channel.1.clone()),
                     self.consensus.clone(),
+                    Arc::new(TempDir::new().unwrap()),
                 )
             }
         }

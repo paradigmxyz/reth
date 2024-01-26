@@ -43,6 +43,7 @@ tracing.workspace = true
 
 # io
 serde.workspace = true
+tempfile.workspace = true
 
 # metrics
 reth-metrics.workspace = true

@@ -891,7 +891,7 @@ impl NodeConfig {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
-                )
+                )?
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_config.sender_recovery.commit_threshold,
                 })
