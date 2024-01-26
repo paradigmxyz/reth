@@ -131,13 +131,10 @@ mod tests {
         },
         BlockingTaskPool,
     };
-    use reth_primitives::{
-        constants::ETHEREUM_BLOCK_GAS_LIMIT, Receipt, SealedBlock, StorageKey, StorageValue,
-    };
+    use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, StorageKey, StorageValue};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
     use reth_transaction_pool::test_utils::testing_pool;
     use std::collections::HashMap;
-    use tokio::sync::watch;
 
     #[tokio::test]
     async fn test_storage() {
@@ -145,8 +142,6 @@ mod tests {
         let pool = testing_pool();
 
         let cache = EthStateCache::spawn(NoopProvider::default(), Default::default());
-        let initial_value: Option<(SealedBlock, Vec<Receipt>)> = None;
-        let (local_pending_block_watcher_tx, _) = watch::channel(initial_value.clone());
         let eth_api = EthApi::new(
             NoopProvider::default(),
             pool.clone(),
@@ -156,7 +151,6 @@ mod tests {
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default()),
-            local_pending_block_watcher_tx,
         );
         let address = Address::random();
         let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
@@ -170,7 +164,6 @@ mod tests {
         let account = ExtendedAccount::new(0, U256::ZERO).extend_storage(storage);
         mock_provider.add_account(address, account);
 
-        let (local_pending_block_watcher_tx, _) = watch::channel(initial_value);
         let cache = EthStateCache::spawn(mock_provider.clone(), Default::default());
         let eth_api = EthApi::new(
             mock_provider.clone(),
@@ -181,7 +174,6 @@ mod tests {
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default()),
-            local_pending_block_watcher_tx,
         );
 
         let storage_key: U256 = storage_key.into();

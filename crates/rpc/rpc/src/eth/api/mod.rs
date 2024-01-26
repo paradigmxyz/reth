@@ -109,7 +109,6 @@ where
         gas_cap: impl Into<GasCap>,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
-        local_pending_block_sender: LocalPendingBlockWatcherSender,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -121,7 +120,6 @@ where
             Box::<TokioTaskExecutor>::default(),
             blocking_task_pool,
             fee_history_cache,
-            local_pending_block_sender,
         )
     }
 
@@ -137,7 +135,6 @@ where
         task_spawner: Box<dyn TaskSpawner>,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
-        local_pending_block_sender: LocalPendingBlockWatcherSender,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -147,6 +144,8 @@ where
             .map(|header| header.number)
             .unwrap_or_default();
 
+        let initial_value: Option<(SealedBlock, Vec<Receipt>)> = None;
+        let (local_pending_block_sender, _) = watch::channel(initial_value);
         let inner = EthApiInner {
             provider,
             pool,
@@ -224,8 +223,13 @@ where
     }
 
     /// Returns local pending block sender
-    pub fn local_pending_block_sender(&self) -> &LocalPendingBlockWatcherSender {
+    fn local_pending_block_sender(&self) -> &LocalPendingBlockWatcherSender {
         &self.inner.local_pending_block_sender
+    }
+
+    /// Returns the inner `Provider`
+    pub fn local_pending_block_listener(&self) -> LocalPendingBlockWatcherReceiver {
+        self.inner.local_pending_block_sender.subscribe()
     }
 }
 

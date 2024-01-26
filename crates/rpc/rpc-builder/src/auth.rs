@@ -5,8 +5,6 @@ use crate::{
     EthConfig,
 };
 
-use tokio::sync::watch;
-
 use hyper::header::AUTHORIZATION;
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
@@ -16,7 +14,6 @@ use jsonrpsee::{
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_node_api::EngineTypes;
-use reth_primitives::{Receipt, SealedBlock};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
     StateProviderFactory,
@@ -74,8 +71,6 @@ where
     let fee_history_cache =
         FeeHistoryCache::new(eth_cache.clone(), FeeHistoryCacheConfig::default());
 
-    let initial_value: Option<(SealedBlock, Vec<Receipt>)> = None;
-    let (local_pending_block_watcher_tx, _) = watch::channel(initial_value);
     let eth_api = EthApi::with_spawner(
         provider.clone(),
         pool.clone(),
@@ -86,7 +81,6 @@ where
         Box::new(executor.clone()),
         BlockingTaskPool::build().expect("failed to build tracing pool"),
         fee_history_cache,
-        local_pending_block_watcher_tx,
     );
     let config = EthFilterConfig::default()
         .max_logs_per_response(DEFAULT_MAX_LOGS_PER_RESPONSE)
