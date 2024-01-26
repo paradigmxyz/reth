@@ -261,7 +261,7 @@ lint:
 	make lint-op-reth && \
 	make lint-other-targets
 
-docs:
+rustdocs:
 	RUSTDOCFLAGS="--cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options -D warnings" cargo +nightly docs --document-private-items
 
 test-reth:
