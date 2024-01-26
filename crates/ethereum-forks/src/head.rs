@@ -57,7 +57,7 @@ impl fmt::Display for Head {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Head Block:\n Number: {}\n Hash: {:?}\n Difficulty: {:?}\n Total Difficulty: {:?}\n Timestamp: {}",
+            "Head Block:\n Number: {}\n Hash: {}\n Difficulty: {:?}\n Total Difficulty: {:?}\n Timestamp: {}",
             self.number, self.hash, self.difficulty, self.total_difficulty, self.timestamp
         )
     }
