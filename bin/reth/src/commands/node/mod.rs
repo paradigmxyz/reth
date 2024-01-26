@@ -2,6 +2,23 @@
 //!
 //! Starts the client
 
+use clap::{value_parser, Parser};
+use reth_auto_seal_consensus::AutoSealConsensus;
+use reth_beacon_consensus::BeaconConsensus;
+use reth_interfaces::consensus::Consensus;
+use reth_primitives::ChainSpec;
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+
+/// Re-export from `reth_node_core` for backwards compatibility.
+pub mod events {
+    pub use crate::core::events::*;
+}
+
+/// Re-export from `reth_node_core` for backwards compatibility.
+pub mod cl_events {
+    pub use crate::core::cl_events::*;
+}
+
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, parse_socket_address, SUPPORTED_CHAINS},
@@ -13,15 +30,6 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
 };
-use clap::{value_parser, Parser};
-use reth_auto_seal_consensus::AutoSealConsensus;
-use reth_beacon_consensus::BeaconConsensus;
-use reth_interfaces::consensus::Consensus;
-use reth_primitives::ChainSpec;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
-
-pub mod cl_events;
-pub mod events;
 
 /// Start the node
 #[derive(Debug, Parser)]

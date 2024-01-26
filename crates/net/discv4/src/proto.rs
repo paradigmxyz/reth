@@ -1,7 +1,5 @@
 //! Discovery v4 protocol implementation.
 
-#![allow(missing_docs)]
-
 use crate::{error::DecodePacketError, EnrForkIdEntry, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
 use alloy_rlp::{
     length_of_length, Decodable, Encodable, Error as RlpError, Header, RlpDecodable, RlpEncodable,
@@ -19,15 +17,23 @@ use std::net::IpAddr;
 
 // Note: this is adapted from https://github.com/vorot93/discv4
 
-/// Id for message variants.
+/// Represents the identifier for message variants.
+///
+/// This enumeration assigns unique identifiers (u8 values) to different message types.
 #[derive(Debug)]
 #[repr(u8)]
 pub enum MessageId {
+    /// Ping message identifier.
     Ping = 1,
+    /// Pong message identifier.
     Pong = 2,
+    /// Find node message identifier.
     FindNode = 3,
+    /// Neighbours message identifier.
     Neighbours = 4,
+    /// ENR request message identifier.
     EnrRequest = 5,
+    /// ENR response message identifier.
     EnrResponse = 6,
 }
 
@@ -173,11 +179,16 @@ impl Message {
     }
 }
 
-/// Decoded packet
+/// Represents a decoded packet.
+///
+/// This struct holds information about a decoded packet, including the message, node ID, and hash.
 #[derive(Debug)]
 pub struct Packet {
+    /// The decoded message from the packet.
     pub msg: Message,
+    /// The ID of the peer that sent the packet.
     pub node_id: PeerId,
+    /// The hash of the packet.
     pub hash: B256,
 }
 
@@ -231,6 +242,7 @@ pub struct Neighbours {
 pub struct EnrWrapper<K: EnrKey>(Enr<K>);
 
 impl<K: EnrKey> EnrWrapper<K> {
+    /// Creates a new instance of [`EnrWrapper`].
     pub fn new(enr: Enr<K>) -> Self {
         EnrWrapper(enr)
     }
@@ -302,15 +314,24 @@ impl<K: EnrKey> Decodable for EnrWrapper<K> {
 }
 
 /// A [ENRRequest packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrrequest-packet-0x05).
+///
+/// This packet is used to request the current version of a node's Ethereum Node Record (ENR).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct EnrRequest {
+    /// The expiration timestamp for the request. No reply should be sent if it refers to a time in
+    /// the past.
     pub expire: u64,
 }
 
 /// A [ENRResponse packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrresponse-packet-0x06).
+///
+/// This packet is used to respond to an ENRRequest packet and includes the requested ENR along with
+/// the hash of the original request.
 #[derive(Clone, Debug, Eq, PartialEq, RlpEncodable)]
 pub struct EnrResponse {
+    /// The hash of the ENRRequest packet being replied to.
     pub request_hash: B256,
+    /// The ENR (Ethereum Node Record) for the responding node.
     pub enr: EnrWrapper<SecretKey>,
 }
 
@@ -352,11 +373,16 @@ impl Decodable for EnrResponse {
     }
 }
 
+/// Represents a Ping packet.
+///
 /// A [Ping packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#ping-packet-0x01).
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Ping {
+    /// The sender's endpoint.
     pub from: NodeEndpoint,
+    /// The recipient's endpoint.
     pub to: NodeEndpoint,
+    /// The expiration timestamp.
     pub expire: u64,
     /// Optional enr_seq for <https://eips.ethereum.org/EIPS/eip-868>
     pub enr_sq: Option<u64>,
@@ -440,11 +466,16 @@ impl Decodable for Ping {
     }
 }
 
+/// Represents a Pong packet.
+///
 /// A [Pong packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#pong-packet-0x02).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Pong {
+    /// The recipient's endpoint.
     pub to: NodeEndpoint,
+    /// The hash of the corresponding ping packet.
     pub echo: B256,
+    /// The expiration timestamp.
     pub expire: u64,
     /// Optional enr_seq for <https://eips.ethereum.org/EIPS/eip-868>
     pub enr_sq: Option<u64>,
