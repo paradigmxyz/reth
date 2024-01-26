@@ -35,7 +35,7 @@ use reth_db::mdbx::DatabaseArguments;
 /// A common provider that fetches data from a database.
 ///
 /// This provider implements most provider or provider factory traits.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProviderFactory<DB> {
     /// Database
     db: DB,
@@ -43,16 +43,6 @@ pub struct ProviderFactory<DB> {
     chain_spec: Arc<ChainSpec>,
     /// Snapshot Provider
     snapshot_provider: Option<Arc<SnapshotProvider>>,
-}
-
-impl<DB: Clone> Clone for ProviderFactory<DB> {
-    fn clone(&self) -> Self {
-        Self {
-            db: self.db.clone(),
-            chain_spec: Arc::clone(&self.chain_spec),
-            snapshot_provider: self.snapshot_provider.clone(),
-        }
-    }
 }
 
 impl<DB> ProviderFactory<DB> {

@@ -3,6 +3,7 @@
 /// For custom stages, use [`StageId::Other`]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StageId {
+    Snapshot,
     /// Header stage in the process.
     Headers,
     /// Total difficulty stage in the process.
@@ -35,7 +36,8 @@ pub enum StageId {
 
 impl StageId {
     /// All supported Stages
-    pub const ALL: [StageId; 13] = [
+    pub const ALL: [StageId; 14] = [
+        StageId::Snapshot,
         StageId::Headers,
         StageId::TotalDifficulty,
         StageId::Bodies,
@@ -54,6 +56,7 @@ impl StageId {
     /// Return stage id formatted as string.
     pub fn as_str(&self) -> &str {
         match self {
+            StageId::Snapshot => "Snapshot",
             StageId::Headers => "Headers",
             StageId::TotalDifficulty => "TotalDifficulty",
             StageId::Bodies => "Bodies",
@@ -94,6 +97,7 @@ mod tests {
 
     #[test]
     fn stage_id_as_string() {
+        assert_eq!(StageId::Snapshot.to_string(), "Snapshot");
         assert_eq!(StageId::Headers.to_string(), "Headers");
         assert_eq!(StageId::TotalDifficulty.to_string(), "TotalDifficulty");
         assert_eq!(StageId::Bodies.to_string(), "Bodies");

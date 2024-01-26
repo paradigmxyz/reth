@@ -6871,6 +6871,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "reth-snapshot",
  "reth-tokio-util",
  "reth-trie",
  "revm",

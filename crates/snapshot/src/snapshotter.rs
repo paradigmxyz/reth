@@ -1,6 +1,6 @@
 //! Support for snapshotting.
 
-use crate::{segments, segments::Segment, SnapshotterError};
+use crate::{segments, segments::Segment};
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
 use reth_primitives::{snapshot::HighestSnapshots, BlockNumber};
@@ -12,13 +12,13 @@ use std::{ops::RangeInclusive, sync::Arc, time::Instant};
 use tracing::{debug, trace};
 
 /// Result of [Snapshotter::run] execution.
-pub type SnapshotterResult = Result<SnapshotTargets, SnapshotterError>;
+pub type SnapshotterResult = RethResult<SnapshotTargets>;
 
 /// The snapshotter type itself with the result of [Snapshotter::run]
 pub type SnapshotterWithResult<DB> = (Snapshotter<DB>, SnapshotterResult);
 
 /// Snapshotting routine. See [Snapshotter::run] for more detailed description.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Snapshotter<DB> {
     /// Provider factory
     provider_factory: ProviderFactory<DB>,
@@ -166,11 +166,12 @@ impl<DB: Database> Snapshotter<DB> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{snapshotter::SnapshotTargets, Snapshotter, SnapshotterError};
+    use crate::{snapshotter::SnapshotTargets, Snapshotter};
     use assert_matches::assert_matches;
     use reth_interfaces::{
         provider::ProviderError,
         test_utils::{generators, generators::random_block_range},
+        RethError,
     };
     use reth_primitives::{snapshot::HighestSnapshots, B256};
     use reth_stages::test_utils::TestStageDB;
@@ -222,7 +223,7 @@ mod tests {
         );
         assert_matches!(
             snapshotter.run(targets),
-            Err(SnapshotterError::Provider(ProviderError::BlockBodyIndicesNotFound(4)))
+            Err(RethError::Provider(ProviderError::BlockBodyIndicesNotFound(4)))
         );
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
