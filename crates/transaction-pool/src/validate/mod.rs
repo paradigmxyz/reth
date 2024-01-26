@@ -355,13 +355,12 @@ impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
 }
 
 impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(fmt, "Transaction {{ ")?;
-        write!(fmt, "hash: {:?}, ", &self.transaction.hash())?;
-        write!(fmt, "provides: {:?}, ", &self.transaction_id)?;
-        write!(fmt, "raw tx: {:?}", &self.transaction)?;
-        write!(fmt, "}}")?;
-        Ok(())
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ValidPoolTransaction")
+            .field("hash", self.transaction.hash())
+            .field("provides", &self.transaction_id)
+            .field("raw_tx", &self.transaction)
+            .finish()
     }
 }
 
