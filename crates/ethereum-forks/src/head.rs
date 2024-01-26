@@ -44,11 +44,7 @@ impl Head {
         total_difficulty: U256,
         timestamp: u64,
     ) {
-        self.number = number;
-        self.hash = hash;
-        self.difficulty = difficulty;
-        self.total_difficulty = total_difficulty;
-        self.timestamp = timestamp;
+        *self = Self { number, hash, difficulty, total_difficulty, timestamp };
     }
 
     /// Checks if the head block is an empty block (i.e., has default values).
