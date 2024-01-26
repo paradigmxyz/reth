@@ -22,8 +22,7 @@ use tokio::sync::broadcast;
 ///
 /// Once an `independent` transaction was executed it *unlocks* the next nonce, if this transaction
 /// is also pending, then this will be moved to the `independent` queue.
-#[allow(missing_debug_implementations)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PendingPool<T: TransactionOrdering> {
     /// How to order transactions.
     ordering: T,
@@ -516,6 +515,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 }
 
 /// A transaction that is ready to be included in a block.
+#[derive(Debug)]
 pub(crate) struct PendingTransaction<T: TransactionOrdering> {
     /// Identifier that tags when transaction was submitted in the pool.
     pub(crate) submission_id: u64,
