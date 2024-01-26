@@ -7,7 +7,6 @@ use reth_provider::test_utils::NoopProvider;
 use secp256k1::SecretKey;
 use std::io;
 
-
 fn is_addr_in_use_kind(err: &NetworkError, kind: ServiceKind) -> bool {
     match err {
         NetworkError::AddressAlreadyInUse { kind: k, error } => {
