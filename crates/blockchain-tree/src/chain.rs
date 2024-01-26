@@ -167,7 +167,7 @@ impl AppendableChain {
         parent_block: &SealedHeader,
         bundle_state_data_provider: BSDP,
         externals: &TreeExternals<DB, EF>,
-        block_attachment: BlockAttachment,
+        _block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
     ) -> RethResult<(BundleStateWithReceipts, Option<TrieUpdates>)>
     where
@@ -194,13 +194,16 @@ impl AppendableChain {
         // validation was requested.
         if block_validation_kind.is_exhaustive() {
             // check state root
-            let (state_root, trie_updates) = if block_attachment.is_canonical() {
-                provider
-                    .state_root_with_updates(&bundle_state)
-                    .map(|(root, updates)| (root, Some(updates)))?
-            } else {
-                (provider.state_root(&bundle_state)?, None)
-            };
+            // TODO: state root caching is disabled until debugged properly
+            // let (state_root, trie_updates) = if block_attachment.is_canonical() {
+            //     provider
+            //         .state_root_with_updates(&bundle_state)
+            //         .map(|(root, updates)| (root, Some(updates)))?
+
+            // } else {
+            //     (provider.state_root(&bundle_state)?, None)
+            // };
+            let state_root = provider.state_root(&bundle_state)?;
             if block.state_root != state_root {
                 return Err(ConsensusError::BodyStateRootDiff(
                     GotExpected { got: state_root, expected: block.state_root }.into(),
@@ -208,7 +211,7 @@ impl AppendableChain {
                 .into())
             }
 
-            Ok((bundle_state, trie_updates))
+            Ok((bundle_state, None))
         } else {
             Ok((bundle_state, None))
         }
