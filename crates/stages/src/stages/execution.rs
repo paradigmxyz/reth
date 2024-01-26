@@ -123,9 +123,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let max_block = input.target();
         let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
 
-        // We only append receipts to static files if there is no pruning or filtering configured
-        // for receipts.
-        let snapshotter = try_prepare_snapshotter(&self.prune_modes, provider, start_block)?;
+        // If there is any receipt pruning or filtering, then don't use static files for Receipts.
+        let mut snapshotter = None;
+        if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
+            snapshotter = Some(prepare_snapshotter(provider, start_block)?);
+        }
 
         // Build executor
         let mut executor =
@@ -427,38 +429,36 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
 
         // Unwind all receipts for transactions in the block range
-        match try_prepare_snapshotter(&self.prune_modes, provider, *range.start())? {
-            Some(_) => {
-                // `try_prepare_snapshotter` already prunes receipts if it detects that there are
-                // more elements in the static files than expected by block `range.start()`,
-                // effectively unwinding it.
+        if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
+            // We only use static files for Receipts, if there is no receipt pruning of any kind.
 
-                // Update the checkpoint.
-                if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
-                    for block_number in range {
-                        stage_checkpoint.progress.processed -= provider
-                            .block_by_number(block_number)?
-                            .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?
-                            .gas_used;
-                    }
+            // prepare_snapshotter does a consistency check that will unwind static files if the
+            // expected highest receipt in the files is higher than the database. Which is
+            // essentially what happens here when we unwind this stage.
+            let _snapshotter = prepare_snapshotter(provider, *range.start())?;
+
+            // Update the checkpoint.
+            if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
+                for block_number in range {
+                    stage_checkpoint.progress.processed -= provider
+                        .block_by_number(block_number)?
+                        .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?
+                        .gas_used;
                 }
             }
-            None => {
-                // `try_prepare_snapshotter` returning None means that the node has some kind of
-                // filtering/pruning enabled. In this case static files are not used, and falls back
-                // to database.
-                let mut cursor = tx.cursor_write::<tables::Receipts>()?;
-                let mut reverse_walker = cursor.walk_back(None)?;
+        } else {
+            // We database for Receipts, if there is any kind of receipt pruning/filtering.
+            let mut cursor = tx.cursor_write::<tables::Receipts>()?;
+            let mut reverse_walker = cursor.walk_back(None)?;
 
-                while let Some(Ok((tx_number, receipt))) = reverse_walker.next() {
-                    if tx_number < first_tx_num {
-                        break
-                    }
-                    reverse_walker.delete_current()?;
+            while let Some(Ok((tx_number, receipt))) = reverse_walker.next() {
+                if tx_number < first_tx_num {
+                    break
+                }
+                reverse_walker.delete_current()?;
 
-                    if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
-                        stage_checkpoint.progress.processed -= receipt.cumulative_gas_used;
-                    }
+                if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
+                    stage_checkpoint.progress.processed -= receipt.cumulative_gas_used;
                 }
             }
         }
@@ -522,26 +522,20 @@ impl ExecutionStageThresholds {
     }
 }
 
-/// Checks if receipts have any filtering or pruning configured. If so, returns `None`. Otherwise,
-/// returns the snapshotter for saving/pruning receipts to/from static files.
+/// Returns a `SnapshotProviderRWRefMut` snapshotter after performing a consistency check.
 ///
-/// Additionally, performs a consistency check between the expected highest receipt and the highest
-/// receipt in the static file to detect any unexpected shutdown. **If the height is higher** on the
-/// static file it **unwinds the static file. If the height is lower** it triggers an **unwind on
-/// the database** until both heights match.
-fn try_prepare_snapshotter<'a, 'b, DB: Database>(
-    prune_modes: &PruneModes,
+/// This function compares the highest receipt number recorded in the database with that in the
+/// static file to detect any discrepancies due to unexpected shutdowns or database rollbacks. **If
+/// the height in the static file is higher**, it rolls back (unwinds) the static file.
+/// **Conversely, if the height in the database is lower**, it triggers a rollback in the database
+/// (by returning [`StageError`]) until the heights in both the database and static file match.
+fn prepare_snapshotter<'a, 'b, DB: Database>(
     provider: &'b DatabaseProviderRW<DB>,
     start_block: u64,
-) -> Result<Option<SnapshotProviderRWRefMut<'a>>, StageError>
+) -> Result<SnapshotProviderRWRefMut<'a>, StageError>
 where
     'b: 'a,
 {
-    // If there is any receipt pruning or filtering, then don't use static files for Receipts.
-    if prune_modes.receipts.is_some() || !prune_modes.receipts_log_filter.is_empty() {
-        return Ok(None)
-    }
-
     // Get next expected receipt number
     let tx = provider.tx_ref();
     let next_receipt_num = tx
@@ -581,7 +575,7 @@ where
         }
         Ordering::Equal => {}
     }
-    Ok(Some(snapshotter))
+    Ok(snapshotter)
 }
 
 #[cfg(test)]
