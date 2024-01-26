@@ -96,7 +96,7 @@ where
     ) -> Result<BlockNumber, StageError> {
         let total_headers = self.header_collector.len();
 
-        info!(target: "sync::stages::headers", len = total_headers, "writing headers");
+        info!(target: "sync::stages::headers", total = total_headers, "Writing headers");
 
         let mut cursor_header = tx.cursor_write::<RawTable<tables::Headers>>()?;
         let mut cursor_canonical = tx.cursor_write::<RawTable<tables::CanonicalHeaders>>()?;
