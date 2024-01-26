@@ -45,6 +45,7 @@ cfg-if = "1.0.0"
 [dev-dependencies]
 # reth
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
+reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-blockchain-tree = { workspace = true, features = ["test-utils"] }

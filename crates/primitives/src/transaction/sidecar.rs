@@ -400,7 +400,7 @@ const _: [(); std::mem::size_of::<BlobTransactionSidecar>()] =
     [(); std::mem::size_of::<BlobTransactionSidecarRlp>()];
 
 const _: [(); std::mem::size_of::<BlobTransactionSidecar>()] =
-    [(); std::mem::size_of::<reth_rpc_types::transaction::BlobTransactionSidecar>()];
+    [(); std::mem::size_of::<reth_rpc_types::BlobTransactionSidecar>()];
 
 impl BlobTransactionSidecarRlp {
     fn wrap_ref(other: &BlobTransactionSidecar) -> &Self {

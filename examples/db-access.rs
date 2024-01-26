@@ -17,8 +17,8 @@ use std::path::Path;
 fn main() -> eyre::Result<()> {
     // Opens a RO handle to the database file.
     // TODO: Should be able to do `ProviderFactory::new_with_db_path_ro(...)` instead of
-    // doing in 2 steps.
-    let db = open_db_read_only(Path::new(&std::env::var("RETH_DB_PATH")?), None)?;
+    //  doing in 2 steps.
+    let db = open_db_read_only(Path::new(&std::env::var("RETH_DB_PATH")?), Default::default())?;
 
     // Instantiate a provider factory for Ethereum mainnet using the provided DB.
     // TODO: Should the DB version include the spec so that you do not need to specify it here?

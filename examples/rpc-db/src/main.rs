@@ -35,7 +35,10 @@ pub mod myrpc_ext;
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     // 1. Setup the DB
-    let db = Arc::new(open_db_read_only(Path::new(&std::env::var("RETH_DB_PATH")?), None)?);
+    let db = Arc::new(open_db_read_only(
+        Path::new(&std::env::var("RETH_DB_PATH")?),
+        Default::default(),
+    )?);
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
     let factory = ProviderFactory::new(db.clone(), spec.clone());
 

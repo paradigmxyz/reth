@@ -1,6 +1,6 @@
 //! Support for handling events emitted by node components.
 
-use crate::commands::node::cl_events::ConsensusLayerHealthEvent;
+use crate::cl_events::ConsensusLayerHealthEvent;
 use futures::Stream;
 use reth_beacon_consensus::BeaconConsensusEngineEvent;
 use reth_db::{database::Database, database_metrics::DatabaseMetadata};
@@ -122,7 +122,7 @@ impl<DB> NodeState<DB> {
                             %target,
                             %stage_progress,
                             %stage_eta,
-                            message,
+                            "{message}",
                         )
                     } else {
                         info!(
@@ -131,7 +131,7 @@ impl<DB> NodeState<DB> {
                             checkpoint = %checkpoint.block_number,
                             %target,
                             %stage_progress,
-                            message,
+                            "{message}",
                         )
                     }
                 }
@@ -466,7 +466,7 @@ impl Display for Eta {
 
 #[cfg(test)]
 mod tests {
-    use crate::commands::node::events::Eta;
+    use crate::events::Eta;
     use std::time::{Duration, Instant};
 
     #[test]

@@ -78,8 +78,7 @@ impl BlockchainTreeConfig {
     /// It is calculated as the maximum of `max_reorg_depth` (which is the number of blocks required
     /// for the deepest reorg possible according to the consensus protocol) and
     /// `num_of_additional_canonical_block_hashes` (which is the number of block hashes needed to
-    /// satisfy the `BLOCKHASH` opcode in the EVM. See [`crate::BundleStateDataRef`] and
-    /// [`crate::AppendableChain::new_canonical_head_fork`] where it's used).
+    /// satisfy the `BLOCKHASH` opcode in the EVM. See [`crate::BundleStateDataRef`]).
     pub fn num_of_canonical_hashes(&self) -> u64 {
         self.max_reorg_depth.max(self.num_of_additional_canonical_block_hashes)
     }
