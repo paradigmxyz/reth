@@ -155,7 +155,7 @@ where
             cursor_header.append(RawKey::<BlockNumber>::from_vec(number), header.into())?;
         }
 
-        info!(target: "sync::stages::headers", len = total_headers, "writing header hash index");
+        info!(target: "sync::stages::headers", total = total_headers, "Writing header hash index");
 
         let mut cursor_header_numbers = tx.cursor_write::<RawTable<tables::HeaderNumbers>>()?;
         let mut first_sync = false;
