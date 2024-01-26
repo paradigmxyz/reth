@@ -25,8 +25,8 @@
 //!
 //!        * Responds to incoming ETH related requests: `Headers`, `Bodies`
 //!
-//!    - `Discovery Task`: is a spawned [`Discv4`] future that handles peer
-//!      discovery and emits new peers to the `Network`
+//!    - `Discovery Task`: is a spawned [`Discv4`] future that handles peer discovery and emits new
+//!      peers to the `Network`
 //!
 //!    - [`NetworkManager`] task advances the state of the `Network`, which includes:
 //!
@@ -136,7 +136,7 @@ pub mod transactions;
 
 pub use builder::NetworkBuilder;
 pub use config::{NetworkConfig, NetworkConfigBuilder};
-pub use discovery::{Discovery as Disc, DiscoveryEvent};
+pub use discovery::DiscoveryEvent;
 pub use fetch::FetchClient;
 pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
@@ -152,16 +152,9 @@ pub use session::{
 };
 
 /// Discovery using [`Discv4`].
-//#[cfg(not(feature = "discv5"))]
-//type Discovery = Discv4;
-
-/// Auto trait for discv5 update stream.
-pub trait StreamDiscv5: futures::Stream<Item = DiscoveryUpdateV5> + Unpin + Send + 'static {}
-impl<S> StreamDiscv5 for S where
-    S: futures::Stream<Item = DiscoveryUpdateV5> + Unpin + Send + 'static
-{
-}
+#[cfg(not(feature = "discv5"))]
+pub type Discovery = discovery::Discovery;
 
 /// Discovery using [`reth_discv5::Discv5`], which supports downgrading to [`Discv4`].
-//#[cfg(feature = "discv5")]
-pub type Discovery = Disc<Discv5, MergedUpdateStream>;
+#[cfg(feature = "discv5")]
+pub type Discovery = discovery::Discovery<Discv5, MergedUpdateStream>;

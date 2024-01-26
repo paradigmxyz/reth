@@ -247,12 +247,15 @@ maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus t
 fmt:
 	cargo +nightly fmt
 
+# will check discv4, i.e. not(feature = "discv5")
 lint-reth:
 	cargo +nightly clippy --workspace --bin "reth" --lib --examples --tests --benches --features "ethereum $(BIN_OTHER_FEATURES)" -- -D warnings
 
+# ...same here
 lint-op-reth:
 	cargo +nightly clippy --workspace --bin "op-reth" --lib --examples --tests --benches --features "optimism $(BIN_OTHER_FEATURES)" -- -D warnings
 
+# will check discv5 
 lint-other-targets:
 	cargo +nightly clippy --workspace --lib --examples --tests --benches --all-features -- -D warnings
 
@@ -264,12 +267,15 @@ lint:
 rustdocs:
 	RUSTDOCFLAGS="--cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options -D warnings" cargo +nightly docs --document-private-items
 
+# will test discv4, i.e. not(feature = "discv5")
 test-reth:
 	cargo test --workspace --bin "reth" --lib --examples --tests --benches --features "ethereum $(BIN_OTHER_FEATURES)"
 
+# ...same here
 test-op-reth:
 	cargo test --workspace --bin "op-reth" --lib --examples --tests --benches --features "optimism $(BIN_OTHER_FEATURES)"
 
+# will test discv5
 test-other-targets:
 	cargo test --workspace --lib --examples --tests --benches --all-features
 

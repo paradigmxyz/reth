@@ -3,7 +3,6 @@
 use crate::{
     error::{NetworkError, ServiceKind},
     manager::DiscoveredEvent,
-    StreamDiscv5,
 };
 use futures::StreamExt;
 use parking_lot::RwLock;
@@ -322,7 +321,7 @@ impl<S> Discovery<Discv5, S> {
 
 impl<S> Stream for Discovery<Discv5, S>
 where
-    S: StreamDiscv5,
+    S: Stream<Item = DiscoveryUpdateV5> + Unpin + Send + 'static,
 {
     type Item = DiscoveryEvent;
 
@@ -384,9 +383,20 @@ impl Discovery<Discv5, MergedUpdateStream> {
     pub async fn new_discv5(
         discv4_addr: SocketAddr, // discv5 addr in config
         sk: SecretKey,
-        (discv4_config, discv5_config): (Discv4Config, discv5::Discv5Config),
+        (discv4_config, discv5_config): (Option<Discv4Config>, Option<discv5::Discv5Config>),
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
+        let Some(discv5_config) = discv5_config else {
+            return Err(NetworkError::custom_discovery(
+                "missing discv5 config needed to start discv5",
+            ))
+        };
+        let Some(discv4_config) = discv4_config else {
+            return Err(NetworkError::custom_discovery(
+                "missing discv4 config, also needed to start discv5",
+            ))
+        };
+
         //
         // 1. one port per discovery node
         //
@@ -551,6 +561,15 @@ pub(crate) fn new_dns(
     Ok((Some(dns_disc), Some(dns_discovery_updates), Some(dns_disc_service)))
 }
 
+/// Events produced by the [`Discovery`] manager.
+#[derive(Debug, Clone)]
+pub enum DiscoveryEvent {
+    /// Discovered a node
+    NewNode(DiscoveredEvent),
+    /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
+    EnrForkId(PeerId, ForkId),
+}
+
 #[cfg(test)]
 impl<D, S> Discovery<D, S> {
     /// Returns a Discovery instance that does nothing and is intended for testing purposes.
@@ -578,15 +597,6 @@ impl<D, S> Discovery<D, S> {
             discovery_listeners: Default::default(),
         }
     }
-}
-
-/// Events produced by the [`Discovery`] manager.
-#[derive(Debug, Clone)]
-pub enum DiscoveryEvent {
-    /// Discovered a node
-    NewNode(DiscoveredEvent),
-    /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
-    EnrForkId(PeerId, ForkId),
 }
 
 #[cfg(test)]

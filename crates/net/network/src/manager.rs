@@ -48,7 +48,7 @@ use reth_tasks::shutdown::GracefulShutdown;
 use reth_tokio_util::EventListeners;
 use secp256k1::SecretKey;
 use std::{
-    net::{Ipv4Addr, SocketAddr},
+    net::SocketAddr,
     pin::Pin,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -161,6 +161,8 @@ where
             client,
             secret_key,
             mut discovery_v4_config,
+            #[cfg(feature = "discv5")]
+            discovery_v5_config,
             discovery_addr,
             listener_addr,
             peers_config,
@@ -195,28 +197,16 @@ where
             disc_config
         });
 
-        let Some(discv4_config) = discovery_v4_config else {
-            return Err(NetworkError::custom_discovery(
-                "missing discv4 config needed to start reth_discv5",
-            ))
-        };
-        //#[cfg(not(feature = "discv5"))]
-        /*let discovery =
-        Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config)
-            .await?;*/
+        #[cfg(not(feature = "discv5"))]
+        let discovery =
+            Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config)
+                .await?;
 
-        //#[cfg(feature = "discv5")]
+        #[cfg(feature = "discv5")]
         let discovery = Discovery::new_discv5(
             discovery_addr,
             secret_key,
-            (
-                discv4_config,
-                discv5::Discv5ConfigBuilder::new(discv5::ListenConfig::Ipv4 {
-                    ip: Ipv4Addr::UNSPECIFIED,
-                    port: 9001,
-                })
-                .build(),
-            ),
+            (discovery_v4_config, discovery_v5_config),
             dns_discovery_config,
         )
         .await?;
