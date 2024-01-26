@@ -1,6 +1,5 @@
 use super::{HashedAccountCursor, HashedCursorFactory, HashedStorageCursor};
 use crate::state::HashedPostState;
-use reth_interfaces::db::DatabaseError;
 use reth_primitives::{Account, StorageEntry, B256, U256};
 
 /// The hashed cursor factory for the post state.
@@ -44,7 +43,7 @@ pub struct HashedPostStateAccountCursor<'b, C> {
     post_state_account_index: usize,
     /// The last hashed account that was returned by the cursor.
     /// De facto, this is a current cursor position.
-    last_account: Option<(B256, Account)>,
+    last_account: Option<B256>,
 }
 
 impl<'b, C> HashedPostStateAccountCursor<'b, C> {
@@ -115,7 +114,7 @@ where
         // database.
         if let Some((address, account)) = post_state_entry {
             if address == &key {
-                self.last_account = Some((*address, *account));
+                self.last_account = Some(*address);
                 return Ok(Some((*address, *account)))
             }
         }
@@ -133,7 +132,7 @@ where
 
         // Compare two entries and return the lowest.
         let result = Self::next_account(post_state_entry, db_entry);
-        self.last_account = result;
+        self.last_account = result.as_ref().map(|(address, _)| *address);
         Ok(result)
     }
 
@@ -148,12 +147,12 @@ where
         debug_assert!(self.post_state.sorted, "`HashedPostState` must be pre-sorted");
 
         let last_account = match self.last_account.as_ref() {
-            Some((account, _)) => account,
+            Some(account) => account,
             None => return Ok(None), // no previous entry was found
         };
 
         // If post state was given precedence, move the cursor forward.
-        let mut db_entry = self.cursor.current()?;
+        let mut db_entry = self.cursor.seek(*last_account)?;
         while db_entry
             .as_ref()
             .map(|(address, _)| address <= last_account || self.is_account_cleared(address))
@@ -171,12 +170,8 @@ where
 
         // Compare two entries and return the lowest.
         let result = Self::next_account(post_state_entry, db_entry);
-        self.last_account = result;
+        self.last_account = result.as_ref().map(|(address, _)| *address);
         Ok(result)
-    }
-
-    fn current(&mut self) -> Result<Option<(B256, Account)>, DatabaseError> {
-        Ok(self.last_account)
     }
 }
 

@@ -28,9 +28,6 @@ pub trait HashedAccountCursor {
 
     /// Move the cursor to the next entry and return it.
     fn next(&mut self) -> Result<Option<(B256, Account)>, reth_db::DatabaseError>;
-
-    /// Get current entry.
-    fn current(&mut self) -> Result<Option<(B256, Account)>, reth_db::DatabaseError>;
 }
 
 /// The cursor for iterating over hashed storage entries.
