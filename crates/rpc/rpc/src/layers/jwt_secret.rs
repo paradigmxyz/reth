@@ -142,7 +142,7 @@ impl JwtSecret {
                 ErrorKind::InvalidSignature => Err(JwtError::InvalidSignature)?,
                 ErrorKind::InvalidAlgorithm => Err(JwtError::UnsupportedSignatureAlgorithm)?,
                 _ => {
-                    let detail = format!("{err:?}");
+                    let detail = format!("{err}");
                     Err(JwtError::JwtDecodingError(detail))?
                 }
             },
