@@ -383,140 +383,142 @@ impl Discovery<Discv5, MergedUpdateStream> {
     pub async fn new_discv5(
         discv4_addr: SocketAddr, // discv5 addr in config
         sk: SecretKey,
-        (discv4_config, discv5_config): (Option<Discv4Config>, Option<discv5::Discv5Config>),
+        disc_config: (Option<Discv4Config>, Option<discv5::Discv5Config>),
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
-        let Some(discv5_config) = discv5_config else {
-            return Err(NetworkError::custom_discovery(
-                "missing discv5 config needed to start discv5",
-            ))
-        };
-        let Some(discv4_config) = discv4_config else {
-            return Err(NetworkError::custom_discovery(
-                "missing discv4 config, also needed to start discv5",
-            ))
-        };
+        let (disc, disc_updates, local_enr_discv4) = match disc_config {
+            (Some(discv4_config), Some(discv5_config)) => {
+                //
+                // 1. one port per discovery node
+                //
+                // get the discv5 addr
+                let mut discv5_addresses: SmallVec<[SocketAddr; 2]> = smallvec!();
+                use discv5::ListenConfig::*;
+                match discv5_config.listen_config {
+                    Ipv4 { ip, port } => discv5_addresses.push((ip, port).into()),
+                    Ipv6 { ip, port } => discv5_addresses.push((ip, port).into()),
+                    DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
+                        discv5_addresses.push((ipv4, ipv4_port).into());
+                        discv5_addresses.push((ipv6, ipv6_port).into());
+                    }
+                };
 
-        //
-        // 1. one port per discovery node
-        //
-        // get the discv5 addr
-        let mut discv5_addresses: SmallVec<[SocketAddr; 2]> = smallvec!();
-        use discv5::ListenConfig::*;
-        match discv5_config.listen_config {
-            Ipv4 { ip, port } => discv5_addresses.push((ip, port).into()),
-            Ipv6 { ip, port } => discv5_addresses.push((ip, port).into()),
-            DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
-                discv5_addresses.push((ipv4, ipv4_port).into());
-                discv5_addresses.push((ipv6, ipv6_port).into());
-            }
-        };
-
-        if discv5_addresses.iter().any(|addr| addr.port() == discv4_addr.port()) {
-            return Err(NetworkError::custom_discovery(&format!("discv5 port and discv4 port can't be the same, discv5_addresses: {discv5_addresses:?}, discv4_addr: {discv4_addr}")))
-        }
-
-        //
-        // 2. same key for signing enr in discv4 and discv5
-        //
-        // make enr for discv4
-        let local_enr_discv4 = NodeRecord::from_secret_key(discv4_addr, &sk);
-
-        // make enr for discv5
-        let mut sk_copy = *sk.as_ref();
-        let sk_discv5_wrapper = discv5::enr::CombinedKey::secp256k1_from_bytes(&mut sk_copy)
-            .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
-        let enr = {
-            let mut builder = discv5::enr::EnrBuilder::new("v4");
-            builder.ip(discv5_addresses[0].ip());
-            builder.udp4(discv5_addresses[0].port());
-            if let Some(ipv6) = discv5_addresses.get(1) {
-                builder.ip(ipv6.ip());
-                builder.udp4(ipv6.port());
-            }
-            // todo: add additional fields from config like ipv6 etc
-
-            // enr v4 not to get confused with discv4, independent versioning enr and discovery
-            builder.build(&sk_discv5_wrapper).expect("should build enr v4")
-        };
-
-        // start the two discovery nodes
-        let (disc, disc_updates) = {
-            //
-            // 3. start discv5
-            //
-            let mut discv5 = discv5::Discv5::new(enr, sk_discv5_wrapper, discv5_config)
-                .map_err(NetworkError::custom_discovery)?;
-            discv5.start().await.map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
-
-            info!("Discv5 listening on {discv5_addresses:?}");
-
-            // start discv5 updates stream
-            let discv5_updates = discv5
-                .event_stream()
-                .await
-                .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
-
-            //
-            // 3. types needed for interfacing with discv4
-            //
-            // callback passed to discv4 will only takes read lock on discv5 handle! though discv5
-            // will blocking wait for write lock on its kbuckets internally to apply pending
-            // nodes.
-            let discv5 = Arc::new(RwLock::new(discv5));
-            let discv5_ref = discv5.clone();
-            let kbuckets_callback = move || -> Result<HashSet<PeerId>, secp256k1::Error> {
-                let keys = discv5_ref.read().table_entries_id();
-
-                let mut discv5_kbucket_keys = HashSet::new();
-
-                for node_id in keys {
-                    let pk_compressed_bytes = node_id.raw();
-                    let pk = PublicKey::from_slice(&pk_compressed_bytes)?;
-                    let pk_uncompressed_bytes =
-                        PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
-                    discv5_kbucket_keys.insert(pk_uncompressed_bytes);
+                if discv5_addresses.iter().any(|addr| addr.port() == discv4_addr.port()) {
+                    return Err(NetworkError::custom_discovery(&format!("discv5 port and discv4 port can't be the same, discv5_addresses: {discv5_addresses:?}, discv4_addr: {discv4_addr}")))
                 }
 
-                Ok(discv5_kbucket_keys)
-            };
-            // channel which will tell discv4 that discv5 has updated its kbuckets
-            let (discv5_kbuckets_change_tx, discv5_kbuckets_change_rx) = watch::channel(());
+                //
+                // 2. same key for signing enr in discv4 and discv5
+                //
+                // make enr for discv4
+                let local_enr_discv4 = NodeRecord::from_secret_key(discv4_addr, &sk);
 
-            //
-            // 4. start discv4 as discv5 fallback, maintains a mirror of discv5 kbuckets
-            //
-            let (discv4, mut discv4_service) = Discv4::bind_as_secondary_disc_node(
-                discv4_addr,
-                local_enr_discv4,
-                sk,
-                discv4_config,
-                discv5_kbuckets_change_rx,
-                kbuckets_callback,
-            )
-            .await
-            .map_err(|err| NetworkError::from_io_error(err, ServiceKind::Discovery(discv4_addr)))?;
+                // make enr for discv5
+                let mut sk_copy = *sk.as_ref();
+                let sk_discv5_wrapper =
+                    discv5::enr::CombinedKey::secp256k1_from_bytes(&mut sk_copy)
+                        .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
+                let enr = {
+                    let mut builder = discv5::enr::EnrBuilder::new("v4");
+                    builder.ip(discv5_addresses[0].ip());
+                    builder.udp4(discv5_addresses[0].port());
+                    if let Some(ipv6) = discv5_addresses.get(1) {
+                        builder.ip(ipv6.ip());
+                        builder.udp4(ipv6.port());
+                    }
+                    // todo: add additional fields from config like ipv6 etc
 
-            // start an update stream
-            let discv4_updates = discv4_service.update_stream();
+                    // enr v4 not to get confused with discv4, independent versioning enr and
+                    // discovery
+                    builder.build(&sk_discv5_wrapper).expect("should build enr v4")
+                };
 
-            // spawn the service
-            let _discv4_service = discv4_service.spawn();
+                // start the two discovery nodes
 
-            info!("Discv4 listening on {discv4_addr}");
+                //
+                // 3. start discv5
+                //
+                let mut discv5 = discv5::Discv5::new(enr, sk_discv5_wrapper, discv5_config)
+                    .map_err(NetworkError::custom_discovery)?;
+                discv5.start().await.map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
 
-            //
-            // 5. merge both discovery nodes
-            //
-            // combined handle
-            let disc = Discv5::new(discv5, discv4, discv5_kbuckets_change_tx);
+                info!("Discv5 listening on {discv5_addresses:?}");
 
-            // combined update stream
-            let disc_updates = reth_discv5::merge_discovery_streams(discv5_updates, discv4_updates);
+                // start discv5 updates stream
+                let discv5_updates = discv5
+                    .event_stream()
+                    .await
+                    .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
 
-            // discv5 and discv4 are running like usual, only that discv4 will filter out
-            // nodes already connected over discv5 identified by their public key
-            (Some(disc), Some(disc_updates))
+                //
+                // 3. types needed for interfacing with discv4
+                //
+                // callback passed to discv4 will only takes read lock on discv5 handle! though
+                // discv5 will blocking wait for write lock on its kbuckets
+                // internally to apply pending nodes.
+                let discv5 = Arc::new(RwLock::new(discv5));
+                let discv5_ref = discv5.clone();
+                let kbuckets_callback = move || -> Result<HashSet<PeerId>, secp256k1::Error> {
+                    let keys = discv5_ref.read().table_entries_id();
+
+                    let mut discv5_kbucket_keys = HashSet::new();
+
+                    for node_id in keys {
+                        let pk_compressed_bytes = node_id.raw();
+                        let pk = PublicKey::from_slice(&pk_compressed_bytes)?;
+                        let pk_uncompressed_bytes =
+                            PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+                        discv5_kbucket_keys.insert(pk_uncompressed_bytes);
+                    }
+
+                    Ok(discv5_kbucket_keys)
+                };
+                // channel which will tell discv4 that discv5 has updated its kbuckets
+                let (discv5_kbuckets_change_tx, discv5_kbuckets_change_rx) = watch::channel(());
+
+                //
+                // 4. start discv4 as discv5 fallback, maintains a mirror of discv5 kbuckets
+                //
+                let (discv4, mut discv4_service) = Discv4::bind_as_secondary_disc_node(
+                    discv4_addr,
+                    local_enr_discv4,
+                    sk,
+                    discv4_config,
+                    discv5_kbuckets_change_rx,
+                    kbuckets_callback,
+                )
+                .await
+                .map_err(|err| {
+                    NetworkError::from_io_error(err, ServiceKind::Discovery(discv4_addr))
+                })?;
+
+                // start an update stream
+                let discv4_updates = discv4_service.update_stream();
+
+                // spawn the service
+                let _discv4_service = discv4_service.spawn();
+
+                info!("Discv4 listening on {discv4_addr}");
+
+                //
+                // 5. merge both discovery nodes
+                //
+                // combined handle
+                let disc = Discv5::new(discv5, discv4, discv5_kbuckets_change_tx);
+
+                // combined update stream
+                let disc_updates =
+                    reth_discv5::merge_discovery_streams(discv5_updates, discv4_updates);
+
+                // discv5 and discv4 are running like usual, only that discv4 will filter out
+                // nodes already connected over discv5 identified by their public key
+                (Some(disc), Some(disc_updates), local_enr_discv4)
+            }
+            _ => {
+                // make enr for discv4 not to break existing api, possibly used in tests
+                let local_enr_discv4 = NodeRecord::from_secret_key(discv4_addr, &sk);
+                (None, None, local_enr_discv4)
+            }
         };
 
         // setup DNS discovery.
