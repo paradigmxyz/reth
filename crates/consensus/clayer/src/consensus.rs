@@ -150,6 +150,10 @@ impl ClayerConsensusEngine {
     ) -> Result<(), PbftError> {
         self.inner.write().on_peer_connected(peer_id, state)
     }
+
+    pub fn try_publish(&mut self, state: &mut PbftState) -> Result<(), PbftError> {
+        self.inner.write().try_publish(state)
+    }
 }
 
 impl ClayerConsensus for ClayerConsensusEngine {

@@ -190,6 +190,11 @@ where
                 }
             }
 
+            // If the block publishing delay has passed, attempt to publish a block
+            if let Poll::Ready(x) = block_publishing_ticker.poll(cx) {
+                log_any_error(this.consensus_engine.try_publish(state));
+            }
+
             // If the idle timeout has expired, initiate a view change
             if this.consensus_engine.check_idle_timeout_expired(state) {
                 warn!(target:"consensus::cl","Idle timeout expired; proposing view change");
