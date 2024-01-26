@@ -1,7 +1,7 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
 use reth_primitives::stage::{StageCheckpoint, StageId};
-use reth_provider::DatabaseProviderRW;
+use reth_provider::{BlockNumReader, DatabaseProviderRW};
 use reth_snapshot::Snapshotter;
 
 /// The snapshot stage.
@@ -24,10 +24,10 @@ impl<DB: Database> Stage<DB> for SnapshotStage<DB> {
 
     fn execute(
         &mut self,
-        _provider: &DatabaseProviderRW<DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let targets = self.snapshotter.get_snapshot_targets(input.target())?;
+        let targets = self.snapshotter.get_snapshot_targets(provider.best_block_number()?)?;
         self.snapshotter.run(targets)?;
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
     }
