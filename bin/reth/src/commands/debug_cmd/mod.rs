@@ -8,9 +8,7 @@ mod build_block;
 mod execution;
 mod in_memory_merkle;
 mod merkle;
-
 mod replay_engine;
-pub(crate) use replay_engine::EngineApiStore;
 
 /// `reth debug` command
 #[derive(Debug, Parser)]

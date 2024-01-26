@@ -28,7 +28,6 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::sync::watch;
 
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a snapshot range.
@@ -44,8 +43,6 @@ pub struct SnapshotProvider {
     snapshots_max_block: RwLock<HashMap<SnapshotSegment, u64>>,
     /// Available snapshot block ranges on disk indexed by max transactions.
     snapshots_tx_index: RwLock<SegmentRanges>,
-    /// Tracks the highest snapshot of every segment.
-    highest_tracker: Option<watch::Receiver<Option<HighestSnapshots>>>,
     /// Directory where snapshots are located
     path: PathBuf,
     /// Whether [`SnapshotJarProvider`] loads filters into memory. If not, `by_hash` queries won't
@@ -63,7 +60,6 @@ impl SnapshotProvider {
             writers: Default::default(),
             snapshots_max_block: Default::default(),
             snapshots_tx_index: Default::default(),
-            highest_tracker: None,
             path: path.as_ref().to_path_buf(),
             load_filters: false,
         };
@@ -75,15 +71,6 @@ impl SnapshotProvider {
     /// Loads filters into memory when creating a [`SnapshotJarProvider`].
     pub fn with_filters(mut self) -> Self {
         self.load_filters = true;
-        self
-    }
-
-    /// Adds a highest snapshot tracker to the provider
-    pub fn with_highest_tracker(
-        mut self,
-        highest_tracker: Option<watch::Receiver<Option<HighestSnapshots>>>,
-    ) -> Self {
-        self.highest_tracker = highest_tracker;
         self
     }
 
@@ -345,6 +332,15 @@ impl SnapshotProvider {
             .read()
             .get(&segment)
             .and_then(|index| index.last_key_value().map(|(last_tx, _)| *last_tx))
+    }
+
+    /// Gets the highest snapshotted blocks for all segments.
+    pub fn get_highest_snapshots(&self) -> HighestSnapshots {
+        HighestSnapshots {
+            headers: self.get_highest_snapshot_block(SnapshotSegment::Headers),
+            receipts: self.get_highest_snapshot_block(SnapshotSegment::Receipts),
+            transactions: self.get_highest_snapshot_block(SnapshotSegment::Transactions),
+        }
     }
 
     /// Iterates through segment snapshots in reverse order, executing a function until it returns

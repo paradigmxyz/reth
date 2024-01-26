@@ -27,7 +27,5 @@ pub fn create_test_provider_factory_with_chain_spec(
     chain_spec: Arc<ChainSpec>,
 ) -> ProviderFactory<Arc<TempDatabase<DatabaseEnv>>> {
     let db = create_test_rw_db();
-    ProviderFactory::new(db, chain_spec)
-        .with_snapshots(create_test_snapshots_dir(), tokio::sync::watch::channel(None).1)
-        .unwrap()
+    ProviderFactory::new(db, chain_spec).with_snapshots(create_test_snapshots_dir()).unwrap()
 }

@@ -11,7 +11,7 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use igd::aio::search_gateway;
+use igd_next::aio::tokio::search_gateway;
 use pin_project_lite::pin_project;
 use std::{
     fmt,

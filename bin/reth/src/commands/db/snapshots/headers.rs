@@ -3,7 +3,7 @@ use super::{
     Command,
 };
 use rand::{seq::SliceRandom, Rng};
-use reth_db::{open_db_read_only, snapshot::HeaderMask};
+use reth_db::{mdbx::DatabaseArguments, open_db_read_only, snapshot::HeaderMask};
 use reth_interfaces::db::LogLevel;
 use reth_primitives::{
     snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction},
@@ -27,7 +27,9 @@ impl Command {
         inclusion_filter: InclusionFilter,
         phf: Option<PerfectHashingFunction>,
     ) -> eyre::Result<()> {
-        let factory = ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone());
+        let db_args = DatabaseArguments::default().log_level(log_level);
+
+        let factory = ProviderFactory::new(open_db_read_only(db_path, db_args)?, chain.clone());
         let provider = factory.provider()?;
         let tip = provider.last_block_number()?;
         let block_range =
@@ -56,7 +58,7 @@ impl Command {
         for bench_kind in [BenchKind::Walk, BenchKind::RandomAll] {
             bench(
                 bench_kind,
-                (open_db_read_only(db_path, log_level)?, chain.clone()),
+                (open_db_read_only(db_path, db_args)?, chain.clone()),
                 SnapshotSegment::Headers,
                 filters,
                 compression,
@@ -87,7 +89,7 @@ impl Command {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())];
             bench(
                 BenchKind::RandomOne,
-                (open_db_read_only(db_path, log_level)?, chain.clone()),
+                (open_db_read_only(db_path, db_args)?, chain.clone()),
                 SnapshotSegment::Headers,
                 filters,
                 compression,
@@ -108,14 +110,14 @@ impl Command {
         {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())] as u64;
             let header_hash =
-                ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone())
+                ProviderFactory::new(open_db_read_only(db_path, db_args)?, chain.clone())
                     .header_by_number(num)?
                     .ok_or(ProviderError::HeaderNotFound(num.into()))?
                     .hash_slow();
 
             bench(
                 BenchKind::RandomHash,
-                (open_db_read_only(db_path, log_level)?, chain.clone()),
+                (open_db_read_only(db_path, db_args)?, chain.clone()),
                 SnapshotSegment::Headers,
                 filters,
                 compression,

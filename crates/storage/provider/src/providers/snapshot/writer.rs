@@ -5,7 +5,8 @@ use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
     snapshot::{find_fixed_range, SegmentHeader},
-    BlockNumber, Receipt, SnapshotSegment, TransactionSignedNoHash, TxNumber,
+    BlockHash, BlockNumber, Header, Receipt, SnapshotSegment, TransactionSignedNoHash, TxNumber,
+    U256,
 };
 use std::{ops::Deref, path::PathBuf, sync::Arc};
 
@@ -218,6 +219,26 @@ impl<'a> SnapshotProviderRW<'a> {
         self.append_column(value)?;
 
         Ok(self.writer.user_header().tx_end())
+    }
+
+    /// Appends header to snapshot file.
+    ///
+    /// Returns the current [`BlockNumber`] as seen in the static file.
+    pub fn append_header(
+        &mut self,
+        header: Header,
+        terminal_difficulty: U256,
+        hash: BlockHash,
+    ) -> ProviderResult<BlockNumber> {
+        debug_assert!(self.writer.user_header().segment() == SnapshotSegment::Headers);
+
+        self.writer.user_header_mut().increment_block();
+
+        self.append_column(header)?;
+        self.append_column(terminal_difficulty)?;
+        self.append_column(hash)?;
+
+        Ok(self.writer.user_header().block_end())
     }
 
     /// Appends transaction to snapshot file.

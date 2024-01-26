@@ -78,7 +78,7 @@ impl Case for BlockchainTestCase {
             // Create a new test database and initialize a provider for the test case.
             let db = create_test_rw_db();
             let provider = ProviderFactory::new(db.as_ref(), Arc::new(case.network.clone().into()))
-                .with_snapshots(create_test_snapshots_dir(), tokio::sync::watch::channel(None).1)
+                .with_snapshots(create_test_snapshots_dir())
                 .map_err(|err| Error::RethError(err.into()))?
                 .provider_rw()
                 .unwrap();

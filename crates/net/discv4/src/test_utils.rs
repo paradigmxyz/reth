@@ -1,7 +1,5 @@
 //! Mock discovery support
 
-#![allow(missing_docs)]
-
 use crate::{
     proto::{FindNode, Message, Neighbours, NodeEndpoint, Packet, Ping, Pong},
     receive_loop, send_loop, Discv4, Discv4Config, Discv4Service, EgressSender, IngressEvent,
@@ -104,10 +102,12 @@ impl MockDiscovery {
         self.pending_neighbours.insert(target, nodes);
     }
 
+    /// Returns the local socket address associated with the service.
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
 
+    /// Returns the local [`NodeRecord`] associated with the service.
     pub fn local_enr(&self) -> NodeRecord {
         self.local_enr
     }
@@ -190,18 +190,44 @@ impl Stream for MockDiscovery {
     }
 }
 
-/// The event type the mock service produces
+/// Represents the event types produced by the mock service.
 #[derive(Debug)]
 pub enum MockEvent {
-    Pong { ping: Ping, pong: Pong, to: SocketAddr },
-    Neighbours { nodes: Vec<NodeRecord>, to: SocketAddr },
+    /// A Pong event, consisting of the original Ping packet, the corresponding Pong packet,
+    /// and the recipient's socket address.
+    Pong {
+        /// The original Ping packet.
+        ping: Ping,
+        /// The corresponding Pong packet.
+        pong: Pong,
+        /// The recipient's socket address.
+        to: SocketAddr,
+    },
+    /// A Neighbours event, containing a list of node records and the recipient's socket address.
+    Neighbours {
+        /// The list of node records.
+        nodes: Vec<NodeRecord>,
+        /// The recipient's socket address.
+        to: SocketAddr,
+    },
 }
 
-/// Command for interacting with the `MockDiscovery` service
+/// Represents commands for interacting with the `MockDiscovery` service.
 #[derive(Debug)]
 pub enum MockCommand {
-    MockPong { node_id: PeerId },
-    MockNeighbours { target: PeerId, nodes: Vec<NodeRecord> },
+    /// A command to simulate a Pong event, including the node ID of the recipient.
+    MockPong {
+        /// The node ID of the recipient.
+        node_id: PeerId,
+    },
+    /// A command to simulate a Neighbours event, including the target node ID and a list of node
+    /// records.
+    MockNeighbours {
+        /// The target node ID.
+        target: PeerId,
+        /// The list of node records.
+        nodes: Vec<NodeRecord>,
+    },
 }
 
 /// Creates a new testing instance for [`Discv4`] and its service
@@ -221,6 +247,7 @@ pub async fn create_discv4_with_config(config: Discv4Config) -> (Discv4, Discv4S
     Discv4::bind(socket, local_enr, secret_key, config).await.unwrap()
 }
 
+/// Generates a random [`NodeEndpoint`] using the provided random number generator.
 pub fn rng_endpoint(rng: &mut impl Rng) -> NodeEndpoint {
     let address = if rng.gen() {
         let mut ip = [0u8; 4];
@@ -234,11 +261,13 @@ pub fn rng_endpoint(rng: &mut impl Rng) -> NodeEndpoint {
     NodeEndpoint { address, tcp_port: rng.gen(), udp_port: rng.gen() }
 }
 
+/// Generates a random [`NodeRecord`] using the provided random number generator.
 pub fn rng_record(rng: &mut impl RngCore) -> NodeRecord {
     let NodeEndpoint { address, udp_port, tcp_port } = rng_endpoint(rng);
     NodeRecord { address, tcp_port, udp_port, id: rng.gen() }
 }
 
+/// Generates a random IPv6 [`NodeRecord`] using the provided random number generator.
 pub fn rng_ipv6_record(rng: &mut impl RngCore) -> NodeRecord {
     let mut ip = [0u8; 16];
     rng.fill_bytes(&mut ip);
@@ -246,6 +275,7 @@ pub fn rng_ipv6_record(rng: &mut impl RngCore) -> NodeRecord {
     NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: rng.gen() }
 }
 
+/// Generates a random IPv4 [`NodeRecord`] using the provided random number generator.
 pub fn rng_ipv4_record(rng: &mut impl RngCore) -> NodeRecord {
     let mut ip = [0u8; 4];
     rng.fill_bytes(&mut ip);
@@ -253,6 +283,7 @@ pub fn rng_ipv4_record(rng: &mut impl RngCore) -> NodeRecord {
     NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: rng.gen() }
 }
 
+/// Generates a random [`Message`] using the provided random number generator.
 pub fn rng_message(rng: &mut impl RngCore) -> Message {
     match rng.gen_range(1..=4) {
         1 => Message::Ping(Ping {
