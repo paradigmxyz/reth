@@ -295,7 +295,7 @@ impl HashedPostStateSorted {
         &self,
         tx: &'a TX,
     ) -> StateRoot<&'a TX, HashedPostStateCursorFactory<'_, &'a TX>> {
-        let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &self);
+        let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, self);
         StateRoot::from_tx(tx)
             .with_hashed_cursor_factory(hashed_cursor_factory)
             .with_destroyed_accounts(self.destroyed_accounts())
