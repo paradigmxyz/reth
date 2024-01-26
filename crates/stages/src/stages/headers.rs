@@ -98,7 +98,7 @@ where
     ) -> Result<BlockNumber, StageError> {
         let total_headers = self.header_collector.len();
 
-        info!(target: "sync::stages::headers", len = total_headers, "writing headers");
+        info!(target: "sync::stages::headers", total = total_headers, "Writing headers");
 
         let mut cursor_header = tx.cursor_write::<RawTable<tables::Headers>>()?;
         let mut cursor_canonical = tx.cursor_write::<RawTable<tables::CanonicalHeaders>>()?;
@@ -125,7 +125,7 @@ where
             let (number, header_buf) = header?;
 
             if index > 0 && index % interval == 0 {
-                info!(target: "sync::stages::headers", progress = ((index as f64 / total_headers as f64) * 100.0).round(), "writing headers");
+                info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers");
             }
 
             let (sealed_header, _) = SealedHeader::from_compact(&header_buf, header_buf.len());
@@ -157,7 +157,7 @@ where
             cursor_header.append(RawKey::<BlockNumber>::from_vec(number), header.into())?;
         }
 
-        info!(target: "sync::stages::headers", len = total_headers, "writing header hash index");
+        info!(target: "sync::stages::headers", total = total_headers, "Writing header hash index");
 
         let mut cursor_header_numbers = tx.cursor_write::<RawTable<tables::HeaderNumbers>>()?;
         let mut first_sync = false;
@@ -178,7 +178,7 @@ where
             let (hash, number) = hash_to_number?;
 
             if index > 0 && index % interval == 0 {
-                info!(target: "sync::stages::headers", progress = ((index as f64 / total_headers as f64) * 100.0).round(), "writing headers hash index");
+                info!(target: "sync::stages::headers", progress = ((index as f64 / total_headers as f64) * 100.0).round(), "Writing headers hash index");
             }
 
             if first_sync {
@@ -248,7 +248,7 @@ where
         loop {
             match ready!(self.downloader.poll_next_unpin(cx)) {
                 Some(Ok(headers)) => {
-                    info!(target: "sync::stages::headers", len = headers.len(), from = headers.first().map(|h| h.number), to = headers.last().map(|h| h.number), "Received headers");
+                    info!(target: "sync::stages::headers", total = headers.len(), from_block = headers.first().map(|h| h.number), to_block = headers.last().map(|h| h.number), "Received headers");
                     for header in headers {
                         let header_number = header.number;
 
