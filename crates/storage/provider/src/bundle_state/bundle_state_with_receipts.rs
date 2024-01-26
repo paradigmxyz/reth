@@ -4,7 +4,10 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
+use reth_interfaces::{
+    db::DatabaseError,
+    provider::{ProviderError, ProviderResult},
+};
 use reth_primitives::{
     logs_bloom,
     revm::compat::{into_reth_acc, into_revm_acc},
@@ -291,12 +294,15 @@ impl BundleStateWithReceipts {
     ///
     /// `omit_changed_check` should be set to true of bundle has some of it data
     /// detached, This would make some original values not known.
-    pub fn write_to_storage<TX: DbTxMut + DbTx>(
+    pub fn write_to_storage<TX>(
         self,
         tx: &TX,
         mut snapshotter: Option<SnapshotProviderRWRefMut<'_>>,
         is_value_known: OriginalValuesKnown,
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<()>
+    where
+        TX: DbTxMut + DbTx,
+    {
         let (plain_state, reverts) = self.bundle.into_plain_state_and_reverts(is_value_known);
 
         StateReverts(reverts).write_to_db(tx, self.first_block)?;
@@ -305,28 +311,23 @@ impl BundleStateWithReceipts {
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
 
-        let mut body_indices = |block_number: BlockNumber| {
-            Ok::<_,DatabaseError>(bodies_cursor.seek_exact(block_number)?.unwrap_or_else(|| {
-                        let last_available = bodies_cursor.last().ok().flatten().map(|(number, _)| number);
-                        panic!("body indices for block {block_number} must exist. last available block number: {last_available:?}");
-                    }).1)
-        };
-
         for (idx, receipts) in self.receipts.into_iter().enumerate() {
             let block_number = self.first_block + idx as u64;
+            let first_tx_index = bodies_cursor
+                .seek_exact(block_number)?
+                .map(|(_, indices)| indices.first_tx_num())
+                .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
 
             if let Some(snapshotter) = &mut snapshotter {
                 // Increment block on static file header.
                 snapshotter.increment_block(SnapshotSegment::Receipts)?;
 
-                let first_tx_index = body_indices(block_number)?.first_tx_num();
                 for (tx_idx, receipt) in receipts.into_iter().enumerate() {
                     let receipt = receipt
                         .expect("receipt should not be filtered when saving to static files.");
                     snapshotter.append_receipt(first_tx_index + tx_idx as u64, receipt)?;
                 }
             } else if !receipts.is_empty() {
-                let first_tx_index = body_indices(block_number)?.first_tx_num();
                 for (tx_idx, receipt) in receipts.into_iter().enumerate() {
                     if let Some(receipt) = receipt {
                         receipts_cursor.append(first_tx_index + tx_idx as u64, receipt)?;
