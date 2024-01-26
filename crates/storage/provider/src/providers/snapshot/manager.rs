@@ -265,7 +265,7 @@ impl SnapshotProvider {
                         })
                         .or_insert_with(|| BTreeMap::from([(tx_end, current_block_range)]));
                 } else if let Some(1) = tx_index.get(&segment).map(|index| index.len()) {
-                    // Only happens if we unwind all the txes/receipts from the first static file.
+                    // Only happens if we unwind all the txs/receipts from the first static file.
                     // Should only happen in test scenarios.
                     if matches!(segment, SnapshotSegment::Receipts | SnapshotSegment::Transactions)
                     {
