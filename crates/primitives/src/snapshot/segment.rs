@@ -190,6 +190,7 @@ impl SegmentHeader {
     /// ### Panics
     ///
     /// This method panics if `self.tx_range` is `None`.
+    #[track_caller]
     pub fn tx_end(&self) -> TxNumber {
         *self.tx_range.as_ref().expect("should exist").end()
     }
@@ -199,6 +200,7 @@ impl SegmentHeader {
     /// ### Panics
     ///
     /// This method panics if `self.tx_range` is `None`.
+    #[track_caller]
     pub fn tx_len(&self) -> u64 {
         self.tx_range.as_ref().expect("should exist").end() + 1 -
             self.tx_range.as_ref().expect("should exist").start()
