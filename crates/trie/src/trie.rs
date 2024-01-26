@@ -1164,7 +1164,6 @@ mod tests {
     }
 
     #[test]
-
     fn account_trie_around_extension_node_with_dbtrie() {
         let factory = create_test_provider_factory();
         let tx = factory.provider_rw().unwrap();

@@ -3,7 +3,7 @@ use reth_interfaces::{
     consensus, db::DatabaseError as DbError, executor, p2p::error::DownloadError,
     provider::ProviderError, RethError,
 };
-use reth_primitives::SealedHeader;
+use reth_primitives::{BlockNumber, SealedHeader, SnapshotSegment, TxNumber};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
@@ -76,6 +76,36 @@ pub enum StageError {
     /// rely on external downloaders
     #[error("invalid download response: {0}")]
     Download(#[from] DownloadError),
+    /// Database is ahead of snapshot data.
+    #[error("missing snapshot data for block number: {number}", number = block.number)]
+    MissingSnapshotData {
+        /// Starting block with  missing data.
+        block: Box<SealedHeader>,
+        /// Snapshot segment
+        segment: SnapshotSegment,
+    },
+    /// Unrecoverable inconsistency error related to a transaction number in a static file segment.
+    #[error(
+        "inconsistent transaction number for {segment}. db: {database}, static_file: {static_file}"
+    )]
+    InconsistentTxNumber {
+        /// Snapshot segment where this error was encountered.
+        segment: SnapshotSegment,
+        /// Expected database transaction number.
+        database: TxNumber,
+        /// Expected static file transaction number.
+        static_file: TxNumber,
+    },
+    /// Unrecoverable inconsistency error related to a block number in a static file segment.
+    #[error("inconsistent block number for {segment}. db: {database}, static_file: {static_file}")]
+    InconsistentBlockNumber {
+        /// Snapshot segment where this error was encountered.
+        segment: SnapshotSegment,
+        /// Expected database block number.
+        database: BlockNumber,
+        /// Expected static file block number.
+        static_file: BlockNumber,
+    },
     /// Internal error
     #[error(transparent)]
     Internal(#[from] RethError),
@@ -104,6 +134,8 @@ impl StageError {
                 StageError::MissingDownloadBuffer |
                 StageError::MissingSyncGap |
                 StageError::ChannelClosed |
+                StageError::InconsistentBlockNumber { .. } |
+                StageError::InconsistentTxNumber { .. } |
                 StageError::Fatal(_)
         )
     }

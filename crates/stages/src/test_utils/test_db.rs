@@ -5,7 +5,9 @@ use reth_db::{
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::Table,
     tables,
-    test_utils::{create_test_rw_db, create_test_rw_db_with_path, TempDatabase},
+    test_utils::{
+        create_test_rw_db, create_test_rw_db_with_path, create_test_snapshots_dir, TempDatabase,
+    },
     transaction::{DbTx, DbTxMut},
     DatabaseEnv, DatabaseError as DbError,
 };
@@ -26,13 +28,21 @@ pub struct TestStageDB {
 impl Default for TestStageDB {
     /// Create a new instance of [TestStageDB]
     fn default() -> Self {
-        Self { factory: ProviderFactory::new(create_test_rw_db(), MAINNET.clone()) }
+        Self {
+            factory: ProviderFactory::new(create_test_rw_db(), MAINNET.clone())
+                .with_snapshots(create_test_snapshots_dir())
+                .unwrap(),
+        }
     }
 }
 
 impl TestStageDB {
     pub fn new(path: &Path) -> Self {
-        Self { factory: ProviderFactory::new(create_test_rw_db_with_path(path), MAINNET.clone()) }
+        Self {
+            factory: ProviderFactory::new(create_test_rw_db_with_path(path), MAINNET.clone())
+                .with_snapshots(create_test_snapshots_dir())
+                .unwrap(),
+        }
     }
 
     /// Invoke a callback with transaction committing it afterwards

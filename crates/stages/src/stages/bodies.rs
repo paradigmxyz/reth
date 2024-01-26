@@ -5,15 +5,21 @@ use reth_db::{
     database::Database,
     models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
     provider::ProviderResult,
 };
-use reth_primitives::stage::{EntitiesCheckpoint, StageCheckpoint, StageId};
-use reth_provider::{DatabaseProviderRW, StatsReader};
-use std::task::{ready, Context, Poll};
+use reth_primitives::{
+    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
+    SnapshotSegment,
+};
+use reth_provider::{providers::SnapshotWriter, DatabaseProviderRW, StatsReader};
+use std::{
+    cmp::Ordering,
+    task::{ready, Context, Poll},
+};
 use tracing::*;
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
@@ -111,13 +117,49 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // Cursors used to write bodies, ommers and transactions
         let tx = provider.tx_ref();
         let mut block_indices_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
-        let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
 
         // Get id for the next tx_num of zero if there are no transactions.
-        let mut next_tx_num = tx_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
+        let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
+
+        let snapshot_provider = provider.snapshot_provider().expect("should exist");
+        let mut snapshotter =
+            snapshot_provider.get_writer(from_block, SnapshotSegment::Transactions)?;
+
+        // Make sure Transactions static file is at the same height. If it's further, this
+        // input execution was interrupted previously and we need to unwind the static file.
+        let next_snapshot_tx_num = snapshot_provider
+            .get_highest_snapshot_tx(SnapshotSegment::Transactions)
+            .map(|id| id + 1)
+            .unwrap_or_default();
+
+        match next_snapshot_tx_num.cmp(&next_tx_num) {
+            // If static files are ahead, then we didn't reach the database commit in a previous
+            // stage run. So, our only solution is to unwind the static files and proceed from the
+            // database expected height.
+            Ordering::Greater => snapshotter
+                .prune_transactions(next_snapshot_tx_num - next_tx_num, from_block - 1)?,
+            // If static files are behind, then there was some corruption or loss of files. This
+            // error will trigger an unwind, that will bring the database to the same height as the
+            // static files.
+            Ordering::Less => {
+                let last_block = snapshot_provider
+                    .get_highest_snapshot_block(SnapshotSegment::Transactions)
+                    .unwrap_or_default();
+
+                let missing_block = Box::new(
+                    tx.get::<tables::Headers>(last_block + 1)?.unwrap_or_default().seal_slow(),
+                );
+
+                return Err(StageError::MissingSnapshotData {
+                    block: missing_block,
+                    segment: SnapshotSegment::Transactions,
+                })
+            }
+            Ordering::Equal => {}
+        }
 
         debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, start_tx_id = next_tx_num, "Commencing sync");
 
@@ -135,6 +177,23 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                     BlockResponse::Empty(_) => 0,
                 },
             };
+
+            // Increment block on snapshot header.
+            if block_number > 0 {
+                let appended_block_number =
+                    snapshotter.increment_block(SnapshotSegment::Transactions)?;
+
+                if appended_block_number != block_number {
+                    // This scenario indicates a critical error in the logic of adding new
+                    // items. It should be treated as an `expect()` failure.
+                    return Err(StageError::InconsistentBlockNumber {
+                        segment: SnapshotSegment::Transactions,
+                        database: block_number,
+                        static_file: appended_block_number,
+                    });
+                }
+            }
+
             match response {
                 BlockResponse::Full(block) => {
                     // write transaction block index
@@ -144,8 +203,19 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
                     // Write transactions
                     for transaction in block.body {
-                        // Append the transaction
-                        tx_cursor.append(next_tx_num, transaction.into())?;
+                        let appended_tx_number =
+                            snapshotter.append_transaction(next_tx_num, transaction.into())?;
+
+                        if appended_tx_number != next_tx_num {
+                            // This scenario indicates a critical error in the logic of adding new
+                            // items. It should be treated as an `expect()` failure.
+                            return Err(StageError::InconsistentTxNumber {
+                                segment: SnapshotSegment::Transactions,
+                                database: next_tx_num,
+                                static_file: appended_tx_number,
+                            });
+                        }
+
                         // Increment transaction id for each transaction.
                         next_tx_num += 1;
                     }
@@ -173,6 +243,9 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             highest_block = block_number;
         }
 
+        // Committing static file can be done, since we unwind it if the db tx is not committed.
+        snapshotter.commit()?;
+
         // The stage is "done" if:
         // - We got fewer blocks than our target
         // - We reached our target and the target was not limited by the batch size of the stage
@@ -192,10 +265,10 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     ) -> Result<UnwindOutput, StageError> {
         self.buffer.take();
 
+        let snapshot_provider = provider.snapshot_provider().expect("should exist");
         let tx = provider.tx_ref();
         // Cursors to unwind bodies, ommers
         let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
-        let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
         // Cursors to unwind transitions
@@ -224,17 +297,40 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 tx_block_cursor.delete_current()?;
             }
 
-            // Delete all transactions that belong to this block
-            for tx_id in block_meta.tx_num_range() {
-                // First delete the transaction
-                if transaction_cursor.seek_exact(tx_id)?.is_some() {
-                    transaction_cursor.delete_current()?;
-                }
-            }
-
             // Delete the current body value
             rev_walker.delete_current()?;
         }
+
+        let mut snapshotter = snapshot_provider.latest_writer(SnapshotSegment::Transactions)?;
+
+        // Unwind from static files. Get the current last expected transaction from DB, and match it
+        // on static file
+        let db_tx_num =
+            body_cursor.last()?.map(|(_, block_meta)| block_meta.last_tx_num()).unwrap_or_default();
+        let snapshot_tx_num: u64 = snapshot_provider
+            .get_highest_snapshot_tx(SnapshotSegment::Transactions)
+            .unwrap_or_default();
+
+        // If there are more transactions on database, then we are missing snapshot data and we need
+        // to unwind further.
+        if db_tx_num > snapshot_tx_num {
+            let last_block = snapshot_provider
+                .get_highest_snapshot_block(SnapshotSegment::Transactions)
+                .unwrap_or_default();
+
+            let missing_block = Box::new(
+                tx.get::<tables::Headers>(last_block + 1)?.unwrap_or_default().seal_slow(),
+            );
+
+            return Err(StageError::MissingSnapshotData {
+                block: missing_block,
+                segment: SnapshotSegment::Transactions,
+            })
+        }
+
+        // Unwinds static file
+        snapshotter
+            .prune_transactions(snapshot_tx_num.saturating_sub(db_tx_num), input.unwind_to)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(input.unwind_to)
@@ -441,16 +537,12 @@ mod tests {
             .expect("Written block data invalid");
 
         // Delete a transaction
-        runner
-            .db()
-            .commit(|tx| {
-                let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
-                tx_cursor.last()?.expect("Could not read last transaction");
-                tx_cursor.delete_current()?;
-                Ok(())
-            })
-            .expect("Could not delete a transaction");
-
+        let snapshot_provider = runner.db().factory.snapshot_provider().expect("should exist");
+        {
+            let mut snapshotter =
+                snapshot_provider.latest_writer(SnapshotSegment::Transactions).unwrap();
+            snapshotter.prune_transactions(1, checkpoint.block_number).unwrap();
+        }
         // Unwind all of it
         let unwind_to = 1;
         let input = UnwindInput { bad_block: None, checkpoint, unwind_to };
@@ -503,8 +595,10 @@ mod tests {
                 generators::{random_block_range, random_signed_tx},
             },
         };
-        use reth_primitives::{BlockBody, BlockNumber, SealedBlock, SealedHeader, TxNumber, B256};
-        use reth_provider::ProviderFactory;
+        use reth_primitives::{
+            BlockBody, BlockNumber, SealedBlock, SealedHeader, SnapshotSegment, TxNumber, B256,
+        };
+        use reth_provider::{providers::SnapshotWriter, ProviderFactory, TransactionsProvider};
         use std::{
             collections::{HashMap, VecDeque},
             ops::RangeInclusive,
@@ -574,24 +668,34 @@ mod tests {
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.checkpoint().block_number;
                 let end = input.target();
+
+                let snapshot_provider = self.db.factory.snapshot_provider().expect("should exist");
+
                 let mut rng = generators::rng();
                 let blocks = random_block_range(&mut rng, start..=end, GENESIS_HASH, 0..2);
                 self.db.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
-                    self.db.commit(|tx| {
+                    {
+                        let tx = self.db.factory.provider_rw()?.into_tx();
+                        let mut snapshotter =
+                            snapshot_provider.get_writer(start, SnapshotSegment::Transactions)?;
+
                         let body = StoredBlockBodyIndices {
                             first_tx_num: 0,
                             tx_count: progress.body.len() as u64,
                         };
+
+                        snapshotter.set_block_range(0..=progress.number);
+
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx(&mut rng);
-                            tx.put::<tables::Transactions>(tx_num, transaction.into())
+                            snapshotter.append_transaction(tx_num, transaction.into()).map(|_| ())
                         })?;
 
                         if body.tx_count != 0 {
                             tx.put::<tables::TransactionBlock>(
-                                body.first_tx_num(),
+                                body.last_tx_num(),
                                 progress.number,
                             )?;
                         }
@@ -604,8 +708,10 @@ mod tests {
                                 StoredBlockOmmers { ommers: progress.ommers.clone() },
                             )?;
                         }
-                        Ok(())
-                    })?;
+
+                        snapshotter.commit()?;
+                        tx.commit()?;
+                    }
                 }
                 self.set_responses(blocks.iter().map(body_by_hash).collect());
                 Ok(blocks)
@@ -666,12 +772,17 @@ mod tests {
                 prev_progress: BlockNumber,
                 highest_block: BlockNumber,
             ) -> Result<(), TestRunnerError> {
+                let snapshot_provider = self
+                    .db
+                    .factory
+                    .snapshot_provider()
+                    .expect("snapshot provider should be initalized.");
+
                 self.db.query(|tx| {
                     // Acquire cursors on body related tables
                     let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
                     let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
-                    let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
                     let mut tx_block_cursor = tx.cursor_read::<tables::TransactionBlock>()?;
 
                     let first_body_key = match bodies_cursor.first()? {
@@ -680,6 +791,7 @@ mod tests {
                     };
 
                     let mut prev_number: Option<BlockNumber> = None;
+
 
                     for entry in bodies_cursor.walk(Some(first_body_key))? {
                         let (number, body) = entry?;
@@ -715,10 +827,8 @@ mod tests {
                         }
 
                         for tx_id in body.tx_num_range() {
-                            let tx_entry = transaction_cursor.seek_exact(tx_id)?;
-                            assert!(tx_entry.is_some(), "Transaction is missing.");
+                            assert!(snapshot_provider.transaction_by_id(tx_id)?.is_some(), "Transaction is missing.");
                         }
-
 
                         prev_number = Some(number);
                     }
