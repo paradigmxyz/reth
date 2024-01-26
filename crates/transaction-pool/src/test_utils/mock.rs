@@ -1094,7 +1094,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
 }
 
 /// A factory for creating and managing various types of mock transactions.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct MockTransactionFactory {
     pub(crate) ids: SenderIdentifiers,
 }
@@ -1169,6 +1169,7 @@ impl TransactionOrdering for MockOrdering {
 }
 
 /// A configured distribution that can generate transactions
+#[derive(Debug)]
 pub struct MockTransactionDistribution {
     /// legacy to EIP-1559 ration
     legacy_ratio: WeightedIndex<u32>,
