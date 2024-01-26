@@ -75,7 +75,7 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
     ) -> RethResult<Option<EngineHookEvent>> {
         Ok(match &mut self.state {
             SnapshotterState::Idle(snapshotter) => {
-                let Some(mut snapshotter) = snapshotter.take() else { return Ok(None) };
+                let Some(snapshotter) = snapshotter.take() else { return Ok(None) };
 
                 let targets = snapshotter.get_snapshot_targets(finalized_block_number)?;
 
@@ -112,9 +112,7 @@ impl<DB: Database + 'static> EngineHook for SnapshotHook<DB> {
         cx: &mut Context<'_>,
         ctx: EngineContext,
     ) -> Poll<RethResult<EngineHookEvent>> {
-        let Some(finalized_block_number) = ctx.finalized_block_number else {
-            return Poll::Ready(Ok(EngineHookEvent::NotReady))
-        };
+        let Some(finalized_block_number) = ctx.finalized_block_number else { return Poll::Pending };
 
         // Try to spawn a snapshotter
         match self.try_spawn_snapshotter(finalized_block_number)? {
