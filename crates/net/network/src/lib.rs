@@ -25,7 +25,7 @@
 //!
 //!        * Responds to incoming ETH related requests: `Headers`, `Bodies`
 //!
-//!    - `Discovery Task`: is a spawned [`Discv4`](reth_discv4::Discv4) future that handles peer
+//!    - `Discovery Task`: is a spawned [`Discv4`] future that handles peer
 //!      discovery and emits new peers to the `Network`
 //!
 //!    - [`NetworkManager`] task advances the state of the `Network`, which includes:
