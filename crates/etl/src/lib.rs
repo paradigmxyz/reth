@@ -28,8 +28,8 @@ use tempfile::{NamedTempFile, TempDir};
 
 /// An ETL (extract, transform, load) data collector.
 ///
-/// Data is pushed (extract) to the collector which internally flushes the data in a sorted (transform) manner to files of
-/// some specified capacity.
+/// Data is pushed (extract) to the collector which internally flushes the data in a sorted
+/// (transform) manner to files of some specified capacity.
 ///
 /// The data can later be iterated over (load) in a sorted manner.
 #[derive(Debug)]
@@ -130,7 +130,13 @@ where
     }
 }
 
-/// An iterator over sorted data in a collection of ETL files.
+/// `EtlIter` is an iterator for traversing through sorted key-value pairs in a collection of ETL
+/// files. These files are created using the [`Collector`] and contain data where keys are encoded
+/// and values are compressed.
+///
+/// This iterator returns each key-value pair in ascending order based on the key.
+/// It is particularly designed to efficiently handle large datasets by employing a binary heap for
+/// managing the iteration order.
 #[derive(Debug)]
 pub struct EtlIter<'a> {
     /// Heap managing the next items to be iterated.
@@ -202,7 +208,7 @@ impl EtlFile {
     }
 
     /// Read the next entry in the file.
-    /// 
+    ///
     /// Can return error if it reaches EOF before filling the internal buffers.
     pub(crate) fn read_next(&mut self) -> std::io::Result<Option<(Vec<u8>, Vec<u8>)>> {
         if self.len == 0 {
