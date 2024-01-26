@@ -187,11 +187,10 @@ impl HashedPostState {
     ///
     /// // Initialize hashed post state
     /// let mut hashed_state = HashedPostState::default();
-    /// hashed_state.insert_account(
+    /// hashed_state.accounts.insert(
     ///     [0x11; 32].into(),
     ///     Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
     /// );
-    /// hashed_state.sort();
     ///
     /// // Calculate the state root
     /// let tx = db.tx().expect("failed to create transaction");
