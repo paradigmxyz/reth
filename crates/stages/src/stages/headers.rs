@@ -176,7 +176,7 @@ where
             let (hash, number) = hash_to_number?;
 
             if index > 0 && index % interval == 0 {
-                info!(target: "sync::stages::headers", progress = ((index as f64 / total_headers as f64) * 100.0).round(), "writing headers hash index");
+                info!(target: "sync::stages::headers", progress = ((index as f64 / total_headers as f64) * 100.0).round(), "Writing headers hash index");
             }
 
             if first_sync {
