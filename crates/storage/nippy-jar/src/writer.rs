@@ -1,14 +1,41 @@
 use crate::{compression::Compression, ColumnResult, NippyJar, NippyJarError, NippyJarHeader};
 use std::{
     cmp::Ordering,
-    fmt,
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
+    ops::{Deref, DerefMut},
     path::Path,
 };
 
 /// Size of one offset in bytes.
 const OFFSET_SIZE_BYTES: u64 = 8;
+
+/// Holds a reference or an owned [`NippyJar`].
+#[derive(Debug)]
+enum CowJar<'a, H: NippyJarHeader = ()> {
+    MutRef(&'a mut NippyJar<H>),
+    Owned(Box<NippyJar<H>>),
+}
+
+impl<'a, H: NippyJarHeader> Deref for CowJar<'a, H> {
+    type Target = NippyJar<H>;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            CowJar::MutRef(jar) => jar,
+            CowJar::Owned(jar) => jar,
+        }
+    }
+}
+
+impl<'a, H: NippyJarHeader> DerefMut for CowJar<'a, H> {
+    fn deref_mut(&mut self) -> &mut NippyJar<H> {
+        match self {
+            CowJar::MutRef(jar) => jar,
+            CowJar::Owned(jar) => jar,
+        }
+    }
+}
 
 /// Writer of [`NippyJar`]. Handles table data and offsets only.
 ///
@@ -23,10 +50,11 @@ const OFFSET_SIZE_BYTES: u64 = 8;
 ///
 /// ## Data file layout
 /// The data file is represented just as a sequence of bytes of data without any delimiters
-pub struct NippyJarWriter<'a, H> {
+#[derive(Debug)]
+pub struct NippyJarWriter<'a, H: NippyJarHeader = ()> {
     /// Reference to the associated [`NippyJar`], containing all necessary configurations for data
     /// handling.
-    jar: &'a mut NippyJar<H>,
+    jar: CowJar<'a, H>,
     /// File handle to where the data is stored.
     data_file: File,
     /// File handle to where the offsets are stored.
@@ -41,16 +69,36 @@ pub struct NippyJarWriter<'a, H> {
     column: usize,
 }
 
-impl<H> fmt::Debug for NippyJarWriter<'_, H> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("NippyJarWriter").finish_non_exhaustive()
-    }
-}
-
 impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
-    pub fn new(jar: &'a mut NippyJar<H>) -> Result<Self, NippyJarError> {
+    /// Creates a [`NippyJarWriter`] from mutable refence of [`NippyJar`]. It also does consistency
+    /// checks and self heals.
+    pub fn from_mut(jar: &'a mut NippyJar<H>) -> Result<Self, NippyJarError> {
+        Self::new(CowJar::MutRef(jar))
+    }
+
+    /// Creates a [`NippyJarWriter`] from an owned [`NippyJar`]. It also does consistency checks and
+    /// self heals.
+    pub fn from_owned(jar: NippyJar<H>) -> Result<Self, NippyJarError> {
+        Self::new(CowJar::Owned(Box::new(jar)))
+    }
+
+    /// Returns a reference to `H` of [`NippyJar`]
+    pub fn user_header(&self) -> &H {
+        &self.jar.user_header
+    }
+
+    /// Returns a mutable reference to `H` of [`NippyJar`]
+    pub fn user_header_mut(&mut self) -> &mut H {
+        &mut self.jar.user_header
+    }
+
+    /// Creates a [`NippyJarWriter`] from [`CowJar`].
+    fn new(mut jar: CowJar<'a, H>) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
+
+        // Makes sure we don't have dangling data and offset files
+        jar.freeze_config()?;
 
         let mut writer = Self {
             jar,
@@ -77,24 +125,24 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
     ) -> Result<(File, File, bool), NippyJarError> {
         let is_created = !data.exists() || !offsets.exists();
 
-        let mut data_file = if !data.exists() {
-            File::create(data)?
-        } else {
-            OpenOptions::new().read(true).write(true).open(data)?
-        };
+        if !data.exists() {
+            // File::create is write-only (no reading possible)
+            File::create(data)?;
+        }
+
+        let mut data_file = OpenOptions::new().read(true).write(true).open(data)?;
         data_file.seek(SeekFrom::End(0))?;
 
-        let mut offsets_file = if !offsets.exists() {
-            let mut offsets = File::create(offsets)?;
+        if !offsets.exists() {
+            // File::create is write-only (no reading possible)
+            File::create(offsets)?;
+        }
 
-            // First byte of the offset file is the size of one offset in bytes
-            offsets.write_all(&[OFFSET_SIZE_BYTES as u8])?;
-            offsets.sync_all()?;
+        let mut offsets_file = OpenOptions::new().read(true).write(true).open(offsets)?;
 
-            offsets
-        } else {
-            OpenOptions::new().read(true).write(true).open(offsets)?
-        };
+        // First byte of the offset file is the size of one offset in bytes
+        offsets_file.write_all(&[OFFSET_SIZE_BYTES as u8])?;
+        offsets_file.sync_all()?;
         offsets_file.seek(SeekFrom::End(0))?;
 
         Ok((data_file, offsets_file, is_created))

@@ -1,13 +1,18 @@
 mod manager;
-pub use manager::SnapshotProvider;
+pub use manager::{SnapshotProvider, SnapshotWriter};
 
 mod jar;
 pub use jar::SnapshotJarProvider;
+
+mod writer;
+pub use writer::SnapshotProviderRW;
 
 use reth_interfaces::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{snapshot::SegmentHeader, SnapshotSegment};
 use std::{ops::Deref, sync::Arc};
+
+const BLOCKS_PER_SNAPSHOT: u64 = 500_000;
 
 /// Alias type for each specific `NippyJar`.
 type LoadedJarRef<'a> = dashmap::mapref::one::Ref<'a, (u64, SnapshotSegment), LoadedJar>;
@@ -51,7 +56,7 @@ mod tests {
     };
     use reth_interfaces::test_utils::generators::{self, random_header_range};
     use reth_nippy_jar::NippyJar;
-    use reth_primitives::{BlockNumber, B256, U256};
+    use reth_primitives::{snapshot::find_fixed_range, BlockNumber, B256, U256};
 
     #[test]
     fn test_snap() {
@@ -59,12 +64,14 @@ mod tests {
         let row_count = 100u64;
         let range = 0..=(row_count - 1);
         let segment_header =
-            SegmentHeader::new(range.clone(), range.clone(), SnapshotSegment::Headers);
+            SegmentHeader::new(range.clone(), Some(range.clone()), SnapshotSegment::Headers);
 
         // Data sources
         let factory = create_test_provider_factory();
         let snap_path = tempfile::tempdir().unwrap();
-        let snap_file = snap_path.path().join(SnapshotSegment::Headers.filename(&range, &range));
+        let snap_file = snap_path
+            .path()
+            .join(SnapshotSegment::Headers.filename(&find_fixed_range(*range.end())));
 
         // Setup data
         let mut headers = random_header_range(

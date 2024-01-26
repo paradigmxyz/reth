@@ -15,6 +15,13 @@ pub enum PruneMode {
 }
 
 impl PruneMode {
+    /// Prune blocks up to the specified block number. The specified block number is also pruned.
+    ///
+    /// This acts as `PruneMode::Before(block_number + 1)`.
+    pub fn before_inclusive(block_number: BlockNumber) -> Self {
+        Self::Before(block_number + 1)
+    }
+
     /// Returns block up to which variant pruning needs to be done, inclusive, according to the
     /// provided tip.
     pub fn prune_target_block(
