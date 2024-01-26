@@ -561,7 +561,7 @@ pub(crate) fn new_dns(
     Ok((Some(dns_disc), Some(dns_discovery_updates), Some(dns_disc_service)))
 }
 
-/// Events produced by the [`Discovery`] manager.
+/// Events produced by the [`crate::Discovery`] manager.
 #[derive(Debug, Clone)]
 pub enum DiscoveryEvent {
     /// Discovered a node
