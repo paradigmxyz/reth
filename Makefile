@@ -248,30 +248,79 @@ fmt:
 	cargo +nightly fmt
 
 lint-reth:
-	cargo +nightly clippy --workspace --bin "reth" --lib --examples --tests --benches --features "ethereum $(BIN_OTHER_FEATURES)" -- -D warnings
+	cargo +nightly clippy \
+	--workspace \
+	--bin "reth" \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--features "ethereum $(BIN_OTHER_FEATURES)" \
+	-- -D warnings
 
 lint-op-reth:
-	cargo +nightly clippy --workspace --bin "op-reth" --lib --examples --tests --benches --features "optimism $(BIN_OTHER_FEATURES)" -- -D warnings
+	cargo +nightly clippy \
+	--workspace \
+	--bin "op-reth" \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--features "optimism $(BIN_OTHER_FEATURES)" \
+	-- -D warnings
 
 lint-other-targets:
-	cargo +nightly clippy --workspace --lib --examples --tests --benches --all-features -- -D warnings
+	cargo +nightly clippy \
+	--workspace \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--all-features \
+	-- -D warnings
 
 lint:
+	make fmt && \
 	make lint-reth && \
 	make lint-op-reth && \
 	make lint-other-targets
 
 rustdocs:
-	RUSTDOCFLAGS="--cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options -D warnings" cargo +nightly docs --document-private-items
+	RUSTDOCFLAGS="\
+	--cfg docsrs \
+	--show-type-layout \
+	--generate-link-to-definition \
+	--enable-index-page -Zunstable-options -D warnings" \
+	cargo +nightly docs \
+	--document-private-items
 
 test-reth:
-	cargo test --workspace --bin "reth" --lib --examples --tests --benches --features "ethereum $(BIN_OTHER_FEATURES)"
+	cargo test \
+	--workspace \
+	--bin "reth" \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--features "ethereum $(BIN_OTHER_FEATURES)"
 
 test-op-reth:
-	cargo test --workspace --bin "op-reth" --lib --examples --tests --benches --features "optimism $(BIN_OTHER_FEATURES)"
+	cargo test \
+	--workspace \
+	--bin "op-reth" \
+	--lib --examples \
+	--tests \
+	--benches \
+	--features "optimism $(BIN_OTHER_FEATURES)"
 
 test-other-targets:
-	cargo test --workspace --lib --examples --tests --benches --all-features
+	cargo test \
+	--workspace \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--all-features
 
 test:
 	make test-reth && \
