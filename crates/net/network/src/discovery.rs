@@ -5,16 +5,16 @@ use crate::{
     manager::DiscoveredEvent,
     StreamDiscv5,
 };
-use discv5;
 use futures::StreamExt;
 use parking_lot::RwLock;
-use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry, HandleDiscovery};
+use reth_discv4::{
+    DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry, HandleDiscovery, PublicKey, SecretKey,
+};
 use reth_discv5::{self, DiscoveryUpdateV5, Discv5, MergedUpdateStream};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
 use reth_primitives::{ForkId, NodeRecord, PeerId};
-use secp256k1::{PublicKey, SecretKey};
 use smallvec::{smallvec, SmallVec};
 use tokio::{
     sync::{mpsc, watch},
@@ -104,7 +104,7 @@ where
     }
 
     /// Add a node to the discv4 table.
-    pub(crate) fn add_discv4_node(&self, node: NodeRecord) {
+    pub(crate) fn add_disc_node(&self, node: NodeRecord) {
         if let Some(disc) = &self.disc {
             disc.add_node(node);
         }
@@ -217,7 +217,7 @@ impl Stream for Discovery {
         while let Some(Poll::Ready(Some(update))) =
             self.dns_discovery_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
         {
-            self.add_discv4_node(update.node_record);
+            self.add_disc_node(update.node_record);
             self.on_node_record_update(update.node_record, update.fork_id);
         }
 
@@ -259,7 +259,7 @@ impl<S> Discovery<Discv5, S> {
                 // covers DiscoveryUpdate::Added(_) and DiscoveryUpdate::Removed(_)
 
                 if let Some(node_id) = replaced {
-                    let id = into_uncompressed_id(node_id).map_err(|_| {
+                    let id = reth_discv5::compressed_to_uncompressed_id(node_id).map_err(|_| {
                         NetworkError::custom_discovery(
                             "conversion from discv5 node id to pk failed",
                         )
@@ -303,7 +303,7 @@ impl<S> Discovery<Discv5, S> {
         // todo: get port v6 with respect to ip mode of this node
         let Some(tcp_port_ipv4) = enr.tcp4() else { return Ok(()) };
 
-        let id = into_uncompressed_id(enr.node_id()).map_err(|_| {
+        let id = reth_discv5::compressed_to_uncompressed_id(enr.node_id()).map_err(|_| {
             NetworkError::custom_discovery("conversion from discv5 node id to pk failed")
         })?;
 
@@ -350,7 +350,7 @@ where
         while let Some(Poll::Ready(Some(update))) =
             self.dns_discovery_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
         {
-            self.add_discv4_node(update.node_record);
+            self.add_disc_node(update.node_record); // atm adds node to discv4. see reth_discv5.
             self.on_node_record_update(update.node_record, update.fork_id);
         }
 
@@ -376,8 +376,11 @@ impl<S> fmt::Debug for Discovery<Discv5, S> {
 impl Discovery<Discv5, MergedUpdateStream> {
     /// Spawns the discovery service.
     ///
-    /// This will spawn [`discv5::Discv5`] and [`Discv4`] each onto their own new task and establish
-    /// a merged listener channel to receive all discovered nodes.
+    /// This will spawn [`discv5::Discv5`] and [`Discv4`] each onto their own new task and
+    /// establish a merged listener channel to receive all discovered nodes.
+    ///
+    /// Note: if dns discovery is configured, any nodes found by this service will be
+    /// added to discv4 atm. See todo in [`HandleDiscovery`] impl on [`Discv5`].
     pub async fn new_discv5(
         discv4_addr: SocketAddr, // discv5 addr in config
         sk: SecretKey,
@@ -506,7 +509,7 @@ impl Discovery<Discv5, MergedUpdateStream> {
             (Some(disc), Some(disc_updates))
         };
 
-        // setup DNS discovery
+        // setup DNS discovery.
         let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
             if let Some(dns_config) = dns_discovery_config {
                 new_dns(dns_config)?
@@ -546,13 +549,6 @@ pub(crate) fn new_dns(
     let dns_disc_service = service.spawn();
 
     Ok((Some(dns_disc), Some(dns_discovery_updates), Some(dns_disc_service)))
-}
-
-pub fn into_uncompressed_id(node_id: discv5::enr::NodeId) -> Result<PeerId, secp256k1::Error> {
-    let pk_compressed_bytes = node_id.raw();
-    let pk = PublicKey::from_slice(&pk_compressed_bytes)?;
-
-    Ok(PeerId::from_slice(&pk.serialize_uncompressed()[1..]))
 }
 
 #[cfg(test)]

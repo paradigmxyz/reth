@@ -14,8 +14,10 @@ workspace = true
 [dependencies]
 # reth
 reth-discv4.workspace = true
+reth-primitives.workspace = true
 
 # ethereum
+alloy-rlp.workspace = true
 discv5.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }

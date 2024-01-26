@@ -6116,6 +6116,7 @@ dependencies = [
 name = "reth-discv5"
 version = "0.1.0-alpha.15"
 dependencies = [
+ "alloy-rlp",
  "derive_more",
  "discv5",
  "enr",
@@ -6123,6 +6124,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "pin-project",
  "reth-discv4",
+ "reth-primitives",
  "secp256k1 0.27.0",
  "tokio",
  "tokio-stream",
