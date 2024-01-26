@@ -23,6 +23,7 @@ use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
     ops::{Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use tokio::sync::watch;
 
@@ -35,9 +36,12 @@ use tokio::sync::watch;
 /// - `HashMap<SnapshotSegment, BTreeMap<TxNumber, RangeInclusive<BlockNumber>>>`
 type SegmentRanges = HashMap<SnapshotSegment, BTreeMap<u64, RangeInclusive<u64>>>;
 
-/// [`SnapshotProvider`] manages all existing [`SnapshotJarProvider`].
+/// Type alias for the shared snapshot provider, wrapping the inner implementation.
+pub type SnapshotProvider = Arc<SnapshotProviderInner>;
+
+/// [`SnapshotProviderInner`] manages all existing [`SnapshotJarProvider`].
 #[derive(Debug, Default)]
-pub struct SnapshotProvider {
+pub struct SnapshotProviderInner {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
     map: DashMap<(BlockNumber, SnapshotSegment), LoadedJar>,
@@ -54,8 +58,8 @@ pub struct SnapshotProvider {
     load_filters: bool,
 }
 
-impl SnapshotProvider {
-    /// Creates a new [`SnapshotProvider`].
+impl SnapshotProviderInner {
+    /// Creates a new [`SnapshotProviderInner`].
     pub fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
         let provider = Self {
             map: Default::default(),
@@ -361,7 +365,7 @@ impl SnapshotProvider {
     }
 }
 
-impl HeaderProvider for SnapshotProvider {
+impl HeaderProvider for SnapshotProviderInner {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         self.find_snapshot(SnapshotSegment::Headers, |jar_provider| {
             Ok(jar_provider
@@ -427,7 +431,7 @@ impl HeaderProvider for SnapshotProvider {
     }
 }
 
-impl BlockHashReader for SnapshotProvider {
+impl BlockHashReader for SnapshotProviderInner {
     fn block_hash(&self, num: u64) -> ProviderResult<Option<B256>> {
         self.get_segment_provider_from_block(SnapshotSegment::Headers, num, None)?.block_hash(num)
     }
@@ -446,7 +450,7 @@ impl BlockHashReader for SnapshotProvider {
     }
 }
 
-impl ReceiptProvider for SnapshotProvider {
+impl ReceiptProvider for SnapshotProviderInner {
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.get_segment_provider_from_transaction(SnapshotSegment::Receipts, num, None)?
             .receipt(num)
@@ -476,7 +480,7 @@ impl ReceiptProvider for SnapshotProvider {
     }
 }
 
-impl TransactionsProviderExt for SnapshotProvider {
+impl TransactionsProviderExt for SnapshotProviderInner {
     fn transaction_hashes_by_range(
         &self,
         tx_range: Range<TxNumber>,
@@ -494,7 +498,7 @@ impl TransactionsProviderExt for SnapshotProvider {
     }
 }
 
-impl TransactionsProvider for SnapshotProvider {
+impl TransactionsProvider for SnapshotProviderInner {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.find_snapshot(SnapshotSegment::Transactions, |jar_provider| {
             let mut cursor = jar_provider.cursor()?;
@@ -592,7 +596,7 @@ impl TransactionsProvider for SnapshotProvider {
 
 /* Cannot be successfully implemented but must exist for trait requirements */
 
-impl BlockNumReader for SnapshotProvider {
+impl BlockNumReader for SnapshotProviderInner {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
@@ -614,7 +618,7 @@ impl BlockNumReader for SnapshotProvider {
     }
 }
 
-impl BlockReader for SnapshotProvider {
+impl BlockReader for SnapshotProviderInner {
     fn find_block_by_hash(
         &self,
         _hash: B256,
@@ -669,7 +673,7 @@ impl BlockReader for SnapshotProvider {
     }
 }
 
-impl WithdrawalsProvider for SnapshotProvider {
+impl WithdrawalsProvider for SnapshotProviderInner {
     fn withdrawals_by_block(
         &self,
         _id: BlockHashOrNumber,

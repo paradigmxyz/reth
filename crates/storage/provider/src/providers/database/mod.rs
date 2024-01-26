@@ -1,5 +1,6 @@
 use crate::{
     providers::{
+        snapshot::SnapshotProviderInner,
         state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
         SnapshotProvider,
     },
@@ -45,7 +46,7 @@ pub struct ProviderFactory<DB> {
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Snapshot Provider
-    snapshot_provider: Option<Arc<SnapshotProvider>>,
+    snapshot_provider: Option<SnapshotProvider>,
 }
 
 impl<DB: Clone> Clone for ProviderFactory<DB> {
@@ -85,7 +86,7 @@ impl<DB> ProviderFactory<DB> {
         highest_snapshot_tracker: watch::Receiver<Option<HighestSnapshots>>,
     ) -> ProviderResult<Self> {
         self.snapshot_provider = Some(Arc::new(
-            SnapshotProvider::new(snapshots_path)?
+            SnapshotProviderInner::new(snapshots_path)?
                 .with_highest_tracker(Some(highest_snapshot_tracker)),
         ));
         Ok(self)

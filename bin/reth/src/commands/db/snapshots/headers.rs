@@ -10,8 +10,8 @@ use reth_primitives::{
     BlockHash, ChainSpec, Header, SnapshotSegment,
 };
 use reth_provider::{
-    providers::SnapshotProvider, BlockNumReader, HeaderProvider, ProviderError, ProviderFactory,
-    TransactionsProviderExt,
+    providers::SnapshotProviderInner, BlockNumReader, HeaderProvider, ProviderError,
+    ProviderFactory, TransactionsProviderExt,
 };
 use std::{
     path::{Path, PathBuf},
@@ -52,7 +52,7 @@ impl Command {
         let path: PathBuf = SnapshotSegment::Headers
             .filename_with_configuration(filters, compression, &block_range, &tx_range)
             .into();
-        let provider = SnapshotProvider::new(PathBuf::default())?;
+        let provider = SnapshotProviderInner::new(PathBuf::default())?;
         let jar_provider = provider.get_segment_provider_from_block(
             SnapshotSegment::Headers,
             self.from,

@@ -100,7 +100,7 @@ pub struct DatabaseProvider<TX> {
     chain_spec: Arc<ChainSpec>,
     /// Snapshot provider
     #[allow(dead_code)]
-    snapshot_provider: Option<Arc<SnapshotProvider>>,
+    snapshot_provider: Option<SnapshotProvider>,
 }
 
 impl<TX: DbTxMut> DatabaseProvider<TX> {
@@ -213,7 +213,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     }
 
     /// Creates a new [`Self`] with access to a [`SnapshotProvider`].
-    pub fn with_snapshot_provider(mut self, snapshot_provider: Arc<SnapshotProvider>) -> Self {
+    pub fn with_snapshot_provider(mut self, snapshot_provider: SnapshotProvider) -> Self {
         self.snapshot_provider = Some(snapshot_provider);
         self
     }

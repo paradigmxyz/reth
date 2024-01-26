@@ -3,18 +3,16 @@ use super::{
     Command, Compression, PerfectHashingFunction,
 };
 use rand::{seq::SliceRandom, Rng};
-use reth_db::{open_db_read_only, snapshot::TransactionMask};
+use reth_db::{mdbx::DatabaseArguments, open_db_read_only, snapshot::TransactionMask};
 use reth_interfaces::db::LogLevel;
 use reth_primitives::{
     snapshot::{Filters, InclusionFilter},
     ChainSpec, SnapshotSegment, TransactionSignedNoHash,
 };
 use reth_provider::{
-    providers::SnapshotProvider, BlockNumReader, ProviderError, ProviderFactory,
+    providers::SnapshotProviderInner, BlockNumReader, ProviderError, ProviderFactory,
     TransactionsProvider, TransactionsProviderExt,
 };
-
-use reth_db::mdbx::DatabaseArguments;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -53,7 +51,7 @@ impl Command {
         let path: PathBuf = SnapshotSegment::Transactions
             .filename_with_configuration(filters, compression, &block_range, &tx_range)
             .into();
-        let provider = SnapshotProvider::new(PathBuf::default())?;
+        let provider = SnapshotProviderInner::new(PathBuf::default())?;
         let jar_provider = provider.get_segment_provider_from_block(
             SnapshotSegment::Transactions,
             self.from,
