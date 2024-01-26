@@ -246,7 +246,7 @@ where
         loop {
             match ready!(self.downloader.poll_next_unpin(cx)) {
                 Some(Ok(headers)) => {
-                    info!(target: "sync::stages::headers", len = headers.len(), from = headers.first().map(|h| h.number), to = headers.last().map(|h| h.number), "Received headers");
+                    info!(target: "sync::stages::headers", total = headers.len(), from_block = headers.first().map(|h| h.number), to_block = headers.last().map(|h| h.number), "Received headers");
                     for header in headers {
                         let header_number = header.number;
 
