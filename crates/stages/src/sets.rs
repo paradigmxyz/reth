@@ -19,7 +19,7 @@
 //! # let executor_factory = EvmProcessorFactory::new(MAINNET.clone());
 //! # let provider_factory = create_test_provider_factory();
 //! // Build a pipeline with all offline stages.
-//! # let pipeline = Pipeline::builder().add_stages(OfflineStages::new(executor_factory)).unwrap().build(provider_factory);
+//! # let pipeline = Pipeline::builder().add_stages(OfflineStages::new(executor_factory)).build(provider_factory);
 //! ```
 //!
 //! ```ignore

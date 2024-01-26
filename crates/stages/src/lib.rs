@@ -55,7 +55,6 @@
 //!         )
 //!         .unwrap(),
 //!     )
-//!     .unwrap()
 //!     .build(provider_factory);
 //! ```
 //!
