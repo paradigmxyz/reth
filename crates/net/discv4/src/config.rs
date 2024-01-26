@@ -10,13 +10,12 @@ use reth_primitives::{
     bytes::{Bytes, BytesMut},
     NodeRecord,
 };
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     time::Duration,
 };
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 /// Configuration parameters that define the performance of the discovery network.
 #[derive(Clone, Debug)]

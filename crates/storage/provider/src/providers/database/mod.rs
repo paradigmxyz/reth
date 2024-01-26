@@ -10,7 +10,7 @@ use crate::{
     TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
-use reth_interfaces::{db::LogLevel, provider::ProviderResult, RethError, RethResult};
+use reth_interfaces::{provider::ProviderResult, RethError, RethResult};
 use reth_primitives::{
     snapshot::HighestSnapshots,
     stage::{StageCheckpoint, StageId},
@@ -32,6 +32,7 @@ mod metrics;
 mod provider;
 
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
+use reth_db::mdbx::DatabaseArguments;
 
 /// A common provider that fetches data from a database.
 ///
@@ -56,8 +57,6 @@ impl<DB: Clone> Clone for ProviderFactory<DB> {
     }
 }
 
-impl<DB: Database> ProviderFactory<DB> {}
-
 impl<DB> ProviderFactory<DB> {
     /// Create new database provider factory.
     pub fn new(db: DB, chain_spec: Arc<ChainSpec>) -> Self {
@@ -69,10 +68,10 @@ impl<DB> ProviderFactory<DB> {
     pub fn new_with_database_path<P: AsRef<Path>>(
         path: P,
         chain_spec: Arc<ChainSpec>,
-        log_level: Option<LogLevel>,
+        args: DatabaseArguments,
     ) -> RethResult<ProviderFactory<DatabaseEnv>> {
         Ok(ProviderFactory::<DatabaseEnv> {
-            db: init_db(path, log_level).map_err(|e| RethError::Custom(e.to_string()))?,
+            db: init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?,
             chain_spec,
             snapshot_provider: None,
         })
@@ -561,7 +560,7 @@ mod tests {
         let factory = ProviderFactory::<DatabaseEnv>::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
-            None,
+            Default::default(),
         )
         .unwrap();
 

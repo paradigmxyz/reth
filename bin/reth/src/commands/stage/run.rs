@@ -15,8 +15,9 @@ use crate::{
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
-use reth_db::init_db;
+use reth_db::{init_db, mdbx::DatabaseArguments};
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
+
 use reth_primitives::ChainSpec;
 use reth_provider::{ProviderFactory, StageCheckpointReader};
 use reth_stages::{
@@ -122,7 +123,8 @@ impl Command {
         let db_path = data_dir.db_path();
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(db_path, self.db.log_level)?);
+        let db =
+            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         info!(target: "reth::cli", "Database opened");
 
         let factory = ProviderFactory::new(Arc::clone(&db), self.chain.clone());
@@ -204,6 +206,7 @@ impl Command {
                                 max_blocks: Some(batch_size),
                                 max_changes: None,
                                 max_cumulative_gas: None,
+                                max_duration: None,
                             },
                             config.stages.merkle.clean_threshold,
                             config.prune.map(|prune| prune.segments).unwrap_or_default(),
