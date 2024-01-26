@@ -19,8 +19,9 @@ pub use engine::{
     PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
 };
 
-/// Traits and types for the node's EVM.
+/// Traits and helper types used to abstract over EVM methods and types.
 pub mod evm;
+pub use evm::EvmEnvConfig;
 
 /// High level node types.
 pub mod node;

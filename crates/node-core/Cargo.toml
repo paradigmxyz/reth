@@ -39,14 +39,12 @@ reth-consensus-common.workspace = true
 reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
 reth-downloaders.workspace = true
-#reth-node-builder.workspace = true
 reth-revm.workspace = true
 reth-stages.workspace = true
 reth-prune.workspace = true
 reth-blockchain-tree.workspace = true
 revm-inspectors.workspace = true
 reth-snapshot.workspace = true
-reth-ethereum-payload-builder.workspace = true
 reth-optimism-payload-builder = { workspace = true, optional = true }
 
 # async
@@ -67,13 +65,11 @@ humantime = "2.1.0"
 thiserror.workspace = true
 const-str = "0.5.6"
 rand.workspace = true
-fdlimit = "0.3.0"
 pin-project.workspace = true
 
 # io
 dirs-next = "2.0.0"
 shellexpand = "3.0.0"
-confy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
@@ -92,7 +88,6 @@ secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recov
 futures.workspace = true
 
 [target.'cfg(not(windows))'.dependencies]
-jemallocator = { version = "0.5.0", optional = true }
 jemalloc-ctl = { version = "0.5.0", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -116,7 +111,6 @@ optimism = [
     "reth-network/optimism",
     "reth-network-api/optimism",
     "reth-payload-builder/optimism",
-#    "reth-node-builder/optimism",
     "reth-rpc-types/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-auto-seal-consensus/optimism",
@@ -124,11 +118,10 @@ optimism = [
     "reth-blockchain-tree/optimism",
     "reth-beacon-consensus/optimism",
     "reth-optimism-payload-builder/optimism",
-    "reth-ethereum-payload-builder/optimism",
     "reth-node-api/optimism",
 ]
 
-jemalloc = ["dep:jemallocator", "dep:jemalloc-ctl"]
+jemalloc = ["dep:jemalloc-ctl"]
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "git2"] }

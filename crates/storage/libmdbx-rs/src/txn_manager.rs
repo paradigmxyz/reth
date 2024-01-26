@@ -52,7 +52,9 @@ impl TxnManager {
     /// - [TxnManagerMessage::Abort] aborts a transaction with [ffi::mdbx_txn_abort]
     /// - [TxnManagerMessage::Commit] commits a transaction with [ffi::mdbx_txn_commit_ex]
     fn start_message_listener(&self, env: EnvPtr, rx: Receiver<TxnManagerMessage>) {
+        #[cfg(feature = "read-tx-timeouts")]
         let read_transactions = self.read_transactions.clone();
+
         std::thread::spawn(move || {
             #[allow(clippy::redundant_locals)]
             let env = env;
