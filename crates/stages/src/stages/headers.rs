@@ -119,9 +119,7 @@ where
         // order
 
         let interval = total_headers / 10;
-        for (index, header) in
-            self.header_collector.iter()?.enumerate()
-        {
+        for (index, header) in self.header_collector.iter()?.enumerate() {
             let (number, header_buf) = header?;
 
             if index > 0 && index % interval == 0 {
@@ -174,9 +172,7 @@ where
 
         // Since ETL sorts all entries by hashes, we are either appending (first sync) or inserting
         // in order (further syncs).
-        for (index, hash_to_number) in
-            self.hash_collector.iter()?.enumerate()
-        {
+        for (index, hash_to_number) in self.hash_collector.iter()?.enumerate() {
             let (hash, number) = hash_to_number?;
 
             if index > 0 && index % interval == 0 {
