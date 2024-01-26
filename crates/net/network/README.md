@@ -1,6 +1,5 @@
 # RETH network implementation
 
-Supports both devp2p peer discovery version 4  5. The default is Discv4 and is 
-enabled as default feature for the crate. Behind the scenes, Discv5 runs with 
-support for downgrading to Discv4. The feature flags, `discv5` and `discv4`, 
-are mutually exclusive.
+Supports both devp2p peer discovery version 4 and 5. The default is Discv4. Discv5 
+is available as a feature. Behind the scenes, Discv5 runs Discv4 too, for 
+connecting to peers that don't connect over Discv5.
