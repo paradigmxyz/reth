@@ -3,21 +3,24 @@ use crate::{
     processor::EVMProcessor,
     stack::{InspectorStack, InspectorStackConfig},
 };
+use reth_node_api::EvmEnvConfig;
 use reth_primitives::ChainSpec;
 use reth_provider::{ExecutorFactory, PrunableBlockExecutor, StateProvider};
 use std::sync::Arc;
 
 /// Factory for creating [EVMProcessor].
 #[derive(Clone, Debug)]
-pub struct EvmProcessorFactory {
+pub struct EvmProcessorFactory<EvmConfig> {
     chain_spec: Arc<ChainSpec>,
     stack: Option<InspectorStack>,
+    /// Type that defines how the produced EVM should be configured.
+    evm_config: EvmConfig,
 }
 
-impl EvmProcessorFactory {
+impl<EvmConfig> EvmProcessorFactory<EvmConfig> {
     /// Create new factory
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec, stack: None }
+    pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
+        Self { chain_spec, stack: None, evm_config }
     }
 
     /// Sets the inspector stack for all generated executors.
@@ -33,13 +36,20 @@ impl EvmProcessorFactory {
     }
 }
 
-impl ExecutorFactory for EvmProcessorFactory {
+impl<EvmConfig> ExecutorFactory for EvmProcessorFactory<EvmConfig>
+where
+    EvmConfig: EvmEnvConfig + Send + Sync + Clone + 'static,
+{
     fn with_state<'a, SP: StateProvider + 'a>(
         &'a self,
         sp: SP,
     ) -> Box<dyn PrunableBlockExecutor + 'a> {
         let database_state = StateProviderDatabase::new(sp);
-        let mut evm = Box::new(EVMProcessor::new_with_db(self.chain_spec.clone(), database_state));
+        let mut evm = Box::new(EVMProcessor::new_with_db(
+            self.chain_spec.clone(),
+            database_state,
+            self.evm_config.clone(),
+        ));
         if let Some(ref stack) = self.stack {
             evm.set_stack(stack.clone());
         }
