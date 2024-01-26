@@ -1,11 +1,13 @@
 //! Components that are used by the node command.
 
+use reth_db::database::Database;
 use reth_network::{NetworkEvents, NetworkProtocols};
 use reth_network_api::{NetworkInfo, Peers};
+use reth_node_api::EvmEnvConfig;
 use reth_primitives::ChainSpec;
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, StateProviderFactory,
+    DatabaseProviderFactory, EvmEnvProvider, StateProviderFactory,
 };
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
@@ -13,11 +15,12 @@ use reth_rpc_builder::{
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 /// Helper trait to unify all provider traits for simplicity.
-pub trait FullProvider:
-    BlockReaderIdExt
+pub trait FullProvider<DB: Database>:
+    DatabaseProviderFactory<DB>
+    + BlockReaderIdExt
     + AccountReader
     + StateProviderFactory
     + EvmEnvProvider
@@ -29,8 +32,9 @@ pub trait FullProvider:
 {
 }
 
-impl<T> FullProvider for T where
-    T: BlockReaderIdExt
+impl<T, DB: Database> FullProvider<DB> for T where
+    T: DatabaseProviderFactory<DB>
+        + BlockReaderIdExt
         + AccountReader
         + StateProviderFactory
         + EvmEnvProvider
@@ -44,8 +48,10 @@ impl<T> FullProvider for T where
 
 /// The trait that is implemented for the Node command.
 pub trait RethNodeComponents: Clone + Send + Sync + 'static {
+    /// Underlying database type.
+    type DB: Database + Clone + Unpin + 'static;
     /// The Provider type that is provided by the node itself
-    type Provider: FullProvider;
+    type Provider: FullProvider<Self::DB>;
     /// The transaction pool type
     type Pool: TransactionPool + Clone + Unpin + 'static;
     /// The network type used to communicate with p2p.
@@ -54,6 +60,8 @@ pub trait RethNodeComponents: Clone + Send + Sync + 'static {
     type Events: CanonStateSubscriptions + Clone + 'static;
     /// The type that is used to spawn tasks.
     type Tasks: TaskSpawner + Clone + Unpin + 'static;
+    /// The type that defines how to configure the EVM before execution.
+    type EvmConfig: EvmEnvConfig + 'static;
 
     /// Returns the instance of the provider
     fn provider(&self) -> Self::Provider;
@@ -69,6 +77,9 @@ pub trait RethNodeComponents: Clone + Send + Sync + 'static {
 
     /// Returns the instance of the events subscription handler.
     fn events(&self) -> Self::Events;
+
+    /// Returns the instance of the EVM config.
+    fn evm_config(&self) -> Self::EvmConfig;
 
     /// Helper function to return the chain spec.
     fn chain_spec(&self) -> Arc<ChainSpec> {
@@ -93,6 +104,7 @@ pub struct RethRpcComponents<'a, Reth: RethNodeComponents> {
         Reth::Network,
         Reth::Tasks,
         Reth::Events,
+        Reth::EvmConfig,
     >,
     /// Holds installed modules per transport type.
     ///
@@ -109,7 +121,9 @@ pub struct RethRpcComponents<'a, Reth: RethNodeComponents> {
 ///
 /// Represents components required for the Reth node.
 #[derive(Clone, Debug)]
-pub struct RethNodeComponentsImpl<Provider, Pool, Network, Events, Tasks> {
+pub struct RethNodeComponentsImpl<DB, Provider, Pool, Network, Events, Tasks, EvmConfig> {
+    /// Represents underlying database type.
+    __phantom: PhantomData<DB>,
     /// Represents the provider instance.
     pub provider: Provider,
     /// Represents the transaction pool instance.
@@ -120,22 +134,52 @@ pub struct RethNodeComponentsImpl<Provider, Pool, Network, Events, Tasks> {
     pub task_executor: Tasks,
     /// Represents the events subscription handler instance.
     pub events: Events,
+    /// Represents the type that is used to configure the EVM before execution.
+    pub evm_config: EvmConfig,
 }
 
-impl<Provider, Pool, Network, Events, Tasks> RethNodeComponents
-    for RethNodeComponentsImpl<Provider, Pool, Network, Events, Tasks>
+impl<DB, Provider, Pool, Network, Events, Tasks, EvmConfig>
+    RethNodeComponentsImpl<DB, Provider, Pool, Network, Events, Tasks, EvmConfig>
+{
+    /// Create new instance of the node components.
+    pub fn new(
+        provider: Provider,
+        pool: Pool,
+        network: Network,
+        task_executor: Tasks,
+        events: Events,
+        evm_config: EvmConfig,
+    ) -> Self {
+        Self {
+            provider,
+            pool,
+            network,
+            task_executor,
+            events,
+            evm_config,
+            __phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<DB, Provider, Pool, Network, Events, Tasks, EvmConfig> RethNodeComponents
+    for RethNodeComponentsImpl<DB, Provider, Pool, Network, Events, Tasks, EvmConfig>
 where
-    Provider: FullProvider + Clone + 'static,
+    DB: Database + Clone + Unpin + 'static,
+    Provider: FullProvider<DB> + Clone + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + Unpin + 'static,
     Network: NetworkInfo + Peers + NetworkProtocols + NetworkEvents + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
+    EvmConfig: EvmEnvConfig + 'static,
 {
+    type DB = DB;
     type Provider = Provider;
     type Pool = Pool;
     type Network = Network;
     type Events = Events;
     type Tasks = Tasks;
+    type EvmConfig = EvmConfig;
 
     fn provider(&self) -> Self::Provider {
         self.provider.clone()
@@ -155,6 +199,10 @@ where
 
     fn events(&self) -> Self::Events {
         self.events.clone()
+    }
+
+    fn evm_config(&self) -> Self::EvmConfig {
+        self.evm_config.clone()
     }
 }
 

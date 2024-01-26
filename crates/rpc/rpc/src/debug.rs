@@ -21,10 +21,12 @@ use reth_primitives::{
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,
 };
-use reth_revm::{
-    database::{StateProviderDatabase, SubState},
-    tracing::{js::JsInspector, FourByteInspector, TracingInspector, TracingInspectorConfig},
+use revm_inspectors::tracing::{
+    js::{JsInspector, TransactionContext},
+    FourByteInspector, TracingInspector, TracingInspectorConfig,
 };
+
+use reth_revm::database::{StateProviderDatabase, SubState};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
     trace::geth::{
@@ -34,6 +36,7 @@ use reth_rpc_types::{
     BlockError, Bundle, CallRequest, RichBlock, StateContext,
 };
 use revm::{db::CacheDB, primitives::Env};
+
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -80,16 +83,26 @@ where
         self.inner
             .eth_api
             .spawn_with_state_at_block(at, move |state| {
+                let block_hash = at.as_block_hash();
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
-
-                let mut transactions = transactions.into_iter().peekable();
-                while let Some(tx) = transactions.next() {
+                let mut transactions = transactions.into_iter().enumerate().peekable();
+                while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
                     let tx = tx_env_with_recovered(&tx);
                     let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
-                    let (result, state_changes) =
-                        this.trace_transaction(opts.clone(), env, &mut db).map_err(|err| {
+                    let (result, state_changes) = this
+                        .trace_transaction(
+                            opts.clone(),
+                            env,
+                            &mut db,
+                            Some(TransactionContext {
+                                block_hash,
+                                tx_hash: Some(tx_hash),
+                                tx_index: Some(index),
+                            }),
+                        )
+                        .map_err(|err| {
                             results.push(TraceResult::Error {
                                 error: err.to_string(),
                                 tx_hash: Some(tx_hash),
@@ -201,6 +214,7 @@ where
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
         let state_at: BlockId = block.parent_hash.into();
+        let block_hash = block.hash;
         let block_txs = block.body;
 
         let this = self.clone();
@@ -212,7 +226,7 @@ where
 
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
                 // replay all transactions prior to the targeted transaction
-                replay_transactions_until(
+                let index = replay_transactions_until(
                     &mut db,
                     cfg.clone(),
                     block_env.clone(),
@@ -221,13 +235,26 @@ where
                 )?;
 
                 let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
-                this.trace_transaction(opts, env, &mut db).map(|(trace, _)| trace)
+                this.trace_transaction(
+                    opts,
+                    env,
+                    &mut db,
+                    Some(TransactionContext {
+                        block_hash: Some(block_hash),
+                        tx_index: Some(index),
+                        tx_hash: Some(tx.hash),
+                    }),
+                )
+                .map(|(trace, _)| trace)
             })
             .await
     }
 
     /// The debug_traceCall method lets you run an `eth_call` within the context of the given block
     /// execution using the final state of parent block as the base.
+    ///
+    /// Differences compare to `eth_call`:
+    ///  - `debug_traceCall` executes with __enabled__ basefee check, `eth_call` does not: <https://github.com/paradigmxyz/reth/issues/6240>
     pub async fn debug_trace_call(
         &self,
         call: CallRequest,
@@ -430,7 +457,7 @@ where
                         )?;
 
                         let (trace, state) =
-                            this.trace_transaction(tracing_options.clone(), env, &mut db)?;
+                            this.trace_transaction(tracing_options.clone(), env, &mut db, None)?;
 
                         // If there is more transactions, commit the database
                         // If there is no transactions, but more bundles, commit to the database too
@@ -459,6 +486,7 @@ where
         opts: GethDebugTracingOptions,
         env: Env,
         db: &mut SubState<StateProviderBox>,
+        transaction_context: Option<TransactionContext>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -515,8 +543,11 @@ where
                 },
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
-
-                    let mut inspector = JsInspector::new(code, config)?;
+                    let mut inspector = JsInspector::with_transaction_context(
+                        code,
+                        config,
+                        transaction_context.unwrap_or_default(),
+                    )?;
                     let (res, env, db) = inspect_and_return_db(db, env, &mut inspector)?;
 
                     let state = res.state.clone();

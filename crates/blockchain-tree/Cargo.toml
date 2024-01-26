@@ -45,6 +45,7 @@ reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true , features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm.workspace = true
+reth-node-builder.workspace = true
 parking_lot.workspace = true
 assert_matches.workspace = true
 

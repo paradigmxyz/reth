@@ -16,7 +16,6 @@ pub mod error;
 mod builder {
     use crate::error::OptimismPayloadBuilderError;
     use reth_basic_payload_builder::*;
-    use reth_node_api::PayloadBuilderAttributes;
     use reth_payload_builder::{
         error::PayloadBuilderError, EthBuiltPayload, OptimismPayloadBuilderAttributes,
     };
@@ -101,10 +100,7 @@ mod builder {
         fn build_empty_payload(
             client: &Client,
             config: PayloadConfig<Self::Attributes>,
-        ) -> Result<EthBuiltPayload, PayloadBuilderError>
-        where
-            Client: StateProviderFactory,
-        {
+        ) -> Result<EthBuiltPayload, PayloadBuilderError> {
             let extra_data = config.extra_data();
             let PayloadConfig {
                 initialized_block_env,
@@ -145,8 +141,8 @@ mod builder {
             })?;
 
             let WithdrawalsOutcome { withdrawals_root, withdrawals } =
-                commit_withdrawals(&mut db, &chain_spec, attributes.timestamp(), attributes.withdrawals().clone()).map_err(|err| {
-                    warn!(target: "payload_builder", parent_hash=%parent_block.hash,?err,  "failed to commit withdrawals for empty payload");
+                commit_withdrawals(&mut db, &chain_spec, attributes.payload_attributes.timestamp, attributes.payload_attributes.withdrawals.clone()).map_err(|err| {
+                    warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to commit withdrawals for empty payload");
                     err
                 })?;
 
@@ -171,8 +167,8 @@ mod builder {
                 withdrawals_root,
                 receipts_root: EMPTY_RECEIPTS,
                 logs_bloom: Default::default(),
-                timestamp: attributes.timestamp(),
-                mix_hash: attributes.prev_randao(),
+                timestamp: attributes.payload_attributes.timestamp,
+                mix_hash: attributes.payload_attributes.prev_randao,
                 nonce: BEACON_NONCE,
                 base_fee_per_gas: Some(base_fee),
                 number: parent_block.number + 1,
@@ -182,13 +178,17 @@ mod builder {
                 extra_data,
                 blob_gas_used: None,
                 excess_blob_gas: None,
-                parent_beacon_block_root: attributes.parent_beacon_block_root(),
+                parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
             };
 
             let block = Block { header, body: vec![], ommers: vec![], withdrawals };
             let sealed_block = block.seal_slow();
 
-            Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO))
+            Ok(EthBuiltPayload::new(
+                attributes.payload_attributes.payload_id(),
+                sealed_block,
+                U256::ZERO,
+            ))
         }
     }
 
@@ -232,7 +232,7 @@ mod builder {
             ..
         } = config;
 
-        debug!(target: "payload_builder", id=%attributes.payload_id(), parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building new payload");
+        debug!(target: "payload_builder", id=%attributes.payload_attributes.payload_id(), parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building new payload");
         let mut cumulative_gas_used = 0;
         let block_gas_limit: u64 = attributes
             .gas_limit
@@ -246,8 +246,10 @@ mod builder {
 
         let block_number = initialized_block_env.number.to::<u64>();
 
-        let is_regolith =
-            chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp());
+        let is_regolith = chain_spec.is_fork_active_at_timestamp(
+            Hardfork::Regolith,
+            attributes.payload_attributes.timestamp,
+        );
 
         // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
         // blocks will always have at least a single transaction in them (the L1 info transaction),
@@ -255,7 +257,7 @@ mod builder {
         // the above check for empty blocks will never be hit on OP chains.
         reth_revm::optimism::ensure_create2_deployer(
             chain_spec.clone(),
-            attributes.timestamp(),
+            attributes.payload_attributes.timestamp,
             &mut db,
         )
         .map_err(|_| {
@@ -339,7 +341,10 @@ mod builder {
                 // receipt hashes should be computed when set. The state transition process
                 // ensures this is only set for post-Canyon deposit transactions.
                 deposit_receipt_version: chain_spec
-                    .is_fork_active_at_timestamp(Hardfork::Canyon, attributes.timestamp())
+                    .is_fork_active_at_timestamp(
+                        Hardfork::Canyon,
+                        attributes.payload_attributes.timestamp,
+                    )
                     .then_some(1),
             }));
 
@@ -440,8 +445,8 @@ mod builder {
         let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
             &mut db,
             &chain_spec,
-            attributes.timestamp(),
-            attributes.withdrawals().clone(),
+            attributes.payload_attributes.timestamp,
+            attributes.payload_attributes.withdrawals.clone(),
         )?;
 
         // merge all transitions into bundle state, this would apply the withdrawal balance changes
@@ -454,7 +459,11 @@ mod builder {
             block_number,
         );
         let receipts_root = bundle
-            .receipts_root_slow(block_number, chain_spec.as_ref(), attributes.timestamp())
+            .receipts_root_slow(
+                block_number,
+                chain_spec.as_ref(),
+                attributes.payload_attributes.timestamp,
+            )
             .expect("Number is in range");
         let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
 
@@ -478,8 +487,8 @@ mod builder {
             receipts_root,
             withdrawals_root,
             logs_bloom,
-            timestamp: attributes.timestamp(),
-            mix_hash: attributes.prev_randao(),
+            timestamp: attributes.payload_attributes.timestamp,
+            mix_hash: attributes.payload_attributes.prev_randao,
             nonce: BEACON_NONCE,
             base_fee_per_gas: Some(base_fee),
             number: parent_block.number + 1,
@@ -487,7 +496,7 @@ mod builder {
             difficulty: U256::ZERO,
             gas_used: cumulative_gas_used,
             extra_data,
-            parent_beacon_block_root: attributes.parent_beacon_block_root(),
+            parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
             blob_gas_used,
             excess_blob_gas,
         };
@@ -498,7 +507,11 @@ mod builder {
         let sealed_block = block.seal_slow();
         debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
-        let mut payload = EthBuiltPayload::new(attributes.payload_id(), sealed_block, total_fees);
+        let mut payload = EthBuiltPayload::new(
+            attributes.payload_attributes.payload_id(),
+            sealed_block,
+            total_fees,
+        );
 
         // extend the payload with the blob sidecars from the executed txs
         payload.extend_sidecars(blob_sidecars);

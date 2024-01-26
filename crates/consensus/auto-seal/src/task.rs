@@ -2,7 +2,7 @@ use crate::{mode::MiningMode, Storage};
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_node_api::EngineTypes;
+use reth_node_api::{EngineTypes, EvmEnvConfig};
 use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_stages::PipelineEvent;
@@ -19,7 +19,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, warn};
 
 /// A Future that listens for new ready transactions and puts new blocks into storage
-pub struct MiningTask<Client, Pool: TransactionPool, Engine: EngineTypes> {
+pub struct MiningTask<Client, Pool: TransactionPool, EvmConfig, Engine: EngineTypes> {
     /// The configured chain spec
     chain_spec: Arc<ChainSpec>,
     /// The client used to interact with the state
@@ -40,12 +40,17 @@ pub struct MiningTask<Client, Pool: TransactionPool, Engine: EngineTypes> {
     canon_state_notification: CanonStateNotificationSender,
     /// The pipeline events to listen on
     pipe_line_events: Option<UnboundedReceiverStream<PipelineEvent>>,
+    /// The type that defines how to configure the EVM.
+    evm_config: EvmConfig,
 }
 
 // === impl MiningTask ===
 
-impl<Client, Pool: TransactionPool, Engine: EngineTypes> MiningTask<Client, Pool, Engine> {
+impl<EvmConfig, Client, Pool: TransactionPool, Engine: EngineTypes>
+    MiningTask<Client, Pool, EvmConfig, Engine>
+{
     /// Creates a new instance of the task
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         chain_spec: Arc<ChainSpec>,
         miner: MiningMode,
@@ -54,6 +59,7 @@ impl<Client, Pool: TransactionPool, Engine: EngineTypes> MiningTask<Client, Pool
         storage: Storage,
         client: Client,
         pool: Pool,
+        evm_config: EvmConfig,
     ) -> Self {
         Self {
             chain_spec,
@@ -66,6 +72,7 @@ impl<Client, Pool: TransactionPool, Engine: EngineTypes> MiningTask<Client, Pool
             canon_state_notification,
             queued: Default::default(),
             pipe_line_events: None,
+            evm_config,
         }
     }
 
@@ -75,12 +82,13 @@ impl<Client, Pool: TransactionPool, Engine: EngineTypes> MiningTask<Client, Pool
     }
 }
 
-impl<Client, Pool, Engine> Future for MiningTask<Client, Pool, Engine>
+impl<EvmConfig, Client, Pool, Engine> Future for MiningTask<Client, Pool, EvmConfig, Engine>
 where
     Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
     Engine: EngineTypes + 'static,
+    EvmConfig: EvmEnvConfig + Clone + Unpin + Send + Sync + 'static,
 {
     type Output = ();
 
@@ -110,6 +118,7 @@ where
                 let pool = this.pool.clone();
                 let events = this.pipe_line_events.take();
                 let canon_state_notification = this.canon_state_notification.clone();
+                let evm_config = this.evm_config.clone();
 
                 // Create the mining future that creates a block, notifies the engine that drives
                 // the pipeline
@@ -125,7 +134,12 @@ where
                         })
                         .unzip();
 
-                    match storage.build_and_execute(transactions.clone(), &client, chain_spec) {
+                    match storage.build_and_execute(
+                        transactions.clone(),
+                        &client,
+                        chain_spec,
+                        evm_config,
+                    ) {
                         Ok((new_header, bundle_state)) => {
                             // clear all transactions from pool
                             pool.remove_transactions(
@@ -230,8 +244,8 @@ where
     }
 }
 
-impl<Client, Pool: TransactionPool, Engine: EngineTypes> std::fmt::Debug
-    for MiningTask<Client, Pool, Engine>
+impl<Client, Pool: TransactionPool, EvmConfig: std::fmt::Debug, Engine: EngineTypes> std::fmt::Debug
+    for MiningTask<Client, Pool, EvmConfig, Engine>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MiningTask").finish_non_exhaustive()

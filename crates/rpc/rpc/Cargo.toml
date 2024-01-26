@@ -26,7 +26,8 @@ reth-revm = { workspace = true, features = ["js-tracer"] }
 reth-tasks.workspace = true
 reth-consensus-common.workspace = true
 reth-rpc-types-compat.workspace = true
-lazy_static = "*"
+revm-inspectors.workspace = true
+reth-node-api.workspace = true
 
 # eth
 alloy-rlp.workspace = true
@@ -75,12 +76,14 @@ tracing-futures = "0.2"
 schnellru.workspace = true
 futures.workspace = true
 derive_more = "0.99"
+lazy_static = "*"
 
 [dev-dependencies]
 jsonrpsee = { workspace = true, features = ["client"] }
 assert_matches.workspace = true
 tempfile.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-node-builder.workspace = true
 
 [features]
 optimism = [

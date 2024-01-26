@@ -19,8 +19,7 @@ use std::{
 ///
 /// Note: This type is generic over [ParkedPool] which enforces that the underlying transaction type
 /// is [ValidPoolTransaction] wrapped in an [Arc].
-#[allow(missing_debug_implementations)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ParkedPool<T: ParkedOrd> {
     /// Keeps track of transactions inserted in the pool.
     ///
@@ -296,6 +295,7 @@ impl<T: ParkedOrd> Default for ParkedPool<T> {
 }
 
 /// Represents a transaction in this pool.
+#[derive(Debug)]
 struct ParkedPoolTransaction<T: ParkedOrd> {
     /// Identifier that tags when transaction was submitted in the pool.
     submission_id: u64,

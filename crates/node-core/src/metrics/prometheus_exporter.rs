@@ -1,5 +1,6 @@
 //! Prometheus exporter
 
+use crate::metrics::version_metrics::register_version_metrics;
 use eyre::WrapErr;
 use hyper::{
     service::{make_service_fn, service_fn},
@@ -16,7 +17,7 @@ pub(crate) trait Hook: Fn() + Send + Sync {}
 impl<T: Fn() + Send + Sync> Hook for T {}
 
 /// Installs Prometheus as the metrics recorder.
-pub(crate) fn install_recorder() -> eyre::Result<PrometheusHandle> {
+pub fn install_recorder() -> eyre::Result<PrometheusHandle> {
     let recorder = PrometheusBuilder::new().build_recorder();
     let handle = recorder.handle();
 
@@ -74,7 +75,7 @@ async fn start_endpoint<F: Hook + 'static>(
 }
 
 /// Serves Prometheus metrics over HTTP with database and process metrics.
-pub(crate) async fn serve<Metrics>(
+pub async fn serve<Metrics>(
     listen_addr: SocketAddr,
     handle: PrometheusHandle,
     db: Metrics,
@@ -104,6 +105,7 @@ where
     process.describe();
     describe_memory_stats();
     describe_io_stats();
+    register_version_metrics();
 
     Ok(())
 }
@@ -244,7 +246,7 @@ fn describe_io_stats() {}
 
 #[cfg(test)]
 mod tests {
-    use crate::builder::PROMETHEUS_RECORDER_HANDLE;
+    use crate::node_config::PROMETHEUS_RECORDER_HANDLE;
     use std::ops::Deref;
 
     // Dependencies using different version of the `metrics` crate (to be exact, 0.21 vs 0.22)
