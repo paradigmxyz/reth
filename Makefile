@@ -280,6 +280,7 @@ lint-other-targets:
 	-- -D warnings
 
 lint:
+	make fmt && \
 	make lint-reth && \
 	make lint-op-reth && \
 	make lint-other-targets
