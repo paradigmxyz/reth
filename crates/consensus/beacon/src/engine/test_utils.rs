@@ -482,7 +482,6 @@ where
         let mut pipeline = match self.base_config.pipeline_config {
             TestPipelineConfig::Test(outputs) => Pipeline::builder()
                 .add_stages(TestStages::new(outputs, Default::default()))
-                .unwrap()
                 .with_tip_sender(tip_tx),
             TestPipelineConfig::Real => {
                 let header_downloader = ReverseHeadersDownloaderBuilder::default()
@@ -493,16 +492,14 @@ where
                     .build(client.clone(), consensus.clone(), provider_factory.clone())
                     .into_task();
 
-                Pipeline::builder()
-                    .add_stages(DefaultStages::new(
-                        ProviderFactory::new(db.clone(), self.base_config.chain_spec.clone()),
-                        HeaderSyncMode::Tip(tip_rx.clone()),
-                        Arc::clone(&consensus),
-                        header_downloader,
-                        body_downloader,
-                        executor_factory.clone(),
-                    ))
-                    .unwrap()
+                Pipeline::builder().add_stages(DefaultStages::new(
+                    ProviderFactory::new(db.clone(), self.base_config.chain_spec.clone()),
+                    HeaderSyncMode::Tip(tip_rx.clone()),
+                    Arc::clone(&consensus),
+                    header_downloader,
+                    body_downloader,
+                    executor_factory.clone(),
+                ))
             }
         };
 

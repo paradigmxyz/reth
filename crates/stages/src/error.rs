@@ -111,7 +111,7 @@ impl StageError {
 
 impl From<std::io::Error> for StageError {
     fn from(source: std::io::Error) -> Self {
-        StageError::Fatal(Box::new(source))
+       StageError::Fatal(Box::new(source))
     }
 }
 

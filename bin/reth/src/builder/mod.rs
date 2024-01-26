@@ -894,7 +894,7 @@ impl NodeConfig {
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_config.sender_recovery.commit_threshold,
-                })?
+                })
                 .set(
                     ExecutionStage::new(
                         factory,
@@ -934,7 +934,7 @@ impl NodeConfig {
                     stage_config.index_storage_history.commit_threshold,
                     prune_modes.storage_history,
                 )),
-            )?
+            )
             .build(provider_factory);
 
         Ok(pipeline)

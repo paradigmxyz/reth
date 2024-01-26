@@ -172,7 +172,7 @@ impl ImportCommand {
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,
-                })?
+                })
                 .set(ExecutionStage::new(
                     factory,
                     ExecutionStageThresholds {
@@ -189,7 +189,7 @@ impl ImportCommand {
                         .max(config.stages.storage_hashing.clean_threshold),
                     config.prune.map(|prune| prune.segments).unwrap_or_default(),
                 )),
-            )?
+            )
             .build(provider_factory);
 
         let events = pipeline.events().map(Into::into);

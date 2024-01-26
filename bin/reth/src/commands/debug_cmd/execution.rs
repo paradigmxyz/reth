@@ -125,7 +125,7 @@ impl Command {
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
-                })?
+                })
                 .set(ExecutionStage::new(
                     factory,
                     ExecutionStageThresholds {
@@ -141,7 +141,7 @@ impl Command {
                         .max(stage_conf.storage_hashing.clean_threshold),
                     config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
                 )),
-            )?
+            )
             .build(provider_factory);
 
         Ok(pipeline)
