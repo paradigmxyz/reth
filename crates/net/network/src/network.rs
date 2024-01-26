@@ -158,6 +158,12 @@ impl NetworkHandle {
         self.send_message(NetworkHandleMessage::Hibernate(tx));
         rx.await
     }
+    /// Send a message to wake up the node after it has been hibernated.
+    pub async fn wake_up(&self) -> Result<(), oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        self.send_message(NetworkHandleMessage::WakeUp(tx));
+        rx.await
+    }
 
     /// Whether tx gossip is disabled
     pub fn tx_gossip_disabled(&self) -> bool {
@@ -441,6 +447,8 @@ pub(crate) enum NetworkHandleMessage {
     Shutdown(oneshot::Sender<()>),
     /// Initiates an hibernation of the network via a oneshot sender.
     Hibernate(oneshot::Sender<()>),
+    /// Reactivates the network after hibernation via a oneshot sender.
+    WakeUp(oneshot::Sender<()>),
     /// Adds a new listener for `DiscoveryEvent`.
     DiscoveryListener(UnboundedSender<DiscoveryEvent>),
     /// Adds an additional `RlpxSubProtocol`.

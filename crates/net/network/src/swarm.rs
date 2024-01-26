@@ -288,6 +288,13 @@ where
         self.net_connection_state = NetworkConnectionState::Hibernate;
         self.state_mut().peers_mut().on_network_hibernation();
     }
+
+    /// Set network connection state to `Active` and updates the `PeerManager` state
+    /// Opposite action of `on_hibernate_requested`
+    pub(crate) fn on_wake_up_requested(&mut self) {
+        self.net_connection_state = NetworkConnectionState::Active;
+        self.state_mut().peers_mut().on_network_wake_up();
+    }
 }
 
 impl<C> Stream for Swarm<C>

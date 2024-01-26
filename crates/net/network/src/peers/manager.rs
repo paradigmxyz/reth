@@ -729,6 +729,12 @@ impl PeersManager {
         self.hibernated = true;
     }
 
+    /// Sets hibernated to false so that the outbound slots can be filled again.
+    /// Opposite action of [`Self::on_network_hibernation`].
+    pub fn on_network_wake_up(&mut self) {
+        self.hibernated = false;
+    }
+
     /// Advances the state.
     ///
     /// Event hooks invoked externally may trigger a new [`PeerAction`] that are buffered until

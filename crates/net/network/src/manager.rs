@@ -558,6 +558,12 @@ where
                 self.swarm.on_hibernate_requested();
                 let _ = tx.send(());
             }
+            NetworkHandleMessage::WakeUp(tx) => {
+                // Set connection status to `Active`. Activates the node to fill new outbound
+                // connections.
+                self.swarm.on_wake_up_requested();
+                let _ = tx.send(());
+            }
             NetworkHandleMessage::Shutdown(tx) => {
                 // Set connection status to `Shutdown`. Stops node to accept
                 // new incoming connections as well as sending connection requests to newly
