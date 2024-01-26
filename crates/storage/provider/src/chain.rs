@@ -76,6 +76,7 @@ impl Chain {
     /// Prepends the given state to the current state.
     pub fn prepend_state(&mut self, state: BundleState) {
         self.state.prepend_state(state);
+        self.trie_updates.take(); // invalidate cached trie updates
     }
 
     /// Return true if chain is empty and has no blocks.

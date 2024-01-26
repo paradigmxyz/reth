@@ -87,14 +87,18 @@ impl Hardfork {
             Hardfork::Canyon => None,
         }
     }
+
+    /// Checks if the hardfork is post the Ethereum merge.
+    pub fn is_post_merge(&self) -> bool {
+        self >= &Hardfork::Paris
+    }
 }
 
 impl FromStr for Hardfork {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.to_lowercase();
-        let hardfork = match s.as_str() {
+        Ok(match s.to_lowercase().as_str() {
             "frontier" => Hardfork::Frontier,
             "homestead" => Hardfork::Homestead,
             "dao" => Hardfork::Dao,
@@ -119,8 +123,7 @@ impl FromStr for Hardfork {
             #[cfg(feature = "optimism")]
             "canyon" => Hardfork::Canyon,
             _ => return Err(format!("Unknown hardfork: {s}")),
-        };
-        Ok(hardfork)
+        })
     }
 }
 
@@ -196,5 +199,34 @@ mod tests {
     #[test]
     fn check_nonexistent_hardfork_from_str() {
         assert!(Hardfork::from_str("not a hardfork").is_err());
+    }
+
+    #[test]
+    fn check_post_merge() {
+        assert!(!Hardfork::Frontier.is_post_merge());
+        assert!(!Hardfork::Homestead.is_post_merge());
+        assert!(!Hardfork::Dao.is_post_merge());
+        assert!(!Hardfork::Tangerine.is_post_merge());
+        assert!(!Hardfork::SpuriousDragon.is_post_merge());
+        assert!(!Hardfork::Byzantium.is_post_merge());
+        assert!(!Hardfork::Constantinople.is_post_merge());
+        assert!(!Hardfork::Petersburg.is_post_merge());
+        assert!(!Hardfork::Istanbul.is_post_merge());
+        assert!(!Hardfork::MuirGlacier.is_post_merge());
+        assert!(!Hardfork::Berlin.is_post_merge());
+        assert!(!Hardfork::London.is_post_merge());
+        assert!(!Hardfork::ArrowGlacier.is_post_merge());
+        assert!(!Hardfork::GrayGlacier.is_post_merge());
+        assert!(Hardfork::Paris.is_post_merge());
+        assert!(Hardfork::Shanghai.is_post_merge());
+        assert!(Hardfork::Cancun.is_post_merge());
+    }
+
+    #[test]
+    #[cfg(feature = "optimism")]
+    fn check_op_post_merge() {
+        assert!(Hardfork::Bedrock.is_post_merge());
+        assert!(Hardfork::Regolith.is_post_merge());
+        assert!(Hardfork::Canyon.is_post_merge());
     }
 }

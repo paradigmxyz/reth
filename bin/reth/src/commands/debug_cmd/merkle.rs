@@ -14,11 +14,13 @@ use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
-use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEnv};
+use reth_db::{
+    cursor::DbCursorRO, init_db, mdbx::DatabaseArguments, tables, transaction::DbTx, DatabaseEnv,
+};
 use reth_interfaces::{consensus::Consensus, p2p::full_block::FullBlockClient};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-
+use reth_node_builder::EthEvmConfig;
 use reth_primitives::{
     fs,
     stage::{StageCheckpoint, StageId},
@@ -121,7 +123,8 @@ impl Command {
         fs::create_dir_all(&db_path)?;
 
         // initialize the database
-        let db = Arc::new(init_db(db_path, self.db.log_level)?);
+        let db =
+            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         let factory = ProviderFactory::new(&db, self.chain.clone());
         let provider_rw = factory.provider_rw()?;
 
@@ -199,7 +202,8 @@ impl Command {
                         checkpoint.stage_checkpoint.is_some()
                 });
 
-        let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
+        let factory =
+            reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
         let mut execution_stage = ExecutionStage::new(
             factory,
             ExecutionStageThresholds {
@@ -308,7 +312,7 @@ impl Command {
                 {
                     match (incremental_account_trie_iter.next(), clean_account_trie_iter.next()) {
                         (Some(incremental), Some(clean)) => {
-                            pretty_assertions::assert_eq!(
+                            similar_asserts::assert_eq!(
                                 incremental.0,
                                 clean.0,
                                 "Nibbles don't match"
@@ -361,7 +365,7 @@ impl Command {
                     }
                 }
 
-                pretty_assertions::assert_eq!(
+                similar_asserts::assert_eq!(
                     (
                         incremental_account_mismatched,
                         first_mismatched_storage.as_ref().map(|(incremental, _)| incremental)
