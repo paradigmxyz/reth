@@ -123,7 +123,7 @@ where
             let (number, header_buf) = header?;
 
             if index > 0 && index % interval == 0 {
-                info!(target: "sync::stages::headers", progress = ((index as f64 / total_headers as f64) * 100.0).round(), "writing headers");
+                info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers");
             }
 
             let (sealed_header, _) = SealedHeader::from_compact(&header_buf, header_buf.len());
