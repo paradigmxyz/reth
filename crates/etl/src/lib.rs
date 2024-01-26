@@ -26,12 +26,12 @@ use std::{
 use reth_db::table::{Compress, Encode, Key, Value};
 use tempfile::{NamedTempFile, TempDir};
 
-/// An ETL data collector.
+/// An ETL (extract, transform, load) data collector.
 ///
-/// Data is pushed to the collector which internally flushes the data in a sorted manner to files of
+/// Data is pushed (extract) to the collector which internally flushes the data in a sorted (transform) manner to files of
 /// some specified capacity.
 ///
-/// The data can later be iterated over in a sorted manner.
+/// The data can later be iterated over (load) in a sorted manner.
 #[derive(Debug)]
 pub struct Collector<K, V>
 where
