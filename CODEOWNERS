@@ -1,6 +1,6 @@
 *                           @gakonst
 bin/                        @onbjerg
-crates/net/                 @mattsse @Rjected
+crates/net/                 @emhane @mattsse @Rjected
 crates/net/downloaders/     @onbjerg @rkrasiuk
 crates/revm/src/            @rakita
 crates/revm/                @mattsse

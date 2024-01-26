@@ -1,13 +1,13 @@
 use crate::{
+    keccak256,
     revm_primitives::{Bytecode as RevmBytecode, BytecodeState, Bytes, JumpMap},
-    B256, KECCAK_EMPTY, U256,
+    GenesisAccount, B256, KECCAK_EMPTY, U256,
 };
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
 use reth_codecs::{main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
-
 /// An Ethereum account.
 #[main_codec]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -29,21 +29,25 @@ impl Account {
     /// After SpuriousDragon empty account is defined as account with nonce == 0 && balance == 0 &&
     /// bytecode = None.
     pub fn is_empty(&self) -> bool {
-        let is_bytecode_empty = match self.bytecode_hash {
-            None => true,
-            Some(hash) => hash == KECCAK_EMPTY,
-        };
+        self.nonce == 0 &&
+            self.balance.is_zero() &&
+            self.bytecode_hash.map_or(true, |hash| hash == KECCAK_EMPTY)
+    }
 
-        self.nonce == 0 && self.balance.is_zero() && is_bytecode_empty
+    /// Converts [GenesisAccount] to [Account] type
+    pub fn from_genesis_account(value: GenesisAccount) -> Self {
+        Account {
+            // nonce must exist, so we default to zero when converting a genesis account
+            nonce: value.nonce.unwrap_or_default(),
+            balance: value.balance,
+            bytecode_hash: value.code.map(keccak256),
+        }
     }
 
     /// Returns an account bytecode's hash.
     /// In case of no bytecode, returns [`KECCAK_EMPTY`].
     pub fn get_bytecode_hash(&self) -> B256 {
-        match self.bytecode_hash {
-            Some(hash) => hash,
-            None => KECCAK_EMPTY,
-        }
+        self.bytecode_hash.unwrap_or(KECCAK_EMPTY)
     }
 }
 

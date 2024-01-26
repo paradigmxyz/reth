@@ -1,7 +1,5 @@
 //! Discovery v4 protocol implementation.
 
-#![allow(missing_docs)]
-
 use crate::{error::DecodePacketError, EnrForkIdEntry, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
 use alloy_rlp::{
     length_of_length, Decodable, Encodable, Error as RlpError, Header, RlpDecodable, RlpEncodable,
@@ -19,22 +17,30 @@ use std::net::IpAddr;
 
 // Note: this is adapted from https://github.com/vorot93/discv4
 
-/// Id for message variants.
+/// Represents the identifier for message variants.
+///
+/// This enumeration assigns unique identifiers (u8 values) to different message types.
 #[derive(Debug)]
 #[repr(u8)]
 pub enum MessageId {
+    /// Ping message identifier.
     Ping = 1,
+    /// Pong message identifier.
     Pong = 2,
+    /// Find node message identifier.
     FindNode = 3,
+    /// Neighbours message identifier.
     Neighbours = 4,
+    /// ENR request message identifier.
     EnrRequest = 5,
+    /// ENR response message identifier.
     EnrResponse = 6,
 }
 
 impl MessageId {
     /// Converts the byte that represents the message id to the enum.
     fn from_u8(msg: u8) -> Result<Self, u8> {
-        let msg = match msg {
+        Ok(match msg {
             1 => MessageId::Ping,
             2 => MessageId::Pong,
             3 => MessageId::FindNode,
@@ -42,19 +48,24 @@ impl MessageId {
             5 => MessageId::EnrRequest,
             6 => MessageId::EnrResponse,
             _ => return Err(msg),
-        };
-        Ok(msg)
+        })
     }
 }
 
-/// All message variants
+/// Enum representing various message types exchanged in the Discovery v4 protocol.
 #[derive(Debug, Eq, PartialEq)]
 pub enum Message {
+    /// Represents a ping message sent during liveness checks.
     Ping(Ping),
+    /// Represents a pong message, which is a reply to a PING message.
     Pong(Pong),
+    /// Represents a query for nodes in the given bucket.
     FindNode(FindNode),
+    /// Represents a neighbour message, providing information about nearby nodes.
     Neighbours(Neighbours),
+    /// Represents an ENR request message, a request for Ethereum Node Records (ENR) as per [EIP-778](https://eips.ethereum.org/EIPS/eip-778).
     EnrRequest(EnrRequest),
+    /// Represents an ENR response message, a response to an ENR request with Ethereum Node Records (ENR) as per [EIP-778](https://eips.ethereum.org/EIPS/eip-778).
     EnrResponse(EnrResponse),
 }
 
@@ -86,48 +97,40 @@ impl Message {
         let mut sig_bytes = datagram.split_off(B256::len_bytes());
         let mut payload = sig_bytes.split_off(secp256k1::constants::COMPACT_SIGNATURE_SIZE + 1);
 
+        // Put the message type at the beginning of the payload
+        payload.put_u8(self.msg_type() as u8);
+
+        // Match the message type and encode the corresponding message into the payload
         match self {
-            Message::Ping(message) => {
-                payload.put_u8(1);
-                message.encode(&mut payload);
-            }
-            Message::Pong(message) => {
-                payload.put_u8(2);
-                message.encode(&mut payload);
-            }
-            Message::FindNode(message) => {
-                payload.put_u8(3);
-                message.encode(&mut payload);
-            }
-            Message::Neighbours(message) => {
-                payload.put_u8(4);
-                message.encode(&mut payload);
-            }
-            Message::EnrRequest(message) => {
-                payload.put_u8(5);
-                message.encode(&mut payload);
-            }
-            Message::EnrResponse(message) => {
-                payload.put_u8(6);
-                message.encode(&mut payload);
-            }
+            Message::Ping(message) => message.encode(&mut payload),
+            Message::Pong(message) => message.encode(&mut payload),
+            Message::FindNode(message) => message.encode(&mut payload),
+            Message::Neighbours(message) => message.encode(&mut payload),
+            Message::EnrRequest(message) => message.encode(&mut payload),
+            Message::EnrResponse(message) => message.encode(&mut payload),
         }
 
+        // Sign the payload with the secret key using recoverable ECDSA
         let signature: RecoverableSignature = SECP256K1.sign_ecdsa_recoverable(
             &secp256k1::Message::from_slice(keccak256(&payload).as_ref())
                 .expect("is correct MESSAGE_SIZE; qed"),
             secret_key,
         );
 
+        // Serialize the signature and append it to the signature bytes
         let (rec, sig) = signature.serialize_compact();
         sig_bytes.extend_from_slice(&sig);
         sig_bytes.put_u8(rec.to_i32() as u8);
         sig_bytes.unsplit(payload);
 
+        // Calculate the hash of the signature bytes and append it to the datagram
         let hash = keccak256(&sig_bytes);
         datagram.extend_from_slice(hash.as_slice());
 
+        // Append the signature bytes to the datagram
         datagram.unsplit(sig_bytes);
+
+        // Return the frozen datagram and the hash
         (datagram.freeze(), hash)
     }
 
@@ -176,19 +179,27 @@ impl Message {
     }
 }
 
-/// Decoded packet
+/// Represents a decoded packet.
+///
+/// This struct holds information about a decoded packet, including the message, node ID, and hash.
 #[derive(Debug)]
 pub struct Packet {
+    /// The decoded message from the packet.
     pub msg: Message,
+    /// The ID of the peer that sent the packet.
     pub node_id: PeerId,
+    /// The hash of the packet.
     pub hash: B256,
 }
 
 /// Represents the `from`, `to` fields in the packets
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
 pub struct NodeEndpoint {
+    /// The IP address of the network endpoint. It can be either IPv4 or IPv6.
     pub address: IpAddr,
+    /// The UDP port used for communication in the discovery protocol.
     pub udp_port: u16,
+    /// The TCP port used for communication in the RLPx protocol.
     pub tcp_port: u16,
 }
 
@@ -198,17 +209,28 @@ impl From<NodeRecord> for NodeEndpoint {
     }
 }
 
+impl NodeEndpoint {
+    /// Creates a new [`NodeEndpoint`] from a given UDP address and TCP port.
+    pub fn from_udp_address(udp_address: &std::net::SocketAddr, tcp_port: u16) -> Self {
+        NodeEndpoint { address: udp_address.ip(), udp_port: udp_address.port(), tcp_port }
+    }
+}
+
 /// A [FindNode packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#findnode-packet-0x03).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct FindNode {
+    /// The target node's ID, a 64-byte secp256k1 public key.
     pub id: PeerId,
+    /// The expiration timestamp of the packet, an absolute UNIX time stamp.
     pub expire: u64,
 }
 
 /// A [Neighbours packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#neighbors-packet-0x04).
 #[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct Neighbours {
+    /// The list of nodes containing IP, UDP port, TCP port, and node ID.
     pub nodes: Vec<NodeRecord>,
+    /// The expiration timestamp of the packet, an absolute UNIX time stamp.
     pub expire: u64,
 }
 
@@ -220,6 +242,7 @@ pub struct Neighbours {
 pub struct EnrWrapper<K: EnrKey>(Enr<K>);
 
 impl<K: EnrKey> EnrWrapper<K> {
+    /// Creates a new instance of [`EnrWrapper`].
     pub fn new(enr: Enr<K>) -> Self {
         EnrWrapper(enr)
     }
@@ -291,15 +314,24 @@ impl<K: EnrKey> Decodable for EnrWrapper<K> {
 }
 
 /// A [ENRRequest packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrrequest-packet-0x05).
+///
+/// This packet is used to request the current version of a node's Ethereum Node Record (ENR).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct EnrRequest {
+    /// The expiration timestamp for the request. No reply should be sent if it refers to a time in
+    /// the past.
     pub expire: u64,
 }
 
 /// A [ENRResponse packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrresponse-packet-0x06).
+///
+/// This packet is used to respond to an ENRRequest packet and includes the requested ENR along with
+/// the hash of the original request.
 #[derive(Clone, Debug, Eq, PartialEq, RlpEncodable)]
 pub struct EnrResponse {
+    /// The hash of the ENRRequest packet being replied to.
     pub request_hash: B256,
+    /// The ENR (Ethereum Node Record) for the responding node.
     pub enr: EnrWrapper<SecretKey>,
 }
 
@@ -341,11 +373,16 @@ impl Decodable for EnrResponse {
     }
 }
 
+/// Represents a Ping packet.
+///
 /// A [Ping packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#ping-packet-0x01).
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Ping {
+    /// The sender's endpoint.
     pub from: NodeEndpoint,
+    /// The recipient's endpoint.
     pub to: NodeEndpoint,
+    /// The expiration timestamp.
     pub expire: u64,
     /// Optional enr_seq for <https://eips.ethereum.org/EIPS/eip-868>
     pub enr_sq: Option<u64>,
@@ -429,11 +466,16 @@ impl Decodable for Ping {
     }
 }
 
+/// Represents a Pong packet.
+///
 /// A [Pong packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#pong-packet-0x02).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Pong {
+    /// The recipient's endpoint.
     pub to: NodeEndpoint,
+    /// The hash of the corresponding ping packet.
     pub echo: B256,
+    /// The expiration timestamp.
     pub expire: u64,
     /// Optional enr_seq for <https://eips.ethereum.org/EIPS/eip-868>
     pub enr_sq: Option<u64>,

@@ -139,7 +139,7 @@ pub fn try_block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
             encoded.into()
         })
         .collect();
-    let standalone_withdrawals: Vec<reth_rpc_types::engine::payload::Withdrawal> = value
+    let standalone_withdrawals: Vec<reth_rpc_types::withdrawal::Withdrawal> = value
         .withdrawals
         .clone()
         .unwrap_or_default()
@@ -180,7 +180,7 @@ pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
         })
         .collect();
 
-    let withdrawals: Vec<reth_rpc_types::engine::payload::Withdrawal> = value
+    let withdrawals: Vec<reth_rpc_types::withdrawal::Withdrawal> = value
         .withdrawals
         .clone()
         .unwrap_or_default()
@@ -318,11 +318,11 @@ pub fn validate_block_hash(
     Ok(sealed_block)
 }
 
-/// Converts [Withdrawal] to [reth_rpc_types::engine::payload::Withdrawal]
+/// Converts [Withdrawal] to [reth_rpc_types::withdrawal::Withdrawal]
 pub fn convert_withdrawal_to_standalone_withdraw(
     withdrawal: Withdrawal,
-) -> reth_rpc_types::engine::payload::Withdrawal {
-    reth_rpc_types::engine::payload::Withdrawal {
+) -> reth_rpc_types::withdrawal::Withdrawal {
+    reth_rpc_types::withdrawal::Withdrawal {
         index: withdrawal.index,
         validator_index: withdrawal.validator_index,
         address: withdrawal.address,
@@ -330,9 +330,9 @@ pub fn convert_withdrawal_to_standalone_withdraw(
     }
 }
 
-/// Converts [reth_rpc_types::engine::payload::Withdrawal] to [Withdrawal]
+/// Converts [reth_rpc_types::withdrawal::Withdrawal] to [Withdrawal]
 pub fn convert_standalone_withdraw_to_withdrawal(
-    standalone: reth_rpc_types::engine::payload::Withdrawal,
+    standalone: reth_rpc_types::withdrawal::Withdrawal,
 ) -> Withdrawal {
     Withdrawal {
         index: standalone.index,
@@ -349,7 +349,7 @@ pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
         tx.encode_enveloped(&mut out);
         out.into()
     });
-    let withdraw: Option<Vec<reth_rpc_types::engine::payload::Withdrawal>> =
+    let withdraw: Option<Vec<reth_rpc_types::withdrawal::Withdrawal>> =
         value.withdrawals.map(|withdrawals| {
             withdrawals
                 .into_iter()

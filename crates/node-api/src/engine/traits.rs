@@ -7,17 +7,15 @@ use reth_primitives::{
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, OptimismPayloadAttributes,
-        PayloadAttributes as EthPayloadAttributes, PayloadId, Withdrawal,
+        PayloadAttributes as EthPayloadAttributes, PayloadId,
     },
+    withdrawal::Withdrawal,
     ExecutionPayloadV1,
 };
 
 /// Represents a built payload type that contains a built [SealedBlock] and can be converted into
 /// engine API execution payloads.
 pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
-    /// Initializes the payload with the given initial block.
-    fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self;
-
     /// Returns the built block (sealed)
     fn block(&self) -> &SealedBlock;
 

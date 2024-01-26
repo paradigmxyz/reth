@@ -1,29 +1,29 @@
 //! Support for customizing the node
-use super::cli::{components::RethRpcServerHandles, ext::DefaultRethNodeCommandConfig};
+
 use crate::{
     args::{
         get_secret_key, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
         PruningArgs, RpcServerArgs, TxPoolArgs,
     },
+    cl_events::ConsensusLayerHealthEvents,
     cli::{
-        components::RethNodeComponentsImpl,
+        components::{RethNodeComponentsImpl, RethRpcServerHandles},
         config::{RethRpcConfig, RethTransactionPoolConfig},
         db_type::{DatabaseBuilder, DatabaseInstance},
-        ext::{RethCliExt, RethNodeCommandConfig},
-    },
-    commands::{
-        debug_cmd::EngineApiStore,
-        node::{cl_events::ConsensusLayerHealthEvents, events},
+        ext::{DefaultRethNodeCommandConfig, RethCliExt, RethNodeCommandConfig},
     },
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
+    engine_api_store::EngineApiStore,
+    events,
     init::init_genesis,
-    prometheus_exporter,
+    metrics::prometheus_exporter,
     utils::{get_single_header, write_peers_to_file},
     version::SHORT_VERSION,
 };
-use eyre::Context;
+use core::future::Future;
+use eyre::WrapErr;
 use fdlimit::raise_fd_limit;
-use futures::{future::Either, stream, stream_select, StreamExt};
+use futures::{future::Either, stream, stream_select, FutureExt, StreamExt};
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
@@ -63,6 +63,8 @@ use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_node_builder::EthEngineTypes;
 #[cfg(feature = "optimism")]
 use reth_node_builder::OptimismEngineTypes;
+use std::task::ready;
+
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
@@ -98,7 +100,9 @@ use secp256k1::SecretKey;
 use std::{
     net::{SocketAddr, SocketAddrV4},
     path::PathBuf,
+    pin::Pin,
     sync::Arc,
+    task::{Context, Poll},
 };
 use tokio::sync::{
     mpsc::{unbounded_channel, Receiver, UnboundedSender},
@@ -117,8 +121,8 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// # Example
 /// ```rust
 /// # use reth_tasks::{TaskManager, TaskSpawner};
-/// # use reth::{
-/// #     builder::NodeConfig,
+/// # use reth_node_core::{
+/// #     node_config::NodeConfig,
 /// #     cli::{
 /// #         ext::DefaultRethNodeCommandConfig,
 /// #     },
@@ -151,8 +155,8 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// # Example
 /// ```rust
 /// # use reth_tasks::{TaskManager, TaskSpawner};
-/// # use reth::{
-/// #     builder::NodeConfig,
+/// # use reth_node_core::{
+/// #     node_config::NodeConfig,
 /// #     cli::{
 /// #         ext::DefaultRethNodeCommandConfig,
 /// #     },
@@ -246,7 +250,7 @@ pub struct NodeConfig {
 impl NodeConfig {
     /// Creates a testing [NodeConfig], causing the database to be launched ephemerally.
     pub fn test() -> Self {
-        Self {
+        let mut test = Self {
             database: DatabaseBuilder::test(),
             config: None,
             chain: MAINNET.clone(),
@@ -263,7 +267,11 @@ impl NodeConfig {
             pruning: PruningArgs::default(),
             #[cfg(feature = "optimism")]
             rollup: crate::args::RollupArgs::default(),
-        }
+        };
+
+        // set all ports to zero by default for test instances
+        test = test.with_unused_ports();
+        test
     }
 
     /// Set the datadir for the node
@@ -350,12 +358,6 @@ impl NodeConfig {
         self
     }
 
-    /// Set the node instance number
-    pub fn with_instance_number(mut self, instance: u16) -> Self {
-        self.instance = instance;
-        self
-    }
-
     /// Set the rollup args for the node
     #[cfg(feature = "optimism")]
     pub fn with_rollup(mut self, rollup: crate::args::RollupArgs) -> Self {
@@ -368,8 +370,8 @@ impl NodeConfig {
     /// # Example
     /// ```rust
     /// # use reth_tasks::{TaskManager, TaskSpawner};
-    /// # use reth::builder::NodeConfig;
-    /// # use reth::cli::{
+    /// # use reth_node_core::node_config::NodeConfig;
+    /// # use reth_node_core::cli::{
     /// #     ext::DefaultRethNodeCommandConfig,
     /// # };
     /// # use tokio::runtime::Handle;
@@ -945,6 +947,14 @@ impl NodeConfig {
     fn adjust_instance_ports(&mut self) {
         self.rpc.adjust_instance_ports(self.instance);
     }
+
+    /// Sets networking and RPC ports to zero, causing the OS to choose random unused ports when
+    /// sockets are bound.
+    fn with_unused_ports(mut self) -> Self {
+        self.rpc = self.rpc.with_unused_ports();
+        self.network = self.network.with_unused_ports();
+        self
+    }
 }
 
 impl Default for NodeConfig {
@@ -974,6 +984,7 @@ impl Default for NodeConfig {
 /// [NodeHandle].
 ///
 /// This also contains a path to a data dir that cannot be changed.
+#[derive(Debug)]
 pub struct NodeBuilderWithDatabase<DB> {
     /// The node config
     pub config: NodeConfig,
@@ -1075,13 +1086,13 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             )
             .await?;
 
-        let components = RethNodeComponentsImpl {
-            provider: blockchain_db.clone(),
-            pool: transaction_pool.clone(),
-            network: network_builder.handle(),
-            task_executor: executor.clone(),
-            events: blockchain_db.clone(),
-        };
+        let components = RethNodeComponentsImpl::new(
+            blockchain_db.clone(),
+            transaction_pool.clone(),
+            network_builder.handle(),
+            executor.clone(),
+            blockchain_db.clone(),
+        );
 
         // allow network modifications
         ext.configure_network(network_builder.network_mut(), &components)?;
@@ -1300,12 +1311,11 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             .await?;
         }
 
+        // wait for node exit future
+        let node_exit_future = NodeExitFuture::new(rx, self.config.debug.terminate);
+
         // construct node handle and return
-        let node_handle = NodeHandle {
-            rpc_server_handles,
-            consensus_engine_rx: rx,
-            terminate: self.config.debug.terminate,
-        };
+        let node_handle = NodeHandle { rpc_server_handles, node_exit_future };
         Ok(node_handle)
     }
 
@@ -1344,12 +1354,9 @@ pub struct NodeHandle {
     /// The handles to the RPC servers
     rpc_server_handles: RethRpcServerHandles,
 
-    /// The receiver half of the channel for the consensus engine.
-    /// This can be used to wait for the consensus engine to exit.
-    consensus_engine_rx: oneshot::Receiver<Result<(), BeaconConsensusEngineError>>,
-
-    /// Flag indicating whether the node should be terminated after the pipeline sync.
-    terminate: bool,
+    /// A Future which waits node exit
+    /// See [`NodeExitFuture`]
+    node_exit_future: NodeExitFuture,
 }
 
 impl NodeHandle {
@@ -1358,16 +1365,52 @@ impl NodeHandle {
         &self.rpc_server_handles
     }
 
-    /// Waits for the node to exit, if it was configured to exit.
+    /// Waits for the node to exit. Uses [`NodeExitFuture`]
     pub async fn wait_for_node_exit(self) -> eyre::Result<()> {
-        self.consensus_engine_rx.await??;
+        self.node_exit_future.await
+    }
+}
 
-        if self.terminate {
-            Ok(())
+/// A Future which resolves when the node exits
+#[derive(Debug)]
+pub struct NodeExitFuture {
+    /// The receiver half of the channel for the consensus engine.
+    /// This can be used to wait for the consensus engine to exit.
+    consensus_engine_rx: Option<oneshot::Receiver<Result<(), BeaconConsensusEngineError>>>,
+
+    /// Flag indicating whether the node should be terminated after the pipeline sync.
+    terminate: bool,
+}
+
+impl NodeExitFuture {
+    fn new(
+        consensus_engine_rx: oneshot::Receiver<Result<(), BeaconConsensusEngineError>>,
+        terminate: bool,
+    ) -> Self {
+        Self { consensus_engine_rx: Some(consensus_engine_rx), terminate }
+    }
+}
+
+impl Future for NodeExitFuture {
+    type Output = eyre::Result<()>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        if let Some(rx) = this.consensus_engine_rx.as_mut() {
+            match ready!(rx.poll_unpin(cx)) {
+                Ok(res) => {
+                    this.consensus_engine_rx.take();
+                    res?;
+                    if this.terminate {
+                        Poll::Ready(Ok(()))
+                    } else {
+                        Poll::Pending
+                    }
+                }
+                Err(err) => Poll::Ready(Err(err.into())),
+            }
         } else {
-            // The pipeline has finished downloading blocks up to `--debug.tip` or
-            // `--debug.max-block`. Keep other node components alive for further usage.
-            futures::future::pending().await
+            Poll::Pending
         }
     }
 }
@@ -1377,16 +1420,15 @@ impl NodeHandle {
 ///
 /// # Example
 /// ```
-/// # use reth::{
-/// #     builder::{NodeConfig, spawn_node},
+/// # use reth_node_core::{
+/// #     node_config::{NodeConfig, spawn_node},
 /// #     args::RpcServerArgs,
 /// # };
 /// async fn t() {
 ///     // Create a node builder with an http rpc server enabled
 ///     let rpc_args = RpcServerArgs::default().with_http();
 ///
-///     /// Set the node instance number to 2
-///     let builder = NodeConfig::test().with_rpc(rpc_args).with_instance(2);
+///     let builder = NodeConfig::test().with_rpc(rpc_args);
 ///
 ///     // Spawn the builder, returning a handle to the node
 ///     let (_handle, _manager) = spawn_node(builder).await.unwrap();
@@ -1394,13 +1436,14 @@ impl NodeHandle {
 /// ```
 pub async fn spawn_node(config: NodeConfig) -> eyre::Result<(NodeHandle, TaskManager)> {
     let task_manager = TaskManager::current();
-    let ext = DefaultRethNodeCommandConfig;
+    let ext = DefaultRethNodeCommandConfig::default();
     Ok((config.launch::<()>(ext, task_manager.executor()).await?, task_manager))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::future::poll_fn;
     use reth_primitives::U256;
     use reth_rpc_api::EthApiClient;
 
@@ -1409,11 +1452,7 @@ mod tests {
         // this launches a test node with http
         let rpc_args = RpcServerArgs::default().with_http();
 
-        // NOTE: tests here manually set an instance number. The alternative would be to use an
-        // atomic counter. This works for `cargo test` but if tests would be run in `nextest` then
-        // they would become flaky. So new tests should manually set a unique instance number.
-        let (handle, _manager) =
-            spawn_node(NodeConfig::test().with_rpc(rpc_args).with_instance(1)).await.unwrap();
+        let (handle, _manager) = spawn_node(NodeConfig::test().with_rpc(rpc_args)).await.unwrap();
 
         // call a function on the node
         let client = handle.rpc_server_handles().rpc.http_client().unwrap();
@@ -1426,7 +1465,7 @@ mod tests {
     #[tokio::test]
     async fn rpc_handles_none_without_http() {
         // this launches a test node _without_ http
-        let (handle, _manager) = spawn_node(NodeConfig::test().with_instance(2)).await.unwrap();
+        let (handle, _manager) = spawn_node(NodeConfig::test()).await.unwrap();
 
         // ensure that the `http_client` is none
         let maybe_client = handle.rpc_server_handles().rpc.http_client();
@@ -1438,15 +1477,39 @@ mod tests {
         // spawn_test_node takes roughly 1 second per node, so this test takes ~4 seconds
         let num_nodes = 4;
 
-        // this reserves instances 3-6
-        let starting_instance = 3;
         // contains handles and managers
         let mut handles = Vec::new();
-        for i in 0..num_nodes {
-            let handle =
-                spawn_node(NodeConfig::test().with_instance(starting_instance + i)).await.unwrap();
+        for _ in 0..num_nodes {
+            let handle = spawn_node(NodeConfig::test()).await.unwrap();
             handles.push(handle);
         }
+    }
+
+    #[tokio::test]
+    async fn test_node_exit_future_terminate_true() {
+        let (tx, rx) = oneshot::channel::<Result<(), BeaconConsensusEngineError>>();
+
+        let _ = tx.send(Ok(()));
+
+        let node_exit_future = NodeExitFuture::new(rx, true);
+
+        let res = node_exit_future.await;
+
+        assert!(res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_node_exit_future_terminate_false() {
+        let (tx, rx) = oneshot::channel::<Result<(), BeaconConsensusEngineError>>();
+
+        let _ = tx.send(Ok(()));
+
+        let mut node_exit_future = NodeExitFuture::new(rx, false);
+        poll_fn(|cx| {
+            assert!(node_exit_future.poll_unpin(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
     }
 
     #[cfg(feature = "optimism")]
@@ -1474,7 +1537,7 @@ mod tests {
         let genesis_hash = spec.genesis_hash();
 
         // create node config
-        let node_config = NodeConfig::test().with_rpc(rpc_args).with_instance(7).with_chain(spec);
+        let node_config = NodeConfig::test().with_rpc(rpc_args).with_chain(spec);
 
         let (handle, _manager) = spawn_node(node_config).await.unwrap();
 
@@ -1542,7 +1605,7 @@ mod tests {
         let genesis_hash = spec.genesis_hash();
 
         // create node config
-        let node_config = NodeConfig::test().with_rpc(rpc_args).with_instance(8).with_chain(spec);
+        let node_config = NodeConfig::test().with_rpc(rpc_args).with_chain(spec);
 
         let (handle, _manager) = spawn_node(node_config).await.unwrap();
 
@@ -1611,7 +1674,7 @@ mod tests {
         let genesis_hash = spec.genesis_hash();
 
         // create node config
-        let node_config = NodeConfig::test().with_rpc(rpc_args).with_instance(9).with_chain(spec);
+        let node_config = NodeConfig::test().with_rpc(rpc_args).with_chain(spec);
 
         let (handle, _manager) = spawn_node(node_config).await.unwrap();
 
@@ -1679,7 +1742,7 @@ mod tests {
         let genesis_hash = spec.genesis_hash();
 
         // create node config
-        let node_config = NodeConfig::test().with_rpc(rpc_args).with_instance(10).with_chain(spec);
+        let node_config = NodeConfig::test().with_rpc(rpc_args).with_chain(spec);
 
         let (handle, _manager) = spawn_node(node_config).await.unwrap();
 

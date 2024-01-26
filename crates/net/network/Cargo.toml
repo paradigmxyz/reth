@@ -65,6 +65,7 @@ rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 derive_more.workspace = true
 schnellru.workspace = true
+itertools.workspace = true
 
 enr = { workspace = true, features = ["rust-secp256k1"], optional = true }
 tempfile = { workspace = true, optional = true }
@@ -83,6 +84,7 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
+alloy-node-bindings.workspace = true
 ethers-core = { workspace = true, default-features = false }
 ethers-providers = { workspace = true, default-features = false, features = ["ws"] }
 ethers-signers = { workspace = true, default-features = false }

@@ -4,10 +4,7 @@
 
 use alloy_primitives::{Address, Bytes, B256, U128, U256, U64};
 use alloy_rlp::{BufMut, Decodable, Encodable, Error as RlpError};
-use alloy_rpc_types::{
-    kzg::{Blob, Bytes48},
-    AccessList,
-};
+use alloy_rpc_types::{AccessList, BlobTransactionSidecar};
 use serde::{Deserialize, Serialize};
 
 /// Container type for various Ethereum transaction requests
@@ -179,18 +176,6 @@ impl Decodable for TransactionKind {
             Err(RlpError::InputTooShort)
         }
     }
-}
-
-/// This represents a set of blobs, and its corresponding commitments and proofs.
-#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[repr(C)]
-pub struct BlobTransactionSidecar {
-    /// The blob data.
-    pub blobs: Vec<Blob>,
-    /// The blob commitments.
-    pub commitments: Vec<Bytes48>,
-    /// The blob proofs.
-    pub proofs: Vec<Bytes48>,
 }
 
 #[cfg(test)]

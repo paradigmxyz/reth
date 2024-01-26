@@ -513,25 +513,25 @@ impl Transaction {
 
     /// Returns true if the transaction is a legacy transaction.
     #[inline]
-    pub fn is_legacy(&self) -> bool {
+    pub const fn is_legacy(&self) -> bool {
         matches!(self, Transaction::Legacy(_))
     }
 
     /// Returns true if the transaction is an EIP-2930 transaction.
     #[inline]
-    pub fn is_eip2930(&self) -> bool {
+    pub const fn is_eip2930(&self) -> bool {
         matches!(self, Transaction::Eip2930(_))
     }
 
     /// Returns true if the transaction is an EIP-1559 transaction.
     #[inline]
-    pub fn is_eip1559(&self) -> bool {
+    pub const fn is_eip1559(&self) -> bool {
         matches!(self, Transaction::Eip1559(_))
     }
 
     /// Returns true if the transaction is an EIP-4844 transaction.
     #[inline]
-    pub fn is_eip4844(&self) -> bool {
+    pub const fn is_eip4844(&self) -> bool {
         matches!(self, Transaction::Eip4844(_))
     }
 
@@ -1583,7 +1583,7 @@ mod tests {
         },
         Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, B256, U256,
     };
-    use alloy_primitives::{b256, bytes};
+    use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use bytes::BytesMut;
     use secp256k1::{KeyPair, Secp256k1};
@@ -1870,5 +1870,31 @@ mod tests {
 
             assert_eq!(parallel_senders, seq_senders);
         }
+    }
+
+    // <https://etherscan.io/tx/0x280cde7cdefe4b188750e76c888f13bd05ce9a4d7767730feefe8a0e50ca6fc4>
+    #[test]
+    fn recover_legacy_singer() {
+        let raw_tx = "f9015482078b8505d21dba0083022ef1947a250d5630b4cf539739df2c5dacb4c659f2488d880c46549a521b13d8b8e47ff36ab50000000000000000000000000000000000000000000066ab5a608bd00a23f2fe000000000000000000000000000000000000000000000000000000000000008000000000000000000000000048c04ed5691981c42154c6167398f95e8f38a7ff00000000000000000000000000000000000000000000000000000000632ceac70000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000006c6ee5e31d828de241282b9606c8e98ea48526e225a0c9077369501641a92ef7399ff81c21639ed4fd8fc69cb793cfa1dbfab342e10aa0615facb2f1bcf3274a354cfe384a38d0cc008a11c2dd23a69111bc6930ba27a8";
+        let data = hex::decode(raw_tx).unwrap();
+        let tx = TransactionSigned::decode_rlp_legacy_transaction(&mut data.as_slice()).unwrap();
+        assert!(tx.is_legacy());
+        let sender = tx.recover_signer().unwrap();
+        assert_eq!(sender, address!("a12e1462d0ceD572f396F58B6E2D03894cD7C8a4"));
+    }
+
+    // <https://github.com/alloy-rs/alloy/issues/141>
+    // <https://etherscan.io/tx/0xce4dc6d7a7549a98ee3b071b67e970879ff51b5b95d1c340bacd80fa1e1aab31>
+    #[test]
+    fn recover_enveloped() {
+        let raw_tx = "02f86f0102843b9aca0085029e7822d68298f094d9e1459a7a482635700cbc20bbaf52d495ab9c9680841b55ba3ac080a0c199674fcb29f353693dd779c017823b954b3c69dffa3cd6b2a6ff7888798039a028ca912de909e7e6cdef9cdcaf24c54dd8c1032946dfa1d85c206b32a9064fe8";
+        let data = hex::decode(raw_tx).unwrap();
+        let tx = TransactionSigned::decode_enveloped(&mut data.as_slice()).unwrap();
+        let sender = tx.recover_signer().unwrap();
+        assert_eq!(sender, address!("001e2b7dE757bA469a57bF6b23d982458a07eFcE"));
+        assert_eq!(tx.to(), Some(address!("D9e1459A7A482635700cBc20BBAF52D495Ab9C96")));
+        assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
+        let encoded = tx.envelope_encoded();
+        assert_eq!(encoded.as_ref(), data.as_slice());
     }
 }

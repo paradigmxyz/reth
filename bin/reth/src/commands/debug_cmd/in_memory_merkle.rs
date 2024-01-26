@@ -13,7 +13,7 @@ use crate::{
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_config::Config;
-use reth_db::{init_db, DatabaseEnv};
+use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_interfaces::executor::BlockValidationError;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
@@ -112,7 +112,8 @@ impl Command {
         fs::create_dir_all(&db_path)?;
 
         // initialize the database
-        let db = Arc::new(init_db(db_path, self.db.log_level)?);
+        let db =
+            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         let factory = ProviderFactory::new(&db, self.chain.clone());
         let provider = factory.provider()?;
 
@@ -232,7 +233,7 @@ impl Command {
         while in_mem_updates_iter.peek().is_some() || incremental_updates_iter.peek().is_some() {
             match (in_mem_updates_iter.next(), incremental_updates_iter.next()) {
                 (Some(in_mem), Some(incr)) => {
-                    pretty_assertions::assert_eq!(in_mem.0, incr.0, "Nibbles don't match");
+                    similar_asserts::assert_eq!(in_mem.0, incr.0, "Nibbles don't match");
                     if in_mem.1 != incr.1 &&
                         matches!(in_mem.0, TrieKey::AccountNode(ref nibbles) if nibbles.0.len() > self.skip_node_depth.unwrap_or_default())
                     {
@@ -252,7 +253,7 @@ impl Command {
             }
         }
 
-        pretty_assertions::assert_eq!(
+        similar_asserts::assert_eq!(
             incremental_mismatched,
             in_mem_mismatched,
             "Mismatched trie updates"

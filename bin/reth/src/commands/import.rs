@@ -1,12 +1,7 @@
 //! Command that initializes the node by importing a chain from a file.
 
 use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
     commands::node::events::{handle_events, NodeEvent},
-    dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
     version::SHORT_VERSION,
 };
@@ -15,7 +10,7 @@ use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
-use reth_db::{database::Database, init_db};
+use reth_db::{database::Database, init_db, mdbx::DatabaseArguments};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -30,6 +25,14 @@ use reth_stages::{
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, info};
+
+use crate::{
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs,
+    },
+    dirs::{DataDirPath, MaybePlatformPath},
+};
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
@@ -86,7 +89,8 @@ impl ImportCommand {
         let db_path = data_dir.db_path();
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(db_path, self.db.log_level)?);
+        let db =
+            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         info!(target: "reth::cli", "Database opened");
         let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone());
 

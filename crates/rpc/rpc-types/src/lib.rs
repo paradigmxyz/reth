@@ -34,9 +34,7 @@ pub use eth::{
     engine::{
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
     },
-    transaction::{
-        self, BlobTransactionSidecar, TransactionKind, TransactionRequest, TypedTransactionRequest,
-    },
+    transaction::{self, TransactionKind, TransactionRequest, TypedTransactionRequest},
 };
 
 pub use admin::*;
