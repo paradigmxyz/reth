@@ -1,4 +1,3 @@
-#![allow(missing_docs)]
 use criterion::*;
 use futures::StreamExt;
 use pprof::criterion::{Output, PProfProfiler};

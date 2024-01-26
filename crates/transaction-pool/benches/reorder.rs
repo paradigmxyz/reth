@@ -1,4 +1,3 @@
-#![allow(missing_docs)]
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
