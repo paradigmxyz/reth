@@ -1,4 +1,4 @@
-Discv5 that downgrades to Discv4.
+# Discv5 with Discv4 support
 
 A Discv5 node and a Discv4 node run alongside each other on different ports. The node
 records of both are signed with the same key. Hence both nodes share the same node id.
