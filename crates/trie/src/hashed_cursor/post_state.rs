@@ -1,45 +1,32 @@
 use super::{HashedAccountCursor, HashedCursorFactory, HashedStorageCursor};
 use crate::state::HashedPostState;
-use reth_db::{
-    cursor::{DbCursorRO, DbDupCursorRO},
-    tables,
-    transaction::DbTx,
-};
 use reth_primitives::{Account, StorageEntry, B256, U256};
 
 /// The hashed cursor factory for the post state.
-#[derive(Debug)]
-pub struct HashedPostStateCursorFactory<'a, 'b, TX> {
-    tx: &'a TX,
-    post_state: &'b HashedPostState,
+#[derive(Debug, Clone)]
+pub struct HashedPostStateCursorFactory<'a, CF> {
+    cursor_factory: CF,
+    post_state: &'a HashedPostState,
 }
 
-impl<'a, 'b, TX> Clone for HashedPostStateCursorFactory<'a, 'b, TX> {
-    fn clone(&self) -> Self {
-        Self { tx: self.tx, post_state: self.post_state }
-    }
-}
-
-impl<'a, 'b, TX> HashedPostStateCursorFactory<'a, 'b, TX> {
+impl<'a, CF> HashedPostStateCursorFactory<'a, CF> {
     /// Create a new factory.
-    pub fn new(tx: &'a TX, post_state: &'b HashedPostState) -> Self {
-        Self { tx, post_state }
+    pub fn new(cursor_factory: CF, post_state: &'a HashedPostState) -> Self {
+        Self { cursor_factory, post_state }
     }
 }
 
-impl<'a, 'b, TX: DbTx> HashedCursorFactory for HashedPostStateCursorFactory<'a, 'b, TX> {
-    type AccountCursor =
-        HashedPostStateAccountCursor<'b, <TX as DbTx>::Cursor<tables::HashedAccount>>;
-    type StorageCursor =
-        HashedPostStateStorageCursor<'b, <TX as DbTx>::DupCursor<tables::HashedStorage>>;
+impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorFactory<'a, CF> {
+    type AccountCursor = HashedPostStateAccountCursor<'a, CF::AccountCursor>;
+    type StorageCursor = HashedPostStateStorageCursor<'a, CF::StorageCursor>;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
-        let cursor = self.tx.cursor_read::<tables::HashedAccount>()?;
+        let cursor = self.cursor_factory.hashed_account_cursor()?;
         Ok(HashedPostStateAccountCursor::new(cursor, self.post_state))
     }
 
     fn hashed_storage_cursor(&self) -> Result<Self::StorageCursor, reth_db::DatabaseError> {
-        let cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
+        let cursor = self.cursor_factory.hashed_storage_cursor()?;
         Ok(HashedPostStateStorageCursor::new(cursor, self.post_state))
     }
 }
@@ -54,7 +41,7 @@ pub struct HashedPostStateAccountCursor<'b, C> {
     post_state: &'b HashedPostState,
     /// The post state account index where the cursor is currently at.
     post_state_account_index: usize,
-    /// The last hashed account key that was returned by the cursor.
+    /// The last hashed account that was returned by the cursor.
     /// De facto, this is a current cursor position.
     last_account: Option<B256>,
 }
@@ -100,7 +87,7 @@ impl<'b, C> HashedPostStateAccountCursor<'b, C> {
 
 impl<'b, C> HashedAccountCursor for HashedPostStateAccountCursor<'b, C>
 where
-    C: DbCursorRO<tables::HashedAccount>,
+    C: HashedAccountCursor,
 {
     /// Seek the next entry for a given hashed account key.
     ///
@@ -165,7 +152,7 @@ where
         };
 
         // If post state was given precedence, move the cursor forward.
-        let mut db_entry = self.cursor.current()?;
+        let mut db_entry = self.cursor.seek(*last_account)?;
         while db_entry
             .as_ref()
             .map(|(address, _)| address <= last_account || self.is_account_cleared(address))
@@ -258,7 +245,7 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
 
 impl<'b, C> HashedStorageCursor for HashedPostStateStorageCursor<'b, C>
 where
-    C: DbCursorRO<tables::HashedStorage> + DbDupCursorRO<tables::HashedStorage>,
+    C: HashedStorageCursor,
 {
     /// Returns `true` if the account has no storage entries.
     ///
@@ -272,7 +259,7 @@ where
                     // and the current storage does not contain any non-zero values 
                     storage.non_zero_valued_slots.is_empty()
             }
-            None => self.cursor.seek_exact(key)?.is_none(),
+            None => self.cursor.is_storage_empty(key)?,
         };
         Ok(is_empty)
     }
@@ -315,14 +302,14 @@ where
         let db_entry = if self.is_db_storage_wiped(&account) {
             None
         } else {
-            let mut db_entry = self.cursor.seek_by_key_subkey(account, subkey)?;
+            let mut db_entry = self.cursor.seek(account, subkey)?;
 
             while db_entry
                 .as_ref()
                 .map(|entry| self.is_slot_zero_valued(&account, &entry.key))
                 .unwrap_or_default()
             {
-                db_entry = self.cursor.next_dup_val()?;
+                db_entry = self.cursor.next()?;
             }
 
             db_entry
@@ -352,7 +339,7 @@ where
             None
         } else {
             // If post state was given precedence, move the cursor forward.
-            let mut db_entry = self.cursor.seek_by_key_subkey(account, *last_slot)?;
+            let mut db_entry = self.cursor.seek(account, *last_slot)?;
 
             // If the entry was already returned or is zero-values, move to the next.
             while db_entry
@@ -362,7 +349,7 @@ where
                 })
                 .unwrap_or_default()
             {
-                db_entry = self.cursor.next_dup_val()?;
+                db_entry = self.cursor.next()?;
             }
 
             db_entry
@@ -393,7 +380,9 @@ mod tests {
 
     use super::*;
     use proptest::prelude::*;
-    use reth_db::{database::Database, test_utils::create_test_rw_db, transaction::DbTxMut};
+    use reth_db::{
+        database::Database, tables, test_utils::create_test_rw_db, transaction::DbTxMut,
+    };
     use std::collections::BTreeMap;
 
     fn assert_account_cursor_order(

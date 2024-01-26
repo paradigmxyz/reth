@@ -256,7 +256,7 @@ impl HashedPostState {
     fn state_root_calculator<'a, TX: DbTx>(
         &self,
         tx: &'a TX,
-    ) -> StateRoot<&'a TX, HashedPostStateCursorFactory<'a, '_, TX>> {
+    ) -> StateRoot<&'a TX, HashedPostStateCursorFactory<'_, &'a TX>> {
         assert!(self.sorted, "Hashed post state must be sorted for state root calculation");
         let (account_prefix_set, storage_prefix_set) = self.construct_prefix_sets();
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, self);
