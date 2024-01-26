@@ -5,7 +5,6 @@ mod filters;
 mod segment;
 
 use std::ops::RangeInclusive;
-
 use alloy_primitives::BlockNumber;
 pub use compression::Compression;
 pub use filters::{Filters, InclusionFilter, PerfectHashingFunction};
