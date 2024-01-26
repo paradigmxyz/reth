@@ -44,14 +44,17 @@
 //! # let pipeline =
 //! Pipeline::builder()
 //!     .with_tip_sender(tip_tx)
-//!     .add_stages(DefaultStages::new(
-//!         provider_factory.clone(),
-//!         HeaderSyncMode::Tip(tip_rx),
-//!         consensus,
-//!         headers_downloader,
-//!         bodies_downloader,
-//!         executor_factory,
-//!     ))
+//!     .add_stages(
+//!         DefaultStages::new(
+//!             provider_factory.clone(),
+//!             HeaderSyncMode::Tip(tip_rx),
+//!             consensus,
+//!             headers_downloader,
+//!             bodies_downloader,
+//!             executor_factory,
+//!         )
+//!         .unwrap(),
+//!     )
 //!     .build(provider_factory);
 //! ```
 //!

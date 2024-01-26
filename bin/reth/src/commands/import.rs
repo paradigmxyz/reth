@@ -20,7 +20,7 @@ use reth_primitives::{stage::StageId, ChainSpec, B256};
 use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     prelude::*,
-    stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage, TotalDifficultyStage},
+    stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
 };
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
@@ -173,11 +173,7 @@ impl ImportCommand {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
-                )
-                .set(
-                    TotalDifficultyStage::new(consensus.clone())
-                        .with_commit_threshold(config.stages.total_difficulty.commit_threshold),
-                )
+                )?
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,
                 })

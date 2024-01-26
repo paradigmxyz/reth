@@ -29,6 +29,7 @@ macro_rules! impl_compression_for_compact {
 }
 
 impl_compression_for_compact!(
+    SealedHeader,
     Header,
     Account,
     Log,

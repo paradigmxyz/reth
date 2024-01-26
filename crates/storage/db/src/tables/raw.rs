@@ -55,6 +55,12 @@ impl<K: Key> RawKey<K> {
         Self { key: K::encode(key).into(), _phantom: std::marker::PhantomData }
     }
 
+    /// Creates a raw key from an existing `Vec`. Useful when we already have the encoded
+    /// key.
+    pub fn from_vec(vec: Vec<u8>) -> Self {
+        Self { key: vec, _phantom: std::marker::PhantomData }
+    }
+
     /// Returns the decoded value.
     pub fn key(&self) -> Result<K, DatabaseError> {
         K::decode(&self.key)
@@ -112,6 +118,12 @@ impl<V: Value> RawValue<V> {
     /// Create new raw value.
     pub fn new(value: V) -> Self {
         Self { value: V::compress(value).into(), _phantom: std::marker::PhantomData }
+    }
+
+    /// Creates a raw value from an existing `Vec`. Useful when we already have the compressed
+    /// value.
+    pub fn from_vec(vec: Vec<u8>) -> Self {
+        Self { value: vec, _phantom: std::marker::PhantomData }
     }
 
     /// Returns the decompressed value.
