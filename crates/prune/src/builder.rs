@@ -3,7 +3,6 @@ use reth_config::PruneConfig;
 use reth_db::database::Database;
 use reth_primitives::{PruneModes, MAINNET};
 use reth_provider::ProviderFactory;
-use reth_snapshot::HighestSnapshotsTracker;
 
 /// Contains the information required to build a pruner
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,11 +52,7 @@ impl PrunerBuilder {
     }
 
     /// Builds a [Pruner] from the current configuration.
-    pub fn build<DB: Database>(
-        self,
-        provider_factory: ProviderFactory<DB>,
-        highest_snapshots_rx: HighestSnapshotsTracker,
-    ) -> Pruner<DB> {
+    pub fn build<DB: Database>(self, provider_factory: ProviderFactory<DB>) -> Pruner<DB> {
         let segments = SegmentSet::<DB>::from_prune_modes(self.segments);
 
         Pruner::new(
@@ -66,7 +61,6 @@ impl PrunerBuilder {
             self.block_interval,
             self.prune_delete_limit,
             self.max_reorg_depth,
-            highest_snapshots_rx,
         )
     }
 }

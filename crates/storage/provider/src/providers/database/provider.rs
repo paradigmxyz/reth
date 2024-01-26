@@ -1,6 +1,6 @@
 use crate::{
     bundle_state::{BundleStateInit, BundleStateWithReceipts, HashedStateChanges, RevertsInit},
-    providers::{database::metrics, SnapshotProvider},
+    providers::{database::metrics, snapshot::SnapshotWriter, SnapshotProvider},
     to_range,
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
@@ -81,8 +81,11 @@ impl<DB: Database> DerefMut for DatabaseProviderRW<DB> {
 }
 
 impl<DB: Database> DatabaseProviderRW<DB> {
-    /// Commit database transaction
+    /// Commit database transaction and snapshot if it exists.
     pub fn commit(self) -> ProviderResult<bool> {
+        if let Some(snapshot_provider) = &self.0.snapshot_provider {
+            snapshot_provider.commit()?;
+        }
         self.0.commit()
     }
 
@@ -101,8 +104,14 @@ pub struct DatabaseProvider<TX> {
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Snapshot provider
-    #[allow(dead_code)]
     snapshot_provider: Option<Arc<SnapshotProvider>>,
+}
+
+impl<TX> DatabaseProvider<TX> {
+    /// Returns snapshot provider
+    pub fn snapshot_provider(&self) -> Option<Arc<SnapshotProvider>> {
+        self.snapshot_provider.clone()
+    }
 }
 
 impl<TX: DbTxMut> DatabaseProvider<TX> {
@@ -2374,7 +2383,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         let mut next_tx_num = self
             .tx
-            .cursor_read::<tables::Transactions>()?
+            .cursor_read::<tables::TransactionBlock>()?
             .last()?
             .map(|(n, _)| n + 1)
             .unwrap_or_default();
