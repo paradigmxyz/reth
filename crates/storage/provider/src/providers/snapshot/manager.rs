@@ -21,7 +21,7 @@ use reth_primitives::{
 };
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
-    ops::{Range, RangeBounds, RangeInclusive},
+    ops::{Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -36,8 +36,27 @@ use tokio::sync::watch;
 /// - `HashMap<SnapshotSegment, BTreeMap<TxNumber, RangeInclusive<BlockNumber>>>`
 type SegmentRanges = HashMap<SnapshotSegment, BTreeMap<u64, RangeInclusive<u64>>>;
 
-/// Type alias for the shared snapshot provider, wrapping the inner implementation.
-pub type SnapshotProvider = Arc<SnapshotProviderInner>;
+/// Structure representing a shared snapshot provider, encapsulating the internal implementation
+/// with an [`Arc`].
+#[derive(Debug, Default, Clone)]
+pub struct SnapshotProvider(Arc<SnapshotProviderInner>);
+
+impl SnapshotProvider {
+    /// Creates a new [`SnapshotProvider`] with the specified snapshot.
+    pub fn new(inner: SnapshotProviderInner) -> Self {
+        Self(Arc::new(inner))
+    }
+}
+
+/// Implementation of [`Deref`] to allow access to the methods of [`SnapshotProviderInner`] via
+/// [`SnapshotProvider`].
+impl Deref for SnapshotProvider {
+    type Target = SnapshotProviderInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// [`SnapshotProviderInner`] manages all existing [`SnapshotJarProvider`].
 #[derive(Debug, Default)]

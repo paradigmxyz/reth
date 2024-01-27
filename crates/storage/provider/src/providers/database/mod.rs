@@ -1,8 +1,7 @@
 use crate::{
     providers::{
-        snapshot::SnapshotProviderInner,
+        snapshot::{SnapshotProvider, SnapshotProviderInner},
         state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
-        SnapshotProvider,
     },
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, EvmEnvProvider,
@@ -85,7 +84,12 @@ impl<DB> ProviderFactory<DB> {
         snapshots_path: PathBuf,
         highest_snapshot_tracker: watch::Receiver<Option<HighestSnapshots>>,
     ) -> ProviderResult<Self> {
-        self.snapshot_provider = Some(Arc::new(
+        // self.snapshot_provider = Some(Arc::new(
+        //     SnapshotProviderInner::new(snapshots_path)?
+        //         .with_highest_tracker(Some(highest_snapshot_tracker)),
+        // ));
+
+        self.snapshot_provider = Some(SnapshotProvider::new(
             SnapshotProviderInner::new(snapshots_path)?
                 .with_highest_tracker(Some(highest_snapshot_tracker)),
         ));
