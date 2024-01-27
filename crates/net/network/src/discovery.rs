@@ -4,6 +4,7 @@ use crate::{
     error::{NetworkError, ServiceKind},
     manager::DiscoveredEvent,
 };
+use derive_more::{Deref, DerefMut};
 use futures::StreamExt;
 use parking_lot::RwLock;
 use reth_discv4::{
@@ -35,7 +36,11 @@ use std::{
 ///
 /// Listens for new discovered nodes and emits events for discovered nodes and their
 /// address.
-pub struct Discovery<D = Discv4, S = ReceiverStream<DiscoveryUpdate>> {
+pub struct Discovery<
+    D = Discv4,
+    S = ReceiverStream<DiscoveryUpdate>,
+    N: Clone + TryFrom<discv5::enr::Enr<SecretKey>, Error = &'static str> = DnsNodeRecordUpdate,
+> {
     /// All nodes discovered via discovery protocol.
     ///
     /// These nodes can be ephemeral and are updated via the discovery protocol.
@@ -49,9 +54,9 @@ pub struct Discovery<D = Discv4, S = ReceiverStream<DiscoveryUpdate>> {
     /// The handle to the spawned discv4 service
     _disc_service: Option<JoinHandle<()>>,
     /// Handler to interact with the DNS discovery service
-    _dns_discovery: Option<DnsDiscoveryHandle>,
+    _dns_discovery: Option<DnsDiscoveryHandle<N>>,
     /// Updates from the DNS discovery service.
-    dns_discovery_updates: Option<ReceiverStream<DnsNodeRecordUpdate>>,
+    dns_discovery_updates: Option<ReceiverStream<N>>,
     /// The handle to the spawned DNS discovery service
     _dns_disc_service: Option<JoinHandle<()>>,
     /// Events buffered until polled.
@@ -103,7 +108,7 @@ where
     }
 
     /// Add a node to the discv4 table.
-    pub(crate) fn add_disc_node(&self, node: NodeRecord) {
+    pub(crate) fn add_disc_node(&self, node: N) {
         if let Some(disc) = &self.disc {
             disc.add_node(node);
         }
@@ -372,7 +377,7 @@ impl<S> fmt::Debug for Discovery<Discv5, S> {
     }
 }
 
-impl Discovery<Discv5, MergedUpdateStream> {
+impl Discovery<Discv5, MergedUpdateStream, EnrWrapper> {
     /// Spawns the discovery service.
     ///
     /// This will spawn [`discv5::Discv5`] and [`Discv4`] each onto their own new task and
@@ -524,7 +529,7 @@ impl Discovery<Discv5, MergedUpdateStream> {
         // setup DNS discovery.
         let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
             if let Some(dns_config) = dns_discovery_config {
-                new_dns(dns_config)?
+                new_dns::<EnrWrapper>(dns_config)?
             } else {
                 (None, None, None)
             };
@@ -544,15 +549,22 @@ impl Discovery<Discv5, MergedUpdateStream> {
     }
 }
 
+#[derive(Deref, DerefMut, Clone)]
+struct EnrWrapper(discv5::enr::Enr<discv5::enr::CombinedKey>);
+
+impl TryFrom<discv5::enr::Enr<SecretKey>> for EnrWrapper {
+    type Error = NetworkError;
+    fn try_from(value: discv5::enr::Enr<SecretKey>) -> Result<Self, Self::Error> {
+        // serialize and deserialize enr
+        todo!()
+    }
+}
+
 #[allow(clippy::type_complexity)]
-pub(crate) fn new_dns(
+pub(crate) fn new_dns<N>(
     dns_config: DnsDiscoveryConfig,
 ) -> Result<
-    (
-        Option<DnsDiscoveryHandle>,
-        Option<ReceiverStream<DnsNodeRecordUpdate>>,
-        Option<JoinHandle<()>>,
-    ),
+    (Option<DnsDiscoveryHandle<N>>, Option<ReceiverStream<N>>, Option<JoinHandle<()>>),
     NetworkError,
 > {
     let (mut service, dns_disc) =
