@@ -2,6 +2,18 @@ use alloy_chains::Chain;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, str::FromStr};
 
+/// Represents the consensus type of a blockchain fork.
+///
+/// This enum defines two variants: `ProofOfWork` for hardforks that use a proof-of-work consensus
+/// mechanism, and `ProofOfStake` for hardforks that use a proof-of-stake consensus mechanism.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum ConsensusType {
+    /// Indicates a proof-of-work consensus mechanism.
+    ProofOfWork,
+    /// Indicates a proof-of-stake consensus mechanism.
+    ProofOfStake,
+}
+
 /// The name of an Ethereum hardfork.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -88,9 +100,23 @@ impl Hardfork {
         }
     }
 
-    /// Checks if the hardfork is post the Ethereum merge.
-    pub fn is_post_merge(&self) -> bool {
-        self >= &Hardfork::Paris
+    /// Retrieves the consensus type for the specified hardfork.
+    pub fn consensus_type(&self) -> ConsensusType {
+        if *self >= Hardfork::Paris {
+            ConsensusType::ProofOfStake
+        } else {
+            ConsensusType::ProofOfWork
+        }
+    }
+
+    /// Checks if the hardfork uses Proof of Stake consensus.
+    pub fn is_proof_of_stake(&self) -> bool {
+        matches!(self.consensus_type(), ConsensusType::ProofOfStake)
+    }
+
+    /// Checks if the hardfork uses Proof of Work consensus.
+    pub fn is_proof_of_work(&self) -> bool {
+        matches!(self.consensus_type(), ConsensusType::ProofOfWork)
     }
 }
 
@@ -202,31 +228,46 @@ mod tests {
     }
 
     #[test]
-    fn check_post_merge() {
-        assert!(!Hardfork::Frontier.is_post_merge());
-        assert!(!Hardfork::Homestead.is_post_merge());
-        assert!(!Hardfork::Dao.is_post_merge());
-        assert!(!Hardfork::Tangerine.is_post_merge());
-        assert!(!Hardfork::SpuriousDragon.is_post_merge());
-        assert!(!Hardfork::Byzantium.is_post_merge());
-        assert!(!Hardfork::Constantinople.is_post_merge());
-        assert!(!Hardfork::Petersburg.is_post_merge());
-        assert!(!Hardfork::Istanbul.is_post_merge());
-        assert!(!Hardfork::MuirGlacier.is_post_merge());
-        assert!(!Hardfork::Berlin.is_post_merge());
-        assert!(!Hardfork::London.is_post_merge());
-        assert!(!Hardfork::ArrowGlacier.is_post_merge());
-        assert!(!Hardfork::GrayGlacier.is_post_merge());
-        assert!(Hardfork::Paris.is_post_merge());
-        assert!(Hardfork::Shanghai.is_post_merge());
-        assert!(Hardfork::Cancun.is_post_merge());
-    }
+    fn check_consensus_type() {
+        let pow_hardforks = [
+            Hardfork::Frontier,
+            Hardfork::Homestead,
+            Hardfork::Dao,
+            Hardfork::Tangerine,
+            Hardfork::SpuriousDragon,
+            Hardfork::Byzantium,
+            Hardfork::Constantinople,
+            Hardfork::Petersburg,
+            Hardfork::Istanbul,
+            Hardfork::MuirGlacier,
+            Hardfork::Berlin,
+            Hardfork::London,
+            Hardfork::ArrowGlacier,
+            Hardfork::GrayGlacier,
+        ];
 
-    #[test]
-    #[cfg(feature = "optimism")]
-    fn check_op_post_merge() {
-        assert!(Hardfork::Bedrock.is_post_merge());
-        assert!(Hardfork::Regolith.is_post_merge());
-        assert!(Hardfork::Canyon.is_post_merge());
+        let pos_hardforks = [Hardfork::Paris, Hardfork::Shanghai, Hardfork::Cancun];
+
+        #[cfg(feature = "optimism")]
+        let op_hardforks = [Hardfork::Bedrock, Hardfork::Regolith, Hardfork::Canyon];
+
+        for hardfork in pow_hardforks.iter() {
+            assert_eq!(hardfork.consensus_type(), ConsensusType::ProofOfWork);
+            assert!(!hardfork.is_proof_of_stake());
+            assert!(hardfork.is_proof_of_work());
+        }
+
+        for hardfork in pos_hardforks.iter() {
+            assert_eq!(hardfork.consensus_type(), ConsensusType::ProofOfStake);
+            assert!(hardfork.is_proof_of_stake());
+            assert!(!hardfork.is_proof_of_work());
+        }
+
+        #[cfg(feature = "optimism")]
+        for hardfork in op_hardforks.iter() {
+            assert_eq!(hardfork.consensus_type(), ConsensusType::ProofOfStake);
+            assert!(hardfork.is_proof_of_stake());
+            assert!(!hardfork.is_proof_of_work());
+        }
     }
 }
