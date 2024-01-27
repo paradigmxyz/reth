@@ -134,9 +134,11 @@ where
         }
 
         for (i, &index) in indices_to_remove.iter().rev().enumerate() {
-            msg.hashes.remove(index - i);
-            msg.types.remove(index - i);
-            msg.sizes.remove(index - i);
+            let index = index.saturating_sub(i);
+
+            msg.hashes.remove(index);
+            msg.types.remove(index);
+            msg.sizes.remove(index);
         }
 
         let mut hashes_sorted = msg.hashes.clone();
@@ -279,7 +281,7 @@ mod test {
             vec![TxType::MAX_RESERVED_EIP as u8, TxType::Legacy as u8, TxType::EIP2930 as u8];
         let sizes = vec![
             TxType::MAX_RESERVED_EIP.min_encoded_tx_length() - 1, // the first length isn't valid
-            TxType::MAX_RESERVED_EIP.max_encoded_tx_length(),
+            TxType::MAX_RESERVED_EIP.min_encoded_tx_length() - 1, // neither is the second
             TxType::MAX_RESERVED_EIP.max_encoded_tx_length(),
         ];
         let hashes = vec![
@@ -306,9 +308,9 @@ mod test {
         assert_eq!(
             announcement,
             NewPooledTransactionHashes68 {
-                types: vec!(types[1], types[2]),
-                sizes: vec!(sizes[1], sizes[2]),
-                hashes: vec!(hashes[1], hashes[2]),
+                types: vec!(types[2]),
+                sizes: vec!(sizes[2]),
+                hashes: vec!(hashes[2]),
             }
         );
     }
