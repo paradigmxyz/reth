@@ -46,9 +46,7 @@ impl Discv5 {
 
 impl HandleDiscovery for Discv5 {
     fn add_node(&self, node_record: NodeRecord) {
-        // todo: convert node record to an enr. this is an upstream change since it requires being
-        // able to assemble the enr type without access to the secret key, as `EnrBuilder`
-        // requires.
+       
 
         self.discv4.add_node(node_record)
     }

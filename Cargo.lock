@@ -6065,6 +6065,7 @@ dependencies = [
  "async-trait",
  "data-encoding",
  "enr",
+ "futures",
  "linked_hash_set",
  "parking_lot 0.12.1",
  "reth-net-common",
