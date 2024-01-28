@@ -282,6 +282,9 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Consumer: P2P
     fn retain_unknown(&self, hashes: &mut Vec<TxHash>);
 
+    /// Returns a closure that checks if given transactions is present in the pool.
+    fn is_tx_known(&self) -> impl FnOnce(TxHash) -> bool + '_;
+
     /// Returns if the transaction for the given hash is already included in this pool.
     fn contains(&self, tx_hash: &TxHash) -> bool {
         self.get(tx_hash).is_some()

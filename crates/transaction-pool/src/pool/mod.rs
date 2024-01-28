@@ -676,6 +676,13 @@ where
         removed
     }
 
+    /// Returns a closure that checks if given transactions is present in the pool.
+    pub(crate) fn is_tx_known(&self) -> impl FnOnce(TxHash) -> bool + '_ {
+        let pool = self.get_pool_data();
+
+        move |tx| !pool.contains(&tx)
+    }
+
     /// Removes all transactions that are present in the pool.
     pub(crate) fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {
         if hashes.is_empty() {

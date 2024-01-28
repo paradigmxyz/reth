@@ -175,6 +175,10 @@ impl TransactionPool for NoopTransactionPool {
 
     fn retain_unknown(&self, _hashes: &mut Vec<TxHash>) {}
 
+    fn is_tx_known(&self) -> impl FnOnce(TxHash) -> bool + '_ {
+        |_| false
+    }
+
     fn get(&self, _tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
         None
     }

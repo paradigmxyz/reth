@@ -560,15 +560,14 @@ where
             return
         };
 
-        // extract metadata from payload if this an eth68 msg, since filters that follow mutate
-        // hashes vec and hashes map 1-1 with an index in size and types
+        // extract tx size metadata if this an eth68 msg.
         let mut eth68_sizes = msg
             .as_eth68()
             .map(|eth68_msg| {
                 eth68_msg
                     .metadata_iter()
                     .map(|(&hash, (_type, size))| (hash, size))
-                    .collect::<HashMap<_, _>>()
+                    .collect::<Vec<_>>()
             })
             .unwrap_or_default();
 
@@ -590,7 +589,7 @@ where
         }
 
         // update sizes list to match hashes if is an eth 68 message (otherwise empty map)
-        eth68_sizes.retain(|hash, _| hashes.contains(hash));
+        eth68_sizes.retain(|(hash, _)| hashes.contains(hash));
 
         // filter out invalid `(ty, size, hash)` entries if this is an eth68 announcement
         if let Some(eth68_msg) = msg.as_eth68_mut() {
