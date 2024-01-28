@@ -21,11 +21,6 @@ use reth_primitives::{
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,
 };
-use revm_inspectors::tracing::{
-    js::{JsInspector, TransactionContext},
-    FourByteInspector, TracingInspector, TracingInspectorConfig,
-};
-
 use reth_revm::database::{StateProviderDatabase, SubState};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
@@ -36,7 +31,10 @@ use reth_rpc_types::{
     BlockError, Bundle, CallRequest, RichBlock, StateContext,
 };
 use revm::{db::CacheDB, primitives::Env};
-
+use revm_inspectors::tracing::{
+    js::{JsInspector, TransactionContext},
+    FourByteInspector, TracingInspector, TracingInspectorConfig,
+};
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -640,18 +638,19 @@ where
 
     /// Handler for `debug_getRawReceipts`
     async fn raw_receipts(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
-        let receipts =
-            self.inner.provider.receipts_by_block_id(block_id).to_rpc_result()?.unwrap_or_default();
-        let mut all_receipts = Vec::with_capacity(receipts.len());
-
-        for receipt in receipts {
-            let mut buf = Vec::new();
-            let receipt = receipt.with_bloom();
-            receipt.encode(&mut buf);
-            all_receipts.push(buf.into());
-        }
-
-        Ok(all_receipts)
+        Ok(self
+            .inner
+            .provider
+            .receipts_by_block_id(block_id)
+            .to_rpc_result()?
+            .unwrap_or_default()
+            .into_iter()
+            .map(|receipt| {
+                let mut buf = Vec::new();
+                receipt.with_bloom().encode(&mut buf);
+                Bytes::from(buf)
+            })
+            .collect())
     }
 
     /// Handler for `debug_getBadBlocks`
