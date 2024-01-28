@@ -233,7 +233,9 @@ impl<H: NippyJarHeader> NippyJar<H> {
     /// **The user must ensure the header type matches the one used during the jar's creation.**
     pub fn load(path: &Path) -> Result<Self, NippyJarError> {
         // Read [`Self`] located at the data file.
-        let config_file = File::open(path.with_extension(CONFIG_FILE_EXTENSION))?;
+        let config_path = path.with_extension(CONFIG_FILE_EXTENSION);
+        let config_file = File::open(&config_path)
+            .map_err(|err| reth_primitives::fs::FsPathError::open(err, config_path))?;
 
         let mut obj: Self = bincode::deserialize_from(&config_file)?;
         obj.path = path.to_path_buf();
@@ -243,7 +245,9 @@ impl<H: NippyJarHeader> NippyJar<H> {
     /// Loads filters into memory
     pub fn load_filters(mut self) -> Result<Self, NippyJarError> {
         // Read the offsets lists located at the index file.
-        let mut offsets_file = File::open(self.index_path())?;
+        let offsets_path = self.index_path();
+        let mut offsets_file = File::open(&offsets_path)
+            .map_err(|err| reth_primitives::fs::FsPathError::open(err, offsets_path))?;
 
         self.offsets_index = PrefixSummedEliasFano::deserialize_from(&mut offsets_file)?;
         self.phf = bincode::deserialize_from(&mut offsets_file)?;
