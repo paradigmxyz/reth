@@ -43,7 +43,7 @@ pub mod transaction;
 pub mod trie;
 mod withdrawal;
 
-pub use account::{Account, Bytecode};
+pub use account::{Account, Bytecode, EMPTY_ACCOUNT};
 pub use block::{
     Block, BlockBody, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, BlockWithSenders,
     ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
