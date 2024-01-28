@@ -176,9 +176,7 @@ where
 #[cfg(test)]
 mod test {
     use std::str::FromStr;
-
     use reth_primitives::B256;
-
     use super::*;
 
     #[test]
