@@ -49,8 +49,8 @@ impl<DB: Database> Segment<DB> for Headers {
             debug_assert_eq!(header_block, header_td_block);
             debug_assert_eq!(header_td_block, canonical_header_block);
 
-            let _snapshot_block =
-                snapshot_writer.append_header(header, header_td.0, canonical_header)?;
+            snapshot_writer.append_header(header, header_td.0, canonical_header)?;
+            let _snapshot_block = snapshot_writer.increment_block(SnapshotSegment::Headers)?;
             debug_assert_eq!(_snapshot_block, header_block);
         }
 
