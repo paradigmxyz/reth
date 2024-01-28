@@ -1221,9 +1221,16 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Constantinople at genesis.
+    pub fn constantinople_activated(mut self) -> Self {
+        self = self.byzantium_activated();
+        self.hardforks.insert(Hardfork::Constantinople, ForkCondition::Block(0));
+        self
+    }
+
     /// Enable Petersburg at genesis.
     pub fn petersburg_activated(mut self) -> Self {
-        self = self.byzantium_activated();
+        self = self.constantinople_activated();
         self.hardforks.insert(Hardfork::Petersburg, ForkCondition::Block(0));
         self
     }
