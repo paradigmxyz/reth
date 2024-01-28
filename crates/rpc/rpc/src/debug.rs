@@ -16,7 +16,8 @@ use jsonrpsee::core::RpcResult;
 use reth_primitives::{
     revm::env::tx_env_with_recovered,
     revm_primitives::{db::DatabaseCommit, BlockEnv, CfgEnv},
-    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256,
+    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, Withdrawals,
+    B256,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,
@@ -606,7 +607,7 @@ where
         if let Some(mut block) = block {
             // In RPC withdrawals are always present
             if block.withdrawals.is_none() {
-                block.withdrawals = Some(vec![]);
+                block.withdrawals = Some(Withdrawals::default());
             }
             block.encode(&mut res);
         }

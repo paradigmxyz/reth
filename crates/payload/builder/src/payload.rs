@@ -2,7 +2,9 @@
 
 use alloy_rlp::Encodable;
 use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::{Address, BlobTransactionSidecar, SealedBlock, Withdrawal, B256, U256};
+use reth_primitives::{
+    Address, BlobTransactionSidecar, SealedBlock, Withdrawal, Withdrawals, B256, U256,
+};
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
     PayloadId,
@@ -153,7 +155,7 @@ pub struct EthPayloadBuilderAttributes {
     /// Randomness value for the generated payload
     pub prev_randao: B256,
     /// Withdrawals for the generated payload
-    pub withdrawals: Vec<Withdrawal>,
+    pub withdrawals: Withdrawals,
     /// Root of the parent beacon block
     pub parent_beacon_block_root: Option<B256>,
 }
@@ -174,10 +176,12 @@ impl EthPayloadBuilderAttributes {
 
         let withdraw = attributes.withdrawals.map(
             |withdrawals: Vec<reth_rpc_types::withdrawal::Withdrawal>| {
-                withdrawals
-                    .into_iter()
-                    .map(convert_standalone_withdraw_to_withdrawal) // Removed the parentheses here
-                    .collect::<Vec<_>>()
+                Withdrawals::new(
+                    withdrawals
+                        .into_iter()
+                        .map(convert_standalone_withdraw_to_withdrawal) // Removed the parentheses here
+                        .collect(),
+                )
             },
         );
 

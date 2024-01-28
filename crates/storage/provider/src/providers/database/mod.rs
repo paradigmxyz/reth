@@ -18,7 +18,7 @@ use reth_primitives::{
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
     ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, B256, U256,
+    Withdrawal, Withdrawals, B256, U256,
 };
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
@@ -418,7 +418,7 @@ impl<DB: Database> WithdrawalsProvider for ProviderFactory<DB> {
         &self,
         id: BlockHashOrNumber,
         timestamp: u64,
-    ) -> ProviderResult<Option<Vec<Withdrawal>>> {
+    ) -> ProviderResult<Option<Withdrawals>> {
         self.provider()?.withdrawals_by_block(id, timestamp)
     }
 
