@@ -598,13 +598,13 @@ where
         if let Some(eth68_msg) = msg.as_eth68_mut() {
             // validate eth68 message
             if let FilterOutcome::ReportPeer =
-                self.transaction_fetcher.eth68_filter_valid.filter_valid_entries_68(eth68_msg)
+                self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_68(eth68_msg)
             {
                 self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
             }
         } else if let Some(eth66_msg) = msg.as_eth66_mut() {
             if let FilterOutcome::ReportPeer =
-                self.transaction_fetcher.eth68_filter_valid.filter_valid_entries_66(eth66_msg)
+                self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_66(eth66_msg)
             {
                 self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
             }

@@ -68,7 +68,7 @@ pub(super) struct TransactionFetcher {
     /// Size metadata for unknown eth68 hashes.
     pub(super) eth68_meta: LruMap<TxHash, usize, Unlimited>,
     /// Filter for valid eth68 announcements.
-    pub(super) eth68_filter_valid: AnnouncementFilter,
+    pub(super) filter_valid_hashes: AnnouncementFilter,
 }
 
 // === impl TransactionFetcher ===
@@ -722,7 +722,7 @@ impl Default for TransactionFetcher {
             ),
             unknown_hashes: LruMap::new_unlimited(),
             eth68_meta: LruMap::new_unlimited(),
-            eth68_filter_valid: Default::default(),
+            filter_valid_hashes: Default::default(),
         }
     }
 }
