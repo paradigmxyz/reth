@@ -5,7 +5,10 @@ use reth_db::{
 };
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{snapshot::SegmentConfig, BlockNumber, SnapshotSegment};
-use reth_provider::{providers::SnapshotProvider, DatabaseProviderRO};
+use reth_provider::{
+    providers::{SnapshotProvider, SnapshotWriter},
+    DatabaseProviderRO,
+};
 use std::{ops::RangeInclusive, path::Path, sync::Arc};
 
 /// Snapshot segment responsible for [SnapshotSegment::Headers] part of data.
@@ -19,11 +22,41 @@ impl<DB: Database> Segment<DB> for Headers {
 
     fn snapshot(
         &self,
-        _provider: DatabaseProviderRO<DB>,
-        _snapshot_provider: Arc<SnapshotProvider>,
-        _block_range: RangeInclusive<BlockNumber>,
+        provider: DatabaseProviderRO<DB>,
+        snapshot_provider: Arc<SnapshotProvider>,
+        block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
-        unimplemented!()
+        let mut snapshot_writer =
+            snapshot_provider.get_writer(*block_range.start(), SnapshotSegment::Headers)?;
+
+        let mut headers_cursor = provider.tx_ref().cursor_read::<tables::Headers>()?;
+        let headers_walker = headers_cursor.walk_range(block_range.clone())?;
+
+        let mut header_td_cursor = provider.tx_ref().cursor_read::<tables::HeaderTD>()?;
+        let header_td_walker = header_td_cursor.walk_range(block_range.clone())?;
+
+        let mut canonical_headers_cursor =
+            provider.tx_ref().cursor_read::<tables::CanonicalHeaders>()?;
+        let canonical_headers_walker = canonical_headers_cursor.walk_range(block_range)?;
+
+        for ((header_entry, header_td_entry), canonical_header_entry) in
+            headers_walker.zip(header_td_walker).zip(canonical_headers_walker)
+        {
+            let (header_block, header) = header_entry?;
+            let (header_td_block, header_td) = header_td_entry?;
+            let (canonical_header_block, canonical_header) = canonical_header_entry?;
+
+            debug_assert_eq!(header_block, header_td_block);
+            debug_assert_eq!(header_td_block, canonical_header_block);
+
+            snapshot_writer.append_header(header, header_td.0, canonical_header)?;
+            debug_assert_eq!(
+                snapshot_writer.increment_block(SnapshotSegment::Headers)?,
+                header_block
+            );
+        }
+
+        Ok(())
     }
 
     fn create_snapshot_file(
