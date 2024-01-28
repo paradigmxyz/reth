@@ -581,14 +581,17 @@ where
             }
         }
 
-        // filter out known hashes, those txns have already been successfully fetched
+        // filter out known hashes, those txns have already been successfully fetched. most hashes
+        // will be filtered out here since this the mempool protocol is a gossip protocol, healthy
+        // peers will send many of the same hashes
         self.pool.retain_unknown(hashes);
         if hashes.is_empty() {
             // nothing to request
             return
         }
 
-        // update sizes list to match hashes if is an eth 68 message (otherwise empty map)
+        // update sizes list to match hashes if is an eth 68 message (otherwise empty
+        // `eth68_sizes` is an empty vec)
         eth68_sizes.retain(|(hash, _)| hashes.contains(hash));
 
         // filter out invalid `(ty, size, hash)` entries if this is an eth68 announcement
@@ -605,7 +608,8 @@ where
         // destruct message type
         let mut hashes = msg.into_hashes();
 
-        // filter out already seen unknown hashes, for those hashes add the peer as fallback
+        // filter out already seen unknown hashes. this loads the hashes into the tx fetcher,
+        // hence they should be valid at this point. for any seen hashes add the peer as fallback.
         self.transaction_fetcher.filter_unseen_hashes(&mut hashes, peer_id, |peer_id| {
             self.peers.contains_key(&peer_id)
         });
