@@ -454,10 +454,6 @@ where
         self.pool.remove_transactions(hashes)
     }
 
-    fn is_tx_known(&self) -> impl FnOnce(TxHash) -> bool + '_ {
-        self.pool.is_tx_known()
-    }
-
     fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {
         self.pool.retain_unknown(hashes)
     }

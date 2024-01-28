@@ -175,9 +175,9 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-    use reth_primitives::B256;
     use super::*;
+    use reth_primitives::B256;
+    use std::str::FromStr;
 
     #[test]
     fn eth68_empty_announcement() {
