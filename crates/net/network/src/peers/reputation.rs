@@ -35,7 +35,7 @@ const BAD_PROTOCOL_REPUTATION_CHANGE: i32 = i32::MIN;
 
 /// The reputation change to apply to a peer that sent a bad eth68 announcement.
 // todo: current value is a hint, needs to be set properly
-const BAD_ETH68_ANNOUNCEMENT_REPUTATION_CHANGE: i32 = 1 * REPUTATION_UNIT;
+const BAD_ETH68_ANNOUNCEMENT_REPUTATION_CHANGE: i32 = REPUTATION_UNIT;
 
 /// Returns `true` if the given reputation is below the [`BANNED_REPUTATION`] threshold
 #[inline]
