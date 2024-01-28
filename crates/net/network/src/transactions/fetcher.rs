@@ -344,11 +344,6 @@ impl TransactionFetcher {
                     backups.remove(&peer_id);
                 }
 
-                // might receive hash in more than one announcement from same peer within time 
-                // frame it takes to successfully fetch it
-                if !backups.contains(&peer_id) {
-                    backups.insert(peer_id);
-                }
                 return false
             }
 
