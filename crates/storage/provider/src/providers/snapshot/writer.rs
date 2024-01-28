@@ -218,8 +218,6 @@ impl<'a> SnapshotProviderRW<'a> {
     ) -> ProviderResult<BlockNumber> {
         debug_assert!(self.writer.user_header().segment() == SnapshotSegment::Headers);
 
-        self.writer.user_header_mut().increment_block();
-
         self.append_column(header)?;
         self.append_column(terminal_difficulty)?;
         self.append_column(hash)?;
