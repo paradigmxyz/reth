@@ -819,7 +819,7 @@ where
 
                 if has_blob_txs {
                     debug!(target: "net::tx", ?peer_id, "received bad full blob transaction broadcast");
-                    self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
+                    self.report_peer_bad_transactions(peer_id);
                 }
             }
             NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
@@ -989,10 +989,14 @@ where
         }
     }
 
+    fn report_peer_bad_transactions(&self, peer_id: PeerId) {
+        self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
+        self.metrics.reported_bad_transactions.increment(1);
+    }
+
     fn report_peer(&self, peer_id: PeerId, kind: ReputationChangeKind) {
         trace!(target: "net::tx", ?peer_id, ?kind, "reporting reputation change");
         self.network.reputation_change(peer_id, kind);
-        self.metrics.reported_bad_transactions.increment(1);
     }
 
     fn on_request_error(&self, peer_id: PeerId, req_err: RequestError) {
@@ -1003,7 +1007,7 @@ where
                 // peer is already disconnected
                 return
             }
-            RequestError::BadResponse => ReputationChangeKind::BadTransactions,
+            RequestError::BadResponse => return self.report_peer_bad_transactions(peer_id),
         };
         self.report_peer(peer_id, kind);
     }
@@ -1022,7 +1026,7 @@ where
     fn on_bad_import(&mut self, hash: TxHash) {
         if let Some(peers) = self.transactions_by_peers.remove(&hash) {
             for peer_id in peers {
-                self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
+                self.report_peer_bad_transactions(peer_id);
             }
         }
     }
