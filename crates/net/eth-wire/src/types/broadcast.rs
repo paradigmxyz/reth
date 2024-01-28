@@ -227,6 +227,14 @@ impl NewPooledTransactionHashes {
             NewPooledTransactionHashes::Eth68(msg) => Some(msg),
         }
     }
+
+    /// Returns a mutable reference to the inner type if this an eth66 announcement.
+    pub fn as_eth66_mut(&mut self) -> Option<&mut NewPooledTransactionHashes66> {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => Some(msg),
+            NewPooledTransactionHashes::Eth68(_) => None,
+        }
+    }
 }
 
 impl From<NewPooledTransactionHashes> for EthMessage {

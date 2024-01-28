@@ -147,6 +147,6 @@ pub use session::{
     PendingSessionHandle, PendingSessionHandshakeError, SessionCommand, SessionEvent, SessionId,
     SessionLimits, SessionManager, SessionsConfig,
 };
-pub use transactions::{Announcement68Filter, FilterAnnouncement68, ValidateTx68};
+pub use transactions::{AnnouncementFilter, FilterAnnouncement, ValidateTx68};
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};

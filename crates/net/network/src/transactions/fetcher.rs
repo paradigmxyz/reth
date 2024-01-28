@@ -17,7 +17,7 @@ use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError}
 use tracing::{debug, trace};
 
 use super::{
-    Announcement68Filter, Peer, PooledTransactions, FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT,
+    AnnouncementFilter, Peer, PooledTransactions, FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT,
 };
 
 /// Maximum concurrent [`GetPooledTxRequest`]s to allow per peer.
@@ -68,7 +68,7 @@ pub(super) struct TransactionFetcher {
     /// Size metadata for unknown eth68 hashes.
     pub(super) eth68_meta: LruMap<TxHash, usize, Unlimited>,
     /// Filter for valid eth68 announcements.
-    pub(super) eth68_filter_valid: Announcement68Filter,
+    pub(super) eth68_filter_valid: AnnouncementFilter,
 }
 
 // === impl TransactionFetcher ===
