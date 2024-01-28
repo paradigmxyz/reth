@@ -88,11 +88,16 @@ impl Hardfork {
         }
     }
 
-    /// Retrieves the activation timestamp for the specified hardfork on the Ethereum mainnet.
-    pub fn mainnet_activation_timestamp(&self, chain: Chain) -> Option<u64> {
+    /// Retrieves the activation timestamp for the specified hardfork on the given chain.
+    pub fn activation_timestamp(&self, chain: Chain) -> Option<u64> {
         if chain != Chain::mainnet() {
             return None;
         }
+        self.mainnet_activation_timestamp()
+    }
+
+    /// Retrieves the activation timestamp for the specified hardfork on the Ethereum mainnet.
+    pub fn mainnet_activation_timestamp(&self) -> Option<u64> {
         match self {
             Hardfork::Frontier => Some(1438226773),
             Hardfork::Homestead => Some(1457938193),
