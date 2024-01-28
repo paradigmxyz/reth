@@ -116,6 +116,7 @@ impl ImportCommand {
             provider_factory
                 .snapshot_provider()
                 .expect("snapshot provider initialized via provider factory"),
+            config.prune.clone().unwrap_or_default().segments,
         );
 
         let (mut pipeline, events) = self
