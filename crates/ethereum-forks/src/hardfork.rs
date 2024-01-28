@@ -118,7 +118,7 @@ impl Hardfork {
     pub fn is_proof_of_work(&self) -> bool {
         matches!(self.consensus_type(), ConsensusType::ProofOfWork)
     }
-      
+
     /// Retrieves the activation timestamp for the specified hardfork on the given chain.
     pub fn activation_timestamp(&self, chain: Chain) -> Option<u64> {
         if chain != Chain::mainnet() {
