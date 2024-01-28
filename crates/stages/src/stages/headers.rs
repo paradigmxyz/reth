@@ -120,7 +120,7 @@ where
         // Although headers were downloaded in reverse order, the collector iterates it in ascending
         // order
 
-        let interval = total_headers / 10;
+        let interval = (total_headers / 10).max(1);
         for (index, header) in self.header_collector.iter()?.enumerate() {
             let (number, header_buf) = header?;
 
