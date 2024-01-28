@@ -39,7 +39,7 @@ use std::{
 pub struct Discovery<
     D = Discv4,
     S = ReceiverStream<DiscoveryUpdate>,
-    N: Clone + TryFrom<discv5::enr::Enr<SecretKey>, Error = &'static str> = DnsNodeRecordUpdate,
+    N: Clone + TryFrom<discv5::enr::Enr<SecretKey>, Error = reth_dns_discovery::Error> = DnsNodeRecordUpdate,
 > {
     /// All nodes discovered via discovery protocol.
     ///
@@ -65,7 +65,7 @@ pub struct Discovery<
     discovery_listeners: Vec<mpsc::UnboundedSender<DiscoveryEvent>>,
 }
 
-impl<D, S> Discovery<D, S>
+impl<D, S, N> Discovery<D, S, N>
 where
     D: HandleDiscovery,
 {
@@ -377,7 +377,7 @@ impl<S> fmt::Debug for Discovery<Discv5, S> {
     }
 }
 
-impl Discovery<Discv5, MergedUpdateStream, EnrWrapper> {
+impl Discovery<Discv5, MergedUpdateStream, EnrCombinedKeyWrapper> {
     /// Spawns the discovery service.
     ///
     /// This will spawn [`discv5::Discv5`] and [`Discv4`] each onto their own new task and
@@ -529,7 +529,7 @@ impl Discovery<Discv5, MergedUpdateStream, EnrWrapper> {
         // setup DNS discovery.
         let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
             if let Some(dns_config) = dns_discovery_config {
-                new_dns::<EnrWrapper>(dns_config)?
+                new_dns::<EnrCombinedKeyWrapper>(dns_config)?
             } else {
                 (None, None, None)
             };
@@ -550,10 +550,10 @@ impl Discovery<Discv5, MergedUpdateStream, EnrWrapper> {
 }
 
 #[derive(Deref, DerefMut, Clone)]
-struct EnrWrapper(discv5::enr::Enr<discv5::enr::CombinedKey>);
+struct EnrCombinedKeyWrapper(discv5::enr::Enr<discv5::enr::CombinedKey>);
 
-impl TryFrom<discv5::enr::Enr<SecretKey>> for EnrWrapper {
-    type Error = NetworkError;
+impl TryFrom<discv5::enr::Enr<SecretKey>> for EnrCombinedKeyWrapper {
+    type Error = reth_dns_discovery::Error;
     fn try_from(value: discv5::enr::Enr<SecretKey>) -> Result<Self, Self::Error> {
         // serialize and deserialize enr
         todo!()
@@ -566,7 +566,7 @@ pub(crate) fn new_dns<N>(
 ) -> Result<
     (Option<DnsDiscoveryHandle<N>>, Option<ReceiverStream<N>>, Option<JoinHandle<()>>),
     NetworkError,
-> {
+> where N: Clone + TryFrom<discv5::enr::Enr<SecretKey>, Error = reth_dns_discovery::Error> + Send {
     let (mut service, dns_disc) =
         DnsDiscoveryService::new_pair(Arc::new(DnsResolver::from_system_conf()?), dns_config);
     let dns_discovery_updates = service.node_record_stream();

@@ -395,7 +395,7 @@ impl Discv4 {
 /// Essential interface for interacting with discovery.
 pub trait HandleDiscovery {
     /// Adds the node to the table, if it is not already present.
-    fn add_node(&self, node_record: NodeRecord);
+    fn add_node(&self, node_record: impl TryFrom<Enr<SecretKey>>);
 
     /// Discv4 only
     ///
