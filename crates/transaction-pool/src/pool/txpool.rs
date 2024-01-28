@@ -357,9 +357,15 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Returns all transactions from parked pools
     pub(crate) fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let mut queued = self.basefee_pool.all().collect::<Vec<_>>();
-        queued.extend(self.queued_pool.all());
-        queued
+        self.basefee_pool.all().chain(self.queued_pool.all()).collect()
+    }
+
+    /// Returns queued and pending transactions for the specified sender
+    pub fn queued_and_pending_txs_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> (Vec<TransactionId>, Vec<TransactionId>) {
+        (self.queued_pool.get_txs_by_sender(sender), self.pending_pool.get_txs_by_sender(sender))
     }
 
     /// Returns `true` if the transaction with the given hash is already included in this pool.
@@ -583,8 +589,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// This will move/discard the given transaction according to the `PoolUpdate`
     fn process_updates(&mut self, updates: Vec<PoolUpdate>) -> UpdateOutcome<T::Transaction> {
         let mut outcome = UpdateOutcome::default();
-        for update in updates {
-            let PoolUpdate { id, hash, current, destination } = update;
+        for PoolUpdate { id, hash, current, destination } in updates {
             match destination {
                 Destination::Discard => {
                     // remove the transaction from the pool and subpool
@@ -594,7 +599,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                     self.metrics.removed_transactions.increment(1);
                 }
                 Destination::Pool(move_to) => {
-                    debug_assert!(!move_to.eq(&current), "destination must be different");
+                    debug_assert_ne!(&move_to, &current, "destination must be different");
                     let moved = self.move_transaction(current, move_to, &id);
                     if matches!(move_to, SubPool::Pending) {
                         if let Some(tx) = moved {

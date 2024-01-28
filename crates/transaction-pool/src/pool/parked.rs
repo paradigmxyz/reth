@@ -91,7 +91,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         self.by_id
             .range((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
-            .map(|(_, tx)| *tx.transaction.id())
+            .map(|(tx_id, _)| *tx_id)
             .collect()
     }
 
