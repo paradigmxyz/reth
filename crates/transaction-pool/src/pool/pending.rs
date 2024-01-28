@@ -1,13 +1,15 @@
 use crate::{
-    identifier::TransactionId,
-    pool::{best::BestTransactions, size::SizeTracker},
+    identifier::{SenderId, TransactionId},
+    pool::{
+        best::{BestTransactions, BestTransactionsWithBasefee},
+        size::SizeTracker,
+    },
     Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
-
-use crate::pool::best::BestTransactionsWithBasefee;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
+    ops::Bound::Unbounded,
     sync::Arc,
 };
 use tokio::sync::broadcast;
@@ -487,6 +489,15 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Returns `true` if the transaction with the given id is already included in this pool.
     pub(crate) fn contains(&self, id: &TransactionId) -> bool {
         self.by_id.contains_key(id)
+    }
+
+    /// Get transactions by sender
+    pub(crate) fn get_txs_by_sender(&self, sender: SenderId) -> Vec<TransactionId> {
+        self.by_id
+            .range((sender.start_bound(), Unbounded))
+            .take_while(move |(other, _)| sender == other.sender)
+            .map(|(tx_id, _)| *tx_id)
+            .collect()
     }
 
     /// Retrieves a transaction with the given ID from the pool, if it exists.
