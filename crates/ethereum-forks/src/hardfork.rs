@@ -118,6 +118,47 @@ impl Hardfork {
     pub fn is_proof_of_work(&self) -> bool {
         matches!(self.consensus_type(), ConsensusType::ProofOfWork)
     }
+      
+    /// Retrieves the activation timestamp for the specified hardfork on the given chain.
+    pub fn activation_timestamp(&self, chain: Chain) -> Option<u64> {
+        if chain != Chain::mainnet() {
+            return None;
+        }
+        self.mainnet_activation_timestamp()
+    }
+
+    /// Retrieves the activation timestamp for the specified hardfork on the Ethereum mainnet.
+    pub fn mainnet_activation_timestamp(&self) -> Option<u64> {
+        match self {
+            Hardfork::Frontier => Some(1438226773),
+            Hardfork::Homestead => Some(1457938193),
+            Hardfork::Dao => Some(1468977640),
+            Hardfork::Tangerine => Some(1476753571),
+            Hardfork::SpuriousDragon => Some(1479788144),
+            Hardfork::Byzantium => Some(1508131331),
+            Hardfork::Constantinople => Some(1551340324),
+            Hardfork::Petersburg => Some(1551340324),
+            Hardfork::Istanbul => Some(1575807909),
+            Hardfork::MuirGlacier => Some(1577953849),
+            Hardfork::Berlin => Some(1618481223),
+            Hardfork::London => Some(1628166822),
+            Hardfork::ArrowGlacier => Some(1639036523),
+            Hardfork::GrayGlacier => Some(1656586444),
+            Hardfork::Paris => Some(1663224162),
+            Hardfork::Shanghai => Some(1681338455),
+
+            // upcoming hardforks
+            Hardfork::Cancun => None,
+
+            // optimism hardforks
+            #[cfg(feature = "optimism")]
+            Hardfork::Bedrock => None,
+            #[cfg(feature = "optimism")]
+            Hardfork::Regolith => None,
+            #[cfg(feature = "optimism")]
+            Hardfork::Canyon => None,
+        }
+    }
 }
 
 impl FromStr for Hardfork {
