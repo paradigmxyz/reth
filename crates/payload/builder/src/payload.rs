@@ -2,9 +2,7 @@
 
 use alloy_rlp::Encodable;
 use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::{
-    Address, BlobTransactionSidecar, SealedBlock, Withdrawal, Withdrawals, B256, U256,
-};
+use reth_primitives::{Address, BlobTransactionSidecar, SealedBlock, Withdrawals, B256, U256};
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
     PayloadId,
@@ -232,7 +230,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
         self.prev_randao
     }
 
-    fn withdrawals(&self) -> &Vec<Withdrawal> {
+    fn withdrawals(&self) -> &Withdrawals {
         &self.withdrawals
     }
 }

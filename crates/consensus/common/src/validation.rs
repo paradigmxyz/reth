@@ -478,7 +478,7 @@ mod tests {
     use reth_primitives::{
         constants::eip4844::DATA_GAS_PER_BLOB, hex_literal::hex, proofs, Account, Address,
         BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, Header, Signature,
-        TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
+        TransactionKind, TransactionSigned, Withdrawal, Withdrawals, MAINNET, U256,
     };
     use std::ops::RangeBounds;
 
@@ -492,7 +492,7 @@ mod tests {
                 &self,
                 _id: BlockHashOrNumber,
                 _timestamp: u64,
-            ) -> ProviderResult<Option<Vec<Withdrawal>>> ;
+            ) -> ProviderResult<Option<Withdrawals>> ;
         }
     }
 
@@ -579,7 +579,7 @@ mod tests {
             &self,
             _id: BlockHashOrNumber,
             _timestamp: u64,
-        ) -> ProviderResult<Option<Vec<Withdrawal>>> {
+        ) -> ProviderResult<Option<Withdrawals>> {
             self.withdrawals_provider.withdrawals_by_block(_id, _timestamp)
         }
 
