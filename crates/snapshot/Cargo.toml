@@ -26,6 +26,7 @@ tokio = { workspace = true, features = ["sync"] }
 thiserror.workspace = true
 tracing.workspace = true
 clap = { workspace = true, features = ["derive"], optional = true }
+rayon.workspace = true
 
 [dev-dependencies]
 # reth
