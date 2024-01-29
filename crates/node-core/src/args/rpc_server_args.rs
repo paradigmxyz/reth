@@ -19,7 +19,7 @@ use clap::{
 use futures::TryFutureExt;
 use rand::Rng;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_node_api::EngineTypes;
+use reth_node_api::{EngineTypes, EvmEnvConfig};
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, StateProviderFactory,
@@ -47,12 +47,15 @@ use tracing::{debug, info};
 
 /// Default max number of subscriptions per connection.
 pub(crate) const RPC_DEFAULT_MAX_SUBS_PER_CONN: u32 = 1024;
+
 /// Default max request size in MB.
 pub(crate) const RPC_DEFAULT_MAX_REQUEST_SIZE_MB: u32 = 15;
+
 /// Default max response size in MB.
 ///
 /// This is only relevant for very large trace responses.
-pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 150;
+pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 160;
+
 /// Default number of incoming connections.
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
 
@@ -216,9 +219,10 @@ impl RpcServerArgs {
         // ws port is scaled by a factor of instance * 2
         self.ws_port += instance * 2 - 2;
 
-        // also adjust the ipc path by appending the instance number to the path used for the
-        // endpoint
-        self.ipcpath = format!("{}-{}", self.ipcpath, instance);
+        // if multiple instances are being run, append the instance number to the ipc path
+        if instance > 1 {
+            self.ipcpath = format!("{}-{}", self.ipcpath, instance);
+        }
     }
 
     /// Set the http port to zero, to allow the OS to assign a random unused port when the rpc
@@ -292,6 +296,7 @@ impl RpcServerArgs {
             .with_network(components.network())
             .with_events(components.events())
             .with_executor(components.task_executor())
+            .with_evm_config(components.evm_config())
             .build_with_auth_server(module_config, engine_api);
 
         let rpc_components = RethRpcComponents {
@@ -338,13 +343,14 @@ impl RpcServerArgs {
     }
 
     /// Convenience function for starting a rpc server with configs which extracted from cli args.
-    pub async fn start_rpc_server<Provider, Pool, Network, Tasks, Events>(
+    pub async fn start_rpc_server<Provider, Pool, Network, Tasks, Events, EvmConfig>(
         &self,
         provider: Provider,
         pool: Pool,
         network: Network,
         executor: Tasks,
         events: Events,
+        evm_config: EvmConfig,
     ) -> Result<RpcServerHandle, RpcError>
     where
         Provider: BlockReaderIdExt
@@ -361,6 +367,7 @@ impl RpcServerArgs {
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         Events: CanonStateSubscriptions + Clone + 'static,
+        EvmConfig: EvmEnvConfig + 'static,
     {
         reth_rpc_builder::launch(
             provider,
@@ -370,12 +377,14 @@ impl RpcServerArgs {
             self.rpc_server_config(),
             executor,
             events,
+            evm_config,
         )
         .await
     }
 
     /// Create Engine API server.
-    pub async fn start_auth_server<Provider, Pool, Network, Tasks, EngineT>(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn start_auth_server<Provider, Pool, Network, Tasks, EngineT, EvmConfig>(
         &self,
         provider: Provider,
         pool: Pool,
@@ -383,6 +392,7 @@ impl RpcServerArgs {
         executor: Tasks,
         engine_api: EngineApi<Provider, EngineT>,
         jwt_secret: JwtSecret,
+        evm_config: EvmConfig,
     ) -> Result<AuthServerHandle, RpcError>
     where
         Provider: BlockReaderIdExt
@@ -397,6 +407,7 @@ impl RpcServerArgs {
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         EngineT: EngineTypes + 'static,
+        EvmConfig: EvmEnvConfig + 'static,
     {
         let socket_address = SocketAddr::new(self.auth_addr, self.auth_port);
 
@@ -408,6 +419,7 @@ impl RpcServerArgs {
             engine_api,
             socket_address,
             jwt_secret,
+            evm_config,
         )
         .await
     }

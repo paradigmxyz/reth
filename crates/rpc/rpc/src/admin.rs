@@ -55,7 +55,7 @@ where
         let peers = peers
             .into_iter()
             .map(|peer| PeerInfo {
-                id: Some(format!("{:?}", peer.remote_id)),
+                id: Some(peer.remote_id.to_string()),
                 name: peer.client_version.to_string(),
                 caps: peer.capabilities.capabilities().iter().map(|cap| cap.to_string()).collect(),
                 network: PeerNetworkInfo {
@@ -68,7 +68,7 @@ where
                 protocols: PeerProtocolsInfo {
                     eth: Some(PeerEthProtocolInfo {
                         difficulty: Some(peer.status.total_difficulty),
-                        head: format!("{:?}", peer.status.blockhash),
+                        head: peer.status.blockhash.to_string(),
                         version: peer.status.version as u32,
                     }),
                     pip: None,
