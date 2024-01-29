@@ -153,8 +153,8 @@ impl NetworkHandle {
         rx.await
     }
 
-    /// Toggles network connection state between [`NetworkConnectionState::Hibernate`] and
-    /// [`NetworkConnectionState::Active`].
+    /// Toggles network connection state between Hibernate and
+    /// Active.
     pub async fn toggle_network_conn(&self, network_conn: NetworkConnectionState) {
         self.send_message(ToggleNetworkConnection(network_conn));
     }

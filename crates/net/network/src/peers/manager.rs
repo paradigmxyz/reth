@@ -741,7 +741,7 @@ impl PeersManager {
         self.net_connection_state = NetworkConnectionState::Active;
     }
 
-    /// Sets [`net_connection_state]` to [`ShuttingDown`].
+    /// Sets net_connection_state to ShuttingDown.
     pub fn on_shutdown(&mut self) {
         self.net_connection_state = NetworkConnectionState::ShuttingDown;
     }
