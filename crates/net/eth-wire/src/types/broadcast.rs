@@ -319,6 +319,20 @@ impl HandleAnnouncement for ValidAnnouncementData {
     }
 }
 
+/// Hashes extracted from valid announcement data. For an eth68 announcement, this means the eth68
+/// metadata should have been cached already.
+pub type ValidTxHashes = Vec<TxHash>;
+
+impl HandleAnnouncement for ValidTxHashes {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
+        self.retain(|&hash| f(hash))
+    }
+}
+
 /// This informs peers of transaction hashes for transactions that have appeared on the network,
 /// but have not been included in a block.
 #[derive_arbitrary(rlp)]

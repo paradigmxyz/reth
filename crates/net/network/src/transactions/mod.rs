@@ -569,9 +569,12 @@ where
         }
 
         // 1. filter out known hashes
-        // known txns have already been successfully fetched. most hashes will be filtered out
-        // here since this the mempool protocol is a gossip protocol, healthy
-        // peers will send many of the same hashes.
+        //
+        // known txns have already been successfully fetched.
+        //
+        // most hashes will be filtered out here since this the mempool protocol is a gossip
+        // protocol, healthy peers will send many of the same hashes.
+        //
         self.pool.retain_unknown(&mut msg);
         if msg.is_empty() {
             // nothing to request
@@ -582,8 +585,10 @@ where
         //
         // first get the message version, because this will destruct the message
         let msg_version = msg.version();
+        //
         // validates messages with respect to the given network, e.g. allowed tx types
-        let mut valid_announcement_data = if let Some(eth68_msg) = msg.take_eth68() {
+        //
+        let mut hashes = if let Some(eth68_msg) = msg.take_eth68() {
             // validate eth68 announcement data
             let (outcome, valid_data) =
                 self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_68(eth68_msg);
@@ -591,8 +596,28 @@ where
             if let FilterOutcome::ReportPeer = outcome {
                 self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
             }
-
             valid_data
+            .into_iter()
+            .map(|(hash, metadata)| {
+                // cache eth68 metadata
+                if let Some((_ty, size)) = metadata {
+                    // check if this peer is announcing a different size for an already seen hash
+                    if let Some(previously_seen_size) = self.transaction_fetcher.eth68_meta.get(&hash) {
+                        if size != *previously_seen_size {
+                            // todo: store both sizes as a `(size, peer_id)` tuple to catch peers 
+                            // that respond with another size tx than they announced
+                            debug!(target: "net::tx",
+                                peer_id=format!("{peer_id:#}"),
+                                size=size,
+                                previously_seen_size=previously_seen_size,
+                                "peer announced a different size for tx, this is especially worrying if either size is very big..."
+                            );
+                        }
+                    }
+                    self.transaction_fetcher.eth68_meta.insert(hash, size);
+                }
+                hash
+            }).collect::<Vec<_>>()
         } else if let Some(eth66_msg) = msg.take_eth66() {
             // validate eth66 announcement data
             let (outcome, valid_data) =
@@ -602,7 +627,7 @@ where
                 self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
             }
 
-            valid_data
+            valid_data.into_keys().collect::<Vec<_>>()
         } else {
             debug_assert!(
                 false,
@@ -610,41 +635,31 @@ where
 `%msg`: {msg:?}"
             );
             drop(msg);
-            HashMap::new()
+            vec![]
         };
 
         // 3. filter out already seen unknown hashes
-        // seen hashes are already in the tx fetcher, pending fetch. for any seen hashes add the
-        // peer as fallback. unseen hashes are loaded into the tx fetcher, hence they should be
-        // valid at this point.
-        self.transaction_fetcher.filter_unseen_hashes(
-            &mut valid_announcement_data,
-            peer_id,
-            |peer_id| self.peers.contains_key(&peer_id),
-        );
+        //
+        // seen hashes are already in the tx fetcher, pending fetch.
+        //
+        // for any seen hashes add the peer as fallback. unseen hashes are loaded into the tx
+        // fetcher, hence they should be valid at this point.
+        //
+        self.transaction_fetcher.filter_unseen_hashes(&mut hashes, peer_id, |peer_id| {
+            self.peers.contains_key(&peer_id)
+        });
 
-        if valid_announcement_data.is_empty() {
+        if hashes.is_empty() {
             // nothing to request
             return
         }
 
         debug!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            hashes=?valid_announcement_data.keys(),
+            hashes=?hashes,
             msg_version=%msg_version,
             "received previously unseen hashes in announcement from peer"
         );
-
-        let mut hashes = valid_announcement_data
-            .into_iter()
-            .map(|(hash, metadata)| {
-                // cache eth68 metadata if this was an eth68 announcement
-                if let Some((_ty, size)) = metadata {
-                    self.transaction_fetcher.eth68_meta.insert(hash, size);
-                }
-                hash
-            })
-            .collect::<Vec<TxHash>>();
 
         // only send request for hashes to idle peer, otherwise buffer hashes storing peer as
         // fallback
@@ -1804,7 +1819,6 @@ mod tests {
         // but hashes are taken out of buffer and packed into request to peer_2
         assert!(tx_fetcher.buffered_hashes.is_empty());
 
-        println!("got here");
         // mock session of peer_2 receives request
         let req = to_mock_session_rx
             .recv()
@@ -1866,7 +1880,7 @@ mod tests {
         }
 
         // insert buffered hash for some other peer too, to verify response size accumulation and
-        // selection from buffered hashes
+        // hash selection for peer from buffered hashes
         let peer_id_other = PeerId::new([2; 64]);
         let hash_other = B256::from_slice(&[6; 32]);
         let mut backups = default_cache();
@@ -1900,10 +1914,13 @@ mod tests {
             .await
             .expect("peer session should receive request with buffered hashes");
         let PeerRequest::GetPooledTransactions { request, .. } = req else { unreachable!() };
-        let GetPooledTransactions(hashes) = request;
+        let GetPooledTransactions(mut hashes) = request;
 
         let mut expected_request = unseen_eth68_hashes.to_vec();
         expected_request.push(seen_eth68_hashes[1]);
+
+        hashes.sort();
+
         assert_eq!(hashes, expected_request);
     }
 }
