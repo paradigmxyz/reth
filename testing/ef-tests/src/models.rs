@@ -8,8 +8,8 @@ use reth_db::{
 };
 use reth_primitives::{
     keccak256, Account as RethAccount, Address, Bloom, Bytecode, Bytes, ChainSpec,
-    ChainSpecBuilder, Header as RethHeader, JsonU256, SealedHeader, StorageEntry, Withdrawal,
-    Withdrawals, B256, B64, U256,
+    ChainSpecBuilder, Header as RethHeader, JsonU256, SealedHeader, StorageEntry, Withdrawals,
+    B256, B64, U256,
 };
 use serde::{self, Deserialize};
 use std::{collections::BTreeMap, ops::Deref};
