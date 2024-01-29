@@ -19,7 +19,7 @@ use reth_interfaces::{
     consensus::{Consensus, ConsensusError},
     executor::{BlockExecutionError, BlockValidationError},
 };
-use reth_node_api::EngineTypes;
+use reth_node_api::{EngineTypes, EvmEnvConfig};
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom,
@@ -94,7 +94,7 @@ impl Consensus for AutoSealConsensus {
 
 /// Builder type for configuring the setup
 #[derive(Debug)]
-pub struct AutoSealBuilder<Client, Pool, Engine: EngineTypes> {
+pub struct AutoSealBuilder<Client, Pool, Engine: EngineTypes, EvmConfig> {
     client: Client,
     consensus: AutoSealConsensus,
     pool: Pool,
@@ -102,11 +102,12 @@ pub struct AutoSealBuilder<Client, Pool, Engine: EngineTypes> {
     storage: Storage,
     to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
     canon_state_notification: CanonStateNotificationSender,
+    evm_config: EvmConfig,
 }
 
 // === impl AutoSealBuilder ===
 
-impl<Client, Pool, Engine> AutoSealBuilder<Client, Pool, Engine>
+impl<Client, Pool, Engine, EvmConfig> AutoSealBuilder<Client, Pool, Engine, EvmConfig>
 where
     Client: BlockReaderIdExt,
     Pool: TransactionPool,
@@ -120,6 +121,7 @@ where
         to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
         canon_state_notification: CanonStateNotificationSender,
         mode: MiningMode,
+        evm_config: EvmConfig,
     ) -> Self {
         let latest_header = client
             .latest_header()
@@ -135,6 +137,7 @@ where
             mode,
             to_engine,
             canon_state_notification,
+            evm_config,
         }
     }
 
@@ -146,9 +149,19 @@ where
 
     /// Consumes the type and returns all components
     #[track_caller]
-    pub fn build(self) -> (AutoSealConsensus, AutoSealClient, MiningTask<Client, Pool, Engine>) {
-        let Self { client, consensus, pool, mode, storage, to_engine, canon_state_notification } =
-            self;
+    pub fn build(
+        self,
+    ) -> (AutoSealConsensus, AutoSealClient, MiningTask<Client, Pool, EvmConfig, Engine>) {
+        let Self {
+            client,
+            consensus,
+            pool,
+            mode,
+            storage,
+            to_engine,
+            canon_state_notification,
+            evm_config,
+        } = self;
         let auto_client = AutoSealClient::new(storage.clone());
         let task = MiningTask::new(
             Arc::clone(&consensus.chain_spec),
@@ -158,6 +171,7 @@ where
             storage,
             client,
             pool,
+            evm_config,
         );
         (consensus, auto_client, task)
     }
@@ -298,11 +312,14 @@ impl StorageInner {
     /// Executes the block with the given block and senders, on the provided [EVMProcessor].
     ///
     /// This returns the poststate from execution and post-block changes, as well as the gas used.
-    pub(crate) fn execute(
+    pub(crate) fn execute<EvmConfig>(
         &mut self,
         block: &BlockWithSenders,
-        executor: &mut EVMProcessor<'_>,
-    ) -> Result<(BundleStateWithReceipts, u64), BlockExecutionError> {
+        executor: &mut EVMProcessor<'_, EvmConfig>,
+    ) -> Result<(BundleStateWithReceipts, u64), BlockExecutionError>
+    where
+        EvmConfig: EvmEnvConfig,
+    {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
         // TODO: there isn't really a parent beacon block root here, so not sure whether or not to
         // call the 4788 beacon contract
@@ -370,12 +387,16 @@ impl StorageInner {
     /// Builds and executes a new block with the given transactions, on the provided [EVMProcessor].
     ///
     /// This returns the header of the executed block, as well as the poststate from execution.
-    pub(crate) fn build_and_execute(
+    pub(crate) fn build_and_execute<EvmConfig>(
         &mut self,
         transactions: Vec<TransactionSigned>,
         client: &impl StateProviderFactory,
         chain_spec: Arc<ChainSpec>,
-    ) -> Result<(SealedHeader, BundleStateWithReceipts), BlockExecutionError> {
+        evm_config: EvmConfig,
+    ) -> Result<(SealedHeader, BundleStateWithReceipts), BlockExecutionError>
+    where
+        EvmConfig: EvmEnvConfig,
+    {
         let header = self.build_header_template(&transactions, chain_spec.clone());
 
         let block = Block { header, body: transactions, ommers: vec![], withdrawals: None }
@@ -389,7 +410,7 @@ impl StorageInner {
             .with_database_boxed(Box::new(StateProviderDatabase::new(client.latest().unwrap())))
             .with_bundle_update()
             .build();
-        let mut executor = EVMProcessor::new_with_state(chain_spec.clone(), db);
+        let mut executor = EVMProcessor::new_with_state(chain_spec.clone(), db, evm_config);
 
         let (bundle_state, gas_used) = self.execute(&block, &mut executor)?;
 

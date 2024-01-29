@@ -22,7 +22,7 @@ use reth_interfaces::{
     sync::NoopSyncStateUpdater,
     test_utils::{NoopFullBlockClient, TestConsensus},
 };
-use reth_node_builder::EthEngineTypes;
+use reth_node_builder::{EthEngineTypes, EthEvmConfig};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, PruneModes, Receipt, B256, U256};
 use reth_provider::{
@@ -46,7 +46,7 @@ type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
         Arc<DatabaseEnv>,
         ShareableBlockchainTree<
             Arc<DatabaseEnv>,
-            EitherExecutorFactory<TestExecutorFactory, EvmProcessorFactory>,
+            EitherExecutorFactory<TestExecutorFactory, EvmProcessorFactory<EthEvmConfig>>,
         >,
     >,
     Arc<EitherDownloader<Client, NoopFullBlockClient>>,
@@ -474,6 +474,7 @@ where
             }
             TestExecutorConfig::Real => EitherExecutorFactory::Right(EvmProcessorFactory::new(
                 self.base_config.chain_spec.clone(),
+                EthEvmConfig::default(),
             )),
         };
 

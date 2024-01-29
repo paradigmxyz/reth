@@ -9,15 +9,8 @@ use reth_interfaces::consensus::Consensus;
 use reth_primitives::ChainSpec;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
-/// Re-export from `reth_node_core` for backwards compatibility.
-pub mod events {
-    pub use crate::core::events::*;
-}
-
-/// Re-export from `reth_node_core` for backwards compatibility.
-pub mod cl_events {
-    pub use crate::core::cl_events::*;
-}
+pub mod cl_events;
+pub mod events;
 
 use crate::{
     args::{
@@ -25,7 +18,7 @@ use crate::{
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
         RpcServerArgs, TxPoolArgs,
     },
-    builder::NodeConfig,
+    builder::{launch_from_config, NodeConfig},
     cli::{db_type::DatabaseBuilder, ext::RethCliExt},
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
@@ -222,9 +215,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let executor = ctx.task_executor;
 
         // launch the node
-        let handle = node_config.launch::<Ext>(ext, executor).await?;
+        let handle = launch_from_config::<Ext>(node_config, ext, executor).await?;
 
-        // wait for node exit
         handle.wait_for_node_exit().await
     }
 

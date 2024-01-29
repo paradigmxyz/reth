@@ -2,6 +2,7 @@ use crate::processor::{verify_receipt, EVMProcessor};
 use reth_interfaces::executor::{
     BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
 };
+use reth_node_api::EvmEnvConfig;
 use reth_primitives::{
     revm::compat::into_reth_log, revm_primitives::ResultAndState, BlockWithSenders, Hardfork,
     Receipt, U256,
@@ -11,7 +12,10 @@ use revm::DatabaseCommit;
 use std::time::Instant;
 use tracing::{debug, trace};
 
-impl<'a> BlockExecutor for EVMProcessor<'a> {
+impl<'a, EvmConfig> BlockExecutor for EVMProcessor<'a, EvmConfig>
+where
+    EvmConfig: EvmEnvConfig,
+{
     fn execute(
         &mut self,
         block: &BlockWithSenders,

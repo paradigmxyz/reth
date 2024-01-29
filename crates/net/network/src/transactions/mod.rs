@@ -74,8 +74,8 @@ const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
 /// Soft limit for NewPooledTransactions
 const NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT: usize = 4096;
 
-/// The target size for the message of full transactions in bytes.
-const MAX_FULL_TRANSACTIONS_PACKET_SIZE: usize = 100 * 1024;
+/// Soft limit for the message of full transactions in bytes.
+const FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT: usize = 100 * 1024;
 
 /// Softlimit for the response size of a GetPooledTransactions message (2MB)
 const GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE: GetPooledTransactionLimit =
@@ -683,7 +683,7 @@ where
             debug_assert!(
                 self.peers.contains_key(&peer_id),
                 "a dead peer has been returned as idle by `@pop_any_idle_peer`, broken invariant `@peers` and `@transaction_fetcher`,
-`%peer_id`: {:?},
+`%peer_id`: {},
 `@peers`: {:?},
 `@transaction_fetcher`: {:?}",
                 peer_id, self.peers, self.transaction_fetcher
@@ -1112,7 +1112,7 @@ impl PropagateTransaction {
 }
 
 /// Helper type for constructing the full transaction message that enforces the
-/// `MAX_FULL_TRANSACTIONS_PACKET_SIZE`
+/// `FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT`
 #[derive(Default)]
 struct FullTransactionsBuilder {
     total_size: usize,
@@ -1122,10 +1122,10 @@ struct FullTransactionsBuilder {
 // === impl FullTransactionsBuilder ===
 
 impl FullTransactionsBuilder {
-    /// Append a transaction to the list if it doesn't exceed the maximum size.
+    /// Append a transaction to the list if it doesn't exceed the maximum target size.
     fn push(&mut self, transaction: &PropagateTransaction) {
         let new_size = self.total_size + transaction.size;
-        if new_size > MAX_FULL_TRANSACTIONS_PACKET_SIZE {
+        if new_size > FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT {
             return
         }
 
@@ -1789,8 +1789,10 @@ mod tests {
         let peer_id = PeerId::new([1; 64]);
         let eth_version = EthVersion::Eth68;
         let unseen_eth68_hashes = [B256::from_slice(&[1; 32]), B256::from_slice(&[2; 32])];
-        let unseen_eth68_hashes_sizes =
-            [MAX_FULL_TRANSACTIONS_PACKET_SIZE / 2, MAX_FULL_TRANSACTIONS_PACKET_SIZE / 2 - 4];
+        let unseen_eth68_hashes_sizes = [
+            FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT / 2,
+            FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT / 2 - 4,
+        ];
         // hashes and sizes to buffer in reverse order so that seen_eth68_hashes[0] and
         // seen_eth68_hashes_sizes[0] are lru
         let seen_eth68_hashes =
@@ -1826,7 +1828,7 @@ mod tests {
         let mut backups = default_cache();
         backups.insert(peer_id_other);
         tx_fetcher.unknown_hashes.insert(hash_other, (0, backups));
-        tx_fetcher.eth68_meta.insert(hash_other, MAX_FULL_TRANSACTIONS_PACKET_SIZE - 2); // a big tx
+        tx_fetcher.eth68_meta.insert(hash_other, FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT - 2); // a big tx
         tx_fetcher.buffered_hashes.insert(hash_other);
 
         let (peer, mut to_mock_session_rx) = new_mock_session(peer_id, eth_version);

@@ -1,7 +1,5 @@
 //! Contains RPC handler implementations specific to blocks.
 
-use std::sync::Arc;
-
 use crate::{
     eth::{
         api::transactions::build_transaction_receipt_with_block_receipts,
@@ -10,20 +8,21 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
+use reth_node_api::EvmEnvConfig;
 use reth_primitives::{BlockId, TransactionMeta};
-
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{Index, RichBlock, TransactionReceipt};
-
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 use reth_transaction_pool::TransactionPool;
+use std::sync::Arc;
 
-impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
+    EvmConfig: EvmEnvConfig + 'static,
 {
     /// Returns the uncle headers of the given block
     ///

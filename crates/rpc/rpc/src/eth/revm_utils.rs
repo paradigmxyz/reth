@@ -1,14 +1,20 @@
 //! utilities for working with revm
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
+#[cfg(feature = "optimism")]
+use reth_primitives::revm::env::fill_op_tx_env;
+#[cfg(not(feature = "optimism"))]
+use reth_primitives::revm::env::fill_tx_env;
 use reth_primitives::{
-    revm::env::{fill_tx_env, fill_tx_env_with_recovered},
-    Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256, U256,
+    revm::env::fill_tx_env_with_recovered, Address, TransactionSigned,
+    TransactionSignedEcRecovered, TxHash, B256, U256,
 };
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
     BlockOverrides, CallRequest,
 };
+#[cfg(feature = "optimism")]
+use revm::primitives::{Bytes, OptimismFields};
 use revm::{
     db::CacheDB,
     precompile::{Precompiles, SpecId as PrecompilesSpecId},
@@ -20,9 +26,6 @@ use revm_primitives::{
     Bytecode,
 };
 use tracing::trace;
-
-#[cfg(feature = "optimism")]
-use revm::primitives::{Bytes, OptimismFields};
 
 /// Helper type that bundles various overrides for EVM Execution.
 ///
@@ -104,7 +107,7 @@ impl FillableTransaction for TransactionSigned {
         {
             let mut envelope_buf = Vec::with_capacity(self.length_without_header());
             self.encode_enveloped(&mut envelope_buf);
-            fill_tx_env(tx_env, self, signer, envelope_buf.into());
+            fill_op_tx_env(tx_env, self, signer, envelope_buf.into());
         }
         Ok(())
     }
@@ -204,6 +207,11 @@ where
 /// Prepares the [Env] for execution.
 ///
 /// Does not commit any changes to the underlying database.
+///
+/// EVM settings:
+///  - `disable_block_gas_limit` is set to `true`
+///  - `disable_eip3607` is set to `true`
+///  - `disable_base_fee` is set to `true`
 pub(crate) fn prepare_call_env<DB>(
     mut cfg: CfgEnv,
     block: BlockEnv,

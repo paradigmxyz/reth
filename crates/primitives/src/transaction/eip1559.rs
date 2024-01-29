@@ -110,17 +110,15 @@ impl TxEip1559 {
 
     /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
     pub(crate) fn fields_len(&self) -> usize {
-        let mut len = 0;
-        len += self.chain_id.length();
-        len += self.nonce.length();
-        len += self.max_priority_fee_per_gas.length();
-        len += self.max_fee_per_gas.length();
-        len += self.gas_limit.length();
-        len += self.to.length();
-        len += self.value.length();
-        len += self.input.0.length();
-        len += self.access_list.length();
-        len
+        self.chain_id.length() +
+            self.nonce.length() +
+            self.max_priority_fee_per_gas.length() +
+            self.max_fee_per_gas.length() +
+            self.gas_limit.length() +
+            self.to.length() +
+            self.value.length() +
+            self.input.0.length() +
+            self.access_list.length()
     }
 
     /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
