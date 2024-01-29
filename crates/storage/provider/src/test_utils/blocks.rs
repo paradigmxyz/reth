@@ -137,7 +137,10 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
                 topics: vec![B256::with_last_byte(1), B256::with_last_byte(2)],
                 data: Bytes::default(),
             }],
-            ..Default::default()
+            #[cfg(feature = "optimism")]
+            deposit_nonce: None,
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: None,
         })]]),
         number,
     );
@@ -192,7 +195,10 @@ fn block2(
                 topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
                 data: Bytes::default(),
             }],
-            ..Default::default()
+            #[cfg(feature = "optimism")]
+            deposit_nonce: None,
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: None,
         })]]),
         number,
     );
