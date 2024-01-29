@@ -1246,9 +1246,9 @@ mod tests {
         proofs::{calculate_receipt_root, calculate_transaction_root, state_root_unhashed},
         revm_primitives::AccountInfo,
         stage::StageCheckpoint,
-        Account, Address, ChainSpecBuilder, Genesis, GenesisAccount, Header, Signature,
-        Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
-        B256, MAINNET,
+        Account, Address, ChainSpecBuilder, Genesis, GenesisAccount, Header, ReceiptWithBloom,
+        Signature, Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered,
+        TxEip1559, B256, MAINNET,
     };
     use reth_provider::{
         test_utils::{
@@ -1444,25 +1444,27 @@ mod tests {
                           num_of_signer_txs: u64|
          -> SealedBlockWithSenders {
             let transactions_root = calculate_transaction_root(&body);
-            let receipts = body
+            let (receipts_bloom, receipts): (Vec<ReceiptWithBloom>, Vec<Receipt>) = body
                 .iter()
                 .enumerate()
                 .map(|(idx, tx)| {
-                    Receipt {
+                    let receipt = Receipt {
                         tx_type: tx.tx_type(),
                         success: true,
                         cumulative_gas_used: (idx as u64 + 1) * 21_000,
                         ..Default::default()
-                    }
-                    .with_bloom()
+                    };
+
+                    let receipt_with_bloom = receipt.clone().with_bloom();
+                    (receipt_with_bloom, receipt)
                 })
-                .collect::<Vec<_>>();
+                .unzip();
 
             #[cfg(not(feature = "optimism"))]
-            let receipts_root = calculate_receipt_root(&receipts);
+            let receipts_root = calculate_receipt_root(&receipts_bloom);
 
             #[cfg(feature = "optimism")]
-            let receipts_root = calculate_receipt_root(&receipts, &chain_spec, 0);
+            let receipts_root = calculate_receipt_root(&receipts_bloom, &chain_spec, 0);
 
             SealedBlockWithSenders::new(
                 SealedBlock {
@@ -1495,6 +1497,7 @@ mod tests {
                     withdrawals: Some(Vec::new()),
                 },
                 body.iter().map(|tx| tx.signer()).collect(),
+                receipts,
             )
             .unwrap()
         };

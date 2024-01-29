@@ -1,6 +1,6 @@
 use crate::{
-    Address, GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered,
-    Withdrawal, B256,
+    Address, GotExpected, Header, Receipt, SealedHeader, TransactionSigned,
+    TransactionSignedEcRecovered, Withdrawal, B256,
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
@@ -94,7 +94,7 @@ impl Block {
             senders
         };
 
-        Ok(BlockWithSenders { block: self, senders })
+        Ok(BlockWithSenders { block: self, senders, receipts: Vec::new() })
     }
 
     /// **Expensive**. Transform into a [`BlockWithSenders`] by recovering senders in the contained
@@ -103,7 +103,7 @@ impl Block {
     /// Returns `None` if a transaction is invalid.
     pub fn with_recovered_senders(self) -> Option<BlockWithSenders> {
         let senders = self.senders()?;
-        Some(BlockWithSenders { block: self, senders })
+        Some(BlockWithSenders { block: self, senders, receipts: Vec::new() })
     }
 
     /// Returns whether or not the block contains any blob transactions.
@@ -137,12 +137,14 @@ pub struct BlockWithSenders {
     pub block: Block,
     /// List of senders that match the transactions in the block
     pub senders: Vec<Address>,
+    /// List of receipts
+    pub receipts: Vec<Receipt>,
 }
 
 impl BlockWithSenders {
     /// New block with senders. Return none if len of tx and senders does not match
-    pub fn new(block: Block, senders: Vec<Address>) -> Option<Self> {
-        (!block.body.len() != senders.len()).then_some(Self { block, senders })
+    pub fn new(block: Block, senders: Vec<Address>, receipts: Vec<Receipt>) -> Option<Self> {
+        (!block.body.len() != senders.len()).then_some(Self { block, senders, receipts })
     }
 
     /// Seal the block with a known hash.
@@ -150,14 +152,14 @@ impl BlockWithSenders {
     /// WARNING: This method does not perform validation whether the hash is correct.
     #[inline]
     pub fn seal(self, hash: B256) -> SealedBlockWithSenders {
-        let Self { block, senders } = self;
-        SealedBlockWithSenders { block: block.seal(hash), senders }
+        let Self { block, senders, receipts } = self;
+        SealedBlockWithSenders { block: block.seal(hash), senders, receipts }
     }
 
     /// Split Structure to its components
     #[inline]
-    pub fn into_components(self) -> (Block, Vec<Address>) {
-        (self.block, self.senders)
+    pub fn into_components(self) -> (Block, Vec<Address>, Vec<Receipt>) {
+        (self.block, self.senders, self.receipts)
     }
 
     /// Returns an iterator over all transactions in the block.
@@ -294,7 +296,9 @@ impl SealedBlock {
     /// Seal sealed block with recovered transaction senders.
     pub fn try_seal_with_senders(self) -> Result<SealedBlockWithSenders, Self> {
         match self.senders() {
-            Some(senders) => Ok(SealedBlockWithSenders { block: self, senders }),
+            Some(senders) => {
+                Ok(SealedBlockWithSenders { block: self, senders, receipts: Vec::new() })
+            }
             None => Err(self),
         }
     }
@@ -377,25 +381,27 @@ pub struct SealedBlockWithSenders {
     pub block: SealedBlock,
     /// List of senders that match transactions from block.
     pub senders: Vec<Address>,
+    /// List of receipts
+    pub receipts: Vec<Receipt>,
 }
 
 impl SealedBlockWithSenders {
     /// New sealed block with sender. Return none if len of tx and senders does not match
-    pub fn new(block: SealedBlock, senders: Vec<Address>) -> Option<Self> {
-        (!block.body.len() != senders.len()).then_some(Self { block, senders })
+    pub fn new(block: SealedBlock, senders: Vec<Address>, receipts: Vec<Receipt>) -> Option<Self> {
+        (!block.body.len() != senders.len()).then_some(Self { block, senders, receipts })
     }
 
     /// Split Structure to its components
     #[inline]
-    pub fn into_components(self) -> (SealedBlock, Vec<Address>) {
-        (self.block, self.senders)
+    pub fn into_components(self) -> (SealedBlock, Vec<Address>, Vec<Receipt>) {
+        (self.block, self.senders, self.receipts)
     }
 
     /// Returns the unsealed [BlockWithSenders]
     #[inline]
     pub fn unseal(self) -> BlockWithSenders {
-        let Self { block, senders } = self;
-        BlockWithSenders { block: block.unseal(), senders }
+        let Self { block, senders, receipts } = self;
+        BlockWithSenders { block: block.unseal(), senders, receipts }
     }
 
     /// Returns an iterator over all transactions in the block.

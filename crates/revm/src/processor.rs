@@ -702,6 +702,7 @@ mod tests {
                         withdrawals: None,
                     },
                     senders: vec![],
+                    receipts: vec![],
                 },
                 U256::ZERO,
             )
@@ -727,6 +728,7 @@ mod tests {
                         withdrawals: None,
                     },
                     senders: vec![],
+                    receipts: vec![],
                 },
                 U256::ZERO,
             )
@@ -798,6 +800,7 @@ mod tests {
                         withdrawals: None,
                     },
                     senders: vec![],
+                    receipts: vec![],
                 },
                 U256::ZERO,
             )
@@ -866,6 +869,7 @@ mod tests {
                         withdrawals: None,
                     },
                     senders: vec![],
+                    receipts: vec![],
                 },
                 U256::ZERO,
             )
@@ -924,6 +928,7 @@ mod tests {
                         withdrawals: None,
                     },
                     senders: vec![],
+                    receipts: vec![],
                 },
                 U256::ZERO,
             )
@@ -946,6 +951,7 @@ mod tests {
                         withdrawals: None,
                     },
                     senders: vec![],
+                    receipts: vec![],
                 },
                 U256::ZERO,
             )
@@ -1020,6 +1026,7 @@ mod tests {
                         withdrawals: None,
                     },
                     senders: vec![],
+                    receipts: vec![],
                 },
                 U256::ZERO,
             )

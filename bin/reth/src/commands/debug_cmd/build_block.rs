@@ -27,7 +27,8 @@ use reth_primitives::{
     revm_primitives::KzgSettings,
     stage::StageId,
     Address, BlobTransaction, BlobTransactionSidecar, Bytes, ChainSpec, PooledTransactionsElement,
-    SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
+    Receipt, SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256,
+    U256,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ExecutorFactory,
@@ -305,8 +306,8 @@ impl Command {
                 consensus.validate_block(block)?;
 
                 let senders = block.senders().expect("sender recovery failed");
-                let block_with_senders =
-                    SealedBlockWithSenders::new(block.clone(), senders).unwrap();
+                let mut block_with_senders =
+                    SealedBlockWithSenders::new(block.clone(), senders, Vec::new()).unwrap();
 
                 let executor_factory = EvmProcessorFactory::new(self.chain.clone(), evm_config);
                 let mut executor = executor_factory.with_state(blockchain_db.latest()?);
@@ -314,6 +315,10 @@ impl Command {
                     .execute_and_verify_receipt(&block_with_senders.clone().unseal(), U256::MAX)?;
                 let state = executor.take_output_state();
                 debug!(target: "reth::cli", ?state, "Executed block");
+
+                let receipts = state.receipts_by_block(block.number);
+                let receipts = receipts.iter().filter_map(|r| r.clone()).collect::<Vec<Receipt>>();
+                block_with_senders.receipts = receipts;
 
                 let hashed_state = state.hash_state_slow();
                 let (state_root, trie_updates) = state

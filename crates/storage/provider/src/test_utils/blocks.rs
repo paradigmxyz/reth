@@ -159,7 +159,14 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
     header.parent_hash = B256::ZERO;
     block.header = header.seal_slow();
 
-    (SealedBlockWithSenders { block, senders: vec![Address::new([0x30; 20])] }, bundle)
+    (
+        SealedBlockWithSenders {
+            block,
+            senders: vec![Address::new([0x30; 20])],
+            receipts: Vec::new(),
+        },
+        bundle,
+    )
 }
 
 /// Block two that points to block 1
@@ -220,5 +227,12 @@ fn block2(
     header.parent_hash = parent_hash;
     block.header = header.seal_slow();
 
-    (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, bundle)
+    (
+        SealedBlockWithSenders {
+            block,
+            senders: vec![Address::new([0x31; 20])],
+            receipts: Vec::new(),
+        },
+        bundle,
+    )
 }

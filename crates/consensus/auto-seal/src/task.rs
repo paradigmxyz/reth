@@ -3,7 +3,9 @@ use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_node_api::{EngineTypes, EvmEnvConfig};
-use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
+use reth_primitives::{
+    Block, ChainSpec, IntoRecoveredTransaction, Receipt, SealedBlockWithSenders,
+};
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_stages::PipelineEvent;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
@@ -197,8 +199,11 @@ where
                             };
                             let sealed_block = block.seal_slow();
 
+                            let receipts = bundle_state.receipts_by_block(sealed_block.number);
+                            let receipts =
+                                receipts.iter().filter_map(|r| r.clone()).collect::<Vec<Receipt>>();
                             let sealed_block_with_senders =
-                                SealedBlockWithSenders::new(sealed_block, senders)
+                                SealedBlockWithSenders::new(sealed_block, senders, receipts)
                                     .expect("senders are valid");
 
                             // update canon chain for rpc

@@ -207,7 +207,7 @@ impl PendingBlockEnv {
 
         let bundle = BundleStateWithReceipts::new(
             db.take_bundle(),
-            Receipts::from_vec(vec![receipts]),
+            Receipts::from_vec(vec![receipts.clone()]),
             block_number,
         );
 
@@ -257,7 +257,8 @@ impl PendingBlockEnv {
 
         // seal the block
         let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
-        Ok(SealedBlockWithSenders { block: block.seal_slow(), senders })
+        let receipts = receipts.iter().filter_map(|r| r.clone()).collect::<Vec<Receipt>>();
+        Ok(SealedBlockWithSenders { block: block.seal_slow(), senders, receipts })
     }
 }
 
