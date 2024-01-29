@@ -4,8 +4,8 @@ use crate::{
     constants::EMPTY_OMMER_ROOT_HASH,
     keccak256,
     trie::{HashBuilder, Nibbles, TrieAccount},
-    Address, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned,
-    Withdrawals, B256,
+    Address, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned, Withdrawal,
+    B256,
 };
 use alloy_primitives::U256;
 use alloy_rlp::Encodable;
@@ -64,7 +64,7 @@ where
 }
 
 /// Calculates the root hash of the withdrawals.
-pub fn calculate_withdrawals_root(withdrawals: &Withdrawals) -> B256 {
+pub fn calculate_withdrawals_root(withdrawals: &[Withdrawal]) -> B256 {
     ordered_trie_root(withdrawals)
 }
 

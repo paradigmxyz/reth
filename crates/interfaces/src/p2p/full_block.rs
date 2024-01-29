@@ -320,7 +320,10 @@ fn ensure_valid_body_response(
         ))
     }
 
-    let withdrawals = &block.withdrawals.clone().unwrap_or_default();
+    let withdrawals = match &block.withdrawals {
+        Some(withdrawals) => withdrawals.as_slice(),
+        None => &[][..],
+    };
     if let Some(header_withdrawals_root) = header.withdrawals_root {
         let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
         if withdrawals_root != header_withdrawals_root {
