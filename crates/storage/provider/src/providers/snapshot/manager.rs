@@ -1,13 +1,13 @@
-use super::{LoadedJar, SnapshotJarProvider, SnapshotProviderRW, BLOCKS_PER_SNAPSHOT};
+use super::{
+    LoadedJar, SnapshotJarProvider, SnapshotProviderRW, SnapshotProviderRWRefMut,
+    BLOCKS_PER_SNAPSHOT,
+};
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
     ReceiptProvider, StatsReader, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, WithdrawalsProvider,
 };
-use dashmap::{
-    mapref::{entry::Entry as DashMapEntry, one::RefMut},
-    DashMap,
-};
+use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
@@ -268,6 +268,13 @@ impl SnapshotProvider {
                             index.insert(tx_end, current_block_range.clone());
                         })
                         .or_insert_with(|| BTreeMap::from([(tx_end, current_block_range)]));
+                } else if let Some(1) = tx_index.get(&segment).map(|index| index.len()) {
+                    // Only happens if we unwind all the txs/receipts from the first static file.
+                    // Should only happen in test scenarios.
+                    if matches!(segment, SnapshotSegment::Receipts | SnapshotSegment::Transactions)
+                    {
+                        tx_index.remove(&segment);
+                    }
                 }
 
                 // Update the cached provider.
@@ -424,13 +431,13 @@ pub trait SnapshotWriter {
         &self,
         block: BlockNumber,
         segment: SnapshotSegment,
-    ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>>;
+    ) -> ProviderResult<SnapshotProviderRWRefMut<'_>>;
 
     /// Returns a mutable reference to a [`SnapshotProviderRW`] of the latest [`SnapshotSegment`].
     fn latest_writer(
         &self,
         segment: SnapshotSegment,
-    ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>>;
+    ) -> ProviderResult<SnapshotProviderRWRefMut<'_>>;
 
     /// Commits all changes of all [`SnapshotProviderRW`] of all [`SnapshotSegment`].
     fn commit(&self) -> ProviderResult<()>;
@@ -441,7 +448,7 @@ impl SnapshotWriter for Arc<SnapshotProvider> {
         &self,
         block: BlockNumber,
         segment: SnapshotSegment,
-    ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>> {
+    ) -> ProviderResult<SnapshotProviderRWRefMut<'_>> {
         Ok(match self.writers.entry(segment) {
             DashMapEntry::Occupied(entry) => entry.into_ref(),
             DashMapEntry::Vacant(entry) => {
@@ -453,7 +460,7 @@ impl SnapshotWriter for Arc<SnapshotProvider> {
     fn latest_writer(
         &self,
         segment: SnapshotSegment,
-    ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>> {
+    ) -> ProviderResult<SnapshotProviderRWRefMut<'_>> {
         self.get_writer(self.get_highest_snapshot_block(segment).unwrap_or_default(), segment)
     }
 
@@ -698,7 +705,11 @@ impl TransactionsProvider for SnapshotProvider {
             to_range(range),
             |cursor, number| {
                 cursor.get(number.into(), <TransactionMask<TransactionSignedNoHash>>::MASK).map(
-                    |result| result.map(|row| RawValue::<TransactionSignedNoHash>::new_raw(row[0])),
+                    |result| {
+                        result.map(|row| {
+                            RawValue::<TransactionSignedNoHash>::from_vec(row[0].to_vec())
+                        })
+                    },
                 )
             },
             |_| true,

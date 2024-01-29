@@ -1,12 +1,16 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use futures_util::StreamExt;
+use reth_codecs::Compact;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
+    RawKey, RawTable, RawValue,
 };
+use reth_etl::Collector;
 use reth_interfaces::{
+    consensus::Consensus,
     p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError},
     provider::ProviderError,
 };
@@ -14,10 +18,14 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
     },
-    BlockHashOrNumber, BlockNumber, SealedHeader,
+    BlockHash, BlockNumber, SealedHeader, U256,
 };
 use reth_provider::{DatabaseProviderRW, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode};
-use std::task::{ready, Context, Poll};
+use std::{
+    sync::Arc,
+    task::{ready, Context, Poll},
+};
+use tempfile::TempDir;
 use tracing::*;
 
 /// The headers stage.
@@ -41,10 +49,16 @@ pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
     downloader: Downloader,
     /// The sync mode for the stage.
     mode: HeaderSyncMode,
+    /// Consensus client implementation
+    consensus: Arc<dyn Consensus>,
     /// Current sync gap.
     sync_gap: Option<HeaderSyncGap>,
-    /// Header buffer.
-    buffer: Option<Vec<SealedHeader>>,
+    /// ETL collector with HeaderHash -> BlockNumber
+    hash_collector: Collector<BlockHash, BlockNumber>,
+    /// ETL collector with BlockNumber -> SealedHeader
+    header_collector: Collector<BlockNumber, SealedHeader>,
+    /// Returns true if the ETL collector has all necessary headers to fill the gap.
+    is_etl_ready: bool,
 }
 
 // === impl HeaderStage ===
@@ -54,56 +68,133 @@ where
     Downloader: HeaderDownloader,
 {
     /// Create a new header stage
-    pub fn new(database: Provider, downloader: Downloader, mode: HeaderSyncMode) -> Self {
-        Self { provider: database, downloader, mode, sync_gap: None, buffer: None }
+    pub fn new(
+        database: Provider,
+        downloader: Downloader,
+        mode: HeaderSyncMode,
+        consensus: Arc<dyn Consensus>,
+        tempdir: Arc<TempDir>,
+    ) -> Self {
+        Self {
+            provider: database,
+            downloader,
+            mode,
+            consensus,
+            sync_gap: None,
+            hash_collector: Collector::new(tempdir.clone(), 100 * (1024 * 1024)),
+            header_collector: Collector::new(tempdir, 100 * (1024 * 1024)),
+            is_etl_ready: false,
+        }
     }
 
-    fn is_stage_done<DB: Database>(
-        &self,
-        tx: &<DB as Database>::TXMut,
-        checkpoint: u64,
-    ) -> Result<bool, StageError> {
-        let mut header_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
-        let (head_num, _) = header_cursor
-            .seek_exact(checkpoint)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(checkpoint.into()))?;
-        // Check if the next entry is congruent
-        Ok(header_cursor.next()?.map(|(next_num, _)| head_num + 1 == next_num).unwrap_or_default())
-    }
-
-    /// Write downloaded headers to the given transaction
+    /// Write downloaded headers to the given transaction from ETL.
     ///
-    /// Note: this writes the headers with rising block numbers.
+    /// Writes to the following tables:
+    /// [`tables::Headers`], [`tables::CanonicalHeaders`], [`tables::HeaderTD`] and
+    /// [`tables::HeaderNumbers`].
     fn write_headers<DB: Database>(
-        &self,
+        &mut self,
         tx: &<DB as Database>::TXMut,
-        headers: Vec<SealedHeader>,
-    ) -> Result<Option<BlockNumber>, StageError> {
-        trace!(target: "sync::stages::headers", len = headers.len(), "writing headers");
+    ) -> Result<BlockNumber, StageError> {
+        let total_headers = self.header_collector.len();
 
-        let mut cursor_header = tx.cursor_write::<tables::Headers>()?;
-        let mut cursor_canonical = tx.cursor_write::<tables::CanonicalHeaders>()?;
+        info!(target: "sync::stages::headers", total = total_headers, "Writing headers");
 
-        let mut latest = None;
-        // Since the headers were returned in descending order,
-        // iterate them in the reverse order
-        for header in headers.into_iter().rev() {
+        let mut cursor_header = tx.cursor_write::<RawTable<tables::Headers>>()?;
+        let mut cursor_canonical = tx.cursor_write::<RawTable<tables::CanonicalHeaders>>()?;
+        let mut cursor_td = tx.cursor_write::<tables::HeaderTD>()?;
+
+        let mut last_header_number = tx
+            .cursor_read::<tables::Headers>()?
+            .last()?
+            .map(|(_, header)| header.number)
+            .unwrap_or_default();
+
+        // Find the latest total difficulty
+        let mut td: U256 = cursor_td
+            .seek_exact(last_header_number)?
+            .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?
+            .1
+            .into();
+
+        // Although headers were downloaded in reverse order, the collector iterates it in ascending
+        // order
+
+        let interval = (total_headers / 10).max(1);
+        for (index, header) in self.header_collector.iter()?.enumerate() {
+            let (number, header_buf) = header?;
+
+            if index > 0 && index % interval == 0 {
+                info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers");
+            }
+
+            let (sealed_header, _) = SealedHeader::from_compact(&header_buf, header_buf.len());
+            let (header, header_hash) = sealed_header.split();
             if header.number == 0 {
                 continue
             }
+            last_header_number = header.number;
 
-            let header_hash = header.hash();
-            let header_number = header.number;
-            let header = header.unseal();
-            latest = Some(header.number);
+            // Increase total difficulty
+            td += header.difficulty;
 
-            // NOTE: HeaderNumbers are not sorted and can't be inserted with cursor.
-            tx.put::<tables::HeaderNumbers>(header_hash, header_number)?;
-            cursor_header.insert(header_number, header)?;
-            cursor_canonical.insert(header_number, header_hash)?;
+            // Header validation
+            self.consensus.validate_header_with_total_difficulty(&header, td).map_err(|error| {
+                StageError::Block {
+                    block: Box::new(header.clone().seal(header_hash)),
+                    error: BlockErrorKind::Validation(error),
+                }
+            })?;
+
+            // Append to HeaderTD
+            cursor_td.append(header.number, td.into())?;
+
+            // Append to CanonicalHeaders
+            cursor_canonical
+                .append(RawKey::<BlockNumber>::from_vec(number.clone()), header_hash.into())?;
+
+            // Append to Headers
+            cursor_header.append(RawKey::<BlockNumber>::from_vec(number), header.into())?;
         }
 
-        Ok(latest)
+        info!(target: "sync::stages::headers", total = total_headers, "Writing header hash index");
+
+        let mut cursor_header_numbers = tx.cursor_write::<RawTable<tables::HeaderNumbers>>()?;
+        let mut first_sync = false;
+
+        // If we only have the genesis block hash, then we are at first sync, and we can remove it,
+        // add it to the collector and use tx.append on all hashes.
+        if let Some((hash, block_number)) = cursor_header_numbers.last()? {
+            if block_number.value()? == 0 {
+                self.hash_collector.insert(hash.key()?, 0);
+                cursor_header_numbers.delete_current()?;
+                first_sync = true;
+            }
+        }
+
+        // Since ETL sorts all entries by hashes, we are either appending (first sync) or inserting
+        // in order (further syncs).
+        for (index, hash_to_number) in self.hash_collector.iter()?.enumerate() {
+            let (hash, number) = hash_to_number?;
+
+            if index > 0 && index % interval == 0 {
+                info!(target: "sync::stages::headers", progress = ((index as f64 / total_headers as f64) * 100.0).round(), "Writing headers hash index");
+            }
+
+            if first_sync {
+                cursor_header_numbers.append(
+                    RawKey::<BlockHash>::from_vec(hash),
+                    RawValue::<BlockNumber>::from_vec(number),
+                )?;
+            } else {
+                cursor_header_numbers.insert(
+                    RawKey::<BlockHash>::from_vec(hash),
+                    RawValue::<BlockNumber>::from_vec(number),
+                )?;
+            }
+        }
+
+        Ok(last_header_number)
     }
 }
 
@@ -125,14 +216,8 @@ where
     ) -> Poll<Result<(), StageError>> {
         let current_checkpoint = input.checkpoint();
 
-        // Return if buffer already has some items.
-        if self.buffer.is_some() {
-            // TODO: review
-            trace!(
-                target: "sync::stages::headers",
-                checkpoint = %current_checkpoint.block_number,
-                "Buffer is not empty"
-            );
+        // Return if stage has already completed the gap on the ETL files
+        if self.is_etl_ready {
             return Poll::Ready(Ok(()))
         }
 
@@ -149,27 +234,42 @@ where
                 target = ?tip,
                 "Target block already reached"
             );
+            self.is_etl_ready = true;
             return Poll::Ready(Ok(()))
         }
 
         debug!(target: "sync::stages::headers", ?tip, head = ?gap.local_head.hash(), "Commencing sync");
+        let local_head_number = gap.local_head.number;
 
         // let the downloader know what to sync
-        self.downloader.update_sync_gap(gap.local_head, gap.target);
+        self.downloader.update_sync_gap(gap.local_head, gap.target.clone());
 
-        let result = match ready!(self.downloader.poll_next_unpin(cx)) {
-            Some(Ok(headers)) => {
-                info!(target: "sync::stages::headers", len = headers.len(), "Received headers");
-                self.buffer = Some(headers);
-                Ok(())
+        // We only want to stop once we have all the headers on ETL filespace (disk).
+        loop {
+            match ready!(self.downloader.poll_next_unpin(cx)) {
+                Some(Ok(headers)) => {
+                    info!(target: "sync::stages::headers", total = headers.len(), from_block = headers.first().map(|h| h.number), to_block = headers.last().map(|h| h.number), "Received headers");
+                    for header in headers {
+                        let header_number = header.number;
+
+                        self.hash_collector.insert(header.hash, header_number);
+                        self.header_collector.insert(header_number, header);
+
+                        // Headers are downloaded in reverse, so if we reach here, we know we have
+                        // filled the gap.
+                        if header_number == local_head_number + 1 {
+                            self.is_etl_ready = true;
+                            return Poll::Ready(Ok(()))
+                        }
+                    }
+                }
+                Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
+                    error!(target: "sync::stages::headers", ?error, "Cannot attach header to head");
+                    return Poll::Ready(Err(StageError::DetachedHead { local_head, header, error }))
+                }
+                None => return Poll::Ready(Err(StageError::ChannelClosed)),
             }
-            Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
-                error!(target: "sync::stages::headers", ?error, "Cannot attach header to head");
-                Err(StageError::DetachedHead { local_head, header, error })
-            }
-            None => Err(StageError::ChannelClosed),
-        };
-        Poll::Ready(result)
+        }
     }
 
     /// Download the headers in reverse order (falling block numbers)
@@ -181,99 +281,40 @@ where
     ) -> Result<ExecOutput, StageError> {
         let current_checkpoint = input.checkpoint();
 
-        let gap = self.sync_gap.clone().ok_or(StageError::MissingSyncGap)?;
-        if gap.is_closed() {
-            return Ok(ExecOutput::done(current_checkpoint))
+        if self.sync_gap.as_ref().ok_or(StageError::MissingSyncGap)?.is_closed() {
+            self.is_etl_ready = false;
+            return Ok(ExecOutput::done(current_checkpoint));
         }
 
-        let local_head = gap.local_head.number;
-        let tip = gap.target.tip();
+        // We should be here only after we have downloaded all headers into the disk buffer (ETL).
+        if !self.is_etl_ready {
+            return Err(StageError::MissingDownloadBuffer)
+        }
 
-        let downloaded_headers = self.buffer.take().ok_or(StageError::MissingDownloadBuffer)?;
-        let tip_block_number = match tip {
-            // If tip is hash and it equals to the first downloaded header's hash, we can use
-            // the block number of this header as tip.
-            BlockHashOrNumber::Hash(hash) => downloaded_headers
-                .first()
-                .and_then(|header| (header.hash == hash).then_some(header.number)),
-            // If tip is number, we can just grab it and not resolve using downloaded headers.
-            BlockHashOrNumber::Number(number) => Some(number),
-        };
+        // Reset flag
+        self.is_etl_ready = false;
 
-        // Since we're syncing headers in batches, gap tip will move in reverse direction towards
-        // our local head with every iteration. To get the actual target block number we're
-        // syncing towards, we need to take into account already synced headers from the database.
-        // It is `None`, if tip didn't change and we're still downloading headers for previously
-        // calculated gap.
-        let tx = provider.tx_ref();
-        let target_block_number = if let Some(tip_block_number) = tip_block_number {
-            let local_max_block_number = tx
-                .cursor_read::<tables::CanonicalHeaders>()?
-                .last()?
-                .map(|(canonical_block, _)| canonical_block);
+        // Write the headers and related tables to DB from ETL space
+        let to_be_processed = self.hash_collector.len() as u64;
+        let last_header_number = self.write_headers::<DB>(provider.tx_ref())?;
 
-            Some(tip_block_number.max(local_max_block_number.unwrap_or_default()))
-        } else {
-            None
-        };
-
-        let mut stage_checkpoint = match current_checkpoint.headers_stage_checkpoint() {
-            // If checkpoint block range matches our range, we take the previously used
-            // stage checkpoint as-is.
-            Some(stage_checkpoint)
-                if stage_checkpoint.block_range.from == input.checkpoint().block_number =>
-            {
-                stage_checkpoint
-            }
-            // Otherwise, we're on the first iteration of new gap sync, so we recalculate the number
-            // of already processed and total headers.
-            // `target_block_number` is guaranteed to be `Some`, because on the first iteration
-            // we download the header for missing tip and use its block number.
-            _ => {
-                let target = target_block_number.expect("No downloaded header for tip found");
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(last_header_number).with_headers_stage_checkpoint(
                 HeadersCheckpoint {
                     block_range: CheckpointBlockRange {
                         from: input.checkpoint().block_number,
-                        to: target,
+                        to: last_header_number,
                     },
                     progress: EntitiesCheckpoint {
-                        // Set processed to the local head block number + number
-                        // of block already filled in the gap.
-                        processed: local_head + (target - tip_block_number.unwrap_or_default()),
-                        total: target,
+                        processed: input.checkpoint().block_number + to_be_processed,
+                        total: last_header_number,
                     },
-                }
-            }
-        };
-
-        // Total headers can be updated if we received new tip from the network, and need to fill
-        // the local gap.
-        if let Some(target_block_number) = target_block_number {
-            stage_checkpoint.progress.total = target_block_number;
-        }
-        stage_checkpoint.progress.processed += downloaded_headers.len() as u64;
-
-        // Write the headers to db
-        self.write_headers::<DB>(tx, downloaded_headers)?.unwrap_or_default();
-
-        if self.is_stage_done::<DB>(tx, current_checkpoint.block_number)? {
-            let checkpoint = current_checkpoint.block_number.max(
-                tx.cursor_read::<tables::CanonicalHeaders>()?
-                    .last()?
-                    .map(|(num, _)| num)
-                    .unwrap_or_default(),
-            );
-            Ok(ExecOutput {
-                checkpoint: StageCheckpoint::new(checkpoint)
-                    .with_headers_stage_checkpoint(stage_checkpoint),
-                done: true,
-            })
-        } else {
-            Ok(ExecOutput {
-                checkpoint: current_checkpoint.with_headers_stage_checkpoint(stage_checkpoint),
-                done: false,
-            })
-        }
+                },
+            ),
+            // We only reach here if all headers have been downloaded by ETL, and pushed to DB all
+            // in one stage run.
+            done: true,
+        })
     }
 
     /// Unwind the stage.
@@ -282,7 +323,6 @@ where
         provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        self.buffer.take();
         self.sync_gap.take();
 
         provider.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
@@ -290,6 +330,8 @@ where
         )?;
         provider.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
         let unwound_headers = provider.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
+
+        provider.unwind_table_by_num::<tables::HeaderTD>(input.unwind_to)?;
 
         let stage_checkpoint =
             input.checkpoint.headers_stage_checkpoint().map(|stage_checkpoint| HeadersCheckpoint {
@@ -338,6 +380,7 @@ mod tests {
         use reth_primitives::U256;
         use reth_provider::{BlockHashReader, BlockNumReader, HeaderProvider};
         use std::sync::Arc;
+        use tempfile::TempDir;
         use tokio::sync::watch;
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
@@ -345,6 +388,7 @@ mod tests {
             channel: (watch::Sender<B256>, watch::Receiver<B256>),
             downloader_factory: Box<dyn Fn() -> D + Send + Sync + 'static>,
             db: TestStageDB,
+            consensus: Arc<TestConsensus>,
         }
 
         impl Default for HeadersTestRunner<TestHeaderDownloader> {
@@ -353,6 +397,7 @@ mod tests {
                 Self {
                     client: client.clone(),
                     channel: watch::channel(B256::ZERO),
+                    consensus: Arc::new(TestConsensus::default()),
                     downloader_factory: Box::new(move || {
                         TestHeaderDownloader::new(
                             client.clone(),
@@ -378,6 +423,8 @@ mod tests {
                     self.db.factory.clone(),
                     (*self.downloader_factory)(),
                     HeaderSyncMode::Tip(self.channel.1.clone()),
+                    self.consensus.clone(),
+                    Arc::new(TempDir::new().unwrap()),
                 )
             }
         }
@@ -390,10 +437,7 @@ mod tests {
                 let mut rng = generators::rng();
                 let start = input.checkpoint().block_number;
                 let head = random_header(&mut rng, start, None);
-                self.db.insert_headers(std::iter::once(&head))?;
-                // patch td table for `update_head` call
-                self.db
-                    .commit(|tx| Ok(tx.put::<tables::HeaderTD>(head.number, U256::ZERO.into())?))?;
+                self.db.insert_headers_with_td(std::iter::once(&head))?;
 
                 // use previous checkpoint as seed size
                 let end = input.target.unwrap_or_default() + 1;
@@ -417,8 +461,9 @@ mod tests {
                 match output {
                     Some(output) if output.checkpoint.block_number > initial_checkpoint => {
                         let provider = self.db.factory.provider()?;
-                        for block_num in (initial_checkpoint..output.checkpoint.block_number).rev()
-                        {
+                        let mut td = U256::ZERO;
+
+                        for block_num in initial_checkpoint..output.checkpoint.block_number {
                             // look up the header hash
                             let hash = provider.block_hash(block_num)?.expect("no header hash");
 
@@ -430,6 +475,13 @@ mod tests {
                             assert!(header.is_some());
                             let header = header.unwrap().seal_slow();
                             assert_eq!(header.hash(), hash);
+
+                            // validate the header total difficulty
+                            td += header.difficulty;
+                            assert_eq!(
+                                provider.header_td_by_number(block_num)?.map(Into::into),
+                                Some(td)
+                            );
                         }
                     }
                     _ => self.check_no_header_entry_above(initial_checkpoint)?,
@@ -469,6 +521,7 @@ mod tests {
                             .build(client.clone(), Arc::new(TestConsensus::default()))
                     }),
                     db: TestStageDB::default(),
+                    consensus: Arc::new(TestConsensus::default()),
                 }
             }
         }
@@ -482,6 +535,7 @@ mod tests {
                     .ensure_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
                 self.db.ensure_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
                 self.db.ensure_no_entry_above::<tables::Headers, _>(block, |key| key)?;
+                self.db.ensure_no_entry_above::<tables::HeaderTD, _>(block, |num| num)?;
                 Ok(())
             }
 
@@ -527,69 +581,10 @@ mod tests {
         }, done: true }) if block_number == tip.number &&
             from == checkpoint && to == previous_stage &&
             // -1 because we don't need to download the local head
-            processed == checkpoint + headers.len() as u64 - 1 && total == tip.number);
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
-    }
-
-    /// Execute the stage in two steps
-    #[tokio::test]
-    async fn execute_from_previous_checkpoint() {
-        let mut runner = HeadersTestRunner::with_linear_downloader();
-        // pick range that's larger than the configured headers batch size
-        let (checkpoint, previous_stage) = (600, 1200);
-        let mut input = ExecInput {
-            target: Some(previous_stage),
-            checkpoint: Some(StageCheckpoint::new(checkpoint)),
-        };
-        let headers = runner.seed_execution(input).expect("failed to seed execution");
-        let rx = runner.execute(input);
-
-        runner.client.extend(headers.iter().rev().map(|h| h.clone().unseal())).await;
-
-        // skip `after_execution` hook for linear downloader
-        let tip = headers.last().unwrap();
-        runner.send_tip(tip.hash());
-
-        let result = rx.await.unwrap();
-        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint {
-            block_number,
-            stage_checkpoint: Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
-                block_range: CheckpointBlockRange {
-                    from,
-                    to
-                },
-                progress: EntitiesCheckpoint {
-                    processed,
-                    total,
-                }
-            }))
-        }, done: false }) if block_number == checkpoint &&
-            from == checkpoint && to == previous_stage &&
-            processed == checkpoint + 500 && total == tip.number);
-
-        runner.client.clear().await;
-        runner.client.extend(headers.iter().take(101).map(|h| h.clone().unseal()).rev()).await;
-        input.checkpoint = Some(result.unwrap().checkpoint);
-
-        let rx = runner.execute(input);
-        let result = rx.await.unwrap();
-
-        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint {
-            block_number,
-            stage_checkpoint: Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
-                block_range: CheckpointBlockRange {
-                    from,
-                    to
-                },
-                progress: EntitiesCheckpoint {
-                    processed,
-                    total,
-                }
-            }))
-        }, done: true }) if block_number == tip.number &&
-            from == checkpoint && to == previous_stage &&
-            // -1 because we don't need to download the local head
-            processed == checkpoint + headers.len() as u64 - 1 && total == tip.number);
+            processed == checkpoint + headers.len() as u64 - 1 && total == tip.number
+            // +1 because of the seeded execution that inserts the first block
+            && previous_stage - checkpoint + 1  == runner.db().table::<tables::HeaderTD>().unwrap().len() as u64
+        );
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
 }

@@ -279,7 +279,7 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
             if let Some(tx) =
                 cursor.get(num.into(), <TransactionMask<TransactionSignedNoHash>>::MASK)?
             {
-                txes.push(RawValue::new_raw(tx[0]));
+                txes.push(RawValue::from_vec(tx[0].to_vec()));
             }
         }
 

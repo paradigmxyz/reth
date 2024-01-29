@@ -108,9 +108,9 @@ pub struct DatabaseProvider<TX> {
 }
 
 impl<TX> DatabaseProvider<TX> {
-    /// Returns snapshot provider
-    pub fn snapshot_provider(&self) -> Option<Arc<SnapshotProvider>> {
-        self.snapshot_provider.clone()
+    /// Returns a snapshot provider reference
+    pub fn snapshot_provider(&self) -> Option<&Arc<SnapshotProvider>> {
+        self.snapshot_provider.as_ref()
     }
 }
 
@@ -2519,7 +2519,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         // Write state and changesets to the database.
         // Must be written after blocks because of the receipt lookup.
-        state.write_to_db(self.tx_ref(), OriginalValuesKnown::No)?;
+        state.write_to_storage(self.tx_ref(), None, OriginalValuesKnown::No)?;
         durations_recorder.record_relative(metrics::Action::InsertState);
 
         // insert hashes and intermediate merkle nodes
