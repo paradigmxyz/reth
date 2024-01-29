@@ -218,7 +218,12 @@ impl TransactionFetcher {
 
         let mut acc_size_response = 0;
         let mut surplus_hashes = vec![];
-
+        // sort hashes in descending order for more better greedy packing
+        hashes.sort_by(|a, b| {
+            let a_size = self.eth68_meta.peek(a).expect("should find size in `eth68-meta`");
+            let b_size = self.eth68_meta.peek(b).expect("should find size in `eth68-meta`");
+            b_size.cmp(a_size)
+        });
         hashes.retain(|&hash| match self.include_eth68_hash(&mut acc_size_response, hash) {
             true => true,
             false => {
@@ -835,15 +840,12 @@ mod test {
         ];
         let eth68_hashes_sizes = [
             SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE - 4,
-            SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE, // this one will not fit
-            2,                                                         // this one will fit
-            3,                                                         // but now this one won't
-            2,                                                         /* this one will, no more
-                                                                        * txns
-                                                                        * will
-                                                                        * fit
-                                                                        * after this */
-            1,
+            5, // this one will not fit
+            1, // this one will fit
+            2, // but now this one won't
+            3, /* this one will, no more txns will fit
+                * after this */
+            2,
         ];
 
         // load unseen hashes in reverse order so index 0 in seen_eth68_hashes and
@@ -857,11 +859,11 @@ mod test {
         let mut eth68_hashes_to_request = eth68_hashes.clone().to_vec();
         let surplus_eth68_hashes =
             tx_fetcher.pack_hashes_eth68(&mut eth68_hashes_to_request, peer_id);
-
-        assert_eq!(surplus_eth68_hashes, vec!(eth68_hashes[1], eth68_hashes[3], eth68_hashes[5]));
-        assert_eq!(
-            eth68_hashes_to_request,
-            vec!(eth68_hashes[0], eth68_hashes[2], eth68_hashes[4])
-        );
+        let response_size = eth68_hashes_to_request
+            .iter()
+            .map(|hash| tx_fetcher.eth68_meta.peek(hash).unwrap())
+            .sum::<usize>();
+        assert_eq!(response_size, SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE);
+        assert_eq!(surplus_eth68_hashes.len(), 3);
     }
 }
