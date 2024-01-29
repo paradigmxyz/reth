@@ -7,7 +7,7 @@ use alloy_rlp::{
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Block, Bytes, TransactionSigned, TxHash, B256, U128};
 
-use std::sync::Arc;
+use std::{collections::HashMap, mem, sync::Arc};
 
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
@@ -243,6 +243,22 @@ impl NewPooledTransactionHashes {
             NewPooledTransactionHashes::Eth68(_) => None,
         }
     }
+
+    /// Returns the inner type if this an eth68 announcement.
+    pub fn take_eth68(&mut self) -> Option<NewPooledTransactionHashes68> {
+        match self {
+            NewPooledTransactionHashes::Eth66(_) => None,
+            NewPooledTransactionHashes::Eth68(msg) => Some(mem::take(msg)),
+        }
+    }
+
+    /// Returns the inner type if this an eth66 announcement.
+    pub fn take_eth66(&mut self) -> Option<NewPooledTransactionHashes66> {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => Some(mem::take(msg)),
+            NewPooledTransactionHashes::Eth68(_) => None,
+        }
+    }
 }
 
 impl From<NewPooledTransactionHashes> for EthMessage {
@@ -285,6 +301,21 @@ impl HandleAnnouncement for NewPooledTransactionHashes {
             NewPooledTransactionHashes::Eth66(msg) => msg.retain_by_hash(f),
             NewPooledTransactionHashes::Eth68(msg) => msg.retain_by_hash(f),
         }
+    }
+}
+
+/// Announcement data that has been validated according to the configured network. For an eth68
+/// announcement, values of the map are `Some((u8, usize))` - the tx metadata. For an eth66
+/// announcement, values of the map are `None`.
+pub type ValidAnnouncementData = HashMap<TxHash, Option<(u8, usize)>>;
+
+impl HandleAnnouncement for ValidAnnouncementData {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
+        self.retain(|&hash, _| f(hash))
     }
 }
 

@@ -578,25 +578,36 @@ where
         }
 
         // filter out invalid entries
-        if let Some(eth68_msg) = msg.as_eth68_mut() {
-            // validate eth68 message
-            if let FilterOutcome::ReportPeer =
-                self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_68(eth68_msg)
-            {
+        let mut valid_announcement_data = HashMap::new();
+        if let Some(eth68_msg) = msg.take_eth68() {
+            // validate eth68 announcement data
+            let (outcome, valid_data) =
+                self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_68(eth68_msg);
+
+            if let FilterOutcome::ReportPeer = outcome {
                 self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
             }
-        } else if let Some(eth66_msg) = msg.as_eth66_mut() {
-            if let FilterOutcome::ReportPeer =
-                self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_66(eth66_msg)
-            {
+
+            valid_announcement_data = valid_data
+        } else if let Some(eth66_msg) = msg.take_eth66() {
+            // validate eth66 announcement data
+            let (outcome, valid_data) =
+                self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_66(eth66_msg);
+
+            if let FilterOutcome::ReportPeer = outcome {
                 self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
             }
+
+            valid_announcement_data = valid_data
         }
 
         // filter out already seen unknown hashes. this loads the hashes into the tx fetcher,
         // hence they should be valid at this point. for any seen hashes add the peer as fallback.
-        self.transaction_fetcher
-            .filter_unseen_hashes(&mut msg, peer_id, |peer_id| self.peers.contains_key(&peer_id));
+        self.transaction_fetcher.filter_unseen_hashes(
+            &mut valid_announcement_data,
+            peer_id,
+            |peer_id| self.peers.contains_key(&peer_id),
+        );
 
         if msg.is_empty() {
             // nothing to request

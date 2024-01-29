@@ -1,9 +1,13 @@
 //! Validation of [`NewPooledTransactionHashes68`] entries. These are of the form
 //! `(ty, hash, size)`. Validation and filtering of entries is network dependent. [``]
 
+use std::collections::HashMap;
+
 use derive_more::{Deref, DerefMut, Display};
 use itertools::izip;
-use reth_eth_wire::{NewPooledTransactionHashes66, NewPooledTransactionHashes68};
+use reth_eth_wire::{
+    NewPooledTransactionHashes66, NewPooledTransactionHashes68, ValidAnnouncementData,
+};
 use reth_primitives::{TxHash, TxType};
 use tracing::{debug, trace};
 
@@ -35,14 +39,20 @@ pub trait FilterAnnouncement {
     /// Removes invalid entries from a [`NewPooledTransactionHashes68`] announcement. Returns
     /// [`FilterOutcome::ReportPeer`] if the caller should penalize the peer, otherwise
     /// [`FilterOutcome::Ok`].
-    fn filter_valid_entries_68(&self, msg: &mut NewPooledTransactionHashes68) -> FilterOutcome
+    fn filter_valid_entries_68(
+        &self,
+        msg: NewPooledTransactionHashes68,
+    ) -> (FilterOutcome, ValidAnnouncementData)
     where
         Self: ValidateTx68;
 
     /// Removes invalid entries from a [`NewPooledTransactionHashes66`] announcement. Returns
     /// [`FilterOutcome::ReportPeer`] if the caller should penalize the peer, otherwise
     /// [`FilterOutcome::Ok`].
-    fn filter_valid_entries_66(&self, msg: &mut NewPooledTransactionHashes66) -> FilterOutcome;
+    fn filter_valid_entries_66(
+        &self,
+        msg: NewPooledTransactionHashes66,
+    ) -> (FilterOutcome, ValidAnnouncementData);
 }
 
 /// Outcome from filtering [`NewPooledTransactionHashes68`]. Signals to caller wether to penalize
@@ -105,7 +115,10 @@ impl ValidateTx68 for LayerOne {
 }
 
 impl FilterAnnouncement for LayerOne {
-    fn filter_valid_entries_68(&self, msg: &mut NewPooledTransactionHashes68) -> FilterOutcome
+    fn filter_valid_entries_68(
+        &self,
+        msg: NewPooledTransactionHashes68,
+    ) -> (FilterOutcome, ValidAnnouncementData)
     where
         Self: ValidateTx68,
     {
@@ -123,14 +136,16 @@ impl FilterAnnouncement for LayerOne {
                 network=%Self,
                 "empty eth68 announcement"
             );
-            return FilterOutcome::ReportPeer
+            return (FilterOutcome::ReportPeer, HashMap::new())
         }
+
+        let NewPooledTransactionHashes68 { mut hashes, mut types, mut sizes } = msg;
 
         let mut should_report_peer = false;
         let mut indices_to_remove = vec![];
 
         // 2. checks if eth68 announcement metadata is valid
-        for (i, (&ty, &hash, &size)) in izip!(&msg.types, &msg.hashes, &msg.sizes).enumerate() {
+        for (i, (&ty, &hash, &size)) in izip!(&types, &hashes, &sizes).enumerate() {
             match self.should_fetch(ty, hash, size) {
                 ValidationOutcome::Fetch => (),
                 ValidationOutcome::Ignore => indices_to_remove.push(i),
@@ -144,44 +159,42 @@ impl FilterAnnouncement for LayerOne {
         for (i, index) in indices_to_remove.into_iter().rev().enumerate() {
             let index = index.saturating_sub(i);
 
-            msg.hashes.remove(index);
-            msg.types.remove(index);
-            msg.sizes.remove(index);
+            hashes.remove(index);
+            types.remove(index);
+            sizes.remove(index);
         }
 
         // 3. checks if announcement is spam packed with duplicate hashes
-        let mut hashes_sorted = msg.hashes.clone();
-        hashes_sorted.sort();
+        let mut deduped_data = HashMap::with_capacity(hashes.len());
 
-        for hash_pair in hashes_sorted.windows(2) {
-            if hash_pair[0] == hash_pair[1] {
-                let index = msg.hashes.iter().position(|&hash| hash == hash_pair[0]);
-                if let Some(i) = index {
-                    debug!(target: "net::eth-wire",
-                        ty=msg.types[i],
-                        size=msg.sizes[i],
-                        hash=%msg.hashes[i],
-                        network=%Self,
-                        "duplicate tx hash in eth68 announcement"
-                    );
+        debug_assert!(
+            hashes.len() == types.len() && hashes.len() == sizes.len(), "`%hashes`, `%types` and `%sizes` should all be the same length, decoding of `NewPooledTransactionHashes68` should handle this, 
+`%hashes`: {hashes:?}, 
+`%types`: {types:?}, 
+`%sizes: {sizes:?}`"
+        );
 
-                    msg.hashes.remove(i);
-                    msg.types.remove(i);
-                    msg.sizes.remove(i);
-                }
+        let original_len = hashes.len();
 
-                should_report_peer = true;
+        for hash in hashes.into_iter().rev() {
+            if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
+                deduped_data.insert(hash, Some((ty, size)));
             }
         }
-
-        if should_report_peer {
-            return FilterOutcome::ReportPeer
+        if deduped_data.len() != original_len {
+            should_report_peer = true
         }
 
-        FilterOutcome::Ok
+        (
+            if should_report_peer { FilterOutcome::ReportPeer } else { FilterOutcome::Ok },
+            deduped_data,
+        )
     }
 
-    fn filter_valid_entries_66(&self, msg: &mut NewPooledTransactionHashes66) -> FilterOutcome {
+    fn filter_valid_entries_66(
+        &self,
+        msg: NewPooledTransactionHashes66,
+    ) -> (FilterOutcome, ValidAnnouncementData) {
         trace!(target: "net::tx::validation",
             hashes=?msg.0,
             network=%Self,
@@ -194,37 +207,28 @@ impl FilterAnnouncement for LayerOne {
                 network=%Self,
                 "empty eth66 announcement"
             );
-            return FilterOutcome::ReportPeer
+            return (FilterOutcome::ReportPeer, HashMap::new())
         }
 
-        let mut should_report_peer = false;
+        let NewPooledTransactionHashes66(hashes) = msg;
 
         // 2. checks if announcement is spam packed with duplicate hashes
-        let mut hashes_sorted = msg.0.clone();
-        hashes_sorted.sort();
+        let mut deduped_data = HashMap::with_capacity(hashes.len());
 
-        for hash_pair in hashes_sorted.windows(2) {
-            if hash_pair[0] == hash_pair[1] {
-                let index = msg.0.iter().position(|&hash| hash == hash_pair[0]);
-                if let Some(i) = index {
-                    debug!(target: "net::eth-wire",
-                        hash=%msg.0[i],
-                        network=%Self,
-                        "duplicate tx hash in eth66 announcement"
-                    );
+        let original_len = hashes.len();
 
-                    msg.0.remove(i);
-                }
-
-                should_report_peer = true;
-            }
+        for hash in hashes.into_iter().rev() {
+            deduped_data.insert(hash, None);
         }
 
-        if should_report_peer {
-            return FilterOutcome::ReportPeer
-        }
-
-        FilterOutcome::Ok
+        (
+            if deduped_data.len() != original_len {
+                FilterOutcome::ReportPeer
+            } else {
+                FilterOutcome::Ok
+            },
+            deduped_data,
+        )
     }
 }
 
@@ -240,11 +244,11 @@ mod test {
         let sizes = vec![];
         let hashes = vec![];
 
-        let mut announcement = NewPooledTransactionHashes68 { types, sizes, hashes };
+        let announcement = NewPooledTransactionHashes68 { types, sizes, hashes };
 
         let filter: AnnouncementFilter = AnnouncementFilter::default();
 
-        let outcome = filter.filter_valid_entries_68(&mut announcement);
+        let (outcome, _data) = filter.filter_valid_entries_68(announcement);
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
     }
@@ -266,7 +270,7 @@ mod test {
                 .unwrap(),
         ];
 
-        let mut announcement = NewPooledTransactionHashes68 {
+        let announcement = NewPooledTransactionHashes68 {
             types: types.clone(),
             sizes: sizes.clone(),
             hashes: hashes.clone(),
@@ -274,18 +278,14 @@ mod test {
 
         let filter: AnnouncementFilter = AnnouncementFilter::default();
 
-        let outcome = filter.filter_valid_entries_68(&mut announcement);
+        let (outcome, data) = filter.filter_valid_entries_68(announcement);
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
 
-        assert_eq!(
-            announcement,
-            NewPooledTransactionHashes68 {
-                types: vec!(types[1]),
-                sizes: vec!(sizes[1]),
-                hashes: vec!(hashes[1]),
-            }
-        );
+        let mut expected_data = HashMap::new();
+        expected_data.insert(hashes[1], Some((types[1], sizes[1])));
+
+        assert_eq!(expected_data, data,)
     }
 
     #[test]
@@ -306,7 +306,7 @@ mod test {
                 .unwrap(),
         ];
 
-        let mut announcement = NewPooledTransactionHashes68 {
+        let announcement = NewPooledTransactionHashes68 {
             types: types.clone(),
             sizes: sizes.clone(),
             hashes: hashes.clone(),
@@ -314,18 +314,15 @@ mod test {
 
         let filter: AnnouncementFilter = AnnouncementFilter::default();
 
-        let outcome = filter.filter_valid_entries_68(&mut announcement);
+        let (outcome, data) = filter.filter_valid_entries_68(announcement);
 
         assert_eq!(outcome, FilterOutcome::Ok);
 
-        assert_eq!(
-            announcement,
-            NewPooledTransactionHashes68 {
-                types: vec!(types[0], types[2]),
-                sizes: vec!(sizes[0], sizes[2]),
-                hashes: vec!(hashes[0], hashes[2]),
-            }
-        );
+        let mut expected_data = HashMap::new();
+        expected_data.insert(hashes[0], Some((types[0], sizes[0])));
+        expected_data.insert(hashes[2], Some((types[2], sizes[2])));
+
+        assert_eq!(expected_data, data,)
     }
 
     #[test]
@@ -346,7 +343,7 @@ mod test {
                 .unwrap(),
         ];
 
-        let mut announcement = NewPooledTransactionHashes68 {
+        let announcement = NewPooledTransactionHashes68 {
             types: types.clone(),
             sizes: sizes.clone(),
             hashes: hashes.clone(),
@@ -354,18 +351,14 @@ mod test {
 
         let filter: AnnouncementFilter = AnnouncementFilter::default();
 
-        let outcome = filter.filter_valid_entries_68(&mut announcement);
+        let (outcome, data) = filter.filter_valid_entries_68(announcement);
 
         assert_eq!(outcome, FilterOutcome::Ok);
 
-        assert_eq!(
-            announcement,
-            NewPooledTransactionHashes68 {
-                types: vec!(types[2]),
-                sizes: vec!(sizes[2]),
-                hashes: vec!(hashes[2]),
-            }
-        );
+        let mut expected_data = HashMap::new();
+        expected_data.insert(hashes[2], Some((types[2], sizes[2])));
+
+        assert_eq!(expected_data, data,)
     }
 
     #[test]
@@ -394,7 +387,7 @@ mod test {
                 .unwrap(),
         ];
 
-        let mut announcement = NewPooledTransactionHashes68 {
+        let announcement = NewPooledTransactionHashes68 {
             types: types.clone(),
             sizes: sizes.clone(),
             hashes: hashes.clone(),
@@ -402,19 +395,14 @@ mod test {
 
         let filter: AnnouncementFilter = AnnouncementFilter::default();
 
-        let outcome = filter.filter_valid_entries_68(&mut announcement);
+        let (outcome, data) = filter.filter_valid_entries_68(announcement);
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
 
-        //
+        let mut expected_data = HashMap::new();
+        expected_data.insert(hashes[3], Some((types[3], sizes[3])));
+        expected_data.insert(hashes[2], Some((types[2], sizes[2])));
 
-        assert_eq!(
-            announcement,
-            NewPooledTransactionHashes68 {
-                types: vec!(types[2], types[3]),
-                sizes: vec!(sizes[2], sizes[3]),
-                hashes: vec!(hashes[2], hashes[3]),
-            }
-        );
+        assert_eq!(expected_data, data,)
     }
 }
