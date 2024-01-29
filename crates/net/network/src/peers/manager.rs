@@ -6,6 +6,7 @@ use crate::{
         DEFAULT_MAX_PEERS_OUTBOUND,
     },
     session::{Direction, PendingSessionHandshakeError},
+    swarm::NetworkConnectionState,
 };
 use futures::StreamExt;
 use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
@@ -114,9 +115,8 @@ pub struct PeersManager {
     last_tick: Instant,
     /// Maximum number of backoff attempts before we give up on a peer and dropping.
     max_backoff_count: u32,
-    /// Hibernate state of the network.
-    /// If true, the network will not attempt to fill any outbound slots.
-    hibernated: bool,
+    /// Tracks the connection state of the node
+    net_connection_state: NetworkConnectionState,
 }
 
 impl PeersManager {
@@ -169,7 +169,7 @@ impl PeersManager {
             connect_trusted_nodes_only,
             last_tick: Instant::now(),
             max_backoff_count,
-            hibernated: false,
+            net_connection_state: NetworkConnectionState::default(),
         }
     }
 
@@ -695,7 +695,8 @@ impl PeersManager {
         // as long as there a slots available and not hibernated try to fill them with the best
         // peers
         let mut new_outbound_dials = 1;
-        while self.connection_info.has_out_capacity() && !self.hibernated {
+        while self.connection_info.has_out_capacity() && !self.net_connection_state.is_hibernated()
+        {
             let action = {
                 let (peer_id, peer) = match self.best_unconnected() {
                     Some(peer) => peer,
@@ -726,13 +727,23 @@ impl PeersManager {
 
     /// Keeps track of the network hibernation state.
     pub fn on_network_hibernation(&mut self) {
-        self.hibernated = true;
+        self.net_connection_state = NetworkConnectionState::Hibernate;
     }
 
-    /// Sets hibernated to false so that the outbound slots can be filled again.
+    /// Returns the current network connection state.
+    pub fn connection_state(&self) -> &NetworkConnectionState {
+        &self.net_connection_state
+    }
+
+    /// Sets `net_connection_state` to `Active` so that the outbound slots can be filled again.
     /// Opposite action of [`Self::on_network_hibernation`].
-    pub fn on_network_wake_up(&mut self) {
-        self.hibernated = false;
+    pub fn on_network_active(&mut self) {
+        self.net_connection_state = NetworkConnectionState::Active;
+    }
+
+    /// Sets [`net_connection_state]` to [`ShuttingDown`].
+    pub fn on_shutdown(&mut self) {
+        self.net_connection_state = NetworkConnectionState::ShuttingDown;
     }
 
     /// Advances the state.

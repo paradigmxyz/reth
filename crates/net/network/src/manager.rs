@@ -224,7 +224,7 @@ where
             Arc::clone(&num_active_peers),
         );
 
-        let swarm = Swarm::new(incoming, sessions, state, NetworkConnectionState::default());
+        let swarm = Swarm::new(incoming, sessions, state);
 
         let (to_manager_tx, from_handle_rx) = mpsc::unbounded_channel();
 
@@ -551,19 +551,23 @@ where
             NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
                 self.swarm.sessions_mut().disconnect(peer_id, reason);
             }
-            NetworkHandleMessage::Hibernate(tx) => {
-                // Set connection status to `Hibernate`. Stops the node to fill new outbound
+            NetworkHandleMessage::ToggleNetworkConnection(net_state) => {
+                // Toggle network connection state between Active and Hibernate.
+                // If hibernate stops the node to fill new outbound
                 // connections, this is beneficial for sync stages that do not require a network
                 // connection.
-                self.swarm.on_hibernate_requested();
-                let _ = tx.send(());
+                match net_state {
+                    NetworkConnectionState::Hibernate => {
+                        self.swarm.on_hibernate_requested();
+                    }
+                    NetworkConnectionState::Active => {
+                        self.swarm.on_network_active();
+                    }
+                    // It can only trigger a state change between Active and Hibernate.
+                    _ => {}
+                }
             }
-            NetworkHandleMessage::WakeUp(tx) => {
-                // Set connection status to `Active`. Activates the node to fill new outbound
-                // connections.
-                self.swarm.on_wake_up_requested();
-                let _ = tx.send(());
-            }
+
             NetworkHandleMessage::Shutdown(tx) => {
                 // Set connection status to `Shutdown`. Stops node to accept
                 // new incoming connections as well as sending connection requests to newly

@@ -1,6 +1,7 @@
 use crate::{
     config::NetworkMode, discovery::DiscoveryEvent, manager::NetworkEvent, message::PeerRequest,
-    peers::PeersHandle, protocol::RlpxSubProtocol, FetchClient,
+    network::NetworkHandleMessage::ToggleNetworkConnection, peers::PeersHandle,
+    protocol::RlpxSubProtocol, swarm::NetworkConnectionState, FetchClient,
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -152,17 +153,10 @@ impl NetworkHandle {
         rx.await
     }
 
-    /// Send message to hibernate node.
-    pub async fn hibernate(&self) -> Result<(), oneshot::error::RecvError> {
-        let (tx, rx) = oneshot::channel();
-        self.send_message(NetworkHandleMessage::Hibernate(tx));
-        rx.await
-    }
-    /// Send a message to wake up the node after it has been hibernated.
-    pub async fn wake_up(&self) -> Result<(), oneshot::error::RecvError> {
-        let (tx, rx) = oneshot::channel();
-        self.send_message(NetworkHandleMessage::WakeUp(tx));
-        rx.await
+    /// Toggles network connection state between [`NetworkConnectionState::Hibernate`] and
+    /// [`NetworkConnectionState::Active`].
+    pub async fn toggle_network_conn(&self, network_conn: NetworkConnectionState) {
+        self.send_message(ToggleNetworkConnection(network_conn));
     }
 
     /// Whether tx gossip is disabled
@@ -445,10 +439,8 @@ pub(crate) enum NetworkHandleMessage {
     GetReputationById(PeerId, oneshot::Sender<Option<Reputation>>),
     /// Initiates a graceful shutdown of the network via a oneshot sender.
     Shutdown(oneshot::Sender<()>),
-    /// Initiates an hibernation of the network via a oneshot sender.
-    Hibernate(oneshot::Sender<()>),
-    /// Reactivates the network after hibernation via a oneshot sender.
-    WakeUp(oneshot::Sender<()>),
+    /// Toggles the network state between hibernation and active.
+    ToggleNetworkConnection(NetworkConnectionState),
     /// Adds a new listener for `DiscoveryEvent`.
     DiscoveryListener(UnboundedSender<DiscoveryEvent>),
     /// Adds an additional `RlpxSubProtocol`.

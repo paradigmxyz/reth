@@ -57,8 +57,6 @@ pub(crate) struct Swarm<C> {
     sessions: SessionManager,
     /// Tracks the entire state of the network and handles events received from the sessions.
     state: NetworkState<C>,
-    /// Tracks the connection state of the node
-    net_connection_state: NetworkConnectionState,
 }
 
 // === impl Swarm ===
@@ -69,9 +67,8 @@ impl<C> Swarm<C> {
         incoming: ConnectionListener,
         sessions: SessionManager,
         state: NetworkState<C>,
-        net_connection_state: NetworkConnectionState,
     ) -> Self {
-        Self { incoming, sessions, state, net_connection_state }
+        Self { incoming, sessions, state }
     }
 
     /// Adds an additional protocol handler to the RLPx sub-protocol list.
@@ -274,26 +271,24 @@ where
 
     /// Set network connection state to `ShuttingDown`
     pub(crate) fn on_shutdown_requested(&mut self) {
-        self.net_connection_state = NetworkConnectionState::ShuttingDown;
+        self.state_mut().peers_mut().on_shutdown();
     }
 
     /// Checks if the node's network connection state is 'ShuttingDown'
     #[inline]
     pub(crate) fn is_shutting_down(&self) -> bool {
-        matches!(self.net_connection_state, NetworkConnectionState::ShuttingDown)
+        self.state().peers().connection_state().is_shutting_down()
     }
 
-    /// Set network connection state to `Hibernate` and updates the `PeerManager` state
+    /// Set network connection state to `Hibernate`.
     pub(crate) fn on_hibernate_requested(&mut self) {
-        self.net_connection_state = NetworkConnectionState::Hibernate;
         self.state_mut().peers_mut().on_network_hibernation();
     }
 
-    /// Set network connection state to `Active` and updates the `PeerManager` state
+    /// Set network connection state to `Active`
     /// Opposite action of `on_hibernate_requested`
-    pub(crate) fn on_wake_up_requested(&mut self) {
-        self.net_connection_state = NetworkConnectionState::Active;
-        self.state_mut().peers_mut().on_network_wake_up();
+    pub(crate) fn on_network_active(&mut self) {
+        self.state_mut().peers_mut().on_network_active();
     }
 }
 
@@ -439,9 +434,21 @@ pub(crate) enum SwarmEvent {
 /// When in hibernation mode, the node will not initiate new outbound connections. This is
 /// beneficial for sync stages that do not require a network connection.
 #[derive(Debug, Default)]
-pub(crate) enum NetworkConnectionState {
+pub enum NetworkConnectionState {
     #[default]
     Active,
     ShuttingDown,
     Hibernate,
+}
+
+impl NetworkConnectionState {
+    /// Returns true if the node is in hibernation mode.
+    pub(crate) fn is_hibernated(&self) -> bool {
+        matches!(self, NetworkConnectionState::Hibernate)
+    }
+
+    /// Returns true if the node is shutting down.
+    pub(crate) fn is_shutting_down(&self) -> bool {
+        matches!(self, NetworkConnectionState::ShuttingDown)
+    }
 }
