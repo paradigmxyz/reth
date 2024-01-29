@@ -98,7 +98,7 @@ impl ImportCommand {
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
-        init_genesis(db.clone(), self.chain.clone())?;
+        init_genesis(provider_factory.clone(), self.chain.clone())?;
 
         let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
         info!(target: "reth::cli", "Consensus engine initialized");

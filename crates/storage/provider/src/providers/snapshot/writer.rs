@@ -105,21 +105,11 @@ impl<'a> SnapshotProviderRW<'a> {
             self.writer = writer;
             self.data_path = data_path;
 
-            match segment {
-                SnapshotSegment::Headers => todo!(),
-                SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
-                    let block_start = *find_fixed_range(last_block + 1).start();
-                    *self.writer.user_header_mut() =
-                        SegmentHeader::new(block_start..=block_start, None, segment)
-                }
-            }
+            let block_start = *find_fixed_range(last_block + 1).start();
+            *self.writer.user_header_mut() =
+                SegmentHeader::new(block_start..=block_start, None, segment)
         } else {
-            match segment {
-                SnapshotSegment::Headers => todo!(),
-                SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
-                    self.writer.user_header_mut().increment_block()
-                }
-            }
+            self.writer.user_header_mut().increment_block()
         }
 
         Ok(self.writer.user_header().block_end())
@@ -231,8 +221,6 @@ impl<'a> SnapshotProviderRW<'a> {
         hash: BlockHash,
     ) -> ProviderResult<BlockNumber> {
         debug_assert!(self.writer.user_header().segment() == SnapshotSegment::Headers);
-
-        self.writer.user_header_mut().increment_block();
 
         self.append_column(header)?;
         self.append_column(terminal_difficulty)?;
