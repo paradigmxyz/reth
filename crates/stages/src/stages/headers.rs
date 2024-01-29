@@ -145,6 +145,7 @@ where
             // // Append to HeaderTD
             writer.append_header(header, td, header_hash)?;
         }
+        writer.commit()?;
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing header hash index");
 
