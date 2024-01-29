@@ -377,11 +377,11 @@ mod test {
         ];
         // first three or the same
         let hashes = vec![
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa") // removed dup
-                .unwrap(),
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa") // removed dup
-                .unwrap(),
             B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa") // dup
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa") // removed dup
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa") // removed dup
                 .unwrap(),
             B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb")
                 .unwrap(),
@@ -401,7 +401,7 @@ mod test {
 
         let mut expected_data = HashMap::new();
         expected_data.insert(hashes[3], Some((types[3], sizes[3])));
-        expected_data.insert(hashes[2], Some((types[2], sizes[2])));
+        expected_data.insert(hashes[0], Some((types[0], sizes[0])));
 
         assert_eq!(expected_data, data,)
     }
