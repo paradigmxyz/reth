@@ -692,11 +692,14 @@ impl PeersManager {
     fn fill_outbound_slots(&mut self) {
         self.tick();
 
-        // as long as there a slots available and not hibernated try to fill them with the best
-        // peers
+        if !self.net_connection_state.is_active() {
+            // nothing to fill
+            return
+        }
+
+        // as long as there a slots available fill them with the best peers
         let mut new_outbound_dials = 1;
-        while self.connection_info.has_out_capacity() && !self.net_connection_state.is_hibernated()
-        {
+        while self.connection_info.has_out_capacity() {
             let action = {
                 let (peer_id, peer) = match self.best_unconnected() {
                     Some(peer) => peer,

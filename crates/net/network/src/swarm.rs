@@ -439,9 +439,9 @@ pub enum NetworkConnectionState {
 }
 
 impl NetworkConnectionState {
-    /// Returns true if the node is in hibernation mode.
-    pub(crate) fn is_hibernated(&self) -> bool {
-        matches!(self, NetworkConnectionState::Hibernate)
+    /// Returns true if the node is active.
+    pub(crate) fn is_active(&self) -> bool {
+        matches!(self, NetworkConnectionState::Active)
     }
 
     /// Returns true if the node is shutting down.
