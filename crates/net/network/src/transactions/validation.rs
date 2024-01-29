@@ -130,16 +130,23 @@ impl FilterAnnouncement for LayerOne {
             "validating eth68 announcement data.."
         );
 
+        let NewPooledTransactionHashes68 { mut hashes, mut types, mut sizes } = msg;
+
+        debug_assert!(
+            hashes.len() == types.len() && hashes.len() == sizes.len(), "`%hashes`, `%types` and `%sizes` should all be the same length, decoding of `NewPooledTransactionHashes68` should handle this, 
+`%hashes`: {hashes:?}, 
+`%types`: {types:?}, 
+`%sizes: {sizes:?}`"
+        );
+
         // 1. checks if the announcement is empty
-        if msg.hashes.is_empty() {
+        if hashes.is_empty() {
             debug!(target: "net::tx",
                 network=%Self,
                 "empty eth68 announcement"
             );
             return (FilterOutcome::ReportPeer, HashMap::new())
         }
-
-        let NewPooledTransactionHashes68 { mut hashes, mut types, mut sizes } = msg;
 
         let mut should_report_peer = false;
         let mut indices_to_remove = vec![];
@@ -166,13 +173,6 @@ impl FilterAnnouncement for LayerOne {
 
         // 3. checks if announcement is spam packed with duplicate hashes
         let mut deduped_data = HashMap::with_capacity(hashes.len());
-
-        debug_assert!(
-            hashes.len() == types.len() && hashes.len() == sizes.len(), "`%hashes`, `%types` and `%sizes` should all be the same length, decoding of `NewPooledTransactionHashes68` should handle this, 
-`%hashes`: {hashes:?}, 
-`%types`: {types:?}, 
-`%sizes: {sizes:?}`"
-        );
 
         let original_len = hashes.len();
 
@@ -201,16 +201,16 @@ impl FilterAnnouncement for LayerOne {
             "validating eth66 announcement data.."
         );
 
+        let NewPooledTransactionHashes66(hashes) = msg;
+
         // 1. checks if the announcement is empty
-        if msg.0.is_empty() {
+        if hashes.is_empty() {
             debug!(target: "net::tx",
                 network=%Self,
                 "empty eth66 announcement"
             );
             return (FilterOutcome::ReportPeer, HashMap::new())
         }
-
-        let NewPooledTransactionHashes66(hashes) = msg;
 
         // 2. checks if announcement is spam packed with duplicate hashes
         let mut deduped_data = HashMap::with_capacity(hashes.len());
@@ -404,5 +404,49 @@ mod test {
         expected_data.insert(hashes[0], Some((types[0], sizes[0])));
 
         assert_eq!(expected_data, data,)
+    }
+
+    #[test]
+    fn eth66_empty_announcement() {
+        let hashes = vec![];
+
+        let announcement = NewPooledTransactionHashes66(hashes);
+
+        let filter: AnnouncementFilter = AnnouncementFilter::default();
+
+        let (outcome, _data) = filter.filter_valid_entries_66(announcement);
+
+        assert_eq!(outcome, FilterOutcome::ReportPeer);
+    }
+
+    #[test]
+    fn eth66_announcement_duplicate_tx_hash() {
+        // first three or the same
+        let hashes = vec![
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb") // dup1
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa") // dup2
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa") // removed dup2
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa") // removed dup2
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb") // removed dup1
+                .unwrap(),
+        ];
+
+        let announcement = NewPooledTransactionHashes66(hashes.clone());
+
+        let filter: AnnouncementFilter = AnnouncementFilter::default();
+
+        let (outcome, data) = filter.filter_valid_entries_66(announcement);
+
+        assert_eq!(outcome, FilterOutcome::ReportPeer);
+
+        let mut expected_data = HashMap::new();
+        expected_data.insert(hashes[1], None);
+        expected_data.insert(hashes[0], None);
+
+        assert_eq!(expected_data, data)
     }
 }
