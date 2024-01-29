@@ -479,6 +479,7 @@ where
             provider_factory
                 .snapshot_provider()
                 .expect("snapshot provider initialized via provider factory"),
+            PruneModes::default(),
         );
 
         // Setup pipeline

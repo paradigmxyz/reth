@@ -27,8 +27,9 @@ use reth_interfaces::{
 };
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
-
-use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, B256};
+use reth_primitives::{
+    fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256,
+};
 use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_snapshot::Snapshotter;
 use reth_stages::{
@@ -231,6 +232,7 @@ impl Command {
             provider_factory
                 .snapshot_provider()
                 .expect("snapshot provider initialized via provider factory"),
+            PruneModes::default(),
         );
 
         // Configure the pipeline

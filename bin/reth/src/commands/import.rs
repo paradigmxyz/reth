@@ -16,7 +16,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::consensus::Consensus;
-use reth_primitives::{stage::StageId, ChainSpec, B256};
+use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
 use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_snapshot::Snapshotter;
 use reth_stages::{
@@ -116,6 +116,7 @@ impl ImportCommand {
             provider_factory
                 .snapshot_provider()
                 .expect("snapshot provider initialized via provider factory"),
+            PruneModes::default(),
         );
 
         let (mut pipeline, events) = self
