@@ -5,7 +5,7 @@ use crate::{
     Case, Error, Suite,
 };
 use alloy_rlp::Decodable;
-use reth_db::test_utils::create_test_rw_db;
+use reth_db::test_utils::{create_test_rw_db, create_test_snapshots_dir};
 use reth_primitives::{BlockBody, SealedBlock};
 use reth_provider::{BlockWriter, HashingWriter, ProviderFactory};
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
@@ -78,6 +78,8 @@ impl Case for BlockchainTestCase {
             // Create a new test database and initialize a provider for the test case.
             let db = create_test_rw_db();
             let provider = ProviderFactory::new(db.as_ref(), Arc::new(case.network.clone().into()))
+                .with_snapshots(create_test_snapshots_dir())
+                .map_err(|err| Error::RethError(err.into()))?
                 .provider_rw()
                 .unwrap();
 

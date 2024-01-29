@@ -3,7 +3,7 @@
 use crate::{segments, segments::Segment, SnapshotterError};
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
-use reth_primitives::{snapshot::HighestSnapshots, BlockNumber};
+use reth_primitives::{snapshot::HighestSnapshots, BlockNumber, PruneModes};
 use reth_provider::{
     providers::{SnapshotProvider, SnapshotWriter},
     ProviderFactory,
@@ -24,6 +24,10 @@ pub struct Snapshotter<DB> {
     provider_factory: ProviderFactory<DB>,
     /// Snapshot provider
     snapshot_provider: Arc<SnapshotProvider>,
+    /// Pruning configuration for every part of the data that can be pruned. Set by user, and
+    /// needed in [Snapshotter] to prevent snapshotting the prunable data.
+    /// See [Snapshotter::get_snapshot_targets].
+    prune_modes: PruneModes,
 }
 
 /// Snapshot targets, per data part, measured in [`BlockNumber`].
@@ -64,8 +68,9 @@ impl<DB: Database> Snapshotter<DB> {
     pub fn new(
         provider_factory: ProviderFactory<DB>,
         snapshot_provider: Arc<SnapshotProvider>,
+        prune_modes: PruneModes,
     ) -> Self {
-        Self { provider_factory, snapshot_provider }
+        Self { provider_factory, snapshot_provider, prune_modes }
     }
 
     /// Run the snapshotter.
@@ -128,12 +133,16 @@ impl<DB: Database> Snapshotter<DB> {
     ) -> RethResult<SnapshotTargets> {
         let highest_snapshots = self.snapshot_provider.get_highest_snapshots();
 
-        // TODO(alexey): snapshot receipts
         let targets = SnapshotTargets {
             headers: self.get_snapshot_target(highest_snapshots.headers, finalized_block_number),
-            receipts: None,
-            // receipts: self.get_snapshot_target(highest_snapshots.receipts,
-            // finalized_block_number),
+            // Snapshot receipts only if they're not pruned according to the user configuration
+            receipts: if self.prune_modes.receipts.is_none() &&
+                self.prune_modes.receipts_log_filter.is_empty()
+            {
+                self.get_snapshot_target(highest_snapshots.receipts, finalized_block_number)
+            } else {
+                None
+            },
             transactions: self
                 .get_snapshot_target(highest_snapshots.transactions, finalized_block_number),
         };
@@ -166,9 +175,12 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_interfaces::{
         provider::ProviderError,
-        test_utils::{generators, generators::random_block_range},
+        test_utils::{
+            generators,
+            generators::{random_block_range, random_receipt},
+        },
     };
-    use reth_primitives::{snapshot::HighestSnapshots, B256};
+    use reth_primitives::{snapshot::HighestSnapshots, PruneModes, B256};
     use reth_stages::test_utils::TestStageDB;
 
     #[test]
@@ -179,6 +191,14 @@ mod tests {
 
         let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3);
         db.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        let mut receipts = Vec::new();
+        for block in &blocks {
+            for transaction in &block.body {
+                receipts
+                    .push((receipts.len() as u64, random_receipt(&mut rng, transaction, Some(0))));
+            }
+        }
+        db.insert_receipts(receipts).expect("insert receipts");
 
         let snapshots_dir = tempfile::TempDir::new().unwrap();
         let provider_factory = db
@@ -187,34 +207,47 @@ mod tests {
             .expect("factory with snapshots");
         let snapshot_provider = provider_factory.snapshot_provider().unwrap();
 
-        let snapshotter = Snapshotter::new(provider_factory, snapshot_provider.clone());
+        let snapshotter =
+            Snapshotter::new(provider_factory, snapshot_provider.clone(), PruneModes::default());
 
         let targets = snapshotter.get_snapshot_targets(1).expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets { headers: Some(0..=1), receipts: None, transactions: Some(0..=1) }
+            SnapshotTargets {
+                headers: Some(0..=1),
+                receipts: Some(1..=1),
+                transactions: Some(0..=1)
+            }
         );
         assert_matches!(snapshotter.run(targets), Ok(_));
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: Some(1), receipts: None, transactions: Some(1) }
+            HighestSnapshots { headers: Some(1), receipts: Some(1), transactions: Some(1) }
         );
 
         let targets = snapshotter.get_snapshot_targets(3).expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets { headers: Some(2..=3), receipts: None, transactions: Some(2..=3) }
+            SnapshotTargets {
+                headers: Some(2..=3),
+                receipts: Some(2..=3),
+                transactions: Some(2..=3)
+            }
         );
         assert_matches!(snapshotter.run(targets), Ok(_));
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: Some(3), receipts: None, transactions: Some(3) }
+            HighestSnapshots { headers: Some(3), receipts: Some(3), transactions: Some(3) }
         );
 
         let targets = snapshotter.get_snapshot_targets(4).expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets { headers: Some(4..=4), receipts: None, transactions: Some(4..=4) }
+            SnapshotTargets {
+                headers: Some(4..=4),
+                receipts: Some(4..=4),
+                transactions: Some(4..=4)
+            }
         );
         assert_matches!(
             snapshotter.run(targets),
@@ -222,7 +255,7 @@ mod tests {
         );
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: Some(3), receipts: None, transactions: Some(3) }
+            HighestSnapshots { headers: Some(3), receipts: Some(3), transactions: Some(3) }
         );
     }
 }
