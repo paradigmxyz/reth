@@ -13,6 +13,7 @@ reth-primitives.workspace = true
 reth-node-api.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-payload-builder.workspace = true
+
 tracing.workspace = true
 clap = { workspace = true, features = ["derive"] }
 futures-util.workspace = true

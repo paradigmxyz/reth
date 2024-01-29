@@ -9,6 +9,7 @@
 //!
 //! This launch the regular reth node overriding the engine api payload builder with our custom.
 use clap::Parser;
+use generator::EmptyBlockPayloadJobGenerator;
 use reth::{
     cli::{
         components::RethNodeComponents,
@@ -24,9 +25,8 @@ use reth_basic_payload_builder::{BasicPayloadJobGeneratorConfig, PayloadBuilder}
 use reth_node_api::EngineTypes;
 use reth_payload_builder::PayloadBuilderService;
 
-use crate::empty_payloads::EmptyBlockPayloadJobGenerator;
-
-pub mod empty_payloads;
+pub mod generator;
+pub mod job;
 
 fn main() {
     Cli::<NoArgsCliExt<MyCustomBuilder>>::parse()
@@ -59,6 +59,8 @@ impl RethNodeCommandConfig for MyCustomBuilder {
             > + Unpin
             + 'static,
     {
+        tracing::info!("Spawning a custom payload builder");
+
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
             .interval(conf.interval())
             .deadline(conf.deadline())
@@ -81,7 +83,7 @@ impl RethNodeCommandConfig for MyCustomBuilder {
 
         components
             .task_executor()
-            .spawn_critical("payload builder service", Box::pin(payload_service));
+            .spawn_critical("custom payload builder service", Box::pin(payload_service));
 
         Ok(payload_builder)
     }
