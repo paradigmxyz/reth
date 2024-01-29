@@ -5,7 +5,7 @@ use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTxMut,
     RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
@@ -18,7 +18,7 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
     },
-    BlockHash, BlockNumber, SealedHeader, SnapshotSegment, U256,
+    BlockHash, BlockNumber, SealedHeader, SnapshotSegment,
 };
 use reth_provider::{
     providers::{SnapshotProvider, SnapshotWriter},
@@ -167,7 +167,7 @@ where
             let (hash, number) = hash_to_number?;
 
             if index > 0 && index % interval == 0 {
-                info!(target: "sync::stages::headers", progress = ((index as f64 / total_headers as f64) * 100.0).round(), "Writing headers hash index");
+                info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers hash index");
             }
 
             if first_sync {

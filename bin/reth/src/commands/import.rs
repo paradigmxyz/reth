@@ -92,11 +92,12 @@ impl ImportCommand {
         let db =
             Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         info!(target: "reth::cli", "Database opened");
-        let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone());
+        let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone())
+            .with_snapshots(data_dir.snapshots_path())?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
-        init_genesis(db.clone(), self.chain.clone())?;
+        init_genesis(provider_factory.clone())?;
 
         let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
         info!(target: "reth::cli", "Consensus engine initialized");

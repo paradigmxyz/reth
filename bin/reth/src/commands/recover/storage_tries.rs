@@ -51,7 +51,9 @@ impl Command {
         let db = Arc::new(init_db(db_path, Default::default())?);
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
-        init_genesis(db.clone(), self.chain.clone())?;
+        let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone())
+            .with_snapshots(data_dir.snapshots_path())?;
+        init_genesis(provider_factory.clone())?;
 
         let factory = ProviderFactory::new(&db, self.chain);
         let mut provider = factory.provider_rw()?;

@@ -29,7 +29,7 @@ use reth_db::{
 use reth_interfaces::{
     p2p::headers::downloader::SyncTarget,
     provider::{ProviderResult, RootMismatch},
-    RethError, RethResult,
+    RethResult,
 };
 use reth_primitives::{
     keccak256,
