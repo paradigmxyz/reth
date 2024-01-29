@@ -177,7 +177,10 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_interfaces::{
         provider::ProviderError,
-        test_utils::{generators, generators::random_block_range},
+        test_utils::{
+            generators,
+            generators::{random_block_range, random_receipt},
+        },
     };
     use reth_primitives::{snapshot::HighestSnapshots, PruneModes, B256};
     use reth_stages::test_utils::TestStageDB;
@@ -190,6 +193,14 @@ mod tests {
 
         let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3);
         db.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        let mut receipts = Vec::new();
+        for block in &blocks {
+            for transaction in &block.body {
+                receipts
+                    .push((receipts.len() as u64, random_receipt(&mut rng, transaction, Some(0))));
+            }
+        }
+        db.insert_receipts(receipts).expect("insert receipts");
 
         let snapshots_dir = tempfile::TempDir::new().unwrap();
         let provider_factory = db
