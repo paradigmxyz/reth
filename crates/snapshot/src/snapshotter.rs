@@ -55,12 +55,9 @@ impl SnapshotTargets {
         .iter()
         .all(|(target_block_range, highest_snapshotted_block)| {
             target_block_range.map_or(true, |target_block_range| {
-                highest_snapshotted_block.map_or(
-                    *target_block_range.start() == 1,
-                    |highest_snapshotted_block| {
-                        *target_block_range.start() == highest_snapshotted_block + 1
-                    },
-                )
+                *target_block_range.start() ==
+                    highest_snapshotted_block
+                        .map_or(0, |highest_snapshotted_block| highest_snapshotted_block + 1)
             })
         })
     }
@@ -136,10 +133,8 @@ impl<DB: Database> Snapshotter<DB> {
     ) -> RethResult<SnapshotTargets> {
         let highest_snapshots = self.snapshot_provider.get_highest_snapshots();
 
-        // TODO(alexey): snapshot headers
         let targets = SnapshotTargets {
-            headers: None,
-            // headers: self.get_snapshot_target(highest_snapshots.headers, finalized_block_number),
+            headers: self.get_snapshot_target(highest_snapshots.headers, finalized_block_number),
             // Snapshot receipts only if they're not pruned according to the user configuration
             receipts: if self.prune_modes.receipts.is_none() &&
                 self.prune_modes.receipts_log_filter.is_empty()
@@ -169,7 +164,7 @@ impl<DB: Database> Snapshotter<DB> {
         highest_snapshot: Option<BlockNumber>,
         finalized_block_number: BlockNumber,
     ) -> Option<RangeInclusive<BlockNumber>> {
-        let range = highest_snapshot.unwrap_or_default() + 1..=finalized_block_number;
+        let range = highest_snapshot.map_or(0, |block| block + 1)..=finalized_block_number;
         (!range.is_empty()).then_some(range)
     }
 }
@@ -194,8 +189,8 @@ mod tests {
 
         let db = TestStageDB::default();
 
-        let blocks = random_block_range(&mut rng, 1..=3, B256::ZERO, 2..3);
-        db.insert_blocks(blocks.iter(), Some(1)).expect("insert blocks");
+        let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3);
+        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
         let mut receipts = Vec::new();
         for block in &blocks {
             for transaction in &block.body {
@@ -218,29 +213,41 @@ mod tests {
         let targets = snapshotter.get_snapshot_targets(1).expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets { headers: None, receipts: Some(1..=1), transactions: Some(1..=1) }
+            SnapshotTargets {
+                headers: Some(0..=1),
+                receipts: Some(0..=1),
+                transactions: Some(0..=1)
+            }
         );
         assert_matches!(snapshotter.run(targets), Ok(_));
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: None, receipts: Some(1), transactions: Some(1) }
+            HighestSnapshots { headers: Some(1), receipts: Some(1), transactions: Some(1) }
         );
 
         let targets = snapshotter.get_snapshot_targets(3).expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets { headers: None, receipts: Some(2..=3), transactions: Some(2..=3) }
+            SnapshotTargets {
+                headers: Some(2..=3),
+                receipts: Some(2..=3),
+                transactions: Some(2..=3)
+            }
         );
         assert_matches!(snapshotter.run(targets), Ok(_));
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: None, receipts: Some(3), transactions: Some(3) }
+            HighestSnapshots { headers: Some(3), receipts: Some(3), transactions: Some(3) }
         );
 
         let targets = snapshotter.get_snapshot_targets(4).expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets { headers: None, receipts: Some(4..=4), transactions: Some(4..=4) }
+            SnapshotTargets {
+                headers: Some(4..=4),
+                receipts: Some(4..=4),
+                transactions: Some(4..=4)
+            }
         );
         assert_matches!(
             snapshotter.run(targets),
@@ -248,7 +255,7 @@ mod tests {
         );
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: None, receipts: Some(3), transactions: Some(3) }
+            HighestSnapshots { headers: Some(3), receipts: Some(3), transactions: Some(3) }
         );
     }
 }

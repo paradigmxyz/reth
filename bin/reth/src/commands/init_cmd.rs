@@ -11,6 +11,7 @@ use crate::{
 use clap::Parser;
 use reth_db::{init_db, mdbx::DatabaseArguments};
 use reth_primitives::ChainSpec;
+use reth_provider::ProviderFactory;
 use std::sync::Arc;
 use tracing::info;
 
@@ -56,8 +57,11 @@ impl InitCommand {
             Arc::new(init_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         info!(target: "reth::cli", "Database opened");
 
+        let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone())
+            .with_snapshots(data_dir.snapshots_path())?;
+
         info!(target: "reth::cli", "Writing genesis block");
-        let hash = init_genesis(db, self.chain)?;
+        let hash = init_genesis(provider_factory, self.chain)?;
 
         info!(target: "reth::cli", hash = ?hash, "Genesis block written");
         Ok(())

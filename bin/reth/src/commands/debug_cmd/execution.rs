@@ -202,10 +202,11 @@ impl Command {
         fs::create_dir_all(&db_path)?;
         let db =
             Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
-        let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone());
+        let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone())
+            .with_snapshots(data_dir.snapshots_path())?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
-        init_genesis(db.clone(), self.chain.clone())?;
+        init_genesis(provider_factory.clone(), self.chain.clone())?;
 
         let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
 

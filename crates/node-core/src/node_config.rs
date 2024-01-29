@@ -1019,7 +1019,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
 
         debug!(target: "reth::cli", chain=%self.config.chain.chain, genesis=?self.config.chain.genesis_hash(), "Initializing genesis");
 
-        let genesis_hash = init_genesis(Arc::clone(&self.db), self.config.chain.clone())?;
+        let genesis_hash = init_genesis(provider_factory.clone(), self.config.chain.clone())?;
 
         info!(target: "reth::cli", "{}", DisplayHardforks::new(self.config.chain.hardforks()));
 
