@@ -5,7 +5,7 @@ use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
     RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
@@ -104,6 +104,8 @@ where
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing headers");
 
+        // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
+        // when poll_execute_ready is polled.
         let mut last_header_number = snapshot_provider
             .get_highest_snapshot_block(SnapshotSegment::Headers)
             .unwrap_or_default();
@@ -318,22 +320,29 @@ where
     ) -> Result<UnwindOutput, StageError> {
         self.sync_gap.take();
 
-        provider.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
-            input.unwind_to + 1,
-        )?;
-        provider.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-        let unwound_headers = provider.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
+        let snapshot_provider = provider.snapshot_provider().expect("should exist");
+        let highest_block = snapshot_provider
+            .get_highest_snapshot_block(SnapshotSegment::Headers)
+            .unwrap_or_default();
+        let unwound_headers = highest_block - input.unwind_to + 1;
 
-        provider.unwind_table_by_num::<tables::HeaderTD>(input.unwind_to)?;
+        for block in (input.unwind_to + 1)..=highest_block {
+            let header_hash = snapshot_provider
+                .sealed_header(block)?
+                .ok_or(ProviderError::HeaderNotFound(block.into()))?
+                .hash();
+
+            provider.tx_ref().delete::<tables::HeaderNumbers>(header_hash, None)?;
+        }
+
+        let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
+        writer.prune_headers(unwound_headers)?;
 
         let stage_checkpoint =
             input.checkpoint.headers_stage_checkpoint().map(|stage_checkpoint| HeadersCheckpoint {
                 block_range: stage_checkpoint.block_range,
                 progress: EntitiesCheckpoint {
-                    processed: stage_checkpoint
-                        .progress
-                        .processed
-                        .saturating_sub(unwound_headers as u64),
+                    processed: stage_checkpoint.progress.processed.saturating_sub(unwound_headers),
                     total: stage_checkpoint.progress.total,
                 },
             });
