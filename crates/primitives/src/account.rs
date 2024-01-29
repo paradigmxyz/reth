@@ -5,14 +5,9 @@ use crate::{
 };
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
-use once_cell::sync::Lazy;
 use reth_codecs::{main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
-
-/// Represents an empty Ethereum account.
-pub static EMPTY_ACCOUNT: Lazy<Account> =
-    Lazy::new(|| Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(KECCAK_EMPTY) });
 
 /// An Ethereum account.
 #[main_codec]
@@ -32,10 +27,12 @@ impl Account {
         self.bytecode_hash.is_some()
     }
 
-    /// After SpuriousDragon empty account is defined as account with nonce == 0 && balance == 0
-    /// &&  bytecode = None.
+    /// After SpuriousDragon empty account is defined as account with nonce == 0 && balance == 0 &&
+    /// bytecode = None (or hash is [`KECCAK_EMPTY`]).
     pub fn is_empty(&self) -> bool {
-        self == &*EMPTY_ACCOUNT
+        self.nonce == 0 &&
+            self.balance.is_zero() &&
+            self.bytecode_hash.map_or(true, |hash| hash == KECCAK_EMPTY)
     }
 
     /// Converts [GenesisAccount] to [Account] type
@@ -151,7 +148,11 @@ mod tests {
 
     #[test]
     fn test_empty_account() {
-        let mut acc = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(KECCAK_EMPTY) };
+        let mut acc = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None };
+        // Nonce 0, balance 0, and bytecode hash set to None is considered empty.
+        assert!(acc.is_empty());
+
+        acc.bytecode_hash = Some(KECCAK_EMPTY);
         // Nonce 0, balance 0, and bytecode hash set to KECCAK_EMPTY is considered empty.
         assert!(acc.is_empty());
 
