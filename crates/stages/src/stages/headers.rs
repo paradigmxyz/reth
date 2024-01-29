@@ -5,7 +5,7 @@ use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTxMut,
     RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
