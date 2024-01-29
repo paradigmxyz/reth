@@ -6,7 +6,7 @@ use crate::{
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
     StateProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::{database::Database, models::StoredBlockBodyIndices};
+use reth_db::{database::Database, models::StoredBlockBodyIndices, RawValue};
 use reth_interfaces::{
     blockchain_tree::{BlockchainTreeEngine, BlockchainTreeViewer},
     consensus::ForkchoiceState,
@@ -38,7 +38,10 @@ mod bundle_state_provider;
 mod chain_info;
 mod database;
 mod snapshot;
-pub use snapshot::{SnapshotJarProvider, SnapshotProvider, SnapshotProviderRW, SnapshotWriter};
+pub use snapshot::{
+    SnapshotJarProvider, SnapshotProvider, SnapshotProviderRW, SnapshotProviderRWRefMut,
+    SnapshotWriter,
+};
 mod state;
 use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
 pub use bundle_state_provider::BundleStateProvider;
@@ -353,6 +356,13 @@ where
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
         self.database.provider()?.transactions_by_tx_range(range)
+    }
+
+    fn raw_transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
+        self.database.provider()?.raw_transactions_by_tx_range(range)
     }
 
     fn senders_by_tx_range(

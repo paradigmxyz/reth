@@ -1,11 +1,11 @@
 use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use itertools::Itertools;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
+    cursor::DbCursorRW,
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
-    DatabaseError, RawKey, RawTable, RawValue,
+    RawValue,
 };
 use reth_interfaces::consensus;
 use reth_primitives::{
@@ -15,6 +15,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
+    StatsReader, TransactionsProvider,
 };
 use std::{fmt::Debug, sync::mpsc};
 use thiserror::Error;
@@ -82,11 +83,8 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Acquire the cursor for inserting elements
         let mut senders_cursor = tx.cursor_write::<tables::TxSenders>()?;
 
-        // Acquire the cursor over the transactions
-        let mut tx_cursor = tx.cursor_read::<RawTable<tables::Transactions>>()?;
-        // Walk the transactions from start to end index (inclusive)
-        let raw_tx_range = RawKey::new(tx_range.start)..RawKey::new(tx_range.end);
-        let tx_walker = tx_cursor.walk_range(raw_tx_range)?;
+        // Query the transactions from both database and static files
+        let transactions = provider.raw_transactions_by_tx_range(tx_range.clone())?;
 
         // Iterate over transactions in chunks
         info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
@@ -106,7 +104,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // to gain anything from using more than 1 thread
         let chunk_size = chunk_size.max(16);
 
-        for chunk in &tx_walker.chunks(chunk_size) {
+        for chunk in &tx_range.zip(transactions).chunks(chunk_size) {
             // An _unordered_ channel to receive results from a rayon job
             let (recovered_senders_tx, recovered_senders_rx) = mpsc::channel();
             channels.push(recovered_senders_rx);
@@ -188,14 +186,11 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 }
 
 fn recover_sender(
-    entry: Result<(RawKey<TxNumber>, RawValue<TransactionSignedNoHash>), DatabaseError>,
+    (tx_id, tx): (TxNumber, RawValue<TransactionSignedNoHash>),
     rlp_buf: &mut Vec<u8>,
 ) -> Result<(u64, Address), Box<SenderRecoveryStageError>> {
-    let (tx_id, transaction) =
-        entry.map_err(|e| Box::new(SenderRecoveryStageError::StageError(e.into())))?;
-    let tx_id = tx_id.key().expect("key to be formated");
+    let tx = tx.value().expect("value to be formated");
 
-    let tx = transaction.value().expect("value to be formated");
     tx.transaction.encode_without_signature(rlp_buf);
 
     // We call [Signature::recover_signer_unchecked] because transactions run in the pipeline are
@@ -222,8 +217,8 @@ fn stage_checkpoint<DB: Database>(
         // If `TxSenders` table was pruned, we will have a number of entries in it not matching
         // the actual number of processed transactions. To fix that, we add the number of pruned
         // `TxSenders` entries.
-        processed: provider.tx_ref().entries::<tables::TxSenders>()? as u64 + pruned_entries,
-        total: provider.tx_ref().entries::<tables::Transactions>()? as u64,
+        processed: provider.count_entries::<tables::TxSenders>()? as u64 + pruned_entries,
+        total: provider.count_entries::<tables::Transactions>()? as u64,
     })
 }
 
@@ -249,6 +244,7 @@ struct FailedSenderRecoveryError {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
+    use reth_db::cursor::DbCursorRO;
     use reth_interfaces::test_utils::{
         generators,
         generators::{random_block, random_block_range},

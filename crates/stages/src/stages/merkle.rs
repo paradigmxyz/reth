@@ -13,7 +13,8 @@ use reth_primitives::{
     BlockNumber, GotExpected, SealedHeader, B256,
 };
 use reth_provider::{
-    DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
+    DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader,
+    StageCheckpointWriter, StatsReader,
 };
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
 use std::fmt::Debug;
@@ -187,8 +188,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             }
             .unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: (provider.tx_ref().entries::<tables::HashedAccount>()? +
-                    provider.tx_ref().entries::<tables::HashedStorage>()?)
+                total: (provider.count_entries::<tables::HashedAccount>()? +
+                    provider.count_entries::<tables::HashedStorage>()?)
                     as u64,
             });
 
@@ -233,8 +234,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     .map_err(|e| StageError::Fatal(Box::new(e)))?;
             updates.flush(provider.tx_ref())?;
 
-            let total_hashed_entries = (provider.tx_ref().entries::<tables::HashedAccount>()? +
-                provider.tx_ref().entries::<tables::HashedStorage>()?)
+            let total_hashed_entries = (provider.count_entries::<tables::HashedAccount>()? +
+                provider.count_entries::<tables::HashedStorage>()?)
                 as u64;
 
             let entities_checkpoint = EntitiesCheckpoint {

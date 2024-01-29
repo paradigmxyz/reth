@@ -12,7 +12,7 @@ use reth_primitives::{
     PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment,
 };
 use reth_provider::{
-    BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter,
+    BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter, StatsReader,
     TransactionsProviderExt,
 };
 use tracing::*;
@@ -182,8 +182,8 @@ fn stage_checkpoint<DB: Database>(
         // If `TxHashNumber` table was pruned, we will have a number of entries in it not matching
         // the actual number of processed transactions. To fix that, we add the number of pruned
         // `TxHashNumber` entries.
-        processed: provider.tx_ref().entries::<tables::TxHashNumber>()? as u64 + pruned_entries,
-        total: provider.tx_ref().entries::<tables::Transactions>()? as u64,
+        processed: provider.count_entries::<tables::TxHashNumber>()? as u64 + pruned_entries,
+        total: provider.count_entries::<tables::Transactions>()? as u64,
     })
 }
 

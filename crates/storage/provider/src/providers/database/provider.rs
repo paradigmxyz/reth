@@ -8,7 +8,7 @@ use crate::{
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
     Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
     HeaderSyncMode, HistoryWriter, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, StageCheckpointReader, StorageReader, TransactionVariant,
+    PruneCheckpointWriter, StageCheckpointReader, StatsReader, StorageReader, TransactionVariant,
     TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 use ahash::{AHashMap, AHashSet};
@@ -24,7 +24,7 @@ use reth_db::{
     table::{Table, TableRow},
     tables,
     transaction::{DbTx, DbTxMut},
-    BlockNumberList, DatabaseError,
+    BlockNumberList, DatabaseError, RawKey, RawTable, RawValue,
 };
 use reth_interfaces::{
     p2p::headers::downloader::SyncTarget,
@@ -108,9 +108,9 @@ pub struct DatabaseProvider<TX> {
 }
 
 impl<TX> DatabaseProvider<TX> {
-    /// Returns snapshot provider
-    pub fn snapshot_provider(&self) -> Option<Arc<SnapshotProvider>> {
-        self.snapshot_provider.clone()
+    /// Returns a snapshot provider reference
+    pub fn snapshot_provider(&self) -> Option<&Arc<SnapshotProvider>> {
+        self.snapshot_provider.as_ref()
     }
 }
 
@@ -153,7 +153,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         self.cursor_collect_with_capacity(cursor, range, capacity, |_, v| f(v))
     }
 
-    fn cursor_collect_with_capacity<T: Table<Key = u64>, R>(
+    fn cursor_collect_with_capacity<T: Table, R>(
         &self,
         cursor: &mut impl DbCursorRO<T>,
         range: impl RangeBounds<T::Key>,
@@ -1649,6 +1649,26 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         )
     }
 
+    fn raw_transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
+        self.get_range_with_snapshot(
+            SnapshotSegment::Transactions,
+            to_range(range),
+            |snapshot, range, _| snapshot.raw_transactions_by_tx_range(range),
+            |range, _| {
+                self.cursor_collect_with_capacity(
+                    &mut self.tx.cursor_read::<RawTable<tables::Transactions>>()?,
+                    RawKey::new(range.start)..RawKey::new(range.end),
+                    range_size_hint(&range).unwrap_or(0),
+                    |_, v| Ok(v),
+                )
+            },
+            |_| true,
+        )
+    }
+
     fn senders_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
@@ -2499,7 +2519,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         // Write state and changesets to the database.
         // Must be written after blocks because of the receipt lookup.
-        state.write_to_db(self.tx_ref(), OriginalValuesKnown::No)?;
+        state.write_to_storage(self.tx_ref(), None, OriginalValuesKnown::No)?;
         durations_recorder.record_relative(metrics::Action::InsertState);
 
         // insert hashes and intermediate merkle nodes
@@ -2538,6 +2558,20 @@ impl<TX: DbTxMut> PruneCheckpointWriter for DatabaseProvider<TX> {
         checkpoint: PruneCheckpoint,
     ) -> ProviderResult<()> {
         Ok(self.tx.put::<tables::PruneCheckpoints>(segment, checkpoint)?)
+    }
+}
+
+impl<TX: DbTx> StatsReader for DatabaseProvider<TX> {
+    fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
+        let db_entries = self.tx.entries::<T>()?;
+        let snapshot_entries =
+            match self.snapshot_provider.as_ref().map(|provider| provider.count_entries::<T>()) {
+                Some(Ok(entries)) => entries,
+                Some(Err(ProviderError::UnsupportedProvider)) | None => 0,
+                Some(Err(err)) => return Err(err),
+            };
+
+        Ok(db_entries + snapshot_entries)
     }
 }
 

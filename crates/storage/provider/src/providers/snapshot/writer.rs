@@ -1,4 +1,5 @@
 use super::SnapshotProvider;
+use dashmap::mapref::one::RefMut;
 use reth_codecs::Compact;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
@@ -8,6 +9,9 @@ use reth_primitives::{
     U256,
 };
 use std::{ops::Deref, path::PathBuf, sync::Arc};
+
+/// Mutable reference to a dashmap element of [`SnapshotProviderRW`].
+pub type SnapshotProviderRWRefMut<'a> = RefMut<'a, SnapshotSegment, SnapshotProviderRW<'static>>;
 
 #[derive(Debug)]
 /// Extends `SnapshotProvider` with writing capabilities
@@ -260,6 +264,21 @@ impl<'a> SnapshotProviderRW<'a> {
         debug_assert!(self.writer.user_header().segment() == segment);
 
         self.truncate(segment, number, Some(last_block))
+    }
+
+    /// Prunes `to_delete` number of receipts from snapshots.
+    ///
+    /// # Note
+    /// Commits to the configuration file at the end.
+    pub fn prune_receipts(
+        &mut self,
+        to_delete: u64,
+        last_block: BlockNumber,
+    ) -> ProviderResult<()> {
+        let segment = SnapshotSegment::Receipts;
+        debug_assert!(self.writer.user_header().segment() == segment);
+
+        self.truncate(segment, to_delete, Some(last_block))
     }
 
     #[cfg(any(test, feature = "test-utils"))]
