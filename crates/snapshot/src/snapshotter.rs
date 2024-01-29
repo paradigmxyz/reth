@@ -215,7 +215,7 @@ mod tests {
             targets,
             SnapshotTargets {
                 headers: Some(0..=1),
-                receipts: Some(1..=1),
+                receipts: Some(0..=1),
                 transactions: Some(0..=1)
             }
         );
