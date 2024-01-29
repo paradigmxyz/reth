@@ -68,6 +68,11 @@ impl Chain {
         self.blocks.values().map(|block| block.header.clone())
     }
 
+    /// Get cached trie updates for this chain.
+    pub fn trie_updates(&self) -> Option<&TrieUpdates> {
+        self.trie_updates.as_ref()
+    }
+
     /// Get post state of this chain
     pub fn state(&self) -> &BundleStateWithReceipts {
         &self.state
