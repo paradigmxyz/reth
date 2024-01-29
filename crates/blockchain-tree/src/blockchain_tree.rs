@@ -1576,9 +1576,9 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_side_chain_fork() {
-        let data = BlockChainTestData::default_with_numbers(11, 12);
+    #[test]
+    fn test_side_chain_fork() {
+        let data = BlockChainTestData::default_from_number(11);
         let (block1, exec1) = data.blocks[0].clone();
         let (block2, exec2) = data.blocks[1].clone();
         let genesis = data.genesis;
@@ -1664,9 +1664,9 @@ mod tests {
         assert_eq!(tree.state.chains.get(&1.into()).unwrap().state().state().reverts.len(), 1);
     }
 
-    #[tokio::test]
-    async fn sanity_path() {
-        let data = BlockChainTestData::default_with_numbers(11, 12);
+    #[test]
+    fn sanity_path() {
+        let data = BlockChainTestData::default_from_number(11);
         let (block1, exec1) = data.blocks[0].clone();
         let (block2, exec2) = data.blocks[1].clone();
         let genesis = data.genesis;
