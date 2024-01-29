@@ -1,6 +1,5 @@
 use crate::{constants::GWEI_TO_WEI, serde_helper::u64_hex, Address};
-use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
-use bytes::BufMut;
+use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::{main_codec, Compact};
 use std::{
     mem,
@@ -39,7 +38,7 @@ impl Withdrawal {
 
 /// Represents a collection of Withdrawals.
 #[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodableWrapper, RlpDecodableWrapper)]
 pub struct Withdrawals(Vec<Withdrawal>);
 
 impl Withdrawals {
@@ -85,22 +84,6 @@ impl Deref for Withdrawals {
 impl DerefMut for Withdrawals {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
-    }
-}
-
-impl Encodable for Withdrawals {
-    fn encode(&self, out: &mut dyn BufMut) {
-        self.0.encode(out);
-    }
-
-    fn length(&self) -> usize {
-        self.0.length()
-    }
-}
-
-impl Decodable for Withdrawals {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        Ok(Self(Decodable::decode(buf)?))
     }
 }
 
