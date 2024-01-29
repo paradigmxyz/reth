@@ -45,7 +45,7 @@ pub trait FilterAnnouncement {
     fn filter_valid_entries_66(&self, msg: &mut NewPooledTransactionHashes66) -> FilterOutcome;
 }
 
-/// Outcome from filtering [`NewPooledTransactionHashes68`]. Signals to caller wether to penalize
+/// Outcome from filtering [`NewPooledTransactionHashes68`]. Signals to caller whether to penalize
 /// the sender of the announcement or not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterOutcome {
