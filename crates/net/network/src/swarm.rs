@@ -280,15 +280,9 @@ where
         self.state().peers().connection_state().is_shutting_down()
     }
 
-    /// Set network connection state to `Hibernate`.
-    pub(crate) fn on_hibernate_requested(&mut self) {
-        self.state_mut().peers_mut().on_network_hibernation();
-    }
-
-    /// Set network connection state to `Active`
-    /// Opposite action of `on_hibernate_requested`
-    pub(crate) fn on_network_active(&mut self) {
-        self.state_mut().peers_mut().on_network_active();
+    /// Set network connection state to `Hibernate` or `Active`
+    pub(crate) fn on_network_state_change(&mut self, network_state: NetworkConnectionState) {
+        self.state_mut().peers_mut().on_network_state_change(network_state);
     }
 }
 
@@ -435,9 +429,12 @@ pub(crate) enum SwarmEvent {
 /// beneficial for sync stages that do not require a network connection.
 #[derive(Debug, Default)]
 pub enum NetworkConnectionState {
+    /// Node is active, new outbound connections will be established.
     #[default]
     Active,
+    /// Node is shutting down, no new outbound connections will be established.
     ShuttingDown,
+    /// Hibernate Network connection, no new outbound connections will be established.
     Hibernate,
 }
 

@@ -725,20 +725,14 @@ impl PeersManager {
         }
     }
 
-    /// Keeps track of the network hibernation state.
-    pub fn on_network_hibernation(&mut self) {
-        self.net_connection_state = NetworkConnectionState::Hibernate;
+    /// Keeps track of network state changes.
+    pub fn on_network_state_change(&mut self, state: NetworkConnectionState) {
+        self.net_connection_state = state;
     }
 
     /// Returns the current network connection state.
     pub fn connection_state(&self) -> &NetworkConnectionState {
         &self.net_connection_state
-    }
-
-    /// Sets `net_connection_state` to `Active` so that the outbound slots can be filled again.
-    /// Opposite action of [`Self::on_network_hibernation`].
-    pub fn on_network_active(&mut self) {
-        self.net_connection_state = NetworkConnectionState::Active;
     }
 
     /// Sets net_connection_state to ShuttingDown.
