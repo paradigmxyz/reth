@@ -123,7 +123,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let max_block = input.target();
         let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
 
-        // If there is any receipt pruning or filtering, then don't use static files for Receipts.
+        // We only use static files for Receipts, if there is no receipt pruning of any kind.
         let mut snapshotter = None;
         if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
             snapshotter = Some(prepare_snapshotter(provider, start_block)?);
