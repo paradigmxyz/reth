@@ -31,12 +31,10 @@ use reth_interfaces::{
     provider::{ProviderResult, RootMismatch},
     RethError, RethResult,
 };
+use reth_node_api::EvmEnvConfig;
 use reth_primitives::{
     keccak256,
-    revm::{
-        config::revm_spec,
-        env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
-    },
+    revm::{config::revm_spec, env::fill_block_env},
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
@@ -1729,27 +1727,41 @@ impl<TX: DbTx> WithdrawalsProvider for DatabaseProvider<TX> {
 }
 
 impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
-    fn fill_env_at(
+    fn fill_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnv,
         block_env: &mut BlockEnv,
         at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: EvmEnvConfig,
+    {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
-        self.fill_env_with_header(cfg, block_env, &header)
+        self.fill_env_with_header(cfg, block_env, &header, evm_config)
     }
 
-    fn fill_env_with_header(
+    fn fill_env_with_header<EvmConfig>(
         &self,
         cfg: &mut CfgEnv,
         block_env: &mut BlockEnv,
         header: &Header,
-    ) -> ProviderResult<()> {
+        _evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: EvmEnvConfig,
+    {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        fill_cfg_and_block_env(cfg, block_env, &self.chain_spec, header, total_difficulty);
+        EvmConfig::fill_cfg_and_block_env(
+            cfg,
+            block_env,
+            &self.chain_spec,
+            header,
+            total_difficulty,
+        );
         Ok(())
     }
 
@@ -1788,17 +1800,33 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         Ok(())
     }
 
-    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockHashOrNumber) -> ProviderResult<()> {
+    fn fill_cfg_env_at<EvmConfig>(
+        &self,
+        cfg: &mut CfgEnv,
+        at: BlockHashOrNumber,
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: EvmEnvConfig,
+    {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
-        self.fill_cfg_env_with_header(cfg, &header)
+        self.fill_cfg_env_with_header(cfg, &header, evm_config)
     }
 
-    fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> ProviderResult<()> {
+    fn fill_cfg_env_with_header<EvmConfig>(
+        &self,
+        cfg: &mut CfgEnv,
+        header: &Header,
+        _evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: EvmEnvConfig,
+    {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
+        EvmConfig::fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
         Ok(())
     }
 }

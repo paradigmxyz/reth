@@ -211,7 +211,7 @@ impl DiskFileBlobStoreInner {
     /// Returns the path to the blob file for the given transaction hash.
     #[inline]
     fn blob_disk_file(&self, tx: B256) -> PathBuf {
-        self.blob_dir.join(format!("{:x}", tx))
+        self.blob_dir.join(format!("{tx:x}"))
     }
 
     /// Retries the blob data for the given transaction hash.

@@ -710,7 +710,7 @@ where
             debug_assert!(
                 self.peers.contains_key(&peer_id),
                 "a dead peer has been returned as idle by `@pop_any_idle_peer`, broken invariant `@peers` and `@transaction_fetcher`,
-`%peer_id`: {:?},
+`%peer_id`: {},
 `@peers`: {:?},
 `@transaction_fetcher`: {:?}",
                 peer_id, self.peers, self.transaction_fetcher

@@ -12,7 +12,7 @@ pub enum ReputationChangeKind {
     BadBlock,
     /// Peer sent a bad transaction message. E.g. Transactions which weren't recoverable.
     BadTransactions,
-    /// Peer sent a bad announcement messages, e.g. invalid transaction type for the configured
+    /// Peer sent a bad announcement message, e.g. invalid transaction type for the configured
     /// network.
     BadAnnouncement,
     /// Peer sent a message that included a hash or transaction that we already received from the

@@ -17,6 +17,7 @@ use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_interfaces::executor::BlockValidationError;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
+use reth_node_builder::EthEvmConfig;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
 use reth_provider::{
     AccountExtReader, BlockWriter, ExecutorFactory, HashingWriter, HeaderProvider,
@@ -162,7 +163,8 @@ impl Command {
             )
             .await?;
 
-        let executor_factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
+        let executor_factory =
+            reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
         let mut executor =
             executor_factory.with_state(LatestStateProviderRef::new(provider.tx_ref()));
 
