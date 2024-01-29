@@ -63,7 +63,8 @@ pub struct EmptyBlockPayloadJobGenerator<Client, Pool, Tasks, Builder> {
 // === impl BasicPayloadJobGenerator ===
 
 impl<Client, Pool, Tasks, Builder> EmptyBlockPayloadJobGenerator<Client, Pool, Tasks, Builder> {
-    /// Creates a new [BasicPayloadJobGenerator] with the given config and custom [PayloadBuilder]
+    /// Creates a new [EmptyBlockPayloadJobGenerator] with the given config and custom
+    /// [PayloadBuilder]
     pub fn with_builder(
         client: Client,
         pool: Pool,
