@@ -28,6 +28,10 @@ impl<'a> SnapshotCursor<'a> {
         key_or_num: KeyOrNumber<'_>,
         mask: usize,
     ) -> ProviderResult<Option<Vec<&'_ [u8]>>> {
+        if self.jar().rows() == 0 {
+            return Ok(None)
+        }
+
         let row = match key_or_num {
             KeyOrNumber::Key(k) => self.row_by_key_with_cols(k, mask),
             KeyOrNumber::Number(n) => {

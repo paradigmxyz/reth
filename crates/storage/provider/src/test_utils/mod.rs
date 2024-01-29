@@ -1,6 +1,6 @@
 use crate::ProviderFactory;
 use reth_db::{
-    test_utils::{create_test_rw_db, TempDatabase},
+    test_utils::{create_test_rw_db, create_test_snapshots_dir, TempDatabase},
     DatabaseEnv,
 };
 use reth_primitives::{ChainSpec, MAINNET};
@@ -16,7 +16,6 @@ pub use events::TestCanonStateSubscriptions;
 pub use executor::{TestExecutor, TestExecutorFactory};
 pub use mock::{ExtendedAccount, MockEthProvider};
 pub use noop::NoopProvider;
-use reth_db::test_utils::create_test_snapshots_dir;
 
 /// Creates test provider factory with mainnet chain spec.
 pub fn create_test_provider_factory() -> ProviderFactory<Arc<TempDatabase<DatabaseEnv>>> {

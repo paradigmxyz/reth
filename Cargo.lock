@@ -6366,6 +6366,7 @@ dependencies = [
  "memmap2 0.7.1",
  "ph",
  "rand 0.8.5",
+ "reth-primitives",
  "serde",
  "sucds 0.8.1",
  "tempfile",
