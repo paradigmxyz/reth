@@ -29,7 +29,7 @@ pub enum ValidationOutcome {
     ReportPeer,
 }
 
-/// Filters valid entires in [`NewPooledTransactionHashes68`] and [`NewPooledTransactionHashes66`]
+/// Filters valid entries in [`NewPooledTransactionHashes68`] and [`NewPooledTransactionHashes66`]
 /// in place, and flags misbehaving peers.
 pub trait FilterAnnouncement {
     /// Removes invalid entries from a [`NewPooledTransactionHashes68`] announcement. Returns
