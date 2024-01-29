@@ -8,12 +8,14 @@ use reth_db::{
 };
 use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
 use reth_primitives::{
-    stage::StageId, Account, Bytecode, ChainSpec, Receipts, StorageEntry, B256, U256,
+    stage::StageId, Account, Bytecode, ChainSpec, Receipts, SnapshotSegment, StorageEntry, B256,
+    U256,
 };
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
-    BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown,
-    ProviderError, ProviderFactory,
+    providers::{SnapshotProvider, SnapshotWriter},
+    BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HeaderProvider, HistoryWriter,
+    OriginalValuesKnown, ProviderError, ProviderFactory,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -79,7 +81,11 @@ pub fn init_genesis<DB: Database>(
 
     // Insert header
     let tx = db.tx_mut()?;
-    insert_genesis_header::<DB>(&tx, chain.clone())?;
+    insert_genesis_header::<DB>(
+        &tx,
+        factory.snapshot_provider().expect("should exist"),
+        chain.clone(),
+    )?;
 
     insert_genesis_state::<DB>(&tx, genesis)?;
 
@@ -208,15 +214,20 @@ pub fn insert_genesis_history<DB: Database>(
 /// Inserts header for the genesis state.
 pub fn insert_genesis_header<DB: Database>(
     tx: &<DB as Database>::TXMut,
+    snapshot_provider: Arc<SnapshotProvider>,
     chain: Arc<ChainSpec>,
 ) -> ProviderResult<()> {
     let header = chain.sealed_genesis_header();
 
-    tx.put::<tables::CanonicalHeaders>(0, header.hash)?;
+    let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
+    if writer.header_by_number(0)?.is_none() {
+        let (difficulty, hash) = (header.difficulty, header.hash);
+        writer.append_header(header.header, difficulty, hash)?;
+        writer.commit()?;
+    }
+
     tx.put::<tables::HeaderNumbers>(header.hash, 0)?;
     tx.put::<tables::BlockBodyIndices>(0, Default::default())?;
-    tx.put::<tables::HeaderTD>(0, header.difficulty.into())?;
-    tx.put::<tables::Headers>(0, header.header)?;
 
     Ok(())
 }

@@ -14,6 +14,7 @@ use reth_db::{
     database::Database, mdbx::DatabaseArguments, open_db, tables, transaction::DbTxMut, DatabaseEnv,
 };
 use reth_primitives::{fs, stage::StageId, ChainSpec};
+use reth_provider::providers::SnapshotProvider;
 use std::sync::Arc;
 use tracing::info;
 
@@ -60,6 +61,7 @@ impl Command {
             open_db(db_path.as_ref(), DatabaseArguments::default().log_level(self.db.log_level))?;
 
         let tool = DbTool::new(&db, self.chain.clone())?;
+        let snapshot_provider = Arc::new(SnapshotProvider::new(data_dir.snapshots_path())?);
 
         tool.db.update(|tx| {
             match &self.stage {
@@ -70,7 +72,7 @@ impl Command {
                     tx.clear::<tables::BlockOmmers>()?;
                     tx.clear::<tables::BlockWithdrawals>()?;
                     tx.put::<tables::SyncStage>(StageId::Bodies.to_string(), Default::default())?;
-                    insert_genesis_header::<DatabaseEnv>(tx, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, snapshot_provider, self.chain)?;
                 }
                 StageEnum::Senders => {
                     tx.clear::<tables::TxSenders>()?;
@@ -155,7 +157,7 @@ impl Command {
                         StageId::TotalDifficulty.to_string(),
                         Default::default(),
                     )?;
-                    insert_genesis_header::<DatabaseEnv>(tx, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, snapshot_provider, self.chain)?;
                 }
                 StageEnum::TxLookup => {
                     tx.clear::<tables::TxHashNumber>()?;
@@ -163,7 +165,7 @@ impl Command {
                         StageId::TransactionLookup.to_string(),
                         Default::default(),
                     )?;
-                    insert_genesis_header::<DatabaseEnv>(tx, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, snapshot_provider, self.chain)?;
                 }
                 _ => {
                     info!("Nothing to do for stage {:?}", self.stage);
