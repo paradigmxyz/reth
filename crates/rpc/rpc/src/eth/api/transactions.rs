@@ -63,6 +63,22 @@ pub(crate) type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
 ///
 /// Async functions that are spawned onto the
 /// [BlockingTaskPool](crate::blocking_pool::BlockingTaskPool) begin with `spawn_`
+///
+///
+/// ## Calls
+///
+/// There are subtle differences between when transacting [CallRequest]:
+///
+/// The endpoints `eth_call` and `eth_estimateGas` and `eth_createAccessList` should always
+/// __disable__ the base fee check in the [Env] [Cfg](revm_primitives::CfgEnv).
+///
+/// The behaviour for tracing endpoints is not consistent across clients.
+/// Geth also disables the basefee check for tracing: <https://github.com/ethereum/go-ethereum/blob/bc0b87ca196f92e5af49bd33cc190ef0ec32b197/eth/tracers/api.go#L955-L955>
+/// Erigon does not: <https://github.com/ledgerwatch/erigon/blob/aefb97b07d1c4fd32a66097a24eddd8f6ccacae0/turbo/transactions/tracing.go#L209-L209>
+///
+/// See also <https://github.com/paradigmxyz/reth/issues/6240>
+///
+/// This implementation follows the behaviour of Geth and disables the basefee check for tracing.
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
@@ -160,6 +176,9 @@ pub trait EthTransactions: Send + Sync {
 
     /// Prepares the state and env for the given [CallRequest] at the given [BlockId] and executes
     /// the closure on a new task returning the result of the closure.
+    ///
+    /// This returns the configured [Env] for the given [CallRequest] at the given [BlockId] and
+    /// with configured call settings: `prepare_call_env`.
     async fn spawn_with_call_at<F, R>(
         &self,
         request: CallRequest,

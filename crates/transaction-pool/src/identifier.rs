@@ -30,13 +30,12 @@ impl SenderIdentifiers {
 
     /// Returns the existing `SendId` or assigns a new one if it's missing
     pub(crate) fn sender_id_or_create(&mut self, addr: Address) -> SenderId {
-        if let Some(id) = self.sender_id(&addr) {
-            return id
-        }
-        let id = self.next_id();
-        self.address_to_id.insert(addr, id);
-        self.sender_to_address.insert(id, addr);
-        id
+        self.sender_id(&addr).unwrap_or_else(|| {
+            let id = self.next_id();
+            self.address_to_id.insert(addr, id);
+            self.sender_to_address.insert(id, addr);
+            id
+        })
     }
 
     /// Returns a new address

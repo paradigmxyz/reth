@@ -7,6 +7,7 @@ use reth_primitives::{
 };
 
 /// A generator for transactions for testing purposes.
+#[derive(Debug)]
 pub struct TransactionGenerator<R> {
     /// The random number generator used for generating keys and selecting signers.
     pub rng: R,
@@ -99,6 +100,7 @@ impl<R: Rng> TransactionGenerator<R> {
 }
 
 /// A Builder type to configure and create a transaction.
+#[derive(Debug)]
 pub struct TransactionBuilder {
     /// The signer used to sign the transaction.
     pub signer: B256,
