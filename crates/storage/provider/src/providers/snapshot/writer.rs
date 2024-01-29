@@ -1,6 +1,7 @@
 use super::SnapshotProvider;
 use dashmap::mapref::one::RefMut;
 use reth_codecs::Compact;
+use reth_db::codecs::CompactU256;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
@@ -228,7 +229,7 @@ impl<'a> SnapshotProviderRW<'a> {
         }
 
         self.append_column(header)?;
-        self.append_column(terminal_difficulty)?;
+        self.append_column(CompactU256::from(terminal_difficulty))?;
         self.append_column(hash)?;
 
         Ok(self.writer.user_header().block_end())
