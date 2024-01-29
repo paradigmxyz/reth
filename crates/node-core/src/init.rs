@@ -153,7 +153,7 @@ pub fn insert_genesis_state<DB: Database>(
         0,
     );
 
-    bundle.write_to_db(tx, OriginalValuesKnown::Yes)?;
+    bundle.write_to_storage(tx, None, OriginalValuesKnown::Yes)?;
 
     Ok(())
 }

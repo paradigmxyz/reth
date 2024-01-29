@@ -207,6 +207,11 @@ impl<H: NippyJarHeader> NippyJar<H> {
         &self.user_header
     }
 
+    /// Gets total rows in jar.
+    pub fn rows(&self) -> usize {
+        self.rows
+    }
+
     /// Returns the size of inclusion filter
     pub fn filter_size(&self) -> usize {
         self.size()
