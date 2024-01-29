@@ -48,6 +48,7 @@ use reth_primitives::{
 use reth_trie::{prefix_set::PrefixSetMut, updates::TrieUpdates, HashedPostState, StateRoot};
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
 use std::{
+    cmp::Ordering,
     collections::{hash_map, BTreeMap, BTreeSet, HashMap},
     fmt::Debug,
     ops::{Bound, Deref, DerefMut, Range, RangeBounds, RangeInclusive},
@@ -1053,45 +1054,35 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
         mode: HeaderSyncMode,
         highest_uninterrupted_block: BlockNumber,
     ) -> RethResult<HeaderSyncGap> {
-        // Create a cursor over canonical header hashes
-        let mut cursor = self.tx.cursor_read::<tables::CanonicalHeaders>()?;
-        let mut header_cursor = self.tx.cursor_read::<tables::Headers>()?;
+        let snapshot_provider = self.snapshot_provider().expect("should exist");
+        let mut snapshotter = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
 
-        // Get head hash and reposition the cursor
-        let (head_num, head_hash) = cursor
-            .seek_exact(highest_uninterrupted_block)?
+        // Make sure Headers static file is at the same height. If it's further, this
+        // input execution was interrupted previously and we need to unwind the static file.
+        let next_snapshot_block_num = snapshot_provider
+            .get_highest_snapshot_block(SnapshotSegment::Headers)
+            .map(|id| id + 1)
+            .unwrap_or_default();
+        let next_block = highest_uninterrupted_block + 1;
+
+        match next_snapshot_block_num.cmp(&next_block) {
+            // The node shutdown between an executed static file commit and before the database
+            // commit, so we need to unwind the static files.
+            Ordering::Greater => snapshotter.prune_headers(next_snapshot_block_num - next_block)?,
+            Ordering::Less => {
+                // There's either missing or corrupted files.
+                return Err(ProviderError::HeaderNotFound(next_snapshot_block_num.into()).into())
+            }
+            Ordering::Equal => {}
+        }
+
+        let local_head = snapshot_provider
+            .sealed_header(highest_uninterrupted_block)?
             .ok_or_else(|| ProviderError::HeaderNotFound(highest_uninterrupted_block.into()))?;
 
-        // Construct head
-        let (_, head) = header_cursor
-            .seek_exact(head_num)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(head_num.into()))?;
-        let local_head = head.seal(head_hash);
-
-        // Look up the next header
-        let next_header = cursor
-            .next()?
-            .map(|(next_num, next_hash)| -> Result<SealedHeader, RethError> {
-                let (_, next) = header_cursor
-                    .seek_exact(next_num)?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(next_num.into()))?;
-                Ok(next.seal(next_hash))
-            })
-            .transpose()?;
-
-        // Decide the tip or error out on invalid input.
-        // If the next element found in the cursor is not the "expected" next block per our current
-        // checkpoint, then there is a gap in the database and we should start downloading in
-        // reverse from there. Else, it should use whatever the forkchoice state reports.
-        let target = match next_header {
-            Some(header) if highest_uninterrupted_block + 1 != header.number => {
-                SyncTarget::Gap(header)
-            }
-            None => match mode {
-                HeaderSyncMode::Tip(rx) => SyncTarget::Tip(*rx.borrow()),
-                HeaderSyncMode::Continuous => SyncTarget::TipNum(head_num + 1),
-            },
-            _ => return Err(ProviderError::InconsistentHeaderGap.into()),
+        let target = match mode {
+            HeaderSyncMode::Tip(rx) => SyncTarget::Tip(*rx.borrow()),
+            HeaderSyncMode::Continuous => SyncTarget::TipNum(highest_uninterrupted_block + 1),
         };
 
         Ok(HeaderSyncGap { local_head, target })
