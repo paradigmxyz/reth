@@ -498,7 +498,7 @@ impl BlockBody {
     /// Calculate the withdrawals root for the block body, if withdrawals exist. If there are no
     /// withdrawals, this will return `None`.
     pub fn calculate_withdrawals_root(&self) -> Option<B256> {
-        self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
+        self.withdrawals.as_ref().map(crate::proofs::calculate_withdrawals_root)
     }
 
     /// Calculates a heuristic for the in-memory size of the [BlockBody].
