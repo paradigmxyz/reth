@@ -1,5 +1,8 @@
 use reth_primitives::{revm::env::fill_block_env, Address, ChainSpec, Header, Transaction, U256};
-use revm::{primitives::{BlockEnv, CfgEnv, SpecId, TxEnv}, precompile::Precompiles};
+use revm::{
+    precompile::Precompiles,
+    primitives::{BlockEnv, CfgEnv, SpecId, TxEnv},
+};
 
 /// This represents the set of methods used to configure the EVM before execution.
 pub trait EvmEnvConfig: Send + Sync + Unpin + Clone {
