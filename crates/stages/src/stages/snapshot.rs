@@ -1,10 +1,13 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
-use reth_primitives::stage::{StageCheckpoint, StageId};
+use reth_primitives::stage::StageId;
 use reth_provider::{BlockNumReader, DatabaseProviderRW};
 use reth_snapshot::Snapshotter;
 
-/// The snapshot stage.
+/// The snapshot stage _copies_ all data from database to static files using [Snapshotter]. The
+/// block range for copying is determined by the current highest blocks contained in static files
+/// and [BlockNumReader::best_block_number],
+/// i.e. the range is `highest_snapshotted_block_number..=best_block_number`.
 #[derive(Debug)]
 pub struct SnapshotStage<DB: Database> {
     snapshotter: Snapshotter<DB>,
@@ -29,7 +32,7 @@ impl<DB: Database> Stage<DB> for SnapshotStage<DB> {
     ) -> Result<ExecOutput, StageError> {
         let targets = self.snapshotter.get_snapshot_targets(provider.best_block_number()?)?;
         self.snapshotter.run(targets)?;
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
+        Ok(ExecOutput::done(input.checkpoint()))
     }
 
     fn unwind(
@@ -37,7 +40,6 @@ impl<DB: Database> Stage<DB> for SnapshotStage<DB> {
         _provider: &DatabaseProviderRW<DB>,
         _input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        // TODO(alexey): return proper error
-        Err(StageError::ChannelClosed)
+        Err(StageError::UnwindNotSupported)
     }
 }

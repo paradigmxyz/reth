@@ -3,6 +3,7 @@
 /// For custom stages, use [`StageId::Other`]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StageId {
+    /// Snapshot stage in the process.
     Snapshot,
     /// Header stage in the process.
     Headers,

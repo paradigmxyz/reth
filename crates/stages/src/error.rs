@@ -106,6 +106,9 @@ pub enum StageError {
         /// Expected static file block number.
         static_file: BlockNumber,
     },
+    /// Unwind is not supported for this stage.
+    #[error("unwind not supported")]
+    UnwindNotSupported,
     /// Internal error
     #[error(transparent)]
     Internal(#[from] RethError),
