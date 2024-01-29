@@ -568,18 +568,22 @@ where
             }
         }
 
-        // filter out known hashes, those txns have already been successfully fetched. most hashes
-        // will be filtered out here since this the mempool protocol is a gossip protocol, healthy
-        // peers will send many of the same hashes
+        // 1. filter out known hashes
+        // known txns have already been successfully fetched. most hashes will be filtered out
+        // here since this the mempool protocol is a gossip protocol, healthy
+        // peers will send many of the same hashes.
         self.pool.retain_unknown(&mut msg);
         if msg.is_empty() {
             // nothing to request
             return
         }
 
-        // filter out invalid entries
-        let mut valid_announcement_data = HashMap::new();
-        if let Some(eth68_msg) = msg.take_eth68() {
+        // 2. filter out invalid entries
+        //
+        // first get the message version, because this will destruct the message
+        let msg_version = msg.version();
+        // validates messages with respect to the given network, e.g. allowed tx types
+        let mut valid_announcement_data = if let Some(eth68_msg) = msg.take_eth68() {
             // validate eth68 announcement data
             let (outcome, valid_data) =
                 self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_68(eth68_msg);
@@ -588,7 +592,7 @@ where
                 self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
             }
 
-            valid_announcement_data = valid_data
+            valid_data
         } else if let Some(eth66_msg) = msg.take_eth66() {
             // validate eth66 announcement data
             let (outcome, valid_data) =
@@ -598,41 +602,49 @@ where
                 self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
             }
 
-            valid_announcement_data = valid_data
-        }
+            valid_data
+        } else {
+            debug_assert!(
+                false,
+                "unreachable, `%msg` is either version eth66 and eth68, 
+`%msg`: {msg:?}"
+            );
+            drop(msg);
+            HashMap::new()
+        };
 
-        // filter out already seen unknown hashes. this loads the hashes into the tx fetcher,
-        // hence they should be valid at this point. for any seen hashes add the peer as fallback.
+        // 3. filter out already seen unknown hashes
+        // seen hashes are already in the tx fetcher, pending fetch. for any seen hashes add the
+        // peer as fallback. unseen hashes are loaded into the tx fetcher, hence they should be
+        // valid at this point.
         self.transaction_fetcher.filter_unseen_hashes(
             &mut valid_announcement_data,
             peer_id,
             |peer_id| self.peers.contains_key(&peer_id),
         );
 
-        if msg.is_empty() {
+        if valid_announcement_data.is_empty() {
             // nothing to request
             return
         }
 
-        let msg_version = msg.version();
-
         debug!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            hashes=?msg.hashes(),
+            hashes=?valid_announcement_data.keys(),
             msg_version=%msg_version,
             "received previously unseen hashes in announcement from peer"
         );
 
-        if let Some(eth68_msg) = msg.as_eth68_mut() {
-            // cache size metadata of unseen hashes
-            for (hash, size) in eth68_msg.metadata_iter().map(|(&hash, (_type, size))| (hash, size))
-            {
-                self.transaction_fetcher.eth68_meta.insert(hash, size);
-            }
-        }
-
-        // destruct message type
-        let mut hashes = msg.into_hashes();
+        let mut hashes = valid_announcement_data
+            .into_iter()
+            .map(|(hash, metadata)| {
+                // cache eth68 metadata if this was an eth68 announcement
+                if let Some((_ty, size)) = metadata {
+                    self.transaction_fetcher.eth68_meta.insert(hash, size);
+                }
+                hash
+            })
+            .collect::<Vec<TxHash>>();
 
         // only send request for hashes to idle peer, otherwise buffer hashes storing peer as
         // fallback
@@ -1792,6 +1804,7 @@ mod tests {
         // but hashes are taken out of buffer and packed into request to peer_2
         assert!(tx_fetcher.buffered_hashes.is_empty());
 
+        println!("got here");
         // mock session of peer_2 receives request
         let req = to_mock_session_rx
             .recv()
