@@ -1,30 +1,27 @@
 #![cfg(feature = "c-kzg")]
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
+#[cfg(any(test, feature = "arbitrary"))]
 use crate::{
-    keccak256, Signature, Transaction, TransactionSigned, TxEip4844, TxHash, EIP4844_TX_TYPE_ID,
+    constants::eip4844::{FIELD_ELEMENTS_PER_BLOB, MAINNET_KZG_TRUSTED_SETUP},
+    kzg::{KzgCommitment, KzgProof, BYTES_PER_FIELD_ELEMENT},
 };
-
-use crate::kzg::{
-    self, Blob, Bytes48, KzgSettings, BYTES_PER_BLOB, BYTES_PER_COMMITMENT, BYTES_PER_PROOF,
+use crate::{
+    keccak256,
+    kzg::{
+        self, Blob, Bytes48, KzgSettings, BYTES_PER_BLOB, BYTES_PER_COMMITMENT, BYTES_PER_PROOF,
+    },
+    Signature, Transaction, TransactionSigned, TxEip4844, TxHash, EIP4844_TX_TYPE_ID,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use bytes::BufMut;
-
-use serde::{Deserialize, Serialize};
-
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::{
     arbitrary::{any as proptest_any, ParamsFor},
     collection::vec as proptest_vec,
     strategy::{BoxedStrategy, Strategy},
 };
-
-#[cfg(any(test, feature = "arbitrary"))]
-use crate::{
-    constants::eip4844::{FIELD_ELEMENTS_PER_BLOB, MAINNET_KZG_TRUSTED_SETUP},
-    kzg::{KzgCommitment, KzgProof, BYTES_PER_FIELD_ELEMENT},
-};
+use serde::{Deserialize, Serialize};
 
 /// An error that can occur when validating a [BlobTransaction].
 #[derive(Debug, thiserror::Error)]
