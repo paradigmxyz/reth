@@ -27,7 +27,7 @@ use std::{ops::RangeInclusive, path::Path, sync::Arc};
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
 
 /// A segment represents a snapshotting of some portion of the data.
-pub trait Segment<DB: Database> {
+pub trait Segment<DB: Database>: Send + Sync {
     /// Returns the [`SnapshotSegment`].
     fn segment(&self) -> SnapshotSegment;
 
