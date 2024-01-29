@@ -29,7 +29,7 @@ use crate::{
     protocol::IntoRlpxSubProtocol,
     session::SessionManager,
     state::NetworkState,
-    swarm::{NetworkConnectionState, Swarm, SwarmEvent},
+    swarm::{Swarm, SwarmEvent},
     transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
