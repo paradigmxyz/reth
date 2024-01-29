@@ -729,10 +729,12 @@ mod tests {
         let chain_spec = ChainSpecBuilder::mainnet().shanghai_activated().build();
 
         let create_block_with_withdrawals = |indexes: &[u64]| {
-            let withdrawals = indexes
-                .iter()
-                .map(|idx| Withdrawal { index: *idx, ..Default::default() })
-                .collect::<Vec<_>>();
+            let withdrawals = Withdrawals::new(
+                indexes
+                    .iter()
+                    .map(|idx| Withdrawal { index: *idx, ..Default::default() })
+                    .collect(),
+            );
             SealedBlock {
                 header: Header {
                     withdrawals_root: Some(proofs::calculate_withdrawals_root(&withdrawals)),
@@ -779,7 +781,7 @@ mod tests {
 
         let header = Header {
             base_fee_per_gas: Some(1337u64),
-            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&Withdrawals::default())),
             ..Default::default()
         }
         .seal_slow();
@@ -796,7 +798,7 @@ mod tests {
 
         let header = Header {
             base_fee_per_gas: Some(1337u64),
-            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&Withdrawals::default())),
             blob_gas_used: Some(1),
             transactions_root: proofs::calculate_transaction_root(&[transaction.clone()]),
             ..Default::default()
@@ -806,7 +808,7 @@ mod tests {
         let body = BlockBody {
             transactions: vec![transaction],
             ommers: vec![],
-            withdrawals: Some(vec![]),
+            withdrawals: Some(Withdrawals::default()),
         };
 
         let block = SealedBlock::new(header, body);
