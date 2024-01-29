@@ -39,9 +39,9 @@ impl<DB: Database> Segment<DB> for Headers {
             provider.tx_ref().cursor_read::<tables::CanonicalHeaders>()?;
         let canonical_headers_walker = canonical_headers_cursor.walk_range(block_range)?;
 
-        for ((header_entry, header_td_entry), canonical_header_entry) in
-            headers_walker.zip(header_td_walker).zip(canonical_headers_walker)
-        {
+        let mut headers =
+            headers_walker.zip(header_td_walker).zip(canonical_headers_walker).peekable();
+        while let Some(((header_entry, header_td_entry), canonical_header_entry)) = headers.next() {
             let (header_block, header) = header_entry?;
             let (header_td_block, header_td) = header_td_entry?;
             let (canonical_header_block, canonical_header) = canonical_header_entry?;
@@ -50,8 +50,11 @@ impl<DB: Database> Segment<DB> for Headers {
             debug_assert_eq!(header_td_block, canonical_header_block);
 
             snapshot_writer.append_header(header, header_td.0, canonical_header)?;
-            let _snapshot_block = snapshot_writer.increment_block(SnapshotSegment::Headers)?;
-            debug_assert_eq!(_snapshot_block, header_block);
+
+            if headers.peek().is_some() {
+                let _snapshot_block = snapshot_writer.increment_block(SnapshotSegment::Headers)?;
+                debug_assert_eq!(_snapshot_block, header_block);
+            }
         }
 
         Ok(())
