@@ -119,7 +119,7 @@ impl Block {
             // take into account capacity
             self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
-            self.withdrawals.as_ref().map(|w| w.iter().map(Withdrawal::size).sum::<usize>() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Withdrawals>>())
+            self.withdrawals.as_ref().map(|w| w.size() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Withdrawals>>())
     }
 }
 
@@ -316,7 +316,7 @@ impl SealedBlock {
             // take into account capacity
             self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
-            self.withdrawals.as_ref().map(|w| w.iter().map(Withdrawal::size).sum::<usize>() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Withdrawals>>())
+            self.withdrawals.as_ref().map(|w| w.size() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Withdrawals>>())
     }
 
     /// Calculates the total gas used by blob transactions in the sealed block.
@@ -510,10 +510,7 @@ impl BlockBody {
             self.ommers.capacity() * std::mem::size_of::<Header>() +
             self.withdrawals
                 .as_ref()
-                .map(|w| {
-                    w.iter().map(Withdrawal::size).sum::<usize>() +
-                        w.capacity() * std::mem::size_of::<Withdrawal>()
-                })
+                .map(|w| w.size() + w.capacity() * std::mem::size_of::<Withdrawal>())
                 .unwrap_or(std::mem::size_of::<Option<Withdrawals>>())
     }
 }

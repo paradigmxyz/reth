@@ -47,6 +47,12 @@ impl Withdrawals {
         Withdrawals(withdrawals)
     }
 
+    /// Calculate a heuristic for the in-memory size of the [Withdrawals].
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.iter().map(Withdrawal::size).sum()
+    }
+
     /// Get an iterator over the Withdrawals.
     pub fn iter(&self) -> std::slice::Iter<'_, Withdrawal> {
         self.0.iter()
