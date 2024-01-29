@@ -48,7 +48,7 @@ impl<DB: Database> Segment<DB> for Receipts {
 
             if blocks.peek().is_some() {
                 let _snapshot_block = snapshot_writer.increment_block(SnapshotSegment::Receipts)?;
-                debug_assert_eq!(_snapshot_block, block);
+                debug_assert_eq!(_snapshot_block, block + 1);
             }
         }
 
