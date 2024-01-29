@@ -213,9 +213,8 @@ impl EthMessage {
     }
 }
 
-trait EncodableExt {
+pub trait EncodableExt {
     fn encode_max(&self, size: usize) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error>;
-
     fn encode_truncate(&self, limit: usize) -> Vec<u8>;
 }
 

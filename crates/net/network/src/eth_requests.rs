@@ -1,10 +1,11 @@
 //! Blocks/Headers management for the p2p network.
 
 use crate::{metrics::EthRequestHandlerMetrics, peers::PeersHandle};
+use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
-    BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData,
-    Receipts,
+    message::EncodableExt, BlockBodies, BlockHeaders, EthMessage, GetBlockBodies, GetBlockHeaders,
+    GetNodeData, GetReceipts, NodeData, Receipts,
 };
 use reth_interfaces::p2p::error::RequestResult;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId};
@@ -157,7 +158,7 @@ where
         let _ = response.send(Ok(BlockHeaders(headers)));
     }
 
-    fn on_bodies_request(
+    fn on_bodies_request<T: Encodable>(
         &mut self,
         _peer_id: PeerId,
         request: GetBlockBodies,
@@ -165,9 +166,8 @@ where
     ) {
         self.metrics.received_bodies_requests.increment(1);
         let mut bodies = Vec::new();
-
+        let buf = Vec::<T>::new();
         let mut total_bytes = APPROX_BODY_SIZE;
-
         for hash in request.0 {
             if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
                 let body = BlockBody {
