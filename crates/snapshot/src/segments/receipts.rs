@@ -31,7 +31,8 @@ impl<DB: Database> Segment<DB> for Receipts {
         let mut snapshot_writer =
             snapshot_provider.get_writer(*block_range.start(), SnapshotSegment::Receipts)?;
 
-        for block in block_range {
+        let mut blocks = block_range.peekable();
+        while let Some(block) = blocks.next() {
             let block_body_indices = provider
                 .block_body_indices(block)?
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
@@ -44,7 +45,11 @@ impl<DB: Database> Segment<DB> for Receipts {
 
                 snapshot_writer.append_receipt(tx_number, receipt)?;
             }
-            snapshot_writer.increment_block(SnapshotSegment::Receipts)?;
+
+            if blocks.peek().is_some() {
+                let _snapshot_block = snapshot_writer.increment_block(SnapshotSegment::Receipts)?;
+                debug_assert_eq!(_snapshot_block, block);
+            }
         }
 
         Ok(())
