@@ -105,21 +105,11 @@ impl<'a> SnapshotProviderRW<'a> {
             self.writer = writer;
             self.data_path = data_path;
 
-            match segment {
-                SnapshotSegment::Headers => todo!(),
-                SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
-                    let block_start = *find_fixed_range(last_block + 1).start();
-                    *self.writer.user_header_mut() =
-                        SegmentHeader::new(block_start..=block_start, None, segment)
-                }
-            }
+            let block_start = *find_fixed_range(last_block + 1).start();
+            *self.writer.user_header_mut() =
+                SegmentHeader::new(block_start..=block_start, None, segment)
         } else {
-            match segment {
-                SnapshotSegment::Headers => todo!(),
-                SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
-                    self.writer.user_header_mut().increment_block()
-                }
-            }
+            self.writer.user_header_mut().increment_block()
         }
 
         Ok(self.writer.user_header().block_end())
@@ -232,7 +222,10 @@ impl<'a> SnapshotProviderRW<'a> {
     ) -> ProviderResult<BlockNumber> {
         debug_assert!(self.writer.user_header().segment() == SnapshotSegment::Headers);
 
-        self.writer.user_header_mut().increment_block();
+        // Only increment the block number if this is NOT the genesis header
+        if !(self.writer.rows() == 0 && self.writer.user_header().block_end() == 0) {
+            self.increment_block(SnapshotSegment::Headers)?;
+        }
 
         self.append_column(header)?;
         self.append_column(terminal_difficulty)?;
@@ -291,6 +284,17 @@ impl<'a> SnapshotProviderRW<'a> {
         debug_assert!(self.writer.user_header().segment() == segment);
 
         self.truncate(segment, to_delete, Some(last_block))
+    }
+
+    /// Prunes `to_delete` number of headers from snapshots.
+    ///
+    /// # Note
+    /// Commits to the configuration file at the end.
+    pub fn prune_headers(&mut self, to_delete: u64) -> ProviderResult<()> {
+        let segment = SnapshotSegment::Headers;
+        debug_assert!(self.writer.user_header().segment() == segment);
+
+        self.truncate(segment, to_delete, None)
     }
 
     #[cfg(any(test, feature = "test-utils"))]

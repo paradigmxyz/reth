@@ -18,9 +18,12 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
     },
-    BlockHash, BlockNumber, SealedHeader, U256,
+    BlockHash, BlockNumber, SealedHeader, SnapshotSegment, U256,
 };
-use reth_provider::{DatabaseProviderRW, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode};
+use reth_provider::{
+    providers::{SnapshotProvider, SnapshotWriter},
+    DatabaseProviderRW, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode,
+};
 use std::{
     sync::Arc,
     task::{ready, Context, Poll},
@@ -95,34 +98,27 @@ where
     fn write_headers<DB: Database>(
         &mut self,
         tx: &<DB as Database>::TXMut,
+        snapshot_provider: Arc<SnapshotProvider>,
     ) -> Result<BlockNumber, StageError> {
         let total_headers = self.header_collector.len();
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing headers");
 
-        let mut cursor_header = tx.cursor_write::<RawTable<tables::Headers>>()?;
-        let mut cursor_canonical = tx.cursor_write::<RawTable<tables::CanonicalHeaders>>()?;
-        let mut cursor_td = tx.cursor_write::<tables::HeaderTD>()?;
-
-        let mut last_header_number = tx
-            .cursor_read::<tables::Headers>()?
-            .last()?
-            .map(|(_, header)| header.number)
+        let mut last_header_number = snapshot_provider
+            .get_highest_snapshot_block(SnapshotSegment::Headers)
             .unwrap_or_default();
 
         // Find the latest total difficulty
-        let mut td: U256 = cursor_td
-            .seek_exact(last_header_number)?
-            .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?
-            .1
-            .into();
+        let mut td = snapshot_provider
+            .header_td_by_number(last_header_number)?
+            .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?;
 
         // Although headers were downloaded in reverse order, the collector iterates it in ascending
         // order
-
+        let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
         let interval = (total_headers / 10).max(1);
         for (index, header) in self.header_collector.iter()?.enumerate() {
-            let (number, header_buf) = header?;
+            let (_, header_buf) = header?;
 
             if index > 0 && index % interval == 0 {
                 info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers");
@@ -146,15 +142,8 @@ where
                 }
             })?;
 
-            // Append to HeaderTD
-            cursor_td.append(header.number, td.into())?;
-
-            // Append to CanonicalHeaders
-            cursor_canonical
-                .append(RawKey::<BlockNumber>::from_vec(number.clone()), header_hash.into())?;
-
-            // Append to Headers
-            cursor_header.append(RawKey::<BlockNumber>::from_vec(number), header.into())?;
+            // // Append to HeaderTD
+            writer.append_header(header, td, header_hash)?;
         }
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing header hash index");
@@ -296,7 +285,10 @@ where
 
         // Write the headers and related tables to DB from ETL space
         let to_be_processed = self.hash_collector.len() as u64;
-        let last_header_number = self.write_headers::<DB>(provider.tx_ref())?;
+        let last_header_number = self.write_headers::<DB>(
+            provider.tx_ref(),
+            provider.snapshot_provider().expect("should exist").clone(),
+        )?;
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(last_header_number).with_headers_stage_checkpoint(

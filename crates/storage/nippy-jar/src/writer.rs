@@ -92,6 +92,11 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
         &mut self.jar.user_header
     }
 
+    /// Gets total writter rows in jar.
+    pub fn rows(&mut self) -> usize {
+        self.jar.rows()
+    }
+
     /// Creates a [`NippyJarWriter`] from [`CowJar`].
     fn new(mut jar: CowJar<'a, H>) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
