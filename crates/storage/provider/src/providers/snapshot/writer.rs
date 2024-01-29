@@ -214,6 +214,9 @@ impl<'a> SnapshotProviderRW<'a> {
 
     /// Appends header to snapshot file.
     ///
+    /// It **CALLS** `increment_block()` since the number of headers is equal to the number of
+    /// blocks.
+    ///
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn append_header(
         &mut self,
@@ -237,6 +240,9 @@ impl<'a> SnapshotProviderRW<'a> {
 
     /// Appends transaction to snapshot file.
     ///
+    /// It **DOES NOT CALL** `increment_block()`, it should be handled elsewhere. There might be
+    /// empty blocks and this function wouldn't be called.
+    ///
     /// Returns the current [`TxNumber`] as seen in the static file.
     pub fn append_transaction(
         &mut self,
@@ -247,6 +253,9 @@ impl<'a> SnapshotProviderRW<'a> {
     }
 
     /// Appends receipt to snapshot file.
+    ///
+    /// It **DOES NOT** call `increment_block()`, it should be handled elsewhere. There might be
+    /// empty blocks and this function wouldn't be called.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
     pub fn append_receipt(
