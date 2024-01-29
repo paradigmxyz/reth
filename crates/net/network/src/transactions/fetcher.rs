@@ -4,7 +4,7 @@ use crate::{
 };
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
-use reth_eth_wire::{EthVersion, GetPooledTransactions};
+use reth_eth_wire::{EthVersion, GetPooledTransactions, HandleAnnouncement};
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
 use schnellru::{ByLength, Unlimited};
@@ -316,18 +316,18 @@ impl TransactionFetcher {
         self.remove_from_unknown_hashes(hashes)
     }
 
-    pub(super) fn filter_unseen_hashes(
+    pub(super) fn filter_unseen_hashes<T: HandleAnnouncement>(
         &mut self,
-        new_announced_hashes: &mut Vec<TxHash>,
+        new_announced_hashes: &mut T,
         peer_id: PeerId,
         is_session_active: impl Fn(PeerId) -> bool,
     ) {
         // filter out inflight hashes, and register the peer as fallback for all inflight hashes
-        new_announced_hashes.retain(|hash| {
+        new_announced_hashes.retain_by_hash(|hash| {
             // occupied entry
-            if let Some((_retries, ref mut backups)) = self.unknown_hashes.peek_mut(hash) {
+            if let Some((_retries, ref mut backups)) = self.unknown_hashes.peek_mut(&hash) {
                 // hash has been seen but is not inflight
-                if self.buffered_hashes.remove(hash) {
+                if self.buffered_hashes.remove(&hash) {
                     return true
                 }
                 // hash has been seen and is in flight. store peer as fallback peer.
@@ -348,7 +348,7 @@ impl TransactionFetcher {
             }
 
             // vacant entry
-            let msg_version = || self.eth68_meta.peek(hash).map(|_| EthVersion::Eth68).unwrap_or(EthVersion::Eth66);
+            let msg_version = || self.eth68_meta.peek(&hash).map(|_| EthVersion::Eth68).unwrap_or(EthVersion::Eth66);
 
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),

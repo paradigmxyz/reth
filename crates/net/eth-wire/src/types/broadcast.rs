@@ -5,7 +5,7 @@ use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{Block, Bytes, TransactionSigned, B256, U128};
+use reth_primitives::{Block, Bytes, TransactionSigned, TxHash, B256, U128};
 
 use std::sync::Arc;
 
@@ -159,6 +159,14 @@ impl NewPooledTransactionHashes {
         }
     }
 
+    /// Returns an immutable reference to transaction hashes.
+    pub fn hashes(&self) -> &Vec<B256> {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => &msg.0,
+            NewPooledTransactionHashes::Eth68(msg) => &msg.hashes,
+        }
+    }
+
     /// Returns a mutable reference to transaction hashes.
     pub fn hashes_mut(&mut self) -> &mut Vec<B256> {
         match self {
@@ -258,6 +266,28 @@ impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
     }
 }
 
+/// Interface for handling an announcement.
+pub trait HandleAnnouncement {
+    /// The announcement contains no entries.
+    fn is_empty(&self) -> bool;
+
+    /// Retain only entries for which the hash in the entry, satisfies a given predicate.
+    fn retain_by_hash(&mut self, f: impl FnMut(TxHash) -> bool);
+}
+
+impl HandleAnnouncement for NewPooledTransactionHashes {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn retain_by_hash(&mut self, f: impl FnMut(TxHash) -> bool) {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => msg.retain_by_hash(f),
+            NewPooledTransactionHashes::Eth68(msg) => msg.retain_by_hash(f),
+        }
+    }
+}
+
 /// This informs peers of transaction hashes for transactions that have appeared on the network,
 /// but have not been included in a block.
 #[derive_arbitrary(rlp)]
@@ -273,6 +303,27 @@ pub struct NewPooledTransactionHashes66(
 impl From<Vec<B256>> for NewPooledTransactionHashes66 {
     fn from(v: Vec<B256>) -> Self {
         NewPooledTransactionHashes66(v)
+    }
+}
+
+impl HandleAnnouncement for NewPooledTransactionHashes66 {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
+        let mut indices_to_remove = vec![];
+        for (i, &hash) in self.0.iter().enumerate() {
+            if !f(hash) {
+                indices_to_remove.push(i);
+            }
+        }
+
+        for (i, index) in indices_to_remove.into_iter().rev().enumerate() {
+            let index = index.saturating_sub(i);
+
+            self.0.remove(index);
+        }
     }
 }
 
@@ -413,6 +464,29 @@ impl Decodable for NewPooledTransactionHashes68 {
         }
 
         Ok(msg)
+    }
+}
+
+impl HandleAnnouncement for NewPooledTransactionHashes68 {
+    fn is_empty(&self) -> bool {
+        self.hashes.is_empty()
+    }
+
+    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
+        let mut indices_to_remove = vec![];
+        for (i, &hash) in self.hashes.iter().enumerate() {
+            if !f(hash) {
+                indices_to_remove.push(i);
+            }
+        }
+
+        for (i, index) in indices_to_remove.into_iter().rev().enumerate() {
+            let index = index.saturating_sub(i);
+
+            self.hashes.remove(index);
+            self.types.remove(index);
+            self.sizes.remove(index);
+        }
     }
 }
 

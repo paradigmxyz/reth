@@ -560,22 +560,9 @@ where
             return
         };
 
-        // extract tx size metadata if this an eth68 msg.
-        let mut eth68_sizes = msg
-            .as_eth68()
-            .map(|eth68_msg| {
-                eth68_msg
-                    .metadata_iter()
-                    .map(|(&hash, (_type, size))| (hash, size))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        let hashes = msg.hashes_mut();
-
         // keep track of the transactions the peer knows
         let mut num_already_seen = 0;
-        for tx in hashes.iter().copied() {
+        for tx in msg.iter_hashes().copied() {
             if !peer.transactions.insert(tx) {
                 num_already_seen += 1;
             }
@@ -584,15 +571,11 @@ where
         // filter out known hashes, those txns have already been successfully fetched. most hashes
         // will be filtered out here since this the mempool protocol is a gossip protocol, healthy
         // peers will send many of the same hashes
-        self.pool.retain_unknown(hashes);
-        if hashes.is_empty() {
+        self.pool.retain_unknown(&mut msg);
+        if msg.is_empty() {
             // nothing to request
             return
         }
-
-        // update sizes list to match hashes if is an eth 68 message (otherwise empty
-        // `eth68_sizes` is an empty vec)
-        eth68_sizes.retain(|(hash, _)| hashes.contains(hash));
 
         // filter out invalid entries
         if let Some(eth68_msg) = msg.as_eth68_mut() {
@@ -610,36 +593,35 @@ where
             }
         }
 
-        let msg_version = msg.version();
-        // destruct message type
-        let mut hashes = msg.into_hashes();
-
         // filter out already seen unknown hashes. this loads the hashes into the tx fetcher,
         // hence they should be valid at this point. for any seen hashes add the peer as fallback.
-        self.transaction_fetcher.filter_unseen_hashes(&mut hashes, peer_id, |peer_id| {
-            self.peers.contains_key(&peer_id)
-        });
+        self.transaction_fetcher
+            .filter_unseen_hashes(&mut msg, peer_id, |peer_id| self.peers.contains_key(&peer_id));
 
-        if hashes.is_empty() {
+        if msg.is_empty() {
             // nothing to request
             return
         }
 
+        let msg_version = msg.version();
+
         debug!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            hashes=?hashes,
+            hashes=?msg.hashes(),
             msg_version=%msg_version,
             "received previously unseen hashes in announcement from peer"
         );
 
-        if msg_version == EthVersion::Eth68 {
+        if let Some(eth68_msg) = msg.as_eth68_mut() {
             // cache size metadata of unseen hashes
-            for (hash, size) in eth68_sizes {
-                if hashes.contains(&hash) {
-                    self.transaction_fetcher.eth68_meta.insert(hash, size);
-                }
+            for (hash, size) in eth68_msg.metadata_iter().map(|(&hash, (_type, size))| (hash, size))
+            {
+                self.transaction_fetcher.eth68_meta.insert(hash, size);
             }
         }
+
+        // destruct message type
+        let mut hashes = msg.into_hashes();
 
         // only send request for hashes to idle peer, otherwise buffer hashes storing peer as
         // fallback

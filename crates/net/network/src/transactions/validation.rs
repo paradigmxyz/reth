@@ -141,7 +141,7 @@ impl FilterAnnouncement for LayerOne {
             }
         }
 
-        for (i, &index) in indices_to_remove.iter().rev().enumerate() {
+        for (i, index) in indices_to_remove.into_iter().rev().enumerate() {
             let index = index.saturating_sub(i);
 
             msg.hashes.remove(index);

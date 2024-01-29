@@ -82,6 +82,7 @@ use crate::{
 };
 use best::BestTransactions;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
+use reth_eth_wire::HandleAnnouncement;
 use reth_primitives::{
     Address, BlobTransaction, BlobTransactionSidecar, IntoRecoveredTransaction,
     PooledTransactionsElement, TransactionSigned, TxHash, B256,
@@ -677,12 +678,15 @@ where
     }
 
     /// Removes all transactions that are present in the pool.
-    pub(crate) fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {
-        if hashes.is_empty() {
+    pub(crate) fn retain_unknown<A: HandleAnnouncement>(&self, announcement: &mut A)
+    where
+        A: HandleAnnouncement,
+    {
+        if announcement.is_empty() {
             return
         }
         let pool = self.get_pool_data();
-        hashes.retain(|tx| !pool.contains(tx))
+        announcement.retain_by_hash(|tx| !pool.contains(&tx))
     }
 
     /// Returns the transaction by hash.
