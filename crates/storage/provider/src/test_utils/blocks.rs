@@ -152,7 +152,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
     );
 
     let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
-    block.withdrawals = Some(vec![Withdrawal::default()]);
+    block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = block.header.clone().unseal();
     header.number = number;
     header.state_root = state_root;
@@ -212,7 +212,7 @@ fn block2(
     );
 
     let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
-    block.withdrawals = Some(vec![Withdrawal::default()]);
+    block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = block.header.clone().unseal();
     header.number = number;
     header.state_root = state_root;
