@@ -11,7 +11,11 @@ use std::fs::File;
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db stats` command
-pub struct Command;
+pub struct Command {
+    /// Show detailed sizes for snapshot files.
+    #[arg(long, default_value_t = false)]
+    detailed_sizes: bool,
+}
 
 impl Command {
     /// Execute `db stats` command
@@ -25,7 +29,7 @@ impl Command {
 
         println!("\n");
 
-        let snapshots_stats_table = self.snapshots_stats_table(data_dir)?;
+        let snapshots_stats_table = self.snapshots_stats_table(data_dir, self.detailed_sizes)?;
         println!("{snapshots_stats_table}");
 
         Ok(())
@@ -111,21 +115,29 @@ impl Command {
         Ok(table)
     }
 
-    fn snapshots_stats_table(&self, data_dir: ChainPath<DataDirPath>) -> eyre::Result<ComfyTable> {
+    fn snapshots_stats_table(
+        &self,
+        data_dir: ChainPath<DataDirPath>,
+        detailed_sizes: bool,
+    ) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
-        table.set_header([
-            "Segment",
-            "Block Range",
-            "Transaction Range",
-            "Columns",
-            "Rows",
-            "Data Size",
-            "Index Size",
-            "Offsets Size",
-            "Config Size",
-            "Total Size",
-        ]);
+
+        if detailed_sizes {
+            table.set_header([
+                "Segment",
+                "Block Range",
+                "Transaction Range",
+                "Shape",
+                "Data Size",
+                "Index Size",
+                "Offsets Size",
+                "Config Size",
+                "Total Size",
+            ]);
+        } else {
+            table.set_header(["Segment", "Block Range", "Transaction Range", "Shape", "Size"]);
+        }
 
         let snapshots = iter_snapshots(data_dir.snapshots_path())?;
         let snapshot_provider = SnapshotProvider::new(data_dir.snapshots_path())?;
@@ -167,15 +179,16 @@ impl Command {
                     .add_cell(Cell::new(
                         tx_range.map_or("N/A".to_string(), |tx_range| format!("{tx_range:?}")),
                     ))
-                    .add_cell(Cell::new(columns))
-                    .add_cell(Cell::new(rows))
-                    .add_cell(Cell::new(human_bytes(data_size as f64)))
-                    .add_cell(Cell::new(human_bytes(index_size as f64)))
-                    .add_cell(Cell::new(human_bytes(offsets_size as f64)))
-                    .add_cell(Cell::new(human_bytes(config_size as f64)))
-                    .add_cell(Cell::new(human_bytes(
-                        (data_size + index_size + offsets_size + config_size) as f64,
-                    )));
+                    .add_cell(Cell::new(format!("{columns} x {rows}")));
+                if detailed_sizes {
+                    row.add_cell(Cell::new(human_bytes(data_size as f64)))
+                        .add_cell(Cell::new(human_bytes(index_size as f64)))
+                        .add_cell(Cell::new(human_bytes(offsets_size as f64)))
+                        .add_cell(Cell::new(human_bytes(config_size as f64)));
+                }
+                row.add_cell(Cell::new(human_bytes(
+                    (data_size + index_size + offsets_size + config_size) as f64,
+                )));
                 table.add_row(row);
 
                 total_data_size += data_size;
@@ -196,16 +209,16 @@ impl Command {
         row.add_cell(Cell::new("Total"))
             .add_cell(Cell::new(""))
             .add_cell(Cell::new(""))
-            .add_cell(Cell::new(""))
-            .add_cell(Cell::new(""))
-            .add_cell(Cell::new(human_bytes(total_data_size as f64)))
-            .add_cell(Cell::new(human_bytes(total_index_size as f64)))
-            .add_cell(Cell::new(human_bytes(total_offsets_size as f64)))
-            .add_cell(Cell::new(human_bytes(total_config_size as f64)))
-            .add_cell(Cell::new(human_bytes(
-                (total_data_size + total_index_size + total_offsets_size + total_config_size)
-                    as f64,
-            )));
+            .add_cell(Cell::new(""));
+        if detailed_sizes {
+            row.add_cell(Cell::new(human_bytes(total_data_size as f64)))
+                .add_cell(Cell::new(human_bytes(total_index_size as f64)))
+                .add_cell(Cell::new(human_bytes(total_offsets_size as f64)))
+                .add_cell(Cell::new(human_bytes(total_config_size as f64)));
+        }
+        row.add_cell(Cell::new(human_bytes(
+            (total_data_size + total_index_size + total_offsets_size + total_config_size) as f64,
+        )));
         table.add_row(row);
 
         Ok(table)
