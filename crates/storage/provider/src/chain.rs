@@ -68,6 +68,11 @@ impl Chain {
         self.blocks.values().map(|block| block.header.clone())
     }
 
+    /// Get cached trie updates for this chain.
+    pub fn trie_updates(&self) -> Option<&TrieUpdates> {
+        self.trie_updates.as_ref()
+    }
+
     /// Get post state of this chain
     pub fn state(&self) -> &BundleStateWithReceipts {
         &self.state
@@ -76,6 +81,7 @@ impl Chain {
     /// Prepends the given state to the current state.
     pub fn prepend_state(&mut self, state: BundleState) {
         self.state.prepend_state(state);
+        self.trie_updates.take(); // invalidate cached trie updates
     }
 
     /// Return true if chain is empty and has no blocks.

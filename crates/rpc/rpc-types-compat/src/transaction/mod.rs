@@ -5,6 +5,8 @@ use reth_primitives::{
     BlockNumber, Transaction as PrimitiveTransaction, TransactionKind as PrimitiveTransactionKind,
     TransactionSignedEcRecovered, TxType, B256, U128, U256, U64,
 };
+#[cfg(feature = "optimism")]
+use reth_rpc_types::optimism::OptimismTransactionFields;
 use reth_rpc_types::{AccessListItem, CallInput, CallRequest, Transaction};
 use signature::from_primitive_signature;
 pub use typed::*;
@@ -138,7 +140,7 @@ fn fill(
         blob_versioned_hashes,
         // Optimism fields
         #[cfg(feature = "optimism")]
-        other: reth_rpc_types::OptimismTransactionFields {
+        other: OptimismTransactionFields {
             source_hash: signed_tx.source_hash(),
             mint: signed_tx.mint().map(U128::from),
             is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),

@@ -1,4 +1,10 @@
-#![allow(missing_docs)]
+//! Implements Ethereum wire protocol for versions 66, 67, and 68.
+//! Defines structs/enums for messages, request-response pairs, and broadcasts.
+//! Handles compatibility with [`EthVersion`].
+//!
+//! Examples include creating, encoding, and decoding protocol messages.
+//!
+//! Reference: [Ethereum Wire Protocol](https://github.com/ethereum/wiki/wiki/Ethereum-Wire-Protocol).
 
 use super::{
     broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
@@ -8,10 +14,9 @@ use super::{
 use crate::{errors::EthStreamError, EthVersion, SharedTransactions};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use reth_primitives::bytes::{Buf, BufMut};
-use std::{fmt::Debug, sync::Arc};
-
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use std::{fmt::Debug, sync::Arc};
 
 /// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
 // https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
@@ -21,7 +26,9 @@ pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ProtocolMessage {
+    /// The unique identifier representing the type of the Ethereum message.
     pub message_type: EthMessageID,
+    /// The content of the message, including specific data based on the message type.
     pub message: EthMessage,
 }
 
@@ -126,7 +133,10 @@ impl From<EthMessage> for ProtocolMessage {
 /// Represents messages that can be sent to multiple peers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProtocolBroadcastMessage {
+    /// The unique identifier representing the type of the Ethereum message.
     pub message_type: EthMessageID,
+    /// The content of the message to be broadcasted, including specific data based on the message
+    /// type.
     pub message: EthBroadcastMessage,
 }
 
@@ -168,25 +178,38 @@ impl From<EthBroadcastMessage> for ProtocolBroadcastMessage {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum EthMessage {
-    /// Status is required for the protocol handshake
+    /// Represents a Status message required for the protocol handshake.
     Status(Status),
-    /// The following messages are broadcast to the network
+    /// Represents a NewBlockHashes message broadcast to the network.
     NewBlockHashes(NewBlockHashes),
+    /// Represents a NewBlock message broadcast to the network.
     NewBlock(Box<NewBlock>),
+    /// Represents a Transactions message broadcast to the network.
     Transactions(Transactions),
+    /// Represents a NewPooledTransactionHashes message for eth/66 version.
     NewPooledTransactionHashes66(NewPooledTransactionHashes66),
+    /// Represents a NewPooledTransactionHashes message for eth/68 version.
     NewPooledTransactionHashes68(NewPooledTransactionHashes68),
-
     // The following messages are request-response message pairs
+    /// Represents a GetBlockHeaders request-response pair.
     GetBlockHeaders(RequestPair<GetBlockHeaders>),
+    /// Represents a BlockHeaders request-response pair.
     BlockHeaders(RequestPair<BlockHeaders>),
+    /// Represents a GetBlockBodies request-response pair.
     GetBlockBodies(RequestPair<GetBlockBodies>),
+    /// Represents a BlockBodies request-response pair.
     BlockBodies(RequestPair<BlockBodies>),
+    /// Represents a GetPooledTransactions request-response pair.
     GetPooledTransactions(RequestPair<GetPooledTransactions>),
+    /// Represents a PooledTransactions request-response pair.
     PooledTransactions(RequestPair<PooledTransactions>),
+    /// Represents a GetNodeData request-response pair.
     GetNodeData(RequestPair<GetNodeData>),
+    /// Represents a NodeData request-response pair.
     NodeData(RequestPair<NodeData>),
+    /// Represents a GetReceipts request-response pair.
     GetReceipts(RequestPair<GetReceipts>),
+    /// Represents a Receipts request-response pair.
     Receipts(RequestPair<Receipts>),
 }
 
@@ -266,7 +289,9 @@ impl Encodable for EthMessage {
 /// Note: This is only useful for outgoing messages.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EthBroadcastMessage {
+    /// Represents a new block broadcast message.
     NewBlock(Arc<NewBlock>),
+    /// Represents a transactions broadcast message.
     Transactions(SharedTransactions),
 }
 
@@ -303,20 +328,35 @@ impl Encodable for EthBroadcastMessage {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum EthMessageID {
+    /// Status message.
     Status = 0x00,
+    /// New block hashes message.
     NewBlockHashes = 0x01,
+    /// Transactions message.
     Transactions = 0x02,
+    /// Get block headers message.
     GetBlockHeaders = 0x03,
+    /// Block headers message.
     BlockHeaders = 0x04,
+    /// Get block bodies message.
     GetBlockBodies = 0x05,
+    /// Block bodies message.
     BlockBodies = 0x06,
+    /// New block message.
     NewBlock = 0x07,
+    /// New pooled transaction hashes message.
     NewPooledTransactionHashes = 0x08,
+    /// Requests pooled transactions.
     GetPooledTransactions = 0x09,
+    /// Represents pooled transactions.
     PooledTransactions = 0x0a,
+    /// Requests node data.
     GetNodeData = 0x0d,
+    /// Represents node data.
     NodeData = 0x0e,
+    /// Requests receipts.
     GetReceipts = 0x0f,
+    /// Represents receipts.
     Receipts = 0x10,
 }
 
@@ -338,8 +378,7 @@ impl Encodable for EthMessageID {
 
 impl Decodable for EthMessageID {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let id = buf.first().ok_or(alloy_rlp::Error::InputTooShort)?;
-        let id = match id {
+        let id = match buf.first().ok_or(alloy_rlp::Error::InputTooShort)? {
             0x00 => EthMessageID::Status,
             0x01 => EthMessageID::NewBlockHashes,
             0x02 => EthMessageID::Transactions,

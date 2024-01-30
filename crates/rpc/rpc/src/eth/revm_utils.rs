@@ -1,16 +1,22 @@
 //! utilities for working with revm
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
+#[cfg(feature = "optimism")]
+use reth_primitives::revm::env::fill_op_tx_env;
+#[cfg(not(feature = "optimism"))]
+use reth_primitives::revm::env::fill_tx_env;
 use reth_primitives::{
-    revm::env::{fill_tx_env, fill_tx_env_with_recovered},
-    Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256, U256,
+    revm::env::fill_tx_env_with_recovered, Address, TransactionSigned,
+    TransactionSignedEcRecovered, TxHash, B256, U256,
 };
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
     BlockOverrides, CallRequest,
 };
+#[cfg(feature = "optimism")]
+use revm::primitives::{Bytes, OptimismFields};
 use revm::{
-    db::{CacheDB, EmptyDB},
+    db::CacheDB,
     precompile::{Precompiles, SpecId as PrecompilesSpecId},
     primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId, TransactTo, TxEnv},
     Database, Inspector,
@@ -101,7 +107,7 @@ impl FillableTransaction for TransactionSigned {
         {
             let mut envelope_buf = Vec::with_capacity(self.length_without_header());
             self.encode_enveloped(&mut envelope_buf);
-            fill_tx_env(tx_env, self, signer, envelope_buf.into());
+            fill_op_tx_env(tx_env, self, signer, envelope_buf.into());
         }
         Ok(())
     }
@@ -166,13 +172,14 @@ where
 /// _runtime_ db ([CacheDB]).
 ///
 /// Note: This assumes the target transaction is in the given iterator.
+/// Returns the index of the target transaction in the given iterator.
 pub(crate) fn replay_transactions_until<DB, I, Tx>(
     db: &mut CacheDB<DB>,
     cfg: CfgEnv,
     block_env: BlockEnv,
     transactions: I,
     target_tx_hash: B256,
-) -> EthResult<()>
+) -> Result<usize, EthApiError>
 where
     DB: DatabaseRef,
     EthApiError: From<<DB as DatabaseRef>::Error>,
@@ -182,6 +189,7 @@ where
     let env = Env { cfg, block: block_env, tx: TxEnv::default() };
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
+    let mut index = 0;
     for tx in transactions.into_iter() {
         if tx.hash() == target_tx_hash {
             // reached the target transaction
@@ -190,14 +198,20 @@ where
 
         tx.try_fill_tx_env(&mut evm.env.tx)?;
         let res = evm.transact()?;
-        evm.db.as_mut().expect("is set").commit(res.state)
+        evm.db.as_mut().expect("is set").commit(res.state);
+        index += 1;
     }
-    Ok(())
+    Ok(index)
 }
 
 /// Prepares the [Env] for execution.
 ///
 /// Does not commit any changes to the underlying database.
+///
+/// EVM settings:
+///  - `disable_block_gas_limit` is set to `true`
+///  - `disable_eip3607` is set to `true`
+///  - `disable_base_fee` is set to `true`
 pub(crate) fn prepare_call_env<DB>(
     mut cfg: CfgEnv,
     block: BlockEnv,
@@ -332,7 +346,7 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         blob_hashes: blob_versioned_hashes.unwrap_or_default(),
         max_fee_per_blob_gas,
         #[cfg(feature = "optimism")]
-        optimism: Default::default(),
+        optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
     };
 
     Ok(env)
@@ -585,22 +599,6 @@ where
     };
 
     Ok(())
-}
-
-/// This clones and transforms the given [CacheDB] with an arbitrary [DatabaseRef] into a new
-/// [CacheDB] with [EmptyDB] as the database type
-#[inline]
-pub(crate) fn clone_into_empty_db<DB>(db: &CacheDB<DB>) -> CacheDB<EmptyDB>
-where
-    DB: DatabaseRef,
-{
-    CacheDB {
-        accounts: db.accounts.clone(),
-        contracts: db.contracts.clone(),
-        logs: db.logs.clone(),
-        block_hashes: db.block_hashes.clone(),
-        db: Default::default(),
-    }
 }
 
 #[cfg(test)]
