@@ -6,6 +6,8 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+// The `optimism` feature must be enabled to use this crate.
+#![cfg(feature = "optimism")]
 
 /// Exports optimism-specific implementations of the [EngineTypes](reth_node_api::EngineTypes)
 /// trait.

@@ -21,9 +21,9 @@ use reth_interfaces::consensus::Consensus;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 #[cfg(not(feature = "optimism"))]
-use reth_node_builder::{EthEngineTypes, EthEvmConfig};
+use reth_node_builder_ethereum::{EthEngineTypes, EthEvmConfig};
 #[cfg(feature = "optimism")]
-use reth_node_builder::{OptimismEngineTypes, OptimismEvmConfig};
+use reth_node_builder_optimism::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{fs, ChainSpec};
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory};

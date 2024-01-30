@@ -25,9 +25,9 @@ use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::NetworkEvents;
 use reth_network_api::{NetworkInfo, PeersInfo};
 #[cfg(not(feature = "optimism"))]
-use reth_node_builder::{EthEngineTypes, EthEvmConfig};
+use reth_node_builder_ethereum::{EthEngineTypes, EthEvmConfig};
 #[cfg(feature = "optimism")]
-use reth_node_builder::{OptimismEngineTypes, OptimismEvmConfig};
+use reth_node_builder_optimism::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_node_core::{
     cli::{
         components::{RethNodeComponentsImpl, RethRpcServerHandles},

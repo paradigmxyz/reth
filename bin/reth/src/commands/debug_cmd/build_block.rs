@@ -15,9 +15,9 @@ use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_interfaces::{consensus::Consensus, RethResult};
 use reth_node_api::PayloadBuilderAttributes;
 #[cfg(not(feature = "optimism"))]
-use reth_node_builder::EthEvmConfig;
+use reth_node_builder_ethereum::EthEvmConfig;
 #[cfg(feature = "optimism")]
-use reth_node_builder::OptimismEvmConfig;
+use reth_node_builder_optimism::OptimismEvmConfig;
 use reth_payload_builder::database::CachedReads;
 #[cfg(feature = "optimism")]
 use reth_payload_builder::OptimismPayloadBuilderAttributes;

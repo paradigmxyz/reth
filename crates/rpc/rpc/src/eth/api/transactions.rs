@@ -1295,7 +1295,7 @@ mod tests {
         BlockingTaskPool, EthApi,
     };
     use reth_network_api::noop::NoopNetwork;
-    use reth_node_builder::EthEvmConfig;
+    use reth_node_builder_ethereum::EthEvmConfig;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};

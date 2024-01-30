@@ -65,7 +65,7 @@ mod tests {
         let chain_spec = ChainSpec::default();
         let total_difficulty = U256::ZERO;
 
-        EthEvmConfig::fill_cfg_and_block_env(
+        OptimismEvmConfig::fill_cfg_and_block_env(
             &mut cfg_env,
             &mut block_env,
             &chain_spec,

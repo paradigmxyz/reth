@@ -133,7 +133,7 @@ mod tests {
         },
         BlockingTaskPool,
     };
-    use reth_node_builder::EthEvmConfig;
+    use reth_node_builder_ethereum::EthEvmConfig;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, StorageKey, StorageValue};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
     use reth_transaction_pool::test_utils::testing_pool;

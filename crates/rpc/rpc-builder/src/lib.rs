@@ -168,7 +168,7 @@ use jsonrpsee::{
     Methods, RpcModule,
 };
 use reth_node_api::{EngineTypes, EvmEnvConfig};
-use reth_node_builder::EthEvmConfig;
+use reth_node_builder_ethereum::EthEvmConfig;
 use serde::{Deserialize, Serialize, Serializer};
 use strum::{AsRefStr, EnumIter, EnumVariantNames, IntoStaticStr, ParseError, VariantNames};
 use tower::layer::util::{Identity, Stack};

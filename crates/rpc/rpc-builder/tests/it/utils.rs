@@ -1,6 +1,6 @@
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_network_api::noop::NoopNetwork;
-use reth_node_builder::{EthEngineTypes, EthEvmConfig};
+use reth_node_builder_ethereum::{EthEngineTypes, EthEvmConfig};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::MAINNET;
 use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
