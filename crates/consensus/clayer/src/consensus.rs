@@ -278,19 +278,17 @@ impl ClayerConsensusEngine {
             let connected_peers: Vec<PeerId> = self.agent.get_peers();
             for peer_id in connected_peers {
                 self.broadcast_bootstrap_commit(peer_id).unwrap_or_else(|err| {
-                    error!("Failed to broadcast bootstrap commit due to error: {}", err)
+                    error!(target: "consensus::cl","Failed to broadcast bootstrap commit due to error: {}", err)
                 });
             }
         }
 
         // Primary initializes a block
         if self.state.is_primary() {
-            self.service.initialize_block(None).await.map_err(|err| {
-                PbftError::ServiceError(
-                    format!("Couldn't initialize block on startup due to error"),
-                    err.to_string(),
-                )
-            })?;
+            self.service
+                .initialize_block(None)
+                .await
+                .unwrap_or_else(|err| error!(target: "consensus::cl","Couldn't initialize block on startup due to error {}", err));
         }
         Ok(())
     }
@@ -1696,6 +1694,11 @@ impl ClayerConsensusEngine {
     /// Check to see if the idle timeout has expired
     pub fn check_block_publishing_expired(&mut self) -> bool {
         self.state.block_publishing_timeout.check_expired()
+    }
+
+    /// Start the idle timeout
+    pub fn start_block_publishing_timeout(&mut self) {
+        self.state.block_publishing_timeout.start();
     }
 
     /// Check to see if the idle timeout has expired

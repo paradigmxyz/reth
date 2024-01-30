@@ -127,13 +127,18 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         info!(target:"consensus::cl", "Starting consensus task");
+        let mut reset = false;
 
         'first_layer: loop {
             if let Poll::Ready(x) = this.block_publishing_ticker.poll(cx) {
                 info!(target:"consensus::cl", "Attempting publish block");
                 this.queued.push_back(x);
+
+                if !reset {
+                    reset = true;
+                    this.block_publishing_ticker.reset(Duration::from_millis(100));
+                }
             }
-            // sleep(std::time::Duration::from_millis(100));
 
             if this.insert_task.is_none() {
                 if this.queued.is_empty() {
@@ -171,6 +176,8 @@ where
                         {
                             Ok(_) => {
                                 pbft_running_state.store(true, Ordering::Relaxed);
+                                consensus_engine.start_block_publishing_timeout();
+
                                 consensus_engine.start_idle_timeout();
                             }
                             Err(err) => log_any_error(Err(err)),
@@ -178,7 +185,7 @@ where
                     }
 
                     if pbft_running_state.load(Ordering::Relaxed) {
-                        if let Some(event) = consensus_agent.pop_event() {
+                        while let Some(event) = consensus_agent.pop_event() {
                             let incoming_event = match event {
                                 ClayerConsensusEvent::PeerNetWork(peer_id, connect) => {
                                     let e = if connect {
@@ -218,6 +225,7 @@ where
                             if let Err(e) = consensus_engine.try_publish().await {
                                 log_any_error(Err(e));
                             }
+                            consensus_engine.start_block_publishing_timeout();
                         }
 
                         let view = consensus_engine.view();

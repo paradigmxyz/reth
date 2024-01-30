@@ -28,6 +28,11 @@ impl Ticker {
         }
         Poll::Pending
     }
+
+    pub fn reset(&mut self, duration: Duration) {
+        let start = tokio::time::Instant::now() + duration;
+        self.interval = tokio::time::interval_at(start, duration);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
