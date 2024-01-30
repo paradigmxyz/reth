@@ -3,6 +3,7 @@
 name: hive
 
 on:
+  workflow_dispatch:
   schedule:
     # every day
     - cron: "0 0 * * *"
