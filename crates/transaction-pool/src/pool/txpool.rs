@@ -638,7 +638,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         hashes.into_iter().filter_map(|hash| self.remove_transaction_by_hash(&hash)).collect()
     }
 
-    /// Remove the transaction from the entire pool.
+    /// Remove the transaction from the __entire__ pool.
     ///
     /// This includes the total set of transaction and the subpool it currently resides in.
     fn remove_transaction(
@@ -704,7 +704,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    /// Removes _only_ the descendants of the given transaction from the entire pool.
+    /// Removes _only_ the descendants of the given transaction from the __entire__ pool.
     ///
     /// All removed transactions are added to the `removed` vec.
     fn remove_descendants(
@@ -771,6 +771,8 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// If the current size exceeds the given bounds, the worst transactions are evicted from the
     /// pool and returned.
+    ///
+    /// This returns all transactions that were removed from the entire pool.
     pub(crate) fn discard_worst(&mut self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
 
@@ -783,9 +785,20 @@ impl<T: TransactionOrdering> TxPool<T> {
                         .$limit
                         .is_exceeded($this.$pool.len(), $this.$pool.size())
                     {
-                        removed = $this.$pool.truncate_pool($this.config.$limit.clone());
-                        for tx in removed.clone().iter() {
-                            $this.remove_descendants(tx.id(), &mut $removed);
+                        // 1. first remove the worst transaction from the subpool
+                        let removed_from_subpool = $this.$pool.truncate_pool($this.config.$limit.clone());
+
+                        // 2. remove all transactions from the total set
+                        for tx in removed_from_subpool {
+                            $this.all_transactions.remove_transaction(tx.id());
+
+                            let id = *tx.id();
+
+                            // keep track of removed transaction
+                            removed.push(tx);
+
+                            // 3. remove all its descendants from the entire pool
+                            $this.remove_descendants(&id, &mut $removed);
                         }
                     }
 
@@ -1812,6 +1825,7 @@ mod tests {
     use crate::{
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
         traits::TransactionOrigin,
+        SubPoolLimit,
     };
 
     #[test]
@@ -2663,5 +2677,35 @@ mod tests {
         let outcome = pool.update_accounts(changed_senders);
         assert_eq!(outcome.discarded.len(), 1);
         assert_eq!(pool.pending_pool.len(), 1);
+    }
+
+    #[test]
+    fn discard_at_capacity() {
+        let mut f = MockTransactionFactory::default();
+        let queued_limit = SubPoolLimit::new(1000, usize::MAX);
+        let mut pool =
+            TxPool::new(MockOrdering::default(), PoolConfig { queued_limit, ..Default::default() });
+
+        // insert a bunch of transactions into the queued pool
+        for _ in 0..queued_limit.max_txs {
+            let tx = MockTransaction::eip1559().inc_price_by(10).inc_nonce();
+            let validated = f.validated(tx.clone());
+            let _id = *validated.id();
+            pool.add_transaction(validated, U256::from(1_000), 0).unwrap();
+        }
+
+        let size = pool.size();
+        assert_eq!(size.queued, queued_limit.max_txs);
+
+        for _ in 0..queued_limit.max_txs {
+            let tx = MockTransaction::eip1559().inc_price_by(10).inc_nonce();
+            let validated = f.validated(tx.clone());
+            let _id = *validated.id();
+            pool.add_transaction(validated, U256::from(1_000), 0).unwrap();
+
+            pool.discard_worst();
+            pool.assert_invariants();
+            assert!(pool.size().queued <= queued_limit.max_txs);
+        }
     }
 }

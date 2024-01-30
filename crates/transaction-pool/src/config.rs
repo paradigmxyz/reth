@@ -53,7 +53,7 @@ impl Default for PoolConfig {
 }
 
 /// Size limits for a sub-pool.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SubPoolLimit {
     /// Maximum amount of transaction in the pool.
     pub max_txs: usize,
@@ -62,6 +62,11 @@ pub struct SubPoolLimit {
 }
 
 impl SubPoolLimit {
+    /// Creates a new instance with the given limits.
+    pub const fn new(max_txs: usize, max_size: usize) -> Self {
+        Self { max_txs, max_size }
+    }
+
     /// Returns whether the size or amount constraint is violated.
     #[inline]
     pub fn is_exceeded(&self, txs: usize, size: usize) -> bool {
