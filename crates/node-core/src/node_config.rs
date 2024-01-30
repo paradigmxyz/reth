@@ -81,6 +81,7 @@ use reth_provider::{
 use reth_prune::PrunerBuilder;
 use reth_revm::EvmProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
+use reth_snapshot::Snapshotter;
 use reth_stages::{
     prelude::*,
     stages::{
@@ -616,6 +617,7 @@ impl NodeConfig {
         metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
         max_block: Option<BlockNumber>,
+        snapshotter: Snapshotter<DB>,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Unpin + Clone + 'static,
@@ -641,6 +643,7 @@ impl NodeConfig {
                 self.debug.continuous,
                 metrics_tx,
                 prune_config,
+                snapshotter,
             )
             .await?;
 
@@ -846,6 +849,7 @@ impl NodeConfig {
         continuous: bool,
         metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
+        snapshotter: Snapshotter<DB>,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Clone + 'static,
@@ -893,6 +897,7 @@ impl NodeConfig {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
+                    snapshotter,
                 )?
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_config.sender_recovery.commit_threshold,
@@ -1133,6 +1138,18 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         };
         let max_block = self.config.max_block(&network_client, provider_factory.clone()).await?;
 
+        let mut hooks = EngineHooks::new();
+
+        let snapshotter = Snapshotter::new(
+            provider_factory.clone(),
+            provider_factory
+                .snapshot_provider()
+                .expect("snapshot provider initialized via provider factory"),
+            prune_config.clone().unwrap_or_default().segments,
+        );
+        hooks.add(SnapshotHook::new(snapshotter.clone(), Box::new(executor.clone())));
+        info!(target: "reth::cli", "Snapshotter initialized");
+
         // Configure the pipeline
         let (mut pipeline, client) = if self.config.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
@@ -1160,6 +1177,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
+                    snapshotter,
                 )
                 .await?;
 
@@ -1181,6 +1199,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
+                    snapshotter,
                 )
                 .await?;
 
@@ -1190,7 +1209,6 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         let pipeline_events = pipeline.events();
 
         let initial_target = self.config.initial_pipeline_target(genesis_hash);
-        let mut hooks = EngineHooks::new();
 
         let prune_config = prune_config.unwrap_or_default();
         let mut pruner = PrunerBuilder::new(prune_config.clone())
@@ -1201,16 +1219,6 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         let pruner_events = pruner.events();
         hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));
         info!(target: "reth::cli", ?prune_config, "Pruner initialized");
-
-        let snapshotter = reth_snapshot::Snapshotter::new(
-            provider_factory.clone(),
-            provider_factory
-                .snapshot_provider()
-                .expect("snapshot provider initialized via provider factory"),
-            prune_config.segments,
-        );
-        hooks.add(SnapshotHook::new(snapshotter, Box::new(executor.clone())));
-        info!(target: "reth::cli", "Snapshotter initialized");
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(

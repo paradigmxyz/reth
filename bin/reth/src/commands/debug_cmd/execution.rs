@@ -27,9 +27,11 @@ use reth_interfaces::{
 };
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
-
-use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, B256};
+use reth_primitives::{
+    fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256,
+};
 use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
+use reth_snapshot::Snapshotter;
 use reth_stages::{
     sets::DefaultStages,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
@@ -93,6 +95,7 @@ impl Command {
         consensus: Arc<dyn Consensus>,
         provider_factory: ProviderFactory<DB>,
         task_executor: &TaskExecutor,
+        snapshotter: Snapshotter<DB>,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Unpin + Clone + 'static,
@@ -123,6 +126,7 @@ impl Command {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
+                    snapshotter,
                 )?
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
@@ -223,6 +227,14 @@ impl Command {
             )
             .await?;
 
+        let snapshotter = Snapshotter::new(
+            provider_factory.clone(),
+            provider_factory
+                .snapshot_provider()
+                .expect("snapshot provider initialized via provider factory"),
+            PruneModes::default(),
+        );
+
         // Configure the pipeline
         let fetch_client = network.fetch_client().await?;
         let mut pipeline = self.build_pipeline(
@@ -231,6 +243,7 @@ impl Command {
             Arc::clone(&consensus),
             provider_factory.clone(),
             &ctx.task_executor,
+            snapshotter,
         )?;
 
         let provider = provider_factory.provider()?;

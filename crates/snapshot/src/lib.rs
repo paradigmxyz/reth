@@ -7,9 +7,7 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-mod error;
 pub mod segments;
 mod snapshotter;
 
-pub use error::SnapshotterError;
 pub use snapshotter::{SnapshotTargets, Snapshotter, SnapshotterResult, SnapshotterWithResult};
