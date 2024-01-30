@@ -24,10 +24,6 @@ use reth_db::{
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::NetworkEvents;
 use reth_network_api::{NetworkInfo, PeersInfo};
-#[cfg(not(feature = "optimism"))]
-use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
-#[cfg(feature = "optimism")]
-use reth_node_optimism::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_node_core::{
     cli::{
         components::{RethNodeComponentsImpl, RethRpcServerHandles},
@@ -38,6 +34,10 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     version::SHORT_VERSION,
 };
+#[cfg(not(feature = "optimism"))]
+use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
+#[cfg(feature = "optimism")]
+use reth_node_optimism::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::DisplayHardforks;
 use reth_provider::{providers::BlockchainProvider, ProviderFactory};
