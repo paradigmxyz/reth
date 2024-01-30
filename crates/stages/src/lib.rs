@@ -18,7 +18,7 @@
 //! # use reth_interfaces::consensus::Consensus;
 //! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient};
 //! # use reth_revm::EvmProcessorFactory;
-//! # use reth_primitives::{PeerId, MAINNET, B256};
+//! # use reth_primitives::{PeerId, MAINNET, B256, PruneModes};
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
 //! # use tokio::sync::watch;
@@ -46,6 +46,7 @@
 //! #    provider_factory
 //! #       .snapshot_provider()
 //! #       .expect("snapshot provider initialized via provider factory"),
+//! #    PruneModes::default()
 //! # );
 //! // Create a pipeline that can fully sync
 //! # let pipeline =
