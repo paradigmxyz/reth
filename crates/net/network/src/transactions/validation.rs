@@ -502,4 +502,10 @@ mod test {
 
         assert_eq!(expected_data, data)
     }
+
+    #[test]
+    fn test_derive_more_display_for_zst() {
+        let filter = EthAnnouncementFilter::default();
+        assert_eq!("EthAnnouncementFilter", &filter.to_string());
+    }
 }
