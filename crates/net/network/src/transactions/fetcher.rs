@@ -6,9 +6,10 @@ use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{EthVersion, GetPooledTransactions, HandleAnnouncement};
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
-use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
+use reth_primitives::{PeerId, PooledTransactionsElement, Signature, TxHash};
 use schnellru::{ByLength, Unlimited};
 use std::{
+    mem,
     num::NonZeroUsize,
     pin::Pin,
     task::{Context, Poll},
@@ -46,6 +47,8 @@ const MAX_CAPACITY_BUFFERED_HASHES: usize = 100 * GET_POOLED_TRANSACTION_SOFT_LI
 ///
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>
 const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES: usize = 256;
+
+const TX_MIN_SIZE: usize = mem::size_of::<Signature>();
 
 /// The type responsible for fetching missing transactions from peers.
 ///
@@ -218,31 +221,71 @@ impl TransactionFetcher {
 
         let mut acc_size_response = 0;
         let mut surplus_hashes = vec![];
-        // sort hashes in descending order for more better greedy packing
-        hashes.sort_by(|a, b| {
-            let a_size = self.eth68_meta.peek(a).expect("should find size in `eth68-meta`");
-            let b_size = self.eth68_meta.peek(b).expect("should find size in `eth68-meta`");
-            b_size.cmp(a_size)
-        });
-        hashes.retain(|&hash| match self.include_eth68_hash(&mut acc_size_response, hash) {
-            true => true,
-            false => {
-                trace!(target: "net::tx",
-                    peer_id=format!("{peer_id:#}"),
-                    hash=%hash,
-                    size=self.eth68_meta.peek(&hash).expect("should find size in `eth68-meta`"),
-                    acc_size_response=acc_size_response,
-                    POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE=
-                        SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE,
-                    "no space for hash in `GetPooledTransactions` request to peer"
-                );
 
-                surplus_hashes.push(hash);
-                false
+        // loop through hashes and put them in request if they fit. On first hash that doesn't
+        // fit, stop looping and split_off remaining hashes to
+        for idx in 0..hashes.len() {
+            if !self.include_eth68_hash(&mut acc_size_response, hashes[idx]) {
+                let remaining_size =
+                    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE - acc_size_response;
+
+                // if remaining size is smaller than min tx size, split remaining hashes into
+                // surplus_hashes
+                if remaining_size < TX_MIN_SIZE {
+                    surplus_hashes = hashes.split_off(idx);
+                } else {
+                    // otherwise:
+                    // 1. split remaining hashes into split_off_hashes,
+                    // 2. filter out hashes that don't fit in remaining size.
+                    // 3. sort hashes in descending order by size.
+                    // 4. add hashes to request until remaining size is reached.
+                    let mut split_off_hashes = hashes.split_off(idx);
+                    split_off_hashes.retain(|&hash| {
+                        match self.get_hash_size(&hash) < &remaining_size {
+                            true => true,
+                            false => {
+                                surplus_hashes.push(hash);
+                                false
+                            }
+                        }
+                    });
+                    split_off_hashes.sort_by(|a, b| {
+                        let a_size = self.get_hash_size(a);
+                        let b_size = self.get_hash_size(b);
+                        b_size.cmp(a_size)
+                    });
+
+                    for hash in split_off_hashes {
+                        if self.include_eth68_hash(&mut acc_size_response, hash) {
+                            hashes.push(hash);
+                        } else {
+                            surplus_hashes.push(hash);
+                        }
+                    }
+                }
+                break;
             }
-        });
+        }
 
+        // all hashes included in request and there is still space
+        if acc_size_response < SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE {
+            self.fill_eth68_request_for_peer(hashes, peer_id, &mut acc_size_response);
+        }
+
+        for hash in &surplus_hashes {
+            trace!(target: "net::tx",
+            peer_id=format!("{peer_id:#}"),
+            hash=%hash,
+            size=self.get_hash_size(hash),
+            acc_size_response=acc_size_response,
+            POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE=SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE,
+            "no space for hash in `GetPooledTransactions` request to peer");
+        }
         surplus_hashes
+    }
+
+    fn get_hash_size(&self, hash: &TxHash) -> &usize {
+        self.eth68_meta.peek(hash).expect("should find size in `eth68-meta`")
     }
 
     pub(super) fn buffer_hashes_for_retry(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
@@ -839,13 +882,12 @@ mod test {
             B256::from_slice(&[6; 32]),
         ];
         let eth68_hashes_sizes = [
-            SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE - 4,
-            5, // this one will not fit
-            1, // this one will fit
-            2, // but now this one won't
-            3, /* this one will, no more txns will fit
-                * after this */
-            2,
+            SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE - (4 * TX_MIN_SIZE),
+            5 * TX_MIN_SIZE, // this one will not fit
+            TX_MIN_SIZE,     // this one will fit
+            2 * TX_MIN_SIZE, // this one will not fit
+            3 * TX_MIN_SIZE, // this one will fit
+            2 * TX_MIN_SIZE, // this one will not fit
         ];
 
         // load unseen hashes in reverse order so index 0 in seen_eth68_hashes and
@@ -864,6 +906,15 @@ mod test {
             .map(|hash| tx_fetcher.eth68_meta.peek(hash).unwrap())
             .sum::<usize>();
         assert_eq!(response_size, SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE);
-        assert_eq!(surplus_eth68_hashes.len(), 3);
+        let expected_surplus_eth68_hashes = vec![
+            B256::from_slice(&[2; 32]),
+            B256::from_slice(&[4; 32]),
+            B256::from_slice(&[6; 32]),
+        ];
+        // for every expected surplus hash verify it is in surplus_eth68_hashes
+        for hash in &expected_surplus_eth68_hashes {
+            assert!(surplus_eth68_hashes.contains(hash));
+        }
+        assert_eq!(surplus_eth68_hashes.len(), expected_surplus_eth68_hashes.len());
     }
 }
