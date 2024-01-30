@@ -358,8 +358,8 @@ where
     }
 
     fn pending_log_stream(&self) -> impl Stream<Item = Log> {
-        let stream_local = WatchStream::new(self.local_pending_block_watcher_rx.clone()).flat_map(
-            |new_local_pending_block_with_receipts| {
+        let stream_local = WatchStream::new(self.local_pending_block_watcher_rx.receiver.clone())
+            .flat_map(|new_local_pending_block_with_receipts| {
                 let logs = new_local_pending_block_with_receipts
                     .map(|(_, receipts)| {
                         receipts
@@ -371,8 +371,7 @@ where
                     })
                     .unwrap_or_default();
                 futures::stream::iter(logs)
-            },
-        );
+            });
         let stream_cl = WatchStream::new(self.chain_events.pending_blocks_stream()).flat_map(
             |new_pending_block_with_receipts| {
                 let logs = new_pending_block_with_receipts

@@ -52,11 +52,35 @@ mod transactions;
 use crate::BlockingTaskPool;
 pub use transactions::{EthTransactions, TransactionSource};
 
-/// Type alias for a watch receiver that receives the recent pending block with receipts
-pub(crate) type LocalPendingBlockWatcherReceiver =
-    watch::Receiver<Option<(SealedBlock, Vec<Receipt>)>>;
+/// Type for a watch receiver that receives the recent pending block with receipts
+#[derive(Debug, Clone)]
+pub struct LocalPendingBlockWatcherReceiver {
+    /// A watch receiver for SealedBlock + Receipt
+    pub receiver: watch::Receiver<Option<(SealedBlock, Vec<Receipt>)>>,
+}
+
 /// Type alias for a watch sender that sends the recent local pending block with receipts
-type LocalPendingBlockWatcherSender = watch::Sender<Option<(SealedBlock, Vec<Receipt>)>>;
+pub(crate) struct LocalPendingBlockWatcherSender {
+    /// A watch sender for SealedBlock + Receipt
+    pub(crate) sender: watch::Sender<Option<(SealedBlock, Vec<Receipt>)>>,
+}
+
+impl LocalPendingBlockWatcherSender {
+    pub(crate) fn new() -> Self {
+        let initial_value: Option<(SealedBlock, Vec<Receipt>)> = None;
+        let (sender, _) = watch::channel(initial_value);
+        Self { sender }
+    }
+
+    pub(crate) fn subscribe(&self) -> LocalPendingBlockWatcherReceiver {
+        let receiver = self.sender.subscribe();
+        LocalPendingBlockWatcherReceiver { receiver }
+    }
+
+    pub(crate) fn send(&self, pending_block: SealedBlock, receipts: Vec<Receipt>) {
+        self.sender.send_modify(|v| *v = Some((pending_block, receipts)))
+    }
+}
 
 /// `Eth` API trait.
 ///
@@ -148,8 +172,7 @@ where
             .map(|header| header.number)
             .unwrap_or_default();
 
-        let initial_value: Option<(SealedBlock, Vec<Receipt>)> = None;
-        let (local_pending_block_sender, _) = watch::channel(initial_value);
+        let local_pending_block_sender = LocalPendingBlockWatcherSender::new();
         let inner = EthApiInner {
             provider,
             pool,
@@ -368,19 +391,21 @@ where
             let receipts = pending_block.receipts;
             let pending_block = pending_block.sealed_block_with_senders;
 
+            this.on_new_pending_block(pending_block.block.clone(), receipts);
+
             let now = Instant::now();
             *lock = Some(PendingBlock {
                 block: pending_block.clone(),
                 expires_at: now + Duration::from_secs(3),
             });
 
-            let pending_block_clone = pending_block.block.clone();
-            this.local_pending_block_sender()
-                .send_modify(|v| *v = Some((pending_block_clone, receipts)));
-
             Ok(Some(pending_block))
         })
         .await
+    }
+
+    fn on_new_pending_block(&self, pending_block: SealedBlock, receipts: Vec<Receipt>) {
+        self.local_pending_block_sender().send(pending_block, receipts)
     }
 }
 
