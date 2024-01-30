@@ -1,6 +1,6 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
-use reth_primitives::stage::StageId;
+use reth_primitives::stage::{StageCheckpoint, StageId};
 use reth_provider::{BlockNumReader, DatabaseProviderRW};
 use reth_snapshot::Snapshotter;
 
@@ -38,8 +38,8 @@ impl<DB: Database> Stage<DB> for SnapshotStage<DB> {
     fn unwind(
         &mut self,
         _provider: &DatabaseProviderRW<DB>,
-        _input: UnwindInput,
+        input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        Err(StageError::UnwindNotSupported)
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
 }
