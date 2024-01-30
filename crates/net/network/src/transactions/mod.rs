@@ -75,11 +75,13 @@ const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
 const NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT: usize = 4096;
 
 /// Soft limit for an announcement of full transactions in bytes. See specs
+/// 
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>.
 const NEW_POOLED_TRANSACTION_HASHES_ANNOUNCEMENT_SOFT_LIMIT_BYTES: usize = 150 * 1024;
 
-/// Soft limit for the response size of a GetPooledTransactions message (2MB). Standard maximum 
-/// response size. See specs 
+/// Soft limit for the response size of a GetPooledTransactions message (2MB) in bytes. Standard 
+/// maximum response size. See specs
+/// 
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
 const POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTES: usize = 2 * 1024 * 1024;
 
@@ -302,9 +304,12 @@ where
                 let _ = response.send(Ok(PooledTransactions::default()));
                 return
             }
-            let transactions = self
-                .pool
-                .get_pooled_transaction_elements(request.0, GetPooledTransactionLimit::ResponseSizeSoftLimit(POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTES));
+            let transactions = self.pool.get_pooled_transaction_elements(
+                request.0,
+                GetPooledTransactionLimit::ResponseSizeSoftLimit(
+                    POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTES,
+                ),
+            );
 
             // we sent a response at which point we assume that the peer is aware of the
             // transactions
@@ -1830,7 +1835,9 @@ mod tests {
         let mut backups = default_cache();
         backups.insert(peer_id_other);
         tx_fetcher.unknown_hashes.insert(hash_other, (0, backups));
-        tx_fetcher.eth68_meta.insert(hash_other, NEW_POOLED_TRANSACTION_HASHES_ANNOUNCEMENT_SOFT_LIMIT_BYTES - 2); // a big tx
+        tx_fetcher
+            .eth68_meta
+            .insert(hash_other, NEW_POOLED_TRANSACTION_HASHES_ANNOUNCEMENT_SOFT_LIMIT_BYTES - 2); // a big tx
         tx_fetcher.buffered_hashes.insert(hash_other);
 
         let (peer, mut to_mock_session_rx) = new_mock_session(peer_id, eth_version);
