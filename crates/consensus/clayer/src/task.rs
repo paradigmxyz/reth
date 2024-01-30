@@ -8,7 +8,7 @@ use crate::{consensus::ClayerConsensusEngine, engine_api::http::HttpJsonRpc, tim
 use alloy_primitives::B256;
 use futures_util::{future::BoxFuture, FutureExt};
 use rand::Rng;
-use reth_interfaces::clayer::ClayerConsensusMessageAgentTrait;
+use reth_interfaces::clayer::{ClayerConsensusEvent, ClayerConsensusMessageAgentTrait};
 use reth_interfaces::consensus;
 use reth_network::NetworkHandle;
 use reth_primitives::{hex, SealedHeader, TransactionSigned};
@@ -161,7 +161,6 @@ where
                     let mut consensus_engine = consensus_engine.write().await;
 
                     if !pbft_running_state.load(Ordering::Relaxed) {
-                        pbft_running_state.store(true, Ordering::Relaxed);
                         match consensus_engine
                             .initialize(
                                 clayer_block_from_genesis(&startup_latest_header),
@@ -170,36 +169,39 @@ where
                             )
                             .await
                         {
-                            Ok(_) => {}
-                            Err(err) => log_any_error(Err(err)),
-                        }
-                        consensus_engine.start_idle_timeout();
-                    }
-
-                    if let Some((peer_id, connect)) = consensus_agent.pop_network_event() {
-                        let incoming_event = if connect {
-                            ConsensusEvent::PeerConnected(peer_id)
-                        } else {
-                            ConsensusEvent::PeerConnected(peer_id)
-                        };
-                        match handle_consensus_event(&mut consensus_engine, incoming_event).await {
-                            Ok(again) => {
-                                if !again {
-                                    return events;
-                                }
+                            Ok(_) => {
+                                pbft_running_state.store(true, Ordering::Relaxed);
+                                consensus_engine.start_idle_timeout();
                             }
                             Err(err) => log_any_error(Err(err)),
                         }
                     }
 
-                    if let Some((peer_id, bytes)) = consensus_agent.pop_received_cache() {
-                        match parse_consensus_message(&bytes) {
-                            Ok(msg) => {
-                                match handle_consensus_event(
-                                    &mut consensus_engine,
-                                    ConsensusEvent::PeerMessage(msg, peer_id),
-                                )
-                                .await
+                    if pbft_running_state.load(Ordering::Relaxed) {
+                        if let Some(event) = consensus_agent.pop_event() {
+                            let incoming_event = match event {
+                                ClayerConsensusEvent::PeerNetWork(peer_id, connect) => {
+                                    let e = if connect {
+                                        Some(ConsensusEvent::PeerConnected(peer_id))
+                                    } else {
+                                        Some(ConsensusEvent::PeerConnected(peer_id))
+                                    };
+                                    e
+                                }
+                                ClayerConsensusEvent::PeerMessage(peer_id, bytes) => {
+                                    let e = match parse_consensus_message(&bytes) {
+                                        Ok(msg) => Some(ConsensusEvent::PeerMessage(peer_id, msg)),
+                                        Err(e) => {
+                                            log_any_error(Err(e));
+                                            None
+                                        }
+                                    };
+                                    e
+                                }
+                            };
+                            if let Some(incoming_event) = incoming_event {
+                                match handle_consensus_event(&mut consensus_engine, incoming_event)
+                                    .await
                                 {
                                     Ok(again) => {
                                         if !again {
@@ -209,42 +211,39 @@ where
                                     Err(err) => log_any_error(Err(err)),
                                 }
                             }
-                            Err(e) => {
+                        }
+
+                        // If the block publishing delay has passed, attempt to publish a block
+                        if consensus_engine.check_block_publishing_expired() {
+                            if let Err(e) = consensus_engine.try_publish().await {
                                 log_any_error(Err(e));
                             }
                         }
-                    }
 
-                    // If the block publishing delay has passed, attempt to publish a block
-                    if consensus_engine.check_block_publishing_expired() {
-                        if let Err(e) = consensus_engine.try_publish().await {
-                            log_any_error(Err(e));
-                        }
-                    }
+                        let view = consensus_engine.view();
 
-                    let view = consensus_engine.view();
-
-                    // If the idle timeout has expired, initiate a view change
-                    if consensus_engine.check_idle_timeout_expired() {
-                        warn!(target:"consensus::cl","Idle timeout expired; proposing view change");
-                        log_any_error(consensus_engine.start_view_change(view + 1));
-                    }
-
-                    let view = consensus_engine.view();
-
-                    // If the commit timeout has expired, initiate a view change
-                    if consensus_engine.check_commit_timeout_expired() {
-                        warn!(target:"consensus::cl","Commit timeout expired; proposing view change");
-                        log_any_error(consensus_engine.start_view_change(view + 1));
-                    }
-
-                    let view = consensus_engine.view();
-                    // Check the view change timeout if the node is view changing so we can start a new
-                    // view change if we don't get a NewView in time
-                    if let PbftMode::ViewChanging(v) = consensus_engine.mode() {
-                        if consensus_engine.check_view_change_timeout_expired() {
-                            warn!(target:"consensus::cl","View change timeout expired; proposing view change for view {}", v + 1);
+                        // If the idle timeout has expired, initiate a view change
+                        if consensus_engine.check_idle_timeout_expired() {
+                            warn!(target:"consensus::cl","Idle timeout expired; proposing view change");
                             log_any_error(consensus_engine.start_view_change(view + 1));
+                        }
+
+                        let view = consensus_engine.view();
+
+                        // If the commit timeout has expired, initiate a view change
+                        if consensus_engine.check_commit_timeout_expired() {
+                            warn!(target:"consensus::cl","Commit timeout expired; proposing view change");
+                            log_any_error(consensus_engine.start_view_change(view + 1));
+                        }
+
+                        let view = consensus_engine.view();
+                        // Check the view change timeout if the node is view changing so we can start a new
+                        // view change if we don't get a NewView in time
+                        if let PbftMode::ViewChanging(v) = consensus_engine.mode() {
+                            if consensus_engine.check_view_change_timeout_expired() {
+                                warn!(target:"consensus::cl","View change timeout expired; proposing view change for view {}", v + 1);
+                                log_any_error(consensus_engine.start_view_change(view + 1));
+                            }
                         }
                     }
 

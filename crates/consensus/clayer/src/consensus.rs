@@ -23,7 +23,7 @@ use reth_eth_wire::{
     ClayerExecutionPayload, ClayerSignature, PbftMessage, PbftMessageInfo, PbftMessageType,
     PbftNewView, PbftSeal, PbftSignedVote,
 };
-use reth_interfaces::clayer::ClayerConsensusMessageAgentTrait;
+use reth_interfaces::clayer::{ClayerConsensusEvent, ClayerConsensusMessageAgentTrait};
 use reth_primitives::{public_key_to_address, sign_message, SealedHeader, B256};
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use std::{
@@ -69,10 +69,6 @@ impl ClayerConsensusMessageAgentTrait for ClayerConsensusMessagingAgent {
     fn push_received_cache(&self, peer_id: PeerId, data: reth_primitives::Bytes) {
         self.inner.write().push_received_cache(peer_id, data);
     }
-    /// pop data received from network out cache
-    fn pop_received_cache(&self) -> Option<(PeerId, reth_primitives::Bytes)> {
-        self.inner.write().pop_received_cache()
-    }
 
     /// push data received from self into cache
     fn push_received_cache_first(&self, peer_id: PeerId, msg: reth_primitives::Bytes) {
@@ -83,9 +79,9 @@ impl ClayerConsensusMessageAgentTrait for ClayerConsensusMessagingAgent {
     fn push_network_event(&self, peer_id: PeerId, connect: bool) {
         self.inner.write().push_network_event(peer_id, connect);
     }
-    /// pop network event(PeerConnected, PeerDisconnected)
-    fn pop_network_event(&self) -> Option<(PeerId, bool)> {
-        self.inner.write().pop_network_event()
+
+    fn pop_event(&self) -> Option<ClayerConsensusEvent> {
+        self.inner.write().pop_event()
     }
     /// broadcast consensus
     fn broadcast_consensus(&self, peers: Vec<PeerId>, data: reth_primitives::Bytes) {
@@ -98,20 +94,14 @@ impl ClayerConsensusMessageAgentTrait for ClayerConsensusMessagingAgent {
 }
 
 pub struct ClayerConsensusMessagingAgentInner {
-    queued: VecDeque<(PeerId, reth_primitives::Bytes)>,
-    network_queued: VecDeque<(PeerId, bool)>,
+    queued: VecDeque<ClayerConsensusEvent>,
     sender: Option<Sender<(Vec<PeerId>, reth_primitives::Bytes)>>,
     active_peers: HashSet<PeerId>,
 }
 
 impl ClayerConsensusMessagingAgentInner {
     pub fn new() -> Self {
-        Self {
-            queued: VecDeque::new(),
-            network_queued: VecDeque::new(),
-            sender: None,
-            active_peers: HashSet::new(),
-        }
+        Self { queued: VecDeque::new(), sender: None, active_peers: HashSet::new() }
     }
 }
 
@@ -123,21 +113,17 @@ impl ClayerConsensusMessagingAgentInner {
     }
 
     fn push_received_cache(&mut self, peer_id: PeerId, data: reth_primitives::Bytes) {
-        self.queued.push_back((peer_id, data));
-    }
-
-    fn pop_received_cache(&mut self) -> Option<(PeerId, reth_primitives::Bytes)> {
-        self.queued.pop_front()
+        self.queued.push_back(ClayerConsensusEvent::PeerMessage(peer_id, data));
     }
 
     /// push data received from self into cache
-    fn push_received_cache_first(&mut self, peer_id: PeerId, msg: reth_primitives::Bytes) {
-        self.queued.push_front((peer_id, msg));
+    fn push_received_cache_first(&mut self, peer_id: PeerId, data: reth_primitives::Bytes) {
+        self.queued.push_front(ClayerConsensusEvent::PeerMessage(peer_id, data));
     }
 
     /// push network event(PeerConnected, PeerDisconnected)
     fn push_network_event(&mut self, peer_id: PeerId, connect: bool) {
-        self.network_queued.push_back((peer_id, connect));
+        self.queued.push_back(ClayerConsensusEvent::PeerNetWork(peer_id, connect));
         if connect {
             self.active_peers.insert(peer_id);
         } else {
@@ -145,8 +131,8 @@ impl ClayerConsensusMessagingAgentInner {
         }
     }
     /// pop network event(PeerConnected, PeerDisconnected)
-    fn pop_network_event(&mut self) -> Option<(PeerId, bool)> {
-        self.network_queued.pop_front()
+    fn pop_event(&mut self) -> Option<ClayerConsensusEvent> {
+        self.queued.pop_front()
     }
 
     fn broadcast_consensus(&self, peers: Vec<PeerId>, data: reth_primitives::Bytes) {
