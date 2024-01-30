@@ -13,7 +13,7 @@ use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     SnapshotSegment,
 };
-use reth_provider::{providers::SnapshotWriter, DatabaseProviderRW};
+use reth_provider::{providers::SnapshotWriter, DatabaseProviderRW, HeaderProvider};
 use std::{
     cmp::Ordering,
     task::{ready, Context, Poll},
@@ -147,9 +147,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                     .get_highest_snapshot_block(SnapshotSegment::Transactions)
                     .unwrap_or_default();
 
-                let missing_block = Box::new(
-                    tx.get::<tables::Headers>(last_block + 1)?.unwrap_or_default().seal_slow(),
-                );
+                let missing_block =
+                    Box::new(provider.sealed_header(last_block + 1)?.unwrap_or_default());
 
                 return Err(StageError::MissingSnapshotData {
                     block: missing_block,
@@ -316,9 +315,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 .get_highest_snapshot_block(SnapshotSegment::Transactions)
                 .unwrap_or_default();
 
-            let missing_block = Box::new(
-                tx.get::<tables::Headers>(last_block + 1)?.unwrap_or_default().seal_slow(),
-            );
+            let missing_block =
+                Box::new(provider.sealed_header(last_block + 1)?.unwrap_or_default());
 
             return Err(StageError::MissingSnapshotData {
                 block: missing_block,
@@ -345,7 +343,11 @@ fn stage_checkpoint<DB: Database>(
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
         processed: provider.tx_ref().entries::<tables::BlockBodyIndices>()? as u64,
-        total: provider.tx_ref().entries::<tables::Headers>()? as u64,
+        total: provider
+            .snapshot_provider()
+            .expect("should exist")
+            .get_highest_snapshot_block(SnapshotSegment::Headers)
+            .unwrap_or_default(),
     })
 }
 
@@ -572,6 +574,7 @@ mod tests {
         use reth_db::{
             cursor::DbCursorRO,
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
+            snapshot::HeaderMask,
             tables,
             test_utils::TempDatabase,
             transaction::{DbTx, DbTxMut},
@@ -594,9 +597,12 @@ mod tests {
             },
         };
         use reth_primitives::{
-            BlockBody, BlockNumber, SealedBlock, SealedHeader, SnapshotSegment, TxNumber, B256,
+            BlockBody, BlockHash, BlockNumber, Header, SealedBlock, SealedHeader, SnapshotSegment,
+            TxNumber, B256,
         };
-        use reth_provider::{providers::SnapshotWriter, ProviderFactory, TransactionsProvider};
+        use reth_provider::{
+            providers::SnapshotWriter, HeaderProvider, ProviderFactory, TransactionsProvider,
+        };
         use std::{
             collections::{HashMap, VecDeque},
             ops::RangeInclusive,
@@ -670,9 +676,11 @@ mod tests {
                 let snapshot_provider = self.db.factory.snapshot_provider().expect("should exist");
 
                 let mut rng = generators::rng();
-                let blocks = random_block_range(&mut rng, start..=end, GENESIS_HASH, 0..2);
+
+                // Static files do not support gaps in headers, so we need to generate 0 to end
+                let blocks = random_block_range(&mut rng, 0..=end, GENESIS_HASH, 0..2);
                 self.db.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
-                if let Some(progress) = blocks.first() {
+                if let Some(progress) = blocks.get(start as usize) {
                     // Insert last progress data
                     {
                         let tx = self.db.factory.provider_rw()?.into_tx();
@@ -778,7 +786,6 @@ mod tests {
 
                 self.db.query(|tx| {
                     // Acquire cursors on body related tables
-                    let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
                     let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
                     let mut tx_block_cursor = tx.cursor_read::<tables::TransactionBlock>()?;
@@ -808,7 +815,7 @@ mod tests {
                             "We wrote a block body outside of our synced range. Found block with number {number}, highest block according to stage is {highest_block}",
                         );
 
-                        let (_, header) = headers_cursor.seek_exact(number)?.expect("to be present");
+                        let header = snapshot_provider.header_by_number(number)?.expect("to be present");
                         // Validate that ommers exist if any
                         let stored_ommers =  ommers_cursor.seek_exact(number)?;
                         if header.ommers_hash_is_empty() {
@@ -886,16 +893,15 @@ mod tests {
                 &mut self,
                 range: RangeInclusive<BlockNumber>,
             ) -> DownloadResult<()> {
-                let provider = self.provider_factory.provider()?;
-                let mut header_cursor = provider.tx_ref().cursor_read::<tables::Headers>()?;
+                let snapshot_provider =
+                    self.provider_factory.snapshot_provider().expect("should exist");
 
-                let mut canonical_cursor =
-                    provider.tx_ref().cursor_read::<tables::CanonicalHeaders>()?;
-                let walker = canonical_cursor.walk_range(range)?;
-
-                for entry in walker {
-                    let (num, hash) = entry?;
-                    let (_, header) = header_cursor.seek_exact(num)?.expect("missing header");
+                for header in snapshot_provider.fetch_range_iter(
+                    SnapshotSegment::Headers,
+                    *range.start()..*range.end() + 1,
+                    |cursor, number| cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into()),
+                )? {
+                    let (header, hash) = header?;
                     self.headers.push_back(header.seal(hash));
                 }
 

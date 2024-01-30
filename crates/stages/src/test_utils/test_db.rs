@@ -16,7 +16,10 @@ use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader, StorageEntry,
     TxHash, TxNumber, B256, MAINNET, U256,
 };
-use reth_provider::{HistoryWriter, ProviderFactory};
+use reth_provider::{
+    providers::{SnapshotProviderRWRefMut, SnapshotWriter},
+    HistoryWriter, ProviderError, ProviderFactory,
+};
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 /// Test database that is used for testing stage implementations.
@@ -122,11 +125,37 @@ impl TestStageDB {
         })
     }
 
-    /// Inserts a single [SealedHeader] into the corresponding tables of the headers stage.
-    fn insert_header<TX: DbTxMut + DbTx>(tx: &TX, header: &SealedHeader) -> Result<(), DbError> {
-        tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
-        tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
-        tx.put::<tables::Headers>(header.number, header.clone().unseal())
+    fn insert_header<TX: DbTx + DbTxMut>(
+        writer: &mut SnapshotProviderRWRefMut<'_>,
+        tx: &TX,
+        header: &SealedHeader,
+        td: U256,
+    ) -> ProviderResult<()> {
+        writer.append_header(header.header.clone(), td, header.hash)?;
+        tx.put::<tables::HeaderNumbers>(header.hash, header.number)?;
+        Ok(())
+    }
+
+    pub fn insert_headers_inner<'a, I, const TD: bool>(&self, headers: I) -> ProviderResult<()>
+    where
+        I: Iterator<Item = &'a SealedHeader>,
+    {
+        let provider = self.factory.snapshot_provider().expect("should exist");
+        let mut writer = provider.latest_writer(reth_primitives::SnapshotSegment::Headers)?;
+        let tx = self.factory.provider_rw()?.into_tx();
+        let mut td = U256::ZERO;
+
+        for header in headers {
+            if TD {
+                td += header.difficulty;
+            }
+            Self::insert_header(&mut writer, &tx, header, td)?;
+        }
+
+        writer.commit()?;
+        tx.commit()?;
+
+        Ok(())
     }
 
     /// Insert ordered collection of [SealedHeader] into the corresponding tables
@@ -135,9 +164,7 @@ impl TestStageDB {
     where
         I: Iterator<Item = &'a SealedHeader>,
     {
-        self.commit(|tx| {
-            Ok(headers.into_iter().try_for_each(|header| Self::insert_header(tx, header))?)
-        })
+        self.insert_headers_inner::<I, false>(headers)
     }
 
     /// Inserts total difficulty of headers into the corresponding tables.
@@ -147,14 +174,7 @@ impl TestStageDB {
     where
         I: Iterator<Item = &'a SealedHeader>,
     {
-        self.commit(|tx| {
-            let mut td = U256::ZERO;
-            headers.into_iter().try_for_each(|header| {
-                Self::insert_header(tx, header)?;
-                td += header.difficulty;
-                Ok(tx.put::<tables::HeaderTD>(header.number, td.into())?)
-            })
-        })
+        self.insert_headers_inner::<I, true>(headers)
     }
 
     /// Insert ordered collection of [SealedBlock] into corresponding tables.
@@ -165,11 +185,15 @@ impl TestStageDB {
     where
         I: Iterator<Item = &'a SealedBlock>,
     {
+        let provider = self.factory.snapshot_provider().expect("should exist");
+        let mut writer = provider.latest_writer(reth_primitives::SnapshotSegment::Headers)?;
+
         self.commit(|tx| {
             let mut next_tx_num = tx_offset.unwrap_or_default();
 
             blocks.into_iter().try_for_each(|block| {
-                Self::insert_header(tx, &block.header)?;
+                Self::insert_header(&mut writer, tx, &block.header, U256::ZERO)?;
+
                 // Insert into body tables.
                 let block_body_indices = StoredBlockBodyIndices {
                     first_tx_num: next_tx_num,
@@ -187,9 +211,11 @@ impl TestStageDB {
                 block.body.iter().try_for_each(|body_tx| {
                     tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?;
                     next_tx_num += 1;
-                    Ok(())
+                    Ok::<(), ProviderError>(())
                 })
-            })
+            })?;
+
+            writer.commit()
         })
     }
 
