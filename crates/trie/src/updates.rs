@@ -5,7 +5,6 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
-    b256,
     trie::{
         BranchNodeCompact, Nibbles, StorageTrieEntry, StoredBranchNode, StoredNibbles,
         StoredNibblesSubKey,
