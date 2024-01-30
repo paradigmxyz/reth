@@ -1,4 +1,3 @@
-#![cfg(feature = "optimism")]
 use reth_node_api::{
     optimism_validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion,
     EngineTypes, EvmEnvConfig, PayloadOrAttributes,
