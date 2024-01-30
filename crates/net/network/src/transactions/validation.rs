@@ -1,4 +1,4 @@
-//! Validation of [`NewPooledTransactionHashes66`] and [`NewPooledTransactionHashes68`] 
+//! Validation of [`NewPooledTransactionHashes66`] and [`NewPooledTransactionHashes68`]
 //! announcements. Validation and filtering of announcements is network dependent.
 
 use std::{collections::HashMap, mem};
@@ -261,9 +261,7 @@ impl FilterAnnouncement for EthAnnouncementFilter {
             }
         }
 
-        for (i, index) in indices_to_remove.into_iter().rev().enumerate() {
-            let index = index.saturating_sub(i);
-
+        for index in indices_to_remove.into_iter().rev() {
             hashes.remove(index);
             types.remove(index);
             sizes.remove(index);

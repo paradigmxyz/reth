@@ -477,9 +477,7 @@ impl HandleAnnouncement for NewPooledTransactionHashes68 {
             }
         }
 
-        for (i, index) in indices_to_remove.into_iter().rev().enumerate() {
-            let index = index.saturating_sub(i);
-
+        for index in indices_to_remove.into_iter().rev() {
             self.hashes.remove(index);
             self.types.remove(index);
             self.sizes.remove(index);
@@ -500,9 +498,7 @@ impl HandleAnnouncement for NewPooledTransactionHashes66 {
             }
         }
 
-        for (i, index) in indices_to_remove.into_iter().rev().enumerate() {
-            let index = index.saturating_sub(i);
-
+        for index in indices_to_remove.into_iter().rev() {
             self.0.remove(index);
         }
     }
