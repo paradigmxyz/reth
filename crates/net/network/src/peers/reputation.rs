@@ -63,7 +63,7 @@ pub struct ReputationChangeWeights {
     pub failed_to_connect: Reputation,
     /// Weight for [`ReputationChangeKind::Dropped`]
     pub dropped: Reputation,
-    /// Weight for [`ReputationChangeKind::BadMessage`]
+    /// Weight for [`ReputationChangeKind::BadAnnouncement`]
     pub bad_announcement: Reputation,
 }
 
