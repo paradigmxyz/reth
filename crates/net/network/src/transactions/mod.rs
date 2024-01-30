@@ -36,8 +36,8 @@ use crate::{
 };
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    EthVersion, GetPooledTransactions, NewPooledTransactionHashes, NewPooledTransactionHashes66,
-    NewPooledTransactionHashes68, PooledTransactions, Transactions,
+    EthVersion, GetPooledTransactions, HandleAnnouncement, NewPooledTransactionHashes,
+    NewPooledTransactionHashes66, NewPooledTransactionHashes68, PooledTransactions, Transactions,
 };
 use reth_interfaces::{
     p2p::error::{RequestError, RequestResult},
@@ -588,54 +588,48 @@ where
         //
         // validates messages with respect to the given network, e.g. allowed tx types
         //
-        let mut hashes = if let Some(eth68_msg) = msg.take_eth68() {
-            // validate eth68 announcement data
-            let (outcome, valid_data) =
-                self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_68(eth68_msg);
+        let mut hashes = match msg {
+            NewPooledTransactionHashes::Eth68(eth68_msg) => {
+                // validate eth68 announcement data
+                let (outcome, valid_data) =
+                    self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_68(eth68_msg);
 
-            if let FilterOutcome::ReportPeer = outcome {
-                self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
-            }
-            valid_data
-            .into_iter()
-            .map(|(hash, metadata)| {
-                // cache eth68 metadata
-                if let Some((_ty, size)) = metadata {
-                    // check if this peer is announcing a different size for an already seen hash
-                    if let Some(previously_seen_size) = self.transaction_fetcher.eth68_meta.get(&hash) {
-                        if size != *previously_seen_size {
-                            // todo: store both sizes as a `(size, peer_id)` tuple to catch peers 
-                            // that respond with another size tx than they announced
-                            debug!(target: "net::tx",
-                                peer_id=format!("{peer_id:#}"),
-                                size=size,
-                                previously_seen_size=previously_seen_size,
-                                "peer announced a different size for tx, this is especially worrying if either size is very big..."
-                            );
-                        }
-                    }
-                    self.transaction_fetcher.eth68_meta.insert(hash, size);
+                if let FilterOutcome::ReportPeer = outcome {
+                    self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
                 }
-                hash
-            }).collect::<Vec<_>>()
-        } else if let Some(eth66_msg) = msg.take_eth66() {
-            // validate eth66 announcement data
-            let (outcome, valid_data) =
-                self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_66(eth66_msg);
-
-            if let FilterOutcome::ReportPeer = outcome {
-                self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
+                valid_data.into_iter().map(|(hash, metadata)| {
+                    // cache eth68 metadata
+                    if let Some((_ty, size)) = metadata {
+                        // check if this peer is announcing a different size for an already seen 
+                        // hash
+                        if let Some(previously_seen_size) = self.transaction_fetcher.eth68_meta.get(&hash) {
+                            if size != *previously_seen_size {
+                                // todo: store both sizes as a `(size, peer_id)` tuple to catch peers 
+                                // that respond with another size tx than they announced
+                                debug!(target: "net::tx",
+                                    peer_id=format!("{peer_id:#}"),
+                                    size=size,
+                                    previously_seen_size=previously_seen_size,
+                                    "peer announced a different size for tx, this is especially worrying if either size is very big..."
+                                );
+                            }
+                        }
+                        self.transaction_fetcher.eth68_meta.insert(hash, size);
+                    }
+                    hash
+                }).collect::<Vec<_>>()
             }
+            NewPooledTransactionHashes::Eth66(eth66_msg) => {
+                // validate eth66 announcement data
+                let (outcome, valid_data) =
+                    self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_66(eth66_msg);
 
-            valid_data.into_keys().collect::<Vec<_>>()
-        } else {
-            debug_assert!(
-                false,
-                "unreachable, `%msg` is either version eth66 and eth68, 
-`%msg`: {msg:?}"
-            );
-            drop(msg);
-            vec![]
+                if let FilterOutcome::ReportPeer = outcome {
+                    self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
+                }
+
+                valid_data.into_keys().collect::<Vec<_>>()
+            }
         };
 
         // 3. filter out already seen unknown hashes

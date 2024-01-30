@@ -282,57 +282,6 @@ impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
     }
 }
 
-/// Interface for handling an announcement.
-pub trait HandleAnnouncement {
-    /// The announcement contains no entries.
-    fn is_empty(&self) -> bool;
-
-    /// Retain only entries for which the hash in the entry, satisfies a given predicate.
-    fn retain_by_hash(&mut self, f: impl FnMut(TxHash) -> bool);
-}
-
-impl HandleAnnouncement for NewPooledTransactionHashes {
-    fn is_empty(&self) -> bool {
-        self.is_empty()
-    }
-
-    fn retain_by_hash(&mut self, f: impl FnMut(TxHash) -> bool) {
-        match self {
-            NewPooledTransactionHashes::Eth66(msg) => msg.retain_by_hash(f),
-            NewPooledTransactionHashes::Eth68(msg) => msg.retain_by_hash(f),
-        }
-    }
-}
-
-/// Announcement data that has been validated according to the configured network. For an eth68
-/// announcement, values of the map are `Some((u8, usize))` - the tx metadata. For an eth66
-/// announcement, values of the map are `None`.
-pub type ValidAnnouncementData = HashMap<TxHash, Option<(u8, usize)>>;
-
-impl HandleAnnouncement for ValidAnnouncementData {
-    fn is_empty(&self) -> bool {
-        self.is_empty()
-    }
-
-    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
-        self.retain(|&hash, _| f(hash))
-    }
-}
-
-/// Hashes extracted from valid announcement data. For an eth68 announcement, this means the eth68
-/// metadata should have been cached already.
-pub type ValidTxHashes = Vec<TxHash>;
-
-impl HandleAnnouncement for ValidTxHashes {
-    fn is_empty(&self) -> bool {
-        self.is_empty()
-    }
-
-    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
-        self.retain(|&hash| f(hash))
-    }
-}
-
 /// This informs peers of transaction hashes for transactions that have appeared on the network,
 /// but have not been included in a block.
 #[derive_arbitrary(rlp)]
@@ -348,27 +297,6 @@ pub struct NewPooledTransactionHashes66(
 impl From<Vec<B256>> for NewPooledTransactionHashes66 {
     fn from(v: Vec<B256>) -> Self {
         NewPooledTransactionHashes66(v)
-    }
-}
-
-impl HandleAnnouncement for NewPooledTransactionHashes66 {
-    fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
-        let mut indices_to_remove = vec![];
-        for (i, &hash) in self.0.iter().enumerate() {
-            if !f(hash) {
-                indices_to_remove.push(i);
-            }
-        }
-
-        for (i, index) in indices_to_remove.into_iter().rev().enumerate() {
-            let index = index.saturating_sub(i);
-
-            self.0.remove(index);
-        }
     }
 }
 
@@ -512,6 +440,30 @@ impl Decodable for NewPooledTransactionHashes68 {
     }
 }
 
+/// Interface for handling announcement data in filters in the transaction manager and transaction
+/// pool. Note: this trait may disappear when distinction between eth66 and eth68 hashes is more
+/// clearly defined, see <https://github.com/paradigmxyz/reth/issues/6148>.
+pub trait HandleAnnouncement {
+    /// The announcement contains no entries.
+    fn is_empty(&self) -> bool;
+
+    /// Retain only entries for which the hash in the entry, satisfies a given predicate.
+    fn retain_by_hash(&mut self, f: impl FnMut(TxHash) -> bool);
+}
+
+impl HandleAnnouncement for NewPooledTransactionHashes {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn retain_by_hash(&mut self, f: impl FnMut(TxHash) -> bool) {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => msg.retain_by_hash(f),
+            NewPooledTransactionHashes::Eth68(msg) => msg.retain_by_hash(f),
+        }
+    }
+}
+
 impl HandleAnnouncement for NewPooledTransactionHashes68 {
     fn is_empty(&self) -> bool {
         self.hashes.is_empty()
@@ -532,6 +484,56 @@ impl HandleAnnouncement for NewPooledTransactionHashes68 {
             self.types.remove(index);
             self.sizes.remove(index);
         }
+    }
+}
+
+impl HandleAnnouncement for NewPooledTransactionHashes66 {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
+        let mut indices_to_remove = vec![];
+        for (i, &hash) in self.0.iter().enumerate() {
+            if !f(hash) {
+                indices_to_remove.push(i);
+            }
+        }
+
+        for (i, index) in indices_to_remove.into_iter().rev().enumerate() {
+            let index = index.saturating_sub(i);
+
+            self.0.remove(index);
+        }
+    }
+}
+
+/// Announcement data that has been validated according to the configured network. For an eth68
+/// announcement, values of the map are `Some((u8, usize))` - the tx metadata. For an eth66
+/// announcement, values of the map are `None`.
+pub type ValidAnnouncementData = HashMap<TxHash, Option<(u8, usize)>>;
+
+impl HandleAnnouncement for ValidAnnouncementData {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
+        self.retain(|&hash, _| f(hash))
+    }
+}
+
+/// Hashes extracted from valid announcement data. For an eth68 announcement, this means the eth68
+/// metadata should have been cached already.
+pub type ValidTxHashes = Vec<TxHash>;
+
+impl HandleAnnouncement for ValidTxHashes {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
+        self.retain(|&hash| f(hash))
     }
 }
 

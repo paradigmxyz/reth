@@ -28,7 +28,9 @@ pub const DEPOSIT_TX_TYPE_ID: u8 = 126;
 ///
 /// Other required changes when adding a new type can be seen on [PR#3953](https://github.com/paradigmxyz/reth/pull/3953/files).
 #[derive_arbitrary(compact)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize, Hash,
+)]
 pub enum TxType {
     /// Legacy transaction pre EIP-2929
     #[default]
@@ -55,30 +57,6 @@ impl TxType {
             TxType::EIP2930 | TxType::EIP1559 | TxType::EIP4844 => true,
             #[cfg(feature = "optimism")]
             TxType::DEPOSIT => false,
-        }
-    }
-
-    /// Returns the max size for a transaction type.
-    pub const fn max_encoded_tx_length(&self) -> usize {
-        match self {
-            TxType::Legacy => usize::pow(2, 20),  // todo: set limit
-            TxType::EIP2930 => usize::pow(2, 20), // todo: set limit
-            TxType::EIP1559 => usize::pow(2, 20), // todo: set limit
-            TxType::EIP4844 => usize::pow(2, 20),
-            #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => usize::pow(2, 20), // todo: set limit
-        }
-    }
-
-    /// Returns the min size for a transaction type.
-    pub const fn min_encoded_tx_length(&self) -> usize {
-        match self {
-            TxType::Legacy => 1,  // todo: set limit
-            TxType::EIP2930 => 1, // todo: set limit
-            TxType::EIP1559 => 1, // todo: set limit
-            TxType::EIP4844 => 1,
-            #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => 1, // todo: set limit
         }
     }
 }
