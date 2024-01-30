@@ -1,14 +1,9 @@
-use reth_node_api::{
-    optimism_validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion,
-    EngineTypes, EvmEnvConfig, PayloadOrAttributes,
-};
-use reth_payload_builder::{EthBuiltPayload, OptimismPayloadBuilderAttributes};
+use reth_node_api::EvmEnvConfig;
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_op_tx_env},
     revm_primitives::{AnalysisKind, CfgEnv, TxEnv},
     Address, Bytes, ChainSpec, Head, Header, Transaction, U256,
 };
-use reth_rpc_types::engine::OptimismPayloadAttributes;
 
 /// Optimism-related EVM configuration.
 #[derive(Debug, Default, Clone, Copy)]

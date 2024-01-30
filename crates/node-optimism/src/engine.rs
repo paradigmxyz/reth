@@ -1,13 +1,9 @@
 use reth_node_api::{
     optimism_validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion,
-    EngineTypes, EvmEnvConfig, PayloadOrAttributes,
+    EngineTypes, PayloadOrAttributes,
 };
 use reth_payload_builder::{EthBuiltPayload, OptimismPayloadBuilderAttributes};
-use reth_primitives::{
-    revm::{config::revm_spec, env::fill_op_tx_env},
-    revm_primitives::{AnalysisKind, CfgEnv, TxEnv},
-    Address, Bytes, ChainSpec, Head, Header, Transaction, U256,
-};
+use reth_primitives::ChainSpec;
 use reth_rpc_types::engine::OptimismPayloadAttributes;
 
 /// The types used in the optimism beacon consensus engine.
