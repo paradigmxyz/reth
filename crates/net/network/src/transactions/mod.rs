@@ -36,8 +36,8 @@ use crate::{
 };
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    EthVersion, GetPooledTransactions, HandleAnnouncement, NewPooledTransactionHashes,
-    NewPooledTransactionHashes66, NewPooledTransactionHashes68, PooledTransactions, Transactions,
+    EthVersion, GetPooledTransactions, NewPooledTransactionHashes, NewPooledTransactionHashes66,
+    NewPooledTransactionHashes68, PooledTransactions, Transactions,
 };
 use reth_interfaces::{
     p2p::error::{RequestError, RequestResult},

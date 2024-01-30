@@ -1,13 +1,13 @@
-//! Validation of [`NewPooledTransactionHashes68`] entries. These are of the form
-//! `(ty, hash, size)`. Validation and filtering of entries is network dependent. [``]
+//! Validation of [`NewPooledTransactionHashes66`] and [`NewPooledTransactionHashes68`] 
+//! announcements. Validation and filtering of announcements is network dependent.
 
 use std::{collections::HashMap, mem};
 
 use derive_more::{Deref, DerefMut, Display};
 use itertools::izip;
 use reth_eth_wire::{
-    MAX_MESSAGE_SIZE,
     NewPooledTransactionHashes66, NewPooledTransactionHashes68, ValidAnnouncementData,
+    MAX_MESSAGE_SIZE,
 };
 use reth_primitives::{Signature, TxHash, TxType};
 use tracing::{debug, trace};
@@ -29,17 +29,17 @@ pub trait ValidateTx68 {
 
     /// Returns the strict maximum encoded transaction length for the given transaction type, if
     /// any.
-    fn strict_max_encoded_tx_length(&self, tx: TxType) -> Option<usize>;
+    fn strict_max_encoded_tx_length(&self, ty: TxType) -> Option<usize>;
 
     /// Returns the reasonable minimum encoded transaction length, if any. This property is not
     /// spec'ed out but can be inferred by looking at which
-    /// [`reth_eth_wire::transactions::PooledTransactionsElement`] will successfully pass decoding
+    /// [`reth_primitives::PooledTransactionsElement`] will successfully pass decoding
     /// for any given transaction type.
     fn min_encoded_tx_length(&self, ty: TxType) -> Option<usize>;
 
     /// Returns the strict minimum encoded transaction length for the given transaction type, if
     /// any.
-    fn strict_min_encoded_tx_length(&self, tx: TxType) -> Option<usize>;
+    fn strict_min_encoded_tx_length(&self, ty: TxType) -> Option<usize>;
 }
 
 /// Outcomes from validating a `(ty, hash, size)` entry from a [`NewPooledTransactionHashes68`].
@@ -92,7 +92,7 @@ pub enum FilterOutcome {
 /// Wrapper for types that implement [`FilterAnnouncement`]. The definition of a valid
 /// announcement is network dependent. For example, different networks support different [`TxType`]
 /// s, and different [`TxType`]s have different transaction size constraints. Defaults to
-/// [`LayerOne`].
+/// [`EthAnnouncementFilter`].
 #[derive(Debug, Default, Deref, DerefMut)]
 pub struct AnnouncementFilter<N = EthAnnouncementFilter>(N);
 
@@ -182,14 +182,14 @@ impl ValidateTx68 for EthAnnouncementFilter {
         // the biggest transaction so far is a blob transaction, which is currently max 2^17,
         // encoded length, nonetheless, the blob tx may become bigger in the future.
         match ty {
-            TxType::Legacy | TxType::EIP2930 | TxType::EIP1559 => {
-                Some(MAX_MESSAGE_SIZE)
-            }
+            TxType::Legacy | TxType::EIP2930 | TxType::EIP1559 => Some(MAX_MESSAGE_SIZE),
             TxType::EIP4844 => None,
+            #[cfg(feature = "optimism")]
+            TxType::DEPOSIT => None,
         }
     }
 
-    fn strict_max_encoded_tx_length(&self, tx: TxType) -> Option<usize> {
+    fn strict_max_encoded_tx_length(&self, _ty: TxType) -> Option<usize> {
         None
     }
 
@@ -199,7 +199,7 @@ impl ValidateTx68 for EthAnnouncementFilter {
         Some(SIGNATURE_DECODED_SIZE_BYTES)
     }
 
-    fn strict_min_encoded_tx_length(&self, tx: TxType) -> Option<usize> {
+    fn strict_min_encoded_tx_length(&self, _ty: TxType) -> Option<usize> {
         // decoding a tx will exit right away if it's not at least a byte
         Some(1)
     }
@@ -335,6 +335,7 @@ impl FilterAnnouncement for EthAnnouncementFilter {
 #[cfg(test)]
 mod test {
     use super::*;
+    use reth_eth_wire::MAX_MESSAGE_SIZE;
     use reth_primitives::B256;
     use std::str::FromStr;
 
@@ -346,7 +347,7 @@ mod test {
 
         let announcement = NewPooledTransactionHashes68 { types, sizes, hashes };
 
-        let filter: AnnouncementFilter = AnnouncementFilter::default();
+        let filter = EthAnnouncementFilter::default();
 
         let (outcome, _data) = filter.filter_valid_entries_68(announcement);
 
@@ -359,10 +360,7 @@ mod test {
             TxType::MAX_RESERVED_EIP as u8 + 1, // the first type isn't valid
             TxType::Legacy as u8,
         ];
-        let sizes = vec![
-            TxType::MAX_RESERVED_EIP.max_encoded_tx_length(),
-            TxType::MAX_RESERVED_EIP.max_encoded_tx_length(),
-        ];
+        let sizes = vec![MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE];
         let hashes = vec![
             B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa")
                 .unwrap(),
@@ -376,7 +374,7 @@ mod test {
             hashes: hashes.clone(),
         };
 
-        let filter: AnnouncementFilter = AnnouncementFilter::default();
+        let filter = EthAnnouncementFilter::default();
 
         let (outcome, data) = filter.filter_valid_entries_68(announcement);
 
@@ -389,50 +387,13 @@ mod test {
     }
 
     #[test]
-    fn eth68_announcement_too_big_tx() {
-        let types =
-            vec![TxType::MAX_RESERVED_EIP as u8, TxType::Legacy as u8, TxType::EIP2930 as u8];
-        let sizes = vec![
-            TxType::MAX_RESERVED_EIP.max_encoded_tx_length(),
-            TxType::MAX_RESERVED_EIP.max_encoded_tx_length() + 1, // the second length isn't valid
-            TxType::MAX_RESERVED_EIP.max_encoded_tx_length() - 1,
-        ];
-        let hashes = vec![
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa")
-                .unwrap(),
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb")
-                .unwrap(),
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbc")
-                .unwrap(),
-        ];
-
-        let announcement = NewPooledTransactionHashes68 {
-            types: types.clone(),
-            sizes: sizes.clone(),
-            hashes: hashes.clone(),
-        };
-
-        let filter: AnnouncementFilter = AnnouncementFilter::default();
-
-        let (outcome, data) = filter.filter_valid_entries_68(announcement);
-
-        assert_eq!(outcome, FilterOutcome::Ok);
-
-        let mut expected_data = HashMap::new();
-        expected_data.insert(hashes[0], Some((types[0], sizes[0])));
-        expected_data.insert(hashes[2], Some((types[2], sizes[2])));
-
-        assert_eq!(expected_data, data,)
-    }
-
-    #[test]
     fn eth68_announcement_too_small_tx() {
         let types =
             vec![TxType::MAX_RESERVED_EIP as u8, TxType::Legacy as u8, TxType::EIP2930 as u8];
         let sizes = vec![
-            TxType::MAX_RESERVED_EIP.min_encoded_tx_length() - 1, // the first length isn't valid
-            TxType::MAX_RESERVED_EIP.min_encoded_tx_length() - 1, // neither is the second
-            TxType::MAX_RESERVED_EIP.max_encoded_tx_length(),
+            0, // the first length isn't valid
+            0, // neither is the second
+            1,
         ];
         let hashes = vec![
             B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa")
@@ -449,7 +410,7 @@ mod test {
             hashes: hashes.clone(),
         };
 
-        let filter: AnnouncementFilter = AnnouncementFilter::default();
+        let filter = EthAnnouncementFilter::default();
 
         let (outcome, data) = filter.filter_valid_entries_68(announcement);
 
@@ -469,12 +430,7 @@ mod test {
             TxType::EIP1559 as u8,
             TxType::EIP4844 as u8,
         ];
-        let sizes = vec![
-            TxType::MAX_RESERVED_EIP.max_encoded_tx_length() - 3,
-            TxType::MAX_RESERVED_EIP.min_encoded_tx_length() + 1,
-            TxType::MAX_RESERVED_EIP.max_encoded_tx_length() - 1,
-            TxType::MAX_RESERVED_EIP.min_encoded_tx_length() + 4,
-        ];
+        let sizes = vec![1, 1, 1, MAX_MESSAGE_SIZE];
         // first three or the same
         let hashes = vec![
             B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa") // dup
@@ -493,7 +449,7 @@ mod test {
             hashes: hashes.clone(),
         };
 
-        let filter: AnnouncementFilter = AnnouncementFilter::default();
+        let filter = EthAnnouncementFilter::default();
 
         let (outcome, data) = filter.filter_valid_entries_68(announcement);
 
