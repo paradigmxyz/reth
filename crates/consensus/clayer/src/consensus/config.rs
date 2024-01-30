@@ -3,7 +3,7 @@ use reth_rpc_types::PeerId;
 use serde::Deserialize;
 use std::{str::FromStr, time::Duration};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PbftConfig {
     // Members of the PBFT network
     pub members: Vec<PeerId>,

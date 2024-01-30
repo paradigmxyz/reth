@@ -61,7 +61,21 @@ pub const DEFAULT_JWT_FILE: &str = "jwt.hex";
 
 pub fn create_auth_api(jwt_key: JwtKey) -> HttpJsonRpc {
     let execution_url = Url::from_str(DEFAULT_EXECUTION_ENDPOINT).unwrap();
-    let execution_timeout_multiplier = Option::from(1);
+    let execution_timeout_multiplier = Option::from(3);
+
+    let auth = Auth::new(jwt_key, None, None);
+    let api = match HttpJsonRpc::new_with_auth(execution_url, auth, execution_timeout_multiplier) {
+        Ok(api) => api,
+        Err(e) => {
+            panic!("Failed to create execution api. Error: {:?}", e);
+        }
+    };
+    api
+}
+
+pub fn create_auth_api_with_port(jwt_key: JwtKey, auth_port: u16) -> HttpJsonRpc {
+    let execution_url = Url::from_str(format!("http://127.0.0.1:{}/", auth_port).as_str()).unwrap();
+    let execution_timeout_multiplier = Option::from(2);
 
     let auth = Auth::new(jwt_key, None, None);
     let api = match HttpJsonRpc::new_with_auth(execution_url, auth, execution_timeout_multiplier) {
@@ -354,6 +368,7 @@ pub struct ConsensusBuilder<Client, Pool, CDB> {
     storages: CDB,
     config: PbftConfig,
     state: PbftState,
+    latest_header: SealedHeader,
 }
 
 impl<Client, Pool: TransactionPool, CDB> ConsensusBuilder<Client, Pool, CDB>
@@ -370,6 +385,7 @@ where
         network: NetworkHandle,
         clayer_consensus: ClayerConsensusEngine,
         storages: CDB,
+        auth_port: u16,
     ) -> Self {
         let latest_header = client
             .latest_header()
@@ -380,24 +396,29 @@ where
             Ok(Some(block)) => block,
             _ => panic!("Failed to get latest block"),
         };
-        if latest_header.number == 0 {}
 
         let jwt_key = JwtKey::from_slice(jwt_key_bytes).unwrap();
-        let api = create_auth_api(jwt_key);
+        let api = Arc::new(create_auth_api_with_port(jwt_key, auth_port));
         let config = PbftConfig::new();
         let mut state = PbftState::new(secret, latest_header.number, &config);
-        clayer_consensus.initialize(clayer_block_from_genesis(&latest_header), &config, &mut state);
+        // clayer_consensus.initialize(
+        //     clayer_block_from_genesis(&latest_header),
+        //     ApiService::new(api.clone()),
+        //     &config,
+        //     &mut state,
+        // );
         Self {
             chain_spec,
-            storage: ClStorage::new(latest_header),
+            storage: ClStorage::new(latest_header.clone()),
             client,
             pool,
-            api: Arc::new(api),
+            api,
             network,
             consensus: clayer_consensus,
             storages,
             config,
             state,
+            latest_header,
         }
     }
     /// Consumes the type and returns all components
@@ -414,6 +435,7 @@ where
             storages,
             config,
             state,
+            latest_header,
         } = self;
         let task = ClTask::new(
             Arc::clone(&chain_spec),
@@ -426,6 +448,7 @@ where
             storages,
             config,
             state,
+            latest_header,
         );
         task
     }

@@ -1,3 +1,5 @@
+use super::{config::PbftConfig, pbft_error::PbftError, validators::Validators};
+use crate::timing::Timeout;
 use alloy_primitives::{Address, Bytes, B256};
 use reth_ecies::util::pk2id;
 use reth_network::config::SecretKey;
@@ -8,9 +10,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::{fmt, time::Duration};
 use tracing::{debug, info};
 
-use crate::timing::Timeout;
-
-use super::{config::PbftConfig, pbft_error::PbftError, validators::Validators};
+pub const PRIMARY_FIXED: bool = true;
 
 /// Phases of the PBFT algorithm, in `Normal` mode
 #[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Serialize, Deserialize)]
@@ -45,7 +45,7 @@ pub enum PbftMode {
 }
 
 /// Information about the PBFT algorithm's state
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PbftState {
     /// This node's ID
     pub id: PeerId,
@@ -150,21 +150,37 @@ impl PbftState {
     }
     /// Obtain the ID for the primary node in the network
     pub fn get_primary_id(&self) -> PeerId {
-        self.validators.get_primary_id(self.view)
+        let mut view = self.view;
+        if PRIMARY_FIXED {
+            view = 0;
+        }
+        self.validators.get_primary_id(view)
     }
 
     pub fn get_primary_id_at_view(&self, view: u64) -> PeerId {
+        let mut view = view;
+        if PRIMARY_FIXED {
+            view = 0;
+        }
         let primary_index = (view as usize) % self.validators.len();
         self.validators.index(primary_index).clone()
     }
 
     /// Tell if this node is currently the primary
     pub fn is_primary(&self) -> bool {
-        self.validators.is_primary(self.id.clone(), self.view)
+        let mut view = self.view;
+        if PRIMARY_FIXED {
+            view = 0;
+        }
+        self.validators.is_primary(self.id.clone(), view)
     }
 
     /// Tell if this node is the primary at the specified view
     pub fn is_primary_at_view(&self, view: u64) -> bool {
+        let mut view = view;
+        if PRIMARY_FIXED {
+            view = 0;
+        }
         self.id == self.get_primary_id_at_view(view)
     }
 

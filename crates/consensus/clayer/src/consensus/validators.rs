@@ -4,7 +4,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::fmt;
 // use itertools::free::join;
 /// A set of validators
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Validators {
     pub validators: Vec<PeerId>,
 }

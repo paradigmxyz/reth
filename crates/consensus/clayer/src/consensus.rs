@@ -59,16 +59,18 @@ impl ClayerConsensusEngine {
         }
     }
 
-    pub fn initialize(&self, block: ClayerBlock, config: &PbftConfig, state: &mut PbftState) {
-        self.inner.write().initialize(block, config, state);
+    pub fn initialize(
+        &self,
+        block: ClayerBlock,
+        service: ApiService,
+        config: &PbftConfig,
+        state: &mut PbftState,
+    ) {
+        self.inner.write().initialize(block, service, config, state);
     }
 
     pub fn is_validator(&self) -> bool {
         self.inner.read().is_validator
-    }
-
-    pub fn set_service(&self, service: ApiService) {
-        self.inner.write().set_service(service)
     }
 
     pub fn parse_massage(
@@ -211,7 +213,15 @@ impl ClayerConsensusEngineInner {
         }
     }
 
-    pub fn initialize(&mut self, block: ClayerBlock, config: &PbftConfig, state: &mut PbftState) {
+    pub fn initialize(
+        &mut self,
+        block: ClayerBlock,
+        service: ApiService,
+        config: &PbftConfig,
+        state: &mut PbftState,
+    ) {
+        self.service = service;
+
         // Add chain head to log and update state
         self.msg_log.resize_log(&config);
         self.msg_log.add_validated_block(block.clone());
@@ -280,10 +290,6 @@ impl ClayerConsensusEngineInner {
                 }
             }
         }
-    }
-
-    fn set_service(&mut self, service: ApiService) {
-        self.service = service;
     }
 
     fn service(&mut self) -> &ApiService {

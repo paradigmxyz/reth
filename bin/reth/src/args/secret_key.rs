@@ -48,3 +48,28 @@ pub fn get_secret_key(secret_key_path: &Path) -> Result<SecretKey, SecretKeyErro
         }),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_secret_key() {
+        for i in 1..=4 {
+            let path_string = format!("/work/bin/secrets/p2pn{}.hex", i);
+            let path = Path::new(&path_string);
+            let secret = rng_secret_key();
+            let hex = hex_encode(secret.as_ref());
+            println!("{} secret 0 : {}", i, hex);
+            fs::write(path, hex).unwrap();
+
+            let contents = fs::read_to_string(path).unwrap();
+
+            let s = match contents.as_str().parse::<SecretKey>() {
+                Ok(s) => s,
+                Err(_) => panic!("failed to parse secret key"),
+            };
+            println!("{} secret 1: {}", i, hex_encode(s.as_ref()));
+        }
+    }
+}

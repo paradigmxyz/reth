@@ -58,6 +58,7 @@ use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     fs,
+    hex::encode,
     kzg::KzgSettings,
     stage::StageId,
     BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, B256,
@@ -350,8 +351,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         info!(target: "reth::cli", "Connecting to P2P network");
         let network_secret_path =
             self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
-        debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
         let secret_key = get_secret_key(&network_secret_path)?;
+        info!(target: "reth::cli", network_secret_path = ?network_secret_path, secret_key = %reth_primitives::hex::encode(secret_key.as_ref()), "P2P network");
         let default_peers_path = data_dir.known_peers_path();
         let network_config = self.load_network_config(
             &config,
@@ -388,7 +389,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         );
 
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), enode = %network.local_node_record(), "Connected to P2P network");
-        debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
         let network_client = network.fetch_client().await?;
 
         self.ext.on_components_initialized(&components)?;
@@ -466,7 +466,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
             // ===============================================================================
             // extract the jwt secret from the args if possible
-
             let consensus_db = ConsensusProvider::new(provider_factory.clone())?;
 
             let default_jwt_path = data_dir.jwt_path();
@@ -480,6 +479,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 network.clone(),
                 clayer_consensus,
                 consensus_db,
+                self.rpc.auth_port,
             )
             .build();
             let pipeline_events = pipeline.events();
