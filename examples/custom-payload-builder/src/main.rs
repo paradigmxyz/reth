@@ -73,6 +73,7 @@ impl RethNodeCommandConfig for MyCustomBuilder {
             components.pool(),
             components.task_executor(),
             payload_job_config,
+            components.chain_spec().clone(),
             payload_builder,
         );
 

@@ -1,12 +1,13 @@
 use crate::job::EmptyBlockPayloadJob;
 use reth::{
-    providers::{BlockReaderIdExt, StateProviderFactory},
+    providers::{BlockReaderIdExt, BlockSource, StateProviderFactory},
     tasks::TaskSpawner,
     transaction_pool::TransactionPool,
 };
 use reth_basic_payload_builder::{BasicPayloadJobGeneratorConfig, PayloadBuilder, PayloadConfig};
+use reth_node_api::PayloadBuilderAttributes;
 use reth_payload_builder::{error::PayloadBuilderError, PayloadJobGenerator};
-use reth_primitives::{Bytes, ChainSpec, SealedBlock};
+use reth_primitives::{BlockNumberOrTag, Bytes, ChainSpec};
 use std::sync::Arc;
 
 /// The generator type that creates new jobs that builds empty blocks.
@@ -20,6 +21,8 @@ pub struct EmptyBlockPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     executor: Tasks,
     /// The configuration for the job generator.
     _config: BasicPayloadJobGeneratorConfig,
+    /// The chain spec.
+    chain_spec: Arc<ChainSpec>,
     /// The type responsible for building payloads.
     ///
     /// See [PayloadBuilder]
@@ -36,9 +39,10 @@ impl<Client, Pool, Tasks, Builder> EmptyBlockPayloadJobGenerator<Client, Pool, T
         pool: Pool,
         executor: Tasks,
         config: BasicPayloadJobGeneratorConfig,
+        chain_spec: Arc<ChainSpec>,
         builder: Builder,
     ) -> Self {
-        Self { client, pool, executor, _config: config, builder }
+        Self { client, pool, executor, _config: config, builder, chain_spec }
     }
 }
 
@@ -60,11 +64,26 @@ where
         &self,
         attributes: <Builder as PayloadBuilder<Pool, Client>>::Attributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
+        let parent_block = if attributes.parent().is_zero() {
+            // use latest block if parent is zero: genesis block
+            self.client
+                .block_by_number_or_tag(BlockNumberOrTag::Latest)?
+                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent()))?
+                .seal_slow()
+        } else {
+            let block = self
+                .client
+                .find_block_by_hash(attributes.parent(), BlockSource::Any)?
+                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent()))?;
+
+            // we already know the hash, so we can seal it
+            block.seal(attributes.parent())
+        };
         let config = PayloadConfig::new(
-            Arc::new(SealedBlock::default()),
+            Arc::new(parent_block),
             Bytes::default(),
             attributes,
-            Arc::new(ChainSpec::default()),
+            Arc::clone(&self.chain_spec),
         );
         Ok(EmptyBlockPayloadJob {
             client: self.client.clone(),
