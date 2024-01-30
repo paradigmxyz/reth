@@ -297,7 +297,7 @@ mod builder {
                 tx_type: tx.tx_type(),
                 success: result.is_success(),
                 cumulative_gas_used,
-                logs: result.logs().into_iter().map(into_reth_log).collect(),
+                logs: result.logs(),
             }));
 
             // update add to total fees

@@ -385,7 +385,8 @@ mod tests {
             tx.get::<tables::Transactions>(0).err(),
             Some(DatabaseError::Open(reth_libmdbx::Error::NotFound.to_err_code()))
         ); // Transaction is not timeout-ed
-        assert!(!tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed)); // Backtrace is not recorded
+        assert!(!tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
+        // Backtrace is not recorded
     }
 
     #[test]
@@ -404,6 +405,7 @@ mod tests {
             tx.get::<tables::Transactions>(0).err(),
             Some(DatabaseError::Open(reth_libmdbx::Error::ReadTransactionAborted.to_err_code()))
         ); // Transaction is timeout-ed
-        assert!(tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed)); // Backtrace is recorded
+        assert!(tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
+        // Backtrace is recorded
     }
 }

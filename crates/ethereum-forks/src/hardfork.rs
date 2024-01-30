@@ -67,7 +67,7 @@ impl Hardfork {
     /// Retrieves the activation block for the specified hardfork on the Ethereum mainnet.
     pub fn mainnet_activation_block(&self, chain: Chain) -> Option<u64> {
         if chain != Chain::mainnet() {
-            return None;
+            return None
         }
         match self {
             Hardfork::Frontier => Some(0),
@@ -122,7 +122,7 @@ impl Hardfork {
     /// Retrieves the activation timestamp for the specified hardfork on the given chain.
     pub fn activation_timestamp(&self, chain: Chain) -> Option<u64> {
         if chain != Chain::mainnet() {
-            return None;
+            return None
         }
         self.mainnet_activation_timestamp()
     }

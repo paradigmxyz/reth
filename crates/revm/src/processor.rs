@@ -16,8 +16,9 @@ use reth_provider::{
 };
 use revm::{
     db::{states::bundle_state::BundleRetention, StateDBBox},
+    inspector_handle_register,
     primitives::ResultAndState,
-    State, EVM,
+    Evm, Inspector, State, StateBuilder,
 };
 use std::{sync::Arc, time::Instant};
 
@@ -57,7 +58,7 @@ pub struct EVMProcessor<'a, EvmConfig> {
     /// The configured chain-spec
     pub(crate) chain_spec: Arc<ChainSpec>,
     /// revm instance that contains database and env environment.
-    pub(crate) evm: EVM<StateDBBox<'a, ProviderError>>,
+    pub(crate) evm: Evm<'a, (), StateDBBox<'a, ProviderError>>,
     /// Hook and inspector stack that we want to invoke on that hook.
     stack: InspectorStack,
     /// The collection of receipts.
@@ -94,7 +95,7 @@ where
 
     /// Create a new pocessor with the given chain spec.
     pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
-        let evm = EVM::new();
+        let evm = Evm::builder().with_db(Box::new(StateBuilder::new().build())).build();
         EVMProcessor {
             chain_spec,
             evm,
@@ -129,8 +130,8 @@ where
         revm_state: StateDBBox<'a, ProviderError>,
         evm_config: EvmConfig,
     ) -> Self {
-        let mut evm = EVM::new();
-        evm.database(revm_state);
+        let mut evm = Evm::builder().with_db(revm_state).build();
+        //evm.database(revm_state);
         EVMProcessor {
             chain_spec,
             evm,
@@ -160,7 +161,7 @@ where
         // Option will be removed from EVM in the future.
         // as it is always some.
         // https://github.com/bluealloy/revm/issues/697
-        self.evm.db().expect("Database inside EVM is always set")
+        &mut self.evm.context.evm.db
     }
 
     /// Initializes the config and block env.
@@ -172,8 +173,8 @@ where
         self.db_mut().set_state_clear_flag(state_clear_flag);
 
         EvmConfig::fill_cfg_and_block_env(
-            &mut self.evm.env.cfg,
-            &mut self.evm.env.block,
+            &mut self.evm.context.evm.env.cfg,
+            &mut self.evm.context.evm.env.block,
             &self.chain_spec,
             header,
             total_difficulty,
@@ -248,7 +249,7 @@ where
     ) -> Result<ResultAndState, BlockExecutionError> {
         // Fill revm structure.
         #[cfg(not(feature = "optimism"))]
-        fill_tx_env(&mut self.evm.env.tx, transaction, sender);
+        fill_tx_env(&mut self.evm.context.evm.env.tx, transaction, sender);
 
         #[cfg(feature = "optimism")]
         {
@@ -258,14 +259,26 @@ where
         }
 
         let hash = transaction.hash();
-        let out = if self.stack.should_inspect(&self.evm.env, hash) {
+        let out = if true
+        /* self.stack.should_inspect(self.evm.context.evm.env.as_ref(), hash) */
+        {
             // execution with inspector.
-            let output = self.evm.inspect(&mut self.stack);
+            let evm = self
+                .evm
+                .modify()
+                .reset_handler_with_external_context(self.stack)
+                .append_handler_register(inspector_handle_register)
+                .build();
+            // TODO add optimism handler register.
+            let output = self.evm.transact();
             tracing::trace!(
                 target: "evm",
-                ?hash, ?output, ?transaction, env = ?self.evm.env,
+                ?hash, ?output, ?transaction, env = ?self.evm.context.evm.env,
                 "Executed transaction"
             );
+
+            // TODO add optimism handler
+            self.evm = evm.modify().reset_handler_with_external_context(()).build();
             output
         } else {
             // main execution.
@@ -488,7 +501,7 @@ where
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
         let receipts = std::mem::take(&mut self.receipts);
         BundleStateWithReceipts::new(
-            self.evm.db().unwrap().take_bundle(),
+            self.evm.context.evm.db.take_bundle(),
             receipts,
             self.first_block.unwrap_or_default(),
         )
@@ -499,7 +512,7 @@ where
     }
 
     fn size_hint(&self) -> Option<usize> {
-        self.evm.db.as_ref().map(|db| db.bundle_size_hint())
+        Some(self.evm.context.evm.db.bundle_size_hint())
     }
 }
 

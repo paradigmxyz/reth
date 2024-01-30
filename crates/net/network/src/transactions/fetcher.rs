@@ -288,7 +288,7 @@ impl TransactionFetcher {
                     );
 
                     max_retried_hashes.push(hash);
-                    continue;
+                    continue
                 }
                 *retries += 1;
             }

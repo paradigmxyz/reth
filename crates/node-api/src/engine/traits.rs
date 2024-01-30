@@ -83,7 +83,11 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     /// Block related settings are derived from the `parent` block and the configured attributes.
     ///
     /// NOTE: This is only intended for beacon consensus (after merge).
-    fn cfg_and_block_env(&self, chain_spec: &ChainSpec, parent: &Header) -> (CfgEnv, BlockEnv) {
+    fn cfg_and_block_env(
+        &self,
+        chain_spec: &ChainSpec,
+        parent: &Header,
+    ) -> (SpecId, CfgEnv, BlockEnv) {
         // TODO: should be different once revm has configurable cfgenv
         // configure evm env based on parent block
         let mut cfg = CfgEnv::default();
@@ -95,7 +99,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
         }
 
         // ensure we're not missing any timestamp based hardforks
-        cfg.spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp());
+        let spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp());
 
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value
@@ -103,7 +107,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
             .next_block_excess_blob_gas()
             .map_or_else(
                 || {
-                    if cfg.spec_id == SpecId::CANCUN {
+                    if spec_id == SpecId::CANCUN {
                         // default excess blob gas is zero
                         Some(0)
                     } else {
@@ -131,7 +135,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
             blob_excess_gas_and_price,
         };
 
-        (cfg, block_env)
+        (spec_id, cfg, block_env)
     }
 }
 

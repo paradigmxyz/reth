@@ -683,7 +683,7 @@ impl PoolTransaction for MockTransaction {
 
         // If the maximum fee per gas is less than the base fee, return None
         if max_fee_per_gas < base_fee {
-            return None;
+            return None
         }
 
         // Calculate the fee by subtracting the base fee from the maximum fee per gas
@@ -692,7 +692,7 @@ impl PoolTransaction for MockTransaction {
         // If the maximum priority fee per gas is available, return the minimum of fee and priority
         // fee
         if let Some(priority_fee) = self.max_priority_fee_per_gas() {
-            return Some(fee.min(priority_fee));
+            return Some(fee.min(priority_fee))
         }
 
         // Otherwise, return the calculated fee

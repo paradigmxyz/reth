@@ -163,14 +163,14 @@ reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 
 # revm
-revm = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", features = [
+revm = { git = "https://github.com/bluealloy/revm", branch = "main", features = [
     "std",
     "secp256k1",
 ], default-features = false }
-revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", features = [
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "main", features = [
     "std",
 ], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", branch = "matt/migrate-revm" }
 
 # eth
 alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }

@@ -5835,7 +5835,7 @@ dependencies = [
  "reth-revm",
  "reth-tasks",
  "reth-transaction-pool",
- "revm",
+ "revm 3.5.0 (git+https://github.com/bluealloy/revm?branch=main)",
  "tokio",
  "tracing",
 ]
@@ -6156,7 +6156,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-transaction-pool",
- "revm",
+ "revm 3.5.0 (git+https://github.com/bluealloy/revm?branch=main)",
  "tracing",
 ]
 
@@ -6376,7 +6376,7 @@ dependencies = [
  "reth-payload-builder",
  "reth-primitives",
  "reth-rpc-types",
- "revm-primitives",
+ "revm-primitives 1.3.0 (git+https://github.com/bluealloy/revm?branch=main)",
  "serde",
  "thiserror",
 ]
@@ -6471,7 +6471,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-transaction-pool",
- "revm",
+ "revm 3.5.0 (git+https://github.com/bluealloy/revm?branch=main)",
  "thiserror",
  "tracing",
 ]
@@ -6493,8 +6493,8 @@ dependencies = [
  "reth-rpc-types-compat",
  "reth-tasks",
  "reth-transaction-pool",
- "revm",
- "revm-primitives",
+ "revm 3.5.0 (git+https://github.com/bluealloy/revm?branch=main)",
+ "revm-primitives 1.3.0 (git+https://github.com/bluealloy/revm?branch=main)",
  "serde",
  "sha2",
  "thiserror",
@@ -6546,8 +6546,8 @@ dependencies = [
  "reth-codecs",
  "reth-ethereum-forks",
  "reth-rpc-types",
- "revm",
- "revm-primitives",
+ "revm 3.5.0 (git+https://github.com/bluealloy/revm?branch=main)",
+ "revm-primitives 1.3.0 (git+https://github.com/bluealloy/revm?branch=main)",
  "secp256k1 0.27.0",
  "serde",
  "serde_json",
@@ -6586,7 +6586,7 @@ dependencies = [
  "reth-node-api",
  "reth-primitives",
  "reth-trie",
- "revm",
+ "revm 3.5.0 (git+https://github.com/bluealloy/revm?branch=main)",
  "strum",
  "tempfile",
  "tokio",
@@ -6628,7 +6628,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-trie",
- "revm",
+ "revm 3.5.0 (git+https://github.com/bluealloy/revm?branch=main)",
  "revm-inspectors",
  "tracing",
 ]
@@ -6673,9 +6673,9 @@ dependencies = [
  "reth-rpc-types-compat",
  "reth-tasks",
  "reth-transaction-pool",
- "revm",
+ "revm 3.5.0 (git+https://github.com/bluealloy/revm?branch=main)",
  "revm-inspectors",
- "revm-primitives",
+ "revm-primitives 1.3.0 (git+https://github.com/bluealloy/revm?branch=main)",
  "schnellru",
  "secp256k1 0.27.0",
  "serde",
@@ -6868,7 +6868,7 @@ dependencies = [
  "reth-revm",
  "reth-tokio-util",
  "reth-trie",
- "revm",
+ "revm 3.5.0 (git+https://github.com/bluealloy/revm?branch=main)",
  "serde",
  "serde_json",
  "thiserror",
@@ -6937,7 +6937,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-tasks",
- "revm",
+ "revm 3.5.0 (git+https://github.com/bluealloy/revm?branch=main)",
  "schnellru",
  "serde",
  "tempfile",
@@ -6963,7 +6963,7 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
- "revm",
+ "revm 3.5.0 (git+https://github.com/bluealloy/revm?branch=main)",
  "serde_json",
  "similar-asserts",
  "thiserror",
@@ -6976,17 +6976,31 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.5.0"
-source = "git+https://github.com/bluealloy/revm?branch=reth_freeze#2caa13db91db770e7e015a6e52b5feedbb38ee8a"
+source = "git+https://github.com/bluealloy/revm?branch=main#ecb6c4b65461fcbcad6b51cf7ae9065181bb7617"
 dependencies = [
  "auto_impl",
- "revm-interpreter",
- "revm-precompile",
+ "revm-interpreter 1.3.0 (git+https://github.com/bluealloy/revm?branch=main)",
+ "revm-precompile 2.2.0 (git+https://github.com/bluealloy/revm?branch=main)",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "revm"
+version = "3.5.0"
+source = "git+https://github.com/bluealloy/revm?branch=tweeks#b83e4afbe5f084b04e614c02ca7922eee8b0e0c2"
+dependencies = [
+ "auto_impl",
+ "revm-interpreter 1.3.0 (git+https://github.com/bluealloy/revm?branch=tweeks)",
+ "revm-precompile 2.2.0 (git+https://github.com/bluealloy/revm?branch=tweeks)",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
 name = "revm-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/evm-inspectors#5ee90076f88e64a059e4c0c268929cf9ec91ed6d"
+source = "git+https://github.com/paradigmxyz/evm-inspectors?branch=matt/migrate-revm#a8a33c2df9d0c78a4eab5f8091de372d16a031d2"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-trace-types",
@@ -6994,7 +7008,7 @@ dependencies = [
  "alloy-sol-types",
  "boa_engine",
  "boa_gc",
- "revm",
+ "revm 3.5.0 (git+https://github.com/bluealloy/revm?branch=tweeks)",
  "serde",
  "serde_json",
  "thiserror",
@@ -7003,21 +7017,47 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.3.0"
-source = "git+https://github.com/bluealloy/revm?branch=reth_freeze#2caa13db91db770e7e015a6e52b5feedbb38ee8a"
+source = "git+https://github.com/bluealloy/revm?branch=main#ecb6c4b65461fcbcad6b51cf7ae9065181bb7617"
 dependencies = [
- "revm-primitives",
+ "revm-primitives 1.3.0 (git+https://github.com/bluealloy/revm?branch=main)",
+ "serde",
+]
+
+[[package]]
+name = "revm-interpreter"
+version = "1.3.0"
+source = "git+https://github.com/bluealloy/revm?branch=tweeks#b83e4afbe5f084b04e614c02ca7922eee8b0e0c2"
+dependencies = [
+ "revm-primitives 1.3.0 (git+https://github.com/bluealloy/revm?branch=tweeks)",
+ "serde",
 ]
 
 [[package]]
 name = "revm-precompile"
 version = "2.2.0"
-source = "git+https://github.com/bluealloy/revm?branch=reth_freeze#2caa13db91db770e7e015a6e52b5feedbb38ee8a"
+source = "git+https://github.com/bluealloy/revm?branch=main#ecb6c4b65461fcbcad6b51cf7ae9065181bb7617"
 dependencies = [
  "aurora-engine-modexp",
  "c-kzg",
  "k256",
  "once_cell",
- "revm-primitives",
+ "revm-primitives 1.3.0 (git+https://github.com/bluealloy/revm?branch=main)",
+ "ripemd",
+ "secp256k1 0.28.1",
+ "sha2",
+ "substrate-bn",
+]
+
+[[package]]
+name = "revm-precompile"
+version = "2.2.0"
+source = "git+https://github.com/bluealloy/revm?branch=tweeks#b83e4afbe5f084b04e614c02ca7922eee8b0e0c2"
+dependencies = [
+ "aurora-engine-modexp",
+ "c-kzg",
+ "k256",
+ "once_cell",
+ "revm-primitives 1.3.0 (git+https://github.com/bluealloy/revm?branch=tweeks)",
  "ripemd",
  "secp256k1 0.28.1",
  "sha2",
@@ -7027,10 +7067,9 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.3.0"
-source = "git+https://github.com/bluealloy/revm?branch=reth_freeze#2caa13db91db770e7e015a6e52b5feedbb38ee8a"
+source = "git+https://github.com/bluealloy/revm?branch=main#ecb6c4b65461fcbcad6b51cf7ae9065181bb7617"
 dependencies = [
  "alloy-primitives",
- "alloy-rlp",
  "auto_impl",
  "bitflags 2.4.2",
  "bitvec",
@@ -7040,6 +7079,21 @@ dependencies = [
  "hashbrown 0.14.3",
  "hex",
  "once_cell",
+ "serde",
+]
+
+[[package]]
+name = "revm-primitives"
+version = "1.3.0"
+source = "git+https://github.com/bluealloy/revm?branch=tweeks#b83e4afbe5f084b04e614c02ca7922eee8b0e0c2"
+dependencies = [
+ "alloy-primitives",
+ "auto_impl",
+ "bitflags 2.4.2",
+ "bitvec",
+ "enumn",
+ "hashbrown 0.14.3",
+ "hex",
  "serde",
 ]
 
@@ -7550,6 +7604,7 @@ version = "1.0.112"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d1bd37ce2324cf3bf85e5a25f96eb4baf0d5aa6eba43e7ae8958870c4ec48ed"
 dependencies = [
+ "indexmap 2.1.0",
  "itoa",
  "ryu",
  "serde",

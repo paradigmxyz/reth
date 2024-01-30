@@ -4,7 +4,7 @@ use reth_primitives::{
     constants::SYSTEM_ADDRESS, revm::env::fill_tx_env_with_beacon_root_contract_call, Address,
     ChainSpec, Header, Withdrawal, B256, U256,
 };
-use revm::{Database, DatabaseCommit, EVM};
+use revm::{Database, DatabaseCommit, Evm};
 use std::collections::HashMap;
 
 /// Collect all balance changes at the end of the block.
@@ -57,12 +57,12 @@ pub fn post_block_balance_increments(
 /// If cancun is not activated or the block is the genesis block, then this is a no-op, and no
 /// state changes are made.
 #[inline]
-pub fn apply_beacon_root_contract_call<DB: Database + DatabaseCommit>(
+pub fn apply_beacon_root_contract_call<EXT, DB: Database + DatabaseCommit>(
     chain_spec: &ChainSpec,
     block_timestamp: u64,
     block_number: u64,
     parent_beacon_block_root: Option<B256>,
-    evm: &mut EVM<DB>,
+    evm: &mut Evm<'_, EXT, DB>,
 ) -> Result<(), BlockExecutionError>
 where
     DB::Error: std::fmt::Display,
@@ -87,15 +87,15 @@ where
     }
 
     // get previous env
-    let previous_env = evm.env.clone();
+    let previous_env = evm.context.evm.env.clone();
 
     // modify env for pre block call
-    fill_tx_env_with_beacon_root_contract_call(&mut evm.env, parent_beacon_block_root);
+    fill_tx_env_with_beacon_root_contract_call(&mut evm.context.evm.env, parent_beacon_block_root);
 
     let mut state = match evm.transact() {
         Ok(res) => res.state,
         Err(e) => {
-            evm.env = previous_env;
+            evm.context.evm.env = previous_env;
             return Err(BlockValidationError::BeaconRootContractCall {
                 parent_beacon_block_root: Box::new(parent_beacon_block_root),
                 message: e.to_string(),
@@ -105,13 +105,12 @@ where
     };
 
     state.remove(&SYSTEM_ADDRESS);
-    state.remove(&evm.env.block.coinbase);
+    state.remove(&evm.context.evm.env.block.coinbase);
 
-    let db = evm.db().expect("db to not be moved");
-    db.commit(state);
+    evm.context.evm.db.commit(state);
 
     // re-set the previous env
-    evm.env = previous_env;
+    evm.context.evm.env = previous_env;
 
     Ok(())
 }
