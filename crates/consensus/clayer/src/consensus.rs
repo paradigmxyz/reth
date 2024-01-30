@@ -17,7 +17,6 @@ mod validators;
 
 use alloy_rlp::{Decodable, Encodable};
 use itertools::Itertools;
-use parking_lot::RwLock;
 use reth_ecies::util::id2pk;
 use reth_eth_wire::{
     BlockHeaders, ClayerBlock, ClayerConsensusMessage, ClayerConsensusMessageHeader,
@@ -43,7 +42,7 @@ use crate::{
 };
 
 pub struct ClayerConsensusMessagingAgent {
-    pub inner: Arc<RwLock<ClayerConsensusMessagingAgentInner>>,
+    pub inner: Arc<parking_lot::RwLock<ClayerConsensusMessagingAgentInner>>,
 }
 
 impl Clone for ClayerConsensusMessagingAgent {
@@ -54,7 +53,9 @@ impl Clone for ClayerConsensusMessagingAgent {
 
 impl ClayerConsensusMessagingAgent {
     pub fn new() -> Self {
-        Self { inner: Arc::new(RwLock::new(ClayerConsensusMessagingAgentInner::new())) }
+        Self {
+            inner: Arc::new(parking_lot::RwLock::new(ClayerConsensusMessagingAgentInner::new())),
+        }
     }
 }
 
@@ -165,17 +166,104 @@ impl ClayerConsensusMessagingAgentInner {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
+// #[derive(Clone)]
+// pub struct ClayerConsensusEngine(Arc<RwLock<ClayerConsensusEngineInner>>);
+
+// impl std::ops::Deref for ClayerConsensusEngine {
+//     type Target = Arc<RwLock<ClayerConsensusEngineInner>>;
+//     fn deref(&self) -> &Self::Target {
+//         &self.0
+//     }
+// }
+
+// impl ClayerConsensusEngine {
+//     pub fn new(agent: ClayerConsensusMessagingAgent, state: PbftState) -> Self {
+//         Self(Arc::new(RwLock::new(ClayerConsensusEngineInner::new(agent, state))))
+//     }
+
+//     pub fn id(&self) -> PeerId {
+//         self.0.read().id()
+//     }
+
+//     pub fn view(&self) -> u64 {
+//         self.0.read().view()
+//     }
+
+//     pub fn mode(&self) -> PbftMode {
+//         self.0.read().mode()
+//     }
+
+//     pub async fn initialize(
+//         &mut self,
+//         block: ClayerBlock,
+//         service: ApiService,
+//         config: &PbftConfig,
+//     ) {
+//         self.0.write().initialize(block, service, config).await
+//     }
+
+//     /// Check to see if the idle timeout has expired
+//     pub fn check_block_publishing_expired(&mut self) -> bool {
+//         self.0.write().check_block_publishing_expired()
+//     }
+
+//     /// Check to see if the idle timeout has expired
+//     pub fn check_idle_timeout_expired(&mut self) -> bool {
+//         self.0.write().check_idle_timeout_expired()
+//     }
+
+//     /// Start the idle timeout
+//     pub fn start_idle_timeout(&mut self) {
+//         self.0.write().start_idle_timeout();
+//     }
+
+//     /// Check to see if the commit timeout has expired
+//     pub fn check_commit_timeout_expired(&mut self) -> bool {
+//         self.0.write().check_commit_timeout_expired()
+//     }
+
+//     /// Start the commit timeout
+//     pub fn start_commit_timeout(&self) {
+//         self.0.write().start_commit_timeout();
+//     }
+
+//     /// Check to see if the view change timeout has expired
+//     pub fn check_view_change_timeout_expired(&mut self) -> bool {
+//         self.0.write().check_view_change_timeout_expired()
+//     }
+
+//     pub async fn on_peer_message(&mut self, msg: ParsedMessage) -> Result<(), PbftError> {
+//         self.0.write().on_peer_message(msg).await
+//     }
+
+//     pub async fn on_peer_connected(&mut self, peer_id: PeerId) -> Result<(), PbftError> {
+//         self.0.write().on_peer_connected(peer_id).await
+//     }
+// }
 
 pub struct ClayerConsensusEngine {
     /// Log of messages this node has received and accepted
     pub msg_log: PbftLog,
     service: ApiService,
     agent: ClayerConsensusMessagingAgent,
+    state: PbftState,
 }
 
 impl ClayerConsensusEngine {
-    pub fn new(agent: ClayerConsensusMessagingAgent) -> Self {
-        Self { msg_log: PbftLog::default(), service: ApiService::default(), agent }
+    pub fn new(agent: ClayerConsensusMessagingAgent, state: PbftState) -> Self {
+        Self { msg_log: PbftLog::default(), service: ApiService::default(), agent, state }
+    }
+
+    pub fn id(&self) -> PeerId {
+        self.state.id.clone()
+    }
+
+    pub fn view(&self) -> u64 {
+        self.state.view
+    }
+
+    pub fn mode(&self) -> PbftMode {
+        self.state.mode.clone()
     }
 
     pub async fn initialize(
@@ -183,39 +271,42 @@ impl ClayerConsensusEngine {
         block: ClayerBlock,
         service: ApiService,
         config: &PbftConfig,
-        state: &mut PbftState,
-    ) {
+    ) -> Result<(), PbftError> {
         self.service = service;
 
         // Add chain head to log and update state
         self.msg_log.resize_log(&config);
         self.msg_log.add_validated_block(block.clone());
-        state.chain_head = block.block_id();
+        self.state.chain_head = block.block_id();
 
         // If starting up from a non-genesis block, the node may need to perform some special
         // actions
         if block.block_num() > 0 {
             // If starting up with a block that has a consensus seal, update the view to match
             if let Ok(seal) = PbftSeal::decode(&mut block.seal_bytes.to_vec().as_slice()) {
-                state.view = seal.info.view;
-                info!(target: "consensus::cl","Updated view to {} on startup", state.view);
+                self.state.view = seal.info.view;
+                info!(target: "consensus::cl","Updated view to {} on startup", self.state.view);
             }
 
             // If connected to any peers already, send bootstrap commit messages to them
             let connected_peers: Vec<PeerId> = self.agent.get_peers();
             for peer_id in connected_peers {
-                self.broadcast_bootstrap_commit(peer_id, state).unwrap_or_else(|err| {
+                self.broadcast_bootstrap_commit(peer_id).unwrap_or_else(|err| {
                     error!("Failed to broadcast bootstrap commit due to error: {}", err)
                 });
             }
         }
 
         // Primary initializes a block
-        if state.is_primary() {
-            self.service.initialize_block(None).await.unwrap_or_else(|err| {
-                error!("Couldn't initialize block on startup due to error: {}", err)
-            });
+        if self.state.is_primary() {
+            self.service.initialize_block(None).await.map_err(|err| {
+                PbftError::ServiceError(
+                    format!("Couldn't initialize block on startup due to error"),
+                    err.to_string(),
+                )
+            })?;
         }
+        Ok(())
     }
 
     fn service(&mut self) -> &ApiService {
@@ -250,15 +341,11 @@ impl ClayerConsensusEngine {
     /// Handle all messages from other nodes. Such messages include `PrePrepare`, `Prepare`,
     /// `Commit`, `ViewChange`, and `NewView`. Make sure the message is from a PBFT member. If the
     /// node is view changing, ignore all messages that aren't `ViewChange`s or `NewView`s.
-    pub async fn on_peer_message(
-        &mut self,
-        msg: ParsedMessage,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
-        trace!(target: "consensus::cl","{}: Got peer message: {}", state, msg.info());
+    pub async fn on_peer_message(&mut self, msg: ParsedMessage) -> Result<(), PbftError> {
+        trace!(target: "consensus::cl","{}: Got peer message: {}", self.state, msg.info());
 
         // Make sure this message is from a known member of the PBFT network
-        if !state.validators.contains(&msg.info().signer_id) {
+        if !self.state.validators.contains(&msg.info().signer_id) {
             return Err(PbftError::InvalidMessage(format!(
                 "Received message from node ({:?}) that is not a member of the PBFT network",
                 hex::encode(msg.info().signer_id),
@@ -269,23 +356,23 @@ impl ClayerConsensusEngine {
 
         // If this node is in the process of a view change, ignore all messages except ViewChanges
         // and NewViews
-        if matches!(state.mode, PbftMode::ViewChanging(_))
+        if matches!(self.state.mode, PbftMode::ViewChanging(_))
             && msg_type != PbftMessageType::ViewChange
             && msg_type != PbftMessageType::NewView
         {
-            debug!(target: "consensus::cl","{}: Node is view changing; ignoring {} message", state, msg_type);
+            debug!(target: "consensus::cl","{}: Node is view changing; ignoring {} message", self.state, msg_type);
             return Ok(());
         }
 
         match msg_type {
-            PbftMessageType::PrePrepare => self.handle_pre_prepare(msg, state).await?, // add a extra async
-            PbftMessageType::Prepare => self.handle_prepare(msg, state).await?, // add a extra async
-            PbftMessageType::Commit => self.handle_commit(msg, state).await?,
-            PbftMessageType::ViewChange => self.handle_view_change(&msg, state).await?, // add a extra async
-            PbftMessageType::NewView => self.handle_new_view(&msg, state).await?,
-            PbftMessageType::SealRequest => self.handle_seal_request(msg, state).await?,
-            PbftMessageType::Seal => self.handle_seal_response(&msg, state).await?,
-            PbftMessageType::BlockNew => self.handle_block_new(msg, state).await?,
+            PbftMessageType::PrePrepare => self.handle_pre_prepare(msg).await?, // add a extra async
+            PbftMessageType::Prepare => self.handle_prepare(msg).await?,        // add a extra async
+            PbftMessageType::Commit => self.handle_commit(msg).await?,
+            PbftMessageType::ViewChange => self.handle_view_change(&msg).await?, // add a extra async
+            PbftMessageType::NewView => self.handle_new_view(&msg).await?,
+            PbftMessageType::SealRequest => self.handle_seal_request(msg).await?,
+            PbftMessageType::Seal => self.handle_seal_response(&msg).await?,
+            PbftMessageType::BlockNew => self.handle_block_new(msg).await?,
             _ => warn!("Received message with unknown type: {:?}", msg_type),
         }
 
@@ -303,13 +390,9 @@ impl ClayerConsensusEngine {
     ///
     /// Once a `PrePrepare` for the current sequence number is accepted and added to the log, the
     /// node will try to switch to the `Preparing` phase.
-    async fn handle_pre_prepare(
-        &mut self,
-        msg: ParsedMessage,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
+    async fn handle_pre_prepare(&mut self, msg: ParsedMessage) -> Result<(), PbftError> {
         // Check that the message is from the current primary
-        if msg.info().signer_id != state.get_primary_id() {
+        if msg.info().signer_id != self.state.get_primary_id() {
             warn!(target: "consensus::cl",
                 "Got PrePrepare from a secondary node {:?}; ignoring message",
                 msg.info().signer_id
@@ -318,10 +401,10 @@ impl ClayerConsensusEngine {
         }
 
         // Check that the message is for the current view
-        if msg.info().view != state.view {
+        if msg.info().view != self.state.view {
             return Err(PbftError::InvalidMessage(format!(
                 "Node is on view {}, but a PrePrepare for view {} was received",
-                state.view,
+                self.state.view,
                 msg.info().view,
             )));
         }
@@ -347,7 +430,7 @@ impl ClayerConsensusEngine {
             .collect::<Vec<_>>();
 
         if !mismatched_blocks.is_empty() {
-            self.start_view_change(state, state.view + 1)?;
+            self.start_view_change(self.state.view + 1)?;
             return Err(PbftError::FaultyPrimary(format!(
                 "When checking PrePrepare with block {:?}, found PrePrepare(s) with same view and \
                  seq num but mismatched block(s): {:?}",
@@ -361,7 +444,7 @@ impl ClayerConsensusEngine {
 
         // If the node is in the PrePreparing phase, this message is for the current sequence
         // number, and the node already has this block: switch to Preparing
-        self.try_preparing(msg.get_block_id(), state)
+        self.try_preparing(msg.get_block_id())
     }
 
     /// Handle a `Prepare` message
@@ -369,29 +452,25 @@ impl ClayerConsensusEngine {
     /// Once a `Prepare` for the current sequence number is accepted and added to the log, the node
     /// will check if it has the required 2f + 1 `Prepared` messages to move on to the Committing
     /// phase
-    async fn handle_prepare(
-        &mut self,
-        msg: ParsedMessage,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
+    async fn handle_prepare(&mut self, msg: ParsedMessage) -> Result<(), PbftError> {
         let info = msg.info().clone();
         let block_id = msg.get_block_id();
 
         // Check that the message is for the current view
-        if msg.info().view != state.view {
+        if msg.info().view != self.state.view {
             return Err(PbftError::InvalidMessage(format!(
                 "Node is on view {}, but a Prepare for view {} was received",
-                state.view,
+                self.state.view,
                 msg.info().view,
             )));
         }
 
         // The primary is not allowed to send a Prepare; its PrePrepare counts as its "vote"
-        if info.signer_id == state.get_primary_id() {
-            self.start_view_change(state, state.view + 1)?;
+        if info.signer_id == self.state.get_primary_id() {
+            self.start_view_change(self.state.view + 1)?;
             return Err(PbftError::FaultyPrimary(format!(
                 "Received Prepare from primary at view {}, seq_num {}",
-                state.view, state.seq_num
+                self.state.view, self.state.seq_num
             )));
         }
 
@@ -399,7 +478,7 @@ impl ClayerConsensusEngine {
 
         // If this message is for the current sequence number and the node is in the Preparing
         // phase, check if the node is ready to move on to the Committing phase
-        if info.seq_num == state.seq_num && state.phase == PbftPhase::Preparing {
+        if info.seq_num == self.state.seq_num && self.state.phase == PbftPhase::Preparing {
             // The node is ready to move on to the Committing phase (i.e. the predicate `prepared`
             // is true) when its log has 2f + 1 Prepare messages from different nodes that match
             // the PrePrepare message received earlier (same view, sequence number, and block
@@ -416,15 +495,14 @@ impl ClayerConsensusEngine {
                 )
                 // Check if there are at least 2f + 1 Prepares
                 .len() as u64
-                > 2 * state.f;
+                > 2 * self.state.f;
             if has_matching_pre_prepare && has_required_prepares {
-                state.switch_phase(PbftPhase::Committing)?;
+                self.state.switch_phase(PbftPhase::Committing)?;
                 self.broadcast_pbft_message(
-                    state.view,
-                    state.seq_num,
+                    self.state.view,
+                    self.state.seq_num,
                     PbftMessageType::Commit,
                     block_id,
-                    state,
                 )?;
             }
         }
@@ -436,19 +514,15 @@ impl ClayerConsensusEngine {
     ///
     /// Once a `Commit` for the current sequence number is accepted and added to the log, the node
     /// will check if it has the required 2f + 1 `Commit` messages to actually commit the block
-    async fn handle_commit(
-        &mut self,
-        msg: ParsedMessage,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
+    async fn handle_commit(&mut self, msg: ParsedMessage) -> Result<(), PbftError> {
         let info = msg.info().clone();
         let block_id = msg.get_block_id();
 
         // Check that the message is for the current view
-        if msg.info().view != state.view {
+        if msg.info().view != self.state.view {
             return Err(PbftError::InvalidMessage(format!(
                 "Node is on view {}, but a Commit for view {} was received",
-                state.view,
+                self.state.view,
                 msg.info().view,
             )));
         }
@@ -457,7 +531,7 @@ impl ClayerConsensusEngine {
 
         // If this message is for the current sequence number and the node is in the Committing
         // phase, check if the node is ready to commit the block
-        if info.seq_num == state.seq_num && state.phase == PbftPhase::Committing {
+        if info.seq_num == self.state.seq_num && self.state.phase == PbftPhase::Committing {
             // The node is ready to commit the block (i.e. the predicate `committable` is true)
             // when its log has 2f + 1 Commit messages from different nodes that match the
             // PrePrepare message received earlier (same view, sequence number, and block)
@@ -474,7 +548,7 @@ impl ClayerConsensusEngine {
                 )
                 // Check if there are at least 2f + 1 Commits
                 .len() as u64
-                > 2 * state.f;
+                > 2 * self.state.f;
 
             if has_matching_pre_prepare && has_required_commits {
                 self.service.commit_block(block_id.clone()).await.map_err(|err| {
@@ -483,20 +557,19 @@ impl ClayerConsensusEngine {
                         err.to_string(),
                     )
                 })?;
-                state.switch_phase(PbftPhase::Finishing(false))?;
+                self.state.switch_phase(PbftPhase::Finishing(false))?;
                 // Stop the commit timeout, since the network has agreed to commit the block
-                state.commit_timeout.stop();
+                self.state.commit_timeout.stop();
 
-                self.on_block_commit(block_id, state).await?;
+                self.on_block_commit(block_id).await?;
             }
 
             //broadcast new block hash
             self.broadcast_pbft_message(
-                state.view,
-                state.seq_num,
+                self.state.view,
+                self.state.seq_num,
                 PbftMessageType::AnnounceBlock,
                 block_id,
-                state,
             )?;
         }
 
@@ -509,16 +582,12 @@ impl ClayerConsensusEngine {
     /// node isn't already view changing but it now has f + 1 ViewChange messages, start view
     /// changing early. If the node is the primary and has 2f view change messages now, broadcast
     /// the NewView message to the rest of the nodes to move to the new view.
-    async fn handle_view_change(
-        &mut self,
-        msg: &ParsedMessage,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
+    async fn handle_view_change(&mut self, msg: &ParsedMessage) -> Result<(), PbftError> {
         // Ignore old view change messages (already on a view >= the one this message is
         // for or already trying to change to a later view)
         let msg_view = msg.info().view;
-        if msg_view <= state.view
-            || match state.mode {
+        if msg_view <= self.state.view
+            || match self.state.mode {
                 PbftMode::ViewChanging(v) => msg_view < v,
                 _ => false,
             }
@@ -533,7 +602,7 @@ impl ClayerConsensusEngine {
         // f + 1 ViewChange messages in the log for this proposed view (but if already view
         // changing, only do this for a later view); this will prevent starting the view change too
         // late
-        let is_later_view = match state.mode {
+        let is_later_view = match self.state.mode {
             PbftMode::ViewChanging(v) => msg_view > v,
             PbftMode::Normal => true,
         };
@@ -543,11 +612,11 @@ impl ClayerConsensusEngine {
             .get_messages_of_type_view(PbftMessageType::ViewChange, msg_view)
             // Check if there are at least f + 1 ViewChanges
             .len() as u64
-            > state.f;
+            > self.state.f;
         if is_later_view && start_view_change {
-            info!(target: "consensus::cl","{}: Received f + 1 ViewChange messages; starting early view change", state);
+            info!(target: "consensus::cl","{}: Received f + 1 ViewChange messages; starting early view change", self.state);
             // Can exit early since the node will self-send another ViewChange message here
-            return self.start_view_change(state, msg_view);
+            return self.start_view_change(msg_view);
         }
 
         let messages =
@@ -555,14 +624,14 @@ impl ClayerConsensusEngine {
 
         // If there are 2f + 1 ViewChange messages and the view change timeout is not already
         // started, update the timeout and start it
-        if !state.view_change_timeout.is_active() && messages.len() as u64 > state.f * 2 {
-            state.view_change_timeout = Timeout::new(
-                state
+        if !self.state.view_change_timeout.is_active() && messages.len() as u64 > self.state.f * 2 {
+            self.state.view_change_timeout = Timeout::new(
+                self.state
                     .view_change_duration
-                    .checked_mul((msg_view - state.view) as u32)
+                    .checked_mul((msg_view - self.state.view) as u32)
                     .expect("View change timeout has overflowed"),
             );
-            state.view_change_timeout.start();
+            self.state.view_change_timeout.start();
         }
 
         // If this node is the new primary and the required 2f ViewChange messages (not including
@@ -570,15 +639,15 @@ impl ClayerConsensusEngine {
         let messages_from_other_nodes =
             messages.iter().filter(|msg| !msg.from_self).cloned().collect::<Vec<_>>();
 
-        if state.is_primary_at_view(msg_view)
-            && messages_from_other_nodes.len() as u64 >= 2 * state.f
+        if self.state.is_primary_at_view(msg_view)
+            && messages_from_other_nodes.len() as u64 >= 2 * self.state.f
         {
-            let mut new_view = PbftNewView {
+            let new_view = PbftNewView {
                 info: PbftMessageInfo {
                     ptype: PbftMessageType::NewView as u8,
                     view: msg_view,
-                    seq_num: state.seq_num - 1,
-                    signer_id: state.id.clone(),
+                    seq_num: self.state.seq_num - 1,
+                    signer_id: self.state.id.clone(),
                 },
                 view_changes: Self::signed_votes_from_messages(
                     messages_from_other_nodes.as_slice(),
@@ -587,7 +656,7 @@ impl ClayerConsensusEngine {
 
             trace!(target: "consensus::cl","Created NewView message: {:?}", new_view);
 
-            self.broadcast_message(ParsedMessage::from_new_view_message(new_view)?, state)?;
+            self.broadcast_message(ParsedMessage::from_new_view_message(new_view)?)?;
         }
 
         Ok(())
@@ -597,14 +666,10 @@ impl ClayerConsensusEngine {
     ///
     /// When a `NewView` is received, verify that it is valid; if it is, update the view and the
     /// node's state.
-    async fn handle_new_view(
-        &mut self,
-        msg: &ParsedMessage,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
+    async fn handle_new_view(&mut self, msg: &ParsedMessage) -> Result<(), PbftError> {
         let new_view = msg.get_new_view_message();
 
-        match self.verify_new_view(new_view, state) {
+        match self.verify_new_view(new_view) {
             Ok(_) => trace!(target: "consensus::cl","NewView passed verification"),
             Err(err) => {
                 return Err(PbftError::InvalidMessage(format!(
@@ -615,28 +680,28 @@ impl ClayerConsensusEngine {
         }
 
         // If this node was the primary before, cancel any block that may have been initialized
-        if state.is_primary() {
+        if self.state.is_primary() {
             self.service.cancel_block().await.unwrap_or_else(|err| {
                 info!(target: "consensus::cl","Failed to cancel block when becoming secondary: {:?}", err);
             });
         }
 
         // Update view
-        state.view = new_view.info.view;
-        state.view_change_timeout.stop();
+        self.state.view = new_view.info.view;
+        self.state.view_change_timeout.stop();
 
-        info!(target: "consensus::cl","{}: Updated to view {}", state, state.view);
+        info!(target: "consensus::cl","{}: Updated to view {}", self.state, self.state.view);
 
         // Reset state to Normal mode, reset the phase (unless waiting for a BlockCommit) and
         // restart the idle timeout
-        state.mode = PbftMode::Normal;
-        if !matches!(state.phase, PbftPhase::Finishing(_)) {
-            state.phase = PbftPhase::PrePreparing;
+        self.state.mode = PbftMode::Normal;
+        if !matches!(self.state.phase, PbftPhase::Finishing(_)) {
+            self.state.phase = PbftPhase::PrePreparing;
         }
-        state.idle_timeout.start();
+        self.state.idle_timeout.start();
 
         // Initialize a new block if this node is the new primary
-        if state.is_primary() {
+        if self.state.is_primary() {
             self.service.initialize_block(None).await.map_err(|err| {
                 PbftError::ServiceError(
                     "Couldn't initialize block after view change".into(),
@@ -656,14 +721,10 @@ impl ClayerConsensusEngine {
     /// and the node will build/send the seal when it's done committing. If this is an older block
     /// (state.seq_num > msg.seq_num + 1) or this node is behind (state.seq_num < msg.seq_num), the
     /// node will not be able to build the requseted seal, so just ignore the message.
-    async fn handle_seal_request(
-        &mut self,
-        msg: ParsedMessage,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
-        if state.seq_num == msg.info().seq_num + 1 {
-            return self.send_seal_response(state, &msg.info().signer_id);
-        } else if state.seq_num == msg.info().seq_num {
+    async fn handle_seal_request(&mut self, msg: ParsedMessage) -> Result<(), PbftError> {
+        if self.state.seq_num == msg.info().seq_num + 1 {
+            return self.send_seal_response(&msg.info().signer_id);
+        } else if self.state.seq_num == msg.info().seq_num {
             self.msg_log.add_message(msg);
         }
         Ok(())
@@ -673,15 +734,11 @@ impl ClayerConsensusEngine {
     ///
     /// A node has responded to the seal request by sending a seal for the last block; validate the
     /// seal and commit the block.
-    async fn handle_seal_response(
-        &mut self,
-        msg: &ParsedMessage,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
+    async fn handle_seal_response(&mut self, msg: &ParsedMessage) -> Result<(), PbftError> {
         let seal = msg.get_seal();
 
         // If the node has already committed the block, ignore
-        if let PbftPhase::Finishing(_) = state.phase {
+        if let PbftPhase::Finishing(_) = self.state.phase {
             return Ok(());
         }
 
@@ -698,13 +755,13 @@ impl ClayerConsensusEngine {
             })
             .and_then(|block| {
                 // Make sure the block is at the node's current sequence number
-                if block.block_num() != state.seq_num {
+                if block.block_num() != self.state.seq_num {
                     Err(PbftError::InvalidMessage(format!(
                         "Received a seal for block {:?}, but block_num does not match node's \
                          seq_num: {} != {}",
                         hex::encode(&seal.block_id),
                         block.block_num(),
-                        state.seq_num,
+                        self.state.seq_num,
                     )))
                 } else {
                     Ok(block.previous_id().clone())
@@ -712,7 +769,7 @@ impl ClayerConsensusEngine {
             })?;
 
         // Verify the seal
-        match self.verify_consensus_seal(seal, previous_id, state) {
+        match self.verify_consensus_seal(seal, previous_id) {
             Ok(_) => {
                 trace!(target: "consensus::cl","Consensus seal passed verification");
             }
@@ -725,7 +782,7 @@ impl ClayerConsensusEngine {
         }
 
         // Catch up
-        self.catchup(state, seal, false).await
+        self.catchup(seal, false).await
     }
 
     /// Handle a `announceblock` message
@@ -749,21 +806,17 @@ impl ClayerConsensusEngine {
     ///
     /// The validator has received a new block; check if it is a block that should be considered,
     /// add it to the log as an unvalidated block, and instruct the validator to validate it.
-    pub async fn on_block_new(
-        &mut self,
-        block: ClayerBlock,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
+    pub async fn on_block_new(&mut self, block: ClayerBlock) -> Result<(), PbftError> {
         info!(target: "consensus::cl",
             "{}: Got BlockNew: {} / {}",
-            state,
+            self.state,
             block.block_num(),
             hex::encode(&block.block_id())
         );
         trace!(target: "consensus::cl","Block details: {:?}", block);
 
         // Only future blocks should be considered since committed blocks are final
-        if block.block_num() < state.seq_num {
+        if block.block_num() < self.state.seq_num {
             self.service.fail_block(block.block_id()).await.unwrap_or_else(
                 |err| error!(target: "consensus::cl","Couldn't fail block due to error: {:?}", err),
             );
@@ -771,7 +824,7 @@ impl ClayerConsensusEngine {
                 "Received block {:?} / {:?} that is older than the current sequence number: {:?}",
                 block.block_num(),
                 hex::encode(&block.block_id()),
-                state.seq_num,
+                self.state.seq_num,
             )));
         }
 
@@ -825,7 +878,7 @@ impl ClayerConsensusEngine {
             )
         })?;
 
-        self.on_block_valid(block.block_id(), state).await?;
+        self.on_block_valid(block.block_id()).await?;
 
         Ok(())
     }
@@ -834,11 +887,7 @@ impl ClayerConsensusEngine {
     ///
     /// The block has been verified by the validator, so mark it as validated in the log and
     /// attempt to handle the block.
-    pub async fn on_block_valid(
-        &mut self,
-        block_id: B256,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
+    pub async fn on_block_valid(&mut self, block_id: B256) -> Result<(), PbftError> {
         info!(target: "consensus::cl","Got BlockValid: {}", hex::encode(&block_id));
 
         // Mark block as validated in the log and get the block
@@ -849,18 +898,14 @@ impl ClayerConsensusEngine {
             ))
         })?;
 
-        self.try_handling_block(block, state).await
+        self.try_handling_block(block).await
     }
 
     /// Validate the block's seal and handle the block. If this is the block the node is waiting
     /// for and this node is the primary, broadcast a PrePrepare; if the node isn't the primary but
     /// it already has the PrePrepare for this block, switch to `Preparing`. If this is a future
     /// block, use it to catch up.
-    async fn try_handling_block(
-        &mut self,
-        block: ClayerBlock,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
+    async fn try_handling_block(&mut self, block: ClayerBlock) -> Result<(), PbftError> {
         // If the block's number is higher than the current sequence number + 1 (i.e., it is newer
         // than the grandchild of the last committed block), the seal cannot be verified; this is
         // because the settings in a block's grandparent are needed to verify the block's seal, and
@@ -868,11 +913,11 @@ impl ClayerConsensusEngine {
         // committed. If this is a newer block, wait until after the grandparent is committed
         // before validating the seal and handling the block.
 
-        if block.block_num() > state.seq_num + 1 {
+        if block.block_num() > self.state.seq_num + 1 {
             return Ok(());
         }
 
-        let seal = match self.verify_consensus_seal_from_block(&block, state) {
+        let seal = match self.verify_consensus_seal_from_block(&block) {
             Ok(seal) => seal,
             Err(err) => {
                 self.service.fail_block(block.block_id()).await.unwrap_or_else(
@@ -889,26 +934,25 @@ impl ClayerConsensusEngine {
         // a future block and the node isn't waiting for a commit message for a previous block (if
         // it is waiting for a commit message, catch-up will have to be done after the message is
         // received)
-        let is_waiting = matches!(state.phase, PbftPhase::Finishing(_));
+        let is_waiting = matches!(self.state.phase, PbftPhase::Finishing(_));
         //block.block_num == state.seq_num + 1  &&  state.phase ！= PbftPhase::Finishing  同步区块
-        if block.block_num() > state.seq_num && !is_waiting {
-            self.catchup(state, &seal, true).await?;
-        } else if block.block_num() == state.seq_num {
-            if block.info.signer_id == state.id && state.is_primary() {
+        if block.block_num() > self.state.seq_num && !is_waiting {
+            self.catchup(&seal, true).await?;
+        } else if block.block_num() == self.state.seq_num {
+            if block.info.signer_id == self.state.id && self.state.is_primary() {
                 // This is the next block and this node is the primary; broadcast PrePrepare
                 // messages
                 info!(target: "consensus::cl","Broadcasting PrePrepares");
                 self.broadcast_pbft_message(
-                    state.view,
-                    state.seq_num,
+                    self.state.view,
+                    self.state.seq_num,
                     PbftMessageType::PrePrepare,
                     block.block_id(),
-                    state,
                 )?;
             } else {
                 // If the node is in the PrePreparing phase and it already has a PrePrepare for
                 // this block: switch to Preparing
-                self.try_preparing(block.block_id(), state)?;
+                self.try_preparing(block.block_id())?;
             }
         }
 
@@ -938,13 +982,8 @@ impl ClayerConsensusEngine {
     }
 
     /// Use the given consensus seal to verify and commit the block this node is working on
-    async fn catchup(
-        &mut self,
-        state: &mut PbftState,
-        seal: &PbftSeal,
-        catchup_again: bool,
-    ) -> Result<(), PbftError> {
-        info!(target: "consensus::cl","{}: Attempting to commit block {} using catch-up", state, state.seq_num);
+    async fn catchup(&mut self, seal: &PbftSeal, catchup_again: bool) -> Result<(), PbftError> {
+        info!(target: "consensus::cl","{}: Attempting to commit block {} using catch-up", self.state, self.state.seq_num);
 
         let messages = seal.commit_votes.iter().try_fold(Vec::new(), |mut msgs, vote| {
             msgs.push(ParsedMessage::from_signed_vote(vote)?);
@@ -953,9 +992,9 @@ impl ClayerConsensusEngine {
 
         // Update view if necessary
         let view = messages[0].info().view;
-        if view != state.view {
-            info!(target: "consensus::cl","Updating view from {} to {}", state.view, view);
-            state.view = view;
+        if view != self.state.view {
+            info!(target: "consensus::cl","Updating view from {} to {}", self.state.view, view);
+            self.state.view = view;
         }
 
         // Add messages to the log
@@ -968,14 +1007,14 @@ impl ClayerConsensusEngine {
             PbftError::ServiceError(
                 format!(
                     "Failed to commit block with catch-up {:?} / {:?}",
-                    state.seq_num,
+                    self.state.seq_num,
                     hex::encode(&seal.block_id)
                 ),
                 err.to_string(),
             )
         })?;
-        state.idle_timeout.stop();
-        state.phase = PbftPhase::Finishing(catchup_again);
+        self.state.idle_timeout.stop();
+        self.state.phase = PbftPhase::Finishing(catchup_again);
 
         Ok(())
     }
@@ -985,20 +1024,16 @@ impl ClayerConsensusEngine {
     /// A block was sucessfully committed; clean up any uncommitted blocks, update state to be
     /// ready for the next block, make any necessary view and membership changes, garbage collect
     /// the logs, and start a new block if this node is the primary.
-    pub async fn on_block_commit(
-        &mut self,
-        block_id: B256,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
-        info!(target: "consensus::cl","{}: Got BlockCommit for {}", state, hex::encode(&block_id));
+    pub async fn on_block_commit(&mut self, block_id: B256) -> Result<(), PbftError> {
+        info!(target: "consensus::cl","{}: Got BlockCommit for {}", self.state, hex::encode(&block_id));
 
-        let is_catching_up = matches!(state.phase, PbftPhase::Finishing(true));
+        let is_catching_up = matches!(self.state.phase, PbftPhase::Finishing(true));
 
         // If there are any blocks in the log at this sequence number other than the one that was
         // just committed, reject them
         let invalid_block_ids =
             self.msg_log
-                .get_blocks_with_num(state.seq_num)
+                .get_blocks_with_num(self.state.seq_num)
                 .iter()
                 .filter_map(|block| {
                     if block.block_id() != block_id {
@@ -1016,35 +1051,35 @@ impl ClayerConsensusEngine {
         }
 
         // Increment sequence number and update state
-        state.seq_num += 1;
-        state.mode = PbftMode::Normal;
-        state.phase = PbftPhase::PrePreparing;
-        state.chain_head = block_id.clone();
+        self.state.seq_num += 1;
+        self.state.mode = PbftMode::Normal;
+        self.state.phase = PbftPhase::PrePreparing;
+        self.state.chain_head = block_id.clone();
 
         // If node(s) are waiting for a seal to commit the last block, send it now
         let requesters = self
             .msg_log
-            .get_messages_of_type_seq(PbftMessageType::SealRequest, state.seq_num - 1)
+            .get_messages_of_type_seq(PbftMessageType::SealRequest, self.state.seq_num - 1)
             .iter()
             .map(|req| req.info().signer_id)
             .collect::<Vec<_>>();
 
         for req in requesters {
-            self.send_seal_response(state, &req).unwrap_or_else(|err| {
+            self.send_seal_response(&req).unwrap_or_else(|err| {
                 error!(target: "consensus::cl","Failed to send seal response due to: {:?}", err);
             });
         }
 
         // Update membership if necessary
-        self.update_membership(block_id.clone(), state);
+        self.update_membership(block_id.clone());
 
         // Increment the view if a view change must be forced for fairness 强制切换view
-        if state.at_forced_view_change() {
-            state.view += 1;
+        if self.state.at_forced_view_change() {
+            self.state.view += 1;
         }
 
         // Tell the log to garbage collect if it needs to
-        self.msg_log.garbage_collect(state.seq_num);
+        self.msg_log.garbage_collect(self.state.seq_num);
 
         // If the node already has grandchild(ren) of the block that was just committed, one of
         // them may be used to perform catch-up to commit the next block.
@@ -1053,13 +1088,13 @@ impl ClayerConsensusEngine {
         // grandchildren (state.seq_num + 1)
         let grandchildren = self
             .msg_log
-            .get_blocks_with_num(state.seq_num + 1)
+            .get_blocks_with_num(self.state.seq_num + 1)
             .iter()
             .cloned()
             .cloned()
             .collect::<Vec<_>>();
         for block in grandchildren {
-            if self.try_handling_block(block, state).await.is_ok() {
+            if self.try_handling_block(block).await.is_ok() {
                 return Ok(());
             }
         }
@@ -1069,35 +1104,34 @@ impl ClayerConsensusEngine {
         // block that the network decided to commit, so it can't request the seal for a specific
         // block (puts an empty BlockId in the message)
         if is_catching_up {
-            info!(target: "consensus::cl","{}: Requesting seal to finish catch-up to block {}", state, state.seq_num);
+            info!(target: "consensus::cl","{}: Requesting seal to finish catch-up to block {}", self.state, self.state.seq_num);
             return self.broadcast_pbft_message(
-                state.view,
-                state.seq_num,
+                self.state.view,
+                self.state.seq_num,
                 PbftMessageType::SealRequest,
                 B256::default(),
-                state,
             );
         }
 
         // Start the idle timeout for the next block
-        state.idle_timeout.start();
+        self.state.idle_timeout.start();
 
         // If we already have a block at this sequence number with a valid PrePrepare for it, start
         // Preparing (there may be multiple blocks, but only one will have a valid PrePrepare)
         let block_ids = self
             .msg_log
-            .get_blocks_with_num(state.seq_num)
+            .get_blocks_with_num(self.state.seq_num)
             .iter()
             .map(|block| block.block_id())
             .collect::<Vec<_>>();
         for id in block_ids {
-            self.try_preparing(id, state)?;
+            self.try_preparing(id)?;
         }
 
         // Initialize a new block if this node is the primary and it is not in the process of
         // catching up
-        if state.is_primary() {
-            info!(target: "consensus::cl","{}: Initializing block on top of {}", state, hex::encode(&block_id));
+        if self.state.is_primary() {
+            info!(target: "consensus::cl","{}: Initializing block on top of {}", self.state, hex::encode(&block_id));
             self.service.initialize_block(Some(block_id)).await.map_err(|err| {
                 PbftError::ServiceError(
                     "Couldn't initialize block after commit".into(),
@@ -1114,7 +1148,7 @@ impl ClayerConsensusEngine {
     /// # Panics
     /// + If the `sawtooth.consensus.pbft.members` setting is unset or invalid
     /// + If the network this node is on does not have enough nodes to be Byzantine fault tolernant
-    fn update_membership(&mut self, block_id: B256, state: &mut PbftState) {
+    fn update_membership(&mut self, block_id: B256) {
         // Get list of members from settings (retry until a valid result is received)
         trace!(target: "consensus::cl","Getting on-chain list of members to check for membership updates");
 
@@ -1129,45 +1163,44 @@ impl ClayerConsensusEngine {
 
         let on_chain_members = Vec::default();
 
-        if state.validators.is_different(&on_chain_members) {
+        if self.state.validators.is_different(&on_chain_members) {
             info!(target: "consensus::cl","Updating membership: {:?}", on_chain_members);
-            state.validators.update(&on_chain_members);
-            let f = (state.validators.len() - 1) / 3;
+            self.state.validators.update(&on_chain_members);
+            let f = (self.state.validators.len() - 1) / 3;
             if f == 0 {
                 panic!("This network no longer contains enough nodes to be fault tolerant");
             }
-            state.f = f as u64;
+            self.state.f = f as u64;
         }
     }
 
     /// When the node has a block and a corresponding PrePrepare for its current sequence number,
     /// and it is in the PrePreparing phase, it can enter the Preparing phase and broadcast its
     /// Prepare
-    fn try_preparing(&mut self, block_id: B256, state: &mut PbftState) -> Result<(), PbftError> {
+    fn try_preparing(&mut self, block_id: B256) -> Result<(), PbftError> {
         if let Some(block) = self.msg_log.get_block_with_id(block_id) {
-            if state.phase == PbftPhase::PrePreparing
-                && self.msg_log.has_pre_prepare(state.seq_num, state.view, block_id)
+            if self.state.phase == PbftPhase::PrePreparing
+                && self.msg_log.has_pre_prepare(self.state.seq_num, self.state.view, block_id)
                 // PrePrepare.seq_num == state.seq_num == block.block_num enforces the one-to-one
                 // correlation between seq_num and block_num (PrePrepare n should be for block n)
-                && block.block_num() == state.seq_num
+                && block.block_num() == self.state.seq_num
             {
-                state.switch_phase(PbftPhase::Preparing)?;
+                self.state.switch_phase(PbftPhase::Preparing)?;
 
                 // Stop idle timeout, since a new block and valid PrePrepare were received in time
-                state.idle_timeout.stop();
+                self.state.idle_timeout.stop();
 
                 // Now start the commit timeout in case the network fails to commit the block
                 // within a reasonable amount of time
-                state.commit_timeout.start();
+                self.state.commit_timeout.start();
 
                 // The primary doesn't broadcast a Prepare; its PrePrepare counts as its "vote"
-                if !state.is_primary() {
+                if !self.state.is_primary() {
                     self.broadcast_pbft_message(
-                        state.view,
-                        state.seq_num,
+                        self.state.view,
+                        self.state.seq_num,
                         PbftMessageType::Prepare,
                         block_id,
-                        state,
                     )?;
                 }
             }
@@ -1180,17 +1213,13 @@ impl ClayerConsensusEngine {
     ///
     /// A peer has just connected to this node. Send a bootstrap commit message if the peer is part
     /// of the network and the node isn't at the genesis block.
-    pub async fn on_peer_connected(
-        &mut self,
-        peer_id: PeerId,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
+    pub async fn on_peer_connected(&mut self, peer_id: PeerId) -> Result<(), PbftError> {
         // Ignore if the peer is not a member of the PBFT network or the chain head is block 0
-        if !state.validators.contains(&peer_id) || state.seq_num == 0 {
+        if !self.state.validators.contains(&peer_id) || self.state.seq_num == 0 {
             return Ok(());
         }
 
-        self.broadcast_bootstrap_commit(peer_id, state)
+        self.broadcast_bootstrap_commit(peer_id)
     }
 
     /// When the whole network is starting "fresh" from a non-genesis block, none of the nodes will
@@ -1199,23 +1228,19 @@ impl ClayerConsensusEngine {
     /// `Commit` message for their chain head whenever one of the PBFT members connects; when
     /// > 2f + 1 nodes have connected and received these `Commit` messages, the nodes will be able
     /// to build a seal using the messages.
-    fn broadcast_bootstrap_commit(
-        &mut self,
-        peer_id: PeerId,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
+    fn broadcast_bootstrap_commit(&mut self, peer_id: PeerId) -> Result<(), PbftError> {
         // The network must agree on a single view number for the Commit messages, so the view
         // of the chain head's predecessor is used. For block 1 this is view 0; otherwise, it's the
         // view of the block's consensus seal
-        let view = if state.seq_num == 1 {
+        let view = if self.state.seq_num == 1 {
             0
         } else {
             self.msg_log
-                .get_block_with_id(state.chain_head)
+                .get_block_with_id(self.state.chain_head)
                 .ok_or_else(|| {
                     PbftError::InternalError(format!(
                         "Node does not have chain head ({:?}) in its log",
-                        state.chain_head
+                        self.state.chain_head
                     ))
                 })
                 .and_then(|block| {
@@ -1235,10 +1260,10 @@ impl ClayerConsensusEngine {
         let info = PbftMessageInfo {
             ptype: PbftMessageType::Commit as u8,
             view,
-            seq_num: state.seq_num - 1,
-            signer_id: state.id.clone(),
+            seq_num: self.state.seq_num - 1,
+            signer_id: self.state.id.clone(),
         };
-        let commit = PbftMessage { info, block_id: state.chain_head.clone() };
+        let commit = PbftMessage { info, block_id: self.state.chain_head.clone() };
 
         let mut msg_out = vec![];
         commit.encode(&mut msg_out);
@@ -1248,7 +1273,7 @@ impl ClayerConsensusEngine {
         let header = ClayerConsensusMessageHeader {
             message_type: commit.info.ptype,
             content_hash: keccak256(&message_bytes),
-            signer_id: state.id.clone(),
+            signer_id: self.state.id.clone(),
         };
         let mut header_out = vec![];
         header.encode(&mut header_out);
@@ -1257,9 +1282,10 @@ impl ClayerConsensusEngine {
         //sign header
         let signature_hash = keccak256(&header_bytes);
         let signature =
-            sign_message(B256::from_slice(&state.kp.secret_bytes()[..]), signature_hash).map_err(
-                |err| PbftError::SigningError(format!("signing header error: {}", err.to_string())),
-            )?;
+            sign_message(B256::from_slice(&self.state.kp.secret_bytes()[..]), signature_hash)
+                .map_err(|err| {
+                    PbftError::SigningError(format!("signing header error: {}", err.to_string()))
+                })?;
 
         let clayer_msg = ClayerConsensusMessage {
             header_bytes,
@@ -1293,14 +1319,14 @@ impl ClayerConsensusEngine {
     }
 
     /// Build a consensus seal that proves the last block committed by this node
-    fn build_seal(&self, state: &PbftState) -> Result<PbftSeal, PbftError> {
-        trace!(target: "consensus::cl","{}: Building seal for block {}", state, state.seq_num - 1);
+    fn build_seal(&self) -> Result<PbftSeal, PbftError> {
+        trace!(target: "consensus::cl","{}: Building seal for block {}", self.state, self.state.seq_num - 1);
 
         // The previous block may have been committed in a different view, so the node will need to
         // find the view that contains the required 2f Commit messages for building the seal
         let (block_id, view, messages) = self
             .msg_log
-            .get_messages_of_type_seq(PbftMessageType::Commit, state.seq_num - 1)
+            .get_messages_of_type_seq(PbftMessageType::Commit, self.state.seq_num - 1)
             .iter()
             // Filter out this node's own messages because self-sent messages aren't signed and
             // therefore can't be included in the seal
@@ -1314,7 +1340,7 @@ impl ClayerConsensusEngine {
             // One and only one block/view should have the required number of messages, since only
             // one block at this sequence number should have been committed and in only one view
             .find_map(|((block_id, view), msgs)| {
-                if msgs.len() as u64 >= 2 * state.f {
+                if msgs.len() as u64 >= 2 * self.state.f {
                     Some((block_id, view, msgs))
                 } else {
                     None
@@ -1330,8 +1356,8 @@ impl ClayerConsensusEngine {
             info: PbftMessageInfo {
                 ptype: PbftMessageType::Seal as u8,
                 view,
-                seq_num: state.seq_num - 1,
-                signer_id: state.id.clone(),
+                seq_num: self.state.seq_num - 1,
+                signer_id: self.state.id.clone(),
             },
             block_id,
             commit_votes: Self::signed_votes_from_messages(messages.as_slice()),
@@ -1421,21 +1447,17 @@ impl ClayerConsensusEngine {
     }
 
     /// Verify that a NewView messsage is valid
-    fn verify_new_view(
-        &mut self,
-        new_view: &PbftNewView,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
+    fn verify_new_view(&mut self, new_view: &PbftNewView) -> Result<(), PbftError> {
         // Make sure this is for a future view (prevents re-using old NewView messages)
-        if new_view.info.view <= state.view {
+        if new_view.info.view <= self.state.view {
             return Err(PbftError::InvalidMessage(format!(
                 "Node is on view {}, but received NewView message for view {}",
-                state.view, new_view.info.view,
+                self.state.view, new_view.info.view,
             )));
         }
 
         // Make sure this is from the new primary
-        if new_view.info.signer_id != state.get_primary_id_at_view(new_view.info.view) {
+        if new_view.info.signer_id != self.state.get_primary_id_at_view(new_view.info.view) {
             return Err(PbftError::InvalidMessage(format!(
                 "Received NewView message for view {} that is not from the primary for that view",
                 new_view.info.view
@@ -1463,7 +1485,8 @@ impl ClayerConsensusEngine {
         // All of the votes must come from PBFT members, and the primary can't explicitly vote
         // itself, since broacasting the NewView is an implicit vote. Check that the votes received
         // are from a subset of "members - primary".
-        let peer_ids: HashSet<_> = state
+        let peer_ids: HashSet<_> = self
+            .state
             .validators
             .member_ids()
             .iter()
@@ -1481,10 +1504,10 @@ impl ClayerConsensusEngine {
         }
 
         // Check that the NewView contains 2f votes (primary vote is implicit, so total of 2f + 1)
-        if (voter_ids.len() as u64) < 2 * state.f {
+        if (voter_ids.len() as u64) < 2 * self.state.f {
             return Err(PbftError::InvalidMessage(format!(
                 "NewView needs {} votes, but only {} found",
-                2 * state.f,
+                2 * self.state.f,
                 voter_ids.len()
             )));
         }
@@ -1497,7 +1520,6 @@ impl ClayerConsensusEngine {
     fn verify_consensus_seal_from_block(
         &mut self,
         block: &ClayerBlock,
-        state: &mut PbftState,
     ) -> Result<PbftSeal, PbftError> {
         // Since block 0 is genesis, block 1 is the first that can be verified with a seal; this
         // means that the node won't see a seal until block 2
@@ -1542,7 +1564,7 @@ impl ClayerConsensusEngine {
             })?;
 
         // Verify the seal itself
-        self.verify_consensus_seal(&seal, proven_block_previous_id, state)?;
+        self.verify_consensus_seal(&seal, proven_block_previous_id)?;
 
         Ok(seal)
     }
@@ -1555,7 +1577,6 @@ impl ClayerConsensusEngine {
         &mut self,
         seal: &PbftSeal,
         previous_id: B256,
-        state: &mut PbftState,
     ) -> Result<(), PbftError> {
         // Verify each individual vote and extract the signer ID from each PbftMessage so the IDs
         // can be verified
@@ -1629,10 +1650,10 @@ impl ClayerConsensusEngine {
         }
 
         // Check that the seal contains 2f votes (primary vote is implicit, so total of 2f + 1)
-        if (voter_ids.len() as u64) < 2 * state.f {
+        if (voter_ids.len() as u64) < 2 * self.state.f {
             return Err(PbftError::InvalidMessage(format!(
                 "Consensus seal needs {} votes, but only {} found",
-                2 * state.f,
+                2 * self.state.f,
                 voter_ids.len()
             )));
         }
@@ -1643,15 +1664,15 @@ impl ClayerConsensusEngine {
     // ---------- Methods called in the main engine loop to periodically check and update state ----------
 
     /// At a regular interval, try to finalize a block when the primary is ready
-    pub async fn try_publish(&mut self, state: &mut PbftState) -> Result<(), PbftError> {
+    pub async fn try_publish(&mut self) -> Result<(), PbftError> {
         // Only the primary takes care of this, and we try publishing a block
         // on every engine loop, even if it's not yet ready. This isn't an error,
         // so just return Ok(()).
-        if !state.is_primary() || state.phase != PbftPhase::PrePreparing {
+        if !self.state.is_primary() || self.state.phase != PbftPhase::PrePreparing {
             return Ok(());
         }
 
-        trace!(target: "consensus::cl","{}: Attempting to summarize block", state);
+        trace!(target: "consensus::cl","{}: Attempting to summarize block", self.state);
 
         match self.service.summarize_block().await {
             Ok(_) => {}
@@ -1663,11 +1684,11 @@ impl ClayerConsensusEngine {
 
         // We don't publish a consensus seal at block 1, since we never receive any
         // votes on the genesis block. Leave payload blank for the first block.
-        let data = if state.seq_num <= 1 {
+        let data = if self.state.seq_num <= 1 {
             vec![]
         } else {
             let mut msg_out = vec![];
-            self.build_seal(state)?.encode(&mut msg_out);
+            self.build_seal()?.encode(&mut msg_out);
             msg_out
         };
         let seal_bytes = reth_primitives::Bytes::copy_from_slice(&data);
@@ -1676,8 +1697,8 @@ impl ClayerConsensusEngine {
             Ok(execution_payload) => {
                 let block_id = execution_payload.execution_payload.payload_inner.block_hash;
                 let payload = execution_payload_from_payload(&execution_payload);
-                self.broadcast_block_new(state.view, state.seq_num, payload, seal_bytes, state)?;
-                info!(target: "consensus::cl","{}: Publishing block {}", state, hex::encode(block_id));
+                self.broadcast_block_new(self.state.view, self.state.seq_num, payload, seal_bytes)?;
+                info!(target: "consensus::cl","{}: Publishing block {}", self.state, hex::encode(block_id));
                 Ok(())
             }
             Err(err) => {
@@ -1687,33 +1708,33 @@ impl ClayerConsensusEngine {
     }
 
     /// Check to see if the idle timeout has expired
-    pub fn check_block_publishing_expired(&mut self, state: &mut PbftState) -> bool {
-        state.block_publishing_timeout.check_expired()
+    pub fn check_block_publishing_expired(&mut self) -> bool {
+        self.state.block_publishing_timeout.check_expired()
     }
 
     /// Check to see if the idle timeout has expired
-    pub fn check_idle_timeout_expired(&mut self, state: &mut PbftState) -> bool {
-        state.idle_timeout.check_expired()
+    pub fn check_idle_timeout_expired(&mut self) -> bool {
+        self.state.idle_timeout.check_expired()
     }
 
     /// Start the idle timeout
-    pub fn start_idle_timeout(&self, state: &mut PbftState) {
-        state.idle_timeout.start();
+    pub fn start_idle_timeout(&mut self) {
+        self.state.idle_timeout.start();
     }
 
     /// Check to see if the commit timeout has expired
-    pub fn check_commit_timeout_expired(&mut self, state: &mut PbftState) -> bool {
-        state.commit_timeout.check_expired()
+    pub fn check_commit_timeout_expired(&mut self) -> bool {
+        self.state.commit_timeout.check_expired()
     }
 
     /// Start the commit timeout
-    pub fn start_commit_timeout(&self, state: &mut PbftState) {
-        state.commit_timeout.start();
+    pub fn start_commit_timeout(&mut self) {
+        self.state.commit_timeout.start();
     }
 
     /// Check to see if the view change timeout has expired
-    pub fn check_view_change_timeout_expired(&mut self, state: &mut PbftState) -> bool {
-        state.view_change_timeout.check_expired()
+    pub fn check_view_change_timeout_expired(&mut self) -> bool {
+        self.state.view_change_timeout.check_expired()
     }
 
     // ---------- Methods for communication between nodes ----------
@@ -1725,16 +1746,19 @@ impl ClayerConsensusEngine {
         seq_num: u64,
         msg_type: PbftMessageType,
         block_id: B256,
-        state: &mut PbftState,
     ) -> Result<(), PbftError> {
-        let info =
-            PbftMessageInfo { ptype: msg_type as u8, view, seq_num, signer_id: state.id.clone() };
+        let info = PbftMessageInfo {
+            ptype: msg_type as u8,
+            view,
+            seq_num,
+            signer_id: self.state.id.clone(),
+        };
 
         let msg = PbftMessage { info, block_id };
 
-        trace!(target: "consensus::cl","{}: Created PBFT message: {:?}", state, msg);
+        trace!(target: "consensus::cl","{}: Created PBFT message: {:?}", self.state, msg);
 
-        self.broadcast_message(ParsedMessage::from_pbft_message(msg)?, state)
+        self.broadcast_message(ParsedMessage::from_pbft_message(msg)?)
     }
 
     fn broadcast_block_new(
@@ -1743,28 +1767,23 @@ impl ClayerConsensusEngine {
         seq_num: u64,
         payload: ClayerExecutionPayload,
         seal_bytes: reth_primitives::Bytes,
-        state: &mut PbftState,
     ) -> Result<(), PbftError> {
         let info = PbftMessageInfo {
             ptype: PbftMessageType::BlockNew as u8,
             view,
             seq_num,
-            signer_id: state.id.clone(),
+            signer_id: self.state.id.clone(),
         };
 
         let msg: ClayerBlock = ClayerBlock { info, block: payload, seal_bytes };
 
-        trace!(target: "consensus::cl","{}: Created BlockNew message: {:?}", state, msg);
+        trace!(target: "consensus::cl","{}: Created BlockNew message: {:?}", self.state, msg);
 
-        self.broadcast_message(ParsedMessage::from_block_new_message(msg)?, state)
+        self.broadcast_message(ParsedMessage::from_block_new_message(msg)?)
     }
 
     /// Broadcast the specified message to all of the node's peers, including itself
-    fn broadcast_message(
-        &mut self,
-        msg: ParsedMessage,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
+    fn broadcast_message(&mut self, msg: ParsedMessage) -> Result<(), PbftError> {
         // Broadcast to peers
         let message_bytes = msg.get_message_bytes();
 
@@ -1772,7 +1791,7 @@ impl ClayerConsensusEngine {
         let header = ClayerConsensusMessageHeader {
             message_type: msg.info().ptype,
             content_hash: keccak256(&message_bytes),
-            signer_id: state.id.clone(),
+            signer_id: self.state.id.clone(),
         };
         let mut header_out = vec![];
         header.encode(&mut header_out);
@@ -1781,9 +1800,10 @@ impl ClayerConsensusEngine {
         //sign header
         let signature_hash = keccak256(&header_bytes);
         let signature =
-            sign_message(B256::from_slice(&state.kp.secret_bytes()[..]), signature_hash).map_err(
-                |err| PbftError::SigningError(format!("signing header error: {}", err.to_string())),
-            )?;
+            sign_message(B256::from_slice(&self.state.kp.secret_bytes()[..]), signature_hash)
+                .map_err(|err| {
+                    PbftError::SigningError(format!("signing header error: {}", err.to_string()))
+                })?;
 
         let clayer_msg = ClayerConsensusMessage {
             header_bytes,
@@ -1794,25 +1814,22 @@ impl ClayerConsensusEngine {
         clayer_msg.encode(&mut msg_out);
         let msg_bytes = reth_primitives::Bytes::copy_from_slice(msg_out.as_slice());
 
-        self.agent.broadcast_consensus(state.validators.member_ids().clone(), msg_bytes.clone());
+        self.agent
+            .broadcast_consensus(self.state.validators.member_ids().clone(), msg_bytes.clone());
 
         // Send to self
         // self.on_peer_message(msg, state)
 
         // replace with push_received_cache_first
-        self.agent.push_received_cache_first(state.id.clone(), msg_bytes);
+        self.agent.push_received_cache_first(self.state.id.clone(), msg_bytes);
         Ok(())
     }
 
     /// Build a consensus seal for the last block this node committed and send it to the node that
     /// requested the seal (the `recipient`)
     #[allow(clippy::ptr_arg)]
-    fn send_seal_response(
-        &mut self,
-        state: &PbftState,
-        recipient: &PeerId,
-    ) -> Result<(), PbftError> {
-        let seal = self.build_seal(state).map_err(|err| {
+    fn send_seal_response(&mut self, recipient: &PeerId) -> Result<(), PbftError> {
+        let seal = self.build_seal().map_err(|err| {
             PbftError::InternalError(format!("Failed to build requested seal due to: {}", err))
         })?;
 
@@ -1824,7 +1841,7 @@ impl ClayerConsensusEngine {
         let header = ClayerConsensusMessageHeader {
             message_type: seal.info.ptype,
             content_hash: keccak256(&message_bytes),
-            signer_id: state.id.clone(),
+            signer_id: self.state.id.clone(),
         };
         let mut header_out = vec![];
         header.encode(&mut header_out);
@@ -1833,9 +1850,10 @@ impl ClayerConsensusEngine {
         //sign header
         let signature_hash = keccak256(&header_bytes);
         let signature =
-            sign_message(B256::from_slice(&state.kp.secret_bytes()[..]), signature_hash).map_err(
-                |err| PbftError::SigningError(format!("signing header error: {}", err.to_string())),
-            )?;
+            sign_message(B256::from_slice(&self.state.kp.secret_bytes()[..]), signature_hash)
+                .map_err(|err| {
+                    PbftError::SigningError(format!("signing header error: {}", err.to_string()))
+                })?;
 
         let clayer_msg = ClayerConsensusMessage {
             header_bytes,
@@ -1861,45 +1879,40 @@ impl ClayerConsensusEngine {
     ///
     /// # Panics
     /// + If the view change timeout overflows
-    pub fn start_view_change(&mut self, state: &mut PbftState, view: u64) -> Result<(), PbftError> {
+    pub fn start_view_change(&mut self, view: u64) -> Result<(), PbftError> {
         // Do not send messages again if we are already in the midst of this or a later view change
-        if match state.mode {
+        if match self.state.mode {
             PbftMode::ViewChanging(v) => view <= v,
             _ => false,
         } {
             return Ok(());
         }
 
-        info!(target: "consensus::cl","{}: Starting change to view {}", state, view);
+        info!(target: "consensus::cl","{}: Starting change to view {}", self.state, view);
 
-        state.mode = PbftMode::ViewChanging(view);
+        self.state.mode = PbftMode::ViewChanging(view);
 
         // Stop the idle and commit timeouts because they are not needed until after the view
         // change
-        state.idle_timeout.stop();
-        state.commit_timeout.stop();
+        self.state.idle_timeout.stop();
+        self.state.commit_timeout.stop();
 
         // Stop the view change timeout if it is already active (will be restarted when 2f + 1
         // ViewChange messages for the new view are received)
-        state.view_change_timeout.stop();
+        self.state.view_change_timeout.stop();
 
         // Broadcast the view change message
         self.broadcast_pbft_message(
             view,
-            state.seq_num - 1,
+            self.state.seq_num - 1,
             PbftMessageType::ViewChange,
             B256::ZERO,
-            state,
         )
     }
 
-    async fn handle_block_new(
-        &mut self,
-        msg: ParsedMessage,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
+    async fn handle_block_new(&mut self, msg: ParsedMessage) -> Result<(), PbftError> {
         let block = msg.get_block_new().clone();
-        self.on_block_new(block, state).await?;
+        self.on_block_new(block).await?;
         Ok(())
     }
 }

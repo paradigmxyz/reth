@@ -7,7 +7,6 @@ use crate::ClayerConsensusMessagingAgent;
 use crate::{consensus::ClayerConsensusEngine, engine_api::http::HttpJsonRpc, timing, ClStorage};
 use alloy_primitives::B256;
 use futures_util::{future::BoxFuture, FutureExt};
-use parking_lot::RwLock;
 use rand::Rng;
 use reth_interfaces::clayer::ClayerConsensusMessageAgentTrait;
 use reth_interfaces::consensus;
@@ -65,9 +64,9 @@ pub struct ClTask<Client, Pool: TransactionPool, CDB> {
     ///
     consensus_agent: ClayerConsensusMessagingAgent,
     ///
+    consensus_engine: Arc<tokio::sync::RwLock<ClayerConsensusEngine>>,
     storages: CDB,
     pbft_config: PbftConfig,
-    pbft_state: Arc<RwLock<PbftState>>,
     pbft_running_state: Arc<AtomicBool>,
     startup_latest_header: SealedHeader,
 }
@@ -98,10 +97,13 @@ impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
             api,
             block_publishing_ticker: timing::Ticker::new(Duration::from_secs(12)),
             network,
-            consensus_agent,
+            consensus_agent: consensus_agent.clone(),
+            consensus_engine: Arc::new(tokio::sync::RwLock::new(ClayerConsensusEngine::new(
+                consensus_agent,
+                pbft_state.clone(),
+            ))), //ClayerConsensusEngine::new(consensus_agent, pbft_state.clone()),
             storages,
             pbft_config,
-            pbft_state: Arc::new(RwLock::new(pbft_state)),
             pbft_running_state: Arc::new(AtomicBool::new(false)),
             startup_latest_header,
         }
@@ -131,36 +133,6 @@ where
                 info!(target:"consensus::cl", "Attempting publish block");
                 this.queued.push_back(x);
             }
-
-            // let mut rng = rand::thread_rng();
-            // let cn = rng.gen();
-            // let hash = B256::with_last_byte(cn);
-
-            // match this.storages.save_consensus_number(hash, cn as u64) {
-            //     Ok(o) => {
-            //         info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: {}-{}", cn, hash, cn);
-            //         if o {
-            //             info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: ture", cn);
-            //         } else {
-            //             info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: false", cn);
-            //         }
-            //     }
-            //     Err(e) => {
-            //         info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: error!", cn)
-            //     }
-            // }
-
-            // if this.storages.consensus_number(hash).is_ok() {
-            //     if let Some(num) = this.storages.consensus_number(hash).unwrap() {
-            //         info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages get{}: {}-{}",cn, hash, num);
-            //     } else {
-            //         info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages get{}: NOne", cn);
-            //     }
-            // } else {
-            //     info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ received get{}: error!", cn);
-            // }
-
-            //=========================================================================================
             // sleep(std::time::Duration::from_millis(100));
 
             if this.insert_task.is_none() {
@@ -178,221 +150,103 @@ where
                 let network = this.network.clone();
                 let consensus_agent = this.consensus_agent.clone();
 
-                let pbft_state = this.pbft_state.clone();
                 let pbft_running_state = this.pbft_running_state.clone();
                 let pbft_config = this.pbft_config.clone();
                 let startup_latest_header = this.startup_latest_header.clone();
+                let consensus_engine = this.consensus_engine.clone();
 
                 // define task
                 this.insert_task = Some(Box::pin(async move {
-                    let mut state_clone = { pbft_state.read().clone() };
-                    let state = &mut state_clone;
-                    let mut consensus_engine = ClayerConsensusEngine::new(consensus_agent.clone());
-                    if EXECUTE_PBFT {
-                        // let state = &mut *pbft_state.write();
+                    info!(target:"consensus::cl", "processing bpft task");
+                    let mut consensus_engine = consensus_engine.write().await;
 
-                        if !pbft_running_state.load(Ordering::Relaxed) {
-                            pbft_running_state.store(true, Ordering::Relaxed);
-                            consensus_engine
-                                .initialize(
-                                    clayer_block_from_genesis(&startup_latest_header),
-                                    ApiService::new(api.clone()),
-                                    &pbft_config,
-                                    state,
-                                )
-                                .await;
-                            consensus_engine.start_idle_timeout(state);
-                        }
-
-                        if let Some((peer_id, connect)) = consensus_agent.pop_network_event() {
-                            let incoming_event = if connect {
-                                ConsensusEvent::PeerConnected(peer_id)
-                            } else {
-                                ConsensusEvent::PeerConnected(peer_id)
-                            };
-                            match handle_consensus_event(
-                                &mut consensus_engine,
-                                incoming_event,
-                                state,
+                    if !pbft_running_state.load(Ordering::Relaxed) {
+                        pbft_running_state.store(true, Ordering::Relaxed);
+                        match consensus_engine
+                            .initialize(
+                                clayer_block_from_genesis(&startup_latest_header),
+                                ApiService::new(api.clone()),
+                                &pbft_config,
                             )
                             .await
-                            {
-                                Ok(again) => {
-                                    if !again {
-                                        let pstate = &mut *pbft_state.write();
-                                        pstate.clone_from(state);
-                                        return events;
-                                    }
-                                }
-                                Err(err) => log_any_error(Err(err)),
-                            }
+                        {
+                            Ok(_) => {}
+                            Err(err) => log_any_error(Err(err)),
                         }
+                        consensus_engine.start_idle_timeout();
+                    }
 
-                        if let Some((peer_id, bytes)) = consensus_agent.pop_received_cache() {
-                            match parse_consensus_message(&bytes) {
-                                Ok(msg) => {
-                                    match handle_consensus_event(
-                                        &mut consensus_engine,
-                                        ConsensusEvent::PeerMessage(msg, peer_id),
-                                        state,
-                                    )
-                                    .await
-                                    {
-                                        Ok(again) => {
-                                            if !again {
-                                                let pstate = &mut *pbft_state.write();
-                                                pstate.clone_from(state);
-                                                return events;
-                                            }
+                    if let Some((peer_id, connect)) = consensus_agent.pop_network_event() {
+                        let incoming_event = if connect {
+                            ConsensusEvent::PeerConnected(peer_id)
+                        } else {
+                            ConsensusEvent::PeerConnected(peer_id)
+                        };
+                        match handle_consensus_event(&mut consensus_engine, incoming_event).await {
+                            Ok(again) => {
+                                if !again {
+                                    return events;
+                                }
+                            }
+                            Err(err) => log_any_error(Err(err)),
+                        }
+                    }
+
+                    if let Some((peer_id, bytes)) = consensus_agent.pop_received_cache() {
+                        match parse_consensus_message(&bytes) {
+                            Ok(msg) => {
+                                match handle_consensus_event(
+                                    &mut consensus_engine,
+                                    ConsensusEvent::PeerMessage(msg, peer_id),
+                                )
+                                .await
+                                {
+                                    Ok(again) => {
+                                        if !again {
+                                            return events;
                                         }
-                                        Err(err) => log_any_error(Err(err)),
                                     }
-                                }
-                                Err(e) => {
-                                    log_any_error(Err(e));
+                                    Err(err) => log_any_error(Err(err)),
                                 }
                             }
-                        }
-
-                        // If the block publishing delay has passed, attempt to publish a block
-                        if consensus_engine.check_block_publishing_expired(state) {
-                            if let Err(e) = consensus_engine.try_publish(state).await {
+                            Err(e) => {
                                 log_any_error(Err(e));
                             }
                         }
+                    }
 
-                        // If the idle timeout has expired, initiate a view change
-                        if consensus_engine.check_idle_timeout_expired(state) {
-                            warn!(target:"consensus::cl","Idle timeout expired; proposing view change");
-                            log_any_error(
-                                consensus_engine.start_view_change(state, state.view + 1),
-                            );
-                        }
-
-                        // If the commit timeout has expired, initiate a view change
-                        if consensus_engine.check_commit_timeout_expired(state) {
-                            warn!(target:"consensus::cl","Commit timeout expired; proposing view change");
-                            log_any_error(
-                                consensus_engine.start_view_change(state, state.view + 1),
-                            );
-                        }
-
-                        // Check the view change timeout if the node is view changing so we can start a new
-                        // view change if we don't get a NewView in time
-                        if let PbftMode::ViewChanging(v) = state.mode {
-                            if consensus_engine.check_view_change_timeout_expired(state) {
-                                warn!(target:"consensus::cl","View change timeout expired; proposing view change for view {}", v + 1);
-                                log_any_error(
-                                    consensus_engine.start_view_change(state, state.view + 1),
-                                );
-                            }
+                    // If the block publishing delay has passed, attempt to publish a block
+                    if consensus_engine.check_block_publishing_expired() {
+                        if let Err(e) = consensus_engine.try_publish().await {
+                            log_any_error(Err(e));
                         }
                     }
-                    //=============================================================================
 
-                    // let mut storage = storage.write().await;
-                    // let last_block_hash = storage.best_hash.clone();
-                    // let last_block_height = storage.best_height;
+                    let view = consensus_engine.view();
 
-                    // info!(target: "consensus::cl","step 1: forkchoice_updated {}",timestamp);
-                    // let forkchoice_updated_result = match forkchoice_updated(
-                    //     &api,
-                    //     last_block_hash.clone(),
-                    // )
-                    // .await
-                    // {
-                    //     Ok(x) => x,
-                    //     Err(e) => {
-                    //         error!(target:"consensus::cl", "step 1: Forkchoice updated error: {:?}", e);
-                    //         return events;
-                    //     }
-                    // };
-                    // info!(target: "consensus::cl","forkchoice state response {:?}", forkchoice_updated_result);
-                    // if !forkchoice_updated_result.payload_status.status.is_valid() {
-                    //     return events;
-                    // }
+                    // If the idle timeout has expired, initiate a view change
+                    if consensus_engine.check_idle_timeout_expired() {
+                        warn!(target:"consensus::cl","Idle timeout expired; proposing view change");
+                        log_any_error(consensus_engine.start_view_change(view + 1));
+                    }
 
-                    // info!(target: "consensus::cl","step 2: forkchoice_updated_with_attributes");
-                    // let forkchoice_updated_result = match forkchoice_updated_with_attributes(
-                    //     &api,
-                    //     last_block_hash.clone(),
-                    // )
-                    // .await
-                    // {
-                    //     Ok(x) => x,
-                    //     Err(e) => {
-                    //         error!(target:"consensus::cl", "step 2: Forkchoice updated error: {:?}", e);
-                    //         return events;
-                    //     }
-                    // };
+                    let view = consensus_engine.view();
 
-                    // info!(target: "consensus::cl","forkchoice state response {:?}", forkchoice_updated_result);
-                    // if !forkchoice_updated_result.payload_status.status.is_valid() {
-                    //     return events;
-                    // }
+                    // If the commit timeout has expired, initiate a view change
+                    if consensus_engine.check_commit_timeout_expired() {
+                        warn!(target:"consensus::cl","Commit timeout expired; proposing view change");
+                        log_any_error(consensus_engine.start_view_change(view + 1));
+                    }
 
-                    // let execution_payload = match forkchoice_updated_result.payload_id {
-                    //     Some(id) => {
-                    //         info!(target: "consensus::cl","step 3: get_payload");
-                    //         match api.get_payload_v2(id).await {
-                    //             Ok(x) => x,
-                    //             Err(e) => {
-                    //                 error!(target:"consensus::cl", "step 3: Get payload error: {:?}", e);
-                    //                 return events;
-                    //             }
-                    //         }
-                    //     }
-                    //     None => {
-                    //         return events;
-                    //     }
-                    // };
-                    // info!(target: "consensus::cl","execution payload {:?}", execution_payload);
-                    // let newest_height =
-                    //     execution_payload.execution_payload.payload_inner.block_number;
-
-                    // let payload_status = match new_payload(&api, execution_payload).await {
-                    //     Ok(x) => {
-                    //         info!(target: "consensus::cl","step 4: new_payload");
-                    //         x
-                    //     }
-                    //     Err(e) => {
-                    //         error!(target:"consensus::cl", "step 4: New payload error: {:?}", e);
-                    //         return events;
-                    //     }
-                    // };
-                    // info!(target: "consensus::cl","step 4: payload status {:?}", payload_status);
-                    // if !payload_status.status.is_valid()
-                    //     || payload_status.latest_valid_hash.is_none()
-                    // {
-                    //     error!(target:"consensus::cl", "step 4: Payload status not valid");
-                    //     return events;
-                    // }
-
-                    // if let Some(latest_valid_hash) = &payload_status.latest_valid_hash {
-                    //     info!(target: "consensus::cl","step 5: forkchoice_updated");
-                    //     let forkchoice_updated_result: ForkchoiceUpdated = match forkchoice_updated(
-                    //         &api,
-                    //         latest_valid_hash.clone(),
-                    //     )
-                    //     .await
-                    //     {
-                    //         Ok(x) => x,
-                    //         Err(e) => {
-                    //             error!(target:"consensus::cl", "Forkchoice updated error: {:?}", e);
-                    //             return events;
-                    //         }
-                    //     };
-                    //     info!(target: "consensus::cl","forkchoice state response {:?}", forkchoice_updated_result);
-
-                    //     if forkchoice_updated_result.payload_status.status.is_valid() {
-                    //         storage.best_hash = latest_valid_hash.clone();
-                    //         storage.best_height = newest_height;
-                    //     } else {
-                    //         error!(target:"consensus::cl", "Forkchoice not valid", );
-                    //         return events;
-                    //     }
-                    // }
-                    // info!(target: "consensus::cl","step end");
+                    let view = consensus_engine.view();
+                    // Check the view change timeout if the node is view changing so we can start a new
+                    // view change if we don't get a NewView in time
+                    if let PbftMode::ViewChanging(v) = consensus_engine.mode() {
+                        if consensus_engine.check_view_change_timeout_expired() {
+                            warn!(target:"consensus::cl","View change timeout expired; proposing view change for view {}", v + 1);
+                            log_any_error(consensus_engine.start_view_change(view + 1));
+                        }
+                    }
 
                     events
                 }));
