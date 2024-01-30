@@ -344,7 +344,7 @@ mod test {
 
         let announcement = NewPooledTransactionHashes68 { types, sizes, hashes };
 
-        let filter = EthAnnouncementFilter::default();
+        let filter = EthAnnouncementFilter;
 
         let (outcome, _data) = filter.filter_valid_entries_68(announcement);
 
@@ -371,7 +371,7 @@ mod test {
             hashes: hashes.clone(),
         };
 
-        let filter = EthAnnouncementFilter::default();
+        let filter = EthAnnouncementFilter;
 
         let (outcome, data) = filter.filter_valid_entries_68(announcement);
 
@@ -407,7 +407,7 @@ mod test {
             hashes: hashes.clone(),
         };
 
-        let filter = EthAnnouncementFilter::default();
+        let filter = EthAnnouncementFilter;
 
         let (outcome, data) = filter.filter_valid_entries_68(announcement);
 
@@ -446,7 +446,7 @@ mod test {
             hashes: hashes.clone(),
         };
 
-        let filter = EthAnnouncementFilter::default();
+        let filter = EthAnnouncementFilter;
 
         let (outcome, data) = filter.filter_valid_entries_68(announcement);
 
@@ -505,7 +505,7 @@ mod test {
 
     #[test]
     fn test_derive_more_display_for_zst() {
-        let filter = EthAnnouncementFilter::default();
+        let filter = EthAnnouncementFilter;
         assert_eq!("EthAnnouncementFilter", &filter.to_string());
     }
 }
