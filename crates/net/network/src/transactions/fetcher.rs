@@ -820,11 +820,12 @@ mod test {
         let eth68_hashes_sizes = [
             POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE - 4,
             POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE, // this one will not fit
-            2,                                             // this one will fit
-            3,                                             // but now this one won't
-            2,                                             /* this one will, no more txns will
-                                                            * fit
-                                                            * after this */
+            2,                                                 // this one will fit
+            3,                                                 // but now this one won't
+            2,                                                 /* this one will, no more txns
+                                                                * will
+                                                                * fit
+                                                                * after this */
             1,
         ];
 

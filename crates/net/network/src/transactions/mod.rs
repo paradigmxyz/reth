@@ -1114,7 +1114,7 @@ impl PropagateTransaction {
 }
 
 /// Helper type for constructing the full transaction message that enforces the
-/// [`POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTES`].
+/// [`POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE`].
 #[derive(Default)]
 struct FullTransactionsBuilder {
     total_size: usize,
@@ -1830,7 +1830,9 @@ mod tests {
         let mut backups = default_cache();
         backups.insert(peer_id_other);
         tx_fetcher.unknown_hashes.insert(hash_other, (0, backups));
-        tx_fetcher.eth68_meta.insert(hash_other, POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE - 2); // a big tx
+        tx_fetcher
+            .eth68_meta
+            .insert(hash_other, POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE - 2); // a big tx
         tx_fetcher.buffered_hashes.insert(hash_other);
 
         let (peer, mut to_mock_session_rx) = new_mock_session(peer_id, eth_version);
