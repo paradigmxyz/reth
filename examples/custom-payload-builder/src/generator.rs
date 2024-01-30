@@ -9,6 +9,39 @@ use reth_payload_builder::{error::PayloadBuilderError, PayloadJobGenerator};
 use reth_primitives::{Bytes, ChainSpec, SealedBlock};
 use std::sync::Arc;
 
+/// The generator type that creates new jobs that builds empty blocks.
+#[derive(Debug)]
+pub struct EmptyBlockPayloadJobGenerator<Client, Pool, Tasks, Builder> {
+    /// The client that can interact with the chain.
+    client: Client,
+    /// txpool
+    pool: Pool,
+    /// How to spawn building tasks
+    executor: Tasks,
+    /// The configuration for the job generator.
+    _config: BasicPayloadJobGeneratorConfig,
+    /// The type responsible for building payloads.
+    ///
+    /// See [PayloadBuilder]
+    builder: Builder,
+}
+
+// === impl EmptyBlockPayloadJobGenerator ===
+
+impl<Client, Pool, Tasks, Builder> EmptyBlockPayloadJobGenerator<Client, Pool, Tasks, Builder> {
+    /// Creates a new [EmptyBlockPayloadJobGenerator] with the given config and custom
+    /// [PayloadBuilder]
+    pub fn with_builder(
+        client: Client,
+        pool: Pool,
+        executor: Tasks,
+        config: BasicPayloadJobGeneratorConfig,
+        builder: Builder,
+    ) -> Self {
+        Self { client, pool, executor, _config: config, builder }
+    }
+}
+
 impl<Client, Pool, Tasks, Builder> PayloadJobGenerator
     for EmptyBlockPayloadJobGenerator<Client, Pool, Tasks, Builder>
 where
@@ -40,38 +73,5 @@ where
             _builder: self.builder.clone(),
             config,
         })
-    }
-}
-
-/// The generator type that creates new jobs that builds empty blocks.
-#[derive(Debug)]
-pub struct EmptyBlockPayloadJobGenerator<Client, Pool, Tasks, Builder> {
-    /// The client that can interact with the chain.
-    client: Client,
-    /// txpool
-    pool: Pool,
-    /// How to spawn building tasks
-    executor: Tasks,
-    /// The configuration for the job generator.
-    _config: BasicPayloadJobGeneratorConfig,
-    /// The type responsible for building payloads.
-    ///
-    /// See [PayloadBuilder]
-    builder: Builder,
-}
-
-// === impl BasicPayloadJobGenerator ===
-
-impl<Client, Pool, Tasks, Builder> EmptyBlockPayloadJobGenerator<Client, Pool, Tasks, Builder> {
-    /// Creates a new [EmptyBlockPayloadJobGenerator] with the given config and custom
-    /// [PayloadBuilder]
-    pub fn with_builder(
-        client: Client,
-        pool: Pool,
-        executor: Tasks,
-        config: BasicPayloadJobGeneratorConfig,
-        builder: Builder,
-    ) -> Self {
-        Self { client, pool, executor, _config: config, builder }
     }
 }
