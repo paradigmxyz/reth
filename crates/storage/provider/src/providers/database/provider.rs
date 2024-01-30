@@ -785,7 +785,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             blocks.push(SealedBlockWithSenders {
                 block: SealedBlock { header, body, ommers, withdrawals },
                 senders,
-                receipts: Vec::new(),
             })
         }
 

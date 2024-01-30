@@ -365,6 +365,8 @@ where
                     return Ok(None)
                 }
             };
+            let receipts = pending_block.receipts;
+            let pending_block = pending_block.sealed_block_with_senders;
 
             let now = Instant::now();
             *lock = Some(PendingBlock {
@@ -372,10 +374,9 @@ where
                 expires_at: now + Duration::from_secs(3),
             });
 
-            let receipts = this.cache().get_receipts(pending_block.hash).await?.unwrap_or_default();
             let pending_block_clone = pending_block.block.clone();
             this.local_pending_block_sender()
-                .send_modify(|v| *v = Some((pending_block_clone, receipts.to_vec())));
+                .send_modify(|v| *v = Some((pending_block_clone, receipts)));
 
             Ok(Some(pending_block))
         })

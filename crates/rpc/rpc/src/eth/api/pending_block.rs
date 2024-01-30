@@ -9,7 +9,8 @@ use reth_primitives::{
         BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
     },
     Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    Receipts, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Receipts, SealedBlockWithSenders, SealedBlockWithSendersAndReceipts, SealedHeader, B256,
+    EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -42,7 +43,7 @@ impl PendingBlockEnv {
         self,
         client: &Client,
         pool: &Pool,
-    ) -> EthResult<SealedBlockWithSenders>
+    ) -> EthResult<SealedBlockWithSendersAndReceipts>
     where
         Client: StateProviderFactory + ChainSpecProvider,
         Pool: TransactionPool,
@@ -258,7 +259,10 @@ impl PendingBlockEnv {
         // seal the block
         let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
         let receipts = receipts.iter().filter_map(|r| r.clone()).collect::<Vec<Receipt>>();
-        Ok(SealedBlockWithSenders { block: block.seal_slow(), senders, receipts })
+        Ok(SealedBlockWithSendersAndReceipts {
+            sealed_block_with_senders: SealedBlockWithSenders { block: block.seal_slow(), senders },
+            receipts,
+        })
     }
 }
 
