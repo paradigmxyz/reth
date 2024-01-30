@@ -4,7 +4,7 @@ use crate::{
     blobstore::BlobStore,
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     traits::TransactionOrigin,
-    validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_SIZE, TX_MAX_SIZE},
+    validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE, MAX_TX_INPUT_BYTES},
     EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig, PoolTransaction,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
@@ -201,17 +201,17 @@ where
         };
 
         // Reject transactions over defined size to prevent DOS attacks
-        if transaction.size() > TX_MAX_SIZE {
+        if transaction.size() > MAX_TX_INPUT_BYTES {
             let size = transaction.size();
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::OversizedData(size, TX_MAX_SIZE),
+                InvalidPoolTransactionError::OversizedData(size, MAX_TX_INPUT_BYTES),
             )
         }
 
         // Check whether the init code size has been exceeded.
         if self.fork_tracker.is_shanghai_activated() {
-            if let Err(err) = ensure_max_init_code_size(&transaction, MAX_INIT_CODE_SIZE) {
+            if let Err(err) = ensure_max_init_code_size(&transaction, MAX_INIT_CODE_BYTE_SIZE) {
                 return TransactionValidationOutcome::Invalid(transaction, err)
             }
         }
