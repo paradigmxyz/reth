@@ -83,8 +83,8 @@ jsonrpsee = { workspace = true, features = ["client"] }
 assert_matches.workspace = true
 tempfile.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
-reth-node-builder-ethereum.workspace = true
-reth-node-builder-optimism.workspace = true
+reth-node-ethereum.workspace = true
+reth-node-optimism.workspace = true
 
 [features]
 optimism = [

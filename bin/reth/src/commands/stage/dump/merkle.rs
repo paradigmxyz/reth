@@ -2,7 +2,7 @@ use super::setup;
 use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
-use reth_node_builder_ethereum::EthEvmConfig;
+use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageCheckpoint, BlockNumber, ChainSpec, PruneModes};
 use reth_provider::ProviderFactory;
 use reth_stages::{

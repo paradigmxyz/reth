@@ -404,7 +404,7 @@ mod tests {
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use reth_interfaces::test_utils::{generators, generators::Rng};
     use reth_network_api::noop::NoopNetwork;
-    use reth_node_builder_ethereum::EthEvmConfig;
+    use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         basefee::calculate_next_block_base_fee, constants::ETHEREUM_BLOCK_GAS_LIMIT, BaseFeeParams,
         Block, BlockNumberOrTag, Header, TransactionSigned, B256, U256,

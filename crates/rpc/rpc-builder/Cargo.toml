@@ -26,8 +26,8 @@ reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-node-api.workspace = true
-reth-node-builder-optimism = { workspace = true, optional = true }
-reth-node-builder-ethereum.workspace = true
+reth-node-optimism = { workspace = true, optional = true }
+reth-node-ethereum.workspace = true
 
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }

@@ -17,7 +17,7 @@ use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_interfaces::executor::BlockValidationError;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_node_builder_ethereum::EthEvmConfig;
+use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
 use reth_provider::{
     AccountExtReader, BlockWriter, ExecutorFactory, HashingWriter, HeaderProvider,

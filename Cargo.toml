@@ -36,8 +36,8 @@ members = [
     "crates/rpc/rpc-testing-util/",
     "crates/rpc/rpc-types/",
     "crates/rpc/rpc-types-compat/",
-    "crates/node-builder-ethereum/",
-    "crates/node-builder-optimism/",
+    "crates/node-ethereum/",
+    "crates/node-optimism/",
     "crates/node-core/",
     "crates/node-api/",
     "crates/snapshot/",
@@ -122,8 +122,8 @@ reth-consensus-common = { path = "crates/consensus/common" }
 reth-db = { path = "crates/storage/db" }
 reth-discv4 = { path = "crates/net/discv4" }
 reth-dns-discovery = { path = "crates/net/dns" }
-reth-node-builder-ethereum = { path = "crates/node-builder-ethereum" }
-reth-node-builder-optimism = { path = "crates/node-builder-optimism" }
+reth-node-ethereum = { path = "crates/node-ethereum" }
+reth-node-optimism = { path = "crates/node-optimism" }
 reth-node-core = { path = "crates/node-core" }
 reth-node-api = { path = "crates/node-api" }
 reth-downloaders = { path = "crates/net/downloaders" }

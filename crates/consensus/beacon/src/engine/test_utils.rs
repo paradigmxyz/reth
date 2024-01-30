@@ -22,7 +22,7 @@ use reth_interfaces::{
     sync::NoopSyncStateUpdater,
     test_utils::{NoopFullBlockClient, TestConsensus},
 };
-use reth_node_builder_ethereum::{EthEngineTypes, EthEvmConfig};
+use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, PruneModes, Receipt, B256, U256};
 use reth_provider::{
