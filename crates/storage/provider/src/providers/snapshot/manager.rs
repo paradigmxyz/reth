@@ -184,9 +184,8 @@ impl SnapshotProvider {
         self.snapshots_max_block
             .read()
             .get(&segment)
-            .into_iter()
-            .find(|max| **max >= block)
-            .map(|block| find_fixed_range(*block))
+            .filter(|max| **max >= block)
+            .map(|_| find_fixed_range(block))
     }
 
     /// Gets a snapshot segment's fixed block range from the provider inner
@@ -436,7 +435,7 @@ impl SnapshotProvider {
         let mut provider = get_provider(range.start)?;
 
         Ok(range.filter_map(move |number| {
-            return match get_fn(&mut provider.cursor().ok()?, number).transpose() {
+            match get_fn(&mut provider.cursor().ok()?, number).transpose() {
                 Some(result) => Some(result),
                 None => {
                     provider = get_provider(number).ok()?;

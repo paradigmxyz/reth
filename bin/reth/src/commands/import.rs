@@ -16,8 +16,9 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::consensus::Consensus;
-use reth_primitives::{stage::StageId, ChainSpec, B256};
+use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
 use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
+use reth_snapshot::Snapshotter;
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
@@ -110,8 +111,22 @@ impl ImportCommand {
         let tip = file_client.tip().expect("file client has no tip");
         info!(target: "reth::cli", "Chain file imported");
 
+        let snapshotter = Snapshotter::new(
+            provider_factory.clone(),
+            provider_factory
+                .snapshot_provider()
+                .expect("snapshot provider initialized via provider factory"),
+            PruneModes::default(),
+        );
+
         let (mut pipeline, events) = self
-            .build_import_pipeline(config, provider_factory.clone(), &consensus, file_client)
+            .build_import_pipeline(
+                config,
+                provider_factory.clone(),
+                &consensus,
+                file_client,
+                snapshotter,
+            )
             .await?;
 
         // override the tip
@@ -141,6 +156,7 @@ impl ImportCommand {
         provider_factory: ProviderFactory<DB>,
         consensus: &Arc<C>,
         file_client: Arc<FileClient>,
+        snapshotter: Snapshotter<DB>,
     ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
     where
         DB: Database + Clone + Unpin + 'static,
@@ -174,6 +190,7 @@ impl ImportCommand {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
+                    snapshotter,
                 )?
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,

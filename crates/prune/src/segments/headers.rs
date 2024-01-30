@@ -52,13 +52,9 @@ impl<DB: Database> Segment<DB> for Headers {
         }
 
         let results = [
-            self.prune_table::<DB, tables::CanonicalHeaders>(
-                provider,
-                block_range.clone(),
-                delete_limit,
-            )?,
             self.prune_table::<DB, tables::Headers>(provider, block_range.clone(), delete_limit)?,
-            self.prune_table::<DB, tables::HeaderTD>(provider, block_range, delete_limit)?,
+            self.prune_table::<DB, tables::HeaderTD>(provider, block_range.clone(), delete_limit)?,
+            self.prune_table::<DB, tables::CanonicalHeaders>(provider, block_range, delete_limit)?,
         ];
 
         if !results.iter().map(|(_, _, last_pruned_block)| last_pruned_block).all_equal() {

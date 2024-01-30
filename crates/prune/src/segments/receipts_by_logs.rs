@@ -4,7 +4,8 @@ use crate::{
 };
 use reth_db::{database::Database, tables};
 use reth_primitives::{
-    PruneCheckpoint, PruneMode, PruneSegment, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
+    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig,
+    MINIMUM_PRUNING_DISTANCE,
 };
 use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
 use tracing::{instrument, trace};
@@ -39,7 +40,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
         // for the other receipts it's as if they had a `PruneMode::Distance()` of
         // `MINIMUM_PRUNING_DISTANCE`.
         let to_block = PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)
-            .prune_target_block(input.to_block, PruneSegment::ContractLogs)?
+            .prune_target_block(input.to_block, PruneSegment::ContractLogs, PrunePurpose::User)?
             .map(|(bn, _)| bn)
             .unwrap_or_default();
 

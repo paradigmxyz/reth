@@ -76,7 +76,6 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
     let provider_rw = factory.provider_rw()?;
     insert_genesis_hashes(&provider_rw, genesis)?;
     insert_genesis_history(&provider_rw, genesis)?;
-    provider_rw.commit()?;
 
     // Insert header
     let tx = factory.provider_rw()?.into_tx();
@@ -94,6 +93,7 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
     }
 
     tx.commit()?;
+
     Ok(hash)
 }
 
@@ -238,18 +238,19 @@ pub fn insert_genesis_header<DB: Database>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_db::cursor::DbCursorRO;
 
     use reth_db::{
+        cursor::DbCursorRO,
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         table::{Table, TableRow},
-        test_utils::create_test_rw_db,
+        transaction::DbTx,
         DatabaseEnv,
     };
     use reth_primitives::{
         Address, Chain, ForkTimestamps, Genesis, GenesisAccount, IntegerList, GOERLI,
         GOERLI_GENESIS_HASH, MAINNET, MAINNET_GENESIS_HASH, SEPOLIA, SEPOLIA_GENESIS_HASH,
     };
+    use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
     use std::collections::HashMap;
 
     fn collect_table_entries<DB, T>(
@@ -265,7 +266,7 @@ mod tests {
     #[test]
     fn success_init_genesis_mainnet() {
         let genesis_hash =
-            init_genesis(ProviderFactory::new(create_test_rw_db(), MAINNET.clone())).unwrap();
+            init_genesis(create_test_provider_factory_with_chain_spec(MAINNET.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, MAINNET_GENESIS_HASH);
@@ -274,7 +275,7 @@ mod tests {
     #[test]
     fn success_init_genesis_goerli() {
         let genesis_hash =
-            init_genesis(ProviderFactory::new(create_test_rw_db(), GOERLI.clone())).unwrap();
+            init_genesis(create_test_provider_factory_with_chain_spec(GOERLI.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, GOERLI_GENESIS_HASH);
@@ -283,7 +284,7 @@ mod tests {
     #[test]
     fn success_init_genesis_sepolia() {
         let genesis_hash =
-            init_genesis(ProviderFactory::new(create_test_rw_db(), SEPOLIA.clone())).unwrap();
+            init_genesis(create_test_provider_factory_with_chain_spec(SEPOLIA.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS_HASH);
@@ -291,10 +292,11 @@ mod tests {
 
     #[test]
     fn fail_init_inconsistent_db() {
-        init_genesis(ProviderFactory::new(create_test_rw_db(), SEPOLIA.clone())).unwrap();
+        init_genesis(create_test_provider_factory_with_chain_spec(SEPOLIA.clone())).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash = init_genesis(ProviderFactory::new(create_test_rw_db(), MAINNET.clone()));
+        let genesis_hash =
+            init_genesis(create_test_provider_factory_with_chain_spec(MAINNET.clone()));
 
         assert_eq!(
             genesis_hash.unwrap_err(),
@@ -336,7 +338,7 @@ mod tests {
             ..Default::default()
         });
 
-        let factory = ProviderFactory::new(create_test_rw_db(), chain_spec);
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(factory.clone()).unwrap();
 
         let provider = factory.provider().unwrap();
