@@ -2363,6 +2363,18 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         self.tx.put::<tables::HeaderTD>(block_number, ttd.into())?;
         durations_recorder.record_relative(metrics::Action::InsertHeaderTD);
 
+        // TODO: temporary to ease transition/tests. should we add a insert_historical_block?
+        #[cfg(any(test, feature = "test-utils"))]
+        {
+            let mut writer = self
+                .snapshot_provider
+                .as_ref()
+                .expect("should exist")
+                .latest_writer(SnapshotSegment::Headers)?;
+            writer.append_header(block.header.as_ref().clone(), ttd, block.hash())?;
+            writer.commit()?;
+        }
+
         // insert body ommers data
         if !block.ommers.is_empty() {
             self.tx.put::<tables::BlockOmmers>(

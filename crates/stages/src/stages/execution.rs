@@ -7,10 +7,10 @@ use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::BlockNumberAddress,
+    snapshot::HeaderMask,
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
@@ -18,7 +18,7 @@ use reth_primitives::{
     BlockNumber, Header, PruneModes, SnapshotSegment, U256,
 };
 use reth_provider::{
-    providers::{SnapshotProviderRWRefMut, SnapshotWriter},
+    providers::{SnapshotProvider, SnapshotProviderRWRefMut, SnapshotWriter},
     BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, TransactionVariant,
 };
@@ -122,6 +122,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let start_block = input.next_block();
         let max_block = input.target();
         let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
+        let snapshot_provider = provider.snapshot_provider().expect("should exist");
 
         // We only use static files for Receipts, if there is no receipt pruning of any kind.
         let mut snapshotter = None;
@@ -138,7 +139,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Progress tracking
         let mut stage_progress = start_block;
         let mut stage_checkpoint =
-            execution_checkpoint(provider, start_block, max_block, input.checkpoint())?;
+            execution_checkpoint(snapshot_provider, start_block, max_block, input.checkpoint())?;
 
         let mut fetch_block_duration = Duration::default();
         let mut execution_duration = Duration::default();
@@ -254,12 +255,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     }
 }
 
-fn execution_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
+fn execution_checkpoint(
+    provider: &SnapshotProvider,
     start_block: BlockNumber,
     max_block: BlockNumber,
     checkpoint: StageCheckpoint,
-) -> Result<ExecutionCheckpoint, DatabaseError> {
+) -> Result<ExecutionCheckpoint, ProviderError> {
     Ok(match checkpoint.execution_stage_checkpoint() {
         // If checkpoint block range fully matches our range,
         // we take the previously used stage checkpoint as-is.
@@ -321,15 +322,20 @@ fn execution_checkpoint<DB: Database>(
     })
 }
 
-fn calculate_gas_used_from_headers<DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
+fn calculate_gas_used_from_headers(
+    provider: &SnapshotProvider,
     range: RangeInclusive<BlockNumber>,
-) -> Result<u64, DatabaseError> {
+) -> Result<u64, ProviderError> {
     let mut gas_total = 0;
 
     let start = Instant::now();
-    for entry in provider.tx_ref().cursor_read::<tables::Headers>()?.walk_range(range.clone())? {
-        let (_, Header { gas_used, .. }) = entry?;
+
+    for entry in provider.fetch_range_iter(
+        SnapshotSegment::Headers,
+        *range.start()..*range.end() + 1,
+        |cursor, number| cursor.get_one::<HeaderMask<Header>>(number.into()),
+    )? {
+        let Header { gas_used, .. } = entry?;
         gas_total += gas_used;
     }
 
@@ -618,8 +624,9 @@ mod tests {
     #[test]
     fn execution_checkpoint_matches() {
         let state_db = create_test_rw_db();
-        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
-        let tx = factory.provider_rw().unwrap();
+        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone())
+            .with_snapshots(create_test_snapshots_dir())
+            .unwrap();
 
         let previous_stage_checkpoint = ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 0, to: 0 },
@@ -631,7 +638,7 @@ mod tests {
         };
 
         let stage_checkpoint = execution_checkpoint(
-            &tx,
+            &factory.snapshot_provider().unwrap(),
             previous_stage_checkpoint.block_range.from,
             previous_stage_checkpoint.block_range.to,
             previous_checkpoint,
@@ -643,7 +650,9 @@ mod tests {
     #[test]
     fn execution_checkpoint_precedes() {
         let state_db = create_test_rw_db();
-        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone())
+            .with_snapshots(create_test_snapshots_dir())
+            .unwrap();
         let provider = factory.provider_rw().unwrap();
 
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
@@ -671,8 +680,8 @@ mod tests {
             stage_checkpoint: Some(StageUnitCheckpoint::Execution(previous_stage_checkpoint)),
         };
 
-        let provider = factory.provider_rw().unwrap();
-        let stage_checkpoint = execution_checkpoint(&provider, 1, 1, previous_checkpoint);
+        let stage_checkpoint =
+            execution_checkpoint(&factory.snapshot_provider().unwrap(), 1, 1, previous_checkpoint);
 
         assert_matches!(stage_checkpoint, Ok(ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 1, to: 1 },
@@ -687,7 +696,9 @@ mod tests {
     #[test]
     fn execution_checkpoint_recalculate_full_previous_some() {
         let state_db = create_test_rw_db();
-        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone())
+            .with_snapshots(create_test_snapshots_dir())
+            .unwrap();
         let provider = factory.provider_rw().unwrap();
 
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
@@ -707,8 +718,8 @@ mod tests {
             stage_checkpoint: Some(StageUnitCheckpoint::Execution(previous_stage_checkpoint)),
         };
 
-        let provider = factory.provider_rw().unwrap();
-        let stage_checkpoint = execution_checkpoint(&provider, 1, 1, previous_checkpoint);
+        let stage_checkpoint =
+            execution_checkpoint(&factory.snapshot_provider().unwrap(), 1, 1, previous_checkpoint);
 
         assert_matches!(stage_checkpoint, Ok(ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 1, to: 1 },
@@ -723,7 +734,9 @@ mod tests {
     #[test]
     fn execution_checkpoint_recalculate_full_previous_none() {
         let state_db = create_test_rw_db();
-        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone())
+            .with_snapshots(create_test_snapshots_dir())
+            .unwrap();
         let provider = factory.provider_rw().unwrap();
 
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
@@ -732,12 +745,13 @@ mod tests {
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
         provider.insert_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
         provider.insert_block(block.clone().try_seal_with_senders().unwrap(), None).unwrap();
+
         provider.commit().unwrap();
 
         let previous_checkpoint = StageCheckpoint { block_number: 1, stage_checkpoint: None };
 
-        let provider = factory.provider_rw().unwrap();
-        let stage_checkpoint = execution_checkpoint(&provider, 1, 1, previous_checkpoint);
+        let stage_checkpoint =
+            execution_checkpoint(&factory.snapshot_provider().unwrap(), 1, 1, previous_checkpoint);
 
         assert_matches!(stage_checkpoint, Ok(ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 1, to: 1 },

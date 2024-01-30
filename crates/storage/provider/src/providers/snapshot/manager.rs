@@ -369,7 +369,7 @@ impl SnapshotProvider {
     /// This function iteratively retrieves data using `get_fn` for each item in the given range.
     /// It continues fetching until the end of the range is reached or the provided `predicate`
     /// returns false.
-    pub fn fetch_range<T, F, P>(
+    pub fn fetch_range_with_predicate<T, F, P>(
         &self,
         segment: SnapshotSegment,
         range: Range<u64>,
@@ -412,6 +412,38 @@ impl SnapshotProvider {
         }
 
         Ok(result)
+    }
+
+    /// Fetches data within a specified range across multiple snapshot files.
+    ///
+    /// Returns an iterator over the data
+    pub fn fetch_range_iter<'a, T, F>(
+        &'a self,
+        segment: SnapshotSegment,
+        range: Range<u64>,
+        get_fn: F,
+    ) -> ProviderResult<impl Iterator<Item = ProviderResult<T>> + 'a>
+    where
+        F: Fn(&mut SnapshotCursor<'_>, u64) -> ProviderResult<Option<T>> + 'a,
+        T: std::fmt::Debug,
+    {
+        let get_provider = move |start: u64| match segment {
+            SnapshotSegment::Headers => self.get_segment_provider_from_block(segment, start, None),
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                self.get_segment_provider_from_transaction(segment, start, None)
+            }
+        };
+        let mut provider = get_provider(range.start)?;
+
+        Ok(range.filter_map(move |number| {
+            return match get_fn(&mut provider.cursor().ok()?, number).transpose() {
+                Some(result) => Some(result),
+                None => {
+                    provider = get_provider(number).ok()?;
+                    get_fn(&mut provider.cursor().ok()?, number).transpose()
+                }
+            }
+        }))
     }
 
     /// Returns directory where snapshots are located.
@@ -503,7 +535,7 @@ impl HeaderProvider for SnapshotProvider {
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        self.fetch_range(
+        self.fetch_range_with_predicate(
             SnapshotSegment::Headers,
             to_range(range),
             |cursor, number| cursor.get_one::<HeaderMask<Header>>(number.into()),
@@ -521,7 +553,7 @@ impl HeaderProvider for SnapshotProvider {
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.fetch_range(
+        self.fetch_range_with_predicate(
             SnapshotSegment::Headers,
             to_range(range),
             |cursor, number| {
@@ -544,7 +576,7 @@ impl BlockHashReader for SnapshotProvider {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.fetch_range(
+        self.fetch_range_with_predicate(
             SnapshotSegment::Headers,
             start..end,
             |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(number.into()),
@@ -574,7 +606,7 @@ impl ReceiptProvider for SnapshotProvider {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
-        self.fetch_range(
+        self.fetch_range_with_predicate(
             SnapshotSegment::Receipts,
             to_range(range),
             |cursor, number| cursor.get_one::<ReceiptMask<Receipt>>(number.into()),
@@ -588,7 +620,7 @@ impl TransactionsProviderExt for SnapshotProvider {
         &self,
         tx_range: Range<TxNumber>,
     ) -> ProviderResult<Vec<(TxHash, TxNumber)>> {
-        self.fetch_range(
+        self.fetch_range_with_predicate(
             SnapshotSegment::Transactions,
             tx_range,
             |cursor, number| {
@@ -682,7 +714,7 @@ impl TransactionsProvider for SnapshotProvider {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<reth_primitives::TransactionSignedNoHash>> {
-        self.fetch_range(
+        self.fetch_range_with_predicate(
             SnapshotSegment::Transactions,
             to_range(range),
             |cursor, number| {
