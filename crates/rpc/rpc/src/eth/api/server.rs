@@ -12,6 +12,7 @@ use crate::{
 };
 use jsonrpsee::core::RpcResult as Result;
 use reth_network_api::NetworkInfo;
+use reth_node_api::EvmEnvConfig;
 use reth_primitives::{
     serde_helper::{num::U64HexOrNumber, JsonStorageKey},
     Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
@@ -31,7 +32,7 @@ use serde_json::Value;
 use tracing::trace;
 
 #[async_trait::async_trait]
-impl<Provider, Pool, Network> EthApiServer for EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthApiServer for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: EthApiSpec + EthTransactions,
     Pool: TransactionPool + 'static,
@@ -44,6 +45,7 @@ where
         + EvmEnvProvider
         + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
+    EvmConfig: EvmEnvConfig + 'static,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> Result<U64> {
@@ -402,6 +404,7 @@ mod tests {
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use reth_interfaces::test_utils::{generators, generators::Rng};
     use reth_network_api::noop::NoopNetwork;
+    use reth_node_builder::EthEvmConfig;
     use reth_primitives::{
         basefee::calculate_next_block_base_fee, constants::ETHEREUM_BLOCK_GAS_LIMIT, BaseFeeParams,
         Block, BlockNumberOrTag, Header, TransactionSigned, B256, U256,
@@ -425,9 +428,9 @@ mod tests {
             + 'static,
     >(
         provider: P,
-    ) -> EthApi<P, TestPool, NoopNetwork> {
-        let cache = EthStateCache::spawn(provider.clone(), Default::default());
-
+    ) -> EthApi<P, TestPool, NoopNetwork, EthEvmConfig> {
+        let evm_config = EthEvmConfig::default();
+        let cache = EthStateCache::spawn(provider.clone(), Default::default(), evm_config);
         let fee_history_cache =
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
 
@@ -440,6 +443,7 @@ mod tests {
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
+            evm_config,
         )
     }
 
@@ -449,7 +453,7 @@ mod tests {
         mut oldest_block: Option<B256>,
         block_count: u64,
         mock_provider: MockEthProvider,
-    ) -> (EthApi<MockEthProvider, TestPool, NoopNetwork>, Vec<U256>, Vec<f64>) {
+    ) -> (EthApi<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>, Vec<U256>, Vec<f64>) {
         let mut rng = generators::rng();
 
         // Build mock data
@@ -534,7 +538,7 @@ mod tests {
     /// Invalid block range
     #[tokio::test]
     async fn test_fee_history_empty() {
-        let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
             &build_test_eth_api(NoopProvider::default()),
             1.into(),
             BlockNumberOrTag::Latest,
@@ -556,7 +560,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
             &eth_api,
             (newest_block + 1).into(),
             newest_block.into(),
@@ -579,7 +583,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
             &eth_api,
             (1).into(),
             (newest_block + 1000).into(),
@@ -602,7 +606,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
             &eth_api,
             (0).into(),
             (newest_block).into(),

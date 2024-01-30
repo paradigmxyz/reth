@@ -1,14 +1,20 @@
 //! utilities for working with revm
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
+#[cfg(feature = "optimism")]
+use reth_primitives::revm::env::fill_op_tx_env;
+#[cfg(not(feature = "optimism"))]
+use reth_primitives::revm::env::fill_tx_env;
 use reth_primitives::{
-    revm::env::{fill_tx_env, fill_tx_env_with_recovered},
-    Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256, U256,
+    revm::env::fill_tx_env_with_recovered, Address, TransactionSigned,
+    TransactionSignedEcRecovered, TxHash, B256, U256,
 };
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
     BlockOverrides, CallRequest,
 };
+#[cfg(feature = "optimism")]
+use revm::primitives::{Bytes, OptimismFields};
 use revm::{
     db::CacheDB,
     precompile::{Precompiles, SpecId as PrecompilesSpecId},
@@ -20,9 +26,6 @@ use revm_primitives::{
     Bytecode,
 };
 use tracing::trace;
-
-#[cfg(feature = "optimism")]
-use revm::primitives::{Bytes, OptimismFields};
 
 /// Helper type that bundles various overrides for EVM Execution.
 ///
@@ -104,7 +107,7 @@ impl FillableTransaction for TransactionSigned {
         {
             let mut envelope_buf = Vec::with_capacity(self.length_without_header());
             self.encode_enveloped(&mut envelope_buf);
-            fill_tx_env(tx_env, self, signer, envelope_buf.into());
+            fill_op_tx_env(tx_env, self, signer, envelope_buf.into());
         }
         Ok(())
     }
@@ -169,13 +172,14 @@ where
 /// _runtime_ db ([CacheDB]).
 ///
 /// Note: This assumes the target transaction is in the given iterator.
+/// Returns the index of the target transaction in the given iterator.
 pub(crate) fn replay_transactions_until<DB, I, Tx>(
     db: &mut CacheDB<DB>,
     cfg: CfgEnv,
     block_env: BlockEnv,
     transactions: I,
     target_tx_hash: B256,
-) -> EthResult<()>
+) -> Result<usize, EthApiError>
 where
     DB: DatabaseRef,
     EthApiError: From<<DB as DatabaseRef>::Error>,
@@ -185,6 +189,7 @@ where
     let env = Env { cfg, block: block_env, tx: TxEnv::default() };
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
+    let mut index = 0;
     for tx in transactions.into_iter() {
         if tx.hash() == target_tx_hash {
             // reached the target transaction
@@ -193,9 +198,10 @@ where
 
         tx.try_fill_tx_env(&mut evm.env.tx)?;
         let res = evm.transact()?;
-        evm.db.as_mut().expect("is set").commit(res.state)
+        evm.db.as_mut().expect("is set").commit(res.state);
+        index += 1;
     }
-    Ok(())
+    Ok(index)
 }
 
 /// Prepares the [Env] for execution.

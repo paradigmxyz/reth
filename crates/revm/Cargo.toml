@@ -17,6 +17,7 @@ reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
 reth-consensus-common.workspace = true
+reth-node-api.workspace = true
 
 # revm
 revm.workspace = true
@@ -27,6 +28,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 reth-trie.workspace = true
+reth-node-builder.workspace = true
 
 [features]
 optimism = [

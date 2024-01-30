@@ -20,7 +20,7 @@ use reth_db::{
 use reth_interfaces::{consensus::Consensus, p2p::full_block::FullBlockClient};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-
+use reth_node_builder::EthEvmConfig;
 use reth_primitives::{
     fs,
     stage::{StageCheckpoint, StageId},
@@ -202,7 +202,8 @@ impl Command {
                         checkpoint.stage_checkpoint.is_some()
                 });
 
-        let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
+        let factory =
+            reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
         let mut execution_stage = ExecutionStage::new(
             factory,
             ExecutionStageThresholds {
@@ -311,7 +312,7 @@ impl Command {
                 {
                     match (incremental_account_trie_iter.next(), clean_account_trie_iter.next()) {
                         (Some(incremental), Some(clean)) => {
-                            pretty_assertions::assert_eq!(
+                            similar_asserts::assert_eq!(
                                 incremental.0,
                                 clean.0,
                                 "Nibbles don't match"
@@ -364,7 +365,7 @@ impl Command {
                     }
                 }
 
-                pretty_assertions::assert_eq!(
+                similar_asserts::assert_eq!(
                     (
                         incremental_account_mismatched,
                         first_mismatched_storage.as_ref().map(|(incremental, _)| incremental)

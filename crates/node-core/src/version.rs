@@ -79,7 +79,7 @@ pub fn default_extradata() -> String {
     format!("reth/v{}/{}", env!("CARGO_PKG_VERSION"), std::env::consts::OS)
 }
 
-const fn build_profile_name() -> &'static str {
+pub(crate) const fn build_profile_name() -> &'static str {
     // Derived from https://stackoverflow.com/questions/73595435/how-to-get-profile-from-cargo-toml-in-build-rs-or-at-runtime
     // We split on the path separator of the *host* machine, which may be different from
     // `std::path::MAIN_SEPARATOR_STR`.
