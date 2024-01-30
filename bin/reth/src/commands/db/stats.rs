@@ -3,6 +3,7 @@ use clap::Parser;
 use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;
 use human_bytes::human_bytes;
+use itertools::Itertools;
 use reth_db::{database::Database, mdbx, snapshot::iter_snapshots, DatabaseEnv, Tables};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::snapshot::find_fixed_range;
@@ -147,7 +148,7 @@ impl Command {
         let mut total_offsets_size = 0;
         let mut total_config_size = 0;
 
-        for (segment, ranges) in snapshots {
+        for (segment, ranges) in snapshots.into_iter().sorted_by_key(|(segment, _)| *segment) {
             for (block_range, tx_range) in ranges {
                 let fixed_block_range = find_fixed_range(*block_range.start());
                 let jar_provider = snapshot_provider
