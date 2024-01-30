@@ -114,10 +114,13 @@ fn bundle_state_root(state: &BundleStateWithReceipts) -> B256 {
                 address,
                 (
                     into_reth_acc(info.clone()),
-                    storage_root_unhashed(account.storage.iter().filter_map(|(slot, value)| {
-                        (!value.present_value.is_zero())
-                            .then(|| ((*slot).into(), value.present_value))
-                    })),
+                    storage_root_unhashed(
+                        account
+                            .storage
+                            .iter()
+                            .filter(|(_, value)| !value.present_value.is_zero())
+                            .map(|(slot, value)| ((*slot).into(), value.present_value)),
+                    ),
                 ),
             )
         })
