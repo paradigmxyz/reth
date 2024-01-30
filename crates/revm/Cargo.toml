@@ -28,7 +28,8 @@ tracing.workspace = true
 
 [dev-dependencies]
 reth-trie.workspace = true
-reth-node-builder.workspace = true
+reth-node-builder-ethereum.workspace = true
+reth-node-builder-optimism.workspace = true
 
 [features]
 optimism = [

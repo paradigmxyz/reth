@@ -2284,7 +2284,7 @@ dependencies = [
  "alloy-rlp",
  "reth-db",
  "reth-interfaces",
- "reth-node-builder",
+ "reth-node-builder-ethereum",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -5760,7 +5760,8 @@ dependencies = [
  "reth-network-api",
  "reth-nippy-jar",
  "reth-node-api",
- "reth-node-builder",
+ "reth-node-builder-ethereum",
+ "reth-node-builder-optimism",
  "reth-node-core",
  "reth-optimism-payload-builder",
  "reth-payload-builder",
@@ -5805,7 +5806,7 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-interfaces",
  "reth-node-api",
- "reth-node-builder",
+ "reth-node-builder-ethereum",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -5855,7 +5856,8 @@ dependencies = [
  "reth-interfaces",
  "reth-metrics",
  "reth-node-api",
- "reth-node-builder",
+ "reth-node-builder-ethereum",
+ "reth-node-builder-optimism",
  "reth-payload-builder",
  "reth-payload-validator",
  "reth-primitives",
@@ -5898,7 +5900,8 @@ dependencies = [
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
- "reth-node-builder",
+ "reth-node-builder-ethereum",
+ "reth-node-builder-optimism",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -6382,7 +6385,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-node-builder"
+name = "reth-node-builder-ethereum"
+version = "0.1.0-alpha.16"
+dependencies = [
+ "reth-node-api",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-rpc-types",
+ "serde",
+]
+
+[[package]]
+name = "reth-node-builder-optimism"
 version = "0.1.0-alpha.16"
 dependencies = [
  "reth-node-api",
@@ -6624,7 +6638,8 @@ dependencies = [
  "reth-consensus-common",
  "reth-interfaces",
  "reth-node-api",
- "reth-node-builder",
+ "reth-node-builder-ethereum",
+ "reth-node-builder-optimism",
  "reth-primitives",
  "reth-provider",
  "reth-trie",
@@ -6663,7 +6678,8 @@ dependencies = [
  "reth-network",
  "reth-network-api",
  "reth-node-api",
- "reth-node-builder",
+ "reth-node-builder-ethereum",
+ "reth-node-builder-optimism",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -6730,7 +6746,8 @@ dependencies = [
  "reth-metrics",
  "reth-network-api",
  "reth-node-api",
- "reth-node-builder",
+ "reth-node-builder-ethereum",
+ "reth-node-builder-optimism",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
@@ -6766,7 +6783,8 @@ dependencies = [
  "reth-interfaces",
  "reth-metrics",
  "reth-node-api",
- "reth-node-builder",
+ "reth-node-builder-ethereum",
+ "reth-node-builder-optimism",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
@@ -6862,7 +6880,8 @@ dependencies = [
  "reth-eth-wire",
  "reth-interfaces",
  "reth-metrics",
- "reth-node-builder",
+ "reth-node-builder-ethereum",
+ "reth-node-builder-optimism",
  "reth-primitives",
  "reth-provider",
  "reth-revm",

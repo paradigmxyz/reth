@@ -62,7 +62,8 @@ reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-downloaders.workspace = true
 reth-eth-wire.workspace = true # TODO(onbjerg): We only need this for [BlockBody]
-reth-node-builder.workspace = true
+reth-node-builder-ethereum.workspace = true
+reth-node-builder-optimism.workspace = true
 reth-blockchain-tree.workspace = true
 reth-revm.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
