@@ -222,7 +222,8 @@ impl TransactionFetcher {
                     hash=%hash,
                     size=self.eth68_meta.peek(&hash).expect("should find size in `eth68-meta`"),
                     acc_size_response=acc_size_response,
-                    POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTES=POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
+                    POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE=
+                        POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
                     "no space for hash in `GetPooledTransactions` request to peer"
                 );
 
@@ -526,7 +527,8 @@ impl TransactionFetcher {
                 trace!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
                     acc_size_eth68_response=acc_size_response, // no change acc size
-                    POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTES=POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
+                    POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE=
+                        POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
                     "request to peer full"
                 );
 
@@ -568,7 +570,8 @@ impl TransactionFetcher {
                         peer_id=format!("{peer_id:#}"),
                         hash=%hash,
                         acc_size_eth68_response=acc_size_response,
-                        POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTES=POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
+                        POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE=
+                            POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
                         "found buffered hash for request to peer"
                     );
                 }
@@ -629,7 +632,8 @@ impl TransactionFetcher {
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
                         hash=%hash,
-                        POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTES=POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
+                        POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE=
+                            POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
                         "found buffered hash for request to peer"
                     );
                 }
