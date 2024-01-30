@@ -1015,18 +1015,37 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
+        // If the budget is exhausted we manually yield back control to tokio. See
+        // `NetworkManager` for more context on the design pattern.
+        let budget = &mut 1024;
+        macro_rules! budget_checkpoint {
+            () => {
+                *budget -= 1;
+                if *budget == 0 {
+                    // make sure we're woken up again
+                    return Poll::Ready(())
+                }
+            };
+        }
+
         // drain network/peer related events
         while let Poll::Ready(Some(event)) = this.network_events.poll_next_unpin(cx) {
+            budget_checkpoint!();
+
             this.on_network_event(event);
         }
 
         // drain commands
         while let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
+            budget_checkpoint!();
+
             this.on_command(cmd);
         }
 
         // drain incoming transaction events
         while let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
+            budget_checkpoint!();
+
             this.on_network_tx_event(event);
         }
 
@@ -1034,6 +1053,8 @@ where
 
         // drain fetching transaction events
         while let Poll::Ready(Some(fetch_event)) = this.transaction_fetcher.poll_next_unpin(cx) {
+            budget_checkpoint!();
+
             match fetch_event {
                 FetchEvent::TransactionsFetched { peer_id, transactions } => {
                     this.import_transactions(peer_id, transactions, TransactionSource::Response);
@@ -1053,6 +1074,8 @@ where
 
         // Advance all imports
         while let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
+            budget_checkpoint!();
+
             match import_res {
                 Ok(hash) => {
                     this.on_good_import(hash);
@@ -1078,6 +1101,8 @@ where
         // handle and propagate new transactions
         let mut new_txs = Vec::new();
         while let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
+            budget_checkpoint!();
+
             new_txs.push(hash);
         }
         if !new_txs.is_empty() {
