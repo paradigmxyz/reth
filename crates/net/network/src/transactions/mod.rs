@@ -83,7 +83,8 @@ const GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE: GetPooledTransactionLimit =
     GetPooledTransactionLimit::SizeSoftLimit(2 * 1024 * 1024);
 
 /// The future for inserting a function into the pool
-pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<Vec<PoolResult<TxHash>>>> + Send + 'static>>;
+pub type PoolImportFuture =
+    Pin<Box<dyn Future<Output = PoolResult<Vec<PoolResult<TxHash>>>> + Send + 'static>>;
 
 /// Api to interact with [`TransactionsManager`] task.
 #[derive(Debug, Clone)]
