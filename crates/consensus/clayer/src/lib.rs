@@ -400,7 +400,7 @@ where
         let jwt_key = JwtKey::from_slice(jwt_key_bytes).unwrap();
         let api = Arc::new(create_auth_api_with_port(jwt_key, auth_port));
         let config = PbftConfig::new();
-        let mut state = PbftState::new(secret, latest_header.number, &config);
+        let state = PbftState::new(secret, latest_header.number, &config);
 
         Self {
             chain_spec,

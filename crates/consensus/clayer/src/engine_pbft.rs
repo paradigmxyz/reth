@@ -75,7 +75,7 @@ pub async fn handle_consensus_event(
         }
         ConsensusEvent::PeerConnected(peer_id) => {
             info!(target: "consensus::cl","Received PeerConnected message with peer ID: {:?}", peer_id);
-            consensus.on_peer_connected(peer_id, state)?
+            consensus.on_peer_connected(peer_id, state).await?
         }
         ConsensusEvent::PeerDisconnected(peer_id) => {
             info!(target: "consensus::cl","Received PeerDisconnected for peer ID: {:?}", peer_id);

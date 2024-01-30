@@ -52,6 +52,12 @@ impl Clone for ClayerConsensusMessagingAgent {
     }
 }
 
+impl ClayerConsensusMessagingAgent {
+    pub fn new() -> Self {
+        Self { inner: Arc::new(RwLock::new(ClayerConsensusMessagingAgentInner::new())) }
+    }
+}
+
 impl ClayerConsensusMessageAgentTrait for ClayerConsensusMessagingAgent {
     /// Returns pending consensus listener
     fn pending_consensus_listener(&self) -> Receiver<(Vec<PeerId>, reth_primitives::Bytes)> {
@@ -95,6 +101,17 @@ pub struct ClayerConsensusMessagingAgentInner {
     network_queued: VecDeque<(PeerId, bool)>,
     sender: Option<Sender<(Vec<PeerId>, reth_primitives::Bytes)>>,
     active_peers: HashSet<PeerId>,
+}
+
+impl ClayerConsensusMessagingAgentInner {
+    pub fn new() -> Self {
+        Self {
+            queued: VecDeque::new(),
+            network_queued: VecDeque::new(),
+            sender: None,
+            active_peers: HashSet::new(),
+        }
+    }
 }
 
 impl ClayerConsensusMessagingAgentInner {
@@ -261,10 +278,10 @@ impl ClayerConsensusEngine {
         }
 
         match msg_type {
-            PbftMessageType::PrePrepare => self.handle_pre_prepare(msg, state)?,
-            PbftMessageType::Prepare => self.handle_prepare(msg, state)?,
+            PbftMessageType::PrePrepare => self.handle_pre_prepare(msg, state).await?, // add a extra async
+            PbftMessageType::Prepare => self.handle_prepare(msg, state).await?, // add a extra async
             PbftMessageType::Commit => self.handle_commit(msg, state).await?,
-            PbftMessageType::ViewChange => self.handle_view_change(&msg, state)?,
+            PbftMessageType::ViewChange => self.handle_view_change(&msg, state).await?, // add a extra async
             PbftMessageType::NewView => self.handle_new_view(&msg, state).await?,
             PbftMessageType::SealRequest => self.handle_seal_request(msg, state).await?,
             PbftMessageType::Seal => self.handle_seal_response(&msg, state).await?,
@@ -286,7 +303,7 @@ impl ClayerConsensusEngine {
     ///
     /// Once a `PrePrepare` for the current sequence number is accepted and added to the log, the
     /// node will try to switch to the `Preparing` phase.
-    fn handle_pre_prepare(
+    async fn handle_pre_prepare(
         &mut self,
         msg: ParsedMessage,
         state: &mut PbftState,
@@ -352,7 +369,7 @@ impl ClayerConsensusEngine {
     /// Once a `Prepare` for the current sequence number is accepted and added to the log, the node
     /// will check if it has the required 2f + 1 `Prepared` messages to move on to the Committing
     /// phase
-    fn handle_prepare(
+    async fn handle_prepare(
         &mut self,
         msg: ParsedMessage,
         state: &mut PbftState,
@@ -492,7 +509,7 @@ impl ClayerConsensusEngine {
     /// node isn't already view changing but it now has f + 1 ViewChange messages, start view
     /// changing early. If the node is the primary and has 2f view change messages now, broadcast
     /// the NewView message to the rest of the nodes to move to the new view.
-    fn handle_view_change(
+    async fn handle_view_change(
         &mut self,
         msg: &ParsedMessage,
         state: &mut PbftState,
@@ -1163,7 +1180,7 @@ impl ClayerConsensusEngine {
     ///
     /// A peer has just connected to this node. Send a bootstrap commit message if the peer is part
     /// of the network and the node isn't at the genesis block.
-    pub fn on_peer_connected(
+    pub async fn on_peer_connected(
         &mut self,
         peer_id: PeerId,
         state: &mut PbftState,
