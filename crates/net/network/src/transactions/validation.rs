@@ -1,12 +1,12 @@
 //! Validation of [`NewPooledTransactionHashes68`] entries. These are of the form
 //! `(ty, hash, size)`. Validation and filtering of entries is network dependent. [``]
 
-use core::fmt;
 use std::{collections::HashMap, mem};
 
 use derive_more::{Deref, DerefMut, Display};
 use itertools::izip;
 use reth_eth_wire::{
+    MAX_MESSAGE_SIZE,
     NewPooledTransactionHashes66, NewPooledTransactionHashes68, ValidAnnouncementData,
 };
 use reth_primitives::{Signature, TxHash, TxType};
@@ -14,9 +14,6 @@ use tracing::{debug, trace};
 
 /// The size of a decoded signature in bytes.
 pub const SIGNATURE_DECODED_SIZE_BYTES: usize = mem::size_of::<Signature>();
-
-/// Max encoded length of transaction types pre-blob transaction type.
-pub const MAX_ENCODED_PRE_BLOB_TX_LENGTH: usize = usize::pow(2, 17);
 
 /// Interface for validating a `(ty, size, hash)` tuple from a [`NewPooledTransactionHashes68`].
 pub trait ValidateTx68 {
@@ -186,7 +183,7 @@ impl ValidateTx68 for EthAnnouncementFilter {
         // encoded length, nonetheless, the blob tx may become bigger in the future.
         match ty {
             TxType::Legacy | TxType::EIP2930 | TxType::EIP1559 => {
-                Some(MAX_ENCODED_PRE_BLOB_TX_LENGTH)
+                Some(MAX_MESSAGE_SIZE)
             }
             TxType::EIP4844 => None,
         }
