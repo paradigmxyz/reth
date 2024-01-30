@@ -1246,7 +1246,6 @@ mod tests {
         proofs::{calculate_receipt_root, calculate_transaction_root, state_root_unhashed},
         revm_primitives::AccountInfo,
         stage::StageCheckpoint,
-        trie::{Nibbles, StoredNibblesSubKey},
         Account, Address, ChainSpecBuilder, Genesis, GenesisAccount, Header, Signature,
         Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
         Withdrawals, B256, MAINNET,
@@ -1259,7 +1258,7 @@ mod tests {
         BlockWriter, BundleStateWithReceipts, ProviderFactory,
     };
     use reth_revm::EvmProcessorFactory;
-    use reth_trie::{updates::TrieKey, StateRoot};
+    use reth_trie::StateRoot;
     use std::{
         collections::{HashMap, HashSet},
         sync::Arc,
@@ -1632,13 +1631,6 @@ mod tests {
         let block3_chain = tree.state.chains.get(&block3_chain_id).unwrap();
         assert!(block3_chain.trie_updates().is_some());
 
-        println!("\n\nBlock 3 trie updates");
-        if let Some(updates) = block3_chain.trie_updates() {
-            for (key, op) in updates.clone().into_iter() {
-                println!("{key:?}: {op:?}");
-            }
-        }
-
         assert_eq!(
             tree.make_canonical(&block3.hash).unwrap(),
             CanonicalOutcome::Committed { head: block3.header.clone() }
@@ -1652,14 +1644,6 @@ mod tests {
         let block4_chain = tree.state.chains.get(&block4_chain_id).unwrap();
         assert!(block4_chain.trie_updates().is_some());
 
-        println!("\n\nBlock 4 trie updates");
-        if let Some(updates) = block4_chain.trie_updates() {
-            for (key, op) in updates.clone().into_iter() {
-                println!("{key:?}: {op:?}");
-            }
-        }
-
-        println!("\nCOMMITTING 5 >>>>>> ");
         assert_eq!(
             tree.insert_block(block5.clone(), BlockValidationKind::Exhaustive).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
@@ -1668,13 +1652,6 @@ mod tests {
         let block5_chain_id = tree.state.block_indices.get_blocks_chain_id(&block5.hash).unwrap();
         let block5_chain = tree.state.chains.get(&block5_chain_id).unwrap();
         assert!(block5_chain.trie_updates().is_some());
-
-        println!("\n\nBlock 5 trie updates");
-        if let Some(updates) = block5_chain.trie_updates() {
-            for (key, op) in updates.clone().into_iter() {
-                println!("{key:?}: {op:?}");
-            }
-        }
 
         assert_eq!(
             tree.make_canonical(&block5.hash).unwrap(),

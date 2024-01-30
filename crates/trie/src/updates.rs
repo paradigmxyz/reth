@@ -130,28 +130,16 @@ impl TrieUpdates {
                         }
                     }
                 },
-                TrieKey::StorageTrie(hashed_address) => {
-                    match operation {
-                        TrieOp::Delete => {
-                            if hashed_address == b256!("8c3ab0970b73895b8c9959bae685c3a19f45eb5ad89d42b52a340ec4ac204d19") {
-                                println!("DELETING {hashed_address}");
-                            }
-                            if storage_trie_cursor.seek_exact(hashed_address)?.is_some() {
-                                storage_trie_cursor.delete_current_duplicates()?;
-                            }
+                TrieKey::StorageTrie(hashed_address) => match operation {
+                    TrieOp::Delete => {
+                        if storage_trie_cursor.seek_exact(hashed_address)?.is_some() {
+                            storage_trie_cursor.delete_current_duplicates()?;
                         }
-                        TrieOp::Update(..) => unreachable!("Cannot update full storage trie."),
                     }
-                }
+                    TrieOp::Update(..) => unreachable!("Cannot update full storage trie."),
+                },
                 TrieKey::StorageNode(hashed_address, nibbles) => {
                     if !nibbles.is_empty() {
-                        if hashed_address ==
-                            b256!(
-                                "8c3ab0970b73895b8c9959bae685c3a19f45eb5ad89d42b52a340ec4ac204d19"
-                            )
-                        {
-                            println!("UPDATING {hashed_address} {nibbles:?}: {operation:?}");
-                        }
                         // Delete the old entry if it exists.
                         if storage_trie_cursor
                             .seek_by_key_subkey(hashed_address, nibbles.clone())?
