@@ -74,12 +74,11 @@ const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
 /// Soft limit for NewPooledTransactions
 const NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT: usize = 4096;
 
-/// Soft limit for the message of full transactions in bytes.
-const FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT: usize = 100 * 1024;
-
-/// Softlimit for the response size of a GetPooledTransactions message (2MB)
-const GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE: GetPooledTransactionLimit =
-    GetPooledTransactionLimit::SizeSoftLimit(2 * 1024 * 1024);
+/// Soft limit for the response size of a GetPooledTransactions message (2MB) in bytes. Standard
+/// maximum response size. See specs
+///
+/// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
+const POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE: usize = 2 * 1024 * 1024;
 
 /// The future for inserting a function into the pool
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<TxHash>> + Send + 'static>>;
@@ -300,9 +299,12 @@ where
                 let _ = response.send(Ok(PooledTransactions::default()));
                 return
             }
-            let transactions = self
-                .pool
-                .get_pooled_transaction_elements(request.0, GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE);
+            let transactions = self.pool.get_pooled_transaction_elements(
+                request.0,
+                GetPooledTransactionLimit::ResponseSizeSoftLimit(
+                    POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
+                ),
+            );
 
             // we sent a response at which point we assume that the peer is aware of the
             // transactions
@@ -1112,7 +1114,7 @@ impl PropagateTransaction {
 }
 
 /// Helper type for constructing the full transaction message that enforces the
-/// `FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT`
+/// [`POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE`].
 #[derive(Default)]
 struct FullTransactionsBuilder {
     total_size: usize,
@@ -1125,7 +1127,7 @@ impl FullTransactionsBuilder {
     /// Append a transaction to the list if it doesn't exceed the maximum target size.
     fn push(&mut self, transaction: &PropagateTransaction) {
         let new_size = self.total_size + transaction.size;
-        if new_size > FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT {
+        if new_size > POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
             return
         }
 
@@ -1790,8 +1792,8 @@ mod tests {
         let eth_version = EthVersion::Eth68;
         let unseen_eth68_hashes = [B256::from_slice(&[1; 32]), B256::from_slice(&[2; 32])];
         let unseen_eth68_hashes_sizes = [
-            FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT / 2,
-            FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT / 2 - 4,
+            POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE / 2,
+            POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE / 2 - 4,
         ];
         // hashes and sizes to buffer in reverse order so that seen_eth68_hashes[0] and
         // seen_eth68_hashes_sizes[0] are lru
@@ -1828,7 +1830,9 @@ mod tests {
         let mut backups = default_cache();
         backups.insert(peer_id_other);
         tx_fetcher.unknown_hashes.insert(hash_other, (0, backups));
-        tx_fetcher.eth68_meta.insert(hash_other, FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT - 2); // a big tx
+        tx_fetcher
+            .eth68_meta
+            .insert(hash_other, POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE - 2); // a big tx
         tx_fetcher.buffered_hashes.insert(hash_other);
 
         let (peer, mut to_mock_session_rx) = new_mock_session(peer_id, eth_version);

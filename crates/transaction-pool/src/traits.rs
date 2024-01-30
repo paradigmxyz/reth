@@ -1134,7 +1134,7 @@ pub enum GetPooledTransactionLimit {
     /// No limit, return all transactions.
     None,
     /// Enforce a size limit on the returned transactions, for example 2MB
-    SizeSoftLimit(usize),
+    ResponseSizeSoftLimit(usize),
 }
 
 impl GetPooledTransactionLimit {
@@ -1143,7 +1143,7 @@ impl GetPooledTransactionLimit {
     pub fn exceeds(&self, size: usize) -> bool {
         match self {
             GetPooledTransactionLimit::None => false,
-            GetPooledTransactionLimit::SizeSoftLimit(limit) => size > *limit,
+            GetPooledTransactionLimit::ResponseSizeSoftLimit(limit) => size > *limit,
         }
     }
 }
