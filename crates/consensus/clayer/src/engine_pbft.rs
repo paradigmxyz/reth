@@ -48,7 +48,7 @@ fn parse_consensus_message_header(
     })
 }
 
-pub fn handle_consensus_event(
+pub async fn handle_consensus_event(
     consensus: &mut ClayerConsensusEngine,
     incoming_event: ConsensusEvent,
     state: &mut PbftState,
@@ -71,7 +71,7 @@ pub fn handle_consensus_event(
                     pbft_signer_id, verified_signer_id, parsed_message
                 )));
             }
-            consensus.on_peer_message(parsed_message, state)?
+            consensus.on_peer_message(parsed_message, state).await?
         }
         ConsensusEvent::PeerConnected(peer_id) => {
             info!(target: "consensus::cl","Received PeerConnected message with peer ID: {:?}", peer_id);

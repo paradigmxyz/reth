@@ -74,6 +74,8 @@ pub struct PbftState {
     /// The maximum number of faulty nodes in the network
     pub f: u64,
 
+    pub block_publishing_timeout: Timeout,
+
     /// Timer used to make sure the primary publishes blocks in a timely manner. If not, then this
     /// node will initiate a view change.
     pub idle_timeout: Timeout,
@@ -139,6 +141,7 @@ impl PbftState {
             mode: PbftMode::Normal,
             f,
             validators: Validators::new(config.members.clone()),
+            block_publishing_timeout: Timeout::new(config.block_publishing_delay),
             idle_timeout: Timeout::new(config.idle_timeout),
             commit_timeout: Timeout::new(config.commit_timeout),
             view_change_timeout: Timeout::new(config.view_change_duration),

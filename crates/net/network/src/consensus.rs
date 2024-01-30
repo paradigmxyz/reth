@@ -7,7 +7,7 @@ use crate::{
 };
 use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt};
 use reth_eth_wire::{ClayerConsensusMsg, EthVersion};
-use reth_interfaces::clayer::ClayerConsensus;
+use reth_interfaces::clayer::ClayerConsensusMessageAgentTrait;
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_rpc_types::PeerId;
@@ -39,7 +39,7 @@ pub struct NetworkClayerManager<Consensus> {
     pending_consensuses: ReceiverStream<(Vec<PeerId>, reth_primitives::Bytes)>,
 }
 
-impl<Consensus: ClayerConsensus> NetworkClayerManager<Consensus> {
+impl<Consensus: ClayerConsensusMessageAgentTrait> NetworkClayerManager<Consensus> {
     /// Sets up a new instance.
     ///
     /// Note: This expects an existing [`NetworkManager`](crate::NetworkManager) instance.
@@ -67,7 +67,7 @@ impl<Consensus: ClayerConsensus> NetworkClayerManager<Consensus> {
 
 impl<Consensus> NetworkClayerManager<Consensus>
 where
-    Consensus: ClayerConsensus + 'static,
+    Consensus: ClayerConsensusMessageAgentTrait + 'static,
 {
     fn on_network_event(&mut self, event: NetworkEvent) {
         match event {
@@ -117,7 +117,7 @@ where
 /// This should be spawned or used as part of `tokio::select!`.
 impl<Consensus> Future for NetworkClayerManager<Consensus>
 where
-    Consensus: ClayerConsensus + Unpin + 'static,
+    Consensus: ClayerConsensusMessageAgentTrait + Unpin + 'static,
 {
     type Output = ();
 

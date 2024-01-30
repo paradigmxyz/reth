@@ -8,8 +8,8 @@ use crate::engine_api::{
     auth::{strip_prefix, Auth, JwtKey},
     http::HttpJsonRpc,
 };
-pub use consensus::ClayerConsensusEngine;
 use consensus::{clayer_block_from_genesis, PbftConfig, PbftState};
+pub use consensus::{ClayerConsensusEngine, ClayerConsensusMessagingAgent};
 use engine_api::ApiService;
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_interfaces::consensus::ForkchoiceState;
@@ -61,7 +61,7 @@ pub const DEFAULT_JWT_FILE: &str = "jwt.hex";
 
 pub fn create_auth_api(jwt_key: JwtKey) -> HttpJsonRpc {
     let execution_url = Url::from_str(DEFAULT_EXECUTION_ENDPOINT).unwrap();
-    let execution_timeout_multiplier = Option::from(3);
+    let execution_timeout_multiplier = Option::from(1);
 
     let auth = Auth::new(jwt_key, None, None);
     let api = match HttpJsonRpc::new_with_auth(execution_url, auth, execution_timeout_multiplier) {
@@ -364,7 +364,7 @@ pub struct ConsensusBuilder<Client, Pool, CDB> {
     storage: ClStorage,
     api: Arc<HttpJsonRpc>,
     network: NetworkHandle,
-    consensus: ClayerConsensusEngine,
+    consensus_agent: ClayerConsensusMessagingAgent,
     storages: CDB,
     config: PbftConfig,
     state: PbftState,
@@ -383,7 +383,7 @@ where
         client: Client,
         pool: Pool,
         network: NetworkHandle,
-        clayer_consensus: ClayerConsensusEngine,
+        clayer_consensus_messaging_agent: ClayerConsensusMessagingAgent,
         storages: CDB,
         auth_port: u16,
     ) -> Self {
@@ -401,12 +401,7 @@ where
         let api = Arc::new(create_auth_api_with_port(jwt_key, auth_port));
         let config = PbftConfig::new();
         let mut state = PbftState::new(secret, latest_header.number, &config);
-        // clayer_consensus.initialize(
-        //     clayer_block_from_genesis(&latest_header),
-        //     ApiService::new(api.clone()),
-        //     &config,
-        //     &mut state,
-        // );
+
         Self {
             chain_spec,
             storage: ClStorage::new(latest_header.clone()),
@@ -414,7 +409,7 @@ where
             pool,
             api,
             network,
-            consensus: clayer_consensus,
+            consensus_agent: clayer_consensus_messaging_agent,
             storages,
             config,
             state,
@@ -431,7 +426,7 @@ where
             storage,
             api,
             network,
-            consensus,
+            consensus_agent,
             storages,
             config,
             state,
@@ -444,7 +439,7 @@ where
             pool,
             Arc::clone(&api),
             network.clone(),
-            consensus,
+            consensus_agent,
             storages,
             config,
             state,

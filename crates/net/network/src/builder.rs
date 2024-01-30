@@ -4,7 +4,7 @@ use crate::{
     consensus::NetworkClayerManager, eth_requests::EthRequestHandler,
     transactions::TransactionsManager, NetworkHandle, NetworkManager,
 };
-use reth_interfaces::clayer::ClayerConsensus;
+use reth_interfaces::clayer::ClayerConsensusMessageAgentTrait;
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::mpsc;
 
@@ -79,7 +79,7 @@ impl<C, Tx, Eth, Cl> NetworkBuilder<C, Tx, Eth, Cl> {
     }
 
     ///
-    pub fn consensus<Consensus: ClayerConsensus>(
+    pub fn consensus<Consensus: ClayerConsensusMessageAgentTrait>(
         self,
         consensus: Consensus,
     ) -> NetworkBuilder<C, Tx, Eth, NetworkClayerManager<Consensus>> {
