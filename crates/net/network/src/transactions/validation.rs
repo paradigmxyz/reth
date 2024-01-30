@@ -96,9 +96,8 @@ pub enum FilterOutcome {
 #[derive(Debug, Default, Deref, DerefMut)]
 pub struct AnnouncementFilter<N = EthAnnouncementFilter>(N);
 
-/// L1 Network.
+/// Filter for announcements containing EIP [`TxType`]s.
 #[derive(Debug, Display, Default)]
-#[non_exhaustive]
 pub struct EthAnnouncementFilter;
 
 impl ValidateTx68 for EthAnnouncementFilter {
