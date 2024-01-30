@@ -144,10 +144,12 @@ use std::{
     str::FromStr,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-
+use crate::cors::CorsDomainError;
 use constants::*;
 use error::{RpcError, ServerKind};
-use futures::future::Either;
+// use futures::future::Either;
+// use either::Either;
+use tower::util::Either;
 use futures_util::{future::BoxFuture, FutureExt};
 use hyper::{header::AUTHORIZATION, Body, HeaderMap, Request, Response};
 pub use jsonrpsee::server::ServerBuilder;
@@ -178,11 +180,11 @@ use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize, Serializer};
-use std::{future::Future, pin::Pin};
+use std::{ pin::Pin};
 use strum::{AsRefStr, EnumIter, EnumVariantNames, IntoStaticStr, ParseError, VariantNames};
 use tower::{
     layer::util::{Identity, Stack},
-    Layer, Service, ServiceBuilder,
+    Layer, ServiceBuilder,
 };
 use tower_http::cors::CorsLayer;
 use tracing::{instrument, trace};
@@ -1623,9 +1625,7 @@ impl RpcServerConfig {
             ws_local_addr = Some(addr);
             ws_server = Some(server);
         }
-        // async fn build(builder: ServerBuilder,   server_kind: ServerKind,socket_addr:
-        // SocketAddr,metrics: RpcServerMetrics,cors_domains: Option<String>, jwt_secret:
-        // Option<JwtSecret>) -> Result<(Self,SocketAddr),RpcError> {
+       
 
         if let Some(builder) = self.http_server_config.take() {
             let builder = builder.http_only();
@@ -1928,46 +1928,45 @@ impl Default for WsHttpServers {
 }
 
 pub struct WsHttpServerKind {
-    server: ServerOriginal,
+    server: EitherServer,
 }
 
-type EitherServer = Either<
-    Either<
-        Server<Identity, RpcServerMetrics>,
-        Server<Stack<CorsLayer, Identity>, RpcServerMetrics>,
-    >,
-    Either<
-        Server<Stack<AuthLayer<JwtAuthValidator>, Identity>, RpcServerMetrics>,
-        Server<Stack<AuthLayer<JwtAuthValidator>, Stack<CorsLayer, Identity>>, RpcServerMetrics>,
-    >,
->;
+type EitherServer = Either<Either<Server<Stack<Either<AuthLayer<JwtAuthValidator>, Identity>, Stack<Either<Result<CorsLayer, CorsDomainError>, Identity>, Identity>>, RpcServerMetrics>, Server<Stack<Either<AuthLayer<JwtAuthValidator>, Identity>, Stack<Either<Result<CorsLayer, CorsDomainError>, Identity>, Identity>>, RpcServerMetrics>>, Either<Server<Stack<Either<AuthLayer<JwtAuthValidator>, Identity>, Stack<Either<Result<CorsLayer, CorsDomainError>, Identity>, Identity>>, RpcServerMetrics>, Server<Stack<Either<AuthLayer<JwtAuthValidator>, Identity>, Stack<Either<Result<CorsLayer, CorsDomainError>, Identity>, Identity>>, RpcServerMetrics>>>;
 
-type ServerOriginal = Server<
-    tower::layer::util::Stack<
-        tower::util::Either<
-            reth_rpc::AuthLayer<reth_rpc::JwtAuthValidator>,
-            tower::layer::util::Identity,
-        >,
-        tower::layer::util::Stack<
-            tower::util::Either<
-                std::result::Result<tower_http::cors::CorsLayer, cors::CorsDomainError>,
-                tower::layer::util::Identity,
-            >,
-            tower::layer::util::Identity,
-        >,
-    >,
-    metrics::RpcServerMetrics,
->;
+// type ServerOriginal = Server<
+//     tower::layer::util::Stack<
+//         tower::util::Either<
+//             reth_rpc::AuthLayer<reth_rpc::JwtAuthValidator>,
+//             tower::layer::util::Identity,
+//         >,
+//         tower::layer::util::Stack<
+//             tower::util::Either<
+//                 std::result::Result<tower_http::cors::CorsLayer, cors::CorsDomainError>,
+//                 tower::layer::util::Identity,
+//             >,
+//             tower::layer::util::Identity,
+//         >,
+//     >,
+//     metrics::RpcServerMetrics,
+// >;
 
 // === impl WsHttpServerKind ===
 
 impl WsHttpServerKind {
     /// Starts the server and returns the handle
-    // async fn start( self, module: RpcModule<()>) -> ServerHandle {
+    async fn start(self,module: RpcModule<()>) -> ServerHandle{
+        match self.server {
+            Either::A(left) => match left {
+                Either::A(a) => a.start(module).await, 
+                Either::B(b) => b.start(module).await, 
+            },
+            Either::B(right) => match right {
+                Either::A(a) => a.start(module).await, 
+                Either::B(b) => b.start(module).await, 
+            },
+        }
+        }
 
-    //   #6133  How to call start() ?
-
-    // }
 
     /// Builds the server according to the given config parameters.
     ///
@@ -1981,7 +1980,7 @@ impl WsHttpServerKind {
         jwt_secret: Option<JwtSecret>,
     ) -> Result<(Self, SocketAddr), RpcError> {
         let secret_layer;
-        if let Some(secret) = jwt_secret {
+        if let Some(ref secret) = jwt_secret {
             secret_layer = Some(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
         } else {
             secret_layer = None
@@ -1996,8 +1995,16 @@ impl WsHttpServerKind {
             .await
             .map_err(|err| RpcError::from_jsonrpsee_error(err, server_kind)))?;
         let local_addr = server.local_addr()?;
-        // Determine the server type based on the parameters
-        Ok((WsHttpServerKind { server }, local_addr))
+            
+        let either_server = match (cors_domains, jwt_secret) {
+            (Some(_), Some(_)) => Either::B(Either::B(server)), // Both CORS and Auth
+            (Some(_), None) => Either::A(Either::B(server)), // Only CORS
+            (None, Some(_)) => Either::B(Either::A(server)), // Only Auth
+            (None, None) => Either::A(Either::A(server)), // Neither CORS nor Auth
+        };
+
+        Ok((WsHttpServerKind { server: either_server }, local_addr))
+
     }
 }
 
