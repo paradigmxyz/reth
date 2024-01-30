@@ -1372,21 +1372,15 @@ impl ForkCondition {
     ///
     /// For timestamp conditions, this will always return false.
     pub fn active_at_block(&self, current_block: BlockNumber) -> bool {
-        match self {
-            ForkCondition::Block(block) => current_block >= *block,
-            ForkCondition::TTD { fork_block: Some(block), .. } => current_block >= *block,
-            _ => false,
-        }
+        matches!(self, ForkCondition::Block(block)
+        | ForkCondition::TTD { fork_block: Some(block), .. } if current_block >= *block)
     }
 
     /// Checks if the given block is the first block that satisfies the fork condition.
     ///
     /// This will return false for any condition that is not block based.
     pub fn transitions_at_block(&self, current_block: BlockNumber) -> bool {
-        match self {
-            ForkCondition::Block(block) => current_block == *block,
-            _ => false,
-        }
+        matches!(self, ForkCondition::Block(block) if current_block == *block)
     }
 
     /// Checks whether the fork condition is satisfied at the given total difficulty and difficulty
@@ -1399,22 +1393,15 @@ impl ForkCondition {
     ///
     /// This will return false for any condition that is not TTD-based.
     pub fn active_at_ttd(&self, ttd: U256, difficulty: U256) -> bool {
-        if let ForkCondition::TTD { total_difficulty, .. } = self {
-            ttd.saturating_sub(difficulty) >= *total_difficulty
-        } else {
-            false
-        }
+        matches!(self, ForkCondition::TTD { total_difficulty, .. }
+            if ttd.saturating_sub(difficulty) >= *total_difficulty)
     }
 
     /// Checks whether the fork condition is satisfied at the given timestamp.
     ///
     /// This will return false for any condition that is not timestamp-based.
     pub fn active_at_timestamp(&self, timestamp: u64) -> bool {
-        if let ForkCondition::Timestamp(time) = self {
-            timestamp >= *time
-        } else {
-            false
-        }
+        matches!(self, ForkCondition::Timestamp(time) if timestamp >= *time)
     }
 
     /// Checks whether the fork condition is satisfied at the given head block.
