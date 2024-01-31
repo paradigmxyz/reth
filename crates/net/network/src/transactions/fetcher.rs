@@ -525,7 +525,7 @@ impl TransactionFetcher {
             let mut next_acc_size = *acc_size_response;
 
             // 1. Check acc size against limit, if so stop looping.
-            if next_acc_size >= POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
+            if next_acc_size >= 2 * POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE / 3 {
                 trace!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
                     acc_size_eth68_response=acc_size_response, // no change acc size
