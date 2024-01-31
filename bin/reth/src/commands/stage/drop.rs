@@ -192,7 +192,7 @@ impl Command {
                 .provider_factory
                 .snapshot_provider()
                 .expect("snapshot provider initialized via provider factory");
-            let snapshots = iter_snapshots(data_dir.snapshots_path())?;
+            let snapshots = iter_snapshots(snapshot_provider.directory())?;
             if let Some(segment_snapshots) = snapshots.get(&snapshot_segment) {
                 for (block_range, _) in segment_snapshots {
                     snapshot_provider
