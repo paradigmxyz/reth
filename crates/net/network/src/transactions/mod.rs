@@ -1189,7 +1189,7 @@ where
         // make sure we're woken up again since this future is spawned in it's own thread,
         // so poll will not be manually called again
         cx.waker().wake_by_ref();
-        return Poll::Pending
+        Poll::Pending
     }
 }
 
