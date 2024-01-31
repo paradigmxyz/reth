@@ -236,11 +236,7 @@ impl TransactionFetcher {
             }
         });
 
-        // all hashes included in request and there is still space
-        // todo: compare free space with min tx size
-        if acc_size_response < POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
-            self.fill_eth68_request_for_peer(hashes, peer_id, &mut acc_size_response);
-        }
+        self.fill_eth68_request_for_peer(hashes, peer_id, &mut acc_size_response);
 
         surplus_hashes
     }
@@ -503,10 +499,12 @@ impl TransactionFetcher {
         peer_id: PeerId,
         acc_size_response: &mut usize,
     ) {
-        if *acc_size_response >= POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
+        if *acc_size_response >= POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE / 2 {
             return
         }
 
+        // all hashes included in request and there is still a lot of space
+        
         debug_assert!(
             {
                 let mut acc_size = 0;
