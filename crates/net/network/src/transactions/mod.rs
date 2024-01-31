@@ -1178,10 +1178,10 @@ where
                 break
             }
 
-            *budget -= 1;
+            budget -= 1;
             // If the budget is exhausted we manually yield back control to tokio. See
             // `NetworkManager` for more context on the design pattern.
-            if *budget == 0 {
+            if budget == 0 {
                 break
             }
         }
