@@ -16,9 +16,7 @@ use std::{
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tracing::{debug, trace};
 
-use super::{
-    AnnouncementFilter, Peer, PooledTransactions, FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT,
-};
+use super::{AnnouncementFilter, Peer, PooledTransactions, POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE};
 
 /// Maximum concurrent [`GetPooledTxRequest`]s to allow per peer.
 pub(super) const MAX_CONCURRENT_TX_REQUESTS_PER_PEER: u8 = 1;
@@ -179,7 +177,7 @@ impl TransactionFetcher {
         if let Some(size) = self.eth68_meta.peek(&hash) {
             let next_acc_size = *acc_size_response + size;
 
-            if next_acc_size <= FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT {
+            if next_acc_size <= POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
                 // only update accumulated size of tx response if tx will fit in without exceeding
                 // soft limit
                 *acc_size_response = next_acc_size;
@@ -209,7 +207,7 @@ impl TransactionFetcher {
     ) -> Vec<TxHash> {
         if let Some(hash) = hashes.first() {
             if let Some(size) = self.eth68_meta.get(hash) {
-                if *size >= FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT {
+                if *size >= POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
                     return hashes.split_off(1)
                 }
             }
@@ -226,7 +224,8 @@ impl TransactionFetcher {
                     hash=%hash,
                     size=self.eth68_meta.peek(&hash).expect("should find size in `eth68-meta`"),
                     acc_size_response=acc_size_response,
-                    FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT=FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT,
+                    POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE=
+                        POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
                     "no space for hash in `GetPooledTransactions` request to peer"
                 );
 
@@ -237,7 +236,7 @@ impl TransactionFetcher {
 
         // all hashes included in request and there is still space
         // todo: compare free space with min tx size
-        if acc_size_response < FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT {
+        if acc_size_response < POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
             self.fill_eth68_request_for_peer(hashes, peer_id, &mut acc_size_response);
         }
 
@@ -502,7 +501,7 @@ impl TransactionFetcher {
         peer_id: PeerId,
         acc_size_response: &mut usize,
     ) {
-        if *acc_size_response >= FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT {
+        if *acc_size_response >= POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
             return
         }
 
@@ -526,11 +525,12 @@ impl TransactionFetcher {
             let mut next_acc_size = *acc_size_response;
 
             // 1. Check acc size against limit, if so stop looping.
-            if next_acc_size >= FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT {
+            if next_acc_size >= POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
                 trace!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
                     acc_size_eth68_response=acc_size_response, // no change acc size
-                    FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT=FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT,
+                    POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE=
+                        POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
                     "request to peer full"
                 );
 
@@ -572,7 +572,8 @@ impl TransactionFetcher {
                         peer_id=format!("{peer_id:#}"),
                         hash=%hash,
                         acc_size_eth68_response=acc_size_response,
-                        FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT=FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT,
+                        POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE=
+                            POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
                         "found buffered hash for request to peer"
                     );
                 }
@@ -633,7 +634,8 @@ impl TransactionFetcher {
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
                         hash=%hash,
-                        FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT=FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT,
+                        POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE=
+                            POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
                         "found buffered hash for request to peer"
                     );
                 }
@@ -823,12 +825,14 @@ mod test {
             B256::from_slice(&[6; 32]),
         ];
         let eth68_hashes_sizes = [
-            FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT - 4,
-            FULL_TRANSACTIONS_PACKET_SIZE_SOFT_LIMIT, // this one will not fit
-            2,                                        // this one will fit
-            3,                                        // but now this one won't
-            2,                                        /* this one will, no more txns will fit
-                                                       * after this */
+            POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE - 4,
+            POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE, // this one will not fit
+            2,                                                 // this one will fit
+            3,                                                 // but now this one won't
+            2,                                                 /* this one will, no more txns
+                                                                * will
+                                                                * fit
+                                                                * after this */
             1,
         ];
 
