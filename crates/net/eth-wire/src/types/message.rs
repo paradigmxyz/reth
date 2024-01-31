@@ -213,8 +213,15 @@ impl EthMessage {
     }
 }
 
+/// `EncodableExt` is an extension trait for types that are encodable, providing methods
+/// to encode data with size constraints. It is designed to work with collections of encodable
+/// items.
 pub trait EncodableExt {
+    /// Encodes the data, ensuring that the encoded message does not exceed the specified size
+    /// limit. If the encoded size exceeds the limit, an error is returned.
     fn encode_max(&self, size: usize) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error>;
+    // Encodes the data, truncating the encoded message if it exceeds the specified size limit.
+    /// The resulting data will fit within the limit, but may be incomplete if truncation occurs.
     fn encode_truncate(&self, limit: usize) -> Vec<u8>;
 }
 
