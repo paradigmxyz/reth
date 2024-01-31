@@ -59,21 +59,15 @@ impl<DB: Database, EF> TreeExternals<DB, EF> {
             let snapshot_provider =
                 self.provider_factory.snapshot_provider().expect("should exist");
             let total_headers = snapshot_provider.count_entries::<tables::Headers>()? as u64;
-            let range = total_headers.saturating_sub(hashes.len() as u64).saturating_sub(1) as u64..
-                total_headers;
+            let range =
+                total_headers.saturating_sub(hashes.len() as u64).saturating_sub(1)..total_headers;
 
-            hashes.extend(
-                range.clone().zip(
-                    snapshot_provider
-                        .fetch_range_with_predicate(
-                            SnapshotSegment::Headers,
-                            range,
-                            |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(number.into()),
-                            |_| true,
-                        )?
-                        .into_iter(),
-                ),
-            );
+            hashes.extend(range.clone().zip(snapshot_provider.fetch_range_with_predicate(
+                SnapshotSegment::Headers,
+                range,
+                |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(number.into()),
+                |_| true,
+            )?));
         }
 
         Ok(hashes)
