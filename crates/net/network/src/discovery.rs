@@ -367,7 +367,7 @@ where
     }
 }
 
-impl<S> fmt::Debug for Discovery<Discv5WithDiscv4Downgrade, S> {
+impl<S, N> fmt::Debug for Discovery<Discv5WithDiscv4Downgrade, S, N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("Discovery<Discv5>");
 
@@ -621,8 +621,7 @@ impl<D, S, N> Discovery<D, S, N> {
 }
 
 #[cfg(test)]
-//#[cfg(not(feature = "discv5"))]
-#[cfg(feature = "discv5")]
+#[cfg(not(feature = "discv5"))]
 mod tests {
     use super::*;
     use rand::thread_rng;

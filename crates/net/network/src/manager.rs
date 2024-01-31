@@ -197,12 +197,12 @@ where
             disc_config
         });
 
-        #[cfg(not(feature = "discv5"))]
+       #[cfg(not(feature = "discv5"))]
         let discovery =
             Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config)
                 .await?;
 
-        #[cfg(feature = "discv5")]
+       #[cfg(feature = "discv5")]
         let discovery = Discovery::new_discv5(
             discovery_addr,
             secret_key,
