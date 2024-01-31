@@ -279,11 +279,6 @@ where
     Pool: TransactionPool + 'static,
 {
     #[inline]
-    fn update_import_metrics(&self) {
-        self.metrics.pending_pool_imports.set(self.pool_imports.len() as f64);
-    }
-
-    #[inline]
     fn update_request_metrics(&self) {
         self.metrics
             .inflight_transaction_requests
@@ -918,7 +913,7 @@ where
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             // pre-size to avoid reallocations, assuming ~50% of the transactions are new
-            let mut to_add = Vec::with_capacity(max(1, transactions.len() / 2));
+            let mut new_txs = Vec::with_capacity(max(1, transactions.len() / 2));
 
             for tx in transactions {
                 // recover transaction
@@ -945,7 +940,7 @@ where
                     Entry::Vacant(entry) => {
                         // this is a new transaction that should be imported into the pool
                         let pool_transaction = <Pool::Transaction as FromRecoveredPooledTransaction>::from_recovered_pooled_transaction(tx);
-                        to_add.push(pool_transaction);
+                        new_txs.push(pool_transaction);
 
                         entry.insert(vec![peer_id]);
                     }
@@ -953,9 +948,20 @@ where
             }
 
             // import new transactions as a batch to minimize lock contention on the underlying pool
-            if !to_add.is_empty() {
+            if !new_txs.is_empty() {
                 let pool = self.pool.clone();
-                let import = Box::pin(async move { pool.add_external_transactions(to_add).await });
+                let metric_pending_pool_imports = self.metrics.pending_pool_imports.clone();
+
+                metric_pending_pool_imports.increment(new_txs.len() as f64);
+
+                let import = Box::pin(async move {
+                    let added = new_txs.len();
+                    let res = pool.add_external_transactions(new_txs).await;
+
+                    metric_pending_pool_imports.decrement(added as f64);
+
+                    res
+                });
 
                 self.pool_imports.push(import);
             }
@@ -1056,7 +1062,6 @@ where
         this.request_buffered_hashes();
 
         this.update_request_metrics();
-        this.update_import_metrics();
 
         // Advance all imports
         while let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
@@ -1089,8 +1094,6 @@ where
                 }
             }
         }
-
-        this.update_import_metrics();
 
         // handle and propagate new transactions
         let mut new_txs = Vec::new();
