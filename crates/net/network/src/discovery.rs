@@ -4,15 +4,19 @@ use crate::{
     error::{NetworkError, ServiceKind},
     manager::DiscoveredEvent,
 };
-use derive_more::{Deref, DerefMut};
+use discv5::enr::Enr;
 use futures::StreamExt;
 use parking_lot::RwLock;
 use reth_discv4::{
-    DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry, HandleDiscovery, PublicKey, SecretKey,
+    DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry, HandleDiscovery, NodeFromExternalSource,
+    PublicKey, SecretKey,
 };
-use reth_discv5::{self, DiscoveryUpdateV5, Discv5, MergedUpdateStream};
+use reth_discv5::{
+    self, DiscoveryUpdateV5, Discv5WithDiscv4Downgrade, MergedUpdateStream,
+};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
+    Update,
 };
 use reth_primitives::{ForkId, NodeRecord, PeerId};
 use smallvec::{smallvec, SmallVec};
@@ -36,11 +40,7 @@ use std::{
 ///
 /// Listens for new discovered nodes and emits events for discovered nodes and their
 /// address.
-pub struct Discovery<
-    D = Discv4,
-    S = ReceiverStream<DiscoveryUpdate>,
-    N: Clone + TryFrom<discv5::enr::Enr<SecretKey>, Error = reth_dns_discovery::Error> = DnsNodeRecordUpdate,
-> {
+pub struct Discovery<D = Discv4, S = ReceiverStream<DiscoveryUpdate>, N = NodeRecord> {
     /// All nodes discovered via discovery protocol.
     ///
     /// These nodes can be ephemeral and are updated via the discovery protocol.
@@ -56,7 +56,7 @@ pub struct Discovery<
     /// Handler to interact with the DNS discovery service
     _dns_discovery: Option<DnsDiscoveryHandle<N>>,
     /// Updates from the DNS discovery service.
-    dns_discovery_updates: Option<ReceiverStream<N>>,
+    dns_discovery_updates: Option<ReceiverStream<DnsNodeRecordUpdate<N>>>,
     /// The handle to the spawned DNS discovery service
     _dns_disc_service: Option<JoinHandle<()>>,
     /// Events buffered until polled.
@@ -84,21 +84,24 @@ where
     pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
         if let Some(disc) = &self.disc {
             // use forward-compatible forkid entry
-            disc.set_eip868_rlp("eth".as_bytes().to_vec(), EnrForkIdEntry::from(fork_id))
+            disc.encode_and_set_eip868_in_local_enr(
+                "eth".as_bytes().to_vec(),
+                EnrForkIdEntry::from(fork_id),
+            )
         }
     }
 
     /// Bans the [`IpAddr`] in the discovery service.
     pub(crate) fn ban_ip(&self, ip: IpAddr) {
         if let Some(disc) = &self.disc {
-            disc.ban_ip(ip)
+            disc.ban_peer_by_ip(ip)
         }
     }
 
     /// Bans the [`PeerId`] and [`IpAddr`] in the discovery service.
     pub(crate) fn ban(&self, peer_id: PeerId, ip: IpAddr) {
         if let Some(disc) = &self.disc {
-            disc.ban(peer_id, ip)
+            disc.ban_peer_by_ip_and_node_id(peer_id, ip)
         }
     }
 
@@ -107,10 +110,10 @@ where
         self.local_enr.id
     }
 
-    /// Add a node to the discv4 table.
-    pub(crate) fn add_disc_node(&self, node: N) {
+    /// Add a node to the discovery routing table table.
+    pub(crate) fn add_disc_node(&self, node: NodeFromExternalSource) {
         if let Some(disc) = &self.disc {
-            disc.add_node(node);
+            _ = disc.add_node_to_routing_table(node);
         }
     }
 
@@ -181,7 +184,7 @@ impl Discovery {
         // setup DNS discovery
         let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
             if let Some(dns_config) = dns_discovery_config {
-                new_dns(dns_config)?
+                new_dns::<NodeRecord>(dns_config)?
             } else {
                 (None, None, None)
             };
@@ -221,7 +224,7 @@ impl Stream for Discovery {
         while let Some(Poll::Ready(Some(update))) =
             self.dns_discovery_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
         {
-            self.add_disc_node(update.node_record);
+            self.add_disc_node(NodeFromExternalSource::NodeRecord(update.node_record));
             self.on_node_record_update(update.node_record, update.fork_id);
         }
 
@@ -244,7 +247,7 @@ impl fmt::Debug for Discovery {
     }
 }
 
-impl<S> Discovery<Discv5, S> {
+impl<S, N> Discovery<Discv5WithDiscv4Downgrade, S, N> {
     fn on_discv5_update(&mut self, update: discv5::Discv5Event) -> Result<(), NetworkError> {
         use discv5::Discv5Event::*;
         match update {
@@ -324,7 +327,7 @@ impl<S> Discovery<Discv5, S> {
     }
 }
 
-impl<S> Stream for Discovery<Discv5, S>
+impl<S> Stream for Discovery<Discv5WithDiscv4Downgrade, S, Enr<SecretKey>>
 where
     S: Stream<Item = DiscoveryUpdateV5> + Unpin + Send + 'static,
 {
@@ -354,15 +357,17 @@ where
         while let Some(Poll::Ready(Some(update))) =
             self.dns_discovery_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
         {
-            self.add_disc_node(update.node_record); // atm adds node to discv4. see reth_discv5.
-            self.on_node_record_update(update.node_record, update.fork_id);
+            self.add_disc_node(NodeFromExternalSource::Enr(update.node_record.clone()));
+            if let Ok(node_record) = update.node_record.try_into() {
+                self.on_node_record_update(node_record, update.fork_id);
+            }
         }
 
         Poll::Pending
     }
 }
 
-impl<S> fmt::Debug for Discovery<Discv5, S> {
+impl<S> fmt::Debug for Discovery<Discv5WithDiscv4Downgrade, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("Discovery<Discv5>");
 
@@ -377,7 +382,7 @@ impl<S> fmt::Debug for Discovery<Discv5, S> {
     }
 }
 
-impl Discovery<Discv5, MergedUpdateStream, EnrCombinedKeyWrapper> {
+impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
     /// Spawns the discovery service.
     ///
     /// This will spawn [`discv5::Discv5`] and [`Discv4`] each onto their own new task and
@@ -509,7 +514,8 @@ impl Discovery<Discv5, MergedUpdateStream, EnrCombinedKeyWrapper> {
                 // 5. merge both discovery nodes
                 //
                 // combined handle
-                let disc = Discv5::new(discv5, discv4, discv5_kbuckets_change_tx);
+                let disc =
+                    Discv5WithDiscv4Downgrade::new(discv5, discv4, discv5_kbuckets_change_tx);
 
                 // combined update stream
                 let disc_updates =
@@ -529,7 +535,7 @@ impl Discovery<Discv5, MergedUpdateStream, EnrCombinedKeyWrapper> {
         // setup DNS discovery.
         let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
             if let Some(dns_config) = dns_discovery_config {
-                new_dns::<EnrCombinedKeyWrapper>(dns_config)?
+                new_dns::<Enr<SecretKey>>(dns_config)?
             } else {
                 (None, None, None)
             };
@@ -549,26 +555,27 @@ impl Discovery<Discv5, MergedUpdateStream, EnrCombinedKeyWrapper> {
     }
 }
 
-#[derive(Deref, DerefMut, Clone)]
-struct EnrCombinedKeyWrapper(discv5::enr::Enr<discv5::enr::CombinedKey>);
-
-impl TryFrom<discv5::enr::Enr<SecretKey>> for EnrCombinedKeyWrapper {
-    type Error = reth_dns_discovery::Error;
-    fn try_from(value: discv5::enr::Enr<SecretKey>) -> Result<Self, Self::Error> {
-        // serialize and deserialize enr
-        todo!()
-    }
-}
-
 #[allow(clippy::type_complexity)]
 pub(crate) fn new_dns<N>(
     dns_config: DnsDiscoveryConfig,
 ) -> Result<
-    (Option<DnsDiscoveryHandle<N>>, Option<ReceiverStream<N>>, Option<JoinHandle<()>>),
+    (
+        Option<DnsDiscoveryHandle<N>>,
+        Option<ReceiverStream<DnsNodeRecordUpdate<N>>>,
+        Option<JoinHandle<()>>,
+    ),
     NetworkError,
-> where N: Clone + TryFrom<discv5::enr::Enr<SecretKey>, Error = reth_dns_discovery::Error> + Send {
-    let (mut service, dns_disc) =
-        DnsDiscoveryService::new_pair(Arc::new(DnsResolver::from_system_conf()?), dns_config);
+>
+where
+    N: Clone + Send + 'static,
+    DnsDiscoveryService<DnsResolver, N>: Update,
+    DnsDiscoveryService<DnsResolver, N>: Stream,
+    <DnsDiscoveryService<DnsResolver, N> as Stream>::Item: fmt::Debug,
+{
+    let (mut service, dns_disc) = DnsDiscoveryService::new_pair(
+        Arc::new(DnsResolver::from_system_conf()?),
+        dns_config,
+    );
     let dns_discovery_updates = service.node_record_stream();
     let dns_disc_service = service.spawn();
 
@@ -585,7 +592,7 @@ pub enum DiscoveryEvent {
 }
 
 #[cfg(test)]
-impl<D, S> Discovery<D, S> {
+impl<D, S, N> Discovery<D, S, N> {
     /// Returns a Discovery instance that does nothing and is intended for testing purposes.
     ///
     /// NOTE: This instance does nothing
@@ -614,7 +621,8 @@ impl<D, S> Discovery<D, S> {
 }
 
 #[cfg(test)]
-#[cfg(not(feature = "discv5"))]
+//#[cfg(not(feature = "discv5"))]
+#[cfg(feature = "discv5")]
 mod tests {
     use super::*;
     use rand::thread_rng;
@@ -631,4 +639,5 @@ mod tests {
                 .await
                 .unwrap();
     }
+
 }

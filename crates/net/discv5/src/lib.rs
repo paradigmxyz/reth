@@ -115,6 +115,7 @@ impl TryFrom<Enr<SecretKey>> for EnrCombinedKeyWrapper {
     }
 }
 
+impl 
 /// Wrapper around update type used in [`discv5::Discv5`] and [`Discv4`].
 #[derive(Debug, From)]
 pub enum DiscoveryUpdateV5 {

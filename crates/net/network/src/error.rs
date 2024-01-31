@@ -6,6 +6,7 @@ use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
     DisconnectReason,
 };
+use reth_rpc_types::NodeRecordParseError;
 use std::{fmt, io, io::ErrorKind, net::SocketAddr};
 
 /// Service kind.
@@ -43,6 +44,8 @@ pub enum NetworkError {
     /// IO error when creating the discovery service
     #[error("failed to launch discovery service: {0}")]
     Discovery(io::Error),
+    #[error(transparent)]
+    DnsDiscovery(#[from] DiscoveryError),
     // todo: upstream error impl for discv5
     /*
     /// Error propagated from [`discv5::Discv5`].
@@ -75,6 +78,16 @@ impl NetworkError {
         let custom_err = io::Error::new(ErrorKind::Other, err_str);
         Self::Discovery(custom_err)
     }
+}
+
+/// Errors thrown by [`Discovery`].
+// todo: move discovery errors here instead of using `custom_discovery` method
+#[derive(Debug, thiserror::Error)]
+pub enum DiscoveryError {
+    #[error(transparent)]
+    ParseRlp(#[from] rlp::DecoderError),
+    #[error(transparent)]
+    ParseNodeRecord(#[from] NodeRecordParseError),
 }
 
 /// Abstraction over errors that can lead to a failed session
