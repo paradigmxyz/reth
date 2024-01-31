@@ -4,15 +4,19 @@ use super::{
 };
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
-    ReceiptProvider, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
-    WithdrawalsProvider,
+    ReceiptProvider, StatsReader, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt, WithdrawalsProvider,
 };
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
     models::StoredBlockBodyIndices,
-    snapshot::{iter_snapshots, HeaderMask, ReceiptMask, SnapshotCursor, TransactionMask},
+    snapshot::{
+        iter_snapshots, ColumnSelectorOne, HeaderMask, ReceiptMask, SnapshotCursor, TransactionMask,
+    },
+    table::Table,
+    tables, RawValue,
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
@@ -797,12 +801,32 @@ impl TransactionsProvider for SnapshotProvider {
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<reth_primitives::TransactionSignedNoHash>> {
+    ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
         self.fetch_range_with_predicate(
             SnapshotSegment::Transactions,
             to_range(range),
             |cursor, number| {
                 cursor.get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())
+            },
+            |_| true,
+        )
+    }
+
+    fn raw_transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
+        self.fetch_range(
+            SnapshotSegment::Transactions,
+            to_range(range),
+            |cursor, number| {
+                cursor.get(number.into(), <TransactionMask<TransactionSignedNoHash>>::MASK).map(
+                    |result| {
+                        result.map(|row| {
+                            RawValue::<TransactionSignedNoHash>::from_vec(row[0].to_vec())
+                        })
+                    },
+                )
             },
             |_| true,
         )
@@ -905,5 +929,23 @@ impl WithdrawalsProvider for SnapshotProvider {
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl StatsReader for SnapshotProvider {
+    fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
+        match T::NAME {
+            tables::CanonicalHeaders::NAME | tables::Headers::NAME | tables::HeaderTD::NAME => {
+                Ok(self.get_highest_snapshot_block(SnapshotSegment::Headers).unwrap_or_default()
+                    as usize)
+            }
+            tables::Receipts::NAME => Ok(self
+                .get_highest_snapshot_tx(SnapshotSegment::Receipts)
+                .unwrap_or_default() as usize),
+            tables::Transactions::NAME => Ok(self
+                .get_highest_snapshot_tx(SnapshotSegment::Transactions)
+                .unwrap_or_default() as usize),
+            _ => Err(ProviderError::UnsupportedProvider),
+        }
     }
 }

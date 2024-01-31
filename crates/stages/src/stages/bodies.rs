@@ -6,14 +6,16 @@ use reth_db::{
     models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
     transaction::{DbTx, DbTxMut},
-    DatabaseError,
 };
-use reth_interfaces::p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
+use reth_interfaces::{
+    p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
+    provider::ProviderResult,
+};
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     SnapshotSegment,
 };
-use reth_provider::{providers::SnapshotWriter, DatabaseProviderRW, HeaderProvider};
+use reth_provider::{providers::SnapshotWriter, DatabaseProviderRW, HeaderProvider, StatsReader};
 use std::{
     cmp::Ordering,
     task::{ready, Context, Poll},
@@ -340,14 +342,10 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 //  progress in gas as a proxy to size. Execution stage uses a similar approach.
 fn stage_checkpoint<DB: Database>(
     provider: &DatabaseProviderRW<DB>,
-) -> Result<EntitiesCheckpoint, DatabaseError> {
+) -> ProviderResult<EntitiesCheckpoint> {
     Ok(EntitiesCheckpoint {
-        processed: provider.tx_ref().entries::<tables::BlockBodyIndices>()? as u64,
-        total: provider
-            .snapshot_provider()
-            .expect("should exist")
-            .get_highest_snapshot_block(SnapshotSegment::Headers)
-            .unwrap_or_default(),
+        processed: provider.count_entries::<tables::BlockBodyIndices>()? as u64,
+        total: provider.count_entries::<tables::Headers>()? as u64,
     })
 }
 

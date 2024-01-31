@@ -120,7 +120,7 @@ impl<V: Value> RawValue<V> {
         Self { value: V::compress(value).into(), _phantom: std::marker::PhantomData }
     }
 
-    /// Creates a raw value from an existing `Vec`. Useful when we already have the compressed
+    /// Creates a raw value from an existing `Vec`. Useful when we already have the encoded
     /// value.
     pub fn from_vec(vec: Vec<u8>) -> Self {
         Self { value: vec, _phantom: std::marker::PhantomData }

@@ -21,11 +21,7 @@ use reth_stages::{
     ExecInput, Stage, UnwindInput,
 };
 use reth_trie::StateRoot;
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 mod constants;
 
@@ -84,8 +80,7 @@ pub(crate) fn unwind_hashes<S: Clone + Stage<Arc<TempDatabase<DatabaseEnv>>>>(
 
 // Helper for generating testdata for the benchmarks.
 // Returns the path to the database file.
-pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("txs-bench");
+pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
     let txs_range = 100..150;
 
     // number of storage changes per transition
@@ -101,11 +96,14 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
     // rng
     let mut rng = generators::rng();
 
-    if !path.exists() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("txs-bench");
+    let exists = path.exists();
+    let db = TestStageDB::new(&path);
+
+    if !exists {
         // create the dirs
         fs::create_dir_all(&path).unwrap();
         println!("Transactions testdata not found, generating to {:?}", path.display());
-        let db = TestStageDB::new(&path);
 
         let accounts: BTreeMap<Address, Account> = concat([
             random_eoa_account_range(&mut rng, 0..n_eoa),
@@ -177,5 +175,5 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         .unwrap();
     }
 
-    path
+    db
 }

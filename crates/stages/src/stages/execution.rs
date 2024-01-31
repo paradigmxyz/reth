@@ -20,7 +20,7 @@ use reth_primitives::{
 use reth_provider::{
     providers::{SnapshotProvider, SnapshotProviderRWRefMut, SnapshotWriter},
     BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, TransactionVariant,
+    OriginalValuesKnown, ProviderError, StatsReader, TransactionVariant,
 };
 use std::{
     cmp::Ordering,
@@ -248,7 +248,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // If we're not executing MerkleStage from scratch (by threshold or first-sync), then erase
         // changeset related pruning configurations
         if !(max_block - start_block > self.external_clean_threshold ||
-            provider.tx_ref().entries::<tables::AccountsTrie>()?.is_zero())
+            provider.count_entries::<tables::AccountsTrie>()?.is_zero())
         {
             prune_modes.account_history = None;
             prune_modes.storage_history = None;
