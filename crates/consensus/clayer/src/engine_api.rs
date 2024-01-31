@@ -515,7 +515,50 @@ impl ApiService {
     }
 
     pub fn sync_block(&mut self, block_id: B256) -> Result<(), ApiServiceError> {
-        //broadcast new block hash after commit
-        Ok(())
+        let api = self.api.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel::<ApiServiceError>();
+
+        self.rt.block_on(async move {
+            let forkchoice_updated_result = match forkchoice_updated(&api, block_id.clone()).await {
+                Ok(x) => x,
+                Err(e) => {
+                    // return Err(ApiServiceError::ApiError(format!("forkchoice_updated: {:?}", e)));
+                    tracing::error!(target:"consensus::cl","ApiService::sync_block::forkchoice_updated return(error: {:?})", e);
+                    let _ = tx.send(ApiServiceError::ApiError(format!(
+                        "forkchoice_updated: {:?}",
+                        e
+                    )));
+                    return;
+                }
+            };
+            if !forkchoice_updated_result.payload_status.status.is_valid() {
+                // return Err(ApiServiceError::BlockNotReady);
+                tracing::error!(target:"consensus::cl","ApiService::sync_block::forkchoice_updated return(not valid)");
+                let _ = tx.send(ApiServiceError::BlockNotReady);
+                return;
+            }
+            let _ = tx.send(ApiServiceError::Ok(AsyncResultType::BlockId(block_id)));
+        });
+
+        match rx.blocking_recv() {
+            Ok(result) => {
+                if let ApiServiceError::Ok(result) = result {
+                    match result {
+                        AsyncResultType::BlockId(id) => {
+                            self.latest_committed_id = Some(id);
+                            return Ok(());
+                        }
+                        _ => {
+                            return Err(ApiServiceError::MismatchAsyncResultType);
+                        }
+                    }
+                } else {
+                    return Err(result);
+                }
+            }
+            Err(e) => {
+                return Err(ApiServiceError::Other(format!("sync_block error: {:?}", e)));
+            }
+        }
     }
 }
