@@ -157,23 +157,14 @@ pub struct ClayerConsensusEngine {
     pub msg_log: PbftLog,
     service: ApiService,
     agent: ClayerConsensusMessagingAgent,
-    state: PbftState,
 }
 
 impl ClayerConsensusEngine {
-    pub fn new(agent: ClayerConsensusMessagingAgent, state: PbftState) -> Self {
-        Self { msg_log: PbftLog::default(), service: ApiService::default(), agent, state }
+    pub fn new(agent: ClayerConsensusMessagingAgent, service: ApiService) -> Self {
+        Self { msg_log: PbftLog::default(), service, agent }
     }
 
-    pub fn initialize(
-        &mut self,
-        block: ClayerBlock,
-        service: ApiService,
-        config: &PbftConfig,
-        state: &mut PbftState,
-    ) {
-        self.service = service;
-
+    pub fn initialize(&mut self, block: ClayerBlock, config: &PbftConfig, state: &mut PbftState) {
         // Add chain head to log and update state
         self.msg_log.resize_log(&config);
         self.msg_log.add_validated_block(block.clone());

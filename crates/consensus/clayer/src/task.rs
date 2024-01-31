@@ -10,7 +10,7 @@ use crate::{consensus::ClayerConsensusEngine, engine_api::http::HttpJsonRpc, tim
 use alloy_primitives::B256;
 use futures_util::{future::BoxFuture, FutureExt};
 use rand::Rng;
-use reth_interfaces::clayer::ClayerConsensusMessageAgentTrait;
+use reth_interfaces::clayer::{ClayerConsensusEvent, ClayerConsensusMessageAgentTrait};
 use reth_network::NetworkHandle;
 use reth_primitives::{hex, SealedHeader, TransactionSigned};
 use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
@@ -24,6 +24,7 @@ use reth_rpc_types::engine::{
 };
 use reth_stages::PipelineEvent;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::sleep;
 use std::{
     collections::VecDeque,
@@ -59,7 +60,7 @@ pub struct ClTask<Client, Pool: TransactionPool, CDB> {
     /// API
     api: Arc<HttpJsonRpc>,
     ///
-    block_publishing_ticker: timing::Ticker,
+    block_publishing_ticker: timing::AsyncTicker,
     ///
     network: NetworkHandle,
     ///
@@ -67,9 +68,10 @@ pub struct ClTask<Client, Pool: TransactionPool, CDB> {
     ///
     storages: CDB,
     pbft_config: PbftConfig,
-    pbft_state: PbftState,
-    pbft_running_state: bool,
+    pbft_state: Arc<parking_lot::RwLock<PbftState>>,
+    pbft_running_state: Arc<AtomicBool>,
     startup_latest_header: SealedHeader,
+    consensus_engine_task_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
@@ -96,20 +98,109 @@ impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
             queued: Default::default(),
             pipe_line_events: None,
             api,
-            block_publishing_ticker: timing::Ticker::new(Duration::from_secs(12)),
+            block_publishing_ticker: timing::AsyncTicker::new(Duration::from_secs(12)),
             network,
             consensus_agent,
             storages,
             pbft_config,
-            pbft_state,
-            pbft_running_state: false,
+            pbft_state: Arc::new(parking_lot::RwLock::new(pbft_state)),
+            pbft_running_state: Arc::new(AtomicBool::new(false)),
             startup_latest_header,
+            consensus_engine_task_handle: None,
         }
     }
 
     /// Sets the pipeline events to listen on.
     pub fn set_pipeline_events(&mut self, events: UnboundedReceiverStream<PipelineEvent>) {
         self.pipe_line_events = Some(events);
+    }
+
+    pub fn start_clayer_consensus_engine(&mut self) {
+        let consensus_agent = self.consensus_agent.clone();
+        let api = self.api.clone();
+        let mut consensus_engine =
+            ClayerConsensusEngine::new(self.consensus_agent.clone(), ApiService::new(api));
+        let pbft_state = self.pbft_state.clone();
+        let pbft_config = self.pbft_config.clone();
+
+        let startup_latest_header = self.startup_latest_header.clone();
+        let thread_join_handle = std::thread::spawn(move || {
+            let state = &mut *pbft_state.write();
+
+            let mut block_publishing_ticker =
+                timing::SyncTicker::new(pbft_config.block_publishing_delay);
+
+            consensus_engine.initialize(
+                clayer_block_from_genesis(&startup_latest_header),
+                &pbft_config,
+                state,
+            );
+
+            consensus_engine.start_idle_timeout(state);
+
+            loop {
+                while let Some(event) = consensus_agent.pop_event() {
+                    let incoming_event = match event {
+                        ClayerConsensusEvent::PeerNetWork(peer_id, connect) => {
+                            let e = if connect {
+                                Some(ConsensusEvent::PeerConnected(peer_id))
+                            } else {
+                                Some(ConsensusEvent::PeerConnected(peer_id))
+                            };
+                            e
+                        }
+                        ClayerConsensusEvent::PeerMessage(peer_id, bytes) => {
+                            let e = match parse_consensus_message(&bytes) {
+                                Ok(msg) => Some(ConsensusEvent::PeerMessage(peer_id, msg)),
+                                Err(e) => {
+                                    log_any_error(Err(e));
+                                    None
+                                }
+                            };
+                            e
+                        }
+                    };
+                    if let Some(incoming_event) = incoming_event {
+                        match handle_consensus_event(&mut consensus_engine, incoming_event, state) {
+                            Ok(again) => {
+                                if !again {
+                                    break;
+                                }
+                            }
+                            Err(err) => log_any_error(Err(err)),
+                        }
+                    }
+                }
+
+                // If the block publishing delay has passed, attempt to publish a block
+                block_publishing_ticker.tick(|| log_any_error(consensus_engine.try_publish(state)));
+
+                // If the idle timeout has expired, initiate a view change
+                if consensus_engine.check_idle_timeout_expired(state) {
+                    warn!("Idle timeout expired; proposing view change");
+                    log_any_error(consensus_engine.start_view_change(state, state.view + 1));
+                }
+
+                // If the commit timeout has expired, initiate a view change
+                if consensus_engine.check_commit_timeout_expired(state) {
+                    warn!("Commit timeout expired; proposing view change");
+                    log_any_error(consensus_engine.start_view_change(state, state.view + 1));
+                }
+
+                // Check the view change timeout if the node is view changing so we can start a new
+                // view change if we don't get a NewView in time
+                if let PbftMode::ViewChanging(v) = state.mode {
+                    if consensus_engine.check_view_change_timeout_expired(state) {
+                        warn!(
+                            "View change timeout expired; proposing view change for view {}",
+                            v + 1
+                        );
+                        log_any_error(consensus_engine.start_view_change(state, v + 1));
+                    }
+                }
+            }
+        });
+        self.consensus_engine_task_handle = Some(thread_join_handle);
     }
 }
 
@@ -125,9 +216,6 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         info!(target:"consensus::cl", "Starting consensus task");
-        let mut block_publishing_ticker =
-            timing::Ticker::new(this.pbft_config.block_publishing_delay);
-
         'first_layer: loop {
             if let Poll::Ready(x) = this.block_publishing_ticker.poll(cx) {
                 info!(target:"consensus::cl", "Attempting publish block");

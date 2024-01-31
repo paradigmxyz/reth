@@ -23,7 +23,7 @@ impl PbftEngine {
 pub enum ConsensusEvent {
     PeerConnected(PeerId),
     PeerDisconnected(PeerId),
-    PeerMessage(ClayerConsensusMessage, PeerId),
+    PeerMessage(PeerId, ClayerConsensusMessage),
 }
 
 pub fn parse_consensus_message(
@@ -58,7 +58,7 @@ pub fn handle_consensus_event(
         // ConsensusEvent::BlockValid(block_id) => consensus.on_block_valid(block_id, state)?,
         // ConsensusEvent::BlockInvalid(block_id) => consensus.on_block_invalid(block_id)?,
         // ConsensusEvent::BlockCommit(block_id) => consensus.on_block_commit(block_id, state)?,
-        ConsensusEvent::PeerMessage(message, peer_id) => {
+        ConsensusEvent::PeerMessage(peer_id, message) => {
             let header: ClayerConsensusMessageHeader =
                 parse_consensus_message_header(&message.header_bytes)?;
             let verified_signer_id = header.signer_id.clone();

@@ -13,7 +13,6 @@ use reth_rpc_types::{
     },
     ExecutionPayloadV2,
 };
-use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 
@@ -202,10 +201,9 @@ pub struct PayloadPair {
     pub execution_payload: Option<ExecutionPayloadWrapperV2>,
 }
 
-#[derive(Clone, Default)]
 pub struct ApiService {
     api: Arc<HttpJsonRpc>,
-    executor: TokioTaskExecutor,
+    rt: tokio::runtime::Runtime,
     latest_committed_id: Option<B256>,
     /// key latest_committed_id, value:payload_id
     next_payload_id_pairs: HashMap<B256, PayloadId>,
@@ -217,7 +215,7 @@ impl ApiService {
     pub fn new(api: Arc<HttpJsonRpc>) -> Self {
         Self {
             api,
-            executor: TokioTaskExecutor::default(),
+            rt: tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap(),
             latest_committed_id: None,
             next_payload_id_pairs: HashMap::new(),
             proposing_payload_pairs: HashMap::new(),
@@ -231,7 +229,7 @@ impl ApiService {
         let api = self.api.clone();
         let (tx, rx) = tokio::sync::oneshot::channel::<ApiServiceError>();
 
-        self.executor.spawn_blocking(Box::pin(async move {
+        self.rt.block_on(async move {
             let block_id = if let Some(block_id) = previous_id {
                 block_id
             } else {
@@ -278,7 +276,7 @@ impl ApiService {
                 return;
             }
             let _ = tx.send(ApiServiceError::Ok(AsyncResultType::BlockId(block_id)));
-        }));
+        });
 
         match rx.blocking_recv() {
             Ok(result) => {
@@ -315,7 +313,7 @@ impl ApiService {
 
         let api = self.api.clone();
         let (tx, rx) = tokio::sync::oneshot::channel::<ApiServiceError>();
-        self.executor.spawn_blocking(Box::pin(async move {
+        self.rt.block_on(async move {
             let forkchoice_updated_result =
                 match forkchoice_updated_with_attributes(&api, previous_id).await {
                     Ok(x) => x,
@@ -329,7 +327,7 @@ impl ApiService {
                     }
                 };
             let _ = tx.send(ApiServiceError::Ok(AsyncResultType::ForkchoiceUpdated(forkchoice_updated_result)));
-        }));
+        });
 
         match rx.blocking_recv() {
             Ok(result) => {
@@ -384,7 +382,7 @@ impl ApiService {
 
         let api = self.api.clone();
         let (tx, rx) = tokio::sync::oneshot::channel::<ApiServiceError>();
-        self.executor.spawn_blocking(Box::pin(async move {
+        self.rt.block_on(async move {
             match api.get_payload_v2(payload_id).await {
                 Ok(x) => {
                     let _ = tx.send(ApiServiceError::Ok(AsyncResultType::ExecutionPayload(x)));
@@ -399,7 +397,7 @@ impl ApiService {
                     return;
                 }
             };
-        }));
+        });
 
         match rx.blocking_recv() {
             Ok(result) => {
@@ -455,7 +453,7 @@ impl ApiService {
 
         let api = self.api.clone();
         let (tx, rx) = tokio::sync::oneshot::channel::<ApiServiceError>();
-        self.executor.spawn_blocking(Box::pin(async move {
+        self.rt.block_on(async move {
             let payload_status = match new_payload(&api, execution_payload).await {
                 Ok(x) =>x,
                 Err(e) => {
@@ -471,7 +469,7 @@ impl ApiService {
                 payload_status,
                 payload_id: Some(payload_id),
             })));
-        }));
+        });
 
         match rx.blocking_recv() {
             Ok(result) => {

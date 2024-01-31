@@ -1,20 +1,36 @@
 use serde_derive::{Deserialize, Serialize};
 use std::thread::sleep;
 use std::{
-    fmt,
-    pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
-use tokio::time::Interval;
 
-/// Encapsulates calling a function every so often
-pub struct Ticker {
-    interval: Interval,
+pub struct SyncTicker {
+    last: std::time::Instant,
+    timeout: std::time::Duration,
 }
 
-impl Ticker {
+impl SyncTicker {
+    pub fn new(period: Duration) -> Self {
+        SyncTicker { last: std::time::Instant::now(), timeout: period }
+    }
+
+    // Do some work if the timeout has expired
+    pub fn tick<T: FnMut()>(&mut self, mut callback: T) {
+        let elapsed = std::time::Instant::now() - self.last;
+        if elapsed >= self.timeout {
+            callback();
+            self.last = std::time::Instant::now();
+        }
+    }
+}
+
+/// Encapsulates calling a function every so often
+pub struct AsyncTicker {
+    interval: tokio::time::Interval,
+}
+
+impl AsyncTicker {
     pub fn new(duration: Duration) -> Self {
         let start = tokio::time::Instant::now() + duration;
         Self { interval: tokio::time::interval_at(start, duration) }
