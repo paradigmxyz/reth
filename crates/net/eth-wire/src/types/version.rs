@@ -38,6 +38,21 @@ impl EthVersion {
             }
         }
     }
+
+    /// Returns true if the version is eth/66
+    pub const fn is_eth66(&self) -> bool {
+        matches!(self, EthVersion::Eth66)
+    }
+
+    /// Returns true if the version is eth/67
+    pub const fn is_eth67(&self) -> bool {
+        matches!(self, EthVersion::Eth67)
+    }
+
+    /// Returns true if the version is eth/68
+    pub const fn is_eth68(&self) -> bool {
+        matches!(self, EthVersion::Eth68)
+    }
 }
 
 /// Allow for converting from a `&str` to an `EthVersion`.
