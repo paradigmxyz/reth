@@ -438,8 +438,9 @@ mod tests {
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let mut rng = generators::rng();
                 let start = input.checkpoint().block_number;
-                let head = random_header(&mut rng, start, None);
-                self.db.insert_headers_with_td(std::iter::once(&head))?;
+                let headers = random_header_range(&mut rng, 0..start + 1, B256::ZERO);
+                let head = headers.last().cloned().unwrap();
+                self.db.insert_headers_with_td(headers.iter())?;
 
                 // use previous checkpoint as seed size
                 let end = input.target.unwrap_or_default() + 1;
@@ -463,7 +464,9 @@ mod tests {
                 match output {
                     Some(output) if output.checkpoint.block_number > initial_checkpoint => {
                         let provider = self.db.factory.provider()?;
-                        let mut td = U256::ZERO;
+                        let mut td = provider
+                            .header_td_by_number(initial_checkpoint.saturating_sub(1))?
+                            .unwrap_or_default();
 
                         for block_num in initial_checkpoint..output.checkpoint.block_number {
                             // look up the header hash
@@ -584,8 +587,6 @@ mod tests {
             from == checkpoint && to == previous_stage &&
             // -1 because we don't need to download the local head
             processed == checkpoint + headers.len() as u64 - 1 && total == tip.number
-            // +1 because of the seeded execution that inserts the first block
-            && previous_stage - checkpoint + 1  == runner.db().table::<tables::HeaderTD>().unwrap().len() as u64
         );
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }
