@@ -13,7 +13,7 @@ use reth_primitives::{
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
     providers::{SnapshotProvider, SnapshotWriter},
-    BundleStateWithReceipts, ChainSpecProvider, DatabaseProviderRW, HashingWriter, HeaderProvider,
+    BlockHashReader, BundleStateWithReceipts, ChainSpecProvider, DatabaseProviderRW, HashingWriter,
     HistoryWriter, OriginalValuesKnown, ProviderError, ProviderFactory,
 };
 use std::{
@@ -54,17 +54,17 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
     let hash = chain.genesis_hash();
 
     // Check if we already have the genesis header or if we have the wrong one.
-    match factory.sealed_header(0) {
+    match factory.block_hash(0) {
         Ok(None) | Err(ProviderError::MissingSnapshotBlock(SnapshotSegment::Headers, 0)) => {}
-        Ok(Some(sealed_header)) => {
-            if sealed_header.hash() == hash {
+        Ok(Some(block_hash)) => {
+            if block_hash == hash {
                 debug!("Genesis already written, skipping.");
                 return Ok(hash)
             }
 
             return Err(InitDatabaseError::GenesisHashMismatch {
                 chainspec_hash: hash,
-                database_hash: sealed_header.hash(),
+                database_hash: block_hash,
             })
         }
         Err(e) => return Err(dbg!(e).into()),
@@ -218,7 +218,7 @@ pub fn insert_genesis_header<DB: Database>(
 ) -> ProviderResult<()> {
     let header = chain.sealed_genesis_header();
 
-    match snapshot_provider.header_by_number(0) {
+    match snapshot_provider.block_hash(0) {
         Ok(None) | Err(ProviderError::MissingSnapshotBlock(SnapshotSegment::Headers, 0)) => {
             let (difficulty, hash) = (header.difficulty, header.hash);
             let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
