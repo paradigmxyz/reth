@@ -519,6 +519,13 @@ impl TransactionFetcher {
         );
 
         for hash in self.buffered_hashes.iter() {
+            // fill request to 2/3 of the soft limit for the response size, or until the number of 
+            // hashes reaches the soft limit number for a request (like in eth66), whatever 
+            // happens first
+            if hashes.len() >= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
+                break
+            }
+
             // copy acc size
             let mut next_acc_size = *acc_size_response;
 
