@@ -8,8 +8,8 @@ use crate::engine_api::{
     auth::{strip_prefix, Auth, JwtKey},
     http::HttpJsonRpc,
 };
-pub use consensus::ClayerConsensusEngine;
-use consensus::{clayer_block_from_genesis, ClayerConsensusMessagingAgent, PbftConfig, PbftState};
+use consensus::{clayer_block_from_genesis, PbftConfig, PbftState};
+pub use consensus::{ClayerConsensusEngine, ClayerConsensusMessagingAgent};
 use engine_api::ApiService;
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_interfaces::consensus::ForkchoiceState;
