@@ -32,7 +32,7 @@ use derive_more::{Deref, DerefMut};
 use discv5::{
     kbucket,
     kbucket::{
-        BucketInsertResult, Distance, Entry as BucketEntry, InsertResult, KBucketsTable, Node,
+        BucketInsertResult, Distance, Entry as BucketEntry, InsertResult, KBucketsTable,
         NodeStatus, MAX_NODES_PER_BUCKET,
     },
     ConnectionDirection, ConnectionState,
@@ -44,11 +44,10 @@ use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    hex, ForkId, NodeRecordParseError, PeerId, B256,
+    hex, ForkId, PeerId, B256,
 };
 use smallvec::{smallvec, SmallVec};
 use std::{
-    any,
     cell::RefCell,
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, HashSet, VecDeque},
     env,
@@ -2337,7 +2336,10 @@ pub enum NodeFromExternalSource {
 /// Essential interface for interacting with discovery.
 pub trait HandleDiscovery {
     /// Adds the node to the table, if it is not already present.
-    fn add_node_to_routing_table(&self, node_record: NodeFromExternalSource) -> Result<(), impl Error>;
+    fn add_node_to_routing_table(
+        &self,
+        node_record: NodeFromExternalSource,
+    ) -> Result<(), impl Error>;
 
     /// Sets the pair in the EIP-868 [`Enr`] of the node.
     ///
@@ -2363,7 +2365,10 @@ pub trait HandleDiscovery {
 }
 
 impl HandleDiscovery for Discv4 {
-    fn add_node_to_routing_table(&self, node_record: NodeFromExternalSource) -> Result<(), impl Error> {
+    fn add_node_to_routing_table(
+        &self,
+        node_record: NodeFromExternalSource,
+    ) -> Result<(), impl Error> {
         if let NodeFromExternalSource::NodeRecord(node_record) = node_record {
             self.add_node(node_record);
         } // todo: handle if not

@@ -639,4 +639,14 @@ mod tests {
                 .unwrap();
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_discv5_with_discv4_downgrade() {
+        let mut rng = thread_rng();
+        let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
+        let discovery_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
+        let discovery =
+            Discovery::new_discv5(discovery_addr, secret_key, (Some(Discv4Config::default()), Default::default()))
+                .await
+                .unwrap();
+    }    
 }

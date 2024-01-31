@@ -16,7 +16,7 @@ use futures::{
     Stream, StreamExt,
 };
 use parking_lot::RwLock;
-use reth_discv4::{DiscoveryUpdate, Discv4, HandleDiscovery, PublicKey, NodeFromExternalSource};
+use reth_discv4::{DiscoveryUpdate, Discv4, HandleDiscovery, NodeFromExternalSource, PublicKey};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     PeerId,
@@ -51,7 +51,10 @@ impl Discv5WithDiscv4Downgrade {
 }
 
 impl HandleDiscovery for Discv5WithDiscv4Downgrade {
-    fn add_node_to_routing_table(&self, node_record: NodeFromExternalSource) -> Result<(), impl Error> {
+    fn add_node_to_routing_table(
+        &self,
+        node_record: NodeFromExternalSource,
+    ) -> Result<(), impl Error> {
         if let NodeFromExternalSource::Enr(enr) = node_record {
             let enr = enr.try_into()?;
             let EnrCombinedKeyWrapper(enr) = enr;
@@ -115,7 +118,6 @@ impl TryFrom<Enr<SecretKey>> for EnrCombinedKeyWrapper {
     }
 }
 
-impl 
 /// Wrapper around update type used in [`discv5::Discv5`] and [`Discv4`].
 #[derive(Debug, From)]
 pub enum DiscoveryUpdateV5 {
