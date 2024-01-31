@@ -25,13 +25,13 @@ impl Command {
         data_dir: ChainPath<DataDirPath>,
         tool: &DbTool<'_, DatabaseEnv>,
     ) -> eyre::Result<()> {
-        let db_stats_table = self.db_stats_table(tool)?;
-        println!("{db_stats_table}");
+        let snapshots_stats_table = self.snapshots_stats_table(data_dir, self.detailed_sizes)?;
+        println!("{snapshots_stats_table}");
 
         println!("\n");
 
-        let snapshots_stats_table = self.snapshots_stats_table(data_dir, self.detailed_sizes)?;
-        println!("{snapshots_stats_table}");
+        let db_stats_table = self.db_stats_table(tool)?;
+        println!("{db_stats_table}");
 
         Ok(())
     }
