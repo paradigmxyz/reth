@@ -20,7 +20,7 @@ impl Command {
     /// Execute `db clear` command
     pub fn execute<DB: Database>(self, provider_factory: ProviderFactory<DB>) -> eyre::Result<()> {
         match self.subcommand {
-            Subcommands::MDBX { table } => {
+            Subcommands::Mdbx { table } => {
                 table.view(&ClearViewer { db: provider_factory.db_ref() })?
             }
             Subcommands::Snapshot { segment } => {
@@ -44,7 +44,7 @@ impl Command {
 
 #[derive(Subcommand, Debug)]
 enum Subcommands {
-    MDBX { table: Tables },
+    Mdbx { table: Tables },
     Snapshot { segment: SnapshotSegment },
 }
 
