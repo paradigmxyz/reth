@@ -16,7 +16,9 @@ use std::{
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tracing::{debug, trace};
 
-use super::{AnnouncementFilter, Peer, PooledTransactions, POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE};
+use super::{
+    AnnouncementFilter, Peer, PooledTransactions, POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
+};
 
 /// Maximum concurrent [`GetPooledTxRequest`]s to allow per peer.
 pub(super) const MAX_CONCURRENT_TX_REQUESTS_PER_PEER: u8 = 1;
