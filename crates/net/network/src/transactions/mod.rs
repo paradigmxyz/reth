@@ -1159,32 +1159,32 @@ where
                             this.on_good_import(err.hash);
                         }
                     }
-                    some_ready = true;
                 }
+                some_ready = true;
+            }
 
-                // handle and propagate new transactions
-                let mut new_txs = Vec::new();
-                if let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
-                    new_txs.push(hash);
-                    some_ready = true;
-                }
-                if !new_txs.is_empty() {
-                    this.on_new_transactions(new_txs);
-                }
+            // handle and propagate new transactions
+            let mut new_txs = Vec::new();
+            if let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
+                new_txs.push(hash);
+                some_ready = true;
+            }
+            if !new_txs.is_empty() {
+                this.on_new_transactions(new_txs);
+            }
 
-                // all channels are fully drained and import futures pending
-                if !some_ready {
-                    return Poll::Pending
-                }
+            // all channels are fully drained and import futures pending
+            if !some_ready {
+                return Poll::Pending
+            }
 
-                *budget -= 1;
-                // If the budget is exhausted we manually yield back control to tokio. See
-                // `NetworkManager` for more context on the design pattern.
-                if *budget == 0 {
-                    // make sure we're woken up again
-                    cx.waker().wake_by_ref();
-                    return Poll::Pending
-                }
+            *budget -= 1;
+            // If the budget is exhausted we manually yield back control to tokio. See
+            // `NetworkManager` for more context on the design pattern.
+            if *budget == 0 {
+                // make sure we're woken up again
+                cx.waker().wake_by_ref();
+                return Poll::Pending
             }
         }
     }
