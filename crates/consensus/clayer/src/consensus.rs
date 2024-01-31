@@ -81,9 +81,15 @@ impl ClayerConsensusMessageAgentTrait for ClayerConsensusMessagingAgent {
         self.inner.write().push_network_event(peer_id, connect);
     }
 
-    fn pop_event(&self) -> Option<ClayerConsensusEvent> {
-        self.inner.write().pop_event()
+    // fn pop_event(&self) -> Option<ClayerConsensusEvent> {
+    //     self.inner.write().pop_event()
+    // }
+
+    /// replace pop_event
+    fn receiver(&self) -> crossbeam_channel::Receiver<ClayerConsensusEvent> {
+        self.inner.write().receiver()
     }
+
     /// broadcast consensus
     fn broadcast_consensus(&self, peers: Vec<PeerId>, data: reth_primitives::Bytes) {
         self.inner.read().broadcast_consensus(peers, data);
@@ -95,14 +101,17 @@ impl ClayerConsensusMessageAgentTrait for ClayerConsensusMessagingAgent {
 }
 
 pub struct ClayerConsensusMessagingAgentInner {
-    queued: VecDeque<ClayerConsensusEvent>,
+    // queued: VecDeque<ClayerConsensusEvent>,
+    cache_tx: crossbeam_channel::Sender<ClayerConsensusEvent>,
+    cache_re: crossbeam_channel::Receiver<ClayerConsensusEvent>,
     sender: Option<Sender<(Vec<PeerId>, reth_primitives::Bytes)>>,
     active_peers: HashSet<PeerId>,
 }
 
 impl ClayerConsensusMessagingAgentInner {
     pub fn new() -> Self {
-        Self { queued: VecDeque::new(), sender: None, active_peers: HashSet::new() }
+        let (tx, re) = crossbeam_channel::unbounded::<ClayerConsensusEvent>();
+        Self { cache_tx: tx, cache_re: re, sender: None, active_peers: HashSet::new() }
     }
 }
 
@@ -114,26 +123,34 @@ impl ClayerConsensusMessagingAgentInner {
     }
 
     fn push_received_cache(&mut self, peer_id: PeerId, data: reth_primitives::Bytes) {
-        self.queued.push_back(ClayerConsensusEvent::PeerMessage(peer_id, data));
+        // self.queued.push_back(ClayerConsensusEvent::PeerMessage(peer_id, data));
+        let _ = self.cache_tx.send(ClayerConsensusEvent::PeerMessage(peer_id, data));
     }
 
     /// push data received from self into cache
     fn push_received_cache_first(&mut self, peer_id: PeerId, data: reth_primitives::Bytes) {
-        self.queued.push_front(ClayerConsensusEvent::PeerMessage(peer_id, data));
+        //self.queued.push_front(ClayerConsensusEvent::PeerMessage(peer_id, data));
+        let _ = self.cache_tx.send(ClayerConsensusEvent::PeerMessage(peer_id, data));
     }
 
     /// push network event(PeerConnected, PeerDisconnected)
     fn push_network_event(&mut self, peer_id: PeerId, connect: bool) {
-        self.queued.push_back(ClayerConsensusEvent::PeerNetWork(peer_id, connect));
+        //self.queued.push_back(ClayerConsensusEvent::PeerNetWork(peer_id, connect));
+        let _ = self.cache_tx.send(ClayerConsensusEvent::PeerNetWork(peer_id, connect));
         if connect {
             self.active_peers.insert(peer_id);
         } else {
             self.active_peers.remove(&peer_id);
         }
     }
-    /// pop network event(PeerConnected, PeerDisconnected)
-    fn pop_event(&mut self) -> Option<ClayerConsensusEvent> {
-        self.queued.pop_front()
+
+    // /// pop network event(PeerConnected, PeerDisconnected)
+    // fn pop_event(&mut self) -> Option<ClayerConsensusEvent> {
+    //     self.queued.pop_front()
+    // }
+
+    fn receiver(&mut self) -> crossbeam_channel::Receiver<ClayerConsensusEvent> {
+        self.cache_re.clone()
     }
 
     fn broadcast_consensus(&self, peers: Vec<PeerId>, data: reth_primitives::Bytes) {

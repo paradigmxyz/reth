@@ -33,6 +33,8 @@ clap = { workspace = true, features = ["derive"], optional = true }
 parking_lot = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 
+crossbeam-channel = "0.5"
+
 [dev-dependencies]
 parking_lot.workspace = true
 rand.workspace = true

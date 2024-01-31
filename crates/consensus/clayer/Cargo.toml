@@ -61,6 +61,7 @@ reth-ecies = { workspace = true }
 reth-tasks.workspace = true
 thiserror.workspace = true
 config = "0.10.1"
+crossbeam-channel = "0.5"
 
 [dev-dependencies]
 reth-interfaces = { workspace = true, features = ["test-utils"] }

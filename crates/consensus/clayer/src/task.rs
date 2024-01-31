@@ -127,6 +127,7 @@ impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
         let thread_join_handle = std::thread::spawn(move || {
             let state = &mut *pbft_state.write();
 
+            let receiver = consensus_agent.receiver();
             let mut block_publishing_ticker =
                 timing::SyncTicker::new(pbft_config.block_publishing_delay);
 
@@ -139,37 +140,44 @@ impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
             consensus_engine.start_idle_timeout(state);
 
             loop {
-                while let Some(event) = consensus_agent.pop_event() {
-                    let incoming_event = match event {
-                        ClayerConsensusEvent::PeerNetWork(peer_id, connect) => {
-                            let e = if connect {
-                                Some(ConsensusEvent::PeerConnected(peer_id))
-                            } else {
-                                Some(ConsensusEvent::PeerConnected(peer_id))
-                            };
-                            e
-                        }
-                        ClayerConsensusEvent::PeerMessage(peer_id, bytes) => {
-                            let e = match parse_consensus_message(&bytes) {
-                                Ok(msg) => Some(ConsensusEvent::PeerMessage(peer_id, msg)),
-                                Err(e) => {
-                                    log_any_error(Err(e));
-                                    None
-                                }
-                            };
-                            e
-                        }
-                    };
-                    if let Some(incoming_event) = incoming_event {
-                        match handle_consensus_event(&mut consensus_engine, incoming_event, state) {
-                            Ok(again) => {
-                                if !again {
-                                    break;
-                                }
+                match receiver.recv_timeout(pbft_config.update_recv_timeout) {
+                    Ok(event) => {
+                        let incoming_event = match event {
+                            ClayerConsensusEvent::PeerNetWork(peer_id, connect) => {
+                                let e = if connect {
+                                    Some(ConsensusEvent::PeerConnected(peer_id))
+                                } else {
+                                    Some(ConsensusEvent::PeerConnected(peer_id))
+                                };
+                                e
                             }
-                            Err(err) => log_any_error(Err(err)),
+                            ClayerConsensusEvent::PeerMessage(peer_id, bytes) => {
+                                let e = match parse_consensus_message(&bytes) {
+                                    Ok(msg) => Some(ConsensusEvent::PeerMessage(peer_id, msg)),
+                                    Err(e) => {
+                                        log_any_error(Err(e));
+                                        None
+                                    }
+                                };
+                                e
+                            }
+                        };
+                        if let Some(incoming_event) = incoming_event {
+                            match handle_consensus_event(
+                                &mut consensus_engine,
+                                incoming_event,
+                                state,
+                            ) {
+                                Ok(again) => {
+                                    if !again {
+                                        break;
+                                    }
+                                }
+                                Err(err) => log_any_error(Err(err)),
+                            }
                         }
                     }
+                    Err(_) => {}
                 }
 
                 // If the block publishing delay has passed, attempt to publish a block
@@ -177,13 +185,13 @@ impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
 
                 // If the idle timeout has expired, initiate a view change
                 if consensus_engine.check_idle_timeout_expired(state) {
-                    warn!("Idle timeout expired; proposing view change");
+                    warn!(target:"consensus::cl", "Idle timeout expired; proposing view change");
                     log_any_error(consensus_engine.start_view_change(state, state.view + 1));
                 }
 
                 // If the commit timeout has expired, initiate a view change
                 if consensus_engine.check_commit_timeout_expired(state) {
-                    warn!("Commit timeout expired; proposing view change");
+                    warn!(target:"consensus::cl", "Commit timeout expired; proposing view change");
                     log_any_error(consensus_engine.start_view_change(state, state.view + 1));
                 }
 
@@ -191,7 +199,7 @@ impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
                 // view change if we don't get a NewView in time
                 if let PbftMode::ViewChanging(v) = state.mode {
                     if consensus_engine.check_view_change_timeout_expired(state) {
-                        warn!(
+                        warn!(target:"consensus::cl",
                             "View change timeout expired; proposing view change for view {}",
                             v + 1
                         );
@@ -220,6 +228,11 @@ where
             if let Poll::Ready(x) = this.block_publishing_ticker.poll(cx) {
                 info!(target:"consensus::cl", "Attempting publish block");
                 this.queued.push_back(x);
+
+                if !this.pbft_running_state.load(Ordering::Relaxed) {
+                    this.pbft_running_state.store(true, Ordering::Relaxed);
+                    this.start_clayer_consensus_engine();
+                }
             }
 
             // let mut rng = rand::thread_rng();
@@ -251,7 +264,6 @@ where
             // }
 
             //=========================================================================================
-            // sleep(std::time::Duration::from_millis(100));
 
             if this.insert_task.is_none() {
                 if this.queued.is_empty() {
