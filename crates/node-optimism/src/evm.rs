@@ -1,34 +1,9 @@
-#![cfg(feature = "optimism")]
-use reth_node_api::{
-    optimism_validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion,
-    EngineTypes, EvmEnvConfig, PayloadOrAttributes,
-};
-use reth_payload_builder::{EthBuiltPayload, OptimismPayloadBuilderAttributes};
+use reth_node_api::EvmEnvConfig;
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_op_tx_env},
     revm_primitives::{AnalysisKind, CfgEnv, TxEnv},
     Address, Bytes, ChainSpec, Head, Header, Transaction, U256,
 };
-use reth_rpc_types::engine::OptimismPayloadAttributes;
-
-/// The types used in the optimism beacon consensus engine.
-#[derive(Debug, Default, Clone)]
-#[non_exhaustive]
-pub struct OptimismEngineTypes;
-
-impl EngineTypes for OptimismEngineTypes {
-    type PayloadAttributes = OptimismPayloadAttributes;
-    type PayloadBuilderAttributes = OptimismPayloadBuilderAttributes;
-    type BuiltPayload = EthBuiltPayload;
-
-    fn validate_version_specific_fields(
-        chain_spec: &ChainSpec,
-        version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, OptimismPayloadAttributes>,
-    ) -> Result<(), AttributesValidationError> {
-        optimism_validate_version_specific_fields(chain_spec, version, payload_or_attrs)
-    }
-}
 
 /// Optimism-related EVM configuration.
 #[derive(Debug, Default, Clone, Copy)]
@@ -68,5 +43,31 @@ impl EvmEnvConfig for OptimismEvmConfig {
 
         // optimism-specific configuration
         cfg_env.optimism = chain_spec.is_optimism();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_primitives::revm_primitives::BlockEnv;
+
+    #[test]
+    #[ignore]
+    fn test_fill_cfg_and_block_env() {
+        let mut cfg_env = CfgEnv::default();
+        let mut block_env = BlockEnv::default();
+        let header = Header::default();
+        let chain_spec = ChainSpec::default();
+        let total_difficulty = U256::ZERO;
+
+        OptimismEvmConfig::fill_cfg_and_block_env(
+            &mut cfg_env,
+            &mut block_env,
+            &chain_spec,
+            &header,
+            total_difficulty,
+        );
+
+        assert_eq!(cfg_env.chain_id, chain_spec.chain().id());
     }
 }

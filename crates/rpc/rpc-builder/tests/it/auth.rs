@@ -2,7 +2,7 @@
 
 use crate::utils::launch_auth;
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
-use reth_node_builder::EthEngineTypes;
+use reth_node_ethereum::EthEngineTypes;
 use reth_primitives::{Block, U64};
 use reth_rpc::JwtSecret;
 use reth_rpc_api::clients::EngineApiClient;
