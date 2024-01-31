@@ -1082,7 +1082,7 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        let budget = &mut 1024;
+        let mut budget = 1024;
 
         loop {
             let mut some_ready = false;
