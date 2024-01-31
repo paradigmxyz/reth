@@ -1186,7 +1186,7 @@ where
             }
         }
 
-        // make sure we're woken up again since this future is spawned in it's own thread,
+        // Make sure we're woken up again since this future is spawned in its own thread,
         // so poll will not be manually called again
         cx.waker().wake_by_ref();
         Poll::Pending
