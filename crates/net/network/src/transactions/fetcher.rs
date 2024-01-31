@@ -83,6 +83,7 @@ impl TransactionFetcher {
         for hash in hashes {
             self.unknown_hashes.remove(&hash);
             self.eth68_meta.remove(&hash);
+            self.buffered_hashes.remove(&hash);
         }
     }
 
@@ -239,7 +240,9 @@ impl TransactionFetcher {
         surplus_hashes
     }
 
-    pub(super) fn buffer_hashes_for_retry(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
+    pub(super) fn buffer_hashes_for_retry(&mut self, mut hashes: Vec<TxHash>) {
+        // Igt could be that the txns have been received over broadcast in the time being.
+        hashes.retain(|hash| self.unknown_hashes.peek(hash).is_some());
         self.buffer_hashes(hashes, None)
     }
 
@@ -251,7 +254,7 @@ impl TransactionFetcher {
         hashes: impl IntoIterator<Item = TxHash>,
         fallback_peer: Option<PeerId>,
     ) {
-        let mut max_retried_hashes = vec![];
+        let mut max_retried_and_evicted_hashes = vec![];
 
         for hash in hashes {
             // todo: enforce by adding new types UnknownTxHash66 and UnknownTxHash68
@@ -286,18 +289,17 @@ impl TransactionFetcher {
                         "retry limit for `GetPooledTransactions` requests reached for hash, dropping hash"
                     );
 
-                    max_retried_hashes.push(hash);
+                    max_retried_and_evicted_hashes.push(hash);
                     continue;
                 }
                 *retries += 1;
             }
             if let (_, Some(evicted_hash)) = self.buffered_hashes.insert_and_get_evicted(hash) {
-                _ = self.unknown_hashes.remove(&evicted_hash);
-                _ = self.eth68_meta.remove(&evicted_hash);
+                max_retried_and_evicted_hashes.push(evicted_hash);
             }
         }
 
-        self.remove_from_unknown_hashes(max_retried_hashes);
+        self.remove_from_unknown_hashes(max_retried_and_evicted_hashes);
     }
 
     /// Removes the provided transaction hashes from the inflight requests set.
@@ -682,15 +684,16 @@ impl Stream for TransactionFetcher {
             return match result {
                 Ok(Ok(transactions)) => {
                     // clear received hashes
+                    let mut fetched = Vec::with_capacity(transactions.hashes().count());
                     requested_hashes.retain(|requested_hash| {
                         if transactions.hashes().any(|hash| hash == requested_hash) {
                             // hash is now known, stop tracking
-                            self.unknown_hashes.remove(requested_hash);
-                            self.eth68_meta.remove(requested_hash);
+                            fetched.push(*requested_hash);
                             return false
                         }
                         true
                     });
+                    self.remove_from_unknown_hashes(fetched);
                     // buffer left over hashes
                     self.buffer_hashes_for_retry(requested_hashes);
 
