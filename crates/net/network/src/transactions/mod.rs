@@ -1018,19 +1018,24 @@ where
         let budget = &mut 1024;
 
         loop {
+            let mut some_ready = false;
+
             // drain network/peer related events
             if let Poll::Ready(Some(event)) = this.network_events.poll_next_unpin(cx) {
                 this.on_network_event(event);
+                some_ready = true;
             }
 
             // drain commands
             if let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
                 this.on_command(cmd);
+                some_ready = true;
             }
 
             // drain incoming transaction events
             if let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
                 this.on_network_tx_event(event);
+                some_ready = true;
             }
 
             this.update_request_metrics();
@@ -1050,6 +1055,7 @@ where
                         this.on_request_error(peer_id, error);
                     }
                 }
+                some_ready = true;
             }
 
             // try drain buffered transactions
@@ -1078,6 +1084,7 @@ where
                         this.on_good_import(err.hash);
                     }
                 }
+                some_ready = true;
             }
 
             this.update_import_metrics();
@@ -1086,12 +1093,16 @@ where
             let mut new_txs = Vec::new();
             if let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
                 new_txs.push(hash);
+                some_ready = true;
             }
             if !new_txs.is_empty() {
                 this.on_new_transactions(new_txs);
             }
 
             // all channels are fully drained and import futures pending
+            if !some_ready {
+                return Poll::Pending
+            }
 
             *budget -= 1;
             // If the budget is exhausted we manually yield back control to tokio. See
