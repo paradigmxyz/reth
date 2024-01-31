@@ -236,8 +236,6 @@ impl TransactionFetcher {
             }
         });
 
-        self.fill_eth68_request_for_peer(hashes, peer_id, &mut acc_size_response);
-
         surplus_hashes
     }
 
