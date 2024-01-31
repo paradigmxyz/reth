@@ -1175,18 +1175,21 @@ where
 
             // all channels are fully drained and import futures pending
             if !some_ready {
-                return Poll::Pending
+                break
             }
 
             *budget -= 1;
             // If the budget is exhausted we manually yield back control to tokio. See
             // `NetworkManager` for more context on the design pattern.
             if *budget == 0 {
-                // make sure we're woken up again
-                cx.waker().wake_by_ref();
-                return Poll::Pending
+                break
             }
         }
+
+        // make sure we're woken up again since this future is spawned in it's own thread,
+        // so poll will not be manually called again
+        cx.waker().wake_by_ref();
+        return Poll::Pending
     }
 }
 
