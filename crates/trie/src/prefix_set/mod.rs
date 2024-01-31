@@ -12,7 +12,7 @@ pub use loader::{LoadedPrefixSets, PrefixSetLoader};
 /// Internally, this implementation uses a `Vec` and aims to act like a `BTreeSet` in being both
 /// sorted and deduplicated. It does this by keeping a `sorted` flag. The `sorted` flag represents
 /// whether or not the `Vec` is definitely sorted. When a new element is added, it is set to
-/// `false.`. The `Vec` is sorted and deduplicated when `sorted` is `false` and:
+/// `false.`. The `Vec` is sorted and deduplicated when `sorted` is `true` and:
 ///  * An element is being checked for inclusion (`contains`), or
 ///  * The set is being converted into an immutable `PrefixSet` (`freeze`)
 ///
@@ -118,20 +118,18 @@ impl PrefixSet {
     /// Returns `true` if any of the keys in the set has the given prefix or
     /// if the given prefix is a prefix of any key in the set.
     #[inline]
-    pub fn contains<T: Into<Nibbles>>(&mut self, prefix: T) -> bool {
-        let prefix = prefix.into();
-
-        while self.index > 0 && self.keys[self.index] > prefix {
+    pub fn contains(&mut self, prefix: &Nibbles) -> bool {
+        while self.index > 0 && &self.keys[self.index] > prefix {
             self.index -= 1;
         }
 
         for (idx, key) in self.keys[self.index..].iter().enumerate() {
-            if key.has_prefix(&prefix) {
+            if key.has_prefix(prefix) {
                 self.index += idx;
                 return true
             }
 
-            if key > &prefix {
+            if key > prefix {
                 self.index += idx;
                 return false
             }

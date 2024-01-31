@@ -1,55 +1,13 @@
 use crate::{
     constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
     recover_signer_unchecked,
-    revm::config::revm_spec,
-    revm_primitives::{AnalysisKind, BlockEnv, CfgEnv, Env, SpecId, TransactTo, TxEnv},
-    Address, Bytes, Chain, ChainSpec, Head, Header, Transaction, TransactionKind,
+    revm_primitives::{BlockEnv, Env, TransactTo, TxEnv},
+    Address, Bytes, Chain, ChainSpec, Header, Transaction, TransactionKind,
     TransactionSignedEcRecovered, B256, U256,
 };
 
 #[cfg(feature = "optimism")]
 use revm_primitives::OptimismFields;
-
-/// Convenience function to call both [fill_cfg_env] and [fill_block_env]
-pub fn fill_cfg_and_block_env(
-    cfg: &mut CfgEnv,
-    block_env: &mut BlockEnv,
-    chain_spec: &ChainSpec,
-    header: &Header,
-    total_difficulty: U256,
-) {
-    fill_cfg_env(cfg, chain_spec, header, total_difficulty);
-    let after_merge = cfg.spec_id >= SpecId::MERGE;
-    fill_block_env(block_env, chain_spec, header, after_merge);
-}
-
-/// Fill [CfgEnv] fields according to the chain spec and given header
-pub fn fill_cfg_env(
-    cfg_env: &mut CfgEnv,
-    chain_spec: &ChainSpec,
-    header: &Header,
-    total_difficulty: U256,
-) {
-    let spec_id = revm_spec(
-        chain_spec,
-        Head {
-            number: header.number,
-            timestamp: header.timestamp,
-            difficulty: header.difficulty,
-            total_difficulty,
-            hash: Default::default(),
-        },
-    );
-
-    cfg_env.chain_id = chain_spec.chain().id();
-    cfg_env.spec_id = spec_id;
-    cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
-
-    #[cfg(feature = "optimism")]
-    {
-        cfg_env.optimism = chain_spec.is_optimism();
-    }
-}
 
 /// Fill block environment from Block.
 pub fn fill_block_env(
@@ -146,7 +104,12 @@ pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEn
     {
         let mut envelope_buf = Vec::with_capacity(transaction.length_without_header());
         transaction.encode_enveloped(&mut envelope_buf);
-        fill_tx_env(&mut tx_env, transaction.as_ref(), transaction.signer(), envelope_buf.into());
+        fill_op_tx_env(
+            &mut tx_env,
+            transaction.as_ref(),
+            transaction.signer(),
+            envelope_buf.into(),
+        );
     }
 
     tx_env
@@ -175,7 +138,7 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
         nonce: None,
         gas_limit: 30_000_000,
         value: U256::ZERO,
-        data: parent_beacon_block_root.0.to_vec().into(),
+        data: parent_beacon_block_root.0.into(),
         // Setting the gas price to zero enforces that no value is transferred as part of the call,
         // and that the call will not count against the block's gas limit
         gas_price: U256::ZERO,
@@ -217,16 +180,12 @@ pub fn fill_tx_env_with_recovered(
     transaction: &TransactionSignedEcRecovered,
     envelope: Bytes,
 ) {
-    fill_tx_env(tx_env, transaction.as_ref(), transaction.signer(), envelope);
+    fill_op_tx_env(tx_env, transaction.as_ref(), transaction.signer(), envelope);
 }
 
 /// Fill transaction environment from a [Transaction] and the given sender address.
-pub fn fill_tx_env<T>(
-    tx_env: &mut TxEnv,
-    transaction: T,
-    sender: Address,
-    #[cfg(feature = "optimism")] envelope: Bytes,
-) where
+pub fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address)
+where
     T: AsRef<Transaction>,
 {
     tx_env.caller = sender;
@@ -246,9 +205,6 @@ pub fn fill_tx_env<T>(
             tx_env.access_list.clear();
             tx_env.blob_hashes.clear();
             tx_env.max_fee_per_blob_gas.take();
-
-            #[cfg(feature = "optimism")]
-            fill_op_tx_env(tx_env, transaction, envelope);
         }
         Transaction::Eip2930(tx) => {
             tx_env.gas_limit = tx.gas_limit;
@@ -272,9 +228,6 @@ pub fn fill_tx_env<T>(
                 .collect();
             tx_env.blob_hashes.clear();
             tx_env.max_fee_per_blob_gas.take();
-
-            #[cfg(feature = "optimism")]
-            fill_op_tx_env(tx_env, transaction, envelope);
         }
         Transaction::Eip1559(tx) => {
             tx_env.gas_limit = tx.gas_limit;
@@ -298,9 +251,6 @@ pub fn fill_tx_env<T>(
                 .collect();
             tx_env.blob_hashes.clear();
             tx_env.max_fee_per_blob_gas.take();
-
-            #[cfg(feature = "optimism")]
-            fill_op_tx_env(tx_env, transaction, envelope);
         }
         Transaction::Eip4844(tx) => {
             tx_env.gas_limit = tx.gas_limit;
@@ -324,9 +274,6 @@ pub fn fill_tx_env<T>(
                 .collect();
             tx_env.blob_hashes = tx.blob_versioned_hashes.clone();
             tx_env.max_fee_per_blob_gas = Some(U256::from(tx.max_fee_per_blob_gas));
-
-            #[cfg(feature = "optimism")]
-            fill_op_tx_env(tx_env, transaction, envelope);
         }
         #[cfg(feature = "optimism")]
         Transaction::Deposit(tx) => {
@@ -342,15 +289,20 @@ pub fn fill_tx_env<T>(
             tx_env.data = tx.input.clone();
             tx_env.chain_id = None;
             tx_env.nonce = None;
-
-            fill_op_tx_env(tx_env, transaction, envelope);
         }
     }
 }
 
+/// Fill transaction environment from a [Transaction], envelope, and the given sender address.
 #[cfg(feature = "optimism")]
 #[inline(always)]
-fn fill_op_tx_env<T: AsRef<Transaction>>(tx_env: &mut TxEnv, transaction: T, envelope: Bytes) {
+pub fn fill_op_tx_env<T: AsRef<Transaction>>(
+    tx_env: &mut TxEnv,
+    transaction: T,
+    sender: Address,
+    envelope: Bytes,
+) {
+    fill_tx_env(tx_env, &transaction, sender);
     match transaction.as_ref() {
         Transaction::Deposit(tx) => {
             tx_env.optimism = OptimismFields {
@@ -368,29 +320,5 @@ fn fill_op_tx_env<T: AsRef<Transaction>>(tx_env: &mut TxEnv, transaction: T, env
                 enveloped_tx: Some(envelope),
             }
         }
-    }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[ignore]
-    fn test_fill_cfg_and_block_env() {
-        let mut cfg_env = CfgEnv::default();
-        let mut block_env = BlockEnv::default();
-        let header = Header::default();
-        let chain_spec = ChainSpec::default();
-        let total_difficulty = U256::ZERO;
-
-        fill_cfg_and_block_env(
-            &mut cfg_env,
-            &mut block_env,
-            &chain_spec,
-            &header,
-            total_difficulty,
-        );
-
-        assert_eq!(cfg_env.chain_id, chain_spec.chain().id());
     }
 }

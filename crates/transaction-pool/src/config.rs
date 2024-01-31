@@ -1,5 +1,6 @@
-use reth_primitives::EIP4844_TX_TYPE_ID;
-
+use crate::TransactionOrigin;
+use reth_primitives::{Address, EIP4844_TX_TYPE_ID};
+use std::collections::HashSet;
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
 
@@ -52,7 +53,7 @@ impl Default for PoolConfig {
 }
 
 /// Size limits for a sub-pool.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SubPoolLimit {
     /// Maximum amount of transaction in the pool.
     pub max_txs: usize,
@@ -61,6 +62,11 @@ pub struct SubPoolLimit {
 }
 
 impl SubPoolLimit {
+    /// Creates a new instance with the given limits.
+    pub const fn new(max_txs: usize, max_size: usize) -> Self {
+        Self { max_txs, max_size }
+    }
+
     /// Returns whether the size or amount constraint is violated.
     #[inline]
     pub fn is_exceeded(&self, txs: usize, size: usize) -> bool {
@@ -109,7 +115,7 @@ impl Default for PriceBumpConfig {
 
 /// Configuration options for the locally received transactions:
 /// [TransactionOrigin::Local](crate::TransactionOrigin)
-#[derive(Debug, Clone, Eq, PartialEq, Default)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LocalTransactionConfig {
     /// Apply no exemptions to the locally received transactions.
     ///
@@ -118,6 +124,20 @@ pub struct LocalTransactionConfig {
     ///   - no price exemptions
     ///   - no eviction exemptions
     pub no_exemptions: bool,
+    /// Addresses that will be considered as local . Above exemptions apply
+    pub local_addresses: HashSet<Address>,
+    /// Flag indicating whether local transactions should be propagated.
+    pub propagate_local_transactions: bool,
+}
+
+impl Default for LocalTransactionConfig {
+    fn default() -> Self {
+        Self {
+            no_exemptions: false,
+            local_addresses: HashSet::default(),
+            propagate_local_transactions: true,
+        }
+    }
 }
 
 impl LocalTransactionConfig {
@@ -125,5 +145,33 @@ impl LocalTransactionConfig {
     #[inline]
     pub fn no_local_exemptions(&self) -> bool {
         self.no_exemptions
+    }
+
+    /// Returns whether the local addresses vector contains the given address.
+    #[inline]
+    pub fn contains_local_address(&self, address: Address) -> bool {
+        self.local_addresses.contains(&address)
+    }
+
+    /// Returns whether the particular transaction should be considered local.
+    ///
+    /// This always returns false if the local exemptions are disabled.
+    #[inline]
+    pub fn is_local(&self, origin: TransactionOrigin, sender: Address) -> bool {
+        if self.no_local_exemptions() {
+            return false
+        }
+        origin.is_local() || self.contains_local_address(sender)
+    }
+
+    /// Sets toggle to propagate transactions received locally by this client (e.g
+    /// transactions from eth_sendTransaction to this nodes' RPC server)
+    ///
+    /// If set to false, only transactions received by network peers (via
+    /// p2p) will be marked as propagated in the local transaction pool and returned on a
+    /// GetPooledTransactions p2p request
+    pub fn set_propagate_local_transactions(mut self, propagate_local_txs: bool) -> Self {
+        self.propagate_local_transactions = propagate_local_txs;
+        self
     }
 }

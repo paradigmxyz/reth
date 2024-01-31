@@ -513,25 +513,25 @@ impl Transaction {
 
     /// Returns true if the transaction is a legacy transaction.
     #[inline]
-    pub fn is_legacy(&self) -> bool {
+    pub const fn is_legacy(&self) -> bool {
         matches!(self, Transaction::Legacy(_))
     }
 
     /// Returns true if the transaction is an EIP-2930 transaction.
     #[inline]
-    pub fn is_eip2930(&self) -> bool {
+    pub const fn is_eip2930(&self) -> bool {
         matches!(self, Transaction::Eip2930(_))
     }
 
     /// Returns true if the transaction is an EIP-1559 transaction.
     #[inline]
-    pub fn is_eip1559(&self) -> bool {
+    pub const fn is_eip1559(&self) -> bool {
         matches!(self, Transaction::Eip1559(_))
     }
 
     /// Returns true if the transaction is an EIP-4844 transaction.
     #[inline]
-    pub fn is_eip4844(&self) -> bool {
+    pub const fn is_eip4844(&self) -> bool {
         matches!(self, Transaction::Eip4844(_))
     }
 
@@ -669,9 +669,9 @@ impl Default for Transaction {
     }
 }
 
-/// This encodes the transaction _without_ the signature, and is only suitable for creating a hash
-/// intended for signing.
 impl Encodable for Transaction {
+    /// This encodes the transaction _without_ the signature, and is only suitable for creating a
+    /// hash intended for signing.
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             Transaction::Legacy(legacy_tx) => {
@@ -771,12 +771,19 @@ impl Compact for TransactionKind {
 }
 
 impl Encodable for TransactionKind {
+    /// This encodes the `to` field of a transaction request.
+    /// If the [TransactionKind] is a [TransactionKind::Call] it will encode the inner address:
+    /// `rlp(address)`
+    ///
+    /// If the [TransactionKind] is a [TransactionKind::Create] it will encode an empty list:
+    /// `rlp([])`, which is also
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         match self {
             TransactionKind::Call(to) => to.encode(out),
             TransactionKind::Create => out.put_u8(EMPTY_STRING_CODE),
         }
     }
+
     fn length(&self) -> usize {
         match self {
             TransactionKind::Call(to) => to.length(),
@@ -897,25 +904,13 @@ impl Compact for TransactionSignedNoHash {
         let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
             TRANSACTION_DECOMPRESSOR.with(|decompressor| {
-                let mut decompressor = decompressor.borrow_mut();
-                let mut tmp: Vec<u8> = Vec::with_capacity(200);
-
-                // `decompress_to_buffer` will return an error if the output buffer doesn't have
-                // enough capacity. However we don't actually have information on the required
-                // length. So we hope for the best, and keep trying again with a fairly bigger size
-                // if it fails.
-                while let Err(err) = decompressor.decompress_to_buffer(buf, &mut tmp) {
-                    let err = err.to_string();
-                    if !err.contains("Destination buffer is too small") {
-                        panic!("Failed to decompress: {}", err);
-                    }
-                    tmp.reserve(tmp.capacity() + 24_000);
-                }
+                let decompressor = &mut decompressor.borrow_mut();
 
                 // TODO: enforce that zstd is only present at a "top" level type
 
                 let transaction_type = (bitflags & 0b110) >> 1;
-                let (transaction, _) = Transaction::from_compact(tmp.as_slice(), transaction_type);
+                let (transaction, _) =
+                    Transaction::from_compact(decompressor.decompress(buf), transaction_type);
 
                 (transaction, buf)
             })
@@ -992,7 +987,23 @@ impl TransactionSigned {
         self.signature.recover_signer(signature_hash)
     }
 
-    /// Recovers a list of signers from a transaction list iterator
+    /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
+    /// value_.
+    ///
+    /// Returns `None` if the transaction's signature is invalid, see also
+    /// [Self::recover_signer_unchecked].
+    pub fn recover_signer_unchecked(&self) -> Option<Address> {
+        // Optimism's Deposit transaction does not have a signature. Directly return the
+        // `from` address.
+        #[cfg(feature = "optimism")]
+        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+            return Some(from)
+        }
+        let signature_hash = self.signature_hash();
+        self.signature.recover_signer_unchecked(signature_hash)
+    }
+
+    /// Recovers a list of signers from a transaction list iterator.
     ///
     /// Returns `None`, if some transaction's signature is invalid, see also
     /// [Self::recover_signer].
@@ -1007,6 +1018,22 @@ impl TransactionSigned {
         }
     }
 
+    /// Recovers a list of signers from a transaction list iterator _without ensuring that the
+    /// signature has a low `s` value_.
+    ///
+    /// Returns `None`, if some transaction's signature is invalid, see also
+    /// [Self::recover_signer_unchecked].
+    pub fn recover_signers_unchecked<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
+    where
+        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
+    {
+        if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
+            txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()
+        } else {
+            txes.into_par_iter().map(|tx| tx.recover_signer_unchecked()).collect()
+        }
+    }
+
     /// Returns the [TransactionSignedEcRecovered] transaction with the given sender.
     #[inline]
     pub const fn with_signer(self, signer: Address) -> TransactionSignedEcRecovered {
@@ -1018,6 +1045,16 @@ impl TransactionSigned {
     /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
     pub fn into_ecrecovered(self) -> Option<TransactionSignedEcRecovered> {
         let signer = self.recover_signer()?;
+        Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
+    }
+
+    /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`] _without
+    /// ensuring that the signature has a low `s` value_ (EIP-2).
+    ///
+    /// Returns `None` if the transaction's signature is invalid, see also
+    /// [Self::recover_signer_unchecked].
+    pub fn into_ecrecovered_unchecked(self) -> Option<TransactionSignedEcRecovered> {
+        let signer = self.recover_signer_unchecked()?;
         Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
     }
 
@@ -1038,6 +1075,18 @@ impl TransactionSigned {
         }
     }
 
+    /// Tries to recover signer and return [`TransactionSignedEcRecovered`]. _without ensuring that
+    /// the signature has a low `s` value_ (EIP-2).
+    ///
+    /// Returns `Err(Self)` if the transaction's signature is invalid, see also
+    /// [Self::recover_signer_unchecked].
+    pub fn try_into_ecrecovered_unchecked(self) -> Result<TransactionSignedEcRecovered, Self> {
+        match self.recover_signer_unchecked() {
+            None => Err(self),
+            Some(signer) => Ok(TransactionSignedEcRecovered { signed_transaction: self, signer }),
+        }
+    }
+
     /// Returns the enveloped encoded transactions.
     ///
     /// See also [TransactionSigned::encode_enveloped]
@@ -1050,9 +1099,10 @@ impl TransactionSigned {
     /// Encodes the transaction into the "raw" format (e.g. `eth_sendRawTransaction`).
     /// This format is also referred to as "binary" encoding.
     ///
-    /// For legacy transactions, it encodes the RLP of the transaction into the buffer: `rlp(tx)`
+    /// For legacy transactions, it encodes the RLP of the transaction into the buffer:
+    /// `rlp(tx-data)`
     /// For EIP-2718 typed it encodes the type of the transaction followed by the rlp of the
-    /// transaction: `type || rlp(tx)`
+    /// transaction: `tx-type || rlp(tx-data)`
     pub fn encode_enveloped(&self, out: &mut dyn bytes::BufMut) {
         self.encode_inner(out, false)
     }
@@ -1169,12 +1219,12 @@ impl TransactionSigned {
     ///
     /// This should be used _only_ be used internally in general transaction decoding methods,
     /// which have already ensured that the input is a typed transaction with the following format:
-    /// `tx_type || rlp(tx)`
+    /// `tx-type || rlp(tx-data)`
     ///
     /// Note that this format does not start with any RLP header, and instead starts with a single
     /// byte indicating the transaction type.
     ///
-    /// CAUTION: this expects that `data` is `tx_type || rlp(tx)`
+    /// CAUTION: this expects that `data` is `tx-type || rlp(tx-data)`
     pub fn decode_enveloped_typed_transaction(
         data: &mut &[u8],
     ) -> alloy_rlp::Result<TransactionSigned> {
@@ -1234,13 +1284,13 @@ impl TransactionSigned {
     ///
     /// A raw transaction is either a legacy transaction or EIP-2718 typed transaction.
     ///
-    /// For legacy transactions, the format is encoded as: `rlp(tx)`. This format will start with a
-    /// RLP list header.
+    /// For legacy transactions, the format is encoded as: `rlp(tx-data)`. This format will start
+    /// with a RLP list header.
     ///
     /// For EIP-2718 typed transactions, the format is encoded as the type of the transaction
-    /// followed by the rlp of the transaction: `type || rlp(tx)`.
+    /// followed by the rlp of the transaction: `type || rlp(tx-data)`.
     ///
-    /// To decode EIP-4844 transactions in `eth_sendRawTransaction`, use
+    /// To decode EIP-4844 transactions from `eth_sendRawTransaction`, use
     /// [PooledTransactionsElement::decode_enveloped].
     pub fn decode_enveloped(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if data.is_empty() {
@@ -1283,6 +1333,14 @@ impl From<TransactionSignedEcRecovered> for TransactionSigned {
 }
 
 impl Encodable for TransactionSigned {
+    /// This encodes the transaction _with_ the signature, and an rlp header.
+    ///
+    /// For legacy transactions, it encodes the transaction data:
+    /// `rlp(tx-data)`
+    ///
+    /// For EIP-2718 typed transactions, it encodes the transaction type followed by the rlp of the
+    /// transaction:
+    /// `rlp(tx-type || rlp(tx-data))`
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         self.encode_inner(out, true);
     }
@@ -1292,29 +1350,37 @@ impl Encodable for TransactionSigned {
     }
 }
 
-/// This `Decodable` implementation only supports decoding rlp encoded transactions as it's used by
-/// p2p.
-///
-/// The p2p encoding format always includes an RLP header, although the type RLP header depends on
-/// whether or not the transaction is a legacy transaction.
-///
-/// If the transaction is a legacy transaction, it is just encoded as a RLP list: `rlp(tx)`.
-///
-/// If the transaction is a typed transaction, it is encoded as a RLP string:
-/// `rlp(type || rlp(tx))`
-///
-/// This cannot be used for decoding EIP-4844 transactions in p2p, since the EIP-4844 variant of
-/// [TransactionSigned] does not include the blob sidecar. For a general purpose decoding method
-/// suitable for decoding transactions from p2p, see [PooledTransactionsElement].
-///
-/// CAUTION: Due to a quirk in [Header::decode], this method will succeed even if a typed
-/// transaction is encoded in the RPC format, and does not start with a RLP header. This is because
-/// [Header::decode] does not advance the buffer, and returns a length-1 string header if the first
-/// byte is less than `0xf7`. This causes this decode implementation to pass unaltered buffer to
-/// [TransactionSigned::decode_enveloped_typed_transaction], which expects the RPC format. Despite
-/// this quirk, this should **not** be used for RPC methods that accept raw transactions.
 impl Decodable for TransactionSigned {
+    /// This `Decodable` implementation only supports decoding rlp encoded transactions as it's used
+    /// by p2p.
+    ///
+    /// The p2p encoding format always includes an RLP header, although the type RLP header depends
+    /// on whether or not the transaction is a legacy transaction.
+    ///
+    /// If the transaction is a legacy transaction, it is just encoded as a RLP list:
+    /// `rlp(tx-data)`.
+    ///
+    /// If the transaction is a typed transaction, it is encoded as a RLP string:
+    /// `rlp(tx-type || rlp(tx-data))`
+    ///
+    /// This can be used for decoding all signed transactions in p2p `BlockBodies` responses.
+    ///
+    /// This cannot be used for decoding EIP-4844 transactions in p2p `PooledTransactions`, since
+    /// the EIP-4844 variant of [TransactionSigned] does not include the blob sidecar.
+    ///
+    /// For a method suitable for decoding pooled transactions, see [PooledTransactionsElement].
+    ///
+    /// CAUTION: Due to a quirk in [Header::decode], this method will succeed even if a typed
+    /// transaction is encoded in this format, and does not start with a RLP header:
+    /// `tx-type || rlp(tx-data)`.
+    ///
+    /// This is because [Header::decode] does not advance the buffer, and returns a length-1 string
+    /// header if the first byte is less than `0xf7`.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        if buf.is_empty() {
+            return Err(RlpError::InputTooShort)
+        }
+
         // decode header
         let mut original_encoding = *buf;
         let header = Header::decode(buf)?;
@@ -1438,6 +1504,9 @@ impl TransactionSignedEcRecovered {
 }
 
 impl Encodable for TransactionSignedEcRecovered {
+    /// This encodes the transaction _with_ the signature, and an rlp header.
+    ///
+    /// Refer to docs for [TransactionSigned::encode] for details on the exact format.
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         self.signed_transaction.encode(out)
     }
@@ -1514,7 +1583,7 @@ mod tests {
         },
         Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, B256, U256,
     };
-    use alloy_primitives::{b256, bytes};
+    use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use bytes::BytesMut;
     use secp256k1::{KeyPair, Secp256k1};
@@ -1525,6 +1594,19 @@ mod tests {
         let input = [0x80u8];
         let res = TransactionSigned::decode(&mut &input[..]).unwrap_err();
         assert_eq!(RlpError::InputTooShort, res);
+    }
+
+    #[test]
+    fn raw_kind_encoding_sanity() {
+        // check the 0x80 encoding for Create
+        let mut buf = Vec::new();
+        TransactionKind::Create.encode(&mut buf);
+        assert_eq!(buf, vec![0x80]);
+
+        // check decoding
+        let buf = [0x80];
+        let decoded = TransactionKind::decode(&mut &buf[..]).unwrap();
+        assert_eq!(decoded, TransactionKind::Create);
     }
 
     #[test]
@@ -1788,5 +1870,31 @@ mod tests {
 
             assert_eq!(parallel_senders, seq_senders);
         }
+    }
+
+    // <https://etherscan.io/tx/0x280cde7cdefe4b188750e76c888f13bd05ce9a4d7767730feefe8a0e50ca6fc4>
+    #[test]
+    fn recover_legacy_singer() {
+        let raw_tx = "f9015482078b8505d21dba0083022ef1947a250d5630b4cf539739df2c5dacb4c659f2488d880c46549a521b13d8b8e47ff36ab50000000000000000000000000000000000000000000066ab5a608bd00a23f2fe000000000000000000000000000000000000000000000000000000000000008000000000000000000000000048c04ed5691981c42154c6167398f95e8f38a7ff00000000000000000000000000000000000000000000000000000000632ceac70000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000006c6ee5e31d828de241282b9606c8e98ea48526e225a0c9077369501641a92ef7399ff81c21639ed4fd8fc69cb793cfa1dbfab342e10aa0615facb2f1bcf3274a354cfe384a38d0cc008a11c2dd23a69111bc6930ba27a8";
+        let data = hex::decode(raw_tx).unwrap();
+        let tx = TransactionSigned::decode_rlp_legacy_transaction(&mut data.as_slice()).unwrap();
+        assert!(tx.is_legacy());
+        let sender = tx.recover_signer().unwrap();
+        assert_eq!(sender, address!("a12e1462d0ceD572f396F58B6E2D03894cD7C8a4"));
+    }
+
+    // <https://github.com/alloy-rs/alloy/issues/141>
+    // <https://etherscan.io/tx/0xce4dc6d7a7549a98ee3b071b67e970879ff51b5b95d1c340bacd80fa1e1aab31>
+    #[test]
+    fn recover_enveloped() {
+        let raw_tx = "02f86f0102843b9aca0085029e7822d68298f094d9e1459a7a482635700cbc20bbaf52d495ab9c9680841b55ba3ac080a0c199674fcb29f353693dd779c017823b954b3c69dffa3cd6b2a6ff7888798039a028ca912de909e7e6cdef9cdcaf24c54dd8c1032946dfa1d85c206b32a9064fe8";
+        let data = hex::decode(raw_tx).unwrap();
+        let tx = TransactionSigned::decode_enveloped(&mut data.as_slice()).unwrap();
+        let sender = tx.recover_signer().unwrap();
+        assert_eq!(sender, address!("001e2b7dE757bA469a57bF6b23d982458a07eFcE"));
+        assert_eq!(tx.to(), Some(address!("D9e1459A7A482635700cBc20BBAF52D495Ab9C96")));
+        assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
+        let encoded = tx.envelope_encoded();
+        assert_eq!(encoded.as_ref(), data.as_slice());
     }
 }

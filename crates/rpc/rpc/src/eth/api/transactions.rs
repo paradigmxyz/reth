@@ -1,4 +1,5 @@
 //! Contains RPC handler implementations specific to transactions
+
 use crate::{
     eth::{
         api::pending_block::PendingBlockEnv,
@@ -13,12 +14,13 @@ use crate::{
 };
 use async_trait::async_trait;
 use reth_network_api::NetworkInfo;
+use reth_node_api::EvmEnvConfig;
 use reth_primitives::{
     eip4844::calc_blob_gasprice,
     revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     revm_primitives::{db::DatabaseCommit, Env, ExecutionResult, ResultAndState, SpecId, State},
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
-    IntoRecoveredTransaction, Receipt, SealedBlock,
+    IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionKind::{Call, Create},
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256, U128, U256, U64,
 };
@@ -44,7 +46,11 @@ use revm::{
 #[cfg(feature = "optimism")]
 use crate::eth::api::optimism::OptimismTxMeta;
 #[cfg(feature = "optimism")]
+use crate::eth::error::OptimismEthApiError;
+#[cfg(feature = "optimism")]
 use reth_revm::optimism::RethL1BlockInfo;
+#[cfg(feature = "optimism")]
+use reth_rpc_types::OptimismTransactionReceiptFields;
 #[cfg(feature = "optimism")]
 use revm::L1BlockInfo;
 #[cfg(feature = "optimism")]
@@ -57,6 +63,22 @@ pub(crate) type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
 ///
 /// Async functions that are spawned onto the
 /// [BlockingTaskPool](crate::blocking_pool::BlockingTaskPool) begin with `spawn_`
+///
+///
+/// ## Calls
+///
+/// There are subtle differences between when transacting [CallRequest]:
+///
+/// The endpoints `eth_call` and `eth_estimateGas` and `eth_createAccessList` should always
+/// __disable__ the base fee check in the [Env] [Cfg](revm_primitives::CfgEnv).
+///
+/// The behaviour for tracing endpoints is not consistent across clients.
+/// Geth also disables the basefee check for tracing: <https://github.com/ethereum/go-ethereum/blob/bc0b87ca196f92e5af49bd33cc190ef0ec32b197/eth/tracers/api.go#L955-L955>
+/// Erigon does not: <https://github.com/ledgerwatch/erigon/blob/aefb97b07d1c4fd32a66097a24eddd8f6ccacae0/turbo/transactions/tracing.go#L209-L209>
+///
+/// See also <https://github.com/paradigmxyz/reth/issues/6240>
+///
+/// This implementation follows the behaviour of Geth and disables the basefee check for tracing.
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
@@ -99,6 +121,14 @@ pub trait EthTransactions: Send + Sync {
     ///
     /// Returns `None` if block does not exist.
     async fn block_by_id(&self, id: BlockId) -> EthResult<Option<SealedBlock>>;
+
+    /// Get the entire block for the given id.
+    ///
+    /// Returns `None` if block does not exist.
+    async fn block_by_id_with_senders(
+        &self,
+        id: BlockId,
+    ) -> EthResult<Option<SealedBlockWithSenders>>;
 
     /// Get all transactions in the block with the given hash.
     ///
@@ -146,6 +176,9 @@ pub trait EthTransactions: Send + Sync {
 
     /// Prepares the state and env for the given [CallRequest] at the given [BlockId] and executes
     /// the closure on a new task returning the result of the closure.
+    ///
+    /// This returns the configured [Env] for the given [CallRequest] at the given [BlockId] and
+    /// with configured call settings: `prepare_call_env`.
     async fn spawn_with_call_at<F, R>(
         &self,
         request: CallRequest,
@@ -294,12 +327,14 @@ pub trait EthTransactions: Send + Sync {
 }
 
 #[async_trait]
-impl<Provider, Pool, Network> EthTransactions for EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthTransactions
+    for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Pool: TransactionPool + Clone + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
+    EvmConfig: EvmEnvConfig + 'static,
 {
     fn call_gas_limit(&self) -> u64 {
         self.inner.gas_cap
@@ -365,6 +400,13 @@ where
         self.block(id).await
     }
 
+    async fn block_by_id_with_senders(
+        &self,
+        id: BlockId,
+    ) -> EthResult<Option<SealedBlockWithSenders>> {
+        self.block_with_senders(id).await
+    }
+
     async fn transactions_by_block_id(
         &self,
         block: BlockId,
@@ -379,8 +421,11 @@ where
                 match this.provider().transaction_by_hash_with_meta(hash)? {
                     None => Ok(None),
                     Some((tx, meta)) => {
+                        // Note: we assume this transaction is valid, because it's mined (or part of
+                        // pending block) and already. We don't need to
+                        // check for pre EIP-2 because this transaction could be pre-EIP-2.
                         let transaction = tx
-                            .into_ecrecovered()
+                            .into_ecrecovered_unchecked()
                             .ok_or(EthApiError::InvalidTransactionSignature)?;
 
                         let tx = TransactionSource::Block {
@@ -846,12 +891,13 @@ where
 
 // === impl EthApi ===
 
-impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Pool: TransactionPool + Clone + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
+    EvmConfig: EvmEnvConfig + 'static,
 {
     /// Spawns the given closure on a new blocking tracing task
     async fn spawn_tracing_task_with<F, T>(&self, f: F) -> EthResult<T>
@@ -868,7 +914,7 @@ where
     }
 }
 
-impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
@@ -932,45 +978,32 @@ where
         l1_block_info: Option<L1BlockInfo>,
         block_timestamp: u64,
     ) -> EthResult<OptimismTxMeta> {
-        if let Some(l1_block_info) = l1_block_info {
-            let envelope_buf: Bytes = {
-                let mut envelope_buf = bytes::BytesMut::default();
-                tx.encode_enveloped(&mut envelope_buf);
-                envelope_buf.freeze().into()
-            };
+        let Some(l1_block_info) = l1_block_info else { return Ok(OptimismTxMeta::default()) };
 
-            let (l1_fee, l1_data_gas) = match (!tx.is_deposit())
-                .then(|| {
-                    let inner_l1_fee = match l1_block_info.l1_tx_data_fee(
-                        &self.inner.provider.chain_spec(),
-                        block_timestamp,
-                        &envelope_buf,
-                        tx.is_deposit(),
-                    ) {
-                        Ok(inner_l1_fee) => inner_l1_fee,
-                        Err(e) => return Err(e),
-                    };
-                    let inner_l1_data_gas = match l1_block_info.l1_data_gas(
-                        &self.inner.provider.chain_spec(),
-                        block_timestamp,
-                        &envelope_buf,
-                    ) {
-                        Ok(inner_l1_data_gas) => inner_l1_data_gas,
-                        Err(e) => return Err(e),
-                    };
-                    Ok((inner_l1_fee, inner_l1_data_gas))
-                })
-                .transpose()
-                .map_err(|_| EthApiError::InternalEthError)?
-            {
-                Some((l1_fee, l1_data_gas)) => (Some(l1_fee), Some(l1_data_gas)),
-                None => (None, None),
-            };
+        let envelope_buf: Bytes = {
+            let mut envelope_buf = bytes::BytesMut::new();
+            tx.encode_enveloped(&mut envelope_buf);
+            envelope_buf.freeze().into()
+        };
 
-            Ok(OptimismTxMeta::new(Some(l1_block_info), l1_fee, l1_data_gas))
+        let (l1_fee, l1_data_gas) = if tx.is_deposit() {
+            let inner_l1_fee = l1_block_info
+                .l1_tx_data_fee(
+                    &self.inner.provider.chain_spec(),
+                    block_timestamp,
+                    &envelope_buf,
+                    tx.is_deposit(),
+                )
+                .map_err(|_| EthApiError::Optimism(OptimismEthApiError::L1BlockFeeError))?;
+            let inner_l1_data_gas = l1_block_info
+                .l1_data_gas(&self.inner.provider.chain_spec(), block_timestamp, &envelope_buf)
+                .map_err(|_| EthApiError::Optimism(OptimismEthApiError::L1BlockGasError))?;
+            (Some(inner_l1_fee), Some(inner_l1_data_gas))
         } else {
-            Ok(OptimismTxMeta::default())
-        }
+            (None, None)
+        };
+
+        Ok(OptimismTxMeta::new(Some(l1_block_info), l1_fee, l1_data_gas))
     }
 
     /// Helper function for `eth_sendRawTransaction` for Optimism.
@@ -991,7 +1024,7 @@ where
                     target = "rpc::eth",
                     "Failed to serialize transaction for forwarding to sequencer"
                 );
-                EthApiError::InternalEthError
+                EthApiError::Optimism(OptimismEthApiError::InvalidSequencerTransaction)
             })?;
 
             self.inner
@@ -1001,18 +1034,19 @@ where
                 .body(body)
                 .send()
                 .await
-                .map_err(|_| EthApiError::InternalEthError)?;
+                .map_err(|err| EthApiError::Optimism(OptimismEthApiError::HttpError(err)))?;
         }
         Ok(())
     }
 }
 
-impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Pool: TransactionPool + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
+    EvmConfig: EvmEnvConfig + 'static,
 {
     pub(crate) fn sign_request(
         &self,
@@ -1146,15 +1180,20 @@ impl From<TransactionSource> for Transaction {
 }
 
 /// Helper function to construct a transaction receipt
+///
+/// Note: This requires _all_ block receipts because we need to calculate the gas used by the
+/// transaction.
 pub(crate) fn build_transaction_receipt_with_block_receipts(
-    tx: TransactionSigned,
+    transaction: TransactionSigned,
     meta: TransactionMeta,
     receipt: Receipt,
     all_receipts: &[Receipt],
     #[cfg(feature = "optimism")] optimism_tx_meta: OptimismTxMeta,
 ) -> EthResult<TransactionReceipt> {
-    let transaction =
-        tx.clone().into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+    // Note: we assume this transaction is valid, because it's mined (or part of pending block) and
+    // we don't need to check for pre EIP-2
+    let from =
+        transaction.recover_signer_unchecked().ok_or(EthApiError::InvalidTransactionSignature)?;
 
     // get the previous transaction cumulative gas used
     let gas_used = if meta.index == 0 {
@@ -1173,14 +1212,14 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         transaction_index: U64::from(meta.index),
         block_hash: Some(meta.block_hash),
         block_number: Some(U256::from(meta.block_number)),
-        from: transaction.signer(),
+        from,
         to: None,
         cumulative_gas_used: U256::from(receipt.cumulative_gas_used),
         gas_used: Some(U256::from(gas_used)),
         contract_address: None,
         logs: Vec::with_capacity(receipt.logs.len()),
         effective_gas_price: U128::from(transaction.effective_gas_price(meta.base_fee)),
-        transaction_type: tx.transaction.tx_type().into(),
+        transaction_type: transaction.transaction.tx_type().into(),
         // TODO pre-byzantium receipts have a post-transaction state root
         state_root: None,
         logs_bloom: receipt.bloom_slow(),
@@ -1188,28 +1227,33 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         // EIP-4844 fields
         blob_gas_price: meta.excess_blob_gas.map(calc_blob_gasprice).map(U128::from),
         blob_gas_used: transaction.transaction.blob_gas_used().map(U128::from),
-        // Optimism fields
-        #[cfg(feature = "optimism")]
-        deposit_nonce: receipt.deposit_nonce.map(U64::from),
         ..Default::default()
     };
 
     #[cfg(feature = "optimism")]
-    if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
-        if !tx.is_deposit() {
-            res_receipt.l1_fee = optimism_tx_meta.l1_fee;
-            res_receipt.l1_gas_used =
-                optimism_tx_meta.l1_data_gas.map(|dg| dg + l1_block_info.l1_fee_overhead);
-            res_receipt.l1_fee_scalar =
-                Some(l1_block_info.l1_fee_scalar.div(U256::from(1_000_000)));
-            res_receipt.l1_gas_price = Some(l1_block_info.l1_base_fee);
+    {
+        let mut op_fields = OptimismTransactionReceiptFields {
+            deposit_nonce: receipt.deposit_nonce.map(U64::from),
+            ..Default::default()
+        };
+
+        if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
+            if !transaction.is_deposit() {
+                op_fields.l1_fee = optimism_tx_meta.l1_fee;
+                op_fields.l1_gas_used =
+                    optimism_tx_meta.l1_data_gas.map(|dg| dg + l1_block_info.l1_fee_overhead);
+                op_fields.l1_fee_scalar =
+                    Some(l1_block_info.l1_fee_scalar.div(U256::from(1_000_000)));
+                op_fields.l1_gas_price = Some(l1_block_info.l1_base_fee);
+            }
         }
+
+        res_receipt.other = op_fields.into();
     }
 
-    match tx.transaction.kind() {
+    match transaction.transaction.kind() {
         Create => {
-            res_receipt.contract_address =
-                Some(transaction.signer().create(tx.transaction.nonce()));
+            res_receipt.contract_address = Some(from.create(transaction.transaction.nonce()));
         }
         Call(addr) => {
             res_receipt.to = Some(*addr);
@@ -1251,6 +1295,7 @@ mod tests {
         BlockingTaskPool, EthApi,
     };
     use reth_network_api::noop::NoopNetwork;
+    use reth_node_builder::EthEvmConfig;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
@@ -1262,7 +1307,8 @@ mod tests {
 
         let pool = testing_pool();
 
-        let cache = EthStateCache::spawn(noop_provider, Default::default());
+        let evm_config = EthEvmConfig::default();
+        let cache = EthStateCache::spawn(noop_provider, Default::default(), evm_config);
         let fee_history_cache =
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
         let eth_api = EthApi::new(
@@ -1274,6 +1320,7 @@ mod tests {
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
+            evm_config,
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d

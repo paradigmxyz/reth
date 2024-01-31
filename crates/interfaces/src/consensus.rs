@@ -1,6 +1,6 @@
 use reth_primitives::{
-    BlockHash, BlockNumber, GotExpected, GotExpectedBoxed, Header, InvalidTransactionError,
-    SealedBlock, SealedHeader, B256, U256,
+    constants::MINIMUM_GAS_LIMIT, BlockHash, BlockNumber, GotExpected, GotExpectedBoxed, Header,
+    InvalidTransactionError, SealedBlock, SealedHeader, B256, U256,
 };
 use std::fmt::Debug;
 
@@ -37,13 +37,14 @@ pub trait Consensus: Debug + Send + Sync {
     ///
     /// Note: this expects that the headers are in natural order (ascending block number)
     fn validate_header_range(&self, headers: &[SealedHeader]) -> Result<(), ConsensusError> {
-        let mut headers = headers.iter();
-        let Some(mut parent) = headers.next() else { return Ok(()) };
-        self.validate_header(parent)?;
-        for child in headers {
-            self.validate_header(child)?;
-            self.validate_header_against_parent(child, parent)?;
-            parent = child;
+        if let Some((initial_header, remaining_headers)) = headers.split_first() {
+            self.validate_header(initial_header)?;
+            let mut parent = initial_header;
+            for child in remaining_headers {
+                self.validate_header(child)?;
+                self.validate_header_against_parent(child, parent)?;
+                parent = child;
+            }
         }
         Ok(())
     }
@@ -165,6 +166,15 @@ pub enum ConsensusError {
     GasLimitInvalidDecrease {
         /// The parent gas limit.
         parent_gas_limit: u64,
+        /// The child gas limit.
+        child_gas_limit: u64,
+    },
+
+    /// Error indicating that the child gas limit is below the minimum allowed limit.
+    ///
+    /// This error occurs when the child gas limit is less than the specified minimum gas limit.
+    #[error("child gas limit {child_gas_limit} is below the minimum allowed limit ({MINIMUM_GAS_LIMIT})")]
+    GasLimitInvalidMinimum {
         /// The child gas limit.
         child_gas_limit: u64,
     },

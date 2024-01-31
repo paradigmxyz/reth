@@ -60,8 +60,6 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 /// Traits defining the database abstractions, such as cursors and transactions.
@@ -89,13 +87,13 @@ pub use utils::is_database_empty;
 #[cfg(feature = "mdbx")]
 pub use mdbx::{DatabaseEnv, DatabaseEnvKind};
 
+use crate::mdbx::DatabaseArguments;
 use eyre::WrapErr;
-use reth_interfaces::db::LogLevel;
 use std::path::Path;
 
 /// Opens up an existing database or creates a new one at the specified path. Creates tables if
 /// necessary. Read/Write mode.
-pub fn init_db<P: AsRef<Path>>(path: P, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnv> {
+pub fn init_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
     use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
 
     let rpath = path.as_ref();
@@ -112,7 +110,7 @@ pub fn init_db<P: AsRef<Path>>(path: P, log_level: Option<LogLevel>) -> eyre::Re
     }
     #[cfg(feature = "mdbx")]
     {
-        let db = DatabaseEnv::open(rpath, DatabaseEnvKind::RW, log_level)?;
+        let db = DatabaseEnv::open(rpath, DatabaseEnvKind::RW, args)?;
         db.create_tables()?;
         Ok(db)
     }
@@ -123,10 +121,10 @@ pub fn init_db<P: AsRef<Path>>(path: P, log_level: Option<LogLevel>) -> eyre::Re
 }
 
 /// Opens up an existing database. Read only mode. It doesn't create it or create tables if missing.
-pub fn open_db_read_only(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnv> {
+pub fn open_db_read_only(path: &Path, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
     #[cfg(feature = "mdbx")]
     {
-        DatabaseEnv::open(path, DatabaseEnvKind::RO, log_level)
+        DatabaseEnv::open(path, DatabaseEnvKind::RO, args)
             .with_context(|| format!("Could not open database at path: {}", path.display()))
     }
     #[cfg(not(feature = "mdbx"))]
@@ -137,10 +135,10 @@ pub fn open_db_read_only(path: &Path, log_level: Option<LogLevel>) -> eyre::Resu
 
 /// Opens up an existing database. Read/Write mode with WriteMap enabled. It doesn't create it or
 /// create tables if missing.
-pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnv> {
+pub fn open_db(path: &Path, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
     #[cfg(feature = "mdbx")]
     {
-        DatabaseEnv::open(path, DatabaseEnvKind::RW, log_level)
+        DatabaseEnv::open(path, DatabaseEnvKind::RW, args)
             .with_context(|| format!("Could not open database at path: {}", path.display()))
     }
     #[cfg(not(feature = "mdbx"))]
@@ -153,7 +151,12 @@ pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<Databas
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::*;
-    use crate::database::Database;
+    use crate::{
+        database::Database,
+        database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    };
+    use reth_libmdbx::MaxReadTransactionDuration;
+    use reth_primitives::fs;
     use std::{path::PathBuf, sync::Arc};
 
     /// Error during database open
@@ -176,7 +179,7 @@ pub mod test_utils {
         fn drop(&mut self) {
             if let Some(db) = self.db.take() {
                 drop(db);
-                let _ = std::fs::remove_dir_all(&self.path);
+                let _ = fs::remove_dir_all(&self.path);
             }
         }
     }
@@ -210,12 +213,35 @@ pub mod test_utils {
         }
     }
 
+    impl<DB: DatabaseMetrics> DatabaseMetrics for TempDatabase<DB> {
+        fn report_metrics(&self) {
+            self.db().report_metrics()
+        }
+    }
+
+    impl<DB: DatabaseMetadata> DatabaseMetadata for TempDatabase<DB> {
+        fn metadata(&self) -> DatabaseMetadataValue {
+            self.db().metadata()
+        }
+    }
+
+    /// Get a temporary directory path to use for the database
+    pub fn tempdir_path() -> PathBuf {
+        let builder = tempfile::Builder::new().prefix("reth-test-").rand_bytes(8).tempdir();
+        builder.expect(ERROR_TEMPDIR).into_path()
+    }
+
     /// Create read/write database for testing
     pub fn create_test_rw_db() -> Arc<TempDatabase<DatabaseEnv>> {
-        let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
+        let path = tempdir_path();
         let emsg = format!("{}: {:?}", ERROR_DB_CREATION, path);
 
-        let db = init_db(&path, None).expect(&emsg);
+        let db = init_db(
+            &path,
+            DatabaseArguments::default()
+                .max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
+        )
+        .expect(&emsg);
 
         Arc::new(TempDatabase { db: Some(db), path })
     }
@@ -223,17 +249,25 @@ pub mod test_utils {
     /// Create read/write database for testing
     pub fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<TempDatabase<DatabaseEnv>> {
         let path = path.as_ref().to_path_buf();
-        let db = init_db(path.as_path(), None).expect(ERROR_DB_CREATION);
+        let db = init_db(
+            path.as_path(),
+            DatabaseArguments::default()
+                .max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
+        )
+        .expect(ERROR_DB_CREATION);
         Arc::new(TempDatabase { db: Some(db), path })
     }
 
     /// Create read only database for testing
     pub fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnv>> {
-        let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
+        let args = DatabaseArguments::default()
+            .max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
+
+        let path = tempdir_path();
         {
-            init_db(path.as_path(), None).expect(ERROR_DB_CREATION);
+            init_db(path.as_path(), args).expect(ERROR_DB_CREATION);
         }
-        let db = open_db_read_only(path.as_path(), None).expect(ERROR_DB_OPEN);
+        let db = open_db_read_only(path.as_path(), args).expect(ERROR_DB_OPEN);
         Arc::new(TempDatabase { db: Some(db), path })
     }
 }
@@ -242,32 +276,37 @@ pub mod test_utils {
 mod tests {
     use crate::{
         init_db,
+        mdbx::DatabaseArguments,
         version::{db_version_file_path, DatabaseVersionError},
     };
     use assert_matches::assert_matches;
+    use reth_libmdbx::MaxReadTransactionDuration;
+    use reth_primitives::fs;
     use tempfile::tempdir;
 
     #[test]
     fn db_version() {
         let path = tempdir().unwrap();
 
+        let args = DatabaseArguments::default()
+            .max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
+
         // Database is empty
         {
-            let db = init_db(&path, None);
+            let db = init_db(&path, args);
             assert_matches!(db, Ok(_));
         }
 
         // Database is not empty, current version is the same as in the file
         {
-            let db = init_db(&path, None);
+            let db = init_db(&path, args);
             assert_matches!(db, Ok(_));
         }
 
         // Database is not empty, version file is malformed
         {
-            std::fs::write(path.path().join(db_version_file_path(&path)), "invalid-version")
-                .unwrap();
-            let db = init_db(&path, None);
+            fs::write(path.path().join(db_version_file_path(&path)), "invalid-version").unwrap();
+            let db = init_db(&path, args);
             assert!(db.is_err());
             assert_matches!(
                 db.unwrap_err().downcast_ref::<DatabaseVersionError>(),
@@ -277,8 +316,8 @@ mod tests {
 
         // Database is not empty, version file contains not matching version
         {
-            std::fs::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
-            let db = init_db(&path, None);
+            fs::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
+            let db = init_db(&path, args);
             assert!(db.is_err());
             assert_matches!(
                 db.unwrap_err().downcast_ref::<DatabaseVersionError>(),

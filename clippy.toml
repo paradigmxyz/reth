@@ -1,3 +1,2 @@
-msrv = "1.70"
-ignore-interior-mutability = ["bytes::Bytes", "reth_primitives::trie::nibbles::Nibbles"]
+msrv = "1.75"
 too-large-for-stack = 128

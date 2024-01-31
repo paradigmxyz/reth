@@ -1,20 +1,20 @@
-use crate::{
-    metrics::EngineApiMetrics, payload::PayloadOrAttributes, EngineApiError,
-    EngineApiMessageVersion, EngineApiResult,
-};
+use crate::{metrics::EngineApiMetrics, EngineApiError, EngineApiResult};
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_payload_builder::{PayloadBuilderAttributes, PayloadStore};
+use reth_node_api::{
+    validate_payload_timestamp, BuiltPayload, EngineApiMessageVersion, EngineTypes,
+    PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
+};
+use reth_payload_builder::PayloadStore;
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2,
     ExecutionPayloadEnvelopeV3, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
-    ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration,
-    CAPABILITIES,
+    ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
 };
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
@@ -32,35 +32,36 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
-pub struct EngineApi<Provider> {
-    inner: Arc<EngineApiInner<Provider>>,
+pub struct EngineApi<Provider, EngineT: EngineTypes> {
+    inner: Arc<EngineApiInner<Provider, EngineT>>,
 }
 
-struct EngineApiInner<Provider> {
+struct EngineApiInner<Provider, EngineT: EngineTypes> {
     /// The provider to interact with the chain.
     provider: Provider,
     /// Consensus configuration
     chain_spec: Arc<ChainSpec>,
     /// The channel to send messages to the beacon consensus engine.
-    beacon_consensus: BeaconConsensusEngineHandle,
+    beacon_consensus: BeaconConsensusEngineHandle<EngineT>,
     /// The type that can communicate with the payload service to retrieve payloads.
-    payload_store: PayloadStore,
+    payload_store: PayloadStore<EngineT>,
     /// For spawning and executing async tasks
     task_spawner: Box<dyn TaskSpawner>,
     /// The metrics for engine api calls
     metrics: EngineApiMetrics,
 }
 
-impl<Provider> EngineApi<Provider>
+impl<Provider, EngineT> EngineApi<Provider, EngineT>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
+    EngineT: EngineTypes + 'static,
 {
     /// Create new instance of [EngineApi].
     pub fn new(
         provider: Provider,
         chain_spec: Arc<ChainSpec>,
-        beacon_consensus: BeaconConsensusEngineHandle,
-        payload_store: PayloadStore,
+        beacon_consensus: BeaconConsensusEngineHandle<EngineT>,
+        payload_store: PayloadStore<EngineT>,
         task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         let inner = Arc::new(EngineApiInner {
@@ -78,7 +79,7 @@ where
     async fn get_payload_attributes(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<PayloadBuilderAttributes> {
+    ) -> EngineApiResult<EngineT::PayloadBuilderAttributes> {
         Ok(self
             .inner
             .payload_store
@@ -94,8 +95,15 @@ where
         payload: ExecutionPayloadV1,
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionPayload::from(payload);
-        let payload_or_attrs = PayloadOrAttributes::from_execution_payload(&payload, None);
-        self.validate_version_specific_fields(EngineApiMessageVersion::V1, &payload_or_attrs)?;
+        let payload_or_attrs =
+            PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
+                &payload, None,
+            );
+        EngineT::validate_version_specific_fields(
+            &self.inner.chain_spec,
+            EngineApiMessageVersion::V1,
+            payload_or_attrs,
+        )?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
 
@@ -105,8 +113,15 @@ where
         payload: ExecutionPayloadInputV2,
     ) -> EngineApiResult<PayloadStatus> {
         let payload = convert_payload_input_v2_to_payload(payload);
-        let payload_or_attrs = PayloadOrAttributes::from_execution_payload(&payload, None);
-        self.validate_version_specific_fields(EngineApiMessageVersion::V2, &payload_or_attrs)?;
+        let payload_or_attrs =
+            PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
+                &payload, None,
+            );
+        EngineT::validate_version_specific_fields(
+            &self.inner.chain_spec,
+            EngineApiMessageVersion::V2,
+            payload_or_attrs,
+        )?;
         Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
     }
 
@@ -119,8 +134,15 @@ where
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionPayload::from(payload);
         let payload_or_attrs =
-            PayloadOrAttributes::from_execution_payload(&payload, Some(parent_beacon_block_root));
-        self.validate_version_specific_fields(EngineApiMessageVersion::V3, &payload_or_attrs)?;
+            PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
+                &payload,
+                Some(parent_beacon_block_root),
+            );
+        EngineT::validate_version_specific_fields(
+            &self.inner.chain_spec,
+            EngineApiMessageVersion::V3,
+            payload_or_attrs,
+        )?;
 
         let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };
 
@@ -136,7 +158,7 @@ where
     pub async fn fork_choice_updated_v1(
         &self,
         state: ForkchoiceState,
-        payload_attrs: Option<PayloadAttributes>,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V1, state, payload_attrs)
             .await
@@ -149,7 +171,7 @@ where
     pub async fn fork_choice_updated_v2(
         &self,
         state: ForkchoiceState,
-        payload_attrs: Option<PayloadAttributes>,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V2, state, payload_attrs)
             .await
@@ -162,7 +184,7 @@ where
     pub async fn fork_choice_updated_v3(
         &self,
         state: ForkchoiceState,
-        payload_attrs: Option<PayloadAttributes>,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V3, state, payload_attrs)
             .await
@@ -187,7 +209,7 @@ where
             .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| (*payload).clone().into_v1_payload())?)
+            .map(|payload| payload.into_v1_payload())?)
     }
 
     /// Returns the most recent version of the payload that is available in the corresponding
@@ -205,7 +227,11 @@ where
         let attributes = self.get_payload_attributes(payload_id).await?;
 
         // validate timestamp according to engine rules
-        self.validate_payload_timestamp(EngineApiMessageVersion::V2, attributes.timestamp)?;
+        validate_payload_timestamp(
+            &self.inner.chain_spec,
+            EngineApiMessageVersion::V2,
+            attributes.timestamp(),
+        )?;
 
         // Now resolve the payload
         Ok(self
@@ -214,7 +240,7 @@ where
             .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| (*payload).clone().into_v2_payload())?)
+            .map(|payload| payload.into_v2_payload())?)
     }
 
     /// Returns the most recent version of the payload that is available in the corresponding
@@ -232,7 +258,11 @@ where
         let attributes = self.get_payload_attributes(payload_id).await?;
 
         // validate timestamp according to engine rules
-        self.validate_payload_timestamp(EngineApiMessageVersion::V3, attributes.timestamp)?;
+        validate_payload_timestamp(
+            &self.inner.chain_spec,
+            EngineApiMessageVersion::V3,
+            attributes.timestamp(),
+        )?;
 
         // Now resolve the payload
         Ok(self
@@ -241,7 +271,7 @@ where
             .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| (*payload).clone().into_v3_payload())?)
+            .map(|payload| payload.into_v3_payload())?)
     }
 
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
@@ -385,159 +415,6 @@ where
         }
     }
 
-    /// Validates the timestamp depending on the version called:
-    ///
-    /// * If V2, this ensure that the payload timestamp is pre-Cancun.
-    /// * If V3, this ensures that the payload timestamp is within the Cancun timestamp.
-    ///
-    /// Otherwise, this will return [EngineApiError::UnsupportedFork].
-    fn validate_payload_timestamp(
-        &self,
-        version: EngineApiMessageVersion,
-        timestamp: u64,
-    ) -> EngineApiResult<()> {
-        let is_cancun = self.inner.chain_spec.is_cancun_active_at_timestamp(timestamp);
-        if version == EngineApiMessageVersion::V2 && is_cancun {
-            // From the Engine API spec:
-            //
-            // ### Update the methods of previous forks
-            //
-            // This document defines how Cancun payload should be handled by the [`Shanghai
-            // API`](https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/shanghai.md).
-            //
-            // For the following methods:
-            //
-            // - [`engine_forkchoiceUpdatedV2`](https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/shanghai.md#engine_forkchoiceupdatedv2)
-            // - [`engine_newPayloadV2`](https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/shanghai.md#engine_newpayloadV2)
-            // - [`engine_getPayloadV2`](https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/shanghai.md#engine_getpayloadv2)
-            //
-            // a validation **MUST** be added:
-            //
-            // 1. Client software **MUST** return `-38005: Unsupported fork` error if the
-            //    `timestamp` of payload or payloadAttributes greater or equal to the Cancun
-            //    activation timestamp.
-            return Err(EngineApiError::UnsupportedFork)
-        }
-
-        if version == EngineApiMessageVersion::V3 && !is_cancun {
-            // From the Engine API spec:
-            // <https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/cancun.md#specification-2>
-            //
-            // 1. Client software **MUST** return `-38005: Unsupported fork` error if the
-            //    `timestamp` of the built payload does not fall within the time frame of the Cancun
-            //    fork.
-            return Err(EngineApiError::UnsupportedFork)
-        }
-        Ok(())
-    }
-
-    /// Validates the presence of the `withdrawals` field according to the payload timestamp.
-    /// After Shanghai, withdrawals field must be [Some].
-    /// Before Shanghai, withdrawals field must be [None];
-    fn validate_withdrawals_presence(
-        &self,
-        version: EngineApiMessageVersion,
-        timestamp: u64,
-        has_withdrawals: bool,
-    ) -> EngineApiResult<()> {
-        let is_shanghai =
-            self.inner.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(timestamp);
-
-        match version {
-            EngineApiMessageVersion::V1 => {
-                if has_withdrawals {
-                    return Err(EngineApiError::WithdrawalsNotSupportedInV1)
-                }
-                if is_shanghai {
-                    return Err(EngineApiError::NoWithdrawalsPostShanghai)
-                }
-            }
-            EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 => {
-                if is_shanghai && !has_withdrawals {
-                    return Err(EngineApiError::NoWithdrawalsPostShanghai)
-                }
-                if !is_shanghai && has_withdrawals {
-                    return Err(EngineApiError::HasWithdrawalsPreShanghai)
-                }
-            }
-        };
-
-        Ok(())
-    }
-
-    /// Validate the presence of the `parentBeaconBlockRoot` field according to the payload
-    /// timestamp.
-    ///
-    /// After Cancun, `parentBeaconBlockRoot` field must be [Some].
-    /// Before Cancun, `parentBeaconBlockRoot` field must be [None].
-    ///
-    /// If the engine API message version is V1 or V2, and the payload attribute's timestamp is
-    /// post-Cancun, then this will return [EngineApiError::UnsupportedFork].
-    ///
-    /// If the payload attribute's timestamp is before the Cancun fork and the engine API message
-    /// version is V3, then this will return [EngineApiError::UnsupportedFork].
-    ///
-    /// If the engine API message version is V3, but the `parentBeaconBlockRoot` is [None], then
-    /// this will return [EngineApiError::NoParentBeaconBlockRootPostCancun].
-    ///
-    /// This implements the following Engine API spec rules:
-    ///
-    /// 1. Client software **MUST** check that provided set of parameters and their fields strictly
-    ///    matches the expected one and return `-32602: Invalid params` error if this check fails.
-    ///    Any field having `null` value **MUST** be considered as not provided.
-    ///
-    /// 2. Client software **MUST** return `-38005: Unsupported fork` error if the
-    ///    `payloadAttributes` is set and the `payloadAttributes.timestamp` does not fall within the
-    ///    time frame of the Cancun fork.
-    fn validate_parent_beacon_block_root_presence(
-        &self,
-        version: EngineApiMessageVersion,
-        timestamp: u64,
-        has_parent_beacon_block_root: bool,
-    ) -> EngineApiResult<()> {
-        // 1. Client software **MUST** check that provided set of parameters and their fields
-        //    strictly matches the expected one and return `-32602: Invalid params` error if this
-        //    check fails. Any field having `null` value **MUST** be considered as not provided.
-        match version {
-            EngineApiMessageVersion::V1 | EngineApiMessageVersion::V2 => {
-                if has_parent_beacon_block_root {
-                    return Err(EngineApiError::ParentBeaconBlockRootNotSupportedBeforeV3)
-                }
-            }
-            EngineApiMessageVersion::V3 => {
-                if !has_parent_beacon_block_root {
-                    return Err(EngineApiError::NoParentBeaconBlockRootPostCancun)
-                }
-            }
-        };
-
-        // 2. Client software **MUST** return `-38005: Unsupported fork` error if the
-        //    `payloadAttributes` is set and the `payloadAttributes.timestamp` does not fall within
-        //    the time frame of the Cancun fork.
-        self.validate_payload_timestamp(version, timestamp)?;
-
-        Ok(())
-    }
-
-    /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
-    /// and the message version.
-    fn validate_version_specific_fields(
-        &self,
-        version: EngineApiMessageVersion,
-        payload_or_attrs: &PayloadOrAttributes<'_>,
-    ) -> EngineApiResult<()> {
-        self.validate_withdrawals_presence(
-            version,
-            payload_or_attrs.timestamp(),
-            payload_or_attrs.withdrawals().is_some(),
-        )?;
-        self.validate_parent_beacon_block_root_presence(
-            version,
-            payload_or_attrs.timestamp(),
-            payload_or_attrs.parent_beacon_block_root().is_some(),
-        )
-    }
-
     /// Validates the `engine_forkchoiceUpdated` payload attributes and executes the forkchoice
     /// update.
     ///
@@ -555,17 +432,11 @@ where
         &self,
         version: EngineApiMessageVersion,
         state: ForkchoiceState,
-        payload_attrs: Option<PayloadAttributes>,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
-            let attr_validation_res = self.validate_version_specific_fields(version, &attrs.into());
-
-            #[cfg(feature = "optimism")]
-            if attrs.optimism_payload_attributes.gas_limit.is_none() &&
-                self.inner.chain_spec.is_optimism()
-            {
-                return Err(EngineApiError::MissingGasLimitInPayloadAttributes)
-            }
+            let attr_validation_res =
+                attrs.ensure_well_formed_attributes(&self.inner.chain_spec, version);
 
             // From the engine API spec:
             //
@@ -587,7 +458,7 @@ where
                 if fcu_res.is_invalid() {
                     return Ok(fcu_res)
                 }
-                return Err(err)
+                return Err(err.into())
             }
         }
 
@@ -596,9 +467,10 @@ where
 }
 
 #[async_trait]
-impl<Provider> EngineApiServer for EngineApi<Provider>
+impl<Provider, EngineT> EngineApiServer<EngineT> for EngineApi<Provider, EngineT>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
+    EngineT: EngineTypes + 'static,
 {
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
@@ -645,7 +517,7 @@ where
     async fn fork_choice_updated_v1(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<PayloadAttributes>,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV1");
         let start = Instant::now();
@@ -660,7 +532,7 @@ where
     async fn fork_choice_updated_v2(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<PayloadAttributes>,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV2");
         let start = Instant::now();
@@ -676,7 +548,7 @@ where
     async fn fork_choice_updated_v3(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<PayloadAttributes>,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
         let start = Instant::now();
@@ -800,7 +672,10 @@ where
     }
 }
 
-impl<Provider> std::fmt::Debug for EngineApi<Provider> {
+impl<Provider, EngineT> std::fmt::Debug for EngineApi<Provider, EngineT>
+where
+    EngineT: EngineTypes,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApi").finish_non_exhaustive()
     }
@@ -812,6 +687,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_beacon_consensus::BeaconEngineMessage;
     use reth_interfaces::test_utils::generators::random_block;
+    use reth_node_builder::EthEngineTypes;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{SealedBlock, B256, MAINNET};
     use reth_provider::test_utils::MockEthProvider;
@@ -820,7 +696,8 @@ mod tests {
     use std::sync::Arc;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
-    fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>>) {
+    fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>, EthEngineTypes>)
+    {
         let chain_spec: Arc<ChainSpec> = MAINNET.clone();
         let provider = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service();
@@ -840,7 +717,7 @@ mod tests {
     struct EngineApiTestHandle {
         chain_spec: Arc<ChainSpec>,
         provider: Arc<MockEthProvider>,
-        from_api: UnboundedReceiver<BeaconEngineMessage>,
+        from_api: UnboundedReceiver<BeaconEngineMessage<EthEngineTypes>>,
     }
 
     #[tokio::test]
@@ -985,7 +862,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let res = api.exchange_transition_configuration(transition_config.clone()).await;
+            let res = api.exchange_transition_configuration(transition_config).await;
 
             assert_matches!(
                 res,
@@ -1013,7 +890,7 @@ mod tests {
             };
 
             // Unknown block number
-            let res = api.exchange_transition_configuration(transition_config.clone()).await;
+            let res = api.exchange_transition_configuration(transition_config).await;
 
             assert_matches!(
                res,
@@ -1027,7 +904,7 @@ mod tests {
                 execution_terminal_block.clone().unseal(),
             );
 
-            let res = api.exchange_transition_configuration(transition_config.clone()).await;
+            let res = api.exchange_transition_configuration(transition_config).await;
 
             assert_matches!(
                 res,
@@ -1052,8 +929,7 @@ mod tests {
 
             handle.provider.add_block(terminal_block.hash(), terminal_block.unseal());
 
-            let config =
-                api.exchange_transition_configuration(transition_config.clone()).await.unwrap();
+            let config = api.exchange_transition_configuration(transition_config).await.unwrap();
             assert_eq!(config, transition_config);
         }
     }

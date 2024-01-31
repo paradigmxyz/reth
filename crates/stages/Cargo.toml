@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "Staged syncing primitives used in reth."
 
+[lints]
+workspace = true
+
 [package.metadata.cargo-udeps.ignore]
 normal = [
     # Used for diagrams in docs
@@ -59,6 +62,7 @@ reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-downloaders.workspace = true
 reth-eth-wire.workspace = true # TODO(onbjerg): We only need this for [BlockBody]
+reth-node-builder.workspace = true
 reth-blockchain-tree.workspace = true
 reth-revm.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }

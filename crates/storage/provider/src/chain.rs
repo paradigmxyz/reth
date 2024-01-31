@@ -6,6 +6,7 @@ use reth_primitives::{
     Address, BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, TxHash,
 };
+use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
 use std::{borrow::Cow, collections::BTreeMap, fmt};
 
@@ -24,6 +25,9 @@ pub struct Chain {
     ///
     /// This state also contains the individual changes that lead to the current state.
     state: BundleStateWithReceipts,
+    /// State trie updates after block is added to the chain.
+    /// NOTE: Currently, trie updates are present only if the block extends canonical chain.
+    trie_updates: Option<TrieUpdates>,
 }
 
 impl Chain {
@@ -31,13 +35,22 @@ impl Chain {
     pub fn new(
         blocks: impl IntoIterator<Item = SealedBlockWithSenders>,
         state: BundleStateWithReceipts,
+        trie_updates: Option<TrieUpdates>,
     ) -> Self {
-        Self { blocks: BTreeMap::from_iter(blocks.into_iter().map(|b| (b.number, b))), state }
+        Self {
+            blocks: BTreeMap::from_iter(blocks.into_iter().map(|b| (b.number, b))),
+            state,
+            trie_updates,
+        }
     }
 
     /// Create new Chain from a single block and its state.
-    pub fn from_block(block: SealedBlockWithSenders, state: BundleStateWithReceipts) -> Self {
-        Self::new([block], state)
+    pub fn from_block(
+        block: SealedBlockWithSenders,
+        state: BundleStateWithReceipts,
+        trie_updates: Option<TrieUpdates>,
+    ) -> Self {
+        Self::new([block], state, trie_updates)
     }
 
     /// Get the blocks in this chain.
@@ -55,6 +68,11 @@ impl Chain {
         self.blocks.values().map(|block| block.header.clone())
     }
 
+    /// Get cached trie updates for this chain.
+    pub fn trie_updates(&self) -> Option<&TrieUpdates> {
+        self.trie_updates.as_ref()
+    }
+
     /// Get post state of this chain
     pub fn state(&self) -> &BundleStateWithReceipts {
         &self.state
@@ -63,6 +81,7 @@ impl Chain {
     /// Prepends the given state to the current state.
     pub fn prepend_state(&mut self, state: BundleState) {
         self.state.prepend_state(state);
+        self.trie_updates.take(); // invalidate cached trie updates
     }
 
     /// Return true if chain is empty and has no blocks.
@@ -101,8 +120,10 @@ impl Chain {
 
     /// Destructure the chain into its inner components, the blocks and the state at the tip of the
     /// chain.
-    pub fn into_inner(self) -> (ChainBlocks<'static>, BundleStateWithReceipts) {
-        (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.state)
+    pub fn into_inner(
+        self,
+    ) -> (ChainBlocks<'static>, BundleStateWithReceipts, Option<TrieUpdates>) {
+        (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.state, self.trie_updates)
     }
 
     /// Destructure the chain into its inner components, the blocks and the state at the tip of the
@@ -184,9 +205,15 @@ impl Chain {
 
     /// Append a single block with state to the chain.
     /// This method assumes that blocks attachment to the chain has already been validated.
-    pub fn append_block(&mut self, block: SealedBlockWithSenders, state: BundleStateWithReceipts) {
+    pub fn append_block(
+        &mut self,
+        block: SealedBlockWithSenders,
+        state: BundleStateWithReceipts,
+        trie_updates: Option<TrieUpdates>,
+    ) {
         self.blocks.insert(block.number, block);
         self.state.extend(state);
+        self.append_trie_updates(trie_updates);
     }
 
     /// Merge two chains by appending the given chain into the current one.
@@ -206,8 +233,21 @@ impl Chain {
         // Insert blocks from other chain
         self.blocks.extend(other.blocks);
         self.state.extend(other.state);
+        self.append_trie_updates(other.trie_updates);
 
         Ok(())
+    }
+
+    /// Append trie updates.
+    /// If existing or incoming trie updates are not set, reset as neither is valid anymore.
+    fn append_trie_updates(&mut self, other_trie_updates: Option<TrieUpdates>) {
+        if let Some((trie_updates, other)) = self.trie_updates.as_mut().zip(other_trie_updates) {
+            // Extend trie updates.
+            trie_updates.extend(other.into_iter());
+        } else {
+            // Reset trie updates as they are no longer valid.
+            self.trie_updates.take();
+        }
     }
 
     /// Split this chain at the given block.
@@ -257,12 +297,19 @@ impl Chain {
         let state = std::mem::take(&mut self.state);
         let (canonical_state, pending_state) = state.split_at(split_at);
 
+        // TODO: Currently, trie updates are reset on chain split.
+        // Add tests ensuring that it is valid to leave updates in the pending chain.
         ChainSplit::Split {
             canonical: Chain {
                 state: canonical_state.expect("split in range"),
                 blocks: self.blocks,
+                trie_updates: None,
             },
-            pending: Chain { state: pending_state, blocks: higher_number_blocks },
+            pending: Chain {
+                state: pending_state,
+                blocks: higher_number_blocks,
+                trie_updates: None,
+            },
         }
     }
 }
@@ -509,15 +556,21 @@ mod tests {
         let mut block_state_extended = block_state1.clone();
         block_state_extended.extend(block_state2.clone());
 
-        let chain = Chain::new(vec![block1.clone(), block2.clone()], block_state_extended);
+        let chain = Chain::new(vec![block1.clone(), block2.clone()], block_state_extended, None);
 
         let (split1_state, split2_state) = chain.state.clone().split_at(2);
 
-        let chain_split1 =
-            Chain { state: split1_state.unwrap(), blocks: BTreeMap::from([(1, block1.clone())]) };
+        let chain_split1 = Chain {
+            state: split1_state.unwrap(),
+            blocks: BTreeMap::from([(1, block1.clone())]),
+            trie_updates: None,
+        };
 
-        let chain_split2 =
-            Chain { state: split2_state, blocks: BTreeMap::from([(2, block2.clone())]) };
+        let chain_split2 = Chain {
+            state: split2_state,
+            blocks: BTreeMap::from([(2, block2.clone())]),
+            trie_updates: None,
+        };
 
         // return tip state
         assert_eq!(chain.state_at_block(block2.number), Some(chain.state.clone()));

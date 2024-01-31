@@ -1,11 +1,12 @@
-use crate::eth::transaction::{
-    typed::{
-        BlobTransactionSidecar, EIP1559TransactionRequest, EIP2930TransactionRequest,
+use crate::{
+    eth::transaction::typed::{
+        EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest, TransactionKind, TypedTransactionRequest,
     },
     AccessList,
 };
 use alloy_primitives::{Address, Bytes, B256, U128, U256, U64, U8};
+use alloy_rpc_types::BlobTransactionSidecar;
 use serde::{Deserialize, Serialize};
 
 /// Represents _all_ transaction requests received from RPC
@@ -141,7 +142,7 @@ impl TransactionRequest {
                 Some(sidecar),
             ) => {
                 // As per the EIP, we follow the same semantics as EIP-1559.
-                Some(TypedTransactionRequest::EIP4844(crate::EIP4844TransactionRequest {
+                Some(TypedTransactionRequest::EIP4844(EIP4844TransactionRequest {
                     chain_id: 0,
                     nonce: nonce.unwrap_or_default(),
                     max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or_default(),

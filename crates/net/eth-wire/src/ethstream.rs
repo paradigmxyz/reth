@@ -166,6 +166,7 @@ where
 #[pin_project]
 #[derive(Debug)]
 pub struct EthStream<S> {
+    /// Negotiated eth version.
     version: EthVersion,
     #[pin]
     inner: S,
@@ -174,26 +175,31 @@ pub struct EthStream<S> {
 impl<S> EthStream<S> {
     /// Creates a new unauthed [`EthStream`] from a provided stream. You will need
     /// to manually handshake a peer.
+    #[inline]
     pub fn new(version: EthVersion, inner: S) -> Self {
         Self { version, inner }
     }
 
     /// Returns the eth version.
+    #[inline]
     pub fn version(&self) -> EthVersion {
         self.version
     }
 
     /// Returns the underlying stream.
+    #[inline]
     pub fn inner(&self) -> &S {
         &self.inner
     }
 
     /// Returns mutable access to the underlying stream.
+    #[inline]
     pub fn inner_mut(&mut self) -> &mut S {
         &mut self.inner
     }
 
     /// Consumes this type and returns the wrapped stream.
+    #[inline]
     pub fn into_inner(self) -> S {
         self.inner
     }
@@ -329,10 +335,11 @@ mod tests {
         types::{broadcast::BlockHashNumber, EthMessage, EthVersion, Status},
         EthStream, HelloMessageWithProtocols, PassthroughCodec,
     };
+    use alloy_chains::NamedChain;
     use futures::{SinkExt, StreamExt};
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_ecies::{stream::ECIESStream, util::pk2id};
-    use reth_primitives::{ForkFilter, Head, NamedChain, B256, U256};
+    use reth_primitives::{ForkFilter, Head, B256, U256};
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;

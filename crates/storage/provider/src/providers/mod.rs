@@ -2,9 +2,9 @@ use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonChainTracker,
     CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, HeaderProvider, ProviderError, PruneCheckpointReader, ReceiptProvider,
-    ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox, StateProviderFactory,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    DatabaseProviderFactory, EvmEnvProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
+    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
+    StateProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::{
@@ -13,6 +13,7 @@ use reth_interfaces::{
     provider::ProviderResult,
     RethError, RethResult,
 };
+use reth_node_api::EvmEnvConfig;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
@@ -64,7 +65,7 @@ pub struct BlockchainProvider<DB, Tree> {
 }
 
 impl<DB, Tree> BlockchainProvider<DB, Tree> {
-    /// Create new  provider instance that wraps the database and the blockchain tree, using the
+    /// Create new provider instance that wraps the database and the blockchain tree, using the
     /// provided latest header to initialize the chain info tracker.
     pub fn with_latest(database: ProviderFactory<DB>, tree: Tree, latest: SealedHeader) -> Self {
         Self { database, tree, chain_info: ChainInfoTracker::new(latest) }
@@ -111,6 +112,15 @@ where
         } else {
             Ok(())
         }
+    }
+}
+
+impl<DB, Tree> DatabaseProviderFactory<DB> for BlockchainProvider<DB, Tree>
+where
+    DB: Database,
+{
+    fn database_provider_ro(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
+        self.database.provider()
     }
 }
 
@@ -374,6 +384,13 @@ where
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
         self.database.provider()?.receipts_by_block(block)
     }
+
+    fn receipts_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Receipt>> {
+        self.database.provider()?.receipts_by_tx_range(range)
+    }
 }
 impl<DB, Tree> ReceiptProviderIdExt for BlockchainProvider<DB, Tree>
 where
@@ -440,22 +457,30 @@ where
     DB: Database,
     Tree: Send + Sync,
 {
-    fn fill_env_at(
+    fn fill_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnv,
         block_env: &mut BlockEnv,
         at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
-        self.database.provider()?.fill_env_at(cfg, block_env, at)
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: EvmEnvConfig,
+    {
+        self.database.provider()?.fill_env_at(cfg, block_env, at, evm_config)
     }
 
-    fn fill_env_with_header(
+    fn fill_env_with_header<EvmConfig>(
         &self,
         cfg: &mut CfgEnv,
         block_env: &mut BlockEnv,
         header: &Header,
-    ) -> ProviderResult<()> {
-        self.database.provider()?.fill_env_with_header(cfg, block_env, header)
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: EvmEnvConfig,
+    {
+        self.database.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
     }
 
     fn fill_block_env_at(
@@ -474,12 +499,28 @@ where
         self.database.provider()?.fill_block_env_with_header(block_env, header)
     }
 
-    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockHashOrNumber) -> ProviderResult<()> {
-        self.database.provider()?.fill_cfg_env_at(cfg, at)
+    fn fill_cfg_env_at<EvmConfig>(
+        &self,
+        cfg: &mut CfgEnv,
+        at: BlockHashOrNumber,
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: EvmEnvConfig,
+    {
+        self.database.provider()?.fill_cfg_env_at(cfg, at, evm_config)
     }
 
-    fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> ProviderResult<()> {
-        self.database.provider()?.fill_cfg_env_with_header(cfg, header)
+    fn fill_cfg_env_with_header<EvmConfig>(
+        &self,
+        cfg: &mut CfgEnv,
+        header: &Header,
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: EvmEnvConfig,
+    {
+        self.database.provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
     }
 }
 

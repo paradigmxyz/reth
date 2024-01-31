@@ -5,6 +5,7 @@ members = [
     "crates/config/",
     "crates/consensus/auto-seal/",
     "crates/consensus/beacon/",
+    "crates/consensus/beacon-core/",
     "crates/consensus/common/",
     "crates/ethereum-forks/",
     "crates/interfaces/",
@@ -21,10 +22,12 @@ members = [
     "crates/net/network-api/",
     "crates/payload/basic/",
     "crates/payload/builder/",
+    "crates/payload/ethereum/",
+    "crates/payload/optimism/",
+    "crates/payload/validator/",
     "crates/primitives/",
     "crates/prune/",
     "crates/revm/",
-    "crates/revm/revm-inspectors/",
     "crates/rpc/ipc/",
     "crates/rpc/rpc/",
     "crates/rpc/rpc-api/",
@@ -33,6 +36,9 @@ members = [
     "crates/rpc/rpc-testing-util/",
     "crates/rpc/rpc-types/",
     "crates/rpc/rpc-types-compat/",
+    "crates/node-builder/",
+    "crates/node-core/",
+    "crates/node-api/",
     "crates/snapshot/",
     "crates/stages/",
     "crates/storage/codecs/",
@@ -62,24 +68,38 @@ default-members = ["bin/reth"]
 # https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html
 resolver = "2"
 
+[workspace.lints]
+rust.missing_debug_implementations = "warn"
+rust.missing_docs = "warn"
+rust.unreachable_pub = "warn"
+rustdoc.all = "warn"
+rust.unused_must_use = "deny"
+rust.rust_2018_idioms = "deny"
+
 [workspace.package]
-version = "0.1.0-alpha.13"
+version = "0.1.0-alpha.16"
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.75"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
 exclude = [".github/"]
 
-# Like release, but with full debug symbols. Useful for e.g. `perf`.
-[profile.debug-fast]
-inherits = "release"
-debug = true
-
 # Meant for testing - all optimizations, but with debug assertions and overflow checks.
 [profile.hivetests]
 inherits = "test"
 opt-level = 3
+lto = "thin"
+
+[profile.release]
+lto = "thin"
+strip = "debuginfo"
+
+# Like release, but with full debug symbols. Useful for e.g. `perf`.
+[profile.debug-fast]
+inherits = "release"
+strip = "none"
+debug = true
 
 [profile.maxperf]
 inherits = "release"
@@ -93,6 +113,7 @@ reth = { path = "bin/reth" }
 reth-auto-seal-consensus = { path = "crates/consensus/auto-seal" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-beacon-consensus = { path = "crates/consensus/beacon" }
+reth-beacon-consensus-core = { path = "crates/consensus/beacon-core" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
 reth-codecs = { path = "crates/storage/codecs" }
 reth-config = { path = "crates/config" }
@@ -100,10 +121,15 @@ reth-consensus-common = { path = "crates/consensus/common" }
 reth-db = { path = "crates/storage/db" }
 reth-discv4 = { path = "crates/net/discv4" }
 reth-dns-discovery = { path = "crates/net/dns" }
+reth-node-builder = { path = "crates/node-builder" }
+reth-node-core = { path = "crates/node-core" }
+reth-node-api = { path = "crates/node-api" }
 reth-downloaders = { path = "crates/net/downloaders" }
 reth-ecies = { path = "crates/net/ecies" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-ethereum-forks = { path = "crates/ethereum-forks" }
+reth-ethereum-payload-builder = { path = "crates/payload/ethereum" }
+reth-optimism-payload-builder = { path = "crates/payload/optimism" }
 reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
@@ -116,11 +142,11 @@ reth-network = { path = "crates/net/network" }
 reth-network-api = { path = "crates/net/network-api" }
 reth-nippy-jar = { path = "crates/storage/nippy-jar" }
 reth-payload-builder = { path = "crates/payload/builder" }
+reth-payload-validator = { path = "crates/payload/validator" }
 reth-primitives = { path = "crates/primitives" }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune" }
 reth-revm = { path = "crates/revm" }
-reth-revm-inspectors = { path = "crates/revm/revm-inspectors" }
 reth-rpc = { path = "crates/rpc/rpc" }
 reth-rpc-api = { path = "crates/rpc/rpc-api" }
 reth-rpc-api-testing-util = { path = "crates/rpc/rpc-testing-util" }
@@ -137,30 +163,46 @@ reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 
 # revm
-revm = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze",  features = ["std", "secp256k1"], default-features = false }
-revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", features = ["std"], default-features = false }
+revm = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", features = [
+    "std",
+    "secp256k1",
+], default-features = false }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", features = [
+    "std",
+], default-features = false }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors" }
 
 # eth
-alloy-primitives = "0.5"
-alloy-dyn-abi = "0.5"
-alloy-sol-types = "0.5"
+alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
+alloy-primitives = "0.6"
+alloy-dyn-abi = "0.6"
+alloy-sol-types = "0.6"
 alloy-rlp = "0.3"
+alloy-trie = "0.2"
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy" }
+alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy" }
+alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy" }
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
 ethers-middleware = { version = "2.0", default-features = false }
+
 discv5 = { git = "https://github.com/sigp/discv5", rev = "f289bbd4c57d499bb1bdb393af3c249600a1c662" }
-igd = { git = "https://github.com/stevefan1999-personal/rust-igd", rev = "c2d1f83eb1612a462962453cb0703bc93258b173" }
+# Fork of rust-igd with ipv6 support
+igd-next = "0.14.3"
 
 # js
 boa_engine = "0.17"
 boa_gc = "0.17"
 
 # misc
-aquamarine = "0.3"
+aquamarine = "0.5"
 bytes = "1.5"
 bitflags = "2.4"
 clap = "4"
+derive_more = "0.99.17"
 eyre = "0.6"
 tracing = "0.1.0"
 tracing-appender = "0.2"
@@ -171,12 +213,14 @@ rand = "0.8.5"
 schnellru = "0.2"
 strum = "0.25"
 rayon = "1.7"
-itertools = "0.11"
+itertools = "0.12"
 parking_lot = "0.12"
 metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 hex-literal = "0.4"
 once_cell = "1.17"
 syn = "2.0"
+ahash = "0.8.6"
+nybbles = "0.1"
 
 # proc-macros
 proc-macro2 = "1.0"
@@ -213,11 +257,16 @@ confy = "0.5"
 toml = "0.8"
 
 # misc-testing
-arbitrary = "1.1"
+arbitrary = "1.3"
 assert_matches = "1.5.0"
 tempfile = "3.8"
 criterion = "0.5"
 pprof = "0.13"
-proptest = "1.0"
+proptest = "1.4"
 proptest-derive = "0.4"
 serial_test = "2"
+similar-asserts = "1.5.0"
+
+[workspace.metadata.cargo-udeps.ignore]
+# ignored because this is mutually exclusive with the optimism payload builder via feature flags
+normal = ["reth-ethereum-payload-builder"]

@@ -6,11 +6,10 @@ use auto_impl::auto_impl;
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
-    Address, Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders,
-    ChainSpec, Header, PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    B256,
+    Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, ChainSpec,
+    Header, PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, B256,
 };
-use reth_trie::{hashed_cursor::HashedPostState, updates::TrieUpdates};
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::ops::RangeInclusive;
 
 /// Enum to control transaction hash inclusion.
@@ -293,8 +292,7 @@ pub trait BlockWriter: Send + Sync {
     /// transition in the block.
     fn insert_block(
         &self,
-        block: SealedBlock,
-        senders: Option<Vec<Address>>,
+        block: SealedBlockWithSenders,
         prune_modes: Option<&PruneModes>,
     ) -> ProviderResult<StoredBlockBodyIndices>;
 

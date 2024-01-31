@@ -61,7 +61,7 @@ is less than 1 second.
 It will take the same time as initial sync.
 
 1. Stop Reth
-2. Drop the database using [`reth db drop`](../cli/db.md#reth-db-drop)
+2. Drop the database using [`reth db drop`](../cli/reth/db/drop.md)
 3. Start reth
 
 ### Database write error

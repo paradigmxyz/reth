@@ -36,7 +36,7 @@ use crate::{
 };
 use reth_primitives::{
     stage::StageCheckpoint,
-    trie::{BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibblesSubKey},
+    trie::{StorageTrieEntry, StoredBranchNode, StoredNibbles, StoredNibblesSubKey},
     Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, PruneCheckpoint,
     PruneSegment, Receipt, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
 };
@@ -59,7 +59,10 @@ pub const NUM_TABLES: usize = 26;
 /// # Example
 ///
 /// ```
-/// use reth_db::{table::Table, TableViewer, Tables};
+/// use reth_db::{
+///     table::{DupSort, Table},
+///     TableViewer, Tables,
+/// };
 /// use std::str::FromStr;
 ///
 /// let headers = Tables::from_str("Headers").unwrap();
@@ -71,7 +74,12 @@ pub const NUM_TABLES: usize = 26;
 ///     type Error = &'static str;
 ///
 ///     fn view<T: Table>(&self) -> Result<(), Self::Error> {
-///         // operate on table in generic way
+///         // operate on table in a generic way
+///         Ok(())
+///     }
+///
+///     fn view_dupsort<T: DupSort>(&self) -> Result<(), Self::Error> {
+///         // operate on a dupsort table in a generic way
 ///         Ok(())
 ///     }
 /// }
@@ -82,15 +90,24 @@ pub const NUM_TABLES: usize = 26;
 /// let _ = transactions.view(&viewer);
 /// ```
 pub trait TableViewer<R> {
-    /// type of error to return
+    /// The error type returned by the viewer.
     type Error;
 
-    /// operate on table in generic way
+    /// Operate on the table in a generic way.
     fn view<T: Table>(&self) -> Result<R, Self::Error>;
+
+    /// Operate on the dupsort table in a generic way.
+    /// By default, the `view` function is invoked unless overridden.
+    fn view_dupsort<T: DupSort>(&self) -> Result<R, Self::Error> {
+        self.view::<T>()
+    }
 }
 
 macro_rules! tables {
-    ([$(($table:ident, $type:expr)),*]) => {
+    ([
+        (TableType::Table, [$($table:ident),*]),
+        (TableType::DupSort, [$($dupsort:ident),*])
+    ]) => {
         #[derive(Debug, PartialEq, Copy, Clone)]
         /// Default tables that should be present inside database.
         pub enum Tables {
@@ -98,17 +115,24 @@ macro_rules! tables {
                 #[doc = concat!("Represents a ", stringify!($table), " table")]
                 $table,
             )*
+            $(
+                #[doc = concat!("Represents a ", stringify!($dupsort), " dupsort table")]
+                $dupsort,
+            )*
         }
 
         impl Tables {
             /// Array of all tables in database
-            pub const ALL: [Tables; NUM_TABLES] = [$(Tables::$table,)*];
+            pub const ALL: [Tables; NUM_TABLES] = [$(Tables::$table,)* $(Tables::$dupsort,)*];
 
             /// The name of the given table in database
             pub const fn name(&self) -> &str {
                 match self {
                     $(Tables::$table => {
                         $table::NAME
+                    },)*
+                    $(Tables::$dupsort => {
+                        $dupsort::NAME
                     },)*
                 }
             }
@@ -117,7 +141,10 @@ macro_rules! tables {
             pub const fn table_type(&self) -> TableType {
                 match self {
                     $(Tables::$table => {
-                        $type
+                        TableType::Table
+                    },)*
+                    $(Tables::$dupsort => {
+                        TableType::DupSort
                     },)*
                 }
             }
@@ -130,6 +157,9 @@ macro_rules! tables {
                 match self {
                     $(Tables::$table => {
                         visitor.view::<$table>()
+                    },)*
+                    $(Tables::$dupsort => {
+                        visitor.view_dupsort::<$dupsort>()
                     },)*
                 }
             }
@@ -147,10 +177,13 @@ macro_rules! tables {
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 match s {
                     $($table::NAME => {
-                        return Ok(Tables::$table)
+                        Ok(Tables::$table)
+                    },)*
+                    $($dupsort::NAME => {
+                        Ok(Tables::$dupsort)
                     },)*
                     _ => {
-                        return Err("Unknown table".to_string())
+                        Err("Unknown table".to_string())
                     }
                 }
             }
@@ -159,32 +192,36 @@ macro_rules! tables {
 }
 
 tables!([
-    (CanonicalHeaders, TableType::Table),
-    (HeaderTD, TableType::Table),
-    (HeaderNumbers, TableType::Table),
-    (Headers, TableType::Table),
-    (BlockBodyIndices, TableType::Table),
-    (BlockOmmers, TableType::Table),
-    (BlockWithdrawals, TableType::Table),
-    (TransactionBlock, TableType::Table),
-    (Transactions, TableType::Table),
-    (TxHashNumber, TableType::Table),
-    (Receipts, TableType::Table),
-    (PlainAccountState, TableType::Table),
-    (PlainStorageState, TableType::DupSort),
-    (Bytecodes, TableType::Table),
-    (AccountHistory, TableType::Table),
-    (StorageHistory, TableType::Table),
-    (AccountChangeSet, TableType::DupSort),
-    (StorageChangeSet, TableType::DupSort),
-    (HashedAccount, TableType::Table),
-    (HashedStorage, TableType::DupSort),
-    (AccountsTrie, TableType::Table),
-    (StoragesTrie, TableType::DupSort),
-    (TxSenders, TableType::Table),
-    (SyncStage, TableType::Table),
-    (SyncStageProgress, TableType::Table),
-    (PruneCheckpoints, TableType::Table)
+    (
+        TableType::Table,
+        [
+            CanonicalHeaders,
+            HeaderTD,
+            HeaderNumbers,
+            Headers,
+            BlockBodyIndices,
+            BlockOmmers,
+            BlockWithdrawals,
+            TransactionBlock,
+            Transactions,
+            TxHashNumber,
+            Receipts,
+            PlainAccountState,
+            Bytecodes,
+            AccountHistory,
+            StorageHistory,
+            HashedAccount,
+            AccountsTrie,
+            TxSenders,
+            SyncStage,
+            SyncStageProgress,
+            PruneCheckpoints
+        ]
+    ),
+    (
+        TableType::DupSort,
+        [PlainStorageState, AccountChangeSet, StorageChangeSet, HashedStorage, StoragesTrie]
+    )
 ]);
 
 /// Macro to declare key value table.
@@ -384,7 +421,7 @@ dupsort!(
 
 table!(
     /// Stores the current state's Merkle Patricia Tree.
-    ( AccountsTrie ) Nibbles | BranchNodeCompact
+    ( AccountsTrie ) StoredNibbles | StoredBranchNode
 );
 
 dupsort!(
@@ -439,20 +476,20 @@ mod tests {
         (TableType::Table, TxHashNumber::NAME),
         (TableType::Table, Receipts::NAME),
         (TableType::Table, PlainAccountState::NAME),
-        (TableType::DupSort, PlainStorageState::NAME),
         (TableType::Table, Bytecodes::NAME),
         (TableType::Table, AccountHistory::NAME),
         (TableType::Table, StorageHistory::NAME),
-        (TableType::DupSort, AccountChangeSet::NAME),
-        (TableType::DupSort, StorageChangeSet::NAME),
         (TableType::Table, HashedAccount::NAME),
-        (TableType::DupSort, HashedStorage::NAME),
         (TableType::Table, AccountsTrie::NAME),
-        (TableType::DupSort, StoragesTrie::NAME),
         (TableType::Table, TxSenders::NAME),
         (TableType::Table, SyncStage::NAME),
         (TableType::Table, SyncStageProgress::NAME),
         (TableType::Table, PruneCheckpoints::NAME),
+        (TableType::DupSort, PlainStorageState::NAME),
+        (TableType::DupSort, AccountChangeSet::NAME),
+        (TableType::DupSort, StorageChangeSet::NAME),
+        (TableType::DupSort, HashedStorage::NAME),
+        (TableType::DupSort, StoragesTrie::NAME),
     ];
 
     #[test]

@@ -1,14 +1,11 @@
 //! Configuration files.
+
 use reth_discv4::Discv4Config;
-use reth_downloaders::{
-    bodies::bodies::BodiesDownloaderBuilder,
-    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
-};
 use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
 use reth_primitives::PruneModes;
 use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 /// Configuration for the reth node.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
@@ -110,17 +107,6 @@ impl Default for HeadersConfig {
     }
 }
 
-impl From<HeadersConfig> for ReverseHeadersDownloaderBuilder {
-    fn from(config: HeadersConfig) -> Self {
-        ReverseHeadersDownloaderBuilder::default()
-            .request_limit(config.downloader_request_limit)
-            .min_concurrent_requests(config.downloader_min_concurrent_requests)
-            .max_concurrent_requests(config.downloader_max_concurrent_requests)
-            .max_buffered_responses(config.downloader_max_buffered_responses)
-            .stream_batch_size(config.commit_threshold as usize)
-    }
-}
-
 /// Total difficulty stage configuration
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
@@ -175,19 +161,6 @@ impl Default for BodiesConfig {
     }
 }
 
-impl From<BodiesConfig> for BodiesDownloaderBuilder {
-    fn from(config: BodiesConfig) -> Self {
-        BodiesDownloaderBuilder::default()
-            .with_stream_batch_size(config.downloader_stream_batch_size)
-            .with_request_limit(config.downloader_request_limit)
-            .with_max_buffered_blocks_size_bytes(config.downloader_max_buffered_blocks_size_bytes)
-            .with_concurrent_requests_range(
-                config.downloader_min_concurrent_requests..=
-                    config.downloader_max_concurrent_requests,
-            )
-    }
-}
-
 /// Sender recovery stage configuration.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
@@ -208,10 +181,12 @@ impl Default for SenderRecoveryConfig {
 pub struct ExecutionConfig {
     /// The maximum number of blocks to process before the execution stage commits.
     pub max_blocks: Option<u64>,
-    /// The maximum amount of state changes to keep in memory before the execution stage commits.
+    /// The maximum number of state changes to keep in memory before the execution stage commits.
     pub max_changes: Option<u64>,
-    /// The maximum gas to process before the execution stage commits.
+    /// The maximum cumulative amount of gas to process before the execution stage commits.
     pub max_cumulative_gas: Option<u64>,
+    /// The maximum time spent on blocks processing before the execution stage commits.
+    pub max_duration: Option<Duration>,
 }
 
 impl Default for ExecutionConfig {
@@ -221,6 +196,8 @@ impl Default for ExecutionConfig {
             max_changes: Some(5_000_000),
             // 50k full blocks of 30M gas
             max_cumulative_gas: Some(30_000_000 * 50_000),
+            // 10 minutes
+            max_duration: Some(Duration::from_secs(10 * 60)),
         }
     }
 }

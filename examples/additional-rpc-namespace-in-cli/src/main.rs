@@ -6,11 +6,12 @@
 //! cargo run -p additional-rpc-namespace-in-cli -- node --http --ws --enable-ext
 //! ```
 //!
-//! This installs an additional RPC method `txpoolExt_transactionCount` that can queried via [cast](https://github.com/foundry-rs/foundry)
+//! This installs an additional RPC method `txpoolExt_transactionCount` that can be queried via [cast](https://github.com/foundry-rs/foundry)
 //!
 //! ```sh
 //! cast rpc txpoolExt_transactionCount
 //! ```
+
 use clap::Parser;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth::cli::{

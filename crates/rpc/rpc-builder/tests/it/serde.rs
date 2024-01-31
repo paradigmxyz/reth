@@ -1,4 +1,5 @@
 //! various serde test
+
 use crate::utils::launch_http;
 use jsonrpsee::{
     core::{client::ClientT, traits::ToRpcParams, Error},
@@ -20,7 +21,7 @@ impl ToRpcParams for RawRpcParams {
 async fn test_eth_balance_serde() {
     let handle = launch_http(vec![RethRpcModule::Eth]).await;
     let s = r#"{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xaa00000000000000000000000000000000000000","0x898753d8fdd8d92c1907ca21e68c7970abd290c647a202091181deec3f30a0b2"]}"#;
-    let req: Request = serde_json::from_str(s).unwrap();
+    let req: Request<'_> = serde_json::from_str(s).unwrap();
     let client = handle.http_client().unwrap();
 
     let params = RawRpcParams(RawValue::from_string(req.params.unwrap().to_string()).unwrap());

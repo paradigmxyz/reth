@@ -8,8 +8,3 @@ Currently only benchmarking the encoding/decoding of `Header`. It can be benchma
 ```bash
 $　cargo bench --features bench
 ```
-
-### Postcard:
-```bash
-$　cargo bench --features bench-postcard
-```

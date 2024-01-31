@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "Helpers for configuring RPC"
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-primitives.workspace = true
@@ -22,6 +25,8 @@ reth-rpc-types.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
 reth-rpc-types-compat.workspace = true
+reth-node-api.workspace = true
+reth-node-builder.workspace = true
 
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }
@@ -48,6 +53,7 @@ reth-network-api.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-beacon-consensus.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
+reth-node-builder.workspace = true
 
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 serde_json.workspace = true

@@ -1,4 +1,5 @@
 //! Reth genesis initialization utility functions.
+
 use reth_db::{
     cursor::DbCursorRO,
     database::Database,
@@ -45,7 +46,6 @@ impl From<DatabaseError> for InitDatabaseError {
 }
 
 /// Write the genesis block if it has not already been written
-#[allow(clippy::field_reassign_with_default)]
 pub fn init_genesis<DB: Database>(
     db: Arc<DB>,
     chain: Arc<ChainSpec>,
@@ -164,8 +164,11 @@ pub fn insert_genesis_hashes<DB: Database>(
     genesis: &reth_primitives::Genesis,
 ) -> ProviderResult<()> {
     // insert and hash accounts to hashing table
-    let alloc_accounts =
-        genesis.alloc.clone().into_iter().map(|(addr, account)| (addr, Some(account.into())));
+    let alloc_accounts = genesis
+        .alloc
+        .clone()
+        .into_iter()
+        .map(|(addr, account)| (addr, Some(Account::from_genesis_account(account))));
     provider.insert_account_for_hashing(alloc_accounts)?;
 
     let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {
@@ -234,7 +237,6 @@ mod tests {
     };
     use std::collections::HashMap;
 
-    #[allow(clippy::type_complexity)]
     fn collect_table_entries<DB, T>(
         tx: &<DB as Database>::TX,
     ) -> Result<Vec<TableRow<T>>, InitDatabaseError>
@@ -295,7 +297,7 @@ mod tests {
         let address_with_storage = Address::with_last_byte(2);
         let storage_key = B256::with_last_byte(1);
         let chain_spec = Arc::new(ChainSpec {
-            chain: Chain::Id(1),
+            chain: Chain::from_id(1),
             genesis: Genesis {
                 alloc: HashMap::from([
                     (

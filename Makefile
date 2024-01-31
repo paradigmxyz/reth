@@ -15,7 +15,7 @@ BUILD_PATH = "target"
 ifeq ($(OS),Windows_NT)
     FEATURES ?=
 else
-    FEATURES ?= jemalloc
+    FEATURES ?= jemalloc asm-keccak
 endif
 
 # Cargo profile for builds. Default is for local builds, CI uses an override.
@@ -31,6 +31,9 @@ EF_TESTS_DIR := ./testing/ef-tests/ethereum-tests
 
 # The docker image name
 DOCKER_IMAGE_NAME ?= ghcr.io/paradigmxyz/reth
+
+# Features in reth/op-reth binary crate other than "ethereum" and "optimism"
+BIN_OTHER_FEATURES := asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs
 
 ##@ Help
 
@@ -73,6 +76,9 @@ op-build-native-%:
 
 # No jemalloc on Windows
 build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(FEATURES))
+
+# asm keccak optimizations not enabled
+build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
 
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
@@ -227,8 +233,102 @@ db-tools: ## Compile MDBX debugging tools.
 update-book-cli: ## Update book cli documentation.
 	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
 	@echo "Updating book cli doc..."
-	@./book/cli/update.sh $(BUILD_PATH)
+	@./book/cli/update.sh $(BUILD_PATH)/$(PROFILE)/reth
 
 .PHONY: maxperf
-maxperf:
+maxperf: ## Builds `reth` with the most aggressive optimisations.
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak
+
+.PHONY: maxperf-no-asm
+maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc
+
+
+fmt:
+	cargo +nightly fmt
+
+lint-reth:
+	cargo +nightly clippy \
+	--workspace \
+	--bin "reth" \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--features "ethereum $(BIN_OTHER_FEATURES)" \
+	-- -D warnings
+
+lint-op-reth:
+	cargo +nightly clippy \
+	--workspace \
+	--bin "op-reth" \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--features "optimism $(BIN_OTHER_FEATURES)" \
+	-- -D warnings
+
+lint-other-targets:
+	cargo +nightly clippy \
+	--workspace \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--all-features \
+	-- -D warnings
+
+lint:
+	make fmt && \
+	make lint-reth && \
+	make lint-op-reth && \
+	make lint-other-targets
+
+rustdocs:
+	RUSTDOCFLAGS="\
+	--cfg docsrs \
+	--show-type-layout \
+	--generate-link-to-definition \
+	--enable-index-page -Zunstable-options -D warnings" \
+	cargo +nightly docs \
+	--document-private-items
+
+test-reth:
+	cargo test \
+	--workspace \
+	--bin "reth" \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--features "ethereum $(BIN_OTHER_FEATURES)"
+
+test-op-reth:
+	cargo test \
+	--workspace \
+	--bin "op-reth" \
+	--lib --examples \
+	--tests \
+	--benches \
+	--features "optimism $(BIN_OTHER_FEATURES)"
+
+test-other-targets:
+	cargo test \
+	--workspace \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--all-features
+
+test:
+	make test-reth && \
+	make test-op-reth && \
+	make test-other-targets
+
+pr:
+	make fmt && \
+	make lint && \
+	make docs && \
+	make test

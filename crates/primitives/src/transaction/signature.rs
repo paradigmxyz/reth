@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 /// The order of the secp256k1 curve, divided by two. Signatures that should be checked according
 /// to EIP-2 should have an S value less than or equal to this.
+///
+/// `57896044618658097711785492504343953926418782139537452191302581570759080747168`
 const SECP256K1N_HALF: U256 = U256::from_be_bytes([
     0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
     0x5D, 0x57, 0x6E, 0x73, 0x57, 0xA4, 0x50, 0x1D, 0xDF, 0xE9, 0x2F, 0x46, 0x68, 0x1B, 0x20, 0xA0,
@@ -99,18 +101,18 @@ impl Signature {
         let v = u64::decode(buf)?;
         let r = Decodable::decode(buf)?;
         let s = Decodable::decode(buf)?;
-        if v >= 35 {
-            // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
-            let odd_y_parity = ((v - 35) % 2) != 0;
-            let chain_id = (v - 35) >> 1;
-            Ok((Signature { r, s, odd_y_parity }, Some(chain_id)))
-        } else {
+        if v < 35 {
             // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
             if v != 27 && v != 28 {
                 return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
             }
             let odd_y_parity = v == 28;
             Ok((Signature { r, s, odd_y_parity }, None))
+        } else {
+            // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
+            let odd_y_parity = ((v - 35) % 2) != 0;
+            let chain_id = (v - 35) >> 1;
+            Ok((Signature { r, s, odd_y_parity }, Some(chain_id)))
         }
     }
 

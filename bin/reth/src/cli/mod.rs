@@ -1,32 +1,28 @@
 //! CLI definition and entrypoint to executable
+
 use crate::{
-    args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-    chain,
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        LogArgs,
+    },
     cli::ext::RethCliExt,
-    db, debug_cmd,
-    dirs::{LogsDir, PlatformPath},
-    node, p2p, recover,
+    commands::{
+        config_cmd, db, debug_cmd, import, init_cmd, node, p2p, recover, stage, test_vectors,
+    },
     runner::CliRunner,
-    stage, test_vectors,
     version::{LONG_VERSION, SHORT_VERSION},
 };
-use clap::{value_parser, ArgAction, Args, Parser, Subcommand, ValueEnum};
+use clap::{value_parser, Parser, Subcommand};
 use reth_primitives::ChainSpec;
-use reth_tracing::{
-    tracing::{metadata::LevelFilter, Level, Subscriber},
-    tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
-    BoxedLayer, FileWorkerGuard,
-};
-use std::{fmt, fmt::Display, sync::Arc};
+use reth_tracing::FileWorkerGuard;
+use std::sync::Arc;
 
-pub mod components;
-pub mod config;
-pub mod ext;
-
-/// Default [Directive] for [EnvFilter] which disables high-frequency debug logs from `hyper` and
-/// `trust-dns`
-const DEFAULT_ENV_FILTER_DIRECTIVE: &str =
-    "hyper::proto::h1=off,trust_dns_proto=off,trust_dns_resolver=off";
+/// Re-export of the `reth_node_core` types specifically in the `cli` module.
+///
+/// This is re-exported because the types in `reth_node_core::cli` originally existed in
+/// `reth::cli` but were moved to the `reth_node_core` crate. This re-export avoids a breaking
+/// change.
+pub use crate::core::cli::*;
 
 /// The main reth cli interface.
 ///
@@ -68,10 +64,7 @@ pub struct Cli<Ext: RethCliExt = ()> {
     instance: u16,
 
     #[clap(flatten)]
-    logs: Logs,
-
-    #[clap(flatten)]
-    verbosity: Verbosity,
+    logs: LogArgs,
 }
 
 impl<Ext: RethCliExt> Cli<Ext> {
@@ -103,13 +96,7 @@ impl<Ext: RethCliExt> Cli<Ext> {
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        let mut layers =
-            vec![reth_tracing::stdout(self.verbosity.directive(), &self.logs.color.to_string())];
-
-        let (additional_layers, guard) = self.logs.layers()?;
-        layers.extend(additional_layers);
-
-        reth_tracing::init(layers);
+        let guard = self.logs.init_tracing()?;
         Ok(guard)
     }
 
@@ -137,10 +124,10 @@ pub enum Commands<Ext: RethCliExt = ()> {
     Node(node::NodeCommand<Ext>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
-    Init(chain::InitCommand),
+    Init(init_cmd::InitCommand),
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
-    Import(chain::ImportCommand),
+    Import(import::ImportCommand),
     /// Database debugging utilities
     #[command(name = "db")]
     Db(db::Command),
@@ -155,7 +142,7 @@ pub enum Commands<Ext: RethCliExt = ()> {
     TestVectors(test_vectors::Command),
     /// Write config to stdout
     #[command(name = "config")]
-    Config(crate::config::Command),
+    Config(config_cmd::Command),
     /// Various debug routines
     #[command(name = "debug")]
     Debug(debug_cmd::Command),
@@ -175,157 +162,13 @@ impl<Ext: RethCliExt> Commands<Ext> {
     }
 }
 
-/// The log configuration.
-#[derive(Debug, Args)]
-#[command(next_help_heading = "Logging")]
-pub struct Logs {
-    /// The path to put log files in.
-    #[arg(long = "log.file.directory", value_name = "PATH", global = true, default_value_t)]
-    log_file_directory: PlatformPath<LogsDir>,
-
-    /// The maximum size (in MB) of one log file.
-    #[arg(long = "log.file.max-size", value_name = "SIZE", global = true, default_value_t = 200)]
-    log_file_max_size: u64,
-
-    /// The maximum amount of log files that will be stored. If set to 0, background file logging
-    /// is disabled.
-    #[arg(long = "log.file.max-files", value_name = "COUNT", global = true, default_value_t = 5)]
-    log_file_max_files: usize,
-
-    /// The filter to use for logs written to the log file.
-    #[arg(long = "log.file.filter", value_name = "FILTER", global = true, default_value = "debug")]
-    log_file_filter: String,
-
-    /// Write logs to journald.
-    #[arg(long = "log.journald", global = true)]
-    journald: bool,
-
-    /// The filter to use for logs written to journald.
-    #[arg(
-        long = "log.journald.filter",
-        value_name = "FILTER",
-        global = true,
-        default_value = "error"
-    )]
-    journald_filter: String,
-
-    /// Sets whether or not the formatter emits ANSI terminal escape codes for colors and other
-    /// text formatting.
-    #[arg(
-        long,
-        value_name = "COLOR",
-        global = true,
-        default_value_t = ColorMode::Always
-    )]
-    color: ColorMode,
-}
-
-/// Constant to convert megabytes to bytes
-const MB_TO_BYTES: u64 = 1024 * 1024;
-
-impl Logs {
-    /// Builds tracing layers from the current log options.
-    pub fn layers<S>(&self) -> eyre::Result<(Vec<BoxedLayer<S>>, Option<FileWorkerGuard>)>
-    where
-        S: Subscriber,
-        for<'a> S: LookupSpan<'a>,
-    {
-        let mut layers = Vec::new();
-
-        if self.journald {
-            layers.push(
-                reth_tracing::journald(
-                    EnvFilter::try_new(DEFAULT_ENV_FILTER_DIRECTIVE)?
-                        .add_directive(self.journald_filter.parse()?),
-                )
-                .expect("Could not connect to journald"),
-            );
-        }
-
-        let file_guard = if self.log_file_max_files > 0 {
-            let (layer, guard) = reth_tracing::file(
-                EnvFilter::try_new(DEFAULT_ENV_FILTER_DIRECTIVE)?
-                    .add_directive(self.log_file_filter.parse()?),
-                &self.log_file_directory,
-                "reth.log",
-                self.log_file_max_size * MB_TO_BYTES,
-                self.log_file_max_files,
-            );
-            layers.push(layer);
-            Some(guard)
-        } else {
-            None
-        };
-
-        Ok((layers, file_guard))
-    }
-}
-
-/// The verbosity settings for the cli.
-#[derive(Debug, Copy, Clone, Args)]
-#[command(next_help_heading = "Display")]
-pub struct Verbosity {
-    /// Set the minimum log level.
-    ///
-    /// -v      Errors
-    /// -vv     Warnings
-    /// -vvv    Info
-    /// -vvvv   Debug
-    /// -vvvvv  Traces (warning: very verbose!)
-    #[clap(short, long, action = ArgAction::Count, global = true, default_value_t = 3, verbatim_doc_comment, help_heading = "Display")]
-    verbosity: u8,
-
-    /// Silence all log output.
-    #[clap(long, alias = "silent", short = 'q', global = true, help_heading = "Display")]
-    quiet: bool,
-}
-
-impl Verbosity {
-    /// Get the corresponding [Directive] for the given verbosity, or none if the verbosity
-    /// corresponds to silent.
-    pub fn directive(&self) -> Directive {
-        if self.quiet {
-            LevelFilter::OFF.into()
-        } else {
-            let level = match self.verbosity - 1 {
-                0 => Level::ERROR,
-                1 => Level::WARN,
-                2 => Level::INFO,
-                3 => Level::DEBUG,
-                _ => Level::TRACE,
-            };
-
-            format!("{level}").parse().unwrap()
-        }
-    }
-}
-
-/// The color mode for the cli.
-#[derive(Debug, Copy, Clone, ValueEnum, Eq, PartialEq)]
-pub enum ColorMode {
-    /// Colors on
-    Always,
-    /// Colors on
-    Auto,
-    /// Colors off
-    Never,
-}
-
-impl Display for ColorMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ColorMode::Always => write!(f, "always"),
-            ColorMode::Auto => write!(f, "auto"),
-            ColorMode::Never => write!(f, "never"),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::args::utils::SUPPORTED_CHAINS;
     use clap::CommandFactory;
+
+    use crate::args::{utils::SUPPORTED_CHAINS, ColorMode};
+
+    use super::*;
 
     #[test]
     fn parse_color_mode() {
@@ -382,5 +225,22 @@ mod tests {
         let reth = Cli::<()>::try_parse_from(["reth", "node", "--trusted-setup-file", "README.md"])
             .unwrap();
         assert!(reth.run().is_err());
+    }
+
+    #[test]
+    fn parse_env_filter_directives() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        std::env::set_var("RUST_LOG", "info,evm=debug");
+        let reth = Cli::<()>::try_parse_from([
+            "reth",
+            "init",
+            "--datadir",
+            temp_dir.path().to_str().unwrap(),
+            "--log.file.filter",
+            "debug,net=trace",
+        ])
+        .unwrap();
+        assert!(reth.run().is_ok());
     }
 }

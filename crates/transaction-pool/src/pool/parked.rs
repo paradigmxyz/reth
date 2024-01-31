@@ -19,8 +19,7 @@ use std::{
 ///
 /// Note: This type is generic over [ParkedPool] which enforces that the underlying transaction type
 /// is [ValidPoolTransaction] wrapped in an [Arc].
-#[allow(missing_debug_implementations)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ParkedPool<T: ParkedOrd> {
     /// Keeps track of transactions inserted in the pool.
     ///
@@ -49,9 +48,9 @@ impl<T: ParkedOrd> ParkedPool<T> {
     pub fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T::Transaction>>) {
         let id = *tx.id();
         assert!(
-            !self.by_id.contains_key(&id),
+            !self.contains(&id),
             "transaction already included {:?}",
-            self.by_id.contains_key(&id)
+            self.get(&id).unwrap().transaction.transaction
         );
         let submission_id = self.next_id();
 
@@ -92,7 +91,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         self.by_id
             .range((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
-            .map(|(_, tx)| *tx.transaction.id())
+            .map(|(tx_id, _)| *tx_id)
             .collect()
     }
 
@@ -207,15 +206,19 @@ impl<T: ParkedOrd> ParkedPool<T> {
 
     /// Returns whether the pool is empty
     #[cfg(test)]
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub(crate) fn is_empty(&self) -> bool {
         self.by_id.is_empty()
     }
 
     /// Returns `true` if the transaction with the given id is already included in this pool.
-    #[cfg(test)]
     pub(crate) fn contains(&self, id: &TransactionId) -> bool {
         self.by_id.contains_key(id)
+    }
+
+    /// Retrieves a transaction with the given ID from the pool, if it exists.
+    fn get(&self, id: &TransactionId) -> Option<&ParkedPoolTransaction<T>> {
+        self.by_id.get(id)
     }
 
     /// Asserts that the bijection between `by_id` and `best` is valid.
@@ -236,7 +239,7 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
         let ids = self.satisfy_base_fee_ids(basefee);
         let mut txs = Vec::with_capacity(ids.len());
         for id in ids {
-            txs.push(self.by_id.get(&id).expect("transaction exists").transaction.clone().into());
+            txs.push(self.get(&id).expect("transaction exists").transaction.clone().into());
         }
         txs
     }
@@ -292,6 +295,7 @@ impl<T: ParkedOrd> Default for ParkedPool<T> {
 }
 
 /// Represents a transaction in this pool.
+#[derive(Debug)]
 struct ParkedPoolTransaction<T: ParkedOrd> {
     /// Identifier that tags when transaction was submitted in the pool.
     submission_id: u64,
@@ -476,7 +480,7 @@ mod tests {
         let tx = f.validated_arc(MockTransaction::eip1559().inc_price());
         pool.add_transaction(tx.clone());
 
-        assert!(pool.by_id.contains_key(tx.id()));
+        assert!(pool.contains(tx.id()));
         assert_eq!(pool.len(), 1);
 
         let removed = pool.enforce_basefee(u64::MAX);
@@ -498,8 +502,8 @@ mod tests {
         let descendant_tx = f.validated_arc(t.inc_nonce().decr_price());
         pool.add_transaction(descendant_tx.clone());
 
-        assert!(pool.by_id.contains_key(root_tx.id()));
-        assert!(pool.by_id.contains_key(descendant_tx.id()));
+        assert!(pool.contains(root_tx.id()));
+        assert!(pool.contains(descendant_tx.id()));
         assert_eq!(pool.len(), 2);
 
         let removed = pool.enforce_basefee(u64::MAX);
@@ -514,8 +518,8 @@ mod tests {
             assert_eq!(removed.len(), 1);
             assert_eq!(pool2.len(), 1);
             // root got popped - descendant should be skipped
-            assert!(!pool2.by_id.contains_key(root_tx.id()));
-            assert!(pool2.by_id.contains_key(descendant_tx.id()));
+            assert!(!pool2.contains(root_tx.id()));
+            assert!(pool2.contains(descendant_tx.id()));
         }
 
         // remove root transaction via descendant tx fee

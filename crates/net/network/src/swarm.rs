@@ -21,8 +21,10 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
+
 use tracing::trace;
 
+#[cfg_attr(doc, aquamarine::aquamarine)]
 /// Contains the connectivity related state of the network.
 ///
 /// A swarm emits [`SwarmEvent`]s when polled.
@@ -44,24 +46,8 @@ use tracing::trace;
 /// request channel for the created session and sends requests it receives from the
 /// [`StateFetcher`], which receives request objects from the client interfaces responsible for
 /// downloading headers and bodies.
-#[cfg_attr(doc, aquamarine::aquamarine)]
-/// ```mermaid
-///  graph TB
-///     connections(TCP Listener)
-///     Discovery[(Discovery)]
-///     fetchRequest(Client Interfaces)
-///     Sessions[(SessionManager)]
-///     SessionTask[(Peer Session)]
-///     State[(State)]
-///     StateFetch[(State Fetcher)]
-///   connections --> |incoming| Sessions
-///   State --> |initiate outgoing| Sessions
-///   Discovery --> |update peers| State
-///   Sessions --> |spawns| SessionTask
-///   SessionTask <--> |handle state requests| State
-///   fetchRequest --> |request Headers, Bodies| StateFetch
-///   State --> |poll pending requests| StateFetch
-/// ```
+///
+/// include_mmd!("docs/mermaid/swarm.mmd")
 #[derive(Debug)]
 #[must_use = "Swarm does nothing unless polled"]
 pub(crate) struct Swarm<C> {
@@ -71,8 +57,6 @@ pub(crate) struct Swarm<C> {
     sessions: SessionManager,
     /// Tracks the entire state of the network and handles events received from the sessions.
     state: NetworkState<C>,
-    /// Tracks the connection state of the node
-    net_connection_state: NetworkConnectionState,
 }
 
 // === impl Swarm ===
@@ -83,9 +67,8 @@ impl<C> Swarm<C> {
         incoming: ConnectionListener,
         sessions: SessionManager,
         state: NetworkState<C>,
-        net_connection_state: NetworkConnectionState,
     ) -> Self {
-        Self { incoming, sessions, state, net_connection_state }
+        Self { incoming, sessions, state }
     }
 
     /// Adds an additional protocol handler to the RLPx sub-protocol list.
@@ -288,13 +271,18 @@ where
 
     /// Set network connection state to `ShuttingDown`
     pub(crate) fn on_shutdown_requested(&mut self) {
-        self.net_connection_state = NetworkConnectionState::ShuttingDown;
+        self.state_mut().peers_mut().on_shutdown();
     }
 
     /// Checks if the node's network connection state is 'ShuttingDown'
     #[inline]
     pub(crate) fn is_shutting_down(&self) -> bool {
-        matches!(self.net_connection_state, NetworkConnectionState::ShuttingDown)
+        self.state().peers().connection_state().is_shutting_down()
+    }
+
+    /// Set network connection state to `Hibernate` or `Active`
+    pub(crate) fn on_network_state_change(&mut self, network_state: NetworkConnectionState) {
+        self.state_mut().peers_mut().on_network_state_change(network_state);
     }
 }
 
@@ -437,9 +425,27 @@ pub(crate) enum SwarmEvent {
 
 /// Represents the state of the connection of the node. If shutting down,
 /// new connections won't be established.
+/// When in hibernation mode, the node will not initiate new outbound connections. This is
+/// beneficial for sync stages that do not require a network connection.
 #[derive(Debug, Default)]
-pub(crate) enum NetworkConnectionState {
+pub enum NetworkConnectionState {
+    /// Node is active, new outbound connections will be established.
     #[default]
     Active,
+    /// Node is shutting down, no new outbound connections will be established.
     ShuttingDown,
+    /// Hibernate Network connection, no new outbound connections will be established.
+    Hibernate,
+}
+
+impl NetworkConnectionState {
+    /// Returns true if the node is active.
+    pub(crate) fn is_active(&self) -> bool {
+        matches!(self, NetworkConnectionState::Active)
+    }
+
+    /// Returns true if the node is shutting down.
+    pub(crate) fn is_shutting_down(&self) -> bool {
+        matches!(self, NetworkConnectionState::ShuttingDown)
+    }
 }

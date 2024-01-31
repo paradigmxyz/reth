@@ -9,6 +9,7 @@ use crate::{
 };
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_interfaces::provider::ProviderResult;
+use reth_node_api::EvmEnvConfig;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::AccountProof,
@@ -222,6 +223,13 @@ impl ReceiptProvider for NoopProvider {
     fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
         Ok(None)
     }
+
+    fn receipts_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Receipt>> {
+        Ok(vec![])
+    }
 }
 
 impl ReceiptProviderIdExt for NoopProvider {}
@@ -307,21 +315,29 @@ impl StateProvider for NoopProvider {
 }
 
 impl EvmEnvProvider for NoopProvider {
-    fn fill_env_at(
+    fn fill_env_at<EvmConfig>(
         &self,
         _cfg: &mut CfgEnv,
         _block_env: &mut BlockEnv,
         _at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
+        _evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: EvmEnvConfig,
+    {
         Ok(())
     }
 
-    fn fill_env_with_header(
+    fn fill_env_with_header<EvmConfig>(
         &self,
         _cfg: &mut CfgEnv,
         _block_env: &mut BlockEnv,
         _header: &Header,
-    ) -> ProviderResult<()> {
+        _evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: EvmEnvConfig,
+    {
         Ok(())
     }
 
@@ -341,11 +357,27 @@ impl EvmEnvProvider for NoopProvider {
         Ok(())
     }
 
-    fn fill_cfg_env_at(&self, _cfg: &mut CfgEnv, _at: BlockHashOrNumber) -> ProviderResult<()> {
+    fn fill_cfg_env_at<EvmConfig>(
+        &self,
+        _cfg: &mut CfgEnv,
+        _at: BlockHashOrNumber,
+        _evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: EvmEnvConfig,
+    {
         Ok(())
     }
 
-    fn fill_cfg_env_with_header(&self, _cfg: &mut CfgEnv, _header: &Header) -> ProviderResult<()> {
+    fn fill_cfg_env_with_header<EvmConfig>(
+        &self,
+        _cfg: &mut CfgEnv,
+        _header: &Header,
+        _evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: EvmEnvConfig,
+    {
         Ok(())
     }
 }

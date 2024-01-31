@@ -1,7 +1,7 @@
 use crate::clique::{CliqueGethInstance, CliqueMiddleware};
-use ethers_core::{
-    types::{transaction::eip2718::TypedTransaction, Address, Eip1559TransactionRequest},
-    utils::Geth,
+use alloy_node_bindings::Geth;
+use ethers_core::types::{
+    transaction::eip2718::TypedTransaction, Address, Eip1559TransactionRequest,
 };
 use ethers_providers::Middleware;
 use reth_network::{
@@ -9,7 +9,7 @@ use reth_network::{
     NetworkConfig, NetworkEvents, NetworkManager,
 };
 use reth_network_api::Peers;
-use reth_primitives::{ChainSpec, Genesis, PeerId, SealedHeader};
+use reth_primitives::{ChainSpec, PeerId, SealedHeader};
 use reth_provider::test_utils::NoopProvider;
 use secp256k1::SecretKey;
 use std::{net::SocketAddr, sync::Arc};
@@ -98,9 +98,9 @@ async fn init_geth() -> (CliqueGethInstance, Arc<ChainSpec>) {
     // === check that we have the same genesis hash ===
 
     // get the chainspec from the genesis we configured for geth
-    let chainspec = ChainSpec::from(Genesis::from(
+    let chainspec = ChainSpec::from(
         clique.instance.genesis().clone().expect("clique should be configured with a genesis"),
-    ));
+    );
 
     let remote_genesis = SealedHeader::from(&clique.provider.remote_genesis_block().await.unwrap());
 
