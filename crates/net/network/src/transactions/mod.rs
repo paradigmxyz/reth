@@ -1128,62 +1128,63 @@ where
             // try drain buffered transactions
             this.request_buffered_hashes();
 
-        this.update_request_metrics();
+            this.update_request_metrics();
 
-        // Advance all imports
-        if let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
-            let import_res = match import_res {
-                Ok(res) => res,
-                Err(err) => {
-                    debug!(target: "net::tx", ?err, "bad pool transaction batch import");
-                    continue
-                }
-            };
-
-            for res in import_res {
-                match res {
-                    Ok(hash) => {
-                        this.on_good_import(hash);
-                    }
+            // Advance all imports
+            if let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
+                let import_res = match import_res {
+                    Ok(res) => res,
                     Err(err) => {
-                        // if we're _currently_ syncing and the transaction is bad we ignore it,
-                        // otherwise we penalize the peer that sent the bad
-                        // transaction with the assumption that the peer should have
-                        // known that this transaction is bad. (e.g. consensus
-                        // rules)
-                        if err.is_bad_transaction() && !this.network.is_syncing() {
-                            debug!(target: "net::tx", ?err, "bad pool transaction import");
-                            this.on_bad_import(err.hash);
-                            continue
-                        }
-                        this.on_good_import(err.hash);
+                        debug!(target: "net::tx", ?err, "bad pool transaction batch import");
+                        continue
                     }
+                };
+
+                for res in import_res {
+                    match res {
+                        Ok(hash) => {
+                            this.on_good_import(hash);
+                        }
+                        Err(err) => {
+                            // if we're _currently_ syncing and the transaction is bad we ignore it,
+                            // otherwise we penalize the peer that sent the bad
+                            // transaction with the assumption that the peer should have
+                            // known that this transaction is bad. (e.g. consensus
+                            // rules)
+                            if err.is_bad_transaction() && !this.network.is_syncing() {
+                                debug!(target: "net::tx", ?err, "bad pool transaction import");
+                                this.on_bad_import(err.hash);
+                                continue
+                            }
+                            this.on_good_import(err.hash);
+                        }
+                    }
+                    some_ready = true;
                 }
-                some_ready = true;
-            }
 
-        // handle and propagate new transactions
-        let mut new_txs = Vec::new();
-        if let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
-            new_txs.push(hash);
-            some_ready = true;
-        }
-        if !new_txs.is_empty() {
-            this.on_new_transactions(new_txs);
-        }
+                // handle and propagate new transactions
+                let mut new_txs = Vec::new();
+                if let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
+                    new_txs.push(hash);
+                    some_ready = true;
+                }
+                if !new_txs.is_empty() {
+                    this.on_new_transactions(new_txs);
+                }
 
-            // all channels are fully drained and import futures pending
-            if !some_ready {
-                return Poll::Pending
-            }
+                // all channels are fully drained and import futures pending
+                if !some_ready {
+                    return Poll::Pending
+                }
 
-            *budget -= 1;
-            // If the budget is exhausted we manually yield back control to tokio. See
-            // `NetworkManager` for more context on the design pattern.
-            if *budget == 0 {
-                // make sure we're woken up again
-                cx.waker().wake_by_ref();
-                return Poll::Pending
+                *budget -= 1;
+                // If the budget is exhausted we manually yield back control to tokio. See
+                // `NetworkManager` for more context on the design pattern.
+                if *budget == 0 {
+                    // make sure we're woken up again
+                    cx.waker().wake_by_ref();
+                    return Poll::Pending
+                }
             }
         }
     }
