@@ -42,7 +42,7 @@ use crate::{
     timing::Timeout,
 };
 
-struct ClayerConsensusMessagingAgent {
+pub struct ClayerConsensusMessagingAgent {
     pub inner: Arc<parking_lot::RwLock<ClayerConsensusMessagingAgentInner>>,
 }
 
