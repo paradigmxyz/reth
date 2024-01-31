@@ -565,6 +565,7 @@ impl SnapshotWriter for Arc<SnapshotProvider> {
         block: BlockNumber,
         segment: SnapshotSegment,
     ) -> ProviderResult<SnapshotProviderRWRefMut<'_>> {
+        tracing::trace!(target: "providers::static_file", ?block, ?segment, "Getting static file writer.");
         Ok(match self.writers.entry(segment) {
             DashMapEntry::Occupied(entry) => entry.into_ref(),
             DashMapEntry::Vacant(entry) => {

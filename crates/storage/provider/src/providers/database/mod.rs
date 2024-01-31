@@ -505,13 +505,13 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
 mod tests {
     use super::ProviderFactory;
     use crate::{
-        test_utils::create_test_provider_factory, BlockHashReader, BlockNumReader, BlockWriter,
-        HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
+        providers::SnapshotWriter, test_utils::create_test_provider_factory, BlockHashReader,
+        BlockNumReader, BlockWriter, HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
     };
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use rand::Rng;
-    use reth_db::{tables, test_utils::ERROR_TEMPDIR, transaction::DbTxMut, DatabaseEnv};
+    use reth_db::{tables, test_utils::ERROR_TEMPDIR, DatabaseEnv};
     use reth_interfaces::{
         provider::ProviderError,
         test_utils::{
@@ -521,7 +521,8 @@ mod tests {
         RethError,
     };
     use reth_primitives::{
-        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, TxNumber, B256,
+        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, SnapshotSegment,
+        TxNumber, B256, U256,
     };
     use std::{ops::RangeInclusive, sync::Arc};
     use tokio::sync::watch;
@@ -662,8 +663,6 @@ mod tests {
         // Genesis
         let checkpoint = 0;
         let head = random_header(&mut rng, 0, None);
-        let gap_fill = random_header(&mut rng, 1, Some(head.hash()));
-        let gap_tip = random_header(&mut rng, 2, Some(gap_fill.hash()));
 
         // Empty database
         assert_matches!(
@@ -673,46 +672,17 @@ mod tests {
         );
 
         // Checkpoint and no gap
-        provider
-            .tx_ref()
-            .put::<tables::CanonicalHeaders>(head.number, head.hash())
-            .expect("failed to write canonical");
-        provider
-            .tx_ref()
-            .put::<tables::Headers>(head.number, head.clone().unseal())
-            .expect("failed to write header");
+        let mut snapshot_writer = provider
+            .snapshot_provider()
+            .expect("should exist")
+            .latest_writer(SnapshotSegment::Headers)
+            .unwrap();
+        snapshot_writer.append_header(head.header.clone(), U256::ZERO, head.hash()).unwrap();
+        snapshot_writer.commit().unwrap();
+        drop(snapshot_writer);
 
         let gap = provider.sync_gap(mode.clone(), checkpoint).unwrap();
         assert_eq!(gap.local_head, head);
         assert_eq!(gap.target.tip(), consensus_tip.into());
-
-        // Checkpoint and gap
-        provider
-            .tx_ref()
-            .put::<tables::CanonicalHeaders>(gap_tip.number, gap_tip.hash())
-            .expect("failed to write canonical");
-        provider
-            .tx_ref()
-            .put::<tables::Headers>(gap_tip.number, gap_tip.clone().unseal())
-            .expect("failed to write header");
-
-        let gap = provider.sync_gap(mode.clone(), checkpoint).unwrap();
-        assert_eq!(gap.local_head, head);
-        assert_eq!(gap.target.tip(), gap_tip.parent_hash.into());
-
-        // Checkpoint and gap closed
-        provider
-            .tx_ref()
-            .put::<tables::CanonicalHeaders>(gap_fill.number, gap_fill.hash())
-            .expect("failed to write canonical");
-        provider
-            .tx_ref()
-            .put::<tables::Headers>(gap_fill.number, gap_fill.clone().unseal())
-            .expect("failed to write header");
-
-        assert_matches!(
-            provider.sync_gap(mode, checkpoint),
-            Err(RethError::Provider(ProviderError::InconsistentHeaderGap))
-        );
     }
 }

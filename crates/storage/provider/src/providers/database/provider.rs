@@ -1055,7 +1055,6 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
         highest_uninterrupted_block: BlockNumber,
     ) -> RethResult<HeaderSyncGap> {
         let snapshot_provider = self.snapshot_provider().expect("should exist");
-        let mut snapshotter = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
 
         // Make sure Headers static file is at the same height. If it's further, this
         // input execution was interrupted previously and we need to unwind the static file.
@@ -1068,7 +1067,10 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
         match next_snapshot_block_num.cmp(&next_block) {
             // The node shutdown between an executed static file commit and before the database
             // commit, so we need to unwind the static files.
-            Ordering::Greater => snapshotter.prune_headers(next_snapshot_block_num - next_block)?,
+            Ordering::Greater => {
+                let mut snapshotter = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
+                snapshotter.prune_headers(next_snapshot_block_num - next_block)?
+            }
             Ordering::Less => {
                 // There's either missing or corrupted files.
                 return Err(ProviderError::HeaderNotFound(next_snapshot_block_num.into()).into())
