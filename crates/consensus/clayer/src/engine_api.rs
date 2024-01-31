@@ -511,7 +511,7 @@ impl ApiService {
 
     pub fn announce_block(&mut self, block_id: B256) -> Result<(), ApiServiceError> {
         //broadcast new block hash after commit
-        Ok(())
+        self.sync_block(block_id)
     }
 
     pub fn sync_block(&mut self, block_id: B256) -> Result<(), ApiServiceError> {
