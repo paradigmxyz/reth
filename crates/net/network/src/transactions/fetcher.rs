@@ -241,7 +241,7 @@ impl TransactionFetcher {
     }
 
     pub(super) fn buffer_hashes_for_retry(&mut self, mut hashes: Vec<TxHash>) {
-        // Igt could be that the txns have been received over broadcast in the time being.
+        // It could be that the txns have been received over broadcast in the time being.
         hashes.retain(|hash| self.unknown_hashes.peek(hash).is_some());
         self.buffer_hashes(hashes, None)
     }
