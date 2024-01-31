@@ -1,7 +1,7 @@
 use crate::{
     blobstore::BlobStoreError,
     error::PoolResult,
-    pool::{state::SubPool, TransactionEvents},
+    pool::{state::SubPool, BestTransactionFilter, TransactionEvents},
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
@@ -655,6 +655,20 @@ pub trait BestTransactions: Iterator + Send {
     ///
     /// If set to true, no blob transactions will be returned.
     fn set_skip_blobs(&mut self, skip_blobs: bool);
+
+    /// Creates an iterator which uses a closure to determine if a transaction should be yielded.
+    ///
+    /// Given an element the closure must return true or false. The returned iterator will yield
+    /// only the elements for which the closure returns true.
+    ///
+    /// Descendant transactions will be skipped.
+    fn filter<P>(self, predicate: P) -> BestTransactionFilter<Self, P>
+    where
+        P: FnMut(&Self::Item) -> bool,
+        Self: Sized,
+    {
+        BestTransactionFilter::new(self, predicate)
+    }
 }
 
 /// A no-op implementation that yields no transactions.
