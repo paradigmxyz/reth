@@ -37,6 +37,12 @@ pub trait EvmEnvConfig: Send + Sync + Unpin + Clone {
     }
 }
 
+/// TODO: for further note: the custom precompiles will be configured in the builder, specifically
+/// in the pre execution hoook.
+///
+/// https://github.com/bluealloy/revm/blob/ecb6c4b65461fcbcad6b51cf7ae9065181bb7617/crates/revm/src/handler/handle_types/pre_execution.rs#L25-L26
+///
+/// We also need `with_state` equivalent
 trait EvmConfig: EvmEnvConfig {
     /// The type of executor used to execute transactions.
     ///
