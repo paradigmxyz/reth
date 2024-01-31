@@ -1,17 +1,21 @@
 use crate::{
+    blobstore::BlobStoreError,
     error::PoolResult,
-    pool::{state::SubPool, TransactionEvents},
+    pool::{state::SubPool, BestTransactionFilter, TransactionEvents},
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
 use futures_util::{ready, Stream};
+use reth_eth_wire::HandleAnnouncement;
 use reth_primitives::{
-    AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError,
+    kzg::KzgSettings, AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError,
     FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
     PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
     TransactionKind, TransactionSignedEcRecovered, TxEip4844, TxHash, B256, EIP1559_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, U256,
 };
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -20,11 +24,6 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::mpsc::Receiver;
-
-use crate::{blobstore::BlobStoreError, pool::BestTransactionFilter};
-use reth_primitives::kzg::KzgSettings;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 /// General purpose abstraction of a transaction-pool.
 ///
@@ -280,7 +279,9 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// the pool.
     ///
     /// Consumer: P2P
-    fn retain_unknown(&self, hashes: &mut Vec<TxHash>);
+    fn retain_unknown<A>(&self, announcement: &mut A)
+    where
+        A: HandleAnnouncement;
 
     /// Returns if the transaction for the given hash is already included in this pool.
     fn contains(&self, tx_hash: &TxHash) -> bool {
@@ -981,8 +982,7 @@ impl PoolTransaction for EthPooledTransaction {
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match &self.transaction.transaction {
-            Transaction::Legacy(_) => None,
-            Transaction::Eip2930(_) => None,
+            Transaction::Legacy(_) | Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
             Transaction::Eip4844(tx) => Some(tx.max_priority_fee_per_gas),
             #[cfg(feature = "optimism")]
@@ -1151,7 +1151,7 @@ pub enum GetPooledTransactionLimit {
     /// No limit, return all transactions.
     None,
     /// Enforce a size limit on the returned transactions, for example 2MB
-    SizeSoftLimit(usize),
+    ResponseSizeSoftLimit(usize),
 }
 
 impl GetPooledTransactionLimit {
@@ -1160,7 +1160,7 @@ impl GetPooledTransactionLimit {
     pub fn exceeds(&self, size: usize) -> bool {
         match self {
             GetPooledTransactionLimit::None => false,
-            GetPooledTransactionLimit::SizeSoftLimit(limit) => size > *limit,
+            GetPooledTransactionLimit::ResponseSizeSoftLimit(limit) => size > *limit,
         }
     }
 }

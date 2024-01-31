@@ -47,12 +47,15 @@ use tracing::{debug, info};
 
 /// Default max number of subscriptions per connection.
 pub(crate) const RPC_DEFAULT_MAX_SUBS_PER_CONN: u32 = 1024;
+
 /// Default max request size in MB.
 pub(crate) const RPC_DEFAULT_MAX_REQUEST_SIZE_MB: u32 = 15;
+
 /// Default max response size in MB.
 ///
 /// This is only relevant for very large trace responses.
-pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 150;
+pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 160;
+
 /// Default number of incoming connections.
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
 
@@ -216,9 +219,10 @@ impl RpcServerArgs {
         // ws port is scaled by a factor of instance * 2
         self.ws_port += instance * 2 - 2;
 
-        // also adjust the ipc path by appending the instance number to the path used for the
-        // endpoint
-        self.ipcpath = format!("{}-{}", self.ipcpath, instance);
+        // if multiple instances are being run, append the instance number to the ipc path
+        if instance > 1 {
+            self.ipcpath = format!("{}-{}", self.ipcpath, instance);
+        }
     }
 
     /// Set the http port to zero, to allow the OS to assign a random unused port when the rpc

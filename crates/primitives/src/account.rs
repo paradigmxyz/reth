@@ -8,6 +8,7 @@ use bytes::Buf;
 use reth_codecs::{main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
+
 /// An Ethereum account.
 #[main_codec]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -27,7 +28,7 @@ impl Account {
     }
 
     /// After SpuriousDragon empty account is defined as account with nonce == 0 && balance == 0 &&
-    /// bytecode = None.
+    /// bytecode = None (or hash is [`KECCAK_EMPTY`]).
     pub fn is_empty(&self) -> bool {
         self.nonce == 0 &&
             self.balance.is_zero() &&
@@ -143,6 +144,31 @@ mod tests {
         acc.nonce = 2;
         let len = acc.to_compact(&mut buf);
         assert_eq!(len, 4);
+    }
+
+    #[test]
+    fn test_empty_account() {
+        let mut acc = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None };
+        // Nonce 0, balance 0, and bytecode hash set to None is considered empty.
+        assert!(acc.is_empty());
+
+        acc.bytecode_hash = Some(KECCAK_EMPTY);
+        // Nonce 0, balance 0, and bytecode hash set to KECCAK_EMPTY is considered empty.
+        assert!(acc.is_empty());
+
+        acc.balance = U256::from(2);
+        // Non-zero balance makes it non-empty.
+        assert!(!acc.is_empty());
+
+        acc.balance = U256::ZERO;
+        acc.nonce = 10;
+        // Non-zero nonce makes it non-empty.
+        assert!(!acc.is_empty());
+
+        acc.nonce = 0;
+        acc.bytecode_hash = Some(B256::from(U256::ZERO));
+        // Non-empty bytecode hash makes it non-empty.
+        assert!(!acc.is_empty());
     }
 
     #[test]

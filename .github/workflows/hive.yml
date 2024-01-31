@@ -3,6 +3,7 @@
 name: hive
 
 on:
+  workflow_dispatch:
   schedule:
     # every day
     - cron: "0 0 * * *"
@@ -27,7 +28,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: .
-          tags: paradigmxyz/reth:main
+          tags: ghcr.io/paradigmxyz/reth:latest
           build-args: BUILD_PROFILE=hivetests
           outputs: type=docker,dest=./artifacts/reth_image.tar
           cache-from: type=gha

@@ -22,7 +22,9 @@ pub use eth::*;
 pub use task::{TransactionValidationTaskExecutor, ValidationTask};
 
 /// Validation constants.
-pub use constants::{MAX_CODE_SIZE, MAX_INIT_CODE_SIZE, TX_MAX_SIZE, TX_SLOT_SIZE};
+pub use constants::{
+    MAX_CODE_BYTE_SIZE, MAX_INIT_CODE_BYTE_SIZE, MAX_TX_INPUT_BYTES, TX_SLOT_BYTE_SIZE,
+};
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
@@ -355,13 +357,12 @@ impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
 }
 
 impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(fmt, "Transaction {{ ")?;
-        write!(fmt, "hash: {:?}, ", &self.transaction.hash())?;
-        write!(fmt, "provides: {:?}, ", &self.transaction_id)?;
-        write!(fmt, "raw tx: {:?}", &self.transaction)?;
-        write!(fmt, "}}")?;
-        Ok(())
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ValidPoolTransaction")
+            .field("hash", self.transaction.hash())
+            .field("provides", &self.transaction_id)
+            .field("raw_tx", &self.transaction)
+            .finish()
     }
 }
 

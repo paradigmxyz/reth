@@ -207,6 +207,11 @@ where
 /// Prepares the [Env] for execution.
 ///
 /// Does not commit any changes to the underlying database.
+///
+/// EVM settings:
+///  - `disable_block_gas_limit` is set to `true`
+///  - `disable_eip3607` is set to `true`
+///  - `disable_base_fee` is set to `true`
 pub(crate) fn prepare_call_env<DB>(
     mut cfg: CfgEnv,
     block: BlockEnv,

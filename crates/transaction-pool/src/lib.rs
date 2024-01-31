@@ -150,6 +150,7 @@
 
 use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;
+use reth_eth_wire::HandleAnnouncement;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
@@ -454,8 +455,11 @@ where
         self.pool.remove_transactions(hashes)
     }
 
-    fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {
-        self.pool.retain_unknown(hashes)
+    fn retain_unknown<A>(&self, announcement: &mut A)
+    where
+        A: HandleAnnouncement,
+    {
+        self.pool.retain_unknown(announcement)
     }
 
     fn get(&self, tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {

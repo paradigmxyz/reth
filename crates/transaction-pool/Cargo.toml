@@ -19,6 +19,7 @@ normal = [
 
 [dependencies]
 # reth
+reth-eth-wire.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-interfaces.workspace = true
