@@ -1,9 +1,11 @@
 //! Blockchain tree externals.
 
-use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
+use reth_db::{
+    cursor::DbCursorRO, database::Database, snapshot::HeaderMask, tables, transaction::DbTx,
+};
 use reth_interfaces::{consensus::Consensus, RethResult};
-use reth_primitives::{BlockHash, BlockNumber};
-use reth_provider::ProviderFactory;
+use reth_primitives::{BlockHash, BlockNumber, SnapshotSegment};
+use reth_provider::{ProviderFactory, StatsReader};
 use std::{collections::BTreeMap, sync::Arc};
 
 /// A container for external components.
@@ -44,13 +46,36 @@ impl<DB: Database, EF> TreeExternals<DB, EF> {
         &self,
         num_hashes: usize,
     ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
-        Ok(self
+        let mut hashes = self
             .provider_factory
             .provider()?
             .tx_ref()
             .cursor_read::<tables::CanonicalHeaders>()?
             .walk_back(None)?
             .take(num_hashes)
-            .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?)
+            .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?;
+
+        if hashes.len() < num_hashes {
+            let snapshot_provider =
+                self.provider_factory.snapshot_provider().expect("should exist");
+            let total_headers = snapshot_provider.count_entries::<tables::Headers>()? as u64;
+            let range = total_headers.saturating_sub(hashes.len() as u64).saturating_sub(1) as u64..
+                dbg!(total_headers);
+
+            hashes.extend(
+                range.clone().zip(
+                    snapshot_provider
+                        .fetch_range_with_predicate(
+                            SnapshotSegment::Headers,
+                            range,
+                            |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(number.into()),
+                            |_| true,
+                        )?
+                        .into_iter(),
+                ),
+            );
+        }
+
+        Ok(hashes)
     }
 }

@@ -937,14 +937,18 @@ impl StatsReader for SnapshotProvider {
     fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
         match T::NAME {
             tables::CanonicalHeaders::NAME | tables::Headers::NAME | tables::HeaderTD::NAME => {
-                Ok(self.get_highest_snapshot_block(SnapshotSegment::Headers).unwrap_or_default()
-                    as usize)
+                Ok(self
+                    .get_highest_snapshot_block(SnapshotSegment::Headers)
+                    .map(|block| block + 1)
+                    .unwrap_or_default() as usize)
             }
             tables::Receipts::NAME => Ok(self
                 .get_highest_snapshot_tx(SnapshotSegment::Receipts)
+                .map(|receipts| receipts + 1)
                 .unwrap_or_default() as usize),
             tables::Transactions::NAME => Ok(self
                 .get_highest_snapshot_tx(SnapshotSegment::Transactions)
+                .map(|txs| txs + 1)
                 .unwrap_or_default() as usize),
             _ => Err(ProviderError::UnsupportedProvider),
         }
