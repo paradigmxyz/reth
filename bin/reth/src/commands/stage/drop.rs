@@ -188,12 +188,16 @@ impl Command {
         };
 
         if let Some(snapshot_segment) = snapshot_segment {
-            let snapshot_provider = tool.provider_factory.snapshot_provider().unwrap();
+            let snapshot_provider = tool
+                .provider_factory
+                .snapshot_provider()
+                .expect("snapshot provider initialized via provider factory");
             let snapshots = iter_snapshots(data_dir.snapshots_path())?;
-            let segment_snapshots = snapshots.get(&snapshot_segment).unwrap();
-            for (block_range, _) in segment_snapshots {
-                snapshot_provider
-                    .delete_jar(snapshot_segment, find_fixed_range(*block_range.start()))?;
+            if let Some(segment_snapshots) = snapshots.get(&snapshot_segment) {
+                for (block_range, _) in segment_snapshots {
+                    snapshot_provider
+                        .delete_jar(snapshot_segment, find_fixed_range(*block_range.start()))?;
+                }
             }
         }
 
