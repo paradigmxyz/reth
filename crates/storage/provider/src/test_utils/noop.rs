@@ -7,7 +7,10 @@ use crate::{
     StateProviderFactory, StateRootProvider, TransactionVariant, TransactionsProvider,
     WithdrawalsProvider,
 };
-use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
+use reth_db::{
+    models::{AccountBeforeTx, StoredBlockBodyIndices},
+    RawValue,
+};
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
@@ -207,6 +210,13 @@ impl TransactionsProvider for NoopProvider {
 
     fn transaction_sender(&self, _id: TxNumber) -> ProviderResult<Option<Address>> {
         Ok(None)
+    }
+
+    fn raw_transactions_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
+        Ok(Vec::default())
     }
 }
 

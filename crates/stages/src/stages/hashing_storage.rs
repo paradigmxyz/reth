@@ -7,7 +7,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::db::DatabaseError;
+use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     keccak256,
     stage::{
@@ -16,7 +16,7 @@ use reth_primitives::{
     },
     StorageEntry,
 };
-use reth_provider::{DatabaseProviderRW, HashingWriter, StorageReader};
+use reth_provider::{DatabaseProviderRW, HashingWriter, StatsReader, StorageReader};
 use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
 
@@ -214,10 +214,10 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
 fn stage_checkpoint_progress<DB: Database>(
     provider: &DatabaseProviderRW<DB>,
-) -> Result<EntitiesCheckpoint, DatabaseError> {
+) -> ProviderResult<EntitiesCheckpoint> {
     Ok(EntitiesCheckpoint {
-        processed: provider.tx_ref().entries::<tables::HashedStorage>()? as u64,
-        total: provider.tx_ref().entries::<tables::PlainStorageState>()? as u64,
+        processed: provider.count_entries::<tables::HashedStorage>()? as u64,
+        total: provider.count_entries::<tables::PlainStorageState>()? as u64,
     })
 }
 
