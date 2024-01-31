@@ -5,7 +5,7 @@ use reth_db::{
     database::Database,
     models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTxMut,
 };
 use reth_interfaces::{
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},

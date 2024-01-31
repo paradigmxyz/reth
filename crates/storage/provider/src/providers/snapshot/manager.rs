@@ -816,7 +816,7 @@ impl TransactionsProvider for SnapshotProvider {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
-        self.fetch_range(
+        self.fetch_range_with_predicate(
             SnapshotSegment::Transactions,
             to_range(range),
             |cursor, number| {
