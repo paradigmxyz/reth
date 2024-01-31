@@ -27,11 +27,15 @@ pub trait Suite {
     ///
     /// This recursively finds every test description in the resulting path.
     fn run(&self) {
+        // Build the path to the test suite directory
         let suite_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("ethereum-tests")
             .join(self.suite_name());
 
-        // todo: assert that the path exists
+        // Verify that the path exists
+        assert!(suite_path.exists(), "Test suite path does not exist: {:?}", suite_path);
+
+        // Find all files with the ".json" extension in the test suite directory
         let test_cases = find_all_files_with_extension(&suite_path, ".json")
             .into_iter()
             .map(|test_case_path| {
@@ -40,8 +44,10 @@ pub trait Suite {
             })
             .collect();
 
+        // Run the test cases and collect the results
         let results = Cases { test_cases }.run();
 
+        // Assert that all tests in the suite pass
         assert_tests_pass(&self.suite_name(), &suite_path, &results);
     }
 }
@@ -53,5 +59,5 @@ fn find_all_files_with_extension(path: &Path, extension: &str) -> Vec<PathBuf> {
         .filter_map(Result::ok)
         .filter(|e| e.file_name().to_string_lossy().ends_with(extension))
         .map(DirEntry::into_path)
-        .collect::<_>()
+        .collect()
 }
