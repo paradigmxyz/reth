@@ -7,7 +7,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawValue,
 };
-use reth_interfaces::consensus;
+use reth_interfaces::{consensus, RethError};
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
@@ -189,7 +189,12 @@ fn recover_sender(
     (tx_id, tx): (TxNumber, RawValue<TransactionSignedNoHash>),
     rlp_buf: &mut Vec<u8>,
 ) -> Result<(u64, Address), Box<SenderRecoveryStageError>> {
-    let tx = tx.value().expect("value to be formated");
+    let tx = tx
+        .value()
+        .map_err(RethError::from)
+        .map_err(StageError::from)
+        .map_err(Into::into)
+        .map_err(Box::new)?;
 
     tx.transaction.encode_without_signature(rlp_buf);
 
