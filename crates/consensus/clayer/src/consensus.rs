@@ -281,6 +281,7 @@ impl ClayerConsensusEngine {
             PbftMessageType::SealRequest => self.handle_seal_request(msg, state)?,
             PbftMessageType::Seal => self.handle_seal_response(&msg, state)?,
             PbftMessageType::BlockNew => self.handle_block_new(msg, state)?,
+            PbftMessageType::AnnounceBlock => self.handle_announceblock_response(&msg)?,
             _ => warn!("Received message with unknown type: {:?}", msg_type),
         }
 
@@ -483,16 +484,16 @@ impl ClayerConsensusEngine {
                 state.commit_timeout.stop();
 
                 self.on_block_commit(block_id, state)?;
-            }
 
-            //broadcast new block hash
-            self.broadcast_pbft_message(
-                state.view,
-                state.seq_num,
-                PbftMessageType::AnnounceBlock,
-                block_id,
-                state,
-            )?;
+                //broadcast new block hash
+                self.broadcast_pbft_message(
+                    state.view,
+                    state.seq_num,
+                    PbftMessageType::AnnounceBlock,
+                    block_id,
+                    state,
+                )?;
+            }
         }
 
         Ok(())
@@ -582,7 +583,7 @@ impl ClayerConsensusEngine {
 
             trace!(target: "consensus::cl","Created NewView message: {:?}", new_view);
 
-            self.broadcast_message(ParsedMessage::from_new_view_message(new_view)?, state)?;
+            self.broadcast_message(ParsedMessage::from_new_view_message(new_view)?, state, false)?;
         }
 
         Ok(())
@@ -1721,29 +1722,7 @@ impl ClayerConsensusEngine {
 
         trace!(target: "consensus::cl","{}: Created PBFT message: {:?}", state, msg);
 
-        self.broadcast_message(ParsedMessage::from_pbft_message(msg)?, state)
-    }
-
-    fn broadcast_block_new(
-        &mut self,
-        view: u64,
-        seq_num: u64,
-        payload: ClayerExecutionPayload,
-        seal_bytes: reth_primitives::Bytes,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
-        let info = PbftMessageInfo {
-            ptype: PbftMessageType::BlockNew as u8,
-            view,
-            seq_num,
-            signer_id: state.id.clone(),
-        };
-
-        let msg: ClayerBlock = ClayerBlock { info, block: payload, seal_bytes };
-
-        trace!(target: "consensus::cl","{}: Created BlockNew message: {:?}", state, msg);
-
-        self.broadcast_message(ParsedMessage::from_block_new_message(msg)?, state)
+        self.broadcast_message(ParsedMessage::from_pbft_message(msg)?, state, true)
     }
 
     /// Broadcast the specified message to all of the node's peers, including itself
@@ -1751,6 +1730,7 @@ impl ClayerConsensusEngine {
         &mut self,
         msg: ParsedMessage,
         state: &mut PbftState,
+        all: bool,
     ) -> Result<(), PbftError> {
         // Broadcast to peers
         let message_bytes = msg.get_message_bytes();
@@ -1781,11 +1761,78 @@ impl ClayerConsensusEngine {
         clayer_msg.encode(&mut msg_out);
         let msg_bytes = reth_primitives::Bytes::copy_from_slice(msg_out.as_slice());
 
-        self.agent.broadcast_consensus(state.validators.member_ids().clone(), msg_bytes);
+        if all {
+            self.agent.broadcast_consensus(vec![], msg_bytes);
+        } else {
+            self.agent.broadcast_consensus(state.validators.member_ids().clone(), msg_bytes);
+        }
 
         // Send to self
         self.on_peer_message(msg, state)
     }
+
+    fn broadcast_block_new(
+        &mut self,
+        view: u64,
+        seq_num: u64,
+        payload: ClayerExecutionPayload,
+        seal_bytes: reth_primitives::Bytes,
+        state: &mut PbftState,
+    ) -> Result<(), PbftError> {
+        let info = PbftMessageInfo {
+            ptype: PbftMessageType::BlockNew as u8,
+            view,
+            seq_num,
+            signer_id: state.id.clone(),
+        };
+
+        let msg: ClayerBlock = ClayerBlock { info, block: payload, seal_bytes };
+
+        trace!(target: "consensus::cl","{}: Created BlockNew message: {:?}", state, msg);
+
+        self.broadcast_message(ParsedMessage::from_block_new_message(msg)?, state, false)
+    }
+
+    /// Broadcast the specified message to all of the node's peers, including itself
+    // fn broadcast_message(
+    //     &mut self,
+    //     msg: ParsedMessage,
+    //     state: &mut PbftState,
+    // ) -> Result<(), PbftError> {
+    //     // Broadcast to peers
+    //     let message_bytes = msg.get_message_bytes();
+
+    //     //create header
+    //     let header = ClayerConsensusMessageHeader {
+    //         message_type: msg.info().ptype,
+    //         content_hash: keccak256(&message_bytes),
+    //         signer_id: state.id.clone(),
+    //     };
+    //     let mut header_out = vec![];
+    //     header.encode(&mut header_out);
+    //     let header_bytes = reth_primitives::Bytes::copy_from_slice(header_out.as_slice());
+
+    //     //sign header
+    //     let signature_hash = keccak256(&header_bytes);
+    //     let signature =
+    //         sign_message(B256::from_slice(&state.kp.secret_bytes()[..]), signature_hash).map_err(
+    //             |err| PbftError::SigningError(format!("signing header error: {}", err.to_string())),
+    //         )?;
+
+    //     let clayer_msg = ClayerConsensusMessage {
+    //         header_bytes,
+    //         header_signature: ClayerSignature(signature),
+    //         message_bytes,
+    //     };
+    //     let mut msg_out = vec![];
+    //     clayer_msg.encode(&mut msg_out);
+    //     let msg_bytes = reth_primitives::Bytes::copy_from_slice(msg_out.as_slice());
+
+    //     self.agent.broadcast_consensus(state.validators.member_ids().clone(), msg_bytes);
+
+    //     // Send to self
+    //     self.on_peer_message(msg, state)
+    // }
 
     /// Build a consensus seal for the last block this node committed and send it to the node that
     /// requested the seal (the `recipient`)
