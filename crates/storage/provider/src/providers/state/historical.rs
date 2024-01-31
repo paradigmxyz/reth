@@ -1,6 +1,7 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    BundleStateWithReceipts, ProviderError, StateProvider, StateRootProvider,
+    providers::{state::macros::delegate_provider_impls, SnapshotProvider},
+    AccountReader, BlockHashReader, BundleStateWithReceipts, ProviderError, StateProvider,
+    StateRootProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -13,9 +14,10 @@ use reth_db::{
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     constants::EPOCH_SLOTS, trie::AccountProof, Account, Address, BlockNumber, Bytecode,
-    StorageKey, StorageValue, B256,
+    SnapshotSegment, StorageKey, StorageValue, B256,
 };
 use reth_trie::{updates::TrieUpdates, HashedPostState};
+use std::sync::Arc;
 
 /// State provider for a given block number which takes a tx reference.
 ///
@@ -36,6 +38,8 @@ pub struct HistoricalStateProviderRef<'b, TX: DbTx> {
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
+    /// Snapshot provider
+    snapshot_provider: Arc<SnapshotProvider>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -48,8 +52,12 @@ pub enum HistoryInfo {
 
 impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
     /// Create new StateProvider for historical block number
-    pub fn new(tx: &'b TX, block_number: BlockNumber) -> Self {
-        Self { tx, block_number, lowest_available_blocks: Default::default() }
+    pub fn new(
+        tx: &'b TX,
+        block_number: BlockNumber,
+        snapshot_provider: Arc<SnapshotProvider>,
+    ) -> Self {
+        Self { tx, block_number, lowest_available_blocks: Default::default(), snapshot_provider }
     }
 
     /// Create new StateProvider for historical block number and lowest block numbers at which
@@ -58,8 +66,9 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         tx: &'b TX,
         block_number: BlockNumber,
         lowest_available_blocks: LowestAvailableBlocks,
+        snapshot_provider: Arc<SnapshotProvider>,
     ) -> Self {
-        Self { tx, block_number, lowest_available_blocks }
+        Self { tx, block_number, lowest_available_blocks, snapshot_provider }
     }
 
     /// Lookup an account in the AccountHistory table
@@ -104,10 +113,12 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        let (tip, _) = self
+        let tip = self
             .tx
             .cursor_read::<tables::CanonicalHeaders>()?
             .last()?
+            .map(|(tip, _)| tip)
+            .or_else(|| self.snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Headers))
             .ok_or(ProviderError::BestBlockNotFound)?;
 
         if tip.saturating_sub(self.block_number) > EPOCH_SLOTS {
@@ -203,7 +214,12 @@ impl<'b, TX: DbTx> AccountReader for HistoricalStateProviderRef<'b, TX> {
 impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.tx.get::<tables::CanonicalHeaders>(number).map_err(Into::into)
+        self.snapshot_provider.get_with_snapshot_or_database(
+            SnapshotSegment::Headers,
+            number,
+            |snapshot| snapshot.block_hash(number),
+            || Ok(self.tx.get::<tables::CanonicalHeaders>(number)?),
+        )
     }
 
     fn canonical_hashes_range(
@@ -211,16 +227,23 @@ impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        let range = start..end;
-        self.tx
-            .cursor_read::<tables::CanonicalHeaders>()
-            .map(|mut cursor| {
-                cursor
-                    .walk_range(range)?
-                    .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
-                    .collect::<ProviderResult<Vec<_>>>()
-            })?
-            .map_err(Into::into)
+        self.snapshot_provider.get_range_with_snapshot_or_database(
+            SnapshotSegment::Headers,
+            start..end,
+            |snapshot, range, _| snapshot.canonical_hashes_range(range.start, range.end),
+            |range, _| {
+                self.tx
+                    .cursor_read::<tables::CanonicalHeaders>()
+                    .map(|mut cursor| {
+                        cursor
+                            .walk_range(range)?
+                            .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
+                            .collect::<ProviderResult<Vec<_>>>()
+                    })?
+                    .map_err(Into::into)
+            },
+            |_| true,
+        )
     }
 }
 
@@ -297,12 +320,18 @@ pub struct HistoricalStateProvider<TX: DbTx> {
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
+    /// Snapshot provider
+    snapshot_provider: Arc<SnapshotProvider>,
 }
 
 impl<TX: DbTx> HistoricalStateProvider<TX> {
     /// Create new StateProvider for historical block number
-    pub fn new(tx: TX, block_number: BlockNumber) -> Self {
-        Self { tx, block_number, lowest_available_blocks: Default::default() }
+    pub fn new(
+        tx: TX,
+        block_number: BlockNumber,
+        snapshot_provider: Arc<SnapshotProvider>,
+    ) -> Self {
+        Self { tx, block_number, lowest_available_blocks: Default::default(), snapshot_provider }
     }
 
     /// Set the lowest block number at which the account history is available.
@@ -330,6 +359,7 @@ impl<TX: DbTx> HistoricalStateProvider<TX> {
             &self.tx,
             self.block_number,
             self.lowest_available_blocks,
+            self.snapshot_provider.clone(),
         )
     }
 }
@@ -369,6 +399,7 @@ impl LowestAvailableBlocks {
 mod tests {
     use crate::{
         providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
+        test_utils::create_test_provider_factory,
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
     };
     use reth_db::{
@@ -394,8 +425,9 @@ mod tests {
 
     #[test]
     fn history_provider_get_account() {
-        let db = create_test_rw_db();
-        let tx = db.tx_mut().unwrap();
+        let factory = create_test_provider_factory();
+        let tx = factory.provider_rw().unwrap().into_tx();
+        let snapshot_provider = factory.snapshot_provider().expect("should exist");
 
         tx.put::<tables::AccountHistory>(
             ShardedKey { key: ADDRESS, highest_block_number: 7 },
@@ -455,54 +487,73 @@ mod tests {
         tx.put::<tables::PlainAccountState>(HIGHER_ADDRESS, higher_acc_plain).unwrap();
         tx.commit().unwrap();
 
-        let tx = db.tx().unwrap();
+        let tx = factory.provider().unwrap().into_tx();
 
         // run
-        assert_eq!(HistoricalStateProviderRef::new(&tx, 1).basic_account(ADDRESS), Ok(None));
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 2).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&tx, 1, snapshot_provider.clone())
+                .basic_account(ADDRESS)
+                .clone(),
+            Ok(None)
+        );
+        assert_eq!(
+            HistoricalStateProviderRef::new(&tx, 2, snapshot_provider.clone())
+                .basic_account(ADDRESS),
             Ok(Some(acc_at3))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 3).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&tx, 3, snapshot_provider.clone())
+                .basic_account(ADDRESS),
             Ok(Some(acc_at3))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 4).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&tx, 4, snapshot_provider.clone())
+                .basic_account(ADDRESS),
             Ok(Some(acc_at7))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 7).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&tx, 7, snapshot_provider.clone())
+                .basic_account(ADDRESS),
             Ok(Some(acc_at7))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 9).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&tx, 9, snapshot_provider.clone())
+                .basic_account(ADDRESS),
             Ok(Some(acc_at10))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 10).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&tx, 10, snapshot_provider.clone())
+                .basic_account(ADDRESS),
             Ok(Some(acc_at10))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 11).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&tx, 11, snapshot_provider.clone())
+                .basic_account(ADDRESS),
             Ok(Some(acc_at15))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 16).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&tx, 16, snapshot_provider.clone())
+                .basic_account(ADDRESS),
             Ok(Some(acc_plain))
         );
 
-        assert_eq!(HistoricalStateProviderRef::new(&tx, 1).basic_account(HIGHER_ADDRESS), Ok(None));
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 1000).basic_account(HIGHER_ADDRESS),
+            HistoricalStateProviderRef::new(&tx, 1, snapshot_provider.clone())
+                .basic_account(HIGHER_ADDRESS),
+            Ok(None)
+        );
+        assert_eq!(
+            HistoricalStateProviderRef::new(&tx, 1000, snapshot_provider.clone())
+                .basic_account(HIGHER_ADDRESS),
             Ok(Some(higher_acc_plain))
         );
     }
 
     #[test]
     fn history_provider_get_storage() {
-        let db = create_test_rw_db();
-        let tx = db.tx_mut().unwrap();
+        let factory = create_test_provider_factory();
+        let tx = factory.provider_rw().unwrap().into_tx();
+        let snapshot_provider = factory.snapshot_provider().expect("should exist");
 
         tx.put::<tables::StorageHistory>(
             StorageShardedKey {
@@ -549,52 +600,66 @@ mod tests {
         tx.put::<tables::PlainStorageState>(HIGHER_ADDRESS, higher_entry_plain).unwrap();
         tx.commit().unwrap();
 
-        let tx = db.tx().unwrap();
+        let tx = factory.provider().unwrap().into_tx();
 
         // run
-        assert_eq!(HistoricalStateProviderRef::new(&tx, 0).storage(ADDRESS, STORAGE), Ok(None));
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 3).storage(ADDRESS, STORAGE),
-            Ok(Some(U256::ZERO))
-        );
-        assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 4).storage(ADDRESS, STORAGE),
-            Ok(Some(entry_at7.value))
-        );
-        assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 7).storage(ADDRESS, STORAGE),
-            Ok(Some(entry_at7.value))
-        );
-        assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 9).storage(ADDRESS, STORAGE),
-            Ok(Some(entry_at10.value))
-        );
-        assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 10).storage(ADDRESS, STORAGE),
-            Ok(Some(entry_at10.value))
-        );
-        assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 11).storage(ADDRESS, STORAGE),
-            Ok(Some(entry_at15.value))
-        );
-        assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 16).storage(ADDRESS, STORAGE),
-            Ok(Some(entry_plain.value))
-        );
-        assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 1).storage(HIGHER_ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&tx, 0, snapshot_provider.clone())
+                .storage(ADDRESS, STORAGE),
             Ok(None)
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 1000).storage(HIGHER_ADDRESS, STORAGE),
+            HistoricalStateProviderRef::new(&tx, 3, snapshot_provider.clone())
+                .storage(ADDRESS, STORAGE),
+            Ok(Some(U256::ZERO))
+        );
+        assert_eq!(
+            HistoricalStateProviderRef::new(&tx, 4, snapshot_provider.clone())
+                .storage(ADDRESS, STORAGE),
+            Ok(Some(entry_at7.value))
+        );
+        assert_eq!(
+            HistoricalStateProviderRef::new(&tx, 7, snapshot_provider.clone())
+                .storage(ADDRESS, STORAGE),
+            Ok(Some(entry_at7.value))
+        );
+        assert_eq!(
+            HistoricalStateProviderRef::new(&tx, 9, snapshot_provider.clone())
+                .storage(ADDRESS, STORAGE),
+            Ok(Some(entry_at10.value))
+        );
+        assert_eq!(
+            HistoricalStateProviderRef::new(&tx, 10, snapshot_provider.clone())
+                .storage(ADDRESS, STORAGE),
+            Ok(Some(entry_at10.value))
+        );
+        assert_eq!(
+            HistoricalStateProviderRef::new(&tx, 11, snapshot_provider.clone())
+                .storage(ADDRESS, STORAGE),
+            Ok(Some(entry_at15.value))
+        );
+        assert_eq!(
+            HistoricalStateProviderRef::new(&tx, 16, snapshot_provider.clone())
+                .storage(ADDRESS, STORAGE),
+            Ok(Some(entry_plain.value))
+        );
+        assert_eq!(
+            HistoricalStateProviderRef::new(&tx, 1, snapshot_provider.clone())
+                .storage(HIGHER_ADDRESS, STORAGE),
+            Ok(None)
+        );
+        assert_eq!(
+            HistoricalStateProviderRef::new(&tx, 1000, snapshot_provider)
+                .storage(HIGHER_ADDRESS, STORAGE),
             Ok(Some(higher_entry_plain.value))
         );
     }
 
     #[test]
     fn history_provider_unavailable() {
-        let db = create_test_rw_db();
-        let tx = db.tx().unwrap();
+        let factory = create_test_provider_factory();
+        let tx = factory.provider_rw().unwrap().into_tx();
+        let snapshot_provider = factory.snapshot_provider().expect("should exist");
 
         // provider block_number < lowest available block number,
         // i.e. state at provider block is pruned
@@ -605,6 +670,7 @@ mod tests {
                 account_history_block_number: Some(3),
                 storage_history_block_number: Some(3),
             },
+            snapshot_provider.clone(),
         );
         assert_eq!(
             provider.account_history_lookup(ADDRESS),
@@ -624,6 +690,7 @@ mod tests {
                 account_history_block_number: Some(2),
                 storage_history_block_number: Some(2),
             },
+            snapshot_provider.clone(),
         );
         assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::MaybeInPlainState));
         assert_eq!(
@@ -640,6 +707,7 @@ mod tests {
                 account_history_block_number: Some(1),
                 storage_history_block_number: Some(1),
             },
+            snapshot_provider.clone(),
         );
         assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::MaybeInPlainState));
         assert_eq!(

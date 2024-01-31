@@ -449,6 +449,91 @@ impl SnapshotProvider {
     pub fn directory(&self) -> &Path {
         &self.path
     }
+
+    /// Retrieves data from the database or snapshot, wherever it's available.
+    ///
+    /// # Arguments
+    /// * `segment` - The segment of the snapshot to check against.
+    /// * `index_key` - Requested index key, usually a block or transaction number.
+    /// * `fetch_from_snapshot` - A closure that defines how to fetch the data from the snapshot
+    ///   provider.
+    /// * `fetch_from_database` - A closure that defines how to fetch the data from the database
+    ///   when the snapshot doesn't contain the required data or is not available.
+    pub fn get_with_snapshot_or_database<T, FS, FD>(
+        &self,
+        segment: SnapshotSegment,
+        number: u64,
+        fetch_from_snapshot: FS,
+        fetch_from_database: FD,
+    ) -> ProviderResult<Option<T>>
+    where
+        FS: Fn(&SnapshotProvider) -> ProviderResult<Option<T>>,
+        FD: Fn() -> ProviderResult<Option<T>>,
+    {
+        // If there is, check the maximum block or transaction number of the segment.
+        let snapshot_upper_bound = match segment {
+            SnapshotSegment::Headers => self.get_highest_snapshot_block(segment),
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                self.get_highest_snapshot_tx(segment)
+            }
+        };
+
+        if snapshot_upper_bound.map_or(false, |snapshot_upper_bound| snapshot_upper_bound >= number)
+        {
+            return fetch_from_snapshot(self)
+        }
+        fetch_from_database()
+    }
+
+    /// Gets data within a specified range, potentially spanning different snapshots and database.
+    ///
+    /// # Arguments
+    /// * `segment` - The segment of the snapshot to query.
+    /// * `block_range` - The range of data to fetch.
+    /// * `fetch_from_snapshot` - A function to fetch data from the snapshot.
+    /// * `fetch_from_database` - A function to fetch data from the database.
+    /// * `predicate` - A function used to evaluate each item in the fetched data. Fetching is
+    ///   terminated when this function returns false, thereby filtering the data based on the
+    ///   provided condition.
+    pub fn get_range_with_snapshot_or_database<T, P, FS, FD>(
+        &self,
+        segment: SnapshotSegment,
+        mut block_or_tx_range: Range<u64>,
+        fetch_from_snapshot: FS,
+        mut fetch_from_database: FD,
+        mut predicate: P,
+    ) -> ProviderResult<Vec<T>>
+    where
+        FS: Fn(&SnapshotProvider, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
+        FD: FnMut(Range<u64>, P) -> ProviderResult<Vec<T>>,
+        P: FnMut(&T) -> bool,
+    {
+        let mut data = Vec::new();
+
+        // If there is, check the maximum block or transaction number of the segment.
+        if let Some(snapshot_upper_bound) = match segment {
+            SnapshotSegment::Headers => self.get_highest_snapshot_block(segment),
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                self.get_highest_snapshot_tx(segment)
+            }
+        } {
+            if block_or_tx_range.start <= snapshot_upper_bound {
+                let end = block_or_tx_range.end.min(snapshot_upper_bound + 1);
+                data.extend(fetch_from_snapshot(
+                    self,
+                    block_or_tx_range.start..end,
+                    &mut predicate,
+                )?);
+                block_or_tx_range.start = end;
+            }
+        }
+
+        if block_or_tx_range.end > block_or_tx_range.start {
+            data.extend(fetch_from_database(block_or_tx_range, predicate)?)
+        }
+
+        Ok(data)
+    }
 }
 
 /// Helper trait to manage different [`SnapshotProviderRW`] of an `Arc<SnapshotProvider`

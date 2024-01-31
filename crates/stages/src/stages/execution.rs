@@ -131,8 +131,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         }
 
         // Build executor
-        let mut executor =
-            self.executor_factory.with_state(LatestStateProviderRef::new(provider.tx_ref()));
+        let mut executor = self.executor_factory.with_state(LatestStateProviderRef::new(
+            provider.tx_ref(),
+            provider.snapshot_provider().expect("should exist").clone(),
+        ));
         executor.set_prune_modes(prune_modes);
         executor.set_tip(max_block);
 

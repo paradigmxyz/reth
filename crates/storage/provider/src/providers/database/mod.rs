@@ -116,7 +116,10 @@ impl<DB: Database> ProviderFactory<DB> {
     #[track_caller]
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Ok(Box::new(LatestStateProvider::new(self.db.tx()?)))
+        Ok(Box::new(LatestStateProvider::new(
+            self.db.tx()?,
+            self.snapshot_provider().expect("should exist"),
+        )))
     }
 
     /// Storage provider for state at that given block
@@ -129,7 +132,10 @@ impl<DB: Database> ProviderFactory<DB> {
         if block_number == provider.best_block_number().unwrap_or_default() &&
             block_number == provider.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProvider::new(provider.into_tx())))
+            return Ok(Box::new(LatestStateProvider::new(
+                provider.into_tx(),
+                self.snapshot_provider().expect("should exist"),
+            )))
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -140,7 +146,11 @@ impl<DB: Database> ProviderFactory<DB> {
         let storage_history_prune_checkpoint =
             provider.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
-        let mut state_provider = HistoricalStateProvider::new(provider.into_tx(), block_number);
+        let mut state_provider = HistoricalStateProvider::new(
+            provider.into_tx(),
+            block_number,
+            self.snapshot_provider().expect("should exist"),
+        );
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.

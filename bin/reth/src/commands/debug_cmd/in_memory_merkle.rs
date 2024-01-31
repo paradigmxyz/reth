@@ -163,8 +163,10 @@ impl Command {
             .await?;
 
         let executor_factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
-        let mut executor =
-            executor_factory.with_state(LatestStateProviderRef::new(provider.tx_ref()));
+        let mut executor = executor_factory.with_state(LatestStateProviderRef::new(
+            provider.tx_ref(),
+            factory.snapshot_provider().expect("should exist"),
+        ));
 
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
