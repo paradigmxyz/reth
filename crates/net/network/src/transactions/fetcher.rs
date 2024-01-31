@@ -236,12 +236,6 @@ impl TransactionFetcher {
             }
         });
 
-        // all hashes included in request and there is still space
-        // todo: compare free space with min tx size
-        if acc_size_response < POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
-            self.fill_eth68_request_for_peer(hashes, peer_id, &mut acc_size_response);
-        }
-
         surplus_hashes
     }
 
@@ -503,9 +497,11 @@ impl TransactionFetcher {
         peer_id: PeerId,
         acc_size_response: &mut usize,
     ) {
-        if *acc_size_response >= POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
+        if *acc_size_response >= POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE / 2 {
             return
         }
+
+        // all hashes included in request and there is still a lot of space
 
         debug_assert!(
             {
@@ -523,11 +519,18 @@ impl TransactionFetcher {
         );
 
         for hash in self.buffered_hashes.iter() {
+            // fill request to 2/3 of the soft limit for the response size, or until the number of
+            // hashes reaches the soft limit number for a request (like in eth66), whatever
+            // happens first
+            if hashes.len() > GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
+                break
+            }
+
             // copy acc size
             let mut next_acc_size = *acc_size_response;
 
             // 1. Check acc size against limit, if so stop looping.
-            if next_acc_size >= POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
+            if next_acc_size >= 2 * POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE / 3 {
                 trace!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
                     acc_size_eth68_response=acc_size_response, // no change acc size
