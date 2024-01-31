@@ -22,7 +22,9 @@ pub use eth::*;
 pub use task::{TransactionValidationTaskExecutor, ValidationTask};
 
 /// Validation constants.
-pub use constants::{MAX_CODE_SIZE, MAX_INIT_CODE_SIZE, TX_MAX_SIZE, TX_SLOT_SIZE};
+pub use constants::{
+    MAX_CODE_BYTE_SIZE, MAX_INIT_CODE_BYTE_SIZE, MAX_TX_INPUT_BYTES, TX_SLOT_BYTE_SIZE,
+};
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]

@@ -502,7 +502,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::{models::AccountBeforeTx, test_utils::create_test_rw_db};
     use reth_interfaces::executor::BlockValidationError;
-    use reth_node_builder::EthEvmConfig;
+    use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
         ChainSpecBuilder, PruneModes, SealedBlock, StorageEntry, B256, MAINNET, U256,

@@ -1,5 +1,5 @@
 [package]
-name = "reth-node-builder"
+name = "reth-node-ethereum"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,6 +19,3 @@ reth-node-api.workspace = true
 
 # io
 serde.workspace = true
-
-[features]
-optimism = ["reth-node-api/optimism"]
