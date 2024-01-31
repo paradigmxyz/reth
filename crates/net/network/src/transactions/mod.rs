@@ -1015,103 +1015,93 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        // If the budget is exhausted we manually yield back control to tokio. See
-        // `NetworkManager` for more context on the design pattern.
         let budget = &mut 1024;
-        macro_rules! budget_checkpoint {
-            () => {
-                *budget -= 1;
-                if *budget == 0 {
-                    // make sure we're woken up again
-                    return Poll::Ready(())
-                }
-            };
-        }
 
-        // drain network/peer related events
-        while let Poll::Ready(Some(event)) = this.network_events.poll_next_unpin(cx) {
-            budget_checkpoint!();
-
-            this.on_network_event(event);
-        }
-
-        // drain commands
-        while let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
-            budget_checkpoint!();
-
-            this.on_command(cmd);
-        }
-
-        // drain incoming transaction events
-        while let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
-            budget_checkpoint!();
-
-            this.on_network_tx_event(event);
-        }
-
-        this.update_request_metrics();
-
-        // drain fetching transaction events
-        while let Poll::Ready(Some(fetch_event)) = this.transaction_fetcher.poll_next_unpin(cx) {
-            budget_checkpoint!();
-
-            match fetch_event {
-                FetchEvent::TransactionsFetched { peer_id, transactions } => {
-                    this.import_transactions(peer_id, transactions, TransactionSource::Response);
-                }
-                FetchEvent::FetchError { peer_id, error } => {
-                    trace!(target: "net::tx", ?peer_id, ?error, "requesting transactions from peer failed");
-                    this.on_request_error(peer_id, error);
-                }
+        loop {
+            // drain network/peer related events
+            if let Poll::Ready(Some(event)) = this.network_events.poll_next_unpin(cx) {
+                this.on_network_event(event);
             }
-        }
 
-        // try drain buffered transactions
-        this.request_buffered_hashes();
+            // drain commands
+            if let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
+                this.on_command(cmd);
+            }
 
-        this.update_request_metrics();
-        this.update_import_metrics();
+            // drain incoming transaction events
+            if let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
+                this.on_network_tx_event(event);
+            }
 
-        // Advance all imports
-        while let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
-            budget_checkpoint!();
+            this.update_request_metrics();
 
-            match import_res {
-                Ok(hash) => {
-                    this.on_good_import(hash);
-                }
-                Err(err) => {
-                    // if we're _currently_ syncing and the transaction is bad we ignore it,
-                    // otherwise we penalize the peer that sent the bad
-                    // transaction with the assumption that the peer should have
-                    // known that this transaction is bad. (e.g. consensus
-                    // rules)
-                    if err.is_bad_transaction() && !this.network.is_syncing() {
-                        debug!(target: "net::tx", ?err, "bad pool transaction import");
-                        this.on_bad_import(err.hash);
-                        continue
+            // drain fetching transaction events
+            if let Poll::Ready(Some(fetch_event)) = this.transaction_fetcher.poll_next_unpin(cx) {
+                match fetch_event {
+                    FetchEvent::TransactionsFetched { peer_id, transactions } => {
+                        this.import_transactions(
+                            peer_id,
+                            transactions,
+                            TransactionSource::Response,
+                        );
                     }
-                    this.on_good_import(err.hash);
+                    FetchEvent::FetchError { peer_id, error } => {
+                        trace!(target: "net::tx", ?peer_id, ?error, "requesting transactions from peer failed");
+                        this.on_request_error(peer_id, error);
+                    }
                 }
             }
+
+            // try drain buffered transactions
+            this.request_buffered_hashes();
+
+            this.update_request_metrics();
+            this.update_import_metrics();
+
+            // Advance all imports
+            if let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
+                match import_res {
+                    Ok(hash) => {
+                        this.on_good_import(hash);
+                    }
+                    Err(err) => {
+                        // if we're _currently_ syncing and the transaction is bad we ignore it,
+                        // otherwise we penalize the peer that sent the bad
+                        // transaction with the assumption that the peer should have
+                        // known that this transaction is bad. (e.g. consensus
+                        // rules)
+                        if err.is_bad_transaction() && !this.network.is_syncing() {
+                            debug!(target: "net::tx", ?err, "bad pool transaction import");
+                            this.on_bad_import(err.hash);
+                            continue
+                        }
+                        this.on_good_import(err.hash);
+                    }
+                }
+            }
+
+            this.update_import_metrics();
+
+            // handle and propagate new transactions
+            let mut new_txs = Vec::new();
+            if let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
+                new_txs.push(hash);
+            }
+            if !new_txs.is_empty() {
+                this.on_new_transactions(new_txs);
+            }
+
+            // all channels are fully drained and import futures pending
+
+            *budget -= 1;
+            // If the budget is exhausted we manually yield back control to tokio. See
+            // `NetworkManager` for more context on the design pattern.
+            if *budget == 0 {
+                // make sure we're woken up again
+                cx.waker().wake_by_ref();
+                return Poll::Pending
+            }
         }
-
-        this.update_import_metrics();
-
-        // handle and propagate new transactions
-        let mut new_txs = Vec::new();
-        while let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
-            budget_checkpoint!();
-
-            new_txs.push(hash);
-        }
-        if !new_txs.is_empty() {
-            this.on_new_transactions(new_txs);
-        }
-
-        // all channels are fully drained and import futures pending
-
-        Poll::Pending
     }
 }
 
