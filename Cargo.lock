@@ -6931,6 +6931,7 @@ dependencies = [
  "paste",
  "proptest",
  "rand 0.8.5",
+ "reth-eth-wire",
  "reth-interfaces",
  "reth-metrics",
  "reth-primitives",

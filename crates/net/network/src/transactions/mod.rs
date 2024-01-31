@@ -65,8 +65,10 @@ use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
 
 mod fetcher;
+mod validation;
 
 use fetcher::{FetchEvent, TransactionFetcher};
+pub use validation::*;
 
 /// Cache limit of transactions to keep track of for a single peer.
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
@@ -539,7 +541,7 @@ where
     fn on_new_pooled_transaction_hashes(
         &mut self,
         peer_id: PeerId,
-        msg: NewPooledTransactionHashes,
+        mut msg: NewPooledTransactionHashes,
     ) {
         // If the node is initially syncing, ignore transactions
         if self.network.is_initially_syncing() {
@@ -556,38 +558,93 @@ where
                 msg=?msg,
                 "discarding announcement from inactive peer"
             );
+
             return
         };
 
-        // message version decides how hashes are packed
-        let msg_version = msg.version();
-        // extract hashes payload, and sizes if version eth68
-        let sizes = msg.as_eth68().map(|eth68_msg| {
-            eth68_msg
-                .metadata_iter()
-                .map(|(&hash, (_type, size))| (hash, size))
-                .collect::<HashMap<_, _>>()
-        });
-        let mut hashes = msg.into_hashes();
-
         // keep track of the transactions the peer knows
         let mut num_already_seen = 0;
-        for tx in hashes.iter().copied() {
+        for tx in msg.iter_hashes().copied() {
             if !peer.transactions.insert(tx) {
                 num_already_seen += 1;
             }
         }
 
-        // filter out known hashes, those txns have already been successfully fetched
-        self.pool.retain_unknown(&mut hashes);
-        if hashes.is_empty() {
+        // 1. filter out known hashes
+        //
+        // known txns have already been successfully fetched.
+        //
+        // most hashes will be filtered out here since this the mempool protocol is a gossip
+        // protocol, healthy peers will send many of the same hashes.
+        //
+        self.pool.retain_unknown(&mut msg);
+        if msg.is_empty() {
             // nothing to request
             return
         }
-        // filter out already seen unknown hashes, for those hashes add the peer as fallback
-        let peers = &self.peers;
-        self.transaction_fetcher
-            .filter_unseen_hashes(&mut hashes, peer_id, |peer_id| peers.contains_key(&peer_id));
+
+        // 2. filter out invalid entries
+        //
+        // first get the message version, because this will destruct the message
+        let msg_version = msg.version();
+        //
+        // validates messages with respect to the given network, e.g. allowed tx types
+        //
+        let mut hashes = match msg {
+            NewPooledTransactionHashes::Eth68(eth68_msg) => {
+                // validate eth68 announcement data
+                let (outcome, valid_data) =
+                    self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_68(eth68_msg);
+
+                if let FilterOutcome::ReportPeer = outcome {
+                    self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
+                }
+                valid_data.into_iter().map(|(hash, metadata)| {
+                    // cache eth68 metadata
+                    if let Some((_ty, size)) = metadata {
+                        // check if this peer is announcing a different size for an already seen 
+                        // hash
+                        if let Some(previously_seen_size) = self.transaction_fetcher.eth68_meta.get(&hash) {
+                            if size != *previously_seen_size {
+                                // todo: store both sizes as a `(size, peer_id)` tuple to catch peers 
+                                // that respond with another size tx than they announced
+                                debug!(target: "net::tx",
+                                    peer_id=format!("{peer_id:#}"),
+                                    size=size,
+                                    previously_seen_size=previously_seen_size,
+                                    "peer announced a different size for tx, this is especially worrying if either size is very big..."
+                                );
+                            }
+                        }
+                        self.transaction_fetcher.eth68_meta.insert(hash, size);
+                    }
+                    hash
+                }).collect::<Vec<_>>()
+            }
+            NewPooledTransactionHashes::Eth66(eth66_msg) => {
+                // validate eth66 announcement data
+                let (outcome, valid_data) =
+                    self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_66(eth66_msg);
+
+                if let FilterOutcome::ReportPeer = outcome {
+                    self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
+                }
+
+                valid_data.into_keys().collect::<Vec<_>>()
+            }
+        };
+
+        // 3. filter out already seen unknown hashes
+        //
+        // seen hashes are already in the tx fetcher, pending fetch.
+        //
+        // for any seen hashes add the peer as fallback. unseen hashes are loaded into the tx
+        // fetcher, hence they should be valid at this point.
+        //
+        self.transaction_fetcher.filter_unseen_hashes(&mut hashes, peer_id, |peer_id| {
+            self.peers.contains_key(&peer_id)
+        });
+
         if hashes.is_empty() {
             // nothing to request
             return
@@ -599,15 +656,6 @@ where
             msg_version=%msg_version,
             "received previously unseen hashes in announcement from peer"
         );
-
-        if msg_version == EthVersion::Eth68 {
-            // cache size metadata of unseen hashes
-            for (hash, size) in sizes.expect("should be at least empty map") {
-                if hashes.contains(&hash) {
-                    self.transaction_fetcher.eth68_meta.insert(hash, size);
-                }
-            }
-        }
 
         // only send request for hashes to idle peer, otherwise buffer hashes storing peer as
         // fallback
@@ -796,7 +844,7 @@ where
 
                 if has_blob_txs {
                     debug!(target: "net::tx", ?peer_id, "received bad full blob transaction broadcast");
-                    self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
+                    self.report_peer_bad_transactions(peer_id);
                 }
             }
             NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
@@ -966,10 +1014,14 @@ where
         }
     }
 
+    fn report_peer_bad_transactions(&self, peer_id: PeerId) {
+        self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
+        self.metrics.reported_bad_transactions.increment(1);
+    }
+
     fn report_peer(&self, peer_id: PeerId, kind: ReputationChangeKind) {
         trace!(target: "net::tx", ?peer_id, ?kind, "reporting reputation change");
         self.network.reputation_change(peer_id, kind);
-        self.metrics.reported_bad_transactions.increment(1);
     }
 
     fn on_request_error(&self, peer_id: PeerId, req_err: RequestError) {
@@ -980,7 +1032,7 @@ where
                 // peer is already disconnected
                 return
             }
-            RequestError::BadResponse => ReputationChangeKind::BadTransactions,
+            RequestError::BadResponse => return self.report_peer_bad_transactions(peer_id),
         };
         self.report_peer(peer_id, kind);
     }
@@ -999,7 +1051,7 @@ where
     fn on_bad_import(&mut self, hash: TxHash) {
         if let Some(peers) = self.transactions_by_peers.remove(&hash) {
             for peer_id in peers {
-                self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
+                self.report_peer_bad_transactions(peer_id);
             }
         }
     }
@@ -1824,7 +1876,7 @@ mod tests {
         }
 
         // insert buffered hash for some other peer too, to verify response size accumulation and
-        // selection from buffered hashes
+        // hash selection for peer from buffered hashes
         let peer_id_other = PeerId::new([2; 64]);
         let hash_other = B256::from_slice(&[6; 32]);
         let mut backups = default_cache();
@@ -1860,10 +1912,13 @@ mod tests {
             .await
             .expect("peer session should receive request with buffered hashes");
         let PeerRequest::GetPooledTransactions { request, .. } = req else { unreachable!() };
-        let GetPooledTransactions(hashes) = request;
+        let GetPooledTransactions(mut hashes) = request;
 
         let mut expected_request = unseen_eth68_hashes.to_vec();
         expected_request.push(seen_eth68_hashes[1]);
+
+        hashes.sort();
+
         assert_eq!(hashes, expected_request);
     }
 }

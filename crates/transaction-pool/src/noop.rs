@@ -16,6 +16,7 @@ use crate::{
     PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
     TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
+use reth_eth_wire::HandleAnnouncement;
 use reth_primitives::{Address, BlobTransactionSidecar, TxHash};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
@@ -173,7 +174,11 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
-    fn retain_unknown(&self, _hashes: &mut Vec<TxHash>) {}
+    fn retain_unknown<A>(&self, _announcement: &mut A)
+    where
+        A: HandleAnnouncement,
+    {
+    }
 
     fn get(&self, _tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
         None
