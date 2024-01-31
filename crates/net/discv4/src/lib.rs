@@ -32,7 +32,7 @@ use derive_more::{Deref, DerefMut};
 use discv5::{
     kbucket,
     kbucket::{
-        BucketInsertResult, Distance, Entry as BucketEntry, InsertResult, KBucketsTable,
+        BucketInsertResult, Distance, Entry as BucketEntry, InsertResult, KBucketsTable, Node,
         NodeStatus, MAX_NODES_PER_BUCKET,
     },
     ConnectionDirection, ConnectionState,
@@ -44,13 +44,16 @@ use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    hex, ForkId, PeerId, B256,
+    hex, ForkId, NodeRecordParseError, PeerId, B256,
 };
 use smallvec::{smallvec, SmallVec};
 use std::{
+    any,
     cell::RefCell,
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, HashSet, VecDeque},
-    env, io,
+    env,
+    error::Error,
+    io,
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     pin::Pin,
     rc::Rc,
@@ -351,6 +354,28 @@ impl Discv4 {
         self.send_to_service(cmd);
     }
 
+    /// Adds the node to the table, if it is not already present.
+    pub fn add_node(&self, node_record: NodeRecord) {
+        let cmd = Discv4Command::Add(node_record);
+        self.send_to_service(cmd);
+    }
+
+    /// Adds the peer and id to the ban list.
+    ///
+    /// This will prevent any future inclusion in the table
+    pub fn ban(&self, node_id: PeerId, ip: IpAddr) {
+        let cmd = Discv4Command::Ban(node_id, ip);
+        self.send_to_service(cmd);
+    }
+
+    /// Adds the ip to the ban list.
+    ///
+    /// This will prevent any future inclusion in the table
+    pub fn ban_ip(&self, ip: IpAddr) {
+        let cmd = Discv4Command::BanIp(ip);
+        self.send_to_service(cmd);
+    }
+
     /// Adds the peer to the ban list.
     ///
     /// This will prevent any future inclusion in the table
@@ -365,6 +390,25 @@ impl Discv4 {
     pub fn set_tcp_port(&self, port: u16) {
         let cmd = Discv4Command::SetTcpPort(port);
         self.send_to_service(cmd);
+    }
+
+    /// Sets the pair in the EIP-868 [`Enr`] of the node.
+    ///
+    /// If the key already exists, this will update it.
+    ///
+    /// CAUTION: The value **must** be rlp encoded
+    pub fn set_eip868_rlp_pair(&self, key: Vec<u8>, rlp: Bytes) {
+        let cmd = Discv4Command::SetEIP868RLPPair { key, rlp };
+        self.send_to_service(cmd);
+    }
+
+    /// Sets the pair in the EIP-868 [`Enr`] of the node.
+    ///
+    /// If the key already exists, this will update it.
+    pub fn set_eip868_rlp(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {
+        let mut buf = BytesMut::new();
+        value.encode(&mut buf);
+        self.set_eip868_rlp_pair(key, buf.freeze())
     }
 
     #[inline]
@@ -389,66 +433,6 @@ impl Discv4 {
     /// Terminates the spawned [Discv4Service].
     pub fn terminate(&self) {
         self.send_to_service(Discv4Command::Terminated);
-    }
-}
-
-/// Essential interface for interacting with discovery.
-pub trait HandleDiscovery {
-    /// Adds the node to the table, if it is not already present.
-    fn add_node(&self, node_record: impl TryFrom<Enr<SecretKey>>);
-
-    /// Discv4 only
-    ///
-    /// Sets the pair in the EIP-868 [`Enr`] of the node.
-    ///
-    /// If the key already exists, this will update it.
-    ///
-    /// CAUTION: The value **must** be rlp encoded
-    fn set_eip868_rlp_pair(&self, key: Vec<u8>, rlp: Bytes);
-
-    /// Discv4 only
-    ///
-    /// Sets the pair in the EIP-868 [`Enr`] of the node.
-    ///
-    /// If the key already exists, this will update it.
-    fn set_eip868_rlp(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable);
-
-    /// Adds the peer and id to the ban list.
-    ///
-    /// This will prevent any future inclusion in the table
-    fn ban(&self, node_id: PeerId, ip: IpAddr);
-
-    /// Adds the ip to the ban list.
-    ///
-    /// This will prevent any future inclusion in the table
-    fn ban_ip(&self, ip: IpAddr);
-}
-
-impl HandleDiscovery for Discv4 {
-    fn add_node(&self, node_record: NodeRecord) {
-        let cmd = Discv4Command::Add(node_record);
-        self.send_to_service(cmd);
-    }
-
-    fn set_eip868_rlp_pair(&self, key: Vec<u8>, rlp: Bytes) {
-        let cmd = Discv4Command::SetEIP868RLPPair { key, rlp };
-        self.send_to_service(cmd);
-    }
-
-    fn set_eip868_rlp(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {
-        let mut buf = BytesMut::new();
-        value.encode(&mut buf);
-        self.set_eip868_rlp_pair(key, buf.freeze())
-    }
-
-    fn ban(&self, node_id: PeerId, ip: IpAddr) {
-        let cmd = Discv4Command::Ban(node_id, ip);
-        self.send_to_service(cmd);
-    }
-
-    fn ban_ip(&self, ip: IpAddr) {
-        let cmd = Discv4Command::BanIp(ip);
-        self.send_to_service(cmd);
     }
 }
 
@@ -2342,6 +2326,65 @@ where
 
         // empty unless in debug mode, just serves for tracing
         Ok(filtered_out)
+    }
+}
+
+pub enum NodeFromExternalSource {
+    NodeRecord(NodeRecord),
+    Enr(Enr<SecretKey>),
+}
+
+/// Essential interface for interacting with discovery.
+pub trait HandleDiscovery {
+    /// Adds the node to the table, if it is not already present.
+    fn add_node_to_routing_table(&self, node_record: NodeFromExternalSource) -> Result<(), impl Error>;
+
+    /// Sets the pair in the EIP-868 [`Enr`] of the node.
+    ///
+    /// If the key already exists, this will update it.
+    ///
+    /// CAUTION: The value **must** be rlp encoded
+    fn set_eip868_in_local_enr(&self, key: Vec<u8>, rlp: Bytes);
+
+    /// Sets the pair in the EIP-868 [`Enr`] of the node.
+    ///
+    /// If the key already exists, this will update it.
+    fn encode_and_set_eip868_in_local_enr(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable);
+
+    /// Adds the peer and id to the ban list.
+    ///
+    /// This will prevent any future inclusion in the table
+    fn ban_peer_by_ip_and_node_id(&self, node_id: PeerId, ip: IpAddr);
+
+    /// Adds the ip to the ban list.
+    ///
+    /// This will prevent any future inclusion in the table
+    fn ban_peer_by_ip(&self, ip: IpAddr);
+}
+
+impl HandleDiscovery for Discv4 {
+    fn add_node_to_routing_table(&self, node_record: NodeFromExternalSource) -> Result<(), impl Error> {
+        if let NodeFromExternalSource::NodeRecord(node_record) = node_record {
+            self.add_node(node_record);
+        } // todo: handle if not
+
+        Ok::<(), Discv4Error>(())
+    }
+
+    fn set_eip868_in_local_enr(&self, key: Vec<u8>, rlp: Bytes) {
+        self.set_eip868_rlp_pair(key, rlp)
+    }
+
+    fn encode_and_set_eip868_in_local_enr(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {
+        self.set_eip868_rlp(key, value)
+    }
+
+    fn ban_peer_by_ip_and_node_id(&self, node_id: PeerId, ip: IpAddr) {
+        self.ban(node_id, ip)
+    }
+
+    fn ban_peer_by_ip(&self, ip: IpAddr) {
+        self.ban_ip(ip)
     }
 }
 

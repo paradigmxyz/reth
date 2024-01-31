@@ -1,6 +1,7 @@
 //! Wrapper for [`discv5::Discv5`] that supports downgrade to [`Discv4`].
 
 use std::{
+    error::Error,
     fmt,
     net::IpAddr,
     pin::Pin,
@@ -9,24 +10,29 @@ use std::{
 };
 
 use derive_more::From;
+use enr::Enr;
 use futures::{
     stream::{select, Select},
     Stream, StreamExt,
 };
 use parking_lot::RwLock;
-use reth_discv4::{DiscoveryUpdate, Discv4, HandleDiscovery, NodeRecord, PublicKey};
-use reth_primitives::{bytes::Bytes, PeerId};
+use reth_discv4::{DiscoveryUpdate, Discv4, HandleDiscovery, PublicKey, NodeFromExternalSource};
+use reth_primitives::{
+    bytes::{Bytes, BytesMut},
+    PeerId,
+};
+use secp256k1::SecretKey;
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 
-/// Reth Discv5 type, wraps [`discv5::Discv5`] supporting downgrade to [`Discv4`].
-pub struct Discv5 {
+/// Wraps [`discv5::Discv5`] supporting downgrade to [`Discv4`].
+pub struct Discv5WithDiscv4Downgrade {
     discv5: Arc<RwLock<discv5::Discv5>>,
     discv4: Discv4,
     discv5_kbuckets_change_tx: watch::Sender<()>,
 }
 
-impl Discv5 {
+impl Discv5WithDiscv4Downgrade {
     /// Returns a new [`Discv5`] handle.
     pub fn new(
         discv5: Arc<RwLock<discv5::Discv5>>,
@@ -44,35 +50,46 @@ impl Discv5 {
     }
 }
 
-impl HandleDiscovery for Discv5 {
-    fn add_node(&self, node_record: NodeRecord) {
-       
+impl HandleDiscovery for Discv5WithDiscv4Downgrade {
+    fn add_node_to_routing_table(&self, node_record: NodeFromExternalSource) -> Result<(), impl Error> {
+        if let NodeFromExternalSource::Enr(enr) = node_record {
+            let enr = enr.try_into()?;
+            let EnrCombinedKeyWrapper(enr) = enr;
+            _ = self.discv5.read().add_enr(enr); // todo: handle error
+        } // todo: handle if not case
 
-        self.discv4.add_node(node_record)
+        Ok::<(), rlp::DecoderError>(())
     }
 
-    fn set_eip868_rlp_pair(&self, key: Vec<u8>, rlp: Bytes) {
-        self.discv4.set_eip868_rlp_pair(key, rlp)
-    }
-
-    fn set_eip868_rlp(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {
-        self.discv4.set_eip868_rlp(key, value)
-    }
-
-    fn ban(&self, node_id: PeerId, _ip: IpAddr) {
-        if let Ok(node_id_compressed) = uncompressed_to_compressed_id(node_id) {
-            self.discv5.read().ban_node(&node_id_compressed, None);
+    fn set_eip868_in_local_enr(&self, key: Vec<u8>, rlp: Bytes) {
+        if let Ok(key_str) = std::str::from_utf8(&key) {
+            // todo: handle error
+            _ = self.discv5.read().enr_insert(key_str, &rlp); // todo: handle error
         }
-        self.discv4.ban(node_id, _ip);
+        self.discv4.set_eip868_in_local_enr(key, rlp)
     }
 
-    fn ban_ip(&self, ip: IpAddr) {
+    fn encode_and_set_eip868_in_local_enr(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {
+        let mut buf = BytesMut::new();
+        value.encode(&mut buf);
+        self.set_eip868_in_local_enr(key, buf.freeze())
+    }
+
+    fn ban_peer_by_ip_and_node_id(&self, node_id: PeerId, ip: IpAddr) {
+        if let Ok(node_id_discv5) = uncompressed_to_compressed_id(node_id) {
+            self.discv5.read().ban_node(&node_id_discv5, None); // todo handle error
+        }
         self.discv5.read().ban_ip(ip, None);
-        self.discv4.ban_ip(ip);
+        self.discv4.ban_peer_by_ip_and_node_id(node_id, ip)
+    }
+
+    fn ban_peer_by_ip(&self, ip: IpAddr) {
+        self.discv5.read().ban_ip(ip, None);
+        self.discv4.ban_peer_by_ip(ip)
     }
 }
 
-impl fmt::Debug for Discv5 {
+impl fmt::Debug for Discv5WithDiscv4Downgrade {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("Discv5");
 
@@ -81,6 +98,20 @@ impl fmt::Debug for Discv5 {
         debug_struct.field("discv5_kbuckets_change_tx", &self.discv5_kbuckets_change_tx);
 
         debug_struct.finish()
+    }
+}
+
+/// Wrapper around enr type used in [`discv5::Discv5`].
+#[derive(Debug, Clone)]
+pub struct EnrCombinedKeyWrapper(Enr<discv5::enr::CombinedKey>);
+
+impl TryFrom<Enr<SecretKey>> for EnrCombinedKeyWrapper {
+    type Error = rlp::DecoderError;
+    fn try_from(value: Enr<SecretKey>) -> Result<Self, Self::Error> {
+        let encoded_enr = rlp::encode(&value);
+        let enr = rlp::decode::<discv5::Enr>(&encoded_enr)?;
+
+        Ok(EnrCombinedKeyWrapper(enr))
     }
 }
 

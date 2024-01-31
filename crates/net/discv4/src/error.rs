@@ -42,6 +42,9 @@ pub enum Discv4Error {
     /// Decoding a packet received over the network failed.
     #[error(transparent)]
     DecodePacketError(#[from] DecodePacketError),
+    /// Unexpected node record type.
+    #[error("conversion to node record failed")]
+    ConversionToNodeRecordFailed,
 }
 
 /// Updating mirror of remote kbuckets failed.
