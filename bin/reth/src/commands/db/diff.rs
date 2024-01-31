@@ -58,7 +58,7 @@ impl Command {
     ///
     /// The discrepancies and extra elements, along with a brief summary of the diff results are
     /// then written to a file in the output directory.
-    pub fn execute(self, tool: &DbTool<'_, DatabaseEnv>) -> eyre::Result<()> {
+    pub fn execute(self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<()> {
         // open second db
         let second_db_path: PathBuf = self.secondary_datadir.join("db").into();
         let second_db = open_db_read_only(
@@ -72,7 +72,7 @@ impl Command {
         };
 
         for table in tables {
-            let primary_tx = tool.db.tx()?;
+            let primary_tx = tool.provider_factory.db_ref().tx()?;
             let secondary_tx = second_db.tx()?;
 
             let output_dir = self.output.clone();

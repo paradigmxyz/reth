@@ -15,6 +15,7 @@ use reth_db::{
     transaction::DbTx, DatabaseEnv,
 };
 use reth_primitives::ChainSpec;
+use reth_provider::ProviderFactory;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -104,9 +105,12 @@ impl Command {
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db =
             Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
+        let provider_factory = ProviderFactory::new(db, self.chain.clone())
+            .with_snapshots(data_dir.snapshots_path())?;
+
         info!(target: "reth::cli", "Database opened");
 
-        let tool = DbTool::new(&db, self.chain.clone())?;
+        let tool = DbTool::new(provider_factory, self.chain.clone())?;
 
         match &self.command {
             Stages::Execution(StageCommand { output_db, from, to, dry_run, .. }) => {
@@ -133,7 +137,7 @@ pub(crate) fn setup<DB: Database>(
     from: u64,
     to: u64,
     output_db: &PathBuf,
-    db_tool: &DbTool<'_, DB>,
+    db_tool: &DbTool<DB>,
 ) -> eyre::Result<(DatabaseEnv, u64)> {
     assert!(from < to, "FROM block should be bigger than TO block.");
 
@@ -143,14 +147,17 @@ pub(crate) fn setup<DB: Database>(
 
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::BlockBodyIndices, _>(
-            &db_tool.db.tx()?,
+            &db_tool.provider_factory.db_ref().tx()?,
             Some(from - 1),
             to + 1,
         )
     })??;
 
-    let (tip_block_number, _) =
-        db_tool.db.view(|tx| tx.cursor_read::<tables::BlockBodyIndices>()?.last())??.expect("some");
+    let (tip_block_number, _) = db_tool
+        .provider_factory
+        .db_ref()
+        .view(|tx| tx.cursor_read::<tables::BlockBodyIndices>()?.last())??
+        .expect("some");
 
     Ok((output_db, tip_block_number))
 }

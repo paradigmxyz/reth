@@ -11,9 +11,11 @@ use crate::{
 };
 use clap::Parser;
 use reth_db::{
-    database::Database, mdbx::DatabaseArguments, open_db, tables, transaction::DbTxMut, DatabaseEnv,
+    database::Database, mdbx::DatabaseArguments, open_db, snapshot::iter_snapshots, tables,
+    transaction::DbTxMut, DatabaseEnv,
 };
-use reth_primitives::{fs, stage::StageId, ChainSpec};
+use reth_primitives::{fs, snapshot::find_fixed_range, stage::StageId, ChainSpec, SnapshotSegment};
+use reth_provider::ProviderFactory;
 use std::sync::Arc;
 use tracing::info;
 
@@ -58,11 +60,13 @@ impl Command {
 
         let db =
             open_db(db_path.as_ref(), DatabaseArguments::default().log_level(self.db.log_level))?;
+        let provider_factory = ProviderFactory::new(db, self.chain.clone())
+            .with_snapshots(data_dir.snapshots_path())?;
 
-        let tool = DbTool::new(&db, self.chain.clone())?;
+        let tool = DbTool::new(provider_factory, self.chain.clone())?;
 
-        tool.db.update(|tx| {
-            match &self.stage {
+        tool.provider_factory.db_ref().update(|tx| {
+            match self.stage {
                 StageEnum::Bodies => {
                     tx.clear::<tables::BlockBodyIndices>()?;
                     tx.clear::<tables::Transactions>()?;
@@ -175,6 +179,23 @@ impl Command {
 
             Ok::<_, eyre::Error>(())
         })??;
+
+        let snapshot_segment = match self.stage {
+            StageEnum::Headers => Some(SnapshotSegment::Headers),
+            StageEnum::Bodies => Some(SnapshotSegment::Transactions),
+            StageEnum::Execution => Some(SnapshotSegment::Receipts),
+            _ => None,
+        };
+
+        if let Some(snapshot_segment) = snapshot_segment {
+            let snapshot_provider = tool.provider_factory.snapshot_provider().unwrap();
+            let snapshots = iter_snapshots(data_dir.snapshots_path())?;
+            let segment_snapshots = snapshots.get(&snapshot_segment).unwrap();
+            for (block_range, _) in segment_snapshots {
+                snapshot_provider
+                    .delete_jar(snapshot_segment, find_fixed_range(*block_range.start()))?;
+            }
+        }
 
         Ok(())
     }

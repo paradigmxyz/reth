@@ -30,7 +30,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db get` command
-    pub fn execute<DB: Database>(self, tool: &DbTool<'_, DB>) -> eyre::Result<()> {
+    pub fn execute<DB: Database>(self, tool: &DbTool<DB>) -> eyre::Result<()> {
         self.table.view(&GetValueViewer { tool, args: &self })?;
 
         Ok(())
@@ -52,7 +52,7 @@ impl Command {
 }
 
 struct GetValueViewer<'a, DB: Database> {
-    tool: &'a DbTool<'a, DB>,
+    tool: &'a DbTool<DB>,
     args: &'a Command,
 }
 

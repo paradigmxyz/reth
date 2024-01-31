@@ -9,7 +9,7 @@ use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
-    db_tool: &DbTool<'_, DB>,
+    db_tool: &DbTool<DB>,
     from: u64,
     to: u64,
     output_db: &PathBuf,
@@ -28,12 +28,12 @@ pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
 
 /// Dry-run an unwind to FROM block and copy the necessary table data to the new database.
 fn unwind_and_copy<DB: Database>(
-    db_tool: &DbTool<'_, DB>,
+    db_tool: &DbTool<DB>,
     from: u64,
     tip_block_number: u64,
     output_db: &DatabaseEnv,
 ) -> eyre::Result<()> {
-    let factory = ProviderFactory::new(db_tool.db, db_tool.chain.clone());
+    let factory = ProviderFactory::new(db_tool.provider_factory.db_ref(), db_tool.chain.clone());
     let provider = factory.provider_rw()?;
 
     let mut exec_stage = StorageHashingStage::default();

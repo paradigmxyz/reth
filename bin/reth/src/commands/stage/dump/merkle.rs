@@ -15,7 +15,7 @@ use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_merkle_stage<DB: Database>(
-    db_tool: &DbTool<'_, DB>,
+    db_tool: &DbTool<DB>,
     from: BlockNumber,
     to: BlockNumber,
     output_db: &PathBuf,
@@ -24,11 +24,19 @@ pub(crate) async fn dump_merkle_stage<DB: Database>(
     let (output_db, tip_block_number) = setup(from, to, output_db, db_tool)?;
 
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::Headers, _>(&db_tool.db.tx()?, Some(from), to)
+        tx.import_table_with_range::<tables::Headers, _>(
+            &db_tool.provider_factory.db_ref().tx()?,
+            Some(from),
+            to,
+        )
     })??;
 
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::AccountChangeSet, _>(&db_tool.db.tx()?, Some(from), to)
+        tx.import_table_with_range::<tables::AccountChangeSet, _>(
+            &db_tool.provider_factory.db_ref().tx()?,
+            Some(from),
+            to,
+        )
     })??;
 
     unwind_and_copy(db_tool, (from, to), tip_block_number, &output_db).await?;
@@ -42,13 +50,13 @@ pub(crate) async fn dump_merkle_stage<DB: Database>(
 
 /// Dry-run an unwind to FROM block and copy the necessary table data to the new database.
 async fn unwind_and_copy<DB: Database>(
-    db_tool: &DbTool<'_, DB>,
+    db_tool: &DbTool<DB>,
     range: (u64, u64),
     tip_block_number: u64,
     output_db: &DatabaseEnv,
 ) -> eyre::Result<()> {
     let (from, to) = range;
-    let factory = ProviderFactory::new(db_tool.db, db_tool.chain.clone());
+    let factory = ProviderFactory::new(db_tool.provider_factory.db_ref(), db_tool.chain.clone());
     let provider = factory.provider_rw()?;
 
     let unwind = UnwindInput {
