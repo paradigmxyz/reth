@@ -24,7 +24,7 @@ use reth_eth_wire::{
     ClayerExecutionPayload, ClayerSignature, PbftMessage, PbftMessageInfo, PbftMessageType,
     PbftNewView, PbftSeal, PbftSignedVote,
 };
-use reth_interfaces::clayer::ClayerConsensus;
+use reth_interfaces::clayer::{ClayerConsensusEvent, ClayerConsensusMessageAgentTrait};
 use reth_primitives::{public_key_to_address, sign_message, SealedHeader, B256};
 use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use std::{
@@ -42,123 +42,25 @@ use crate::{
     timing::Timeout,
 };
 
-pub struct ClayerConsensusEngine {
-    pub inner: Arc<RwLock<ClayerConsensusEngineInner>>,
+pub struct ClayerConsensusMessagingAgent {
+    pub inner: Arc<parking_lot::RwLock<ClayerConsensusMessagingAgentInner>>,
 }
 
-impl Clone for ClayerConsensusEngine {
+impl Clone for ClayerConsensusMessagingAgent {
     fn clone(&self) -> Self {
         Self { inner: self.inner.clone() }
     }
 }
 
-impl ClayerConsensusEngine {
-    pub fn new(is_validator: bool, secret_key: SecretKey) -> Self {
+impl ClayerConsensusMessagingAgent {
+    pub fn new() -> Self {
         Self {
-            inner: Arc::new(RwLock::new(ClayerConsensusEngineInner::new(is_validator, secret_key))),
+            inner: Arc::new(parking_lot::RwLock::new(ClayerConsensusMessagingAgentInner::new())),
         }
-    }
-
-    pub fn initialize(
-        &self,
-        block: ClayerBlock,
-        service: ApiService,
-        config: &PbftConfig,
-        state: &mut PbftState,
-    ) {
-        self.inner.write().initialize(block, service, config, state);
-    }
-
-    pub fn is_validator(&self) -> bool {
-        self.inner.read().is_validator
-    }
-
-    pub fn parse_massage(
-        &self,
-        data: reth_primitives::Bytes,
-    ) -> Result<ClayerConsensusMessage, PbftError> {
-        self.inner.write().parse_massage(data)
-    }
-
-    pub fn on_peer_message(
-        &mut self,
-        msg: ParsedMessage,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
-        self.inner.write().on_peer_message(msg, state)
-    }
-
-    pub fn on_block_new(
-        &mut self,
-        block: ClayerBlock,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
-        self.inner.write().on_block_new(block, state)
-    }
-
-    pub fn on_block_valid(
-        &mut self,
-        block_id: B256,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
-        self.inner.write().on_block_valid(block_id, state)
-    }
-
-    pub fn on_block_invalid(&mut self, block_id: B256) -> Result<(), PbftError> {
-        self.inner.write().on_block_invalid(block_id)
-    }
-
-    pub fn on_block_commit(
-        &mut self,
-        block_id: B256,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
-        self.inner.write().on_block_commit(block_id, state)
-    }
-
-    /// Check to see if the idle timeout has expired
-    pub fn check_idle_timeout_expired(&mut self, state: &mut PbftState) -> bool {
-        self.inner.write().check_idle_timeout_expired(state)
-    }
-
-    /// Start the idle timeout
-    pub fn start_idle_timeout(&self, state: &mut PbftState) {
-        self.inner.write().start_idle_timeout(state)
-    }
-
-    /// Check to see if the commit timeout has expired
-    pub fn check_commit_timeout_expired(&mut self, state: &mut PbftState) -> bool {
-        self.inner.write().check_commit_timeout_expired(state)
-    }
-
-    /// Start the commit timeout
-    pub fn start_commit_timeout(&self, state: &mut PbftState) {
-        self.inner.write().start_commit_timeout(state)
-    }
-
-    /// Check to see if the view change timeout has expired
-    pub fn check_view_change_timeout_expired(&mut self, state: &mut PbftState) -> bool {
-        self.inner.write().check_view_change_timeout_expired(state)
-    }
-
-    pub fn start_view_change(&mut self, state: &mut PbftState, view: u64) -> Result<(), PbftError> {
-        self.inner.write().start_view_change(state, view)
-    }
-
-    pub fn on_peer_connected(
-        &mut self,
-        peer_id: PeerId,
-        state: &mut PbftState,
-    ) -> Result<(), PbftError> {
-        self.inner.write().on_peer_connected(peer_id, state)
-    }
-
-    pub fn try_publish(&mut self, state: &mut PbftState) -> Result<(), PbftError> {
-        self.inner.write().try_publish(state)
     }
 }
 
-impl ClayerConsensus for ClayerConsensusEngine {
+impl ClayerConsensusMessageAgentTrait for ClayerConsensusMessagingAgent {
     /// Returns pending consensus listener
     fn pending_consensus_listener(&self) -> Receiver<(Vec<PeerId>, reth_primitives::Bytes)> {
         self.inner.write().pending_consensus_listener()
@@ -168,49 +70,99 @@ impl ClayerConsensus for ClayerConsensusEngine {
     fn push_received_cache(&self, peer_id: PeerId, data: reth_primitives::Bytes) {
         self.inner.write().push_received_cache(peer_id, data);
     }
-    /// pop data received from network out cache
-    fn pop_received_cache(&self) -> Option<(PeerId, reth_primitives::Bytes)> {
-        self.inner.write().pop_received_cache()
+
+    /// push data received from self into cache
+    fn push_received_cache_first(&self, peer_id: PeerId, msg: reth_primitives::Bytes) {
+        self.inner.write().push_received_cache_first(peer_id, msg);
     }
 
     /// push network event(PeerConnected, PeerDisconnected)
     fn push_network_event(&self, peer_id: PeerId, connect: bool) {
         self.inner.write().push_network_event(peer_id, connect);
     }
-    /// pop network event(PeerConnected, PeerDisconnected)
-    fn pop_network_event(&self) -> Option<(PeerId, bool)> {
-        self.inner.write().pop_network_event()
+
+    fn pop_event(&self) -> Option<ClayerConsensusEvent> {
+        self.inner.write().pop_event()
     }
     /// broadcast consensus
     fn broadcast_consensus(&self, peers: Vec<PeerId>, data: reth_primitives::Bytes) {
         self.inner.read().broadcast_consensus(peers, data);
     }
+    /// get all peers
+    fn get_peers(&self) -> Vec<PeerId> {
+        self.inner.read().get_peers()
+    }
 }
 
-pub struct ClayerConsensusEngineInner {
-    pub is_validator: bool,
-    pub signer_id: PublicKey,
+pub struct ClayerConsensusMessagingAgentInner {
+    queued: VecDeque<ClayerConsensusEvent>,
+    sender: Option<Sender<(Vec<PeerId>, reth_primitives::Bytes)>>,
+    active_peers: HashSet<PeerId>,
+}
+
+impl ClayerConsensusMessagingAgentInner {
+    pub fn new() -> Self {
+        Self { queued: VecDeque::new(), sender: None, active_peers: HashSet::new() }
+    }
+}
+
+impl ClayerConsensusMessagingAgentInner {
+    fn pending_consensus_listener(&mut self) -> Receiver<(Vec<PeerId>, reth_primitives::Bytes)> {
+        let (sender, rx) = mpsc::channel(1024);
+        self.sender = Some(sender);
+        rx
+    }
+
+    fn push_received_cache(&mut self, peer_id: PeerId, data: reth_primitives::Bytes) {
+        self.queued.push_back(ClayerConsensusEvent::PeerMessage(peer_id, data));
+    }
+
+    /// push data received from self into cache
+    fn push_received_cache_first(&mut self, peer_id: PeerId, data: reth_primitives::Bytes) {
+        self.queued.push_front(ClayerConsensusEvent::PeerMessage(peer_id, data));
+    }
+
+    /// push network event(PeerConnected, PeerDisconnected)
+    fn push_network_event(&mut self, peer_id: PeerId, connect: bool) {
+        self.queued.push_back(ClayerConsensusEvent::PeerNetWork(peer_id, connect));
+        if connect {
+            self.active_peers.insert(peer_id);
+        } else {
+            self.active_peers.remove(&peer_id);
+        }
+    }
+    /// pop network event(PeerConnected, PeerDisconnected)
+    fn pop_event(&mut self) -> Option<ClayerConsensusEvent> {
+        self.queued.pop_front()
+    }
+
+    fn broadcast_consensus(&self, peers: Vec<PeerId>, data: reth_primitives::Bytes) {
+        if let Some(sender) = &self.sender {
+            match sender.try_send((peers, data)) {
+                Ok(()) => {}
+                Err(err) => {
+                    error!(target:"consensus::cl","broadcast_consensus error {:?}",err);
+                }
+            }
+        }
+    }
+
+    fn get_peers(&self) -> Vec<PeerId> {
+        self.active_peers.iter().cloned().collect()
+    }
+}
+
+pub struct ClayerConsensusEngine {
     /// Log of messages this node has received and accepted
     pub msg_log: PbftLog,
     service: ApiService,
-    queued: VecDeque<(PeerId, reth_primitives::Bytes)>,
-    network_queued: VecDeque<(PeerId, bool)>,
-    active_peers: HashSet<PeerId>,
-    sender: Option<Sender<(Vec<PeerId>, reth_primitives::Bytes)>>,
+    agent: ClayerConsensusMessagingAgent,
+    state: PbftState,
 }
 
-impl ClayerConsensusEngineInner {
-    pub fn new(is_validator: bool, secret_key: SecretKey) -> Self {
-        Self {
-            is_validator,
-            signer_id: secret_key.public_key(SECP256K1),
-            msg_log: PbftLog::default(),
-            service: ApiService::default(),
-            queued: VecDeque::default(),
-            network_queued: VecDeque::default(),
-            active_peers: HashSet::default(),
-            sender: None,
-        }
+impl ClayerConsensusEngine {
+    pub fn new(agent: ClayerConsensusMessagingAgent, state: PbftState) -> Self {
+        Self { msg_log: PbftLog::default(), service: ApiService::default(), agent, state }
     }
 
     pub fn initialize(
@@ -237,7 +189,7 @@ impl ClayerConsensusEngineInner {
             }
 
             // If connected to any peers already, send bootstrap commit messages to them
-            let connected_peers: Vec<PeerId> = self.active_peers.iter().cloned().collect();
+            let connected_peers: Vec<PeerId> = self.agent.get_peers();
             for peer_id in connected_peers {
                 self.broadcast_bootstrap_commit(peer_id, state).unwrap_or_else(|err| {
                     error!("Failed to broadcast bootstrap commit due to error: {}", err)
@@ -250,45 +202,6 @@ impl ClayerConsensusEngineInner {
             self.service.initialize_block(None).unwrap_or_else(|err| {
                 error!("Couldn't initialize block on startup due to error: {}", err)
             });
-        }
-    }
-
-    fn pending_consensus_listener(&mut self) -> Receiver<(Vec<PeerId>, reth_primitives::Bytes)> {
-        let (sender, rx) = mpsc::channel(1024);
-        self.sender = Some(sender);
-        rx
-    }
-
-    fn push_received_cache(&mut self, peer_id: PeerId, data: reth_primitives::Bytes) {
-        self.queued.push_back((peer_id, data));
-    }
-
-    fn pop_received_cache(&mut self) -> Option<(PeerId, reth_primitives::Bytes)> {
-        self.queued.pop_front()
-    }
-
-    /// push network event(PeerConnected, PeerDisconnected)
-    fn push_network_event(&mut self, peer_id: PeerId, connect: bool) {
-        self.network_queued.push_back((peer_id, connect));
-        if connect {
-            self.active_peers.insert(peer_id);
-        } else {
-            self.active_peers.remove(&peer_id);
-        }
-    }
-    /// pop network event(PeerConnected, PeerDisconnected)
-    fn pop_network_event(&mut self) -> Option<(PeerId, bool)> {
-        self.network_queued.pop_front()
-    }
-
-    fn broadcast_consensus(&self, peers: Vec<PeerId>, data: reth_primitives::Bytes) {
-        if let Some(sender) = &self.sender {
-            match sender.try_send((peers, data)) {
-                Ok(()) => {}
-                Err(err) => {
-                    error!(target:"consensus::cl","broadcast_consensus error {:?}",err);
-                }
-            }
         }
     }
 
@@ -1342,7 +1255,7 @@ impl ClayerConsensusEngineInner {
         let msg_bytes = reth_primitives::Bytes::copy_from_slice(msg_out.as_slice());
 
         // Send the seal to the requester
-        self.broadcast_consensus(vec![peer_id.clone()], msg_bytes);
+        self.agent.broadcast_consensus(vec![peer_id.clone()], msg_bytes);
 
         Ok(())
     }
@@ -1860,7 +1773,7 @@ impl ClayerConsensusEngineInner {
         clayer_msg.encode(&mut msg_out);
         let msg_bytes = reth_primitives::Bytes::copy_from_slice(msg_out.as_slice());
 
-        self.broadcast_consensus(state.validators.member_ids().clone(), msg_bytes);
+        self.agent.broadcast_consensus(state.validators.member_ids().clone(), msg_bytes);
 
         // Send to self
         self.on_peer_message(msg, state)
@@ -1909,7 +1822,7 @@ impl ClayerConsensusEngineInner {
         let msg_bytes = reth_primitives::Bytes::copy_from_slice(msg_out.as_slice());
 
         // Send the seal to the requester
-        self.broadcast_consensus(vec![recipient.clone()], msg_bytes);
+        self.agent.broadcast_consensus(vec![recipient.clone()], msg_bytes);
 
         Ok(())
     }

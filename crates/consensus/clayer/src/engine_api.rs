@@ -4,7 +4,6 @@ use crate::{
 };
 use alloy_primitives::{B256, U256};
 use chrono::format;
-use crossbeam_channel::bounded;
 use reqwest::StatusCode;
 use reth_provider::BlockReaderIdExt;
 use reth_rpc_types::{
@@ -182,13 +181,13 @@ pub enum AsyncResultType {
 pub enum ApiServiceError {
     Ok(AsyncResultType),
     MismatchAsyncResultType,
-    Timeout(String),
     ApiError(String),
     InvalidState(String),
     UnknownBlock(String),
     UnknownPeer(String),
     NoChainHead,
     BlockNotReady,
+    Other(String),
 }
 
 impl std::fmt::Display for ApiServiceError {
@@ -230,7 +229,7 @@ impl ApiService {
     /// head will be used.
     pub fn initialize_block(&mut self, previous_id: Option<B256>) -> Result<(), ApiServiceError> {
         let api = self.api.clone();
-        let (s, r) = crossbeam_channel::bounded(0);
+        let (tx, rx) = tokio::sync::oneshot::channel::<ApiServiceError>();
 
         self.executor.spawn_blocking(Box::pin(async move {
             let block_id = if let Some(block_id) = previous_id {
@@ -241,23 +240,16 @@ impl ApiService {
                         if let Some(execution_block) = x {
                             execution_block.block_hash
                         } else {
-                            // return Err(ApiServiceError::UnknownBlock(
-                            //     "get block return none".to_string(),
-                            // ));
                             tracing::error!(target:"consensus::cl","ApiService::initialize_block::get_block_by_number return None");
-                            let _ = s.try_send(ApiServiceError::UnknownBlock(
+                            let _ = tx.send(ApiServiceError::UnknownBlock(
                                 "get block return none".to_string(),
                             ));
                             return;
                         }
                     }
                     Err(e) => {
-                        // return Err(ApiServiceError::ApiError(format!(
-                        //     "get block by number error: {:?}",
-                        //     e
-                        // )));
                         tracing::error!(target:"consensus::cl","ApiService::initialize_block::get_block_by_number return error: {:?}", e);
-                        let _ = s.try_send(ApiServiceError::ApiError(format!(
+                        let _ = tx.send(ApiServiceError::ApiError(format!(
                             "get block by number error: {:?}",
                             e
                         )));
@@ -272,7 +264,7 @@ impl ApiService {
                 Err(e) => {
                     // return Err(ApiServiceError::ApiError(format!("forkchoice_updated: {:?}", e)));
                     tracing::error!(target:"consensus::cl","ApiService::initialize_block::forkchoice_updated return(error: {:?})", e);
-                    let _ = s.try_send(ApiServiceError::ApiError(format!(
+                    let _ = tx.send(ApiServiceError::ApiError(format!(
                         "forkchoice_updated: {:?}",
                         e
                     )));
@@ -282,17 +274,16 @@ impl ApiService {
             if !forkchoice_updated_result.payload_status.status.is_valid() {
                 // return Err(ApiServiceError::BlockNotReady);
                 tracing::error!(target:"consensus::cl","ApiService::initialize_block::forkchoice_updated return(not valid)");
-                let _ = s.try_send(ApiServiceError::BlockNotReady);
+                let _ = tx.send(ApiServiceError::BlockNotReady);
                 return;
             }
-            let _ = s.try_send(ApiServiceError::Ok(AsyncResultType::BlockId(block_id)));
+            let _ = tx.send(ApiServiceError::Ok(AsyncResultType::BlockId(block_id)));
         }));
 
-        let r = r.recv_timeout(std::time::Duration::from_secs(3));
-        match r {
-            Ok(x) => {
-                if let ApiServiceError::Ok(id) = x {
-                    match id {
+        match rx.blocking_recv() {
+            Ok(result) => {
+                if let ApiServiceError::Ok(result) = result {
+                    match result {
                         AsyncResultType::BlockId(id) => {
                             self.latest_committed_id = Some(id);
                             return Ok(());
@@ -302,11 +293,11 @@ impl ApiService {
                         }
                     }
                 } else {
-                    return Err(x);
+                    return Err(result);
                 }
             }
-            Err(_) => {
-                return Err(ApiServiceError::Timeout("initialize_block".to_string()));
+            Err(e) => {
+                return Err(ApiServiceError::Other(format!("initialize_block error: {:?}", e)));
             }
         }
     }
@@ -323,40 +314,26 @@ impl ApiService {
         };
 
         let api = self.api.clone();
-        let (s, r) = crossbeam_channel::bounded(0);
+        let (tx, rx) = tokio::sync::oneshot::channel::<ApiServiceError>();
         self.executor.spawn_blocking(Box::pin(async move {
             let forkchoice_updated_result =
                 match forkchoice_updated_with_attributes(&api, previous_id).await {
                     Ok(x) => x,
                     Err(e) => {
                         tracing::error!(target:"consensus::cl","ApiService::summarize_block::forkchoice_updated_with_attributes return(error: {:?})", e);
-                        let _ = s.try_send(ApiServiceError::ApiError(format!(
+                        let _ = tx.send(ApiServiceError::ApiError(format!(
                             "forkchoice_updated_with_attributes: {:?}",
                             e
                         )));
                         return;
                     }
                 };
-            let _ = s.try_send(ApiServiceError::Ok(AsyncResultType::ForkchoiceUpdated(forkchoice_updated_result)));
-
-            // if !forkchoice_updated_result.payload_status.status.is_valid() {
-            //     tracing::error!(target:"consensus::cl","ApiService::summarize_block::forkchoice_updated_with_attributes return(not valid)");
-            //     let _ = s.try_send(ApiServiceError::BlockNotReady);
-            //     return;
-            // }else{
-            //     if let Some(payload_id) = &forkchoice_updated_result.payload_id{
-            //         let _ = s.try_send(ApiServiceError::Ok(AsyncResultType::PayloadId(payload_id.clone())));
-            //     }else{
-            //         tracing::error!(target:"consensus::cl","ApiService::summarize_block::forkchoice_updated_with_attributes payload_id is None");
-            //         let _ = s.try_send(ApiServiceError::BlockNotReady);
-            //     }
-            // }
+            let _ = tx.send(ApiServiceError::Ok(AsyncResultType::ForkchoiceUpdated(forkchoice_updated_result)));
         }));
 
-        let r = r.recv_timeout(std::time::Duration::from_secs(3));
-        match r {
-            Ok(x) => {
-                if let ApiServiceError::Ok(result) = x {
+        match rx.blocking_recv() {
+            Ok(result) => {
+                if let ApiServiceError::Ok(result) = result {
                     match result {
                         AsyncResultType::ForkchoiceUpdated(forkchoice_updated) => {
                             if !forkchoice_updated.payload_status.status.is_valid() {
@@ -378,11 +355,11 @@ impl ApiService {
                         }
                     }
                 } else {
-                    return Err(x);
+                    return Err(result);
                 }
             }
-            Err(_) => {
-                return Err(ApiServiceError::Timeout("summarize_block".to_string()));
+            Err(e) => {
+                return Err(ApiServiceError::Other(format!("summarize_block error: {:?}", e)));
             }
         }
     }
@@ -406,16 +383,16 @@ impl ApiService {
         };
 
         let api = self.api.clone();
-        let (s, r) = crossbeam_channel::bounded(0);
+        let (tx, rx) = tokio::sync::oneshot::channel::<ApiServiceError>();
         self.executor.spawn_blocking(Box::pin(async move {
             match api.get_payload_v2(payload_id).await {
                 Ok(x) => {
-                    let _ = s.try_send(ApiServiceError::Ok(AsyncResultType::ExecutionPayload(x)));
+                    let _ = tx.send(ApiServiceError::Ok(AsyncResultType::ExecutionPayload(x)));
                     return;
                 },
                 Err(e) => {
                     tracing::error!(target:"consensus::cl","ApiService::finalize_block::get_payload_v2 return(error: {:?})", e);
-                    let _ = s.try_send(ApiServiceError::ApiError(format!(
+                    let _ = tx.send(ApiServiceError::ApiError(format!(
                         "get_payload_v2: {:?}",
                         e
                     )));
@@ -424,10 +401,9 @@ impl ApiService {
             };
         }));
 
-        let r = r.recv_timeout(std::time::Duration::from_secs(3));
-        match r {
-            Ok(x) => {
-                if let ApiServiceError::Ok(result) = x {
+        match rx.blocking_recv() {
+            Ok(result) => {
+                if let ApiServiceError::Ok(result) = result {
                     match result {
                         AsyncResultType::ExecutionPayload(playload) => {
                             let block_id = playload.execution_payload.payload_inner.block_hash;
@@ -449,11 +425,11 @@ impl ApiService {
                         }
                     }
                 } else {
-                    return Err(x);
+                    return Err(result);
                 }
             }
-            Err(_) => {
-                return Err(ApiServiceError::Timeout("finalize_block".to_string()));
+            Err(e) => {
+                return Err(ApiServiceError::Other(format!("finalize_block error: {:?}", e)));
             }
         }
     }
@@ -478,29 +454,28 @@ impl ApiService {
         };
 
         let api = self.api.clone();
-        let (s, r) = crossbeam_channel::bounded(0);
+        let (tx, rx) = tokio::sync::oneshot::channel::<ApiServiceError>();
         self.executor.spawn_blocking(Box::pin(async move {
             let payload_status = match new_payload(&api, execution_payload).await {
                 Ok(x) =>x,
                 Err(e) => {
                     tracing::error!(target:"consensus::cl","ApiService::commit_block::new_payload return(error: {:?})", e);
-                    let _ = s.try_send(ApiServiceError::ApiError(format!(
+                    let _ = tx.send(ApiServiceError::ApiError(format!(
                         "new_payload: {:?}",
                         e
                     )));
                     return;
                 }
             };
-            let _ = s.try_send(ApiServiceError::Ok(AsyncResultType::ForkchoiceUpdated(ForkchoiceUpdated{
+            let _ = tx.send(ApiServiceError::Ok(AsyncResultType::ForkchoiceUpdated(ForkchoiceUpdated{
                 payload_status,
                 payload_id: Some(payload_id),
             })));
         }));
 
-        let r = r.recv_timeout(std::time::Duration::from_secs(3));
-        match r {
-            Ok(x) => {
-                if let ApiServiceError::Ok(result) = x {
+        match rx.blocking_recv() {
+            Ok(result) => {
+                if let ApiServiceError::Ok(result) = result {
                     match result {
                         AsyncResultType::ForkchoiceUpdated(forkchoice_updated) => {
                             if forkchoice_updated.payload_status.status.is_valid() {
@@ -522,11 +497,11 @@ impl ApiService {
                         }
                     }
                 } else {
-                    return Err(x);
+                    return Err(result);
                 }
             }
-            Err(_) => {
-                return Err(ApiServiceError::Timeout("commit_block".to_string()));
+            Err(e) => {
+                return Err(ApiServiceError::Other(format!("commit_block error: {:?}", e)));
             }
         }
     }

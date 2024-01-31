@@ -9,7 +9,7 @@ use crate::engine_api::{
     http::HttpJsonRpc,
 };
 pub use consensus::ClayerConsensusEngine;
-use consensus::{clayer_block_from_genesis, PbftConfig, PbftState};
+use consensus::{clayer_block_from_genesis, ClayerConsensusMessagingAgent, PbftConfig, PbftState};
 use engine_api::ApiService;
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_interfaces::consensus::ForkchoiceState;
@@ -364,7 +364,7 @@ pub struct ConsensusBuilder<Client, Pool, CDB> {
     storage: ClStorage,
     api: Arc<HttpJsonRpc>,
     network: NetworkHandle,
-    consensus: ClayerConsensusEngine,
+    consensus_agent: ClayerConsensusMessagingAgent,
     storages: CDB,
     config: PbftConfig,
     state: PbftState,
@@ -383,7 +383,7 @@ where
         client: Client,
         pool: Pool,
         network: NetworkHandle,
-        clayer_consensus: ClayerConsensusEngine,
+        clayer_consensus_messaging_agent: ClayerConsensusMessagingAgent,
         storages: CDB,
         auth_port: u16,
     ) -> Self {
@@ -414,7 +414,7 @@ where
             pool,
             api,
             network,
-            consensus: clayer_consensus,
+            consensus_agent: clayer_consensus_messaging_agent,
             storages,
             config,
             state,
@@ -431,7 +431,7 @@ where
             storage,
             api,
             network,
-            consensus,
+            consensus_agent,
             storages,
             config,
             state,
@@ -444,7 +444,7 @@ where
             pool,
             Arc::clone(&api),
             network.clone(),
-            consensus,
+            consensus_agent,
             storages,
             config,
             state,

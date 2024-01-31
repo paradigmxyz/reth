@@ -5867,7 +5867,6 @@ dependencies = [
  "chrono",
  "clap",
  "config",
- "crossbeam-channel",
  "derivative",
  "ethereum_serde_utils",
  "eyre",
