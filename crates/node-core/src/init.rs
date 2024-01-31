@@ -78,7 +78,7 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
     insert_genesis_history(&provider_rw, genesis)?;
 
     // Insert header
-    let tx = factory.provider_rw()?.into_tx();
+    let tx = provider_rw.into_tx();
     insert_genesis_header::<DB>(
         &tx,
         factory.snapshot_provider().expect("should exist"),
