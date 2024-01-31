@@ -60,7 +60,6 @@ impl<DB: Database, EF> TreeExternals<DB, EF> {
                 self.provider_factory.snapshot_provider().expect("should exist");
             let total_headers = snapshot_provider.count_entries::<tables::Headers>()? as u64;
             let range = total_headers.saturating_sub(hashes.len() as u64).saturating_sub(1) as u64..
-                dbg!(total_headers);
 
             hashes.extend(
                 range.clone().zip(
