@@ -345,7 +345,7 @@ fn stage_checkpoint<DB: Database>(
 ) -> ProviderResult<EntitiesCheckpoint> {
     Ok(EntitiesCheckpoint {
         processed: provider.count_entries::<tables::BlockBodyIndices>()? as u64,
-        total: provider.count_entries::<tables::Headers>()? as u64,
+        total: (provider.count_entries::<tables::Headers>()? as u64).saturating_sub(1),
     })
 }
 
