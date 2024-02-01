@@ -270,7 +270,11 @@ impl SnapshotProvider {
                 } else if let Some(1) = tx_index.get(&segment).map(|index| index.len()) {
                     // Only happens if we unwind all the txs/receipts from the first static file.
                     // Should only happen in test scenarios.
-                    if matches!(segment, SnapshotSegment::Receipts | SnapshotSegment::Transactions)
+                    if jar.user_header().block_start() == 0 &&
+                        matches!(
+                            segment,
+                            SnapshotSegment::Receipts | SnapshotSegment::Transactions
+                        )
                     {
                         tx_index.remove(&segment);
                     }
@@ -334,7 +338,7 @@ impl SnapshotProvider {
         self.snapshots_tx_index
             .read()
             .get(&segment)
-            .and_then(|index| index.last_key_value().map(|(last_tx, _)| *last_tx))
+            .and_then(|index| dbg!(index).last_key_value().map(|(last_tx, _)| *last_tx))
     }
 
     /// Gets the highest snapshotted blocks for all segments.
