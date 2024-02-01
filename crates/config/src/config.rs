@@ -381,7 +381,6 @@ timeout = -4096
 bad_protocol = -2147483648
 failed_to_connect = -25600
 dropped = -4096
-bad_announcement = -1204
 
 [peers.backoff_durations]
 low = '30s'
