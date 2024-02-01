@@ -484,9 +484,12 @@ impl TransactionFetcher {
     /// limit. It does so by taking buffered eth68 hashes for which peer is listed as fallback
     /// peer. A mutable reference to a list of hashes to request is passed as parameter.
     ///
+    /// If a single transaction exceeds the soft limit, it's fetched in its own request. Otherwise
+    /// the following applies.
+    ///
     /// Loops through buffered hashes and does:
     ///
-    /// 1. Check acc size against limit, if so stop looping.
+    /// 1. Check if acc size exceeds limit or if hashes count exceeds limit, if so stop looping.
     /// 2. Check if this buffered hash is an eth68 hash, else skip to next iteration.
     /// 3. Check if hash can be included with respect to size metadata and acc size copy.
     /// 4. Check if peer is fallback peer for hash and remove, else skip to next iteration.
