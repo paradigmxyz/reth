@@ -22,7 +22,8 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{SnapshotProvider, SnapshotWriter},
-    DatabaseProviderRW, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode,
+    BlockHashReader, DatabaseProviderRW, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+    HeaderSyncMode,
 };
 use std::{
     sync::Arc,
@@ -324,13 +325,12 @@ where
         let highest_block = snapshot_provider
             .get_highest_snapshot_block(SnapshotSegment::Headers)
             .unwrap_or_default();
-        let unwound_headers = highest_block - input.unwind_to + 1;
+        let unwound_headers = highest_block - input.unwind_to;
 
         for block in (input.unwind_to + 1)..=highest_block {
             let header_hash = snapshot_provider
-                .sealed_header(block)?
-                .ok_or(ProviderError::HeaderNotFound(block.into()))?
-                .hash();
+                .block_hash(block)?
+                .ok_or(ProviderError::HeaderNotFound(block.into()))?;
 
             provider.tx_ref().delete::<tables::HeaderNumbers>(header_hash, None)?;
         }
