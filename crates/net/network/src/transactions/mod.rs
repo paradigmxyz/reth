@@ -402,8 +402,9 @@ where
                 if peer_idx > max_num_full || full_transactions.is_empty() {
                     // enforce tx soft limit per message for the (unlikely) event the number of
                     // hashes exceeds it
-                    new_pooled_hashes
-                        .truncate(SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_MEMPOOL_PACKET);
+                    new_pooled_hashes.truncate(
+                        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_MEMPOOL_PACKET,
+                    );
 
                     for hash in new_pooled_hashes.iter_hashes().copied() {
                         propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
