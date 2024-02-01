@@ -292,11 +292,16 @@ mod tests {
 
     #[test]
     fn fail_init_inconsistent_db() {
-        init_genesis(create_test_provider_factory_with_chain_spec(SEPOLIA.clone())).unwrap();
+        let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
+        let snapshot_provider = factory.snapshot_provider().expect("should exist");
+        init_genesis(factory.clone()).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash =
-            init_genesis(create_test_provider_factory_with_chain_spec(MAINNET.clone()));
+        let genesis_hash = init_genesis(
+            ProviderFactory::new(factory.into_db(), MAINNET.clone())
+                .with_snapshots(snapshot_provider.path().into())
+                .unwrap(),
+        );
 
         assert_eq!(
             genesis_hash.unwrap_err(),

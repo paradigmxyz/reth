@@ -80,6 +80,12 @@ impl<DB> ProviderFactory<DB> {
     pub fn snapshot_provider(&self) -> Option<Arc<SnapshotProvider>> {
         self.snapshot_provider.clone()
     }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    /// Consumes Self and returns DB
+    pub fn into_db(self) -> DB {
+        self.db
+    }
 }
 
 impl<DB: Database> ProviderFactory<DB> {

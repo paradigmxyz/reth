@@ -538,6 +538,12 @@ impl SnapshotProvider {
 
         Ok(data)
     }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    /// Returns snapshots directory
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 }
 
 /// Helper trait to manage different [`SnapshotProviderRW`] of an `Arc<SnapshotProvider`
