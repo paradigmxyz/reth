@@ -125,18 +125,26 @@ impl TestStageDB {
         })
     }
 
-    fn insert_header<TX: DbTx + DbTxMut>(
-        writer: &mut SnapshotProviderRWRefMut<'_>,
+    /// Insert header to static file if `writer` exists, otherwise to DB.
+    pub fn insert_header<TX: DbTx + DbTxMut>(
+        writer: Option<&mut SnapshotProviderRWRefMut<'_>>,
         tx: &TX,
         header: &SealedHeader,
         td: U256,
     ) -> ProviderResult<()> {
-        writer.append_header(header.header.clone(), td, header.hash)?;
+        if let Some(writer) = writer {
+            writer.append_header(header.header.clone(), td, header.hash)?;
+        } else {
+            tx.put::<tables::CanonicalHeaders>(header.number, header.hash)?;
+            tx.put::<tables::HeaderTD>(header.number, td.into())?;
+            tx.put::<tables::Headers>(header.number, header.header.clone())?;
+        }
+
         tx.put::<tables::HeaderNumbers>(header.hash, header.number)?;
         Ok(())
     }
 
-    pub fn insert_headers_inner<'a, I, const TD: bool>(&self, headers: I) -> ProviderResult<()>
+    fn insert_headers_inner<'a, I, const TD: bool>(&self, headers: I) -> ProviderResult<()>
     where
         I: Iterator<Item = &'a SealedHeader>,
     {
@@ -149,7 +157,7 @@ impl TestStageDB {
             if TD {
                 td += header.difficulty;
             }
-            Self::insert_header(&mut writer, &tx, header, td)?;
+            Self::insert_header(Some(&mut writer), &tx, header, td)?;
         }
 
         writer.commit()?;
@@ -158,7 +166,7 @@ impl TestStageDB {
         Ok(())
     }
 
-    /// Insert ordered collection of [SealedHeader] into the corresponding tables
+    /// Insert ordered collection of [SealedHeader] into the corresponding static file and tables
     /// that are supposed to be populated by the headers stage.
     pub fn insert_headers<'a, I>(&self, headers: I) -> ProviderResult<()>
     where
@@ -167,7 +175,7 @@ impl TestStageDB {
         self.insert_headers_inner::<I, false>(headers)
     }
 
-    /// Inserts total difficulty of headers into the corresponding tables.
+    /// Inserts total difficulty of headers into the corresponding static file and tables.
     ///
     /// Superset functionality of [TestStageDB::insert_headers].
     pub fn insert_headers_with_td<'a, I>(&self, headers: I) -> ProviderResult<()>
@@ -192,7 +200,7 @@ impl TestStageDB {
             let mut next_tx_num = tx_offset.unwrap_or_default();
 
             blocks.into_iter().try_for_each(|block| {
-                Self::insert_header(&mut writer, tx, &block.header, U256::ZERO)?;
+                Self::insert_header(Some(&mut writer), tx, &block.header, U256::ZERO)?;
 
                 // Insert into body tables.
                 let block_body_indices = StoredBlockBodyIndices {
