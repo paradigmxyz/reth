@@ -1089,7 +1089,7 @@ where
         let mut budget_tx_manager = 1024;
         let mut maybe_more_work = false;
 
-        'tx_manager: loop {
+        loop {
             // drain network/peer related events
             let mut budget_network_events = 1;
             'network_events: loop {
@@ -1257,20 +1257,17 @@ where
 
             // all channels are fully drained and import futures pending
             if !maybe_more_work {
-                break 'tx_manager
+                return Poll::Pending
             }
 
             // some streams are still ready, continue looping with respect to budget depletion
             budget_tx_manager -= 1;
             if budget_tx_manager == 0 {
-                break 'tx_manager
+                // Make sure we're woken up again
+                cx.waker().wake_by_ref();
+                return Poll::Pending
             }
         }
-
-        // Make sure we're woken up again since this future is spawned in its own thread,
-        // so poll will not be manually called again
-        cx.waker().wake_by_ref();
-        Poll::Pending
     }
 }
 
