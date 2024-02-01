@@ -1071,7 +1071,7 @@ where
     }
 }
 
-/// An endless future. Preemption ensure that future is non-blocking, nonetheless. See 
+/// An endless future. Preemption ensure that future is non-blocking, nonetheless. See
 /// [`crate::NetworkManager`] for more context on the design pattern.
 ///
 /// This should be spawned or used as part of `tokio::select!`.
@@ -1143,7 +1143,7 @@ where
                                     this.on_good_import(hash);
                                 }
                                 Err(err) => {
-                                    // if we're _currently_ syncing and the transaction is bad we 
+                                    // if we're _currently_ syncing and the transaction is bad we
                                     // ignore it, otherwise we penalize the peer that sent the bad
                                     // transaction with the assumption that the peer should have
                                     // known that this transaction is bad. (e.g. consensus
@@ -1157,7 +1157,7 @@ where
                                 }
                             }
                         }
-                    },
+                    }
                     Err(err) => {
                         debug!(target: "net::tx", ?err, "bad pool transaction batch import");
                     }
@@ -1166,9 +1166,12 @@ where
                 some_ready = true;
             }
 
-            // handle and propagate new transactions
+            // handle and propagate new transactions.
+            //
+            // higher priority! stream is drained
+            //
             let mut new_txs = Vec::new();
-            if let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
+            while let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
                 new_txs.push(hash);
                 some_ready = true;
             }
@@ -1178,19 +1181,16 @@ where
 
             // all channels are fully drained and import futures pending
             if !some_ready {
-                break
+                return Poll::Pending
             }
 
             budget -= 1;
             if budget == 0 {
-                break
+                // Make sure we're woken up again
+                cx.waker().wake_by_ref();
+                return Poll::Pending
             }
         }
-
-        // Make sure we're woken up again since this future is spawned in its own thread,
-        // so poll will not be manually called again
-        cx.waker().wake_by_ref();
-        Poll::Pending
     }
 }
 
