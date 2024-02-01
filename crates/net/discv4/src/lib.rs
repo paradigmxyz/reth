@@ -2328,8 +2328,12 @@ where
     }
 }
 
+#[derive(Debug)]
+/// A node that hasn't been discovered via a discv5 or discv4 query.
 pub enum NodeFromExternalSource {
+    /// Node compatible with discv4.
     NodeRecord(NodeRecord),
+    /// Node compatible with discv5.
     Enr(Enr<SecretKey>),
 }
 

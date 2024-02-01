@@ -44,8 +44,9 @@ pub enum NetworkError {
     /// IO error when creating the discovery service
     #[error("failed to launch discovery service: {0}")]
     Discovery(io::Error),
+    /// Error interfacing between dns discovery and discv4 or discv5.
     #[error(transparent)]
-    DnsDiscovery(#[from] DiscoveryError),
+    DiscoveryInterface(#[from] DiscoveryInterfaceError),
     // todo: upstream error impl for discv5
     /*
     /// Error propagated from [`discv5::Discv5`].
@@ -80,12 +81,13 @@ impl NetworkError {
     }
 }
 
-/// Errors thrown by [`Discovery`].
-// todo: move discovery errors here instead of using `custom_discovery` method
+/// Errors thrown when interfacing between discovery services.
 #[derive(Debug, thiserror::Error)]
-pub enum DiscoveryError {
+pub enum DiscoveryInterfaceError {
+    /// Error parsing an rlp value in [`enr::Enr`].
     #[error(transparent)]
     ParseRlp(#[from] rlp::DecoderError),
+    /// Error converting into a [`reth_primitives::NodeRecord`].
     #[error(transparent)]
     ParseNodeRecord(#[from] NodeRecordParseError),
 }

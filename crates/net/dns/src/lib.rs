@@ -27,7 +27,6 @@ use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
-    error::Error,
     fmt,
     pin::Pin,
     sync::Arc,

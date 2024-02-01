@@ -155,6 +155,10 @@ pub use session::{
 #[cfg(not(feature = "discv5"))]
 pub type Discovery = discovery::Discovery;
 
-/// Discovery using [`reth_discv5::Discv5`], which supports downgrading to [`Discv4`].
+/// Discovery using [`reth_discv5::Discv5WithDiscv4Downgrade`], which supports downgrading to [`Discv4`].
 #[cfg(feature = "discv5")]
-pub type Discovery = discovery::Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, enr::Enr<secp256k1::SecretKey>>;
+pub type Discovery = discovery::Discovery<
+    Discv5WithDiscv4Downgrade,
+    MergedUpdateStream,
+    enr::Enr<secp256k1::SecretKey>,
+>;

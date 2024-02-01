@@ -33,7 +33,7 @@ pub struct Discv5WithDiscv4Downgrade {
 }
 
 impl Discv5WithDiscv4Downgrade {
-    /// Returns a new [`Discv5`] handle.
+    /// Returns a new [`Discv5WithDiscv4Downgrade`] handle.
     pub fn new(
         discv5: Arc<RwLock<discv5::Discv5>>,
         discv4: Discv4,

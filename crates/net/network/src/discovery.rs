@@ -11,9 +11,7 @@ use reth_discv4::{
     DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry, HandleDiscovery, NodeFromExternalSource,
     PublicKey, SecretKey,
 };
-use reth_discv5::{
-    self, DiscoveryUpdateV5, Discv5WithDiscv4Downgrade, MergedUpdateStream,
-};
+use reth_discv5::{self, DiscoveryUpdateV5, Discv5WithDiscv4Downgrade, MergedUpdateStream};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
     Update,
@@ -389,7 +387,6 @@ impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
     /// establish a merged listener channel to receive all discovered nodes.
     ///
     /// Note: if dns discovery is configured, any nodes found by this service will be
-    /// added to discv4 atm. See todo in [`HandleDiscovery`] impl on [`Discv5`].
     pub async fn new_discv5(
         discv4_addr: SocketAddr, // discv5 addr in config
         sk: SecretKey,
@@ -572,10 +569,8 @@ where
     DnsDiscoveryService<DnsResolver, N>: Stream,
     <DnsDiscoveryService<DnsResolver, N> as Stream>::Item: fmt::Debug,
 {
-    let (mut service, dns_disc) = DnsDiscoveryService::new_pair(
-        Arc::new(DnsResolver::from_system_conf()?),
-        dns_config,
-    );
+    let (mut service, dns_disc) =
+        DnsDiscoveryService::new_pair(Arc::new(DnsResolver::from_system_conf()?), dns_config);
     let dns_discovery_updates = service.node_record_stream();
     let dns_disc_service = service.spawn();
 
@@ -638,15 +633,4 @@ mod tests {
                 .await
                 .unwrap();
     }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_discv5_with_discv4_downgrade() {
-        let mut rng = thread_rng();
-        let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
-        let discovery_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
-        let discovery =
-            Discovery::new_discv5(discovery_addr, secret_key, (Some(Discv4Config::default()), Default::default()))
-                .await
-                .unwrap();
-    }    
 }
