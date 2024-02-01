@@ -338,7 +338,7 @@ impl SnapshotProvider {
         self.snapshots_tx_index
             .read()
             .get(&segment)
-            .and_then(|index| dbg!(index).last_key_value().map(|(last_tx, _)| *last_tx))
+            .and_then(|index| index.last_key_value().map(|(last_tx, _)| *last_tx))
     }
 
     /// Gets the highest snapshotted blocks for all segments.
