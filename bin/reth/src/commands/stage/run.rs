@@ -127,7 +127,7 @@ impl Command {
             Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         info!(target: "reth::cli", "Database opened");
 
-        let factory = ProviderFactory::new(Arc::clone(&db), self.chain.clone());
+        let factory = ProviderFactory::new(Arc::clone(&db), self.chain.clone()).with_snapshots(data_dir.snapshots_path())?;
         let mut provider_rw = factory.provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
