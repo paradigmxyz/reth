@@ -423,6 +423,12 @@ impl Encodable for Header {
         self.mix_hash.encode(out); // Encode mix hash.
         B64::new(self.nonce.to_be_bytes()).encode(out); // Encode nonce.
 
+        // The following code is needed only to handle proptest-generated headers that are
+        // technically invalid.
+        //
+        // TODO: make proptest generate more valid headers, ie if there is no base fee, there
+        // should be no withdrawals root or any future fork field.
+
         // Encode base fee. Put empty list if base fee is missing,
         // but withdrawals root is present.
         if let Some(ref base_fee) = self.base_fee_per_gas {

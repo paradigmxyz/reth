@@ -120,6 +120,25 @@ mod builder {
                 err
             })?;
 
+            let mut excess_blob_gas = None;
+            let mut blob_gas_used = None;
+
+            if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp) {
+                excess_blob_gas = if chain_spec
+                    .is_cancun_active_at_timestamp(parent_block.timestamp)
+                {
+                    let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
+                    let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
+                    Some(calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
+                } else {
+                    // for the first post-fork block, both parent.blob_gas_used and
+                    // parent.excess_blob_gas are evaluated as 0
+                    Some(calculate_excess_blob_gas(0, 0))
+                };
+
+                blob_gas_used = Some(0);
+            }
+
             let header = Header {
                 parent_hash: parent_block.hash,
                 ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -138,8 +157,8 @@ mod builder {
                 difficulty: U256::ZERO,
                 gas_used: 0,
                 extra_data,
-                blob_gas_used: None,
-                excess_blob_gas: None,
+                blob_gas_used,
+                excess_blob_gas,
                 parent_beacon_block_root: attributes.parent_beacon_block_root,
             };
 
