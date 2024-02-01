@@ -1071,7 +1071,7 @@ where
     }
 }
 
-/// An endless future. Preemption ensure that future is non-blocking, nonetheless. See 
+/// An endless future. Preemption ensure that future is non-blocking, nonetheless. See
 /// [`crate::NetworkManager`] for more context on the design pattern.
 ///
 /// This should be spawned or used as part of `tokio::select!`.
@@ -1086,9 +1086,9 @@ where
 
         // If the budget is exhausted we manually yield back control to tokio. See
         // `NetworkManager` for more context on the design pattern.
-        let mut budget = 1024;
+        let mut budget_tx_manager = 1024;
 
-        loop {
+        'tx_manager: loop {
             let mut some_ready = false;
 
             // drain network/peer related events
@@ -1143,7 +1143,7 @@ where
                                     this.on_good_import(hash);
                                 }
                                 Err(err) => {
-                                    // if we're _currently_ syncing and the transaction is bad we 
+                                    // if we're _currently_ syncing and the transaction is bad we
                                     // ignore it, otherwise we penalize the peer that sent the bad
                                     // transaction with the assumption that the peer should have
                                     // known that this transaction is bad. (e.g. consensus
@@ -1157,7 +1157,7 @@ where
                                 }
                             }
                         }
-                    },
+                    }
                     Err(err) => {
                         debug!(target: "net::tx", ?err, "bad pool transaction batch import");
                     }
@@ -1168,9 +1168,23 @@ where
 
             // handle and propagate new transactions
             let mut new_txs = Vec::new();
-            if let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
-                new_txs.push(hash);
-                some_ready = true;
+            // tx propagation is highly prioritized. we try to drain pending transactions, without
+            // blocking by preemption.
+            let mut budget_propagate_txns = 1024;
+            'pending_txns: loop {
+                match this.pending_transactions.poll_next_unpin(cx) {
+                    Poll::Ready(Some(hash)) => {
+                        new_txs.push(hash);
+
+                        some_ready = true;
+                        budget_propagate_txns -= 1;
+                        if budget_propagate_txns == 0 {
+                            break
+                        }
+                    }
+                    Poll::Ready(None) => {} // todo: handle stream closed as error
+                    Poll::Pending => break 'pending_txns,
+                }
             }
             if !new_txs.is_empty() {
                 this.on_new_transactions(new_txs);
@@ -1178,12 +1192,13 @@ where
 
             // all channels are fully drained and import futures pending
             if !some_ready {
-                break
+                break 'tx_manager
             }
 
-            budget -= 1;
-            if budget == 0 {
-                break
+            // some streams are still ready, continue looping with respect to budget depletion
+            budget_tx_manager -= 1;
+            if budget_tx_manager == 0 {
+                break 'tx_manager
             }
         }
 
