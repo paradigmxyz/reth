@@ -1191,7 +1191,7 @@ impl PropagateTransaction {
 }
 
 /// Helper type for constructing the full transaction message that enforces the
-/// [`POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE`].
+/// [`FULL_TRANSACTIONS_BROADCAST_MSG_BYTE_SIZE_SOFT_LIMIT`].
 #[derive(Default)]
 struct FullTransactionsBuilder {
     total_size: usize,
