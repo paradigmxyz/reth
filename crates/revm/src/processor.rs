@@ -213,7 +213,7 @@ where
             block.timestamp,
             total_difficulty,
             &block.ommers,
-            block.withdrawals.as_deref(),
+            block.withdrawals.as_ref(),
         );
 
         // Irregular state change at Ethereum DAO hardfork
