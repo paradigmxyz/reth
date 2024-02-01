@@ -738,8 +738,9 @@ where
 
             // fill the request with other buffered hashes that have been announced by the peer
             let Some(peer) = self.peers.get(&peer_id) else { return };
-
             let Some(hash) = hashes.first() else { return };
+            hashes.extend_from_slice(&peer.transactions);
+
             let mut eth68_size = self.transaction_fetcher.eth68_meta.get(hash).copied();
             if let Some(ref mut size) = eth68_size {
                 self.transaction_fetcher.fill_eth68_request_for_peer(&mut hashes, peer_id, size);
@@ -1070,7 +1071,8 @@ where
     }
 }
 
-/// An endless future.
+/// An endless future. Preemption ensure that future is non-blocking, nonetheless. See 
+/// [`crate::NetworkManager`] for more context on the design pattern.
 ///
 /// This should be spawned or used as part of `tokio::select!`.
 impl<Pool> Future for TransactionsManager<Pool>
