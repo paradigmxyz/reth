@@ -1248,7 +1248,7 @@ mod tests {
         stage::StageCheckpoint,
         Account, Address, ChainSpecBuilder, Genesis, GenesisAccount, Header, Signature,
         Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
-        B256, MAINNET,
+        Withdrawals, B256, MAINNET,
     };
     use reth_provider::{
         test_utils::{
@@ -1492,7 +1492,7 @@ mod tests {
                     .seal_slow(),
                     body: body.clone().into_iter().map(|tx| tx.into_signed()).collect(),
                     ommers: Vec::new(),
-                    withdrawals: Some(Vec::new()),
+                    withdrawals: Some(Withdrawals::default()),
                 },
                 body.iter().map(|tx| tx.signer()).collect(),
             )

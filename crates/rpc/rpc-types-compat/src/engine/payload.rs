@@ -4,7 +4,7 @@
 use reth_primitives::{
     constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     proofs::{self},
-    Block, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal, B256, U256,
+    Block, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_rpc_types::engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
@@ -65,8 +65,9 @@ pub fn try_payload_v2_to_block(payload: ExecutionPayloadV2) -> Result<Block, Pay
     // this performs the same conversion as the underlying V1 payload, but calculates the
     // withdrawals root and adds withdrawals
     let mut base_sealed_block = try_payload_v1_to_block(payload.payload_inner)?;
-    let withdrawals: Vec<_> =
-        payload.withdrawals.iter().map(|w| convert_standalone_withdraw_to_withdrawal(*w)).collect();
+    let withdrawals = Withdrawals::new(
+        payload.withdrawals.iter().map(|w| convert_standalone_withdraw_to_withdrawal(*w)).collect(),
+    );
     let withdrawals_root = proofs::calculate_withdrawals_root(&withdrawals);
     base_sealed_block.withdrawals = Some(withdrawals);
     base_sealed_block.header.withdrawals_root = Some(withdrawals_root);
