@@ -4,7 +4,7 @@ use crate::eth::error::{EthApiError, EthResult};
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs,
-    revm::{compat::into_reth_log, env::tx_env_with_recovered},
+    revm::env::tx_env_with_recovered,
     revm_primitives::{
         BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
     },
@@ -98,7 +98,7 @@ impl PendingBlockEnv {
                 // which also removes all dependent transaction from the iterator before we can
                 // continue
                 best_txs.mark_invalid(&pool_tx);
-                continue
+                continue;
             }
 
             if pool_tx.origin.is_private() {
@@ -106,7 +106,7 @@ impl PendingBlockEnv {
                 // them as invalid here which removes all dependent transactions from the iterator
                 // before we can continue
                 best_txs.mark_invalid(&pool_tx);
-                continue
+                continue;
             }
 
             // convert tx to a signed transaction
@@ -122,16 +122,18 @@ impl PendingBlockEnv {
                     // the iterator. This is similar to the gas limit condition
                     // for regular transactions above.
                     best_txs.mark_invalid(&pool_tx);
-                    continue
+                    continue;
                 }
             }
 
             // Configure the environment for the block.
-            let env =
-                Env { cfg: cfg.clone(), block: block_env.clone(), tx: tx_env_with_recovered(&tx) };
+            let env = Box::new(Env {
+                cfg: cfg.clone(),
+                block: block_env.clone(),
+                tx: tx_env_with_recovered(&tx),
+            });
 
-            let mut evm = revm::EVM::with_env(env);
-            evm.database(&mut db);
+            let mut evm = revm::Evm::builder().modify_env(|e| *e = env).with_db(db).build();
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,
@@ -145,11 +147,11 @@ impl PendingBlockEnv {
                                 // descendants
                                 best_txs.mark_invalid(&pool_tx);
                             }
-                            continue
+                            continue;
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(err.into())
+                            return Err(err.into());
                         }
                     }
                 }
@@ -179,7 +181,7 @@ impl PendingBlockEnv {
                 tx_type: tx.tx_type(),
                 success: result.is_success(),
                 cumulative_gas_used,
-                logs: result.logs().into_iter().map(into_reth_log).collect(),
+                logs: result.logs().into_iter().map(Into::into).collect(),
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
                 #[cfg(feature = "optimism")]
@@ -229,8 +231,10 @@ impl PendingBlockEnv {
         let transactions_root = proofs::calculate_transaction_root(&executed_txs);
 
         // check if cancun is activated to set eip4844 header fields correctly
-        let blob_gas_used =
-            if cfg.spec_id >= SpecId::CANCUN { Some(sum_blob_gas_used) } else { None };
+        // TODO(revm) how to send spec_id
+        //let blob_gas_used  =
+        //    if cfg.spec_id >= SpecId::CANCUN { Some(sum_blob_gas_used) } else { None };
+        let blob_gas_used = None;
 
         let header = Header {
             parent_hash,
@@ -280,15 +284,14 @@ where
     DB::Error: std::fmt::Display,
 {
     // Configure the environment for the block.
-    let env = Env {
+    let env = Box::new(Env {
         cfg: initialized_cfg.clone(),
         block: initialized_block_env.clone(),
         ..Default::default()
-    };
+    });
 
     // apply pre-block EIP-4788 contract call
-    let mut evm_pre_block = revm::EVM::with_env(env);
-    evm_pre_block.database(db);
+    let mut evm_pre_block = revm::Evm::builder().modify_env(|e| *e = env).with_db(db).build();
 
     // initialize a block from the env, because the pre block call needs the block itself
     apply_beacon_root_contract_call(

@@ -50,12 +50,12 @@ where
         if txs.is_empty() {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::EmptyBundleTransactions.to_string(),
-            ))
+            ));
         }
         if block_number.to::<u64>() == 0 {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::BundleMissingBlockNumber.to_string(),
-            ))
+            ));
         }
 
         let transactions =
@@ -79,7 +79,7 @@ where
             .spawn_with_state_at_block(at, move |state| {
                 let coinbase = block_env.coinbase;
                 let basefee = Some(block_env.basefee.to::<u64>());
-                let env = Env { cfg, block: block_env, tx: TxEnv::default() };
+                let env = Box::new(Env { cfg, block: block_env, tx: TxEnv::default() });
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let initial_coinbase = DatabaseRef::basic_ref(&db, coinbase)?
@@ -91,8 +91,8 @@ where
                 let mut total_gas_fess = U256::ZERO;
                 let mut hash_bytes = Vec::with_capacity(32 * transactions.len());
 
-                let mut evm = revm::EVM::with_env(env);
-                evm.database(db);
+                let mut evm = revm::Evm::builder().modify_env(|e| *e = env).with_db(db).build();
+                //evm.database(db);
 
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut transactions = transactions.into_iter().peekable();
@@ -103,7 +103,7 @@ where
                     let gas_price = tx
                         .effective_tip_per_gas(basefee)
                         .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)?;
-                    tx.try_fill_tx_env(&mut evm.env.tx)?;
+                    tx.try_fill_tx_env(&mut evm.context.evm.env.tx)?;
                     let ResultAndState { result, state } = evm.transact()?;
 
                     let gas_used = result.gas_used();
@@ -150,7 +150,7 @@ where
                     if transactions.peek().is_some() {
                         // need to apply the state changes of this call before executing
                         // the next call
-                        evm.db.as_mut().expect("is set").commit(state)
+                        evm.context.evm.db.commit(state)
                     }
                 }
 

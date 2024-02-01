@@ -163,11 +163,11 @@ reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 
 # revm
-revm = { git = "https://github.com/bluealloy/revm", branch = "main", features = [
+revm = { git = "https://github.com/bluealloy/revm", branch = "tweeks", features = [
     "std",
     "secp256k1",
 ], default-features = false }
-revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "main", features = [
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "tweeks", features = [
     "std",
 ], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", branch = "matt/migrate-revm" }
@@ -215,7 +215,7 @@ strum = "0.25"
 rayon = "1.7"
 itertools = "0.12"
 parking_lot = "0.12"
-metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+metrics = "0.21.1"                                    # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 hex-literal = "0.4"
 once_cell = "1.17"
 syn = "2.0"

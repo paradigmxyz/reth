@@ -25,7 +25,7 @@ use reth_rpc_types::{
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
-    primitives::{BlockEnv, CfgEnv, Env, ExecutionResult, Halt, TransactTo},
+    primitives::{BlockEnv, CfgEnv, Env, ExecutionResult, HaltReason, TransactTo},
     DatabaseCommit,
 };
 use tracing::trace;
@@ -431,7 +431,7 @@ where
 #[inline]
 fn map_out_of_gas_err<S>(
     env_gas_limit: U256,
-    mut env: Env,
+    mut env: Box<Env>,
     mut db: &mut CacheDB<StateProviderDatabase<S>>,
 ) -> EthApiError
 where

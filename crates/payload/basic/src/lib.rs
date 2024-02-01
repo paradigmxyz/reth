@@ -31,8 +31,8 @@ use reth_revm::state_change::{
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{
-    primitives::{BlockEnv, CfgEnv, Env},
-    Database, DatabaseCommit, State,
+    primitives::{BlockEnv, CfgEnv, Env, SpecId},
+    Database, DatabaseCommit, Evm, State,
 };
 use std::{
     future::Future,
@@ -372,7 +372,7 @@ where
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
             trace!(target: "payload_builder", "payload building deadline reached");
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         // check if the interval is reached
@@ -461,7 +461,7 @@ where
 
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         if let Some(ref payload) = self.best_payload {
-            return Ok(payload.clone())
+            return Ok(payload.clone());
         }
         // No payload has been built yet, but we need to return something that the CL then can
         // deliver, so we need to return an empty payload.
@@ -502,7 +502,7 @@ where
                 return (
                     ResolveBestPayload { best_payload: Some(payload), maybe_better, empty_payload },
                     KeepPayloadJobAlive::Yes,
-                )
+                );
             }
 
             // if no payload has been built yet
@@ -559,14 +559,14 @@ where
                 this.maybe_better = None;
                 if let Ok(BuildOutcome::Better { payload, .. }) = res {
                     debug!(target: "payload_builder", "resolving better payload");
-                    return Poll::Ready(Ok(payload))
+                    return Poll::Ready(Ok(payload));
                 }
             }
         }
 
         if let Some(best) = this.best_payload.take() {
             debug!(target: "payload_builder", "resolving best payload");
-            return Poll::Ready(Ok(best))
+            return Poll::Ready(Ok(best));
         }
 
         let mut empty_payload = this.empty_payload.take().expect("polled after completion");
@@ -630,6 +630,8 @@ impl Drop for Cancelled {
 /// Static config for how to build a payload.
 #[derive(Clone, Debug)]
 pub struct PayloadConfig<Attributes> {
+    /// Specification id for the block.
+    pub spec_id: SpecId,
     /// Pre-configured block environment.
     pub initialized_block_env: BlockEnv,
     /// Configuration for the environment.
@@ -663,10 +665,11 @@ where
         chain_spec: Arc<ChainSpec>,
     ) -> Self {
         // configure evm env based on parent block
-        let (initialized_cfg, initialized_block_env) =
+        let (spec_id, initialized_cfg, initialized_block_env) =
             attributes.cfg_and_block_env(&chain_spec, &parent_block);
 
         Self {
+            spec_id,
             initialized_block_env,
             initialized_cfg,
             parent_block,
@@ -823,11 +826,11 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
     withdrawals: Vec<Withdrawal>,
 ) -> RethResult<WithdrawalsOutcome> {
     if !chain_spec.is_shanghai_active_at_timestamp(timestamp) {
-        return Ok(WithdrawalsOutcome::pre_shanghai())
+        return Ok(WithdrawalsOutcome::pre_shanghai());
     }
 
     if withdrawals.is_empty() {
-        return Ok(WithdrawalsOutcome::empty())
+        return Ok(WithdrawalsOutcome::empty());
     }
 
     let balance_increments =
@@ -846,7 +849,7 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
 
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
-/// This constructs a new [EVM](revm::EVM) with the given DB, and environment ([CfgEnv] and
+/// This constructs a new [Evm](revm::EVM) with the given DB, and environment ([CfgEnv] and
 /// [BlockEnv]) to execute the pre block contract call.
 ///
 /// The parent beacon block root used for the call is gathered from the given
@@ -867,15 +870,14 @@ where
     Attributes: PayloadBuilderAttributes,
 {
     // Configure the environment for the block.
-    let env = Env {
+    let env = Box::new(Env {
         cfg: initialized_cfg.clone(),
         block: initialized_block_env.clone(),
         ..Default::default()
-    };
+    });
 
     // apply pre-block EIP-4788 contract call
-    let mut evm_pre_block = revm::EVM::with_env(env);
-    evm_pre_block.database(db);
+    let mut evm_pre_block = Evm::builder().modify_env(|e| *e = env).with_db(db).build();
 
     // initialize a block from the env, because the pre block call needs the block itself
     apply_beacon_root_contract_call(

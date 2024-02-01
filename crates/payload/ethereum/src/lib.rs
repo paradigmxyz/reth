@@ -25,7 +25,7 @@ mod builder {
         },
         eip4844::calculate_excess_blob_gas,
         proofs,
-        revm::{compat::into_reth_log, env::tx_env_with_recovered},
+        revm::env::tx_env_with_recovered,
         Block, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH, U256,
     };
     use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
@@ -212,12 +212,12 @@ mod builder {
                 // which also removes all dependent transaction from the iterator before we can
                 // continue
                 best_txs.mark_invalid(&pool_tx);
-                continue
+                continue;
             }
 
             // check if the job was cancelled, if so we can exit early
             if cancel.is_cancelled() {
-                return Ok(BuildOutcome::Cancelled)
+                return Ok(BuildOutcome::Cancelled);
             }
 
             // convert tx to a signed transaction
@@ -234,19 +234,18 @@ mod builder {
                     // for regular transactions above.
                     trace!(target: "payload_builder", tx=?tx.hash, ?sum_blob_gas_used, ?tx_blob_gas, "skipping blob transaction because it would exceed the max data gas per block");
                     best_txs.mark_invalid(&pool_tx);
-                    continue
+                    continue;
                 }
             }
 
             // Configure the environment for the block.
-            let env = Env {
+            let env = Box::new(Env {
                 cfg: initialized_cfg.clone(),
                 block: initialized_block_env.clone(),
                 tx: tx_env_with_recovered(&tx),
-            };
+            });
 
-            let mut evm = revm::EVM::with_env(env);
-            evm.database(&mut db);
+            let mut evm = revm::Evm::builder().modify_env(|e| *e = env).with_db(&mut db).build();
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,
@@ -263,16 +262,17 @@ mod builder {
                                 best_txs.mark_invalid(&pool_tx);
                             }
 
-                            continue
+                            continue;
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err))
+                            return Err(PayloadBuilderError::EvmExecutionError(err));
                         }
                     }
                 }
             };
-
+            // drop evm so db is released.
+            drop(evm);
             // commit changes
             db.commit(state);
 
@@ -297,7 +297,7 @@ mod builder {
                 tx_type: tx.tx_type(),
                 success: result.is_success(),
                 cumulative_gas_used,
-                logs: result.logs(),
+                logs: result.logs().into_iter().map(Into::into).collect(),
             }));
 
             // update add to total fees
@@ -313,7 +313,7 @@ mod builder {
         // check if we have a better block
         if !is_better_payload(best_payload.as_ref(), total_fees) {
             // can skip building the block
-            return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
+            return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads });
         }
 
         let WithdrawalsOutcome { withdrawals_root, withdrawals } =

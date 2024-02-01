@@ -15,10 +15,10 @@ use reth_provider::{
     BlockExecutor, BlockExecutorStats, ProviderError, PrunableBlockExecutor, StateProvider,
 };
 use revm::{
-    db::{states::bundle_state::BundleRetention, StateDBBox},
+    db::{states::bundle_state::BundleRetention, EmptyDBTyped, StateDBBox},
     inspector_handle_register,
     primitives::ResultAndState,
-    Evm, Inspector, State, StateBuilder,
+    Evm, State, StateBuilder,
 };
 use std::{sync::Arc, time::Instant};
 
@@ -27,8 +27,6 @@ use reth_primitives::revm::env::fill_op_tx_env;
 #[cfg(not(feature = "optimism"))]
 use reth_primitives::revm::env::fill_tx_env;
 
-#[cfg(not(feature = "optimism"))]
-use reth_primitives::revm::compat::into_reth_log;
 #[cfg(not(feature = "optimism"))]
 use reth_provider::BundleStateWithReceipts;
 #[cfg(not(feature = "optimism"))]
@@ -58,9 +56,9 @@ pub struct EVMProcessor<'a, EvmConfig> {
     /// The configured chain-spec
     pub(crate) chain_spec: Arc<ChainSpec>,
     /// revm instance that contains database and env environment.
-    pub(crate) evm: Evm<'a, (), StateDBBox<'a, ProviderError>>,
+    pub(crate) evm: Option<Evm<'a, InspectorStack, StateDBBox<'a, ProviderError>>>,
     /// Hook and inspector stack that we want to invoke on that hook.
-    stack: InspectorStack,
+    /// stack: InspectorStack,
     /// The collection of receipts.
     /// Outer vector stores receipts for each block sequentially.
     /// The inner vector stores receipts ordered by transaction number.
@@ -95,11 +93,21 @@ where
 
     /// Create a new pocessor with the given chain spec.
     pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
-        let evm = Evm::builder().with_db(Box::new(StateBuilder::new().build())).build();
+        // create evm with boxed empty db that is going to be set later.
+        let evm = Evm::builder()
+            .with_db(
+                Box::new(
+                    StateBuilder::new()
+                        .with_database_boxed(Box::new(EmptyDBTyped::<ProviderError>::new())),
+                )
+                .build(),
+            )
+            .with_external_context(InspectorStack::new(InspectorStackConfig::default()))
+            .build();
         EVMProcessor {
             chain_spec,
-            evm,
-            stack: InspectorStack::new(InspectorStackConfig::default()),
+            evm: Some(evm),
+            //stack: Some(),
             receipts: Receipts::new(),
             first_block: None,
             tip: None,
@@ -130,12 +138,13 @@ where
         revm_state: StateDBBox<'a, ProviderError>,
         evm_config: EvmConfig,
     ) -> Self {
-        let mut evm = Evm::builder().with_db(revm_state).build();
-        //evm.database(revm_state);
+        let evm = Evm::builder()
+            .with_db(revm_state)
+            .with_external_context(InspectorStack::new(InspectorStackConfig::default()))
+            .build();
         EVMProcessor {
             chain_spec,
-            evm,
-            stack: InspectorStack::new(InspectorStackConfig::default()),
+            evm: Some(evm),
             receipts: Receipts::new(),
             first_block: None,
             tip: None,
@@ -148,7 +157,7 @@ where
 
     /// Configures the executor with the given inspectors.
     pub fn set_stack(&mut self, stack: InspectorStack) {
-        self.stack = stack;
+        self.evm.as_mut().unwrap().context.external = stack;
     }
 
     /// Configure the executor with the given block.
@@ -161,7 +170,7 @@ where
         // Option will be removed from EVM in the future.
         // as it is always some.
         // https://github.com/bluealloy/revm/issues/697
-        &mut self.evm.context.evm.db
+        &mut self.evm.as_mut().unwrap().context.evm.db
     }
 
     /// Initializes the config and block env.
@@ -172,9 +181,10 @@ where
 
         self.db_mut().set_state_clear_flag(state_clear_flag);
 
+        let env = &mut self.evm.as_mut().unwrap().context.evm.env;
         EvmConfig::fill_cfg_and_block_env(
-            &mut self.evm.context.evm.env.cfg,
-            &mut self.evm.context.evm.env.block,
+            &mut env.cfg,
+            &mut env.block,
             &self.chain_spec,
             header,
             total_difficulty,
@@ -194,7 +204,7 @@ where
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,
-            &mut self.evm,
+            &mut self.evm.as_mut().unwrap(),
         )?;
         Ok(())
     }
@@ -249,7 +259,7 @@ where
     ) -> Result<ResultAndState, BlockExecutionError> {
         // Fill revm structure.
         #[cfg(not(feature = "optimism"))]
-        fill_tx_env(&mut self.evm.context.evm.env.tx, transaction, sender);
+        fill_tx_env(&mut self.evm.as_mut().unwrap().context.evm.env.tx, transaction, sender);
 
         #[cfg(feature = "optimism")]
         {
@@ -259,32 +269,35 @@ where
         }
 
         let hash = transaction.hash();
-        let out = if true
-        /* self.stack.should_inspect(self.evm.context.evm.env.as_ref(), hash) */
-        {
+        let should_inspect = self
+            .evm
+            .as_ref()
+            .unwrap()
+            .context
+            .external
+            .should_inspect(self.evm.as_ref().unwrap().context.evm.env.as_ref(), hash);
+        let out = if should_inspect {
             // execution with inspector.
-            let evm = self
-                .evm
-                .modify()
-                .reset_handler_with_external_context(self.stack)
-                .append_handler_register(inspector_handle_register)
-                .build();
+            let evm = self.evm.take().unwrap();
+            let mut evm = evm.modify().append_handler_register(inspector_handle_register).build();
             // TODO add optimism handler register.
-            let output = self.evm.transact();
+            let output = evm.transact();
             tracing::trace!(
                 target: "evm",
-                ?hash, ?output, ?transaction, env = ?self.evm.context.evm.env,
+                ?hash, ?output, ?transaction, env = ?self.evm.as_mut().unwrap().context.evm.env,
                 "Executed transaction"
             );
 
+            //let context = evm.into_context();
+
             // TODO add optimism handler
-            self.evm = evm.modify().reset_handler_with_external_context(()).build();
+            self.evm = Some(evm.modify().reset_handler().build());
             output
         } else {
             // main execution.
-            self.evm.transact()
+            self.evm.as_mut().unwrap().transact()
         };
-        out.map_err(|e| BlockValidationError::EVM { hash, error: e.into() }.into())
+        out.map_err(move |e| BlockValidationError::EVM { hash, error: e.into() }.into())
     }
 
     /// Execute the block, verify gas usage and apply post-block state changes.
@@ -304,7 +317,7 @@ where
                 gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
                 gas_spent_by_tx: receipts.gas_spent_by_tx()?,
             }
-            .into())
+            .into());
         }
         let time = Instant::now();
         self.apply_post_execution_state_change(block, total_difficulty)?;
@@ -315,8 +328,8 @@ where
             !self
                 .prune_modes
                 .account_history
-                .map_or(false, |mode| mode.should_prune(block.number, tip)) &&
-                !self
+                .map_or(false, |mode| mode.should_prune(block.number, tip))
+                && !self
                     .prune_modes
                     .storage_history
                     .map_or(false, |mode| mode.should_prune(block.number, tip))
@@ -363,7 +376,7 @@ where
             self.prune_modes.receipts.map_or(false, |mode| mode.should_prune(block_number, tip))
         {
             receipts.clear();
-            return Ok(())
+            return Ok(());
         }
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
@@ -371,7 +384,7 @@ where
         let prunable_receipts =
             PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(block_number, tip);
         if !prunable_receipts {
-            return Ok(())
+            return Ok(());
         }
 
         let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
@@ -432,7 +445,7 @@ where
                 verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
             {
                 debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
-                return Err(error)
+                return Err(error);
             };
             self.stats.receipt_root_duration += time.elapsed();
         }
@@ -449,7 +462,7 @@ where
 
         // perf: do not execute empty blocks
         if block.body.is_empty() {
-            return Ok((Vec::new(), 0))
+            return Ok((Vec::new(), 0));
         }
 
         let mut cumulative_gas_used = 0;
@@ -464,7 +477,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into())
+                .into());
             }
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, *sender)?;
@@ -491,7 +504,7 @@ where
                 success: result.is_success(),
                 cumulative_gas_used,
                 // convert to reth log
-                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
+                logs: result.into_logs().into_iter().map(Into::into).collect(),
             });
         }
 
@@ -501,7 +514,7 @@ where
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
         let receipts = std::mem::take(&mut self.receipts);
         BundleStateWithReceipts::new(
-            self.evm.context.evm.db.take_bundle(),
+            self.evm.as_mut().unwrap().context.evm.db.take_bundle(),
             receipts,
             self.first_block.unwrap_or_default(),
         )
@@ -512,7 +525,7 @@ where
     }
 
     fn size_hint(&self) -> Option<usize> {
-        Some(self.evm.context.evm.db.bundle_size_hint())
+        Some(self.evm.as_ref().unwrap().context.evm.db.bundle_size_hint())
     }
 }
 
@@ -550,7 +563,7 @@ pub fn verify_receipt<'a>(
         return Err(BlockValidationError::ReceiptRootDiff(
             GotExpected { got: receipts_root, expected: expected_receipts_root }.into(),
         )
-        .into())
+        .into());
     }
 
     // Create header log bloom.
@@ -559,7 +572,7 @@ pub fn verify_receipt<'a>(
         return Err(BlockValidationError::BloomLogDiff(
             GotExpected { got: logs_bloom, expected: expected_logs_bloom }.into(),
         )
-        .into())
+        .into());
     }
 
     Ok(())
@@ -798,7 +811,7 @@ mod tests {
         executor.init_env(&header, U256::ZERO);
 
         // get the env
-        let previous_env = executor.evm.env.clone();
+        let previous_env = executor.evm.as_ref().unwrap().context.evm.env.clone();
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
@@ -819,7 +832,7 @@ mod tests {
             );
 
         // ensure that the env has not changed
-        assert_eq!(executor.evm.env, previous_env);
+        assert_eq!(executor.evm.unwrap().context.evm.env, previous_env);
     }
 
     #[test]
@@ -966,7 +979,7 @@ mod tests {
 
         // there is no system contract call so there should be NO STORAGE CHANGES
         // this means we'll check the transition state
-        let state = executor.evm.db().unwrap();
+        let state = executor.evm.unwrap().context.evm.db;
         let transition_state = state
             .transition_state
             .clone()
@@ -1020,7 +1033,10 @@ mod tests {
         executor.init_env(&header, U256::ZERO);
 
         // ensure that the env is configured with a base fee
-        assert_eq!(executor.evm.env.block.basefee, U256::from(u64::MAX));
+        assert_eq!(
+            executor.evm.as_ref().unwrap().context.evm.env.block.basefee,
+            U256::from(u64::MAX)
+        );
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor

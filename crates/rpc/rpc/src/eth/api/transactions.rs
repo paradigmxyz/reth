@@ -187,7 +187,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
-        F: FnOnce(StateCacheDB, Env) -> EthResult<R> + Send + 'static,
+        F: FnOnce(StateCacheDB, Box<Env>) -> EthResult<R> + Send + 'static,
         R: Send + 'static;
 
     /// Executes the call request at the given [BlockId].

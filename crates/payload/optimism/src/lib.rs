@@ -22,7 +22,7 @@ mod builder {
     use reth_primitives::{
         constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
         proofs,
-        revm::{compat::into_reth_log, env::tx_env_with_recovered},
+        revm::env::tx_env_with_recovered,
         Block, Hardfork, Header, IntoRecoveredTransaction, Receipt, Receipts,
         EMPTY_OMMER_ROOT_HASH, U256,
     };
@@ -335,7 +335,7 @@ mod builder {
                 tx_type: sequencer_tx.tx_type(),
                 success: result.is_success(),
                 cumulative_gas_used,
-                logs: result.logs().into_iter().map(into_reth_log).collect(),
+                logs: result.logs().into_iter().map(Into::into).collect(),
                 deposit_nonce: depositor.map(|account| account.nonce),
                 // The deposit receipt version was introduced in Canyon to indicate an update to how
                 // receipt hashes should be computed when set. The state transition process
@@ -420,7 +420,7 @@ mod builder {
                     tx_type: tx.tx_type(),
                     success: result.is_success(),
                     cumulative_gas_used,
-                    logs: result.logs().into_iter().map(into_reth_log).collect(),
+                    logs: result.logs().into_iter().map(Into::into).collect(),
                     deposit_nonce: None,
                     deposit_receipt_version: None,
                 }));

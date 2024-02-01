@@ -14,11 +14,6 @@ pub fn is_log_equal(revm_log: &Log, reth_log: &crate::Log) -> bool {
         revm_log.topics() == reth_log.topics
 }
 
-/// Converts a Revm `Log` into a Reth `Log`.
-pub fn into_reth_log(log: Log) -> RethLog {
-    RethLog { address: log.address, topics: log.topics().to_vec(), data: log.data.data }
-}
-
 /// Converts a Revm [`AccountInfo`] into a Reth [`Account`].
 ///
 /// Sets `bytecode_hash` to `None` if `code_hash` is [`KECCAK_EMPTY`].

@@ -17,9 +17,10 @@ use reth_rpc_types::{
 use revm::primitives::{Bytes, OptimismFields};
 use revm::{
     db::CacheDB,
-    precompile::{Precompiles, SpecId as PrecompilesSpecId},
+    inspector_handle_register,
+    precompile::{PrecompileSpecId, Precompiles},
     primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId, TransactTo, TxEnv},
-    Database, Inspector,
+    Database, GetInspector, Inspector,
 };
 use revm_primitives::{
     db::{DatabaseCommit, DatabaseRef},
@@ -116,33 +117,40 @@ impl FillableTransaction for TransactionSigned {
 /// Returns the addresses of the precompiles corresponding to the SpecId.
 #[inline]
 pub(crate) fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Address> {
-    let spec = PrecompilesSpecId::from_spec_id(spec_id);
+    let spec = PrecompileSpecId::from_spec_id(spec_id);
     Precompiles::new(spec).addresses().into_iter().copied().map(Address::from)
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.
-pub(crate) fn transact<DB>(db: DB, env: Env) -> EthResult<(ResultAndState, Env)>
+pub(crate) fn transact<DB>(db: DB, env: Box<Env>) -> EthResult<(ResultAndState, Box<Env>)>
 where
     DB: Database,
     <DB as Database>::Error: Into<EthApiError>,
 {
-    let mut evm = revm::EVM::with_env(env);
-    evm.database(db);
+    let mut evm = revm::Evm::builder().modify_env(|e| *e = env).with_db(db).build();
     let res = evm.transact()?;
-    Ok((res, evm.env))
+    Ok((res, evm.context.evm.env))
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.
-pub(crate) fn inspect<DB, I>(db: DB, env: Env, inspector: I) -> EthResult<(ResultAndState, Env)>
+pub(crate) fn inspect<DB, I>(
+    db: DB,
+    env: Box<Env>,
+    inspector: I,
+) -> EthResult<(ResultAndState, Box<Env>)>
 where
     DB: Database,
     <DB as Database>::Error: Into<EthApiError>,
-    I: Inspector<DB>,
+    I: GetInspector<'static, DB>,
 {
-    let mut evm = revm::EVM::with_env(env);
-    evm.database(db);
-    let res = evm.inspect(inspector)?;
-    Ok((res, evm.env))
+    let mut evm = revm::Evm::builder()
+        .modify_env(|e| *e = env)
+        .with_db(db)
+        .with_external_context(inspector)
+        .append_handler_register(inspector_handle_register)
+        .build();
+    let res = evm.transact()?;
+    Ok((res, evm.into_context().evm.env))
 }
 
 /// Same as [inspect] but also returns the database again.
@@ -151,19 +159,22 @@ where
 /// this is still useful if there are certain trait bounds on the Inspector's database generic type
 pub(crate) fn inspect_and_return_db<DB, I>(
     db: DB,
-    env: Env,
+    env: Box<Env>,
     inspector: I,
-) -> EthResult<(ResultAndState, Env, DB)>
+) -> EthResult<(ResultAndState, Box<Env>, DB)>
 where
     DB: Database,
     <DB as Database>::Error: Into<EthApiError>,
-    I: Inspector<DB>,
+    I: GetInspector<'static, DB>,
 {
-    let mut evm = revm::EVM::with_env(env);
-    evm.database(db);
-    let res = evm.inspect(inspector)?;
-    let db = evm.take_db();
-    Ok((res, evm.env, db))
+    let mut evm = revm::Evm::builder()
+        .modify_env(|e| *e = env)
+        .with_external_context(inspector)
+        .with_db(db)
+        .build();
+    let res = evm.transact()?;
+    let context = evm.into_context();
+    Ok((res, context.evm.env, context.evm.db))
 }
 
 /// Replays all the transactions until the target transaction is found.
@@ -186,19 +197,17 @@ where
     I: IntoIterator<Item = Tx>,
     Tx: FillableTransaction,
 {
-    let env = Env { cfg, block: block_env, tx: TxEnv::default() };
-    let mut evm = revm::EVM::with_env(env);
-    evm.database(db);
+    let env = Box::new(Env { cfg, block: block_env, tx: TxEnv::default() });
+    let mut evm = revm::Evm::builder().modify_env(|e| *e = env).with_db(db).build();
     let mut index = 0;
     for tx in transactions.into_iter() {
         if tx.hash() == target_tx_hash {
             // reached the target transaction
-            break
+            break;
         }
 
-        tx.try_fill_tx_env(&mut evm.env.tx)?;
-        let res = evm.transact()?;
-        evm.db.as_mut().expect("is set").commit(res.state);
+        tx.try_fill_tx_env(&mut evm.context.evm.env.tx)?;
+        evm.transact_commit()?;
         index += 1;
     }
     Ok(index)
@@ -295,7 +304,7 @@ pub(crate) fn build_call_evm_env(
 pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthResult<TxEnv> {
     // Ensure that if versioned hashes are set, they're not empty
     if request.has_empty_blob_hashes() {
-        return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
+        return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into());
     }
 
     let CallRequest {
@@ -443,7 +452,7 @@ impl CallFees {
                     return Err(
                         // `max_priority_fee_per_gas` is greater than the `max_fee_per_gas`
                         RpcInvalidTransactionError::TipAboveFeeCap.into(),
-                    )
+                    );
                 }
             }
             Ok(())
@@ -480,7 +489,7 @@ impl CallFees {
                 // Ensure blob_hashes are present
                 if !has_blob_hashes {
                     // Blob transaction but no blob hashes
-                    return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
+                    return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into());
                 }
 
                 Ok(CallFees {
