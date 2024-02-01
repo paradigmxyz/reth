@@ -402,7 +402,8 @@ where
                 if peer_idx > max_num_full || full_transactions.is_empty() {
                     // enforce tx soft limit per message for the (unlikely) event the number of
                     // hashes exceeds it
-                    new_pooled_hashes.truncate(NEW_POOLED_TRANSACTIONS_BROADCAST_PACKET_HASHES_COUNT_SOFT_LIMIT);
+                    new_pooled_hashes
+                        .truncate(NEW_POOLED_TRANSACTIONS_BROADCAST_PACKET_HASHES_COUNT_SOFT_LIMIT);
 
                     for hash in new_pooled_hashes.iter_hashes().copied() {
                         propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
@@ -925,8 +926,9 @@ where
 
                     let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
 
-                    let pooled_txs =
-                        self.pool.pooled_transactions_max(NEW_POOLED_TRANSACTIONS_BROADCAST_PACKET_HASHES_COUNT_SOFT_LIMIT);
+                    let pooled_txs = self.pool.pooled_transactions_max(
+                        NEW_POOLED_TRANSACTIONS_BROADCAST_PACKET_HASHES_COUNT_SOFT_LIMIT,
+                    );
                     if pooled_txs.is_empty() {
                         // do not send a message if there are no transactions in the pool
                         return

@@ -17,7 +17,8 @@ use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError}
 use tracing::{debug, trace};
 
 use super::{
-    AnnouncementFilter, Peer, PooledTransactions, POOLED_TRANSACTIONS_RPC_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
+    AnnouncementFilter, Peer, PooledTransactions,
+    POOLED_TRANSACTIONS_RPC_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
 };
 
 /// Maximum concurrent [`GetPooledTxRequest`]s to allow per peer.
@@ -832,12 +833,13 @@ mod test {
         let eth68_hashes_sizes = [
             POOLED_TRANSACTIONS_RPC_RESPONSE_SOFT_LIMIT_BYTE_SIZE - 4,
             POOLED_TRANSACTIONS_RPC_RESPONSE_SOFT_LIMIT_BYTE_SIZE, // this one will not fit
-            2,                                                 // this one will fit
-            3,                                                 // but now this one won't
-            2,                                                 /* this one will, no more txns
-                                                                * will
-                                                                * fit
-                                                                * after this */
+            2,                                                     // this one will fit
+            3,                                                     // but now this one won't
+            2,                                                     /* this one will, no more
+                                                                    * txns
+                                                                    * will
+                                                                    * fit
+                                                                    * after this */
             1,
         ];
 
