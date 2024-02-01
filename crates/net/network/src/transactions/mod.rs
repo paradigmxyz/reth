@@ -1131,35 +1131,35 @@ where
             this.update_request_metrics();
 
             // Advance all imports
-            if let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
-                let import_res = match import_res {
-                    Ok(res) => res,
+            if let Poll::Ready(Some(batch_import_res)) = this.pool_imports.poll_next_unpin(cx) {
+                match batch_import_res {
+                    Ok(single_import_results) => {
+                        for res in single_import_results {
+                            match res {
+                                Ok(hash) => {
+                                    this.on_good_import(hash);
+                                }
+                                Err(err) => {
+                                    // if we're _currently_ syncing and the transaction is bad we 
+                                    // ignore it, otherwise we penalize the peer that sent the bad
+                                    // transaction with the assumption that the peer should have
+                                    // known that this transaction is bad. (e.g. consensus
+                                    // rules)
+                                    if err.is_bad_transaction() && !this.network.is_syncing() {
+                                        debug!(target: "net::tx", ?err, "bad pool transaction import");
+                                        this.on_bad_import(err.hash);
+                                        continue
+                                    }
+                                    this.on_good_import(err.hash);
+                                }
+                            }
+                        }
+                    },
                     Err(err) => {
                         debug!(target: "net::tx", ?err, "bad pool transaction batch import");
-                        continue
-                    }
-                };
-
-                for res in import_res {
-                    match res {
-                        Ok(hash) => {
-                            this.on_good_import(hash);
-                        }
-                        Err(err) => {
-                            // if we're _currently_ syncing and the transaction is bad we ignore it,
-                            // otherwise we penalize the peer that sent the bad
-                            // transaction with the assumption that the peer should have
-                            // known that this transaction is bad. (e.g. consensus
-                            // rules)
-                            if err.is_bad_transaction() && !this.network.is_syncing() {
-                                debug!(target: "net::tx", ?err, "bad pool transaction import");
-                                this.on_bad_import(err.hash);
-                                continue
-                            }
-                            this.on_good_import(err.hash);
-                        }
                     }
                 }
+
                 some_ready = true;
             }
 
