@@ -80,11 +80,11 @@ const NEW_POOLED_TRANSACTIONS_BROADCAST_PACKET_HASHES_COUNT_SOFT_LIMIT: usize = 
 /// Soft limit for the message of full transactions in bytes.
 const FULL_TRANSACTIONS_BROADCAST_MSG_BYTE_SIZE_SOFT_LIMIT: usize = 100 * 1024;
 
-/// Soft limit for the response size of a GetPooledTransactions message (2MB) in bytes. Standard
-/// maximum response size. See specs
+/// Soft limit for the response size of a [`GetPooledTransactions`] message (128 KiB) in bytes.
+/// Standard maximum response size is 2 MiB. See specs
 ///
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
-const POOLED_TRANSACTIONS_RPC_RESPONSE_SOFT_LIMIT_BYTE_SIZE: usize = 2 * 1024 * 1024;
+const POOLED_TRANSACTIONS_RPC_RESPONSE_SOFT_LIMIT_BYTE_SIZE: usize = 128 * 1024;
 
 /// The future for inserting a function into the pool
 pub type PoolImportFuture =
