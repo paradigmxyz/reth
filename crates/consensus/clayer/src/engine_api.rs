@@ -20,6 +20,7 @@ use self::http::HttpJsonRpc;
 
 pub mod auth;
 pub mod http;
+pub mod http_blocking;
 pub mod json_structures;
 
 pub const LATEST_TAG: &str = "latest";
