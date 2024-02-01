@@ -208,16 +208,29 @@ pub(crate) struct ExecutedScenarios {
     scenarios: Vec<ExecutedScenario>,
 }
 
-#[test]
-fn test_on_chain_nonce_scenario() {
-    let config = MockSimulatorConfig {
-        num_senders: 10,
-        scenarios: vec![ScenarioType::OnchainNonce],
-        base_fee: 10,
-        tx_generator: MockTransactionDistribution::new(30, 10..100),
-    };
-    let mut simulator = MockTransactionSimulator::new(rand::thread_rng(), config);
-    let mut pool = MockPool::default();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::MockTransactionRatio;
 
-    simulator.next(&mut pool);
+    #[test]
+    fn test_on_chain_nonce_scenario() {
+        let transaction_ratio = MockTransactionRatio::new(30, 70, 0, 0);
+        let config = MockSimulatorConfig {
+            num_senders: 10,
+            scenarios: vec![ScenarioType::OnchainNonce],
+            base_fee: 10,
+            tx_generator: MockTransactionDistribution::new(
+                transaction_ratio,
+                10..100,
+                10..100,
+                100..110,
+                1..100,
+            ),
+        };
+        let mut simulator = MockTransactionSimulator::new(rand::thread_rng(), config);
+        let mut pool = MockPool::default();
+
+        simulator.next(&mut pool);
+    }
 }
