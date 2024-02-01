@@ -240,18 +240,18 @@ impl TransactionFetcher {
         surplus_hashes
     }
 
-    pub(super) fn buffer_hashes_for_retry(&mut self, hashes: Vec<TxHash>) {
+    pub(super) fn buffer_hashes_for_retry(&mut self, mut hashes: Vec<TxHash>) {
+        // It could be that the txns have been received over broadcast in the time being.
+        hashes.retain(|hash| self.unknown_hashes.get(hash).is_some());
+
         self.buffer_hashes(hashes, None)
     }
 
     /// Buffers hashes. Note: Only peers that haven't yet tried to request the hashes should be
     /// passed as `fallback_peer` parameter! Hashes that have been re-requested
     /// [`MAX_REQUEST_RETRIES_PER_TX_HASH`], are dropped.
-    pub(super) fn buffer_hashes(&mut self, mut hashes: Vec<TxHash>, fallback_peer: Option<PeerId>) {
+    pub(super) fn buffer_hashes(&mut self, hashes: Vec<TxHash>, fallback_peer: Option<PeerId>) {
         let mut max_retried_and_evicted_hashes = vec![];
-
-        // It could be that the txns have been received over broadcast in the time being.
-        hashes.retain(|hash| self.unknown_hashes.peek(hash).is_some());
 
         for hash in hashes {
             let Some((retries, peers)) = self.unknown_hashes.get(&hash) else { return };
