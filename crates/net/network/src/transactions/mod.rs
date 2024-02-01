@@ -739,7 +739,6 @@ where
             // fill the request with other buffered hashes that have been announced by the peer
             let Some(peer) = self.peers.get(&peer_id) else { return };
             let Some(hash) = hashes.first() else { return };
-            hashes.extend_from_slice(&peer.transactions);
 
             let mut eth68_size = self.transaction_fetcher.eth68_meta.get(hash).copied();
             if let Some(ref mut size) = eth68_size {
