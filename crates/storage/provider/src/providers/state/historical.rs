@@ -228,7 +228,6 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
     fn state_root(&self, state: &BundleStateWithReceipts) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(state.hash_state_slow());
-        revert_state.sort();
         revert_state.state_root(self.tx).map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -238,7 +237,6 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(state.hash_state_slow());
-        revert_state.sort();
         revert_state
             .state_root_with_updates(self.tx)
             .map_err(|err| ProviderError::Database(err.into()))
