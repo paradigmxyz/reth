@@ -88,7 +88,7 @@ where
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
                     let tx = tx_env_with_recovered(&tx);
-                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                    let env = Box::new(Env { cfg: cfg.clone(), block: block_env.clone(), tx });
                     let (result, state_changes) = this
                         .trace_transaction(
                             opts.clone(),
@@ -232,7 +232,7 @@ where
                     tx.hash,
                 )?;
 
-                let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
+                let env = Box::new(Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) });
                 this.trace_transaction(
                     opts,
                     env,
@@ -425,7 +425,7 @@ where
                     // Execute all transactions until index
                     for tx in transactions {
                         let tx = tx_env_with_recovered(&tx);
-                        let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                        let env = Box::new(Env { cfg: cfg.clone(), block: block_env.clone(), tx });
                         let (res, _) = transact(&mut db, env)?;
                         db.commit(res.state);
                     }
@@ -482,7 +482,7 @@ where
     fn trace_transaction(
         &self,
         opts: GethDebugTracingOptions,
-        env: Env,
+        env: Box<Env>,
         db: &mut SubState<StateProviderBox>,
         transaction_context: Option<TransactionContext>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {

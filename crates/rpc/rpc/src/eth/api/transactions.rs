@@ -196,7 +196,7 @@ pub trait EthTransactions: Send + Sync {
         request: CallRequest,
         at: BlockId,
         overrides: EvmOverrides,
-    ) -> EthResult<(ResultAndState, Env)>;
+    ) -> EthResult<(ResultAndState, Box<Env>)>;
 
     /// Executes the call request at the given [BlockId] on a new task and returns the result of the
     /// inspect call.
@@ -206,7 +206,7 @@ pub trait EthTransactions: Send + Sync {
         at: BlockId,
         overrides: EvmOverrides,
         inspector: I,
-    ) -> EthResult<(ResultAndState, Env)>
+    ) -> EthResult<(ResultAndState, Box<Env>)>
     where
         I: Inspector<StateCacheDB> + Send + 'static;
 
@@ -219,7 +219,7 @@ pub trait EthTransactions: Send + Sync {
     /// Caution: this is blocking
     fn trace_at<F, R>(
         &self,
-        env: Env,
+        env: Box<Env>,
         config: TracingInspectorConfig,
         at: BlockId,
         f: F,
@@ -236,7 +236,7 @@ pub trait EthTransactions: Send + Sync {
     /// configured [Env] was inspected.
     async fn spawn_trace_at_with_state<F, R>(
         &self,
-        env: Env,
+        env: Box<Env>,
         config: TracingInspectorConfig,
         at: BlockId,
         f: F,
@@ -383,7 +383,9 @@ where
         // get the parent config first
         let (cfg, mut block_env, _) = self.evm_env_at(header.parent_hash.into()).await?;
 
-        let after_merge = cfg.spec_id >= SpecId::MERGE;
+        // TODO(revm)
+        //let after_merge = cfg.spec_id >= SpecId::MERGE;
+        let after_merge = false;
         fill_block_env_with_coinbase(&mut block_env, header, after_merge, header.beneficiary);
 
         Ok((cfg, block_env))
@@ -634,7 +636,7 @@ where
         f: F,
     ) -> EthResult<R>
     where
-        F: FnOnce(StateCacheDB, Env) -> EthResult<R> + Send + 'static,
+        F: FnOnce(StateCacheDB, Box<Env>) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
@@ -664,7 +666,7 @@ where
         request: CallRequest,
         at: BlockId,
         overrides: EvmOverrides,
-    ) -> EthResult<(ResultAndState, Env)> {
+    ) -> EthResult<(ResultAndState, Box<Env>)> {
         self.spawn_with_call_at(request, at, overrides, move |mut db, env| transact(&mut db, env))
             .await
     }
@@ -675,7 +677,7 @@ where
         at: BlockId,
         overrides: EvmOverrides,
         inspector: I,
-    ) -> EthResult<(ResultAndState, Env)>
+    ) -> EthResult<(ResultAndState, Box<Env>)>
     where
         I: Inspector<StateCacheDB> + Send + 'static,
     {
@@ -685,7 +687,7 @@ where
 
     fn trace_at<F, R>(
         &self,
-        env: Env,
+        env: Box<Env>,
         config: TracingInspectorConfig,
         at: BlockId,
         f: F,
@@ -705,7 +707,7 @@ where
 
     async fn spawn_trace_at_with_state<F, R>(
         &self,
-        env: Env,
+        env: Box<Env>,
         config: TracingInspectorConfig,
         at: BlockId,
         f: F,
@@ -773,7 +775,7 @@ where
             // replay all transactions prior to the targeted transaction
             replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;
 
-            let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
+            let env = Box::new(Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) });
 
             let mut inspector = TracingInspector::new(config);
             let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
@@ -866,7 +868,7 @@ where
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
             while let Some((tx_info, tx)) = transactions.next() {
-                let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                let env = Box::new(Env { cfg: cfg.clone(), block: block_env.clone(), tx });
 
                 let mut inspector = TracingInspector::new(config);
                 let (res, _) = inspect(&mut db, env, &mut inspector)?;

@@ -139,22 +139,22 @@ pub enum OptimismEthApiError {
 impl From<EthApiError> for ErrorObject<'static> {
     fn from(error: EthApiError) -> Self {
         match error {
-            EthApiError::FailedToDecodeSignedTransaction
-            | EthApiError::InvalidTransactionSignature
-            | EthApiError::EmptyRawTransactionData
-            | EthApiError::InvalidBlockRange
-            | EthApiError::ConflictingFeeFieldsInRequest
-            | EthApiError::Signing(_)
-            | EthApiError::BothStateAndStateDiffInOverride(_)
-            | EthApiError::InvalidTracerConfig => invalid_params_rpc_err(error.to_string()),
+            EthApiError::FailedToDecodeSignedTransaction |
+            EthApiError::InvalidTransactionSignature |
+            EthApiError::EmptyRawTransactionData |
+            EthApiError::InvalidBlockRange |
+            EthApiError::ConflictingFeeFieldsInRequest |
+            EthApiError::Signing(_) |
+            EthApiError::BothStateAndStateDiffInOverride(_) |
+            EthApiError::InvalidTracerConfig => invalid_params_rpc_err(error.to_string()),
             EthApiError::InvalidTransaction(err) => err.into(),
             EthApiError::PoolError(err) => err.into(),
-            EthApiError::PrevrandaoNotSet
-            | EthApiError::ExcessBlobGasNotSet
-            | EthApiError::InvalidBlockData(_)
-            | EthApiError::Internal(_)
-            | EthApiError::TransactionNotFound
-            | EthApiError::EvmCustom(_) => internal_rpc_err(error.to_string()),
+            EthApiError::PrevrandaoNotSet |
+            EthApiError::ExcessBlobGasNotSet |
+            EthApiError::InvalidBlockData(_) |
+            EthApiError::Internal(_) |
+            EthApiError::TransactionNotFound |
+            EthApiError::EvmCustom(_) => internal_rpc_err(error.to_string()),
             EthApiError::UnknownBlockNumber | EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
@@ -175,9 +175,9 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::Optimism(err) => match err {
                 OptimismEthApiError::HyperError(err) => internal_rpc_err(err.to_string()),
                 OptimismEthApiError::HttpError(err) => internal_rpc_err(err.to_string()),
-                OptimismEthApiError::InvalidSequencerTransaction
-                | OptimismEthApiError::L1BlockFeeError
-                | OptimismEthApiError::L1BlockGasError => internal_rpc_err(err.to_string()),
+                OptimismEthApiError::InvalidSequencerTransaction |
+                OptimismEthApiError::L1BlockFeeError |
+                OptimismEthApiError::L1BlockGasError => internal_rpc_err(err.to_string()),
             },
         }
     }
@@ -212,12 +212,12 @@ impl From<reth_interfaces::provider::ProviderError> for EthApiError {
     fn from(error: reth_interfaces::provider::ProviderError) -> Self {
         use reth_interfaces::provider::ProviderError;
         match error {
-            ProviderError::HeaderNotFound(_)
-            | ProviderError::BlockHashNotFound(_)
-            | ProviderError::BestBlockNotFound
-            | ProviderError::BlockNumberForTransactionIndexNotFound
-            | ProviderError::TotalDifficultyNotFound { .. }
-            | ProviderError::UnknownBlockHash(_) => EthApiError::UnknownBlockNumber,
+            ProviderError::HeaderNotFound(_) |
+            ProviderError::BlockHashNotFound(_) |
+            ProviderError::BestBlockNotFound |
+            ProviderError::BlockNumberForTransactionIndexNotFound |
+            ProviderError::TotalDifficultyNotFound { .. } |
+            ProviderError::UnknownBlockHash(_) => EthApiError::UnknownBlockNumber,
             ProviderError::FinalizedBlockNotFound | ProviderError::SafeBlockNotFound => {
                 EthApiError::UnknownSafeOrFinalizedBlock
             }
@@ -379,9 +379,9 @@ impl RpcInvalidTransactionError {
     /// Returns the rpc error code for this error.
     fn error_code(&self) -> i32 {
         match self {
-            RpcInvalidTransactionError::InvalidChainId
-            | RpcInvalidTransactionError::GasTooLow
-            | RpcInvalidTransactionError::GasTooHigh => EthRpcErrorCode::InvalidInput.code(),
+            RpcInvalidTransactionError::InvalidChainId |
+            RpcInvalidTransactionError::GasTooLow |
+            RpcInvalidTransactionError::GasTooHigh => EthRpcErrorCode::InvalidInput.code(),
             RpcInvalidTransactionError::Revert(_) => EthRpcErrorCode::ExecutionError.code(),
             _ => EthRpcErrorCode::TransactionRejected.code(),
         }
@@ -510,9 +510,9 @@ impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionErr
                 RpcInvalidTransactionError::OldLegacyChainId
             }
             InvalidTransactionError::ChainIdMismatch => RpcInvalidTransactionError::InvalidChainId,
-            InvalidTransactionError::Eip2930Disabled
-            | InvalidTransactionError::Eip1559Disabled
-            | InvalidTransactionError::Eip4844Disabled => {
+            InvalidTransactionError::Eip2930Disabled |
+            InvalidTransactionError::Eip1559Disabled |
+            InvalidTransactionError::Eip4844Disabled => {
                 RpcInvalidTransactionError::TxTypeNotSupported
             }
             InvalidTransactionError::TxTypeNotSupported => {

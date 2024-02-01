@@ -28,6 +28,7 @@ use revm::{
     primitives::{BlockEnv, CfgEnv, Env, ExecutionResult, HaltReason, TransactTo},
     DatabaseCommit,
 };
+use revm_primitives::SpecId;
 use tracing::trace;
 
 // Gas per transaction not creating a contract.
@@ -124,7 +125,7 @@ where
                 let transactions = block.into_transactions_ecrecovered().take(num_txs);
                 for tx in transactions {
                     let tx = tx_env_with_recovered(&tx);
-                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                    let env = Box::new(Env { cfg: cfg.clone(), block: block_env.clone(), tx });
                     let (res, _) = transact(&mut db, env)?;
                     db.commit(res.state);
                 }
@@ -328,7 +329,7 @@ where
                 }
                 ExecutionResult::Halt { reason, .. } => {
                     match reason {
-                        Halt::OutOfGas(_) | Halt::InvalidFEOpcode => {
+                        HaltReason::OutOfGas(_) | HaltReason::InvalidFEOpcode => {
                             // either out of gas or invalid opcode can be thrown dynamically if
                             // gasLeft is too low, so we treat this as `out of gas`, we know this
                             // call succeeds with a higher gaslimit. common usage of invalid opcode in openzeppelin <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/94697be8a3f0dfcd95dfb13ffbd39b5973f5c65d/contracts/metatx/ERC2771Forwarder.sol#L360-L367>
@@ -401,13 +402,15 @@ where
         // can consume the list since we're not using the request anymore
         let initial = request.access_list.take().unwrap_or_default();
 
-        let precompiles = get_precompiles(env.cfg.spec_id);
+        // TODO(revm) SpecId
+        //let precompiles = get_precompiles(env.cfg.spec_id);
+        let precompiles = get_precompiles(SpecId::BERLIN);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
         let (result, env) = inspect(&mut db, env, &mut inspector)?;
 
         match result.result {
             ExecutionResult::Halt { reason, .. } => Err(match reason {
-                Halt::NonceOverflow => RpcInvalidTransactionError::NonceMaxValue,
+                HaltReason::NonceOverflow => RpcInvalidTransactionError::NonceMaxValue,
                 halt => RpcInvalidTransactionError::EvmHalt(halt),
             }),
             ExecutionResult::Revert { output, .. } => {

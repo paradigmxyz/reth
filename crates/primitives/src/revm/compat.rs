@@ -8,7 +8,7 @@ use revm::{
 };
 
 /// Check equality between Revm and Reth `Log`s.
-pub fn is_log_equal(revm_log: &Log, reth_log: &crate::Log) -> bool {
+pub fn is_log_equal(revm_log: &Log, reth_log: &RethLog) -> bool {
     revm_log.address == reth_log.address &&
         revm_log.data.data == reth_log.data &&
         revm_log.topics() == reth_log.topics
