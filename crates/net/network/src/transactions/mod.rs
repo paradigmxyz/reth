@@ -1129,7 +1129,6 @@ where
 
             // try drain buffered transactions
             this.request_buffered_hashes();
-
             this.update_request_metrics();
 
             // Advance all imports
