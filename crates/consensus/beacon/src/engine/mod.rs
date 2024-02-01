@@ -1894,7 +1894,7 @@ mod tests {
     use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use reth_rpc_types_compat::engine::payload::try_block_to_payload_v1;
     use reth_stages::{ExecOutput, PipelineError, StageError};
-    use std::{collections::VecDeque, env::temp_dir, sync::Arc, time::Duration};
+    use std::{collections::VecDeque, sync::Arc, time::Duration};
     use tokio::sync::oneshot::error::TryRecvError;
 
     // Pipeline error is propagated.
@@ -2066,7 +2066,8 @@ mod tests {
         chain: Arc<ChainSpec>,
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {
-        let factory = ProviderFactory::new(db, chain).with_snapshots(temp_dir()).unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let factory = ProviderFactory::new(db, chain).with_snapshots(temp_dir.into_path()).unwrap();
         let provider = factory.provider_rw().unwrap();
         blocks
             .try_for_each(|b| {
