@@ -214,7 +214,7 @@ fn test_on_chain_nonce_scenario() {
         num_senders: 10,
         scenarios: vec![ScenarioType::OnchainNonce],
         base_fee: 10,
-        tx_generator: MockTransactionDistribution::new(30, 10..100),
+        tx_generator: MockTransactionDistribution::new(30, 10..100, 10..100, 100..110, 1..100),
     };
     let mut simulator = MockTransactionSimulator::new(rand::thread_rng(), config);
     let mut pool = MockPool::default();

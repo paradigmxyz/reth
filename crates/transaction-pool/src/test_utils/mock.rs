@@ -1175,19 +1175,41 @@ pub struct MockTransactionDistribution {
     legacy_ratio: WeightedIndex<u32>,
     /// generates the gas limit
     gas_limit_range: Uniform<u64>,
+    /// generates the priority fee, if applicable
+    priority_fee_range: Uniform<u128>,
+    /// generates the max fee, if applicable
+    max_fee_range: Uniform<u128>,
+    /// generates the max fee per blob gas, if applicable
+    max_fee_blob_range: Uniform<u128>,
 }
 
 impl MockTransactionDistribution {
     /// Creates a new generator distribution.
     ///
+    /// Expects the bottom of the `priority_fee_range` to be greater than the top of the
+    /// `max_fee_range`.
+    ///
     /// Expects legacy tx in full pct: `30u32` is `30%`.
-    pub fn new(legacy_pct: u32, gas_limit_range: Range<u64>) -> Self {
+    pub fn new(
+        legacy_pct: u32,
+        gas_limit_range: Range<u64>,
+        priority_fee_range: Range<u128>,
+        max_fee_range: Range<u128>,
+        max_fee_blob_range: Range<u128>,
+    ) -> Self {
+        assert!(
+            max_fee_range.start <= priority_fee_range.end,
+            "max_fee_range should be strictly below the priority fee range"
+        );
         assert!(legacy_pct <= 100, "expect pct");
 
         let eip_1559 = 100 - legacy_pct;
         Self {
             legacy_ratio: WeightedIndex::new([eip_1559, legacy_pct]).unwrap(),
             gas_limit_range: gas_limit_range.into(),
+            priority_fee_range: priority_fee_range.into(),
+            max_fee_range: max_fee_range.into(),
+            max_fee_blob_range: max_fee_blob_range.into(),
         }
     }
 
@@ -1195,6 +1217,8 @@ impl MockTransactionDistribution {
     pub fn tx(&self, nonce: u64, rng: &mut impl rand::Rng) -> MockTransaction {
         let tx = if self.legacy_ratio.sample(rng) == 0 {
             MockTransaction::eip1559()
+                .with_priority_fee(self.priority_fee_range.sample(rng))
+                .with_max_fee(self.max_fee_range.sample(rng))
         } else {
             MockTransaction::legacy()
         };
