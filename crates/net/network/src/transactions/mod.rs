@@ -1202,11 +1202,15 @@ struct FullTransactionsBuilder {
 // === impl FullTransactionsBuilder ===
 
 impl FullTransactionsBuilder {
-    /// Append a transaction to the list if it doesn't exceed the maximum target size.
+    /// Append a transaction to the list if the total message bytes size doesn't exceed the soft
+    /// maximum target byte size. The limit is soft, meaning if one single transaction goes over
+    /// the limit, it will be sent in its own mempool message.
     fn push(&mut self, transaction: &PropagateTransaction) {
         let new_size = self.total_size + transaction.size;
-        if new_size > SOFT_LIMIT_BYTE_SIZE_FULL_TRANSACTIONS_MEMPOOL_MESSAGE {
-            return
+        if self.total_size > 0 {
+            if new_size > SOFT_LIMIT_BYTE_SIZE_FULL_TRANSACTIONS_MEMPOOL_MESSAGE {
+                return
+            }
         }
 
         self.total_size = new_size;
