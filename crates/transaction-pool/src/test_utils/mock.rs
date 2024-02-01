@@ -1168,11 +1168,60 @@ impl TransactionOrdering for MockOrdering {
     }
 }
 
+/// A ratio of each of the configured transaction types. The percentages sum up to 100, this is
+/// enforced in [MockTransactionRatio::new] by an assert.
+#[derive(Debug, Clone)]
+pub struct MockTransactionRatio {
+    /// Percent of transactions that are legacy transactions
+    pub legacy_pct: u32,
+    /// Percent of transactions that are access list transactions
+    pub access_list_pct: u32,
+    /// Percent of transactions that are EIP-1559 transactions
+    pub dynamic_fee_pct: u32,
+    /// Percent of transactions that are EIP-4844 transactions
+    pub blob_pct: u32,
+}
+
+impl MockTransactionRatio {
+    /// Creates a new [MockTransactionRatio] with the given percentages.
+    ///
+    /// Each argument is treated as a full percent, for example `30u32` is `30%`.
+    ///
+    /// The percentages must sum up to 100 exactly, or this method will panic.
+    pub fn new(legacy_pct: u32, access_list_pct: u32, dynamic_fee_pct: u32, blob_pct: u32) -> Self {
+        let total = legacy_pct + access_list_pct + dynamic_fee_pct + blob_pct;
+        assert_eq!(
+            total,
+            100,
+            "percentages must sum up to 100, instead got legacy: {legacy_pct}, access_list: {access_list_pct}, dynamic_fee: {dynamic_fee_pct}, blob: {blob_pct}, total: {total}",
+        );
+
+        Self { legacy_pct, access_list_pct, dynamic_fee_pct, blob_pct }
+    }
+
+    /// Create a [WeightedIndex] from this transaction ratio.
+    ///
+    /// This index will sample in the following order:
+    /// * Legacy transaction => 0
+    /// * EIP-2930 transaction => 1
+    /// * EIP-1559 transaction => 2
+    /// * EIP-4844 transaction => 3
+    pub fn weighted_index(&self) -> WeightedIndex<u32> {
+        WeightedIndex::new([
+            self.legacy_pct,
+            self.access_list_pct,
+            self.dynamic_fee_pct,
+            self.blob_pct,
+        ])
+        .unwrap()
+    }
+}
+
 /// A configured distribution that can generate transactions
 #[derive(Debug)]
 pub struct MockTransactionDistribution {
-    /// legacy to EIP-1559 ration
-    legacy_ratio: WeightedIndex<u32>,
+    /// ratio of each transaction type to generate
+    transaction_ratio: WeightedIndex<u32>,
     /// generates the gas limit
     gas_limit_range: Uniform<u64>,
     /// generates the priority fee, if applicable
@@ -1188,10 +1237,8 @@ impl MockTransactionDistribution {
     ///
     /// Expects the bottom of the `priority_fee_range` to be greater than the top of the
     /// `max_fee_range`.
-    ///
-    /// Expects legacy tx in full pct: `30u32` is `30%`.
     pub fn new(
-        legacy_pct: u32,
+        transaction_ratio: MockTransactionRatio,
         gas_limit_range: Range<u64>,
         priority_fee_range: Range<u128>,
         max_fee_range: Range<u128>,
@@ -1201,11 +1248,9 @@ impl MockTransactionDistribution {
             max_fee_range.start <= priority_fee_range.end,
             "max_fee_range should be strictly below the priority fee range"
         );
-        assert!(legacy_pct <= 100, "expect pct");
 
-        let eip_1559 = 100 - legacy_pct;
         Self {
-            legacy_ratio: WeightedIndex::new([eip_1559, legacy_pct]).unwrap(),
+            transaction_ratio: transaction_ratio.weighted_index(),
             gas_limit_range: gas_limit_range.into(),
             priority_fee_range: priority_fee_range.into(),
             max_fee_range: max_fee_range.into(),
@@ -1215,13 +1260,24 @@ impl MockTransactionDistribution {
 
     /// Generates a new transaction
     pub fn tx(&self, nonce: u64, rng: &mut impl rand::Rng) -> MockTransaction {
-        let tx = if self.legacy_ratio.sample(rng) == 0 {
+        let transaction_sample = self.transaction_ratio.sample(rng);
+        let tx = if transaction_sample == 0 {
+            MockTransaction::legacy()
+        } else if transaction_sample == 1 {
+            MockTransaction::eip2930()
+        } else if transaction_sample == 2 {
             MockTransaction::eip1559()
                 .with_priority_fee(self.priority_fee_range.sample(rng))
                 .with_max_fee(self.max_fee_range.sample(rng))
+        } else if transaction_sample == 3 {
+            MockTransaction::eip4844()
+                .with_priority_fee(self.priority_fee_range.sample(rng))
+                .with_max_fee(self.max_fee_range.sample(rng))
+                .with_blob_fee(self.max_fee_blob_range.sample(rng))
         } else {
-            MockTransaction::legacy()
+            unreachable!("unknown transaction type returned by the weighted index")
         };
+
         tx.with_nonce(nonce).with_gas_limit(self.gas_limit_range.sample(rng))
     }
 }
