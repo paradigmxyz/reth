@@ -4,45 +4,57 @@ use crate::{
     error::{NetworkError, ServiceKind},
     manager::DiscoveredEvent,
 };
+use discv5::enr::Enr;
 use futures::StreamExt;
-use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry};
+use parking_lot::RwLock;
+use reth_discv4::{
+    DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry, HandleDiscovery, NodeFromExternalSource,
+    PublicKey, SecretKey,
+};
+use reth_discv5::{self, DiscoveryUpdateV5, Discv5WithDiscv4Downgrade, MergedUpdateStream};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
+    Update,
 };
 use reth_primitives::{ForkId, NodeRecord, PeerId};
-use secp256k1::SecretKey;
+use smallvec::{smallvec, SmallVec};
+use tokio::{
+    sync::{mpsc, watch},
+    task::JoinHandle,
+};
+use tokio_stream::{wrappers::ReceiverStream, Stream};
+use tracing::info;
+
 use std::{
-    collections::{hash_map::Entry, HashMap, VecDeque},
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    fmt,
     net::{IpAddr, SocketAddr},
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
-use tokio::{sync::mpsc, task::JoinHandle};
-use tokio_stream::{wrappers::ReceiverStream, Stream};
 
 /// An abstraction over the configured discovery protocol.
 ///
 /// Listens for new discovered nodes and emits events for discovered nodes and their
 /// address.
-#[derive(Debug)]
-pub struct Discovery {
+pub struct Discovery<D = Discv4, S = ReceiverStream<DiscoveryUpdate>, N = NodeRecord> {
     /// All nodes discovered via discovery protocol.
     ///
     /// These nodes can be ephemeral and are updated via the discovery protocol.
     discovered_nodes: HashMap<PeerId, SocketAddr>,
     /// Local ENR of the discovery service.
     local_enr: NodeRecord,
-    /// Handler to interact with the Discovery v4 service
-    discv4: Option<Discv4>,
-    /// All KAD table updates from the discv4 service.
-    discv4_updates: Option<ReceiverStream<DiscoveryUpdate>>,
+    /// Handler to interact with the Discovery service
+    disc: Option<D>,
+    /// All KAD table updates from the discovery service.
+    disc_updates: Option<S>,
     /// The handle to the spawned discv4 service
-    _discv4_service: Option<JoinHandle<()>>,
+    _disc_service: Option<JoinHandle<()>>,
     /// Handler to interact with the DNS discovery service
-    _dns_discovery: Option<DnsDiscoveryHandle>,
+    _dns_discovery: Option<DnsDiscoveryHandle<N>>,
     /// Updates from the DNS discovery service.
-    dns_discovery_updates: Option<ReceiverStream<DnsNodeRecordUpdate>>,
+    dns_discovery_updates: Option<ReceiverStream<DnsNodeRecordUpdate<N>>>,
     /// The handle to the spawned DNS discovery service
     _dns_disc_service: Option<JoinHandle<()>>,
     /// Events buffered until polled.
@@ -51,60 +63,10 @@ pub struct Discovery {
     discovery_listeners: Vec<mpsc::UnboundedSender<DiscoveryEvent>>,
 }
 
-impl Discovery {
-    /// Spawns the discovery service.
-    ///
-    /// This will spawn the [`reth_discv4::Discv4Service`] onto a new task and establish a listener
-    /// channel to receive all discovered nodes.
-    pub async fn new(
-        discovery_addr: SocketAddr,
-        sk: SecretKey,
-        discv4_config: Option<Discv4Config>,
-        dns_discovery_config: Option<DnsDiscoveryConfig>,
-    ) -> Result<Self, NetworkError> {
-        // setup discv4
-        let local_enr = NodeRecord::from_secret_key(discovery_addr, &sk);
-        let (discv4, discv4_updates, _discv4_service) = if let Some(disc_config) = discv4_config {
-            let (discv4, mut discv4_service) =
-                Discv4::bind(discovery_addr, local_enr, sk, disc_config).await.map_err(|err| {
-                    NetworkError::from_io_error(err, ServiceKind::Discovery(discovery_addr))
-                })?;
-            let discv4_updates = discv4_service.update_stream();
-            // spawn the service
-            let _discv4_service = discv4_service.spawn();
-            (Some(discv4), Some(discv4_updates), Some(_discv4_service))
-        } else {
-            (None, None, None)
-        };
-
-        // setup DNS discovery
-        let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
-            if let Some(dns_config) = dns_discovery_config {
-                let (mut service, dns_disc) = DnsDiscoveryService::new_pair(
-                    Arc::new(DnsResolver::from_system_conf()?),
-                    dns_config,
-                );
-                let dns_discovery_updates = service.node_record_stream();
-                let dns_disc_service = service.spawn();
-                (Some(dns_disc), Some(dns_discovery_updates), Some(dns_disc_service))
-            } else {
-                (None, None, None)
-            };
-
-        Ok(Self {
-            discovery_listeners: Default::default(),
-            local_enr,
-            discv4,
-            discv4_updates,
-            _discv4_service,
-            discovered_nodes: Default::default(),
-            queued_events: Default::default(),
-            _dns_disc_service,
-            _dns_discovery,
-            dns_discovery_updates,
-        })
-    }
-
+impl<D, S, N> Discovery<D, S, N>
+where
+    D: HandleDiscovery,
+{
     /// Registers a listener for receiving [DiscoveryEvent] updates.
     pub(crate) fn add_listener(&mut self, tx: mpsc::UnboundedSender<DiscoveryEvent>) {
         self.discovery_listeners.push(tx);
@@ -118,23 +80,26 @@ impl Discovery {
 
     /// Updates the `eth:ForkId` field in discv4.
     pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
-        if let Some(discv4) = &self.discv4 {
+        if let Some(disc) = &self.disc {
             // use forward-compatible forkid entry
-            discv4.set_eip868_rlp("eth".as_bytes().to_vec(), EnrForkIdEntry::from(fork_id))
+            disc.encode_and_set_eip868_in_local_enr(
+                "eth".as_bytes().to_vec(),
+                EnrForkIdEntry::from(fork_id),
+            )
         }
     }
 
     /// Bans the [`IpAddr`] in the discovery service.
     pub(crate) fn ban_ip(&self, ip: IpAddr) {
-        if let Some(discv4) = &self.discv4 {
-            discv4.ban_ip(ip)
+        if let Some(disc) = &self.disc {
+            disc.ban_peer_by_ip(ip)
         }
     }
 
     /// Bans the [`PeerId`] and [`IpAddr`] in the discovery service.
     pub(crate) fn ban(&self, peer_id: PeerId, ip: IpAddr) {
-        if let Some(discv4) = &self.discv4 {
-            discv4.ban(peer_id, ip)
+        if let Some(disc) = &self.disc {
+            disc.ban_peer_by_ip_and_node_id(peer_id, ip)
         }
     }
 
@@ -143,10 +108,10 @@ impl Discovery {
         self.local_enr.id
     }
 
-    /// Add a node to the discv4 table.
-    pub(crate) fn add_discv4_node(&self, node: NodeRecord) {
-        if let Some(discv4) = &self.discv4 {
-            discv4.add_node(node);
+    /// Add a node to the discovery routing table table.
+    pub(crate) fn add_disc_node(&self, node: NodeFromExternalSource) {
+        if let Some(disc) = &self.disc {
+            _ = disc.add_node_to_routing_table(node);
         }
     }
 
@@ -186,46 +151,443 @@ impl Discovery {
             }
         }
     }
+}
 
-    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<DiscoveryEvent> {
-        loop {
-            // Drain all buffered events first
-            if let Some(event) = self.queued_events.pop_front() {
-                self.notify_listeners(&event);
-                return Poll::Ready(event)
-            }
+impl Discovery {
+    /// Spawns the discovery service.
+    ///
+    /// This will spawn the [`reth_discv4::Discv4Service`] onto a new task and establish a listener
+    /// channel to receive all discovered nodes.
+    pub async fn new(
+        discovery_addr: SocketAddr,
+        sk: SecretKey,
+        discv4_config: Option<Discv4Config>,
+        dns_discovery_config: Option<DnsDiscoveryConfig>,
+    ) -> Result<Self, NetworkError> {
+        // setup discv4
+        let local_enr = NodeRecord::from_secret_key(discovery_addr, &sk);
+        let (discv4, discv4_updates, _discv4_service) = if let Some(disc_config) = discv4_config {
+            let (discv4, mut discv4_service) =
+                Discv4::bind(discovery_addr, local_enr, sk, disc_config).await.map_err(|err| {
+                    NetworkError::from_io_error(err, ServiceKind::Discovery(discovery_addr))
+                })?;
+            let discv4_updates = discv4_service.update_stream();
+            // spawn the service
+            let _discv4_service = discv4_service.spawn();
+            (Some(discv4), Some(discv4_updates), Some(_discv4_service))
+        } else {
+            (None, None, None)
+        };
 
-            // drain the update streams
-            while let Some(Poll::Ready(Some(update))) =
-                self.discv4_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
-            {
-                self.on_discv4_update(update)
-            }
+        // setup DNS discovery
+        let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
+            if let Some(dns_config) = dns_discovery_config {
+                new_dns::<NodeRecord>(dns_config)?
+            } else {
+                (None, None, None)
+            };
 
-            while let Some(Poll::Ready(Some(update))) =
-                self.dns_discovery_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
-            {
-                self.add_discv4_node(update.node_record);
-                self.on_node_record_update(update.node_record, update.fork_id);
-            }
-
-            if self.queued_events.is_empty() {
-                return Poll::Pending
-            }
-        }
+        Ok(Self {
+            discovery_listeners: Default::default(),
+            local_enr,
+            disc: discv4,
+            disc_updates: discv4_updates,
+            _disc_service: _discv4_service,
+            discovered_nodes: Default::default(),
+            queued_events: Default::default(),
+            _dns_disc_service,
+            _dns_discovery,
+            dns_discovery_updates,
+        })
     }
 }
 
 impl Stream for Discovery {
     type Item = DiscoveryEvent;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Poll::Ready(Some(ready!(self.get_mut().poll(cx))))
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // Drain all buffered events first
+        if let Some(event) = self.queued_events.pop_front() {
+            self.notify_listeners(&event);
+            return Poll::Ready(Some(event))
+        }
+
+        // drain the update streams
+        while let Some(Poll::Ready(Some(update))) =
+            self.disc_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
+        {
+            self.on_discv4_update(update);
+        }
+
+        while let Some(Poll::Ready(Some(update))) =
+            self.dns_discovery_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
+        {
+            self.add_disc_node(NodeFromExternalSource::NodeRecord(update.node_record));
+            self.on_node_record_update(update.node_record, update.fork_id);
+        }
+
+        Poll::Pending
     }
 }
 
+impl fmt::Debug for Discovery {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug_struct = f.debug_struct("Discovery");
+
+        debug_struct.field("discovered_nodes", &self.discovered_nodes);
+        debug_struct.field("local_enr", &self.local_enr);
+        debug_struct.field("disc", &self.disc);
+        debug_struct.field("dns_discovery_updates", &self.dns_discovery_updates);
+        debug_struct.field("queued_events", &self.queued_events);
+        debug_struct.field("discovery_listeners", &self.discovery_listeners);
+
+        debug_struct.finish()
+    }
+}
+
+impl<S, N> Discovery<Discv5WithDiscv4Downgrade, S, N> {
+    fn on_discv5_update(&mut self, update: discv5::Discv5Event) -> Result<(), NetworkError> {
+        use discv5::Discv5Event::*;
+        match update {
+            Discovered(enr) => {
+                // covers DiscoveryUpdate::Added(_) and DiscoveryUpdate::DiscoveredAtCapacity(_)
+
+                // node has been discovered as part of a query. discv5::Discv5Config sets
+                // `report_discovered_peers` to true by default.
+
+                self.try_insert_enr_into_discovered_nodes(enr)?;
+            }
+            EnrAdded { .. } => {
+                // not used in discv5 codebase
+            }
+            NodeInserted { replaced, .. } => {
+                // covers DiscoveryUpdate::Added(_) and DiscoveryUpdate::Removed(_)
+
+                if let Some(node_id) = replaced {
+                    let id = reth_discv5::compressed_to_uncompressed_id(node_id).map_err(|_| {
+                        NetworkError::custom_discovery(
+                            "conversion from discv5 node id to pk failed",
+                        )
+                    })?;
+
+                    self.discovered_nodes.remove(&id);
+                };
+
+                // notify discv4 that a node has been inserted,
+                if let Some(disc) = &self.disc {
+                    disc.notify_discv4_of_kbuckets_update()
+                        .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?
+                }
+            }
+            SessionEstablished(enr, _remote_socket) => {
+                // covers DiscoveryUpdate::Added(_) and DiscoveryUpdate::DiscoveredAtCapacity(_)
+
+                // node has been discovered unrelated to a query, e.g. an incoming connection to
+                // discv5
+
+                // todo: notify discv4 also for nodes that don't make it into kbuckets? e.g. nodes
+                // behind symmetric nat
+
+                self.try_insert_enr_into_discovered_nodes(enr)?;
+            }
+            SocketUpdated(_socket_addr) => {}
+            TalkRequest(_talk_req) => {}
+        }
+
+        Ok(())
+    }
+
+    fn try_insert_enr_into_discovered_nodes(
+        &mut self,
+        enr: discv5::Enr,
+    ) -> Result<(), NetworkError> {
+        // todo: get correct ip mode for this node
+        let Some(udp_socket_ipv4) = discv5::IpMode::Ip4.get_contactable_addr(&enr) else {
+            return Ok(())
+        };
+        // todo: get port v6 with respect to ip mode of this node
+        let Some(tcp_port_ipv4) = enr.tcp4() else { return Ok(()) };
+
+        let id = reth_discv5::compressed_to_uncompressed_id(enr.node_id()).map_err(|_| {
+            NetworkError::custom_discovery("conversion from discv5 node id to pk failed")
+        })?;
+
+        let record = NodeRecord {
+            address: udp_socket_ipv4.ip(),
+            tcp_port: tcp_port_ipv4,
+            udp_port: udp_socket_ipv4.port(),
+            id,
+        };
+
+        self.on_node_record_update(record, None);
+
+        Ok(())
+    }
+}
+
+impl<S> Stream for Discovery<Discv5WithDiscv4Downgrade, S, Enr<SecretKey>>
+where
+    S: Stream<Item = DiscoveryUpdateV5> + Unpin + Send + 'static,
+{
+    type Item = DiscoveryEvent;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // Drain all buffered events first
+        if let Some(event) = self.queued_events.pop_front() {
+            self.notify_listeners(&event);
+            return Poll::Ready(Some(event))
+        }
+
+        // drain the update streams
+        while let Some(Poll::Ready(Some(update))) =
+            self.disc_updates.as_mut().map(|ref mut updates| updates.poll_next_unpin(cx))
+        {
+            match update {
+                DiscoveryUpdateV5::V4(update) => self.on_discv4_update(update),
+                DiscoveryUpdateV5::V5(update) => {
+                    if let Err(_e) = self.on_discv5_update(update) {
+                        todo!()
+                    }
+                }
+            }
+        }
+
+        while let Some(Poll::Ready(Some(update))) =
+            self.dns_discovery_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
+        {
+            self.add_disc_node(NodeFromExternalSource::Enr(update.node_record.clone()));
+            if let Ok(node_record) = update.node_record.try_into() {
+                self.on_node_record_update(node_record, update.fork_id);
+            }
+        }
+
+        Poll::Pending
+    }
+}
+
+impl<S, N> fmt::Debug for Discovery<Discv5WithDiscv4Downgrade, S, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug_struct = f.debug_struct("Discovery<Discv5>");
+
+        debug_struct.field("discovered_nodes", &self.discovered_nodes);
+        debug_struct.field("local_enr", &self.local_enr);
+        debug_struct.field("disc", &self.disc);
+        debug_struct.field("dns_discovery_updates", &"{ .. }");
+        debug_struct.field("queued_events", &self.queued_events);
+        debug_struct.field("discovery_listeners", &self.discovery_listeners);
+
+        debug_struct.finish()
+    }
+}
+
+impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
+    /// Spawns the discovery service.
+    ///
+    /// This will spawn [`discv5::Discv5`] and [`Discv4`] each onto their own new task and
+    /// establish a merged listener channel to receive all discovered nodes.
+    ///
+    /// Note: if dns discovery is configured, any nodes found by this service will be
+    pub async fn new_discv5(
+        discv4_addr: SocketAddr, // discv5 addr in config
+        sk: SecretKey,
+        disc_config: (Option<Discv4Config>, Option<discv5::Discv5Config>),
+        dns_discovery_config: Option<DnsDiscoveryConfig>,
+    ) -> Result<Self, NetworkError> {
+        let (disc, disc_updates, local_enr_discv4) = match disc_config {
+            (Some(discv4_config), Some(discv5_config)) => {
+                //
+                // 1. one port per discovery node
+                //
+                // get the discv5 addr
+                let mut discv5_addresses: SmallVec<[SocketAddr; 2]> = smallvec!();
+                use discv5::ListenConfig::*;
+                match discv5_config.listen_config {
+                    Ipv4 { ip, port } => discv5_addresses.push((ip, port).into()),
+                    Ipv6 { ip, port } => discv5_addresses.push((ip, port).into()),
+                    DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
+                        discv5_addresses.push((ipv4, ipv4_port).into());
+                        discv5_addresses.push((ipv6, ipv6_port).into());
+                    }
+                };
+
+                if discv5_addresses.iter().any(|addr| addr.port() == discv4_addr.port()) {
+                    return Err(NetworkError::custom_discovery(&format!("discv5 port and discv4 port can't be the same, discv5_addresses: {discv5_addresses:?}, discv4_addr: {discv4_addr}")))
+                }
+
+                //
+                // 2. same key for signing enr in discv4 and discv5
+                //
+                // make enr for discv4
+                let local_enr_discv4 = NodeRecord::from_secret_key(discv4_addr, &sk);
+
+                // make enr for discv5
+                let mut sk_copy = *sk.as_ref();
+                let sk_discv5_wrapper =
+                    discv5::enr::CombinedKey::secp256k1_from_bytes(&mut sk_copy)
+                        .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
+                let enr = {
+                    let mut builder = discv5::enr::EnrBuilder::new("v4");
+                    builder.ip(discv5_addresses[0].ip());
+                    builder.udp4(discv5_addresses[0].port());
+                    if let Some(ipv6) = discv5_addresses.get(1) {
+                        builder.ip(ipv6.ip());
+                        builder.udp4(ipv6.port());
+                    }
+                    // todo: add additional fields from config like ipv6 etc
+
+                    // enr v4 not to get confused with discv4, independent versioning enr and
+                    // discovery
+                    builder.build(&sk_discv5_wrapper).expect("should build enr v4")
+                };
+
+                // start the two discovery nodes
+
+                //
+                // 3. start discv5
+                //
+                let mut discv5 = discv5::Discv5::new(enr, sk_discv5_wrapper, discv5_config)
+                    .map_err(NetworkError::custom_discovery)?;
+                discv5.start().await.map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
+
+                info!("Discv5 listening on {discv5_addresses:?}");
+
+                // start discv5 updates stream
+                let discv5_updates = discv5
+                    .event_stream()
+                    .await
+                    .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
+
+                //
+                // 3. types needed for interfacing with discv4
+                //
+                // callback passed to discv4 will only takes read lock on discv5 handle! though
+                // discv5 will blocking wait for write lock on its kbuckets
+                // internally to apply pending nodes.
+                let discv5 = Arc::new(RwLock::new(discv5));
+                let discv5_ref = discv5.clone();
+                let kbuckets_callback = move || -> Result<HashSet<PeerId>, secp256k1::Error> {
+                    let keys = discv5_ref.read().table_entries_id();
+
+                    let mut discv5_kbucket_keys = HashSet::new();
+
+                    for node_id in keys {
+                        let pk_compressed_bytes = node_id.raw();
+                        let pk = PublicKey::from_slice(&pk_compressed_bytes)?;
+                        let pk_uncompressed_bytes =
+                            PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+                        discv5_kbucket_keys.insert(pk_uncompressed_bytes);
+                    }
+
+                    Ok(discv5_kbucket_keys)
+                };
+                // channel which will tell discv4 that discv5 has updated its kbuckets
+                let (discv5_kbuckets_change_tx, discv5_kbuckets_change_rx) = watch::channel(());
+
+                //
+                // 4. start discv4 as discv5 fallback, maintains a mirror of discv5 kbuckets
+                //
+                let (discv4, mut discv4_service) = Discv4::bind_as_secondary_disc_node(
+                    discv4_addr,
+                    local_enr_discv4,
+                    sk,
+                    discv4_config,
+                    discv5_kbuckets_change_rx,
+                    kbuckets_callback,
+                )
+                .await
+                .map_err(|err| {
+                    NetworkError::from_io_error(err, ServiceKind::Discovery(discv4_addr))
+                })?;
+
+                // start an update stream
+                let discv4_updates = discv4_service.update_stream();
+
+                // spawn the service
+                let _discv4_service = discv4_service.spawn();
+
+                info!("Discv4 listening on {discv4_addr}");
+
+                //
+                // 5. merge both discovery nodes
+                //
+                // combined handle
+                let disc =
+                    Discv5WithDiscv4Downgrade::new(discv5, discv4, discv5_kbuckets_change_tx);
+
+                // combined update stream
+                let disc_updates =
+                    reth_discv5::merge_discovery_streams(discv5_updates, discv4_updates);
+
+                // discv5 and discv4 are running like usual, only that discv4 will filter out
+                // nodes already connected over discv5 identified by their public key
+                (Some(disc), Some(disc_updates), local_enr_discv4)
+            }
+            _ => {
+                // make enr for discv4 not to break existing api, possibly used in tests
+                let local_enr_discv4 = NodeRecord::from_secret_key(discv4_addr, &sk);
+                (None, None, local_enr_discv4)
+            }
+        };
+
+        // setup DNS discovery.
+        let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
+            if let Some(dns_config) = dns_discovery_config {
+                new_dns::<Enr<SecretKey>>(dns_config)?
+            } else {
+                (None, None, None)
+            };
+
+        Ok(Discovery {
+            discovery_listeners: Default::default(),
+            local_enr: local_enr_discv4,
+            disc,
+            disc_updates,
+            _disc_service: None,
+            discovered_nodes: Default::default(),
+            queued_events: Default::default(),
+            _dns_disc_service,
+            _dns_discovery,
+            dns_discovery_updates,
+        })
+    }
+}
+
+#[allow(clippy::type_complexity)]
+pub(crate) fn new_dns<N>(
+    dns_config: DnsDiscoveryConfig,
+) -> Result<
+    (
+        Option<DnsDiscoveryHandle<N>>,
+        Option<ReceiverStream<DnsNodeRecordUpdate<N>>>,
+        Option<JoinHandle<()>>,
+    ),
+    NetworkError,
+>
+where
+    N: Clone + Send + 'static,
+    DnsDiscoveryService<DnsResolver, N>: Update,
+    DnsDiscoveryService<DnsResolver, N>: Stream,
+    <DnsDiscoveryService<DnsResolver, N> as Stream>::Item: fmt::Debug,
+{
+    let (mut service, dns_disc) =
+        DnsDiscoveryService::new_pair(Arc::new(DnsResolver::from_system_conf()?), dns_config);
+    let dns_discovery_updates = service.node_record_stream();
+    let dns_disc_service = service.spawn();
+
+    Ok((Some(dns_disc), Some(dns_discovery_updates), Some(dns_disc_service)))
+}
+
+/// Events produced by the [`crate::Discovery`] manager.
+#[derive(Debug, Clone)]
+pub enum DiscoveryEvent {
+    /// Discovered a node
+    NewNode(DiscoveredEvent),
+    /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
+    EnrForkId(PeerId, ForkId),
+}
+
 #[cfg(test)]
-impl Discovery {
+impl<D, S, N> Discovery<D, S, N> {
     /// Returns a Discovery instance that does nothing and is intended for testing purposes.
     ///
     /// NOTE: This instance does nothing
@@ -241,10 +603,10 @@ impl Discovery {
                 udp_port: 0,
                 id: PeerId::random(),
             },
-            discv4: Default::default(),
-            discv4_updates: Default::default(),
+            disc: Default::default(),
+            disc_updates: Default::default(),
             queued_events: Default::default(),
-            _discv4_service: Default::default(),
+            _disc_service: Default::default(),
             _dns_discovery: None,
             dns_discovery_updates: None,
             _dns_disc_service: None,
@@ -253,16 +615,8 @@ impl Discovery {
     }
 }
 
-/// Events produced by the [`Discovery`] manager.
-#[derive(Debug, Clone)]
-pub enum DiscoveryEvent {
-    /// Discovered a node
-    NewNode(DiscoveredEvent),
-    /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
-    EnrForkId(PeerId, ForkId),
-}
-
 #[cfg(test)]
+#[cfg(not(feature = "discv5"))]
 mod tests {
     use super::*;
     use rand::thread_rng;

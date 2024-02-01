@@ -13,6 +13,7 @@ members = [
     "crates/metrics/metrics-derive/",
     "crates/net/common/",
     "crates/net/discv4/",
+    "crates/net/discv5/",
     "crates/net/dns/",
     "crates/net/downloaders/",
     "crates/net/ecies/",
@@ -122,6 +123,7 @@ reth-config = { path = "crates/config" }
 reth-consensus-common = { path = "crates/consensus/common" }
 reth-db = { path = "crates/storage/db" }
 reth-discv4 = { path = "crates/net/discv4" }
+reth-discv5 = { path = "crates/net/discv5" }
 reth-dns-discovery = { path = "crates/net/dns" }
 reth-node-ethereum = { path = "crates/node-ethereum" }
 reth-node-optimism = { path = "crates/node-optimism" }
@@ -191,8 +193,7 @@ ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
 ethers-middleware = { version = "2.0", default-features = false }
-
-discv5 = { git = "https://github.com/sigp/discv5", rev = "f289bbd4c57d499bb1bdb393af3c249600a1c662" }
+discv5 = { version = "0.3" }
 # Fork of rust-igd with ipv6 support
 igd-next = "0.14.3"
 
@@ -224,6 +225,7 @@ once_cell = "1.17"
 syn = "2.0"
 ahash = "0.8.6"
 nybbles = "0.1"
+smallvec = "1.13.1"
 
 # proc-macros
 proc-macro2 = "1.0"

@@ -65,7 +65,8 @@ pub use integer_list::IntegerList;
 pub use log::{logs_bloom, Log};
 pub use net::{
     goerli_nodes, holesky_nodes, mainnet_nodes, parse_nodes, sepolia_nodes, NodeRecord,
-    GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES, SEPOLIA_BOOTNODES,
+    NodeRecordParseError, GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES,
+    SEPOLIA_BOOTNODES,
 };
 pub use peer::{PeerId, WithPeerId};
 pub use prune::{

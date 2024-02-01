@@ -1,0 +1,34 @@
+[package]
+name = "reth-discv5"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Ethereum network discovery V5"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-discv4.workspace = true
+reth-primitives.workspace = true
+
+# ethereum
+alloy-rlp.workspace = true
+rlp = "0.5.2"
+discv5.workspace = true
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
+enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
+
+# async/futures
+tokio.workspace = true
+tokio-stream.workspace = true
+futures.workspace = true
+pin-project.workspace = true
+parking_lot.workspace = true
+
+# misc
+derive_more.workspace = true

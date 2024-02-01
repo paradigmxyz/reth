@@ -6,6 +6,7 @@ use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
     DisconnectReason,
 };
+use reth_rpc_types::NodeRecordParseError;
 use std::{fmt, io, io::ErrorKind, net::SocketAddr};
 
 /// Service kind.
@@ -43,6 +44,15 @@ pub enum NetworkError {
     /// IO error when creating the discovery service
     #[error("failed to launch discovery service: {0}")]
     Discovery(io::Error),
+    /// Error interfacing between dns discovery and discv4 or discv5.
+    #[error(transparent)]
+    DiscoveryInterface(#[from] DiscoveryInterfaceError),
+    // todo: upstream error impl for discv5
+    /*
+    /// Error propagated from [`discv5::Discv5`].
+    #[error(transparent)]
+    Discv5(#[from] discv5::Error),
+    */
     /// Error when setting up the DNS resolver failed
     ///
     /// See also [DnsResolver](reth_dns_discovery::DnsResolver::from_system_conf)
@@ -63,6 +73,23 @@ impl NetworkError {
             }
         }
     }
+
+    /// Converts a `&str` to a more descriptive `NetworkError::Discovery`.
+    pub fn custom_discovery(err_str: &str) -> Self {
+        let custom_err = io::Error::new(ErrorKind::Other, err_str);
+        Self::Discovery(custom_err)
+    }
+}
+
+/// Errors thrown when interfacing between discovery services.
+#[derive(Debug, thiserror::Error)]
+pub enum DiscoveryInterfaceError {
+    /// Error parsing an rlp value in [`enr::Enr`].
+    #[error(transparent)]
+    ParseRlp(#[from] rlp::DecoderError),
+    /// Error converting into a [`reth_primitives::NodeRecord`].
+    #[error(transparent)]
+    ParseNodeRecord(#[from] NodeRecordParseError),
 }
 
 /// Abstraction over errors that can lead to a failed session

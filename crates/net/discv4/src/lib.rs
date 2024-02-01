@@ -28,6 +28,7 @@ use crate::{
     proto::{FindNode, Message, Neighbours, Packet, Ping, Pong},
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
+use derive_more::{Deref, DerefMut};
 use discv5::{
     kbucket,
     kbucket::{
@@ -37,16 +38,20 @@ use discv5::{
     ConnectionDirection, ConnectionState,
 };
 use enr::{Enr, EnrBuilder};
+use error::MirrorUpdateError;
+use itertools::Itertools;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     hex, ForkId, PeerId, B256,
 };
-use secp256k1::SecretKey;
+use smallvec::{smallvec, SmallVec};
 use std::{
     cell::RefCell,
-    collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque},
+    collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, HashSet, VecDeque},
+    env,
+    error::Error,
     io,
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     pin::Pin,
@@ -57,7 +62,7 @@ use std::{
 };
 use tokio::{
     net::UdpSocket,
-    sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::Sender as OneshotSender},
+    sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::Sender as OneshotSender, watch},
     task::{JoinHandle, JoinSet},
     time::Interval,
 };
@@ -77,6 +82,8 @@ mod table;
 
 // reexport NodeRecord primitive
 pub use reth_primitives::NodeRecord;
+// re-export key type used
+pub use secp256k1::{PublicKey, SecretKey};
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
@@ -232,6 +239,38 @@ impl Discv4 {
         trace!(target: "discv4",  ?local_addr,"opened UDP socket");
 
         let service = Discv4Service::new(socket, local_addr, local_node_record, secret_key, config);
+        let discv4 = service.handle();
+        Ok((discv4, service))
+    }
+
+    /// Returns a new [`Discv4Service`] that uses the [`MirrorPrimaryKBuckets`] interface to act
+    /// as a secondary discovery service.
+    pub async fn bind_as_secondary_disc_node<F>(
+        local_address: SocketAddr,
+        mut local_node_record: NodeRecord,
+        secret_key: SecretKey,
+        config: Discv4Config,
+        primary_kbuckets_change_rx: watch::Receiver<()>,
+        primary_kbuckets_keys_callback: F,
+    ) -> io::Result<(Self, Discv4Service<KBucketsKeysMirror<F>>)>
+    where
+        F: Fn() -> Result<HashSet<PeerId>, secp256k1::Error> + Send + Unpin + 'static,
+        KBucketsKeysMirror<F>: MirrorPrimaryKBuckets,
+    {
+        let socket = UdpSocket::bind(local_address).await?;
+        let local_addr = socket.local_addr()?;
+        local_node_record.udp_port = local_addr.port();
+        trace!(target: "discv4",  ?local_addr,"opened UDP socket");
+
+        let service = Discv4Service::new_as_secondary_discovery_node(
+            socket,
+            local_addr,
+            local_node_record,
+            secret_key,
+            config,
+            primary_kbuckets_change_rx,
+            primary_kbuckets_keys_callback,
+        );
         let discv4 = service.handle();
         Ok((discv4, service))
     }
@@ -399,7 +438,21 @@ impl Discv4 {
 /// Manages discv4 peer discovery over UDP.
 #[must_use = "Stream does nothing unless polled"]
 #[allow(missing_debug_implementations)]
-pub struct Discv4Service {
+#[derive(Deref, DerefMut)]
+pub struct Discv4Service<M = Noop> {
+    /// Holds data of the discv4 service.
+    #[deref]
+    #[deref_mut]
+    inner: Discv4ServiceInner,
+    /// Mirrors some primary kbuckets if configured, and filters nodes received in [`Neighbours`]
+    /// responses against them. Will be set if the node is ran alongside iscv5, to support
+    /// downgrading to discv4.
+    neighbours_filter: Option<M>,
+}
+
+/// Hold data necessary to manage discv4 peer discovery over UDP.
+#[allow(missing_debug_implementations)]
+pub struct Discv4ServiceInner {
     /// Local address of the UDP socket.
     local_address: SocketAddr,
     /// The local ENR for EIP-868 <https://eips.ethereum.org/EIPS/eip-868>
@@ -466,7 +519,10 @@ pub struct Discv4Service {
     expire_interval: Interval,
 }
 
-impl Discv4Service {
+impl<M> Discv4Service<M>
+where
+    M: MirrorPrimaryKBuckets + Unpin + Send + 'static,
+{
     /// Create a new instance for a bound [`UdpSocket`].
     pub(crate) fn new(
         socket: UdpSocket,
@@ -538,33 +594,36 @@ impl Discv4Service {
         let shared_node_record = Arc::new(Mutex::new(local_node_record));
 
         Discv4Service {
-            local_address,
-            local_eip_868_enr,
-            local_node_record,
-            shared_node_record,
-            _socket: socket,
-            kbuckets,
-            secret_key,
-            _tasks: tasks,
-            ingress: ingress_rx,
-            egress: egress_tx,
-            queued_pings: Default::default(),
-            pending_pings: Default::default(),
-            pending_lookup: Default::default(),
-            pending_find_nodes: Default::default(),
-            pending_enr_requests: Default::default(),
-            commands_rx,
-            to_service,
-            update_listeners: Vec::with_capacity(1),
-            lookup_interval: self_lookup_interval,
-            ping_interval,
-            evict_expired_requests_interval,
-            lookup_rotator,
-            resolve_external_ip_interval: config.resolve_external_ip_interval(),
-            config,
-            queued_events: Default::default(),
-            received_pongs: Default::default(),
-            expire_interval: tokio::time::interval(EXPIRE_DURATION),
+            inner: Discv4ServiceInner {
+                local_address,
+                local_eip_868_enr,
+                local_node_record,
+                shared_node_record,
+                _socket: socket,
+                kbuckets,
+                secret_key,
+                _tasks: tasks,
+                ingress: ingress_rx,
+                egress: egress_tx,
+                queued_pings: Default::default(),
+                pending_pings: Default::default(),
+                pending_lookup: Default::default(),
+                pending_find_nodes: Default::default(),
+                pending_enr_requests: Default::default(),
+                commands_rx,
+                to_service,
+                update_listeners: Vec::with_capacity(1),
+                lookup_interval: self_lookup_interval,
+                ping_interval,
+                evict_expired_requests_interval,
+                lookup_rotator,
+                resolve_external_ip_interval: config.resolve_external_ip_interval(),
+                config,
+                queued_events: Default::default(),
+                received_pongs: Default::default(),
+                expire_interval: tokio::time::interval(EXPIRE_DURATION),
+            },
+            neighbours_filter: None,
         }
     }
 
@@ -593,7 +652,7 @@ impl Discv4Service {
         if self.local_node_record.address != external_ip {
             debug!(target: "discv4",  ?external_ip, "Updating external ip");
             self.local_node_record.address = external_ip;
-            let _ = self.local_eip_868_enr.set_ip(external_ip, &self.secret_key);
+            let _ = self.inner.local_eip_868_enr.set_ip(external_ip, &self.inner.secret_key);
             let mut lock = self.shared_node_record.lock();
             *lock = self.local_node_record;
             debug!(target: "discv4", enr=?self.local_eip_868_enr, "Updated local ENR");
@@ -720,11 +779,12 @@ impl Discv4Service {
         // Start a lookup context with the 16 (MAX_NODES_PER_BUCKET) closest nodes
         let ctx = LookupContext::new(
             target_key.clone(),
-            self.kbuckets
+            self.inner
+                .kbuckets
                 .closest_values(&target_key)
                 .filter(|node| {
                     node.value.has_endpoint_proof &&
-                        !self.pending_find_nodes.contains_key(&node.key.preimage().0)
+                        !self.inner.pending_find_nodes.contains_key(&node.key.preimage().0)
                 })
                 .take(MAX_NODES_PER_BUCKET)
                 .map(|n| (target_key.distance(&n.key), n.value.record)),
@@ -1369,13 +1429,13 @@ impl Discv4Service {
     }
 
     fn evict_expired_requests(&mut self, now: Instant) {
-        self.pending_enr_requests.retain(|_node_id, enr_request| {
-            now.duration_since(enr_request.sent_at) < self.config.ping_expiration
+        self.inner.pending_enr_requests.retain(|_node_id, enr_request| {
+            now.duration_since(enr_request.sent_at) < self.inner.config.ping_expiration
         });
 
         let mut failed_pings = Vec::new();
-        self.pending_pings.retain(|node_id, ping_request| {
-            if now.duration_since(ping_request.sent_at) > self.config.ping_expiration {
+        self.inner.pending_pings.retain(|node_id, ping_request| {
+            if now.duration_since(ping_request.sent_at) > self.inner.config.ping_expiration {
                 failed_pings.push(*node_id);
                 return false
             }
@@ -1390,8 +1450,8 @@ impl Discv4Service {
         }
 
         let mut failed_lookups = Vec::new();
-        self.pending_lookup.retain(|node_id, (lookup_sent_at, _)| {
-            if now.duration_since(*lookup_sent_at) > self.config.ping_expiration {
+        self.inner.pending_lookup.retain(|node_id, (lookup_sent_at, _)| {
+            if now.duration_since(*lookup_sent_at) > self.inner.config.ping_expiration {
                 failed_lookups.push(*node_id);
                 return false
             }
@@ -1410,8 +1470,8 @@ impl Discv4Service {
     /// Handles failed responses to FindNode
     fn evict_failed_neighbours(&mut self, now: Instant) {
         let mut failed_neighbours = Vec::new();
-        self.pending_find_nodes.retain(|node_id, find_node_request| {
-            if now.duration_since(find_node_request.sent_at) > self.config.request_timeout {
+        self.inner.pending_find_nodes.retain(|node_id, find_node_request| {
+            if now.duration_since(find_node_request.sent_at) > self.inner.config.request_timeout {
                 if !find_node_request.answered {
                     // node actually responded but with fewer entries than expected, but we don't
                     // treat this as an hard error since it responded.
@@ -1542,7 +1602,8 @@ impl Discv4Service {
             // trigger self lookup
             if self.config.enable_lookup && self.lookup_interval.poll_tick(cx).is_ready() {
                 let _ = self.lookup_interval.poll_tick(cx);
-                let target = self.lookup_rotator.next(&self.local_node_record.id);
+                let node_id = self.local_node_record.id;
+                let target = self.lookup_rotator.next(&node_id);
                 self.lookup_with(target, None);
             }
 
@@ -1589,15 +1650,21 @@ impl Discv4Service {
                     Discv4Command::SetEIP868RLPPair { key, rlp } => {
                         debug!(target: "discv4", key=%String::from_utf8_lossy(&key), "Update EIP-868 extension pair");
 
-                        let _ = self.local_eip_868_enr.insert_raw_rlp(key, rlp, &self.secret_key);
+                        let _ = self.inner.local_eip_868_enr.insert_raw_rlp(
+                            key,
+                            rlp,
+                            &self.inner.secret_key,
+                        );
                     }
                     Discv4Command::SetTcpPort(port) => {
                         debug!(target: "discv4", %port, "Update tcp port");
                         self.local_node_record.tcp_port = port;
                         if self.local_node_record.address.is_ipv4() {
-                            let _ = self.local_eip_868_enr.set_tcp4(port, &self.secret_key);
+                            let _ =
+                                self.inner.local_eip_868_enr.set_tcp4(port, &self.inner.secret_key);
                         } else {
-                            let _ = self.local_eip_868_enr.set_tcp6(port, &self.secret_key);
+                            let _ =
+                                self.inner.local_eip_868_enr.set_tcp6(port, &self.inner.secret_key);
                         }
                     }
 
@@ -1617,31 +1684,52 @@ impl Discv4Service {
                     IngressEvent::BadPacket(from, err, data) => {
                         debug!(target: "discv4", ?from, ?err, packet=?hex::encode(&data),   "bad packet");
                     }
-                    IngressEvent::Packet(remote_addr, Packet { msg, node_id, hash }) => {
+                    IngressEvent::Packet(remote_addr, Packet { msg, node_id: src_id, hash }) => {
                         trace!(target: "discv4",  r#type=?msg.msg_type(), from=?remote_addr,"received packet");
                         let event = match msg {
                             Message::Ping(ping) => {
-                                self.on_ping(ping, remote_addr, node_id, hash);
+                                self.on_ping(ping, remote_addr, src_id, hash);
                                 Discv4Event::Ping
                             }
                             Message::Pong(pong) => {
-                                self.on_pong(pong, remote_addr, node_id);
+                                self.on_pong(pong, remote_addr, src_id);
                                 Discv4Event::Pong
                             }
                             Message::FindNode(msg) => {
-                                self.on_find_node(msg, remote_addr, node_id);
+                                self.on_find_node(msg, remote_addr, src_id);
                                 Discv4Event::FindNode
                             }
-                            Message::Neighbours(msg) => {
-                                self.on_neighbours(msg, remote_addr, node_id);
+                            Message::Neighbours(mut msg) => {
+                                let nodes = &mut msg.nodes;
+                                if let Some(ref mut neighbours_filter) = self.neighbours_filter {
+                                    match neighbours_filter.filter_nodes(nodes) {
+                                        Err(err) => debug!(target: "discv4",
+                                            src_id=format!("{:#}", src_id),
+                                            nodes=format!("[{}]", nodes.iter().format(", ")),
+                                            err=?err,
+                                            "failed to filter nodes against primary kbuckets mirror"
+                                        ),
+                                        Ok(filtered_out_nodes) => {
+                                            if !filtered_out_nodes.is_empty() {
+                                                trace!(target: "discv4",
+                                                    src_id=format!("{:#}", src_id),
+                                                    filtered_out_nodes=format!("[{:#}]", filtered_out_nodes.iter().format(", ")), "filtered out peers from `Neighbours` response from peer, nodes connected over primary discovery network"
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                // anyhow let the message go down the usual pipeline, even with
+                                // empty nodes, so discv4 doesn't think it's broken
+                                self.on_neighbours(msg, remote_addr, src_id);
                                 Discv4Event::Neighbours
                             }
                             Message::EnrRequest(msg) => {
-                                self.on_enr_request(msg, remote_addr, node_id, hash);
+                                self.on_enr_request(msg, remote_addr, src_id, hash);
                                 Discv4Event::EnrRequest
                             }
                             Message::EnrResponse(msg) => {
-                                self.on_enr_response(msg, remote_addr, node_id);
+                                self.on_enr_response(msg, remote_addr, src_id);
                                 Discv4Event::EnrResponse
                             }
                         };
@@ -1672,7 +1760,10 @@ impl Discv4Service {
 }
 
 /// Endless future impl
-impl Stream for Discv4Service {
+impl<M> Stream for Discv4Service<M>
+where
+    M: MirrorPrimaryKBuckets + Unpin + Send + 'static,
+{
     type Item = Discv4Event;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -1683,6 +1774,31 @@ impl Stream for Discv4Service {
             // For any other event, return Poll::Ready(Some(event))
             ev => Poll::Ready(Some(ev)),
         }
+    }
+}
+
+impl<F> Discv4Service<KBucketsKeysMirror<F>>
+where
+    F: FnOnce() -> Result<HashSet<PeerId>, secp256k1::Error> + Unpin + Send + 'static,
+    KBucketsKeysMirror<F>: MirrorPrimaryKBuckets,
+{
+    /// Returns a new [`Discv4Service`] that uses the [`MirrorPrimaryKBuckets`] interface.
+    pub fn new_as_secondary_discovery_node(
+        socket: UdpSocket,
+        local_address: SocketAddr,
+        local_node_record: NodeRecord,
+        secret_key: SecretKey,
+        config: Discv4Config,
+        primary_kbuckets_change_tx: watch::Receiver<()>,
+        primary_kbuckets_keys_callback: F,
+    ) -> Self {
+        let mut discv4 = Self::new(socket, local_address, local_node_record, secret_key, config);
+        discv4.neighbours_filter = Some(KBucketsKeysMirror::new(
+            primary_kbuckets_change_tx,
+            primary_kbuckets_keys_callback,
+        ));
+
+        discv4
     }
 }
 
@@ -2125,6 +2241,175 @@ pub struct EnrForkIdEntry {
 impl From<ForkId> for EnrForkIdEntry {
     fn from(fork_id: ForkId) -> Self {
         Self { fork_id }
+    }
+}
+
+/// Mirrors another favoured node's kbuckets.
+pub trait MirrorPrimaryKBuckets {
+    /// Updates mirror of the primary kbuckets.
+    fn update_mirror(&mut self) -> Result<(), Discv4Error>;
+    /// Filters nodes passed as parameter against the mirror of the primary kbuckets.
+    fn filter_nodes(
+        &mut self,
+        nodes: &mut Vec<NodeRecord>,
+    ) -> Result<SmallVec<[PeerId; 3]>, Discv4Error>;
+}
+
+/// Mirror of keys in a kbucket table.
+#[derive(Debug)]
+pub struct KBucketsKeysMirror<F> {
+    /// Mirror of keys in the kbuckets table.
+    mirror: HashSet<PeerId>,
+    /// Callback to update the mirror to match the source kbuckets.
+    update_callback: F,
+    /// Channel that notifies of change in source kbuckets.
+    change_tx: watch::Receiver<()>,
+    /// Reads the configured log level at start up.
+    #[doc(hidden)]
+    is_log_level_trace: bool,
+}
+
+impl<F> KBucketsKeysMirror<F>
+where
+    F: FnOnce() -> Result<HashSet<PeerId>, secp256k1::Error> + Unpin + Send,
+{
+    /// Returns a new [KBucketsKeysMirror].
+    pub fn new(change_tx: watch::Receiver<()>, callback: F) -> Self {
+        let is_log_level_trace =
+            if let Ok(var) = env::var("RUST_LOG") { var.to_lowercase() == "trace" } else { false };
+
+        Self {
+            mirror: Default::default(),
+            update_callback: callback,
+            change_tx,
+            is_log_level_trace,
+        }
+    }
+}
+
+impl<F> MirrorPrimaryKBuckets for KBucketsKeysMirror<F>
+where
+    F: Fn() -> Result<HashSet<PeerId>, secp256k1::Error>,
+{
+    fn update_mirror(&mut self) -> Result<(), Discv4Error> {
+        self.mirror = (self.update_callback)()
+            .map_err(<secp256k1::Error as Into<MirrorUpdateError>>::into)?;
+
+        Ok(())
+    }
+
+    fn filter_nodes(
+        &mut self,
+        nodes: &mut Vec<NodeRecord>,
+    ) -> Result<SmallVec<[PeerId; 3]>, Discv4Error> {
+        if self
+            .change_tx
+            .has_changed()
+            .map_err(<watch::error::RecvError as Into<MirrorUpdateError>>::into)?
+        {
+            self.update_mirror()?;
+            self.change_tx.borrow_and_update();
+        }
+
+        let mut filtered_out = smallvec!();
+
+        nodes.retain(|node| {
+            let filter_out = self.mirror.contains(&node.id);
+
+            if filter_out && self.is_log_level_trace {
+                filtered_out.push(node.id);
+            }
+
+            filter_out
+        });
+
+        // empty unless in debug mode, just serves for tracing
+        Ok(filtered_out)
+    }
+}
+
+#[derive(Debug)]
+/// A node that hasn't been discovered via a discv5 or discv4 query.
+pub enum NodeFromExternalSource {
+    /// Node compatible with discv4.
+    NodeRecord(NodeRecord),
+    /// Node compatible with discv5.
+    Enr(Enr<SecretKey>),
+}
+
+/// Essential interface for interacting with discovery.
+pub trait HandleDiscovery {
+    /// Adds the node to the table, if it is not already present.
+    fn add_node_to_routing_table(
+        &self,
+        node_record: NodeFromExternalSource,
+    ) -> Result<(), impl Error>;
+
+    /// Sets the pair in the EIP-868 [`Enr`] of the node.
+    ///
+    /// If the key already exists, this will update it.
+    ///
+    /// CAUTION: The value **must** be rlp encoded
+    fn set_eip868_in_local_enr(&self, key: Vec<u8>, rlp: Bytes);
+
+    /// Sets the pair in the EIP-868 [`Enr`] of the node.
+    ///
+    /// If the key already exists, this will update it.
+    fn encode_and_set_eip868_in_local_enr(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable);
+
+    /// Adds the peer and id to the ban list.
+    ///
+    /// This will prevent any future inclusion in the table
+    fn ban_peer_by_ip_and_node_id(&self, node_id: PeerId, ip: IpAddr);
+
+    /// Adds the ip to the ban list.
+    ///
+    /// This will prevent any future inclusion in the table
+    fn ban_peer_by_ip(&self, ip: IpAddr);
+}
+
+impl HandleDiscovery for Discv4 {
+    fn add_node_to_routing_table(
+        &self,
+        node_record: NodeFromExternalSource,
+    ) -> Result<(), impl Error> {
+        if let NodeFromExternalSource::NodeRecord(node_record) = node_record {
+            self.add_node(node_record);
+        } // todo: handle if not
+
+        Ok::<(), Discv4Error>(())
+    }
+
+    fn set_eip868_in_local_enr(&self, key: Vec<u8>, rlp: Bytes) {
+        self.set_eip868_rlp_pair(key, rlp)
+    }
+
+    fn encode_and_set_eip868_in_local_enr(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {
+        self.set_eip868_rlp(key, value)
+    }
+
+    fn ban_peer_by_ip_and_node_id(&self, node_id: PeerId, ip: IpAddr) {
+        self.ban(node_id, ip)
+    }
+
+    fn ban_peer_by_ip(&self, ip: IpAddr) {
+        self.ban_ip(ip)
+    }
+}
+
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct Noop;
+
+impl MirrorPrimaryKBuckets for Noop {
+    fn update_mirror(&mut self) -> Result<(), Discv4Error> {
+        Ok(())
+    }
+    fn filter_nodes(
+        &mut self,
+        _nodes: &mut Vec<NodeRecord>,
+    ) -> Result<SmallVec<[PeerId; 3]>, Discv4Error> {
+        Ok(smallvec!())
     }
 }
 

@@ -74,16 +74,27 @@ dependencies = [
 
 [[package]]
 name = "aes-gcm"
-version = "0.9.2"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc3be92e19a7ef47457b8e6f90707e12b6ac5d20c6f3866584fa3be0787d839f"
+checksum = "df5f85a83a7d8b0442b6aa7b504b8212c1733da07b98aae43d4bc21b2cb3cdf6"
 dependencies = [
  "aead",
  "aes 0.7.5",
  "cipher 0.3.0",
- "ctr 0.7.0",
+ "ctr 0.8.0",
  "ghash",
  "subtle",
+]
+
+[[package]]
+name = "ahash"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a824f2aa7e75a0c98c5a504fceb80649e9c35265d44525b5f94de4771a395cd"
+dependencies = [
+ "getrandom 0.2.12",
+ "once_cell",
+ "version_check",
 ]
 
 [[package]]
@@ -1764,15 +1775,6 @@ dependencies = [
 
 [[package]]
 name = "ctr"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a232f92a03f37dd7d7dd2adc67166c77e9cd88de5b019b9a9eecfaeaf7bfd481"
-dependencies = [
- "cipher 0.3.0",
-]
-
-[[package]]
-name = "ctr"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "049bb91fb4aaf0e3c7efa6cd5ef877dbbbd15b39dad06d9948de4ec8a75761ea"
@@ -2168,7 +2170,8 @@ dependencies = [
 [[package]]
 name = "discv5"
 version = "0.3.1"
-source = "git+https://github.com/sigp/discv5?rev=f289bbd4c57d499bb1bdb393af3c249600a1c662#f289bbd4c57d499bb1bdb393af3c249600a1c662"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98c05fa26996c6141f78ac4fafbe297a7fa69690565ba4e0d1f2e60bde5ce501"
 dependencies = [
  "aes 0.7.5",
  "aes-gcm",
@@ -2181,7 +2184,7 @@ dependencies = [
  "hex",
  "hkdf",
  "lazy_static",
- "lru 0.12.1",
+ "lru 0.7.8",
  "more-asserts",
  "parking_lot 0.11.2",
  "rand 0.8.5",
@@ -3174,9 +3177,21 @@ checksum = "d23bd4e7b5eda0d0f3a307e8b381fdc8ba9000f26fbe912250c0a4cc3956364a"
 
 [[package]]
 name = "hashbrown"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
+dependencies = [
+ "ahash 0.7.7",
+]
+
+[[package]]
+name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
+dependencies = [
+ "ahash 0.7.7",
+]
 
 [[package]]
 name = "hashbrown"
@@ -3184,7 +3199,7 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
- "ahash",
+ "ahash 0.8.7",
 ]
 
 [[package]]
@@ -3193,7 +3208,7 @@ version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290f1a1d9242c78d09ce40a5e87e7554ee637af1351968159f4952f028f75604"
 dependencies = [
- "ahash",
+ "ahash 0.8.7",
  "allocator-api2",
  "serde",
 ]
@@ -3209,11 +3224,11 @@ dependencies = [
 
 [[package]]
 name = "hashlink"
-version = "0.8.4"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8094feaf31ff591f651a2664fb9cfd92bba7a60ce3197265e9482ebe753c8f7"
+checksum = "7249a3129cbc1ffccd74857f81464a323a152173cdb134e0fd81bc803b29facf"
 dependencies = [
- "hashbrown 0.14.3",
+ "hashbrown 0.11.2",
 ]
 
 [[package]]
@@ -3737,7 +3752,7 @@ version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "321f0f839cd44a4686e9504b0a62b4d69a50b62072144c71c68f5873c167b8d9"
 dependencies = [
- "ahash",
+ "ahash 0.8.7",
  "indexmap 2.1.0",
  "is-terminal",
  "itoa",
@@ -4244,6 +4259,15 @@ checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
 name = "lru"
+version = "0.7.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e999beba7b6e8345721bd280141ed958096a2e4abdf74f67ff4ce49b4b54e47a"
+dependencies = [
+ "hashbrown 0.12.3",
+]
+
+[[package]]
+name = "lru"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4a83fb7698b3643a0e34f9ae6f2e8f0178c0fd42f8b59d493aa271ff3a5bf21"
@@ -4351,7 +4375,7 @@ version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde3af1a009ed76a778cb84fdef9e7dbbdf5775ae3e4cc1f434a6a307f6f76c5"
 dependencies = [
- "ahash",
+ "ahash 0.8.7",
  "metrics-macros",
  "portable-atomic",
 ]
@@ -4532,9 +4556,9 @@ dependencies = [
 
 [[package]]
 name = "more-asserts"
-version = "0.3.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fafa6961cabd9c63bcd77a45d7e3b7f3b552b70417831fb0f56db717e72407e"
+checksum = "7843ec2de400bcbc6a6328c958dc38e5359da6e93e72e37bc5246bf1ae776389"
 
 [[package]]
 name = "nibble_vec"
@@ -6012,9 +6036,11 @@ name = "reth-discv4"
 version = "0.1.0-alpha.16"
 dependencies = [
  "alloy-rlp",
+ "derive_more",
  "discv5",
  "enr",
  "generic-array",
+ "itertools 0.12.0",
  "parking_lot 0.12.1",
  "rand 0.8.5",
  "reth-net-common",
@@ -6024,10 +6050,30 @@ dependencies = [
  "rlp",
  "secp256k1 0.27.0",
  "serde",
+ "smallvec",
  "thiserror",
  "tokio",
  "tokio-stream",
  "tracing",
+]
+
+[[package]]
+name = "reth-discv5"
+version = "0.1.0-alpha.16"
+dependencies = [
+ "alloy-rlp",
+ "derive_more",
+ "discv5",
+ "enr",
+ "futures",
+ "parking_lot 0.12.1",
+ "pin-project",
+ "reth-discv4",
+ "reth-primitives",
+ "rlp",
+ "secp256k1 0.27.0",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -6039,6 +6085,7 @@ dependencies = [
  "async-trait",
  "data-encoding",
  "enr",
+ "futures",
  "linked_hash_set",
  "parking_lot 0.12.1",
  "reth-net-common",
@@ -6308,6 +6355,7 @@ dependencies = [
  "auto_impl",
  "criterion",
  "derive_more",
+ "discv5",
  "enr",
  "ethers-core",
  "ethers-middleware",
@@ -6325,6 +6373,7 @@ dependencies = [
  "pprof",
  "rand 0.8.5",
  "reth-discv4",
+ "reth-discv5",
  "reth-dns-discovery",
  "reth-ecies",
  "reth-eth-wire",
@@ -6340,11 +6389,13 @@ dependencies = [
  "reth-tokio-util",
  "reth-tracing",
  "reth-transaction-pool",
+ "rlp",
  "schnellru",
  "secp256k1 0.27.0",
  "serde",
  "serde_json",
  "serial_test",
+ "smallvec",
  "tempfile",
  "thiserror",
  "tokio",
@@ -6546,7 +6597,7 @@ dependencies = [
 name = "reth-primitives"
 version = "0.1.0-alpha.16"
 dependencies = [
- "ahash",
+ "ahash 0.8.7",
  "alloy-chains",
  "alloy-genesis",
  "alloy-primitives",
@@ -6598,7 +6649,7 @@ dependencies = [
 name = "reth-provider"
 version = "0.1.0-alpha.16"
 dependencies = [
- "ahash",
+ "ahash 0.8.7",
  "alloy-rlp",
  "assert_matches",
  "auto_impl",
@@ -6825,6 +6876,7 @@ dependencies = [
  "alloy-rpc-types",
  "arbitrary",
  "bytes",
+ "enr",
  "ethereum_ssz",
  "ethereum_ssz_derive",
  "itertools 0.12.0",
@@ -6987,7 +7039,7 @@ dependencies = [
 name = "reth-trie"
 version = "0.1.0-alpha.16"
 dependencies = [
- "ahash",
+ "ahash 0.8.7",
  "alloy-chains",
  "alloy-rlp",
  "auto_impl",
@@ -7404,7 +7456,7 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "772575a524feeb803e5b0fcbc6dd9f367e579488197c94c6e4023aad2305774d"
 dependencies = [
- "ahash",
+ "ahash 0.8.7",
  "cfg-if",
  "hashbrown 0.13.2",
 ]
@@ -8017,9 +8069,9 @@ dependencies = [
 
 [[package]]
 name = "subtle"
-version = "2.5.0"
+version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
+checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
 name = "sucds"
