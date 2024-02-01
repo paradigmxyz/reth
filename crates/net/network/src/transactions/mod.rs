@@ -1086,7 +1086,7 @@ where
 
         // If the budget is exhausted we manually yield back control to tokio. See
         // `NetworkManager` for more context on the design pattern.
-        let mut budget = 1024;
+        let mut budget: u16 = 1024;
 
         loop {
             let mut some_ready = false;
@@ -1184,7 +1184,7 @@ where
                 return Poll::Pending
             }
 
-            budget -= 1;
+            budget.saturating_sub(1);
             if budget == 0 {
                 // Make sure we're woken up again
                 cx.waker().wake_by_ref();
