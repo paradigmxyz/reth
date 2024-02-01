@@ -1832,6 +1832,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "custom-payload-builder"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "eyre",
+ "futures-util",
+ "reth",
+ "reth-basic-payload-builder",
+ "reth-node-api",
+ "reth-payload-builder",
+ "reth-primitives",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "darling"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
