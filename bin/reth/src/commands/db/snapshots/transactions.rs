@@ -3,7 +3,7 @@ use super::{
     Command, Compression, PerfectHashingFunction,
 };
 use rand::{seq::SliceRandom, Rng};
-use reth_db::{open_db_read_only, snapshot::TransactionMask};
+use reth_db::{mdbx::DatabaseArguments, open_db_read_only, snapshot::TransactionMask};
 use reth_interfaces::db::LogLevel;
 use reth_primitives::{
     snapshot::{Filters, InclusionFilter},
@@ -13,8 +13,6 @@ use reth_provider::{
     providers::SnapshotProvider, BlockNumReader, ProviderError, ProviderFactory,
     TransactionsProvider, TransactionsProviderExt,
 };
-
-use reth_db::mdbx::DatabaseArguments;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,

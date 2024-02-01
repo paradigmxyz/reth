@@ -160,32 +160,22 @@ where
 
     /// Move to the next list selection
     fn next(&mut self) {
-        let i = match self.list_state.selected() {
-            Some(i) => {
-                if i >= self.entries.len() - 1 {
-                    0
-                } else {
-                    i + 1
-                }
-            }
-            None => 0,
-        };
-        self.list_state.select(Some(i));
+        self.list_state.select(Some(
+            self.list_state
+                .selected()
+                .map(|i| if i >= self.entries.len() - 1 { 0 } else { i + 1 })
+                .unwrap_or(0),
+        ));
     }
 
     /// Move to the previous list selection
     fn previous(&mut self) {
-        let i = match self.list_state.selected() {
-            Some(i) => {
-                if i == 0 {
-                    self.entries.len() - 1
-                } else {
-                    i - 1
-                }
-            }
-            None => 0,
-        };
-        self.list_state.select(Some(i));
+        self.list_state.select(Some(
+            self.list_state
+                .selected()
+                .map(|i| if i == 0 { self.entries.len() - 1 } else { i - 1 })
+                .unwrap_or(0),
+        ));
     }
 
     fn reset(&mut self) {
@@ -194,22 +184,18 @@ where
 
     /// Fetch the next page of items
     fn next_page(&mut self) {
-        if self.skip + self.count >= self.total_entries {
-            return
+        if self.skip + self.count < self.total_entries {
+            self.skip += self.count;
+            self.fetch_page();
         }
-
-        self.skip += self.count;
-        self.fetch_page();
     }
 
     /// Fetch the previous page of items
     fn previous_page(&mut self) {
-        if self.skip == 0 {
-            return
+        if self.skip > 0 {
+            self.skip = self.skip.saturating_sub(self.count);
+            self.fetch_page();
         }
-
-        self.skip = self.skip.saturating_sub(self.count);
-        self.fetch_page();
     }
 
     /// Go to a specific page.

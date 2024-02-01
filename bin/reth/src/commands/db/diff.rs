@@ -1,19 +1,9 @@
-use std::{
-    collections::HashMap,
-    fmt::Debug,
-    fs::{self, File},
-    hash::Hash,
-    io::Write,
-    path::{Path, PathBuf},
-};
-
-use crate::utils::DbTool;
-use clap::Parser;
-
 use crate::{
     args::DatabaseArgs,
     dirs::{DataDirPath, PlatformPath},
+    utils::DbTool,
 };
+use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO, database::Database, mdbx::DatabaseArguments, open_db_read_only,
     table::Table, transaction::DbTx, AccountChangeSet, AccountHistory, AccountsTrie,
@@ -21,6 +11,14 @@ use reth_db::{
     HashedAccount, HashedStorage, HeaderNumbers, HeaderTD, Headers, PlainAccountState,
     PlainStorageState, PruneCheckpoints, Receipts, StorageChangeSet, StorageHistory, StoragesTrie,
     SyncStage, SyncStageProgress, Tables, TransactionBlock, Transactions, TxHashNumber, TxSenders,
+};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    fs::{self, File},
+    hash::Hash,
+    io::Write,
+    path::{Path, PathBuf},
 };
 use tracing::info;
 
