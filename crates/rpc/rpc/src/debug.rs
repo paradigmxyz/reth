@@ -213,7 +213,7 @@ where
         // block the transaction is included in
         let state_at: BlockId = block.parent_hash.into();
         let block_hash = block.hash;
-        let block_txs = block.body;
+        let block_txs = block.into_transactions_ecrecovered();
 
         let this = self.clone();
         self.inner
