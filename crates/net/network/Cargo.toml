@@ -95,8 +95,6 @@ ethers-providers = { workspace = true, default-features = false, features = ["ws
 ethers-signers = { workspace = true, default-features = false }
 ethers-middleware = { workspace = true, default-features = false }
 
-enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
-
 # misc
 serial_test.workspace = true
 tempfile.workspace = true
