@@ -254,6 +254,14 @@ impl TransactionFetcher {
         let mut max_retried_and_evicted_hashes = vec![];
 
         for hash in hashes {
+            // todo: enforce by adding new types UnknownTxHash66 and UnknownTxHash68
+            debug_assert!(
+                self.unknown_hashes.peek(&hash).is_some(),
+                "`%hash` in `@buffered_hashes` that's not in `@unknown_hashes`, `@buffered_hashes` should be a subset of keys in `@unknown_hashes`, broken invariant `@buffered_hashes` and `@unknown_hashes`,
+`%hash`: {hash},
+`@self`: {self:?}",
+            );
+
             let Some((retries, peers)) = self.unknown_hashes.get(&hash) else { return };
 
             if let Some(peer_id) = fallback_peer {
