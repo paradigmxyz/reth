@@ -46,6 +46,7 @@ pub(crate) fn is_banned_reputation(reputation: i32) -> bool {
 /// How the [`ReputationChangeKind`] are weighted.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct ReputationChangeWeights {
     /// Weight for [`ReputationChangeKind::BadMessage`]
     pub bad_message: Reputation,
