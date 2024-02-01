@@ -17,7 +17,8 @@ use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError}
 use tracing::{debug, trace};
 
 use super::{
-    AnnouncementFilter, Peer, PooledTransactions, POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
+    AnnouncementFilter, Peer, PooledTransactions,
+    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE,
 };
 
 /// Maximum concurrent [`GetPooledTxRequest`]s to allow per peer.
@@ -179,7 +180,7 @@ impl TransactionFetcher {
         if let Some(size) = self.eth68_meta.peek(&hash) {
             let next_acc_size = *acc_size_response + size;
 
-            if next_acc_size <= POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
+            if next_acc_size <= SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE {
                 // only update accumulated size of tx response if tx will fit in without exceeding
                 // soft limit
                 *acc_size_response = next_acc_size;
@@ -209,7 +210,7 @@ impl TransactionFetcher {
     ) -> Vec<TxHash> {
         if let Some(hash) = hashes.first() {
             if let Some(size) = self.eth68_meta.get(hash) {
-                if *size >= POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
+                if *size >= SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE {
                     return hashes.split_off(1)
                 }
             }
@@ -227,7 +228,7 @@ impl TransactionFetcher {
                     size=self.eth68_meta.peek(&hash).expect("should find size in `eth68-meta`"),
                     acc_size_response=acc_size_response,
                     POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE=
-                        POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
+                        SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE,
                     "no space for hash in `GetPooledTransactions` request to peer"
                 );
 
@@ -483,9 +484,12 @@ impl TransactionFetcher {
     /// limit. It does so by taking buffered eth68 hashes for which peer is listed as fallback
     /// peer. A mutable reference to a list of hashes to request is passed as parameter.
     ///
+    /// If a single transaction exceeds the soft limit, it's fetched in its own request. Otherwise
+    /// the following applies.
+    ///
     /// Loops through buffered hashes and does:
     ///
-    /// 1. Check acc size against limit, if so stop looping.
+    /// 1. Check if acc size exceeds limit or if hashes count exceeds limit, if so stop looping.
     /// 2. Check if this buffered hash is an eth68 hash, else skip to next iteration.
     /// 3. Check if hash can be included with respect to size metadata and acc size copy.
     /// 4. Check if peer is fallback peer for hash and remove, else skip to next iteration.
@@ -497,7 +501,7 @@ impl TransactionFetcher {
         peer_id: PeerId,
         acc_size_response: &mut usize,
     ) {
-        if *acc_size_response >= POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE / 2 {
+        if *acc_size_response >= SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE / 2 {
             return
         }
 
@@ -530,12 +534,12 @@ impl TransactionFetcher {
             let mut next_acc_size = *acc_size_response;
 
             // 1. Check acc size against limit, if so stop looping.
-            if next_acc_size >= 2 * POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE / 3 {
+            if next_acc_size >= 2 * SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE / 3 {
                 trace!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
                     acc_size_eth68_response=acc_size_response, // no change acc size
                     POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE=
-                        POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
+                        SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE,
                     "request to peer full"
                 );
 
@@ -578,7 +582,7 @@ impl TransactionFetcher {
                         hash=%hash,
                         acc_size_eth68_response=acc_size_response,
                         POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE=
-                            POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
+                            SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE,
                         "found buffered hash for request to peer"
                     );
                 }
@@ -640,7 +644,7 @@ impl TransactionFetcher {
                         peer_id=format!("{peer_id:#}"),
                         hash=%hash,
                         POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE=
-                            POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
+                            SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE,
                         "found buffered hash for request to peer"
                     );
                 }
@@ -830,14 +834,15 @@ mod test {
             B256::from_slice(&[6; 32]),
         ];
         let eth68_hashes_sizes = [
-            POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE - 4,
-            POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE, // this one will not fit
-            2,                                                 // this one will fit
-            3,                                                 // but now this one won't
-            2,                                                 /* this one will, no more txns
-                                                                * will
-                                                                * fit
-                                                                * after this */
+            SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE - 4,
+            SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE, // this one will not fit
+            2,                                                         // this one will fit
+            3,                                                         // but now this one won't
+            2,                                                         /* this one will, no more
+                                                                        * txns
+                                                                        * will
+                                                                        * fit
+                                                                        * after this */
             1,
         ];
 

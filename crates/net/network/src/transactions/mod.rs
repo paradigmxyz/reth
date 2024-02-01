@@ -75,13 +75,16 @@ pub use validation::*;
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
 
 /// Soft limit for NewPooledTransactions
-const NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT: usize = 4096;
+const SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_MEMPOOL_PACKET: usize = 4096;
 
-/// Soft limit for the response size of a GetPooledTransactions message (2MB) in bytes. Standard
-/// maximum response size. See specs
+/// Soft limit for the message of full transactions in bytes.
+const SOFT_LIMIT_BYTE_SIZE_FULL_TRANSACTIONS_MEMPOOL_MESSAGE: usize = 128 * 1024;
+
+/// Soft limit for the response size of a [`GetPooledTransactions`] message (128 KiB) in bytes.
+/// Standard maximum response size is 2 MiB. See specs
 ///
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
-const POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE: usize = 2 * 1024 * 1024;
+const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE: usize = 128 * 1024;
 
 /// The future for inserting a function into the pool
 pub type PoolImportFuture =
@@ -301,7 +304,7 @@ where
             let transactions = self.pool.get_pooled_transaction_elements(
                 request.0,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
-                    POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
+                    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE,
                 ),
             );
 
@@ -399,7 +402,9 @@ where
                 if peer_idx > max_num_full || full_transactions.is_empty() {
                     // enforce tx soft limit per message for the (unlikely) event the number of
                     // hashes exceeds it
-                    new_pooled_hashes.truncate(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT);
+                    new_pooled_hashes.truncate(
+                        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_MEMPOOL_PACKET,
+                    );
 
                     for hash in new_pooled_hashes.iter_hashes().copied() {
                         propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
@@ -922,8 +927,9 @@ where
 
                     let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
 
-                    let pooled_txs =
-                        self.pool.pooled_transactions_max(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT);
+                    let pooled_txs = self.pool.pooled_transactions_max(
+                        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_MEMPOOL_PACKET,
+                    );
                     if pooled_txs.is_empty() {
                         // do not send a message if there are no transactions in the pool
                         return
@@ -1215,7 +1221,7 @@ impl PropagateTransaction {
 }
 
 /// Helper type for constructing the full transaction message that enforces the
-/// [`POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE`].
+/// [`SOFT_LIMIT_BYTE_SIZE_FULL_TRANSACTIONS_MEMPOOL_MESSAGE`].
 #[derive(Default)]
 struct FullTransactionsBuilder {
     total_size: usize,
@@ -1225,10 +1231,15 @@ struct FullTransactionsBuilder {
 // === impl FullTransactionsBuilder ===
 
 impl FullTransactionsBuilder {
-    /// Append a transaction to the list if it doesn't exceed the maximum target size.
+    /// Append a transaction to the list if the total message bytes size doesn't exceed the soft
+    /// maximum target byte size. The limit is soft, meaning if one single transaction goes over
+    /// the limit, it will be broadcasted in its own [`Transactions`] message. The same pattern is
+    /// followed in filling a [`GetPooledTransactions`] request in
+    /// [`TransactionFetcher::fill_eth68_request_for_peer`].
     fn push(&mut self, transaction: &PropagateTransaction) {
         let new_size = self.total_size + transaction.size;
-        if new_size > POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
+        if new_size > SOFT_LIMIT_BYTE_SIZE_FULL_TRANSACTIONS_MEMPOOL_MESSAGE && self.total_size > 0
+        {
             return
         }
 
