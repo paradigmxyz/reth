@@ -739,7 +739,7 @@ impl TransactionKind {
 
     /// Calculates a heuristic for the in-memory size of the [TransactionKind].
     #[inline]
-    fn size(self) -> usize {
+    pub fn size(self) -> usize {
         mem::size_of::<Self>()
     }
 }
