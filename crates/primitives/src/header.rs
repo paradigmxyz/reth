@@ -451,7 +451,8 @@ impl Encodable for Header {
         if let Some(ref blob_gas_used) = self.blob_gas_used {
             U256::from(*blob_gas_used).encode(out);
         } else if self.has_excess_blob_gas() || self.has_parent_beacon_block_root() {
-            out.put_u8(EMPTY_LIST_CODE);
+            // EMPTY_STRING_CODE == 0x80, which is the RLP representation of zero
+            out.put_u8(EMPTY_STRING_CODE);
         }
 
         // Encode excess blob gas. Put empty list if excess blob gas is missing,
@@ -459,7 +460,8 @@ impl Encodable for Header {
         if let Some(ref excess_blob_gas) = self.excess_blob_gas {
             U256::from(*excess_blob_gas).encode(out);
         } else if self.has_parent_beacon_block_root() {
-            out.put_u8(EMPTY_LIST_CODE);
+            // EMPTY_STRING_CODE == 0x80, which is the RLP representation of zero
+            out.put_u8(EMPTY_STRING_CODE);
         }
 
         // Encode parent beacon block root. If new fields are added, the above pattern will need to
@@ -531,7 +533,7 @@ impl Decodable for Header {
 
         // Blob gas used and excess blob gas for post-cancun headers
         if started_len - buf.len() < rlp_head.payload_length {
-            if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
+            if buf.first().map(|b| *b == EMPTY_STRING_CODE).unwrap_or_default() {
                 buf.advance(1)
             } else {
                 this.blob_gas_used = Some(u64::decode(buf)?);
@@ -539,7 +541,7 @@ impl Decodable for Header {
         }
 
         if started_len - buf.len() < rlp_head.payload_length {
-            if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
+            if buf.first().map(|b| *b == EMPTY_STRING_CODE).unwrap_or_default() {
                 buf.advance(1)
             } else {
                 this.excess_blob_gas = Some(u64::decode(buf)?);
