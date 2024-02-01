@@ -1082,6 +1082,8 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
+        // If the budget is exhausted we manually yield back control to tokio. See
+        // `NetworkManager` for more context on the design pattern.
         let mut budget = 1024;
 
         loop {
@@ -1179,8 +1181,6 @@ where
             }
 
             budget -= 1;
-            // If the budget is exhausted we manually yield back control to tokio. See
-            // `NetworkManager` for more context on the design pattern.
             if budget == 0 {
                 break
             }
