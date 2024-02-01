@@ -118,7 +118,7 @@ where
 }
 
 /// Wrapper of [`schnellru::LruMap`] that implements [`fmt::Debug`].
-#[derive(Deref, DerefMut)]
+#[derive(Deref, DerefMut, Default)]
 pub struct LruMap<K, V, L = ByLength, S = RandomState>(schnellru::LruMap<K, V, L, S>)
 where
     K: Hash + PartialEq,

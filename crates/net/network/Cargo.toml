@@ -70,6 +70,9 @@ schnellru.workspace = true
 itertools.workspace = true
 tempfile = { workspace = true, optional = true }
 
+# proc-macros
+paste.workspace = true
+
 [dev-dependencies]
 # reth
 reth-discv4 = { workspace = true, features = ["test-utils"] }

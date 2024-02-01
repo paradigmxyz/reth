@@ -6305,6 +6305,7 @@ dependencies = [
  "linked_hash_set",
  "metrics",
  "parking_lot 0.12.1",
+ "paste",
  "pin-project",
  "pprof",
  "rand 0.8.5",
