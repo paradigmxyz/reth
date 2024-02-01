@@ -55,7 +55,7 @@ reth-trie.workspace = true
 reth-nippy-jar.workspace = true
 reth-node-api.workspace = true
 reth-node-ethereum.workspace = true
-reth-node-optimism = { workspace = true, optional = true }
+reth-node-optimism = { workspace = true, optional = true, features = ["optimism"] }
 reth-node-core.workspace = true
 
 # crypto
