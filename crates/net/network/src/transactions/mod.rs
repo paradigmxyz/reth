@@ -1209,7 +1209,7 @@ impl FullTransactionsBuilder {
     /// [`TransactionFetcher::fill_eth68_request_for_peer`].
     fn push(&mut self, transaction: &PropagateTransaction) {
         let new_size = self.total_size + transaction.size;
-        if self.total_size > 0 && new_size > SOFT_LIMIT_BYTE_SIZE_FULL_TRANSACTIONS_MEMPOOL_MESSAGE
+        if new_size > SOFT_LIMIT_BYTE_SIZE_FULL_TRANSACTIONS_MEMPOOL_MESSAGE && self.total_size > 0
         {
             return
         }
