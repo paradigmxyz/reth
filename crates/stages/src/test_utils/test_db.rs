@@ -195,36 +195,36 @@ impl TestStageDB {
     {
         let provider = self.factory.snapshot_provider().expect("should exist");
         let mut writer = provider.latest_writer(reth_primitives::SnapshotSegment::Headers)?;
+        let tx = self.factory.provider_rw().unwrap().into_tx();
+        
+        let mut next_tx_num = tx_offset.unwrap_or_default();
+        blocks.into_iter().try_for_each(|block| {
+            Self::insert_header(Some(&mut writer), &tx, &block.header, U256::ZERO)?;
 
-        self.commit(|tx| {
-            let mut next_tx_num = tx_offset.unwrap_or_default();
+            // Insert into body tables.
+            let block_body_indices = StoredBlockBodyIndices {
+                first_tx_num: next_tx_num,
+                tx_count: block.body.len() as u64,
+            };
 
-            blocks.into_iter().try_for_each(|block| {
-                Self::insert_header(Some(&mut writer), tx, &block.header, U256::ZERO)?;
+            if !block.body.is_empty() {
+                tx.put::<tables::TransactionBlock>(
+                    block_body_indices.last_tx_num(),
+                    block.number,
+                )?;
+            }
+            tx.put::<tables::BlockBodyIndices>(block.number, block_body_indices)?;
 
-                // Insert into body tables.
-                let block_body_indices = StoredBlockBodyIndices {
-                    first_tx_num: next_tx_num,
-                    tx_count: block.body.len() as u64,
-                };
+            block.body.iter().try_for_each(|body_tx| {
+                tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?;
+                next_tx_num += 1;
+                Ok::<(), ProviderError>(())
+            })
+        })?;
 
-                if !block.body.is_empty() {
-                    tx.put::<tables::TransactionBlock>(
-                        block_body_indices.last_tx_num(),
-                        block.number,
-                    )?;
-                }
-                tx.put::<tables::BlockBodyIndices>(block.number, block_body_indices)?;
-
-                block.body.iter().try_for_each(|body_tx| {
-                    tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?;
-                    next_tx_num += 1;
-                    Ok::<(), ProviderError>(())
-                })
-            })?;
-
-            writer.commit()
-        })
+        tx.commit()?;
+        writer.commit()
+       
     }
 
     pub fn insert_tx_hash_numbers<I>(&self, tx_hash_numbers: I) -> ProviderResult<()>
