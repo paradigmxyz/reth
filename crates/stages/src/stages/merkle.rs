@@ -356,8 +356,10 @@ mod tests {
         },
     };
     use reth_primitives::{
-        keccak256, stage::StageUnitCheckpoint, SealedBlock, StorageEntry, B256, U256,
+        keccak256, stage::StageUnitCheckpoint, SealedBlock, SnapshotSegment, StorageEntry, B256,
+        U256,
     };
+    use reth_provider::providers::SnapshotWriter;
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;
 
@@ -477,6 +479,17 @@ mod tests {
             let end = input.target();
             let mut rng = generators::rng();
 
+            let mut preblocks = vec![];
+            if stage_progress > 0 {
+                preblocks.append(&mut random_block_range(
+                    &mut rng,
+                    0..=stage_progress - 1,
+                    B256::ZERO,
+                    0..1,
+                ));
+                self.db.insert_blocks(preblocks.iter(), None)?;
+            }
+
             let num_of_accounts = 31;
             let accounts = random_contract_account_range(&mut rng, &mut (0..num_of_accounts))
                 .into_iter()
@@ -486,8 +499,13 @@ mod tests {
                 accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
             )?;
 
-            let SealedBlock { header, body, ommers, withdrawals } =
-                random_block(&mut rng, stage_progress, None, Some(0), None);
+            let SealedBlock { header, body, ommers, withdrawals } = random_block(
+                &mut rng,
+                stage_progress,
+                preblocks.last().map(|b| b.hash),
+                Some(0),
+                None,
+            );
             let mut header = header.unseal();
 
             header.state_root = state_root(
@@ -501,6 +519,7 @@ mod tests {
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
             blocks.extend(random_block_range(&mut rng, start..=end, head_hash, 0..3));
+            let last_block = blocks.last().cloned().unwrap();
             self.db.insert_blocks(blocks.iter(), None)?;
 
             let (transitions, final_state) = random_changeset_range(
@@ -538,13 +557,15 @@ mod tests {
                 Ok(state_root_prehashed(accounts.into_iter()))
             })?;
 
-            let last_block_number = end;
-            self.db.commit(|tx| {
-                let mut last_header = tx.get::<tables::Headers>(last_block_number)?.unwrap();
-                last_header.state_root = root;
-                tx.put::<tables::Headers>(last_block_number, last_header)?;
-                Ok(())
-            })?;
+            let snapshot_provider = self.db.factory.snapshot_provider().expect("should exist");
+            let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers).unwrap();
+            let mut last_header = last_block.header.header;
+            last_header.state_root = root;
+
+            let hash = last_header.hash_slow();
+            writer.prune_headers(1).unwrap();
+            writer.append_header(last_header, U256::ZERO, hash).unwrap();
+            writer.commit().unwrap();
 
             Ok(blocks)
         }
