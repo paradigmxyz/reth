@@ -156,7 +156,7 @@ impl PendingBlockEnv {
                     }
                 }
             };
-            // drop evm to release db.
+            // drop evm to release db reference.
             drop(evm);
             // commit changes
             db.commit(state);
