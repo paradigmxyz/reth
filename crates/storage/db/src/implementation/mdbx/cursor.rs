@@ -11,7 +11,7 @@ use crate::{
     tables::utils::*,
     DatabaseError,
 };
-use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
+use reth_interfaces::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{self, Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds};
 
@@ -58,7 +58,7 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
 /// Decodes a `(key, value)` pair from the database.
 #[allow(clippy::type_complexity)]
 pub fn decode<T>(
-    res: Result<Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)>, impl Into<i32>>,
+    res: Result<Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)>, impl Into<DatabaseErrorInfo>>,
 ) -> PairResult<T>
 where
     T: Table,
@@ -218,8 +218,7 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
                         .map_err(|e| DatabaseError::Read(e.into()))?
                         .map(|val| decoder::<T>((Cow::Owned(key), val)))
                 } else {
-                    let err_code = MDBXError::to_err_code(&MDBXError::NotFound);
-                    Some(Err(DatabaseError::Read(err_code)))
+                    Some(Err(DatabaseError::Read(MDBXError::NotFound.into())))
                 }
             }
             (None, None) => self.first().transpose(),
@@ -248,7 +247,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
                     .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::UPSERT)
                     .map_err(|e| {
                         DatabaseWriteError {
-                            code: e.into(),
+                            info: e.into(),
                             operation: DatabaseWriteOperation::CursorUpsert,
                             table_name: T::NAME,
                             key: key.into(),
@@ -270,7 +269,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
                     .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::NO_OVERWRITE)
                     .map_err(|e| {
                         DatabaseWriteError {
-                            code: e.into(),
+                            info: e.into(),
                             operation: DatabaseWriteOperation::CursorInsert,
                             table_name: T::NAME,
                             key: key.into(),
@@ -294,7 +293,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
                     .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND)
                     .map_err(|e| {
                         DatabaseWriteError {
-                            code: e.into(),
+                            info: e.into(),
                             operation: DatabaseWriteOperation::CursorAppend,
                             table_name: T::NAME,
                             key: key.into(),
@@ -330,7 +329,7 @@ impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
                     .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND_DUP)
                     .map_err(|e| {
                         DatabaseWriteError {
-                            code: e.into(),
+                            info: e.into(),
                             operation: DatabaseWriteOperation::CursorAppendDup,
                             table_name: T::NAME,
                             key: key.into(),
