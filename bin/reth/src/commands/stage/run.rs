@@ -18,14 +18,14 @@ use reth_config::Config;
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_primitives::ChainSpec;
-use reth_provider::{ProviderFactory, StageCheckpointReader};
+use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
 use reth_stages::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds,
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TransactionLookupStage,
     },
-    ExecInput, Stage, StageExt, UnwindInput,
+    ExecInput, ExecOutput, Stage, StageExt, UnwindInput, UnwindOutput,
 };
 use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
@@ -102,6 +102,10 @@ pub struct Command {
     // e.g. query the DB size, or any table data.
     #[arg(long, short)]
     commit: bool,
+
+    /// Save stage checkpoints
+    #[arg(long)]
+    checkpoints: bool,
 }
 
 impl Command {
@@ -244,8 +248,12 @@ impl Command {
 
         if !self.skip_unwind {
             while unwind.checkpoint.block_number > self.from {
-                let unwind_output = unwind_stage.unwind(&provider_rw, unwind)?;
-                unwind.checkpoint = unwind_output.checkpoint;
+                let UnwindOutput { checkpoint } = unwind_stage.unwind(&provider_rw, unwind)?;
+                unwind.checkpoint = checkpoint;
+
+                if self.checkpoints {
+                    provider_rw.save_stage_checkpoint(unwind_stage.id(), checkpoint)?;
+                }
 
                 if self.commit {
                     provider_rw.commit()?;
@@ -261,16 +269,19 @@ impl Command {
 
         loop {
             exec_stage.execute_ready(input).await?;
-            let output = exec_stage.execute(&provider_rw, input)?;
+            let ExecOutput { checkpoint, done } = exec_stage.execute(&provider_rw, input)?;
 
-            input.checkpoint = Some(output.checkpoint);
+            input.checkpoint = Some(checkpoint);
 
+            if self.checkpoints {
+                provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
+            }
             if self.commit {
                 provider_rw.commit()?;
                 provider_rw = factory.provider_rw()?;
             }
 
-            if output.done {
+            if done {
                 break
             }
         }

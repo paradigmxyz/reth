@@ -1,18 +1,19 @@
+use bytes::BufMut;
+use roaring::RoaringTreemap;
 use serde::{
     de::{SeqAccess, Unexpected, Visitor},
     ser::SerializeSeq,
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use std::{fmt, ops::Deref};
-use sucds::{EliasFano, Searial};
 
-/// Uses EliasFano to hold a list of integers. It provides really good compression with the
+/// Uses Roaring Bitmaps to hold a list of integers. It provides really good compression with the
 /// capability to access its elements without decoding it.
-#[derive(Clone, PartialEq, Eq, Default)]
-pub struct IntegerList(pub EliasFano);
+#[derive(Clone, PartialEq, Default)]
+pub struct IntegerList(pub RoaringTreemap);
 
 impl Deref for IntegerList {
-    type Target = EliasFano;
+    type Target = RoaringTreemap;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -21,53 +22,54 @@ impl Deref for IntegerList {
 
 impl fmt::Debug for IntegerList {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let vec: Vec<usize> = self.0.iter(0).collect();
+        let vec: Vec<u64> = self.0.iter().collect();
         write!(f, "IntegerList {:?}", vec)
     }
 }
 
 impl IntegerList {
-    /// Creates an IntegerList from a list of integers. `usize` is safe to use since
-    /// [`sucds::EliasFano`] restricts its compilation to 64bits.
+    /// Creates an IntegerList from a list of integers.
     ///
     /// # Returns
     ///
     /// Returns an error if the list is empty or not pre-sorted.
-    pub fn new<T: AsRef<[usize]>>(list: T) -> Result<Self, EliasFanoError> {
-        Ok(Self(EliasFano::from_ints(list.as_ref()).map_err(|_| EliasFanoError::InvalidInput)?))
+    pub fn new<T: AsRef<[u64]>>(list: T) -> Result<Self, RoaringBitmapError> {
+        Ok(Self(
+            RoaringTreemap::from_sorted_iter(list.as_ref().iter().copied())
+                .map_err(|_| RoaringBitmapError::InvalidInput)?,
+        ))
     }
 
-    // Creates an IntegerList from a pre-sorted list of integers. `usize` is safe to use since
-    /// [`sucds::EliasFano`] restricts its compilation to 64bits.
+    // Creates an IntegerList from a pre-sorted list of integers.
     ///
     /// # Panics
     ///
     /// Panics if the list is empty or not pre-sorted.
-    pub fn new_pre_sorted<T: AsRef<[usize]>>(list: T) -> Self {
+    pub fn new_pre_sorted<T: AsRef<[u64]>>(list: T) -> Self {
         Self(
-            EliasFano::from_ints(list.as_ref())
-                .expect("IntegerList must be pre-sorted and non-empty."),
+            RoaringTreemap::from_sorted_iter(list.as_ref().iter().copied())
+                .expect("IntegerList must be pre-sorted and non-empty"),
         )
     }
 
     /// Serializes a [`IntegerList`] into a sequence of bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut vec = Vec::with_capacity(self.0.size_in_bytes());
-        self.0.serialize_into(&mut vec).expect("not able to encode integer list.");
+        let mut vec = Vec::with_capacity(self.0.serialized_size());
+        self.0.serialize_into(&mut vec).expect("not able to encode IntegerList");
         vec
     }
 
     /// Serializes a [`IntegerList`] into a sequence of bytes.
     pub fn to_mut_bytes<B: bytes::BufMut>(&self, buf: &mut B) {
-        let len = self.0.size_in_bytes();
-        let mut vec = Vec::with_capacity(len);
-        self.0.serialize_into(&mut vec).unwrap();
-        buf.put_slice(vec.as_slice());
+        self.0.serialize_into(buf.writer()).unwrap();
     }
 
     /// Deserializes a sequence of bytes into a proper [`IntegerList`].
-    pub fn from_bytes(data: &[u8]) -> Result<Self, EliasFanoError> {
-        Ok(Self(EliasFano::deserialize_from(data).map_err(|_| EliasFanoError::FailedDeserialize)?))
+    pub fn from_bytes(data: &[u8]) -> Result<Self, RoaringBitmapError> {
+        Ok(Self(
+            RoaringTreemap::deserialize_from(data)
+                .map_err(|_| RoaringBitmapError::FailedToDeserialize)?,
+        ))
     }
 }
 
@@ -76,8 +78,7 @@ macro_rules! impl_uint {
         $(
             impl From<Vec<$w>> for IntegerList {
                 fn from(v: Vec<$w>) -> Self {
-                    let v: Vec<usize> = v.iter().map(|v| *v as usize).collect();
-                    Self(EliasFano::from_ints(v.as_slice()).expect("could not create list."))
+                    Self::new_pre_sorted(v.iter().map(|v| *v as u64).collect::<Vec<_>>())
                 }
             }
         )+
@@ -91,8 +92,8 @@ impl Serialize for IntegerList {
     where
         S: Serializer,
     {
-        let vec = self.0.iter(0).collect::<Vec<usize>>();
-        let mut seq = serializer.serialize_seq(Some(self.len()))?;
+        let vec = self.0.iter().collect::<Vec<u64>>();
+        let mut seq = serializer.serialize_seq(Some(self.len() as usize))?;
         for e in vec {
             seq.serialize_element(&e)?;
         }
@@ -136,21 +137,21 @@ use arbitrary::{Arbitrary, Unstructured};
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> Arbitrary<'a> for IntegerList {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self, arbitrary::Error> {
-        let mut nums: Vec<usize> = Vec::arbitrary(u)?;
+        let mut nums: Vec<u64> = Vec::arbitrary(u)?;
         nums.sort();
-        Ok(Self(EliasFano::from_ints(&nums).map_err(|_| arbitrary::Error::IncorrectFormat)?))
+        Self::new(nums).map_err(|_| arbitrary::Error::IncorrectFormat)
     }
 }
 
 /// Primitives error type.
 #[derive(Debug, thiserror::Error)]
-pub enum EliasFanoError {
+pub enum RoaringBitmapError {
     /// The provided input is invalid.
     #[error("the provided input is invalid")]
     InvalidInput,
     /// Failed to deserialize data into type.
     #[error("failed to deserialize data into type")]
-    FailedDeserialize,
+    FailedToDeserialize,
 }
 
 #[cfg(test)]
@@ -161,7 +162,7 @@ mod test {
     fn test_integer_list() {
         let original_list = [1, 2, 3];
         let ef_list = IntegerList::new(original_list).unwrap();
-        assert_eq!(ef_list.iter(0).collect::<Vec<usize>>(), original_list);
+        assert_eq!(ef_list.iter().collect::<Vec<_>>(), original_list);
     }
 
     #[test]
