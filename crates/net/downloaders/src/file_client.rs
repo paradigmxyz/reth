@@ -241,7 +241,7 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use futures_util::stream::StreamExt;
-    use reth_db::test_utils::create_test_rw_db;
+    use reth_db::test_utils::{create_test_rw_db, create_test_snapshots_dir};
     use reth_interfaces::{
         p2p::{
             bodies::downloader::BodyDownloader,
@@ -269,7 +269,8 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone()),
+            ProviderFactory::new(db, MAINNET.clone(), create_test_snapshots_dir())
+                .expect("create provider factory with snapshots"),
         );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
@@ -350,7 +351,8 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone()),
+            ProviderFactory::new(db, MAINNET.clone(), create_test_snapshots_dir())
+                .expect("create provider factory with snapshots"),
         );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 

@@ -545,7 +545,7 @@ where
         .unwrap_or(0);
 
     // Get next expected receipt number in static files
-    let snapshot_provider = provider.snapshot_provider().expect("should exist");
+    let snapshot_provider = provider.snapshot_provider();
     let mut snapshotter = snapshot_provider.get_writer(start_block, SnapshotSegment::Receipts)?;
     let next_snapshot_receipt_num = snapshotter
         .get_highest_snapshot_tx(SnapshotSegment::Receipts)
@@ -618,7 +618,9 @@ mod tests {
     #[test]
     fn execution_checkpoint_matches() {
         let state_db = create_test_rw_db();
-        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
+        let factory =
+            ProviderFactory::new(state_db.as_ref(), MAINNET.clone(), create_test_snapshots_dir())
+                .expect("create provider factory with snapshots");
         let tx = factory.provider_rw().unwrap();
 
         let previous_stage_checkpoint = ExecutionCheckpoint {
@@ -643,7 +645,9 @@ mod tests {
     #[test]
     fn execution_checkpoint_precedes() {
         let state_db = create_test_rw_db();
-        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
+        let factory =
+            ProviderFactory::new(state_db.as_ref(), MAINNET.clone(), create_test_snapshots_dir())
+                .expect("create provider factory with snapshots");
         let provider = factory.provider_rw().unwrap();
 
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
@@ -687,7 +691,9 @@ mod tests {
     #[test]
     fn execution_checkpoint_recalculate_full_previous_some() {
         let state_db = create_test_rw_db();
-        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
+        let factory =
+            ProviderFactory::new(state_db.as_ref(), MAINNET.clone(), create_test_snapshots_dir())
+                .expect("create provider factory with snapshots");
         let provider = factory.provider_rw().unwrap();
 
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
@@ -723,7 +729,9 @@ mod tests {
     #[test]
     fn execution_checkpoint_recalculate_full_previous_none() {
         let state_db = create_test_rw_db();
-        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone());
+        let factory =
+            ProviderFactory::new(state_db.as_ref(), MAINNET.clone(), create_test_snapshots_dir())
+                .expect("create provider factory with snapshots");
         let provider = factory.provider_rw().unwrap();
 
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
@@ -753,9 +761,9 @@ mod tests {
         // TODO cleanup the setup after https://github.com/paradigmxyz/reth/issues/332
         // is merged as it has similar framework
         let state_db = create_test_rw_db();
-        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone())
-            .with_snapshots(create_test_snapshots_dir())
-            .unwrap();
+        let factory =
+            ProviderFactory::new(state_db.as_ref(), MAINNET.clone(), create_test_snapshots_dir())
+                .expect("create provider factory with snapshots");
         let provider = factory.provider_rw().unwrap();
         let input = ExecInput { target: Some(1), checkpoint: None };
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
@@ -790,7 +798,26 @@ mod tests {
         db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
         provider.commit().unwrap();
 
-        // execute
+        let provider = factory.provider_rw().unwrap();
+        let mut execution_stage: ExecutionStage<EvmProcessorFactory> = stage();
+        let output = execution_stage.execute(&provider, input).unwrap();
+        provider.commit().unwrap();
+        assert_matches!(output, ExecOutput {
+            checkpoint: StageCheckpoint {
+                block_number: 1,
+                stage_checkpoint: Some(StageUnitCheckpoint::Execution(ExecutionCheckpoint {
+                    block_range: CheckpointBlockRange {
+                        from: 1,
+                        to: 1,
+                    },
+                    progress: EntitiesCheckpoint {
+                        processed,
+                        total
+                    }
+                }))
+            },
+            done: true
+        } if processed == total && total == block.gas_used);
 
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
@@ -893,9 +920,9 @@ mod tests {
         // is merged as it has similar framework
 
         let state_db = create_test_rw_db();
-        let factory = ProviderFactory::new(state_db.as_ref(), MAINNET.clone())
-            .with_snapshots(create_test_snapshots_dir())
-            .unwrap();
+        let factory =
+            ProviderFactory::new(state_db.as_ref(), MAINNET.clone(), create_test_snapshots_dir())
+                .expect("create provider factory with snapshots");
         let provider = factory.provider_rw().unwrap();
         let input = ExecInput { target: Some(1), checkpoint: None };
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();

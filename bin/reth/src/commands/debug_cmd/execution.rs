@@ -170,7 +170,11 @@ impl Command {
                 self.network.discovery.addr,
                 self.network.discovery.port,
             )))
-            .build(ProviderFactory::new(db, self.chain.clone()))
+            .build(ProviderFactory::new(
+                db,
+                self.chain.clone(),
+                self.datadir.unwrap_or_chain_default(self.chain.chain).snapshots_path(),
+            )?)
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -206,8 +210,8 @@ impl Command {
         fs::create_dir_all(&db_path)?;
         let db =
             Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
-        let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone())
-            .with_snapshots(data_dir.snapshots_path())?;
+        let provider_factory =
+            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.snapshots_path())?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(provider_factory.clone(), self.chain.clone())?;
@@ -229,9 +233,7 @@ impl Command {
 
         let snapshotter = Snapshotter::new(
             provider_factory.clone(),
-            provider_factory
-                .snapshot_provider()
-                .expect("snapshot provider initialized via provider factory"),
+            provider_factory.snapshot_provider(),
             PruneModes::default(),
         );
 

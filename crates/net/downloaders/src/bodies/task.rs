@@ -169,7 +169,7 @@ mod tests {
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use assert_matches::assert_matches;
-    use reth_db::test_utils::create_test_rw_db;
+    use reth_db::test_utils::{create_test_rw_db, create_test_snapshots_dir};
     use reth_interfaces::{p2p::error::DownloadError, test_utils::TestConsensus};
     use reth_primitives::MAINNET;
     use reth_provider::ProviderFactory;
@@ -190,7 +190,8 @@ mod tests {
         let downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone()),
+            ProviderFactory::new(db, MAINNET.clone(), create_test_snapshots_dir())
+                .expect("create provider factory with snapshots"),
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 
@@ -212,7 +213,8 @@ mod tests {
         let downloader = BodiesDownloaderBuilder::default().build(
             Arc::new(TestBodiesClient::default()),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone()),
+            ProviderFactory::new(db, MAINNET.clone(), create_test_snapshots_dir())
+                .expect("create provider factory with snapshots"),
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 

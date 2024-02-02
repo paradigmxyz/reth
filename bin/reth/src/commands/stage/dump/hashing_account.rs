@@ -2,20 +2,20 @@ use super::setup;
 use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
-use reth_primitives::{stage::StageCheckpoint, BlockNumber, ChainSpec};
+use reth_node_core::dirs::{ChainPath, DataDirPath};
+use reth_primitives::{stage::StageCheckpoint, BlockNumber};
 use reth_provider::ProviderFactory;
 use reth_stages::{stages::AccountHashingStage, Stage, UnwindInput};
-use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_hashing_account_stage<DB: Database>(
     db_tool: &DbTool<DB>,
     from: BlockNumber,
     to: BlockNumber,
-    output_db: &PathBuf,
+    output_datadir: ChainPath<DataDirPath>,
     should_run: bool,
 ) -> Result<()> {
-    let (output_db, tip_block_number) = setup(from, to, output_db, db_tool)?;
+    let (output_db, tip_block_number) = setup(from, to, &output_datadir.db_path(), db_tool)?;
 
     // Import relevant AccountChangeSets
     output_db.update(|tx| {
@@ -29,7 +29,16 @@ pub(crate) async fn dump_hashing_account_stage<DB: Database>(
     unwind_and_copy(db_tool, from, tip_block_number, &output_db)?;
 
     if should_run {
-        dry_run(db_tool.chain.clone(), output_db, to, from).await?;
+        dry_run(
+            ProviderFactory::new(
+                output_db,
+                db_tool.chain.clone(),
+                output_datadir.snapshots_path(),
+            )?,
+            to,
+            from,
+        )
+        .await?;
     }
 
     Ok(())
@@ -42,8 +51,7 @@ fn unwind_and_copy<DB: Database>(
     tip_block_number: u64,
     output_db: &DatabaseEnv,
 ) -> eyre::Result<()> {
-    let factory = ProviderFactory::new(db_tool.provider_factory.db_ref(), db_tool.chain.clone());
-    let provider = factory.provider_rw()?;
+    let provider = db_tool.provider_factory.provider_rw()?;
     let mut exec_stage = AccountHashingStage::default();
 
     exec_stage.unwind(
@@ -63,15 +71,13 @@ fn unwind_and_copy<DB: Database>(
 
 /// Try to re-execute the stage straightaway
 async fn dry_run<DB: Database>(
-    chain: Arc<ChainSpec>,
-    output_db: DB,
+    output_provider_factory: ProviderFactory<DB>,
     to: u64,
     from: u64,
 ) -> eyre::Result<()> {
     info!(target: "reth::cli", "Executing stage.");
 
-    let factory = ProviderFactory::new(&output_db, chain);
-    let provider = factory.provider_rw()?;
+    let provider = output_provider_factory.provider_rw()?;
     let mut stage = AccountHashingStage {
         clean_threshold: 1, // Forces hashing from scratch
         ..Default::default()

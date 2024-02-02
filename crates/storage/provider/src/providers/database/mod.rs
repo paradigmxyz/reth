@@ -42,13 +42,21 @@ pub struct ProviderFactory<DB> {
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Snapshot Provider
-    snapshot_provider: Option<Arc<SnapshotProvider>>,
+    snapshot_provider: Arc<SnapshotProvider>,
 }
 
 impl<DB> ProviderFactory<DB> {
     /// Create new database provider factory.
-    pub fn new(db: DB, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { db, chain_spec, snapshot_provider: None }
+    pub fn new(
+        db: DB,
+        chain_spec: Arc<ChainSpec>,
+        snapshots_path: PathBuf,
+    ) -> RethResult<ProviderFactory<DB>> {
+        Ok(Self {
+            db,
+            chain_spec,
+            snapshot_provider: Arc::new(SnapshotProvider::new(snapshots_path)?),
+        })
     }
 
     /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
@@ -57,18 +65,13 @@ impl<DB> ProviderFactory<DB> {
         path: P,
         chain_spec: Arc<ChainSpec>,
         args: DatabaseArguments,
+        snapshots_path: PathBuf,
     ) -> RethResult<ProviderFactory<DatabaseEnv>> {
         Ok(ProviderFactory::<DatabaseEnv> {
             db: init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?,
             chain_spec,
-            snapshot_provider: None,
+            snapshot_provider: Arc::new(SnapshotProvider::new(snapshots_path)?),
         })
-    }
-
-    /// Database provider that comes with a shared snapshot provider.
-    pub fn with_snapshots(mut self, snapshots_path: PathBuf) -> ProviderResult<Self> {
-        self.snapshot_provider = Some(Arc::new(SnapshotProvider::new(snapshots_path)?));
-        Ok(self)
     }
 
     /// Returns reference to the underlying database.
@@ -77,7 +80,7 @@ impl<DB> ProviderFactory<DB> {
     }
 
     /// Returns snapshot provider
-    pub fn snapshot_provider(&self) -> Option<Arc<SnapshotProvider>> {
+    pub fn snapshot_provider(&self) -> Arc<SnapshotProvider> {
         self.snapshot_provider.clone()
     }
 }
@@ -88,11 +91,11 @@ impl<DB: Database> ProviderFactory<DB> {
     /// [`BlockHashReader`]. This may fail if the inner read database transaction fails to open.
     #[track_caller]
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
-        let mut provider = DatabaseProvider::new(self.db.tx()?, self.chain_spec.clone());
-
-        if let Some(snapshot_provider) = &self.snapshot_provider {
-            provider = provider.with_snapshot_provider(snapshot_provider.clone());
-        }
+        let provider = DatabaseProvider::new(
+            self.db.tx()?,
+            self.chain_spec.clone(),
+            self.snapshot_provider.clone(),
+        );
 
         Ok(provider)
     }
@@ -103,11 +106,11 @@ impl<DB: Database> ProviderFactory<DB> {
     /// open.
     #[track_caller]
     pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<DB>> {
-        let mut provider = DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone());
-
-        if let Some(snapshot_provider) = &self.snapshot_provider {
-            provider = provider.with_snapshot_provider(snapshot_provider.clone());
-        }
+        let provider = DatabaseProvider::new_rw(
+            self.db.tx_mut()?,
+            self.chain_spec.clone(),
+            self.snapshot_provider.clone(),
+        );
 
         Ok(DatabaseProviderRW(provider))
     }
@@ -501,7 +504,12 @@ mod tests {
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use rand::Rng;
-    use reth_db::{tables, test_utils::ERROR_TEMPDIR, transaction::DbTxMut, DatabaseEnv};
+    use reth_db::{
+        tables,
+        test_utils::{create_test_snapshots_dir, ERROR_TEMPDIR},
+        transaction::DbTxMut,
+        DatabaseEnv,
+    };
     use reth_interfaces::{
         provider::ProviderError,
         test_utils::{
@@ -549,6 +557,7 @@ mod tests {
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
             Default::default(),
+            create_test_snapshots_dir(),
         )
         .unwrap();
 

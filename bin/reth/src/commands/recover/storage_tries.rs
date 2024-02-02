@@ -50,8 +50,7 @@ impl Command {
         fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path, Default::default())?);
 
-        let factory = ProviderFactory::new(&db, self.chain.clone())
-            .with_snapshots(data_dir.snapshots_path())?;
+        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.snapshots_path())?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(factory.clone(), self.chain.clone())?;

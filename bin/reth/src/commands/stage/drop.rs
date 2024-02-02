@@ -60,8 +60,8 @@ impl Command {
 
         let db =
             open_db(db_path.as_ref(), DatabaseArguments::default().log_level(self.db.log_level))?;
-        let provider_factory = ProviderFactory::new(db, self.chain.clone())
-            .with_snapshots(data_dir.snapshots_path())?;
+        let provider_factory =
+            ProviderFactory::new(db, self.chain.clone(), data_dir.snapshots_path())?;
 
         let tool = DbTool::new(provider_factory, self.chain.clone())?;
 
@@ -188,10 +188,7 @@ impl Command {
         };
 
         if let Some(snapshot_segment) = snapshot_segment {
-            let snapshot_provider = tool
-                .provider_factory
-                .snapshot_provider()
-                .expect("snapshot provider initialized via provider factory");
+            let snapshot_provider = tool.provider_factory.snapshot_provider();
             let snapshots = iter_snapshots(snapshot_provider.directory())?;
             if let Some(segment_snapshots) = snapshots.get(&snapshot_segment) {
                 for (block_range, _) in segment_snapshots {

@@ -131,7 +131,11 @@ impl Command {
         network_config_builder = self.discovery.apply_to_builder(network_config_builder);
 
         let network = network_config_builder
-            .build(Arc::new(ProviderFactory::new(noop_db, self.chain.clone())))
+            .build(Arc::new(ProviderFactory::new(
+                noop_db,
+                self.chain.clone(),
+                data_dir.snapshots_path(),
+            )?))
             .start_network()
             .await?;
 

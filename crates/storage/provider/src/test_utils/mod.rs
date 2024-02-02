@@ -27,7 +27,6 @@ pub fn create_test_provider_factory_with_chain_spec(
     chain_spec: Arc<ChainSpec>,
 ) -> ProviderFactory<Arc<TempDatabase<DatabaseEnv>>> {
     let db = create_test_rw_db();
-    ProviderFactory::new(db, chain_spec)
-        .with_snapshots(create_test_snapshots_dir())
-        .expect("with snapshots")
+    ProviderFactory::new(db, chain_spec, create_test_snapshots_dir())
+        .expect("create provider factory with snapshots")
 }

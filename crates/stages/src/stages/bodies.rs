@@ -124,7 +124,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // Get id for the next tx_num of zero if there are no transactions.
         let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
 
-        let snapshot_provider = provider.snapshot_provider().expect("should exist");
+        let snapshot_provider = provider.snapshot_provider();
         let mut snapshotter =
             snapshot_provider.get_writer(from_block, SnapshotSegment::Transactions)?;
 
@@ -190,7 +190,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                         segment: SnapshotSegment::Transactions,
                         database: block_number,
                         static_file: appended_block_number,
-                    });
+                    })
                 }
             }
 
@@ -213,7 +213,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                                 segment: SnapshotSegment::Transactions,
                                 database: next_tx_num,
                                 static_file: appended_tx_number,
-                            });
+                            })
                         }
 
                         // Increment transaction id for each transaction.
@@ -265,7 +265,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     ) -> Result<UnwindOutput, StageError> {
         self.buffer.take();
 
-        let snapshot_provider = provider.snapshot_provider().expect("should exist");
+        let snapshot_provider = provider.snapshot_provider();
         let tx = provider.tx_ref();
         // Cursors to unwind bodies, ommers
         let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
@@ -537,7 +537,7 @@ mod tests {
             .expect("Written block data invalid");
 
         // Delete a transaction
-        let snapshot_provider = runner.db().factory.snapshot_provider().expect("should exist");
+        let snapshot_provider = runner.db().factory.snapshot_provider();
         {
             let mut snapshotter =
                 snapshot_provider.latest_writer(SnapshotSegment::Transactions).unwrap();
@@ -669,7 +669,7 @@ mod tests {
                 let start = input.checkpoint().block_number;
                 let end = input.target();
 
-                let snapshot_provider = self.db.factory.snapshot_provider().expect("should exist");
+                let snapshot_provider = self.db.factory.snapshot_provider();
 
                 let mut rng = generators::rng();
                 let blocks = random_block_range(&mut rng, start..=end, GENESIS_HASH, 0..2);
@@ -772,11 +772,7 @@ mod tests {
                 prev_progress: BlockNumber,
                 highest_block: BlockNumber,
             ) -> Result<(), TestRunnerError> {
-                let snapshot_provider = self
-                    .db
-                    .factory
-                    .snapshot_provider()
-                    .expect("snapshot provider should be initalized.");
+                let snapshot_provider = self.db.factory.snapshot_provider();
 
                 self.db.query(|tx| {
                     // Acquire cursors on body related tables
