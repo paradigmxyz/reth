@@ -37,24 +37,19 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
             (payload_id_optimism(&parent, &attributes, &transactions), transactions)
         };
 
+        let withdraw = attributes.payload_attributes.withdrawals.map(|withdrawals| {
+            Withdrawals::new(
+                withdrawals.into_iter().map(convert_standalone_withdraw_to_withdrawal).collect(),
+            )
+        });
+
         let payload_attributes = EthPayloadBuilderAttributes {
             id,
             parent,
             timestamp: attributes.payload_attributes.timestamp,
             suggested_fee_recipient: attributes.payload_attributes.suggested_fee_recipient,
             prev_randao: attributes.payload_attributes.prev_randao,
-            withdrawals: attributes
-                .payload_attributes
-                .withdrawals
-                .map(|withdrawals| {
-                    Withdrawals::new(
-                        withdrawals
-                            .into_iter()
-                            .map(convert_standalone_withdraw_to_withdrawal)
-                            .collect(),
-                    )
-                })
-                .unwrap_or_default(),
+            withdrawals: withdraw.unwrap_or_default(),
             parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
         };
 

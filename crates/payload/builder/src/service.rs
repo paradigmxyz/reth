@@ -288,14 +288,17 @@ where
         &self,
         id: PayloadId,
     ) -> Option<Result<<Gen::Job as PayloadJob>::PayloadAttributes, PayloadBuilderError>> {
-        self.payload_jobs
+        let attributes = self
+            .payload_jobs
             .iter()
             .find(|(_, job_id)| *job_id == id)
-            .map(|(j, _)| j.payload_attributes())
-            .or_else(|| {
-                trace!(%id, "no matching payload job found to get attributes for");
-                None
-            })
+            .map(|(j, _)| j.payload_attributes());
+
+        if attributes.is_none() {
+            trace!(%id, "no matching payload job found to get attributes for");
+        }
+
+        attributes
     }
 }
 
