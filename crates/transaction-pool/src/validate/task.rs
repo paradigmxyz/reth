@@ -18,6 +18,10 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 
 /// A service that performs validation jobs.
+///
+/// This listens for incoming validation jobs and executes them.
+///
+/// This should be spawned as a task: [ValidationTask::run]
 #[derive(Clone)]
 pub struct ValidationTask {
     #[allow(clippy::type_complexity)]
