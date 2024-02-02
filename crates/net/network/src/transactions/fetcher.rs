@@ -226,7 +226,6 @@ where
             }
 
             // vacant entry
-
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 hash=%hash,
@@ -262,7 +261,7 @@ impl AnnouncementDataStore<TxHash68> {
     /// Returns `true` if hash is included in request. If there is still space in the respective
     /// response but not enough for the transaction of given hash, `false` is returned.
     fn include_eth68_hash(&self, acc_size_response: &mut usize, hash: TxHash) -> bool {
-        let meta = self.meta.as_ref().expect("metadata cache should be configured for eht68 type");
+        let meta = self.meta.as_ref().expect("metadata cache should be configured for eth68 type");
 
         debug_assert!(
             meta.peek(&hash).is_some(),
@@ -321,7 +320,7 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash68> {
     /// 3. Try to fill remaining space with hashes from buffer.
     /// 4. Return surplus hashes.
     fn pack_hashes(&mut self, hashes: &mut Vec<TxHash>, peer_id: PeerId) -> Vec<TxHash> {
-        let meta = self.meta.as_mut().expect("metadata cache should be configured for eht68 type");
+        let meta = self.meta.as_mut().expect("metadata cache should be configured for eth68 type");
 
         if let Some(hash) = hashes.first() {
             if let Some(size) = meta.get(hash) {
@@ -331,7 +330,7 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash68> {
             }
         }
 
-        let meta = self.meta.as_ref().expect("metadata cache should be configured for eht68 type");
+        let meta = self.meta.as_ref().expect("metadata cache should be configured for eth68 type");
 
         let mut acc_size_response = 0;
         let mut surplus_hashes = vec![];
@@ -426,7 +425,7 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash68> {
             }
             // 2. Check if this buffered hash is an eth68 hash, else skip to next iteration.
             let meta =
-                self.meta.as_mut().expect("metadata cache should be configured for eht68 type");
+                self.meta.as_mut().expect("metadata cache should be configured for eth68 type");
 
             if meta.get(hash).is_none() {
                 continue
@@ -528,14 +527,6 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash66> {
             if hashes.len() >= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
                 break
             }
-            // 2. Check if this buffered hash is an eth66 hash.
-            let meta = &mut self
-                .meta
-                .as_mut()
-                .expect("metadata cache should be configured for eht68 type");
-            if meta.get(hash).is_some() {
-                continue
-            }
 
             debug_assert!(
                 self.unknown_hashes.get(hash).is_some(),
@@ -546,7 +537,7 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash66> {
             );
 
             if let Some((_, fallback_peers)) = self.unknown_hashes.get(hash) {
-                // 3. Check if peer is fallback peer for hash and remove.
+                // 2. Check if peer is fallback peer for hash and remove.
                 //
                 // upgrade this peer from fallback peer, soon to be active peer with inflight
                 // request. since 1 retry per peer per tx hash on this tx fetcher layer, remove
@@ -762,7 +753,7 @@ impl TransactionFetcher {
     {
         if T::version().is_eth68() {
             self.store_eth68.filter_unseen_hashes(new_announced_hashes, peer_id, is_session_active)
-        } else if T::version().is_eth68() {
+        } else if T::version().is_eth66() {
             self.store_eth66.filter_unseen_hashes(new_announced_hashes, peer_id, is_session_active)
         }
     }
