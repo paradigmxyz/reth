@@ -21,7 +21,7 @@ use reth_primitives::{
     TxEip1559, TxEip2930, TxEip4844, TxHash, TxLegacy, TxType, B256, EIP1559_TX_TYPE_ID,
     EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
 };
-use std::{ops::Range, sync::Arc, time::Instant};
+use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [MockOrdering] for transaction ordering.
 ///
@@ -1393,6 +1393,25 @@ impl MockTransactionSet {
     /// Extract the inner [Vec] of [MockTransaction]s
     pub fn into_vec(self) -> Vec<MockTransaction> {
         self.transactions
+    }
+
+    /// Returns an iterator over the contained transactions in the set
+    pub fn iter(&self) -> impl Iterator<Item = &MockTransaction> {
+        self.transactions.iter()
+    }
+
+    /// Returns a mutable iterator over the contained transactions in the set.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut MockTransaction> {
+        self.transactions.iter_mut()
+    }
+}
+
+impl IntoIterator for MockTransactionSet {
+    type Item = MockTransaction;
+    type IntoIter = IntoIter<MockTransaction>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.transactions.into_iter()
     }
 }
 

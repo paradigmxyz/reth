@@ -614,8 +614,13 @@ mod tests {
         let a_sender = address!("000000000000000000000000000000000000000a");
 
         // 2 txs, that should put the pool over the size limit but not max txs
-        let a = MockTransactionSet::dependent(a_sender, 0, 2, TxType::EIP1559);
-        let a_txs = a.clone().into_vec();
+        let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxType::EIP1559)
+            .into_iter()
+            .map(|mut tx| {
+                tx.set_size(default_limits.max_size / 2 + 1);
+                tx
+            })
+            .collect::<Vec<_>>();
 
         // add all the transactions to the pool
         for tx in a_txs {
