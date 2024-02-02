@@ -3,8 +3,8 @@
 use crate::dirs::{LogsDir, PlatformPath};
 use clap::{ArgAction, Args, ValueEnum};
 use reth_tracing::{
-    tracing_subscriber::filter::Directive, FileInfo, FileWorkerGuard, LayerInfo, LogFormat,
-    RethTracer, Tracer,
+    tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber},
+    FileInfo, FileWorkerGuard, LayerInfo, LogFormat, RethTracer, Tracer,
 };
 use std::{fmt, fmt::Display};
 use tracing::{level_filters::LevelFilter, Level};
@@ -98,21 +98,31 @@ impl LogArgs {
 
     /// Initializes tracing with the configured options from cli args.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
+        // Create a new tracer instance.
         let mut tracer = RethTracer::new();
 
+        // Configure stdout logging based on cli args.
         let stdout = self.layer(self.log_stdout_format, self.log_stdout_filter.clone(), true);
         tracer = tracer.with_stdout(stdout);
 
+        // Add Journald logging if enabled.
         if self.journald {
             tracer = tracer.with_journald(self.journald_filter.clone());
         }
 
+        // Add file logging if max files limit is greater than 0.
         if self.log_file_max_files > 0 {
             let info = self.file_info();
             let file = self.layer(self.log_file_format, self.log_file_filter.clone(), false);
             tracer = tracer.with_file(file, info);
         }
 
+        // Set the global default subscriber with env filter.
+        tracing::subscriber::set_global_default(
+            FmtSubscriber::builder().with_env_filter(EnvFilter::from_default_env()).finish(),
+        )?;
+
+        // Initialize the tracer and return the guard.
         let guard = tracer.init()?;
         Ok(guard)
     }

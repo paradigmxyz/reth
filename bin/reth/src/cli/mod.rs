@@ -96,8 +96,7 @@ impl<Ext: RethCliExt> Cli<Ext> {
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        let guard = self.logs.init_tracing()?;
-        Ok(guard)
+        Ok(self.logs.init_tracing()?)
     }
 
     /// Configures the given node extension.
@@ -164,11 +163,9 @@ impl<Ext: RethCliExt> Commands<Ext> {
 
 #[cfg(test)]
 mod tests {
-    use clap::CommandFactory;
-
-    use crate::args::{utils::SUPPORTED_CHAINS, ColorMode};
-
     use super::*;
+    use crate::args::{utils::SUPPORTED_CHAINS, ColorMode};
+    use clap::CommandFactory;
 
     #[test]
     fn parse_color_mode() {
