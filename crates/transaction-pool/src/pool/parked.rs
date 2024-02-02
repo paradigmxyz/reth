@@ -95,6 +95,18 @@ impl<T: ParkedOrd> ParkedPool<T> {
             .collect()
     }
 
+    /// Get transactions, with size, by sender
+    pub(crate) fn get_txs_by_sender_with_size(
+        &self,
+        sender: SenderId,
+    ) -> Vec<(TransactionId, usize)> {
+        self.by_id
+            .range((sender.start_bound(), Unbounded))
+            .take_while(move |(other, _)| sender == other.sender)
+            .map(|(tx_id, tx)| (*tx_id, tx.transaction.size()))
+            .collect()
+    }
+
     /// Returns sender ids sorted by each sender's last submission id. Senders with older last
     /// submission ids are first. Note that _last_ submission ids are the newest submission id for
     /// that sender, so this sorts senders by the last time they submitted a transaction in
@@ -135,6 +147,26 @@ impl<T: ParkedOrd> ParkedPool<T> {
         senders.into_sorted_vec()
     }
 
+    /// Checks the size and len of the pool against the given [SubPoolLimit].
+    ///
+    /// Returns `true` if the pool is over the limits, `false` otherwise.
+    pub(crate) fn over_limit(&self, limit: SubPoolLimit) -> bool {
+        self.len() > limit.max_txs || self.size() > limit.max_size
+    }
+
+    /// Check if the given list of transactions, if dropped, would put the pool under the given
+    /// [SubPoolLimit].
+    ///
+    /// Returns `true` if the pool would be under the limits, `false` otherwise.
+    pub(crate) fn would_move_pool_under_limit(
+        &self,
+        limit: SubPoolLimit,
+        num_txs: usize,
+        total_size: usize,
+    ) -> bool {
+        self.len() - num_txs <= limit.max_txs && self.size() - total_size <= limit.max_size
+    }
+
     /// Truncates the pool by removing transactions, until the given [SubPoolLimit] has been met.
     ///
     /// This is done by first ordering senders by the last time they have submitted a transaction,
@@ -149,39 +181,39 @@ impl<T: ParkedOrd> ParkedPool<T> {
         &mut self,
         limit: SubPoolLimit,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        if self.len() <= limit.max_txs {
+        if !self.over_limit(limit) {
             // if we are below the limits, we don't need to drop anything
             return Vec::new()
         }
 
         let mut removed = Vec::new();
         let mut sender_ids = self.get_senders_by_submission_id();
-        let queued = self.len();
-        let mut drop = queued - limit.max_txs;
 
-        while drop > 0 && !sender_ids.is_empty() {
+        while self.over_limit(limit) && !sender_ids.is_empty() {
             // SAFETY: This will not panic due to `!addresses.is_empty()`
             let sender_id = sender_ids.pop().unwrap().sender_id;
-            let mut list = self.get_txs_by_sender(sender_id);
+            let list = self.get_txs_by_sender_with_size(sender_id);
+            let list_size = list.iter().map(|(_, size)| *size).sum::<usize>();
 
             // Drop all transactions if they are less than the overflow
-            if list.len() <= drop {
-                for txid in &list {
+            if !self.would_move_pool_under_limit(limit, list.len(), list_size) {
+                for (txid, _) in &list {
                     if let Some(tx) = self.remove_transaction(txid) {
                         removed.push(tx);
                     }
                 }
-                drop -= list.len();
                 continue
             }
 
             // Otherwise drop only last few transactions
-            // SAFETY: This will not panic because `list.len() > drop`
-            for txid in list.split_off(drop) {
+            for (txid, _) in list.into_iter().rev() {
                 if let Some(tx) = self.remove_transaction(&txid) {
                     removed.push(tx);
                 }
-                drop -= 1;
+
+                if !self.over_limit(limit) {
+                    break
+                }
             }
         }
 

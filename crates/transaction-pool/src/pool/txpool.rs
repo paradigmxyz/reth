@@ -500,8 +500,6 @@ impl<T: TransactionOrdering> TxPool<T> {
             return Err(PoolError::new(*tx.hash(), PoolErrorKind::AlreadyImported))
         }
 
-        tracing::trace!(?on_chain_balance, ?on_chain_nonce, nonce=tx.nonce(), "adding transaction to the pool: {tx_hash}", tx_hash = tx.hash());
-
         // Update sender info with balance and nonce
         self.sender_info
             .entry(tx.sender_id())
@@ -778,8 +776,6 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) fn discard_worst(&mut self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
 
-        tracing::trace!("discarding worst transactions from the pool");
-
         // Helper macro that discards the worst transactions for the pools
         macro_rules! discard_worst {
             ($this:ident, $removed:ident,  [$($limit:ident => $pool:ident),*]  ) => {
@@ -790,15 +786,18 @@ impl<T: TransactionOrdering> TxPool<T> {
                         .is_exceeded($this.$pool.len(), $this.$pool.size())
                     {
                         tracing::trace!(
-                            "discarding worst transactions from {} pool",
-                            stringify!($pool)
+                            "discarding transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
+                            stringify!($pool),
+                            $this.config.$limit,
+                            $this.$pool.size(),
+                            $this.$pool.len(),
                         );
 
                         // 1. first remove the worst transaction from the subpool
                         let removed_from_subpool = $this.$pool.truncate_pool($this.config.$limit.clone());
 
                         tracing::trace!(
-                            "removed {} transactions from {} pool, limit: {:?}, curr size: {}, curr len: {}",
+                            "removed {} transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
                             removed_from_subpool.len(),
                             stringify!($pool),
                             $this.config.$limit,
@@ -812,12 +811,6 @@ impl<T: TransactionOrdering> TxPool<T> {
 
                             let id = *tx.id();
 
-                            // trace that a transaction was removed from a certain pool
-                            tracing::trace!(
-                                "removed transaction from {} pool: {id:?}",
-                                stringify!($pool),
-                            );
-
                             // keep track of removed transaction
                             removed.push(tx);
 
@@ -829,39 +822,6 @@ impl<T: TransactionOrdering> TxPool<T> {
                 )*
             };
         }
-
-        // trace all the limits and current values
-        tracing::trace!(
-            "queued size: {}/{:?}, queued len: {}/{:?}",
-            self.queued_pool.size(),
-            self.config.queued_limit.max_size,
-            self.queued_pool.len(),
-            self.config.queued_limit.max_txs,
-        );
-
-        tracing::trace!(
-            "pending size: {}/{:?}, pending len: {}/{:?}",
-            self.pending_pool.size(),
-            self.config.pending_limit.max_size,
-            self.pending_pool.len(),
-            self.config.pending_limit.max_txs,
-        );
-
-        tracing::trace!(
-            "basefee size: {}/{:?}, basefee len: {}/{:?}",
-            self.basefee_pool.size(),
-            self.config.basefee_limit.max_size,
-            self.basefee_pool.len(),
-            self.config.basefee_limit.max_txs,
-        );
-
-        tracing::trace!(
-            "blobpool size: {}/{:?}, blobpool len: {}/{:?}",
-            self.blob_pool.size(),
-            self.config.blob_limit.max_size,
-            self.blob_pool.len(),
-            self.config.blob_limit.max_txs,
-        );
 
         discard_worst!(
             self, removed, [
