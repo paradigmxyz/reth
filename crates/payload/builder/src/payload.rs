@@ -172,16 +172,14 @@ impl EthPayloadBuilderAttributes {
     pub fn new(parent: B256, attributes: PayloadAttributes) -> Self {
         let id = payload_id(&parent, &attributes);
 
-        let withdraw = attributes.withdrawals.map(
-            |withdrawals: Vec<reth_rpc_types::withdrawal::Withdrawal>| {
-                Withdrawals::new(
-                    withdrawals
-                        .into_iter()
-                        .map(convert_standalone_withdraw_to_withdrawal) // Removed the parentheses here
-                        .collect(),
-                )
-            },
-        );
+        let withdraw = attributes.withdrawals.map(|withdrawals| {
+            Withdrawals::new(
+                withdrawals
+                    .into_iter()
+                    .map(convert_standalone_withdraw_to_withdrawal) // Removed the parentheses here
+                    .collect(),
+            )
+        });
 
         Self {
             id,

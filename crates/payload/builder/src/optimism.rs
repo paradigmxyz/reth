@@ -37,16 +37,11 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
             (payload_id_optimism(&parent, &attributes, &transactions), transactions)
         };
 
-        let withdraw = attributes.payload_attributes.withdrawals.map(
-            |withdrawals: Vec<reth_rpc_types::withdrawal::Withdrawal>| {
-                Withdrawals::new(
-                    withdrawals
-                        .into_iter()
-                        .map(convert_standalone_withdraw_to_withdrawal) // Removed the parentheses here
-                        .collect(),
-                )
-            },
-        );
+        let withdraw = attributes.payload_attributes.withdrawals.map(|withdrawals| {
+            Withdrawals::new(
+                withdrawals.into_iter().map(convert_standalone_withdraw_to_withdrawal).collect(),
+            )
+        });
 
         let payload_attributes = EthPayloadBuilderAttributes {
             id,
