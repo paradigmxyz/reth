@@ -71,19 +71,21 @@ impl<'a, DB: DatabaseRef> Database for CachedReadsDbMut<'a, DB> {
     type Error = <DB as DatabaseRef>::Error;
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(match self.cached.accounts.entry(address) {
+        let basic = match self.cached.accounts.entry(address) {
             Entry::Occupied(entry) => entry.get().info.clone(),
             Entry::Vacant(entry) => {
                 entry.insert(CachedAccount::new(self.db.basic_ref(address)?)).info.clone()
             }
-        })
+        };
+        Ok(basic)
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        Ok(match self.cached.contracts.entry(code_hash) {
+        let code = match self.cached.contracts.entry(code_hash) {
             Entry::Occupied(entry) => entry.get().clone(),
             Entry::Vacant(entry) => entry.insert(self.db.code_by_hash_ref(code_hash)?).clone(),
-        })
+        };
+        Ok(code)
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
@@ -110,10 +112,11 @@ impl<'a, DB: DatabaseRef> Database for CachedReadsDbMut<'a, DB> {
     }
 
     fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
-        Ok(match self.cached.block_hashes.entry(number) {
+        let code = match self.cached.block_hashes.entry(number) {
             Entry::Occupied(entry) => *entry.get(),
             Entry::Vacant(entry) => *entry.insert(self.db.block_hash_ref(number)?),
-        })
+        };
+        Ok(code)
     }
 }
 
