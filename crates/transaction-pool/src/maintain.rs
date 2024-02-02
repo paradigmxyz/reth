@@ -579,7 +579,7 @@ where
         .into_iter()
         .filter_map(|tx| tx.try_ecrecovered().map(<P::Transaction>::from_recovered_transaction))
         .collect::<Vec<_>>();
-    let outcome = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await?;
+    let outcome = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
 
     info!(target: "txpool", txs_file =?file_path, num_txs=%outcome.len(), "Successfully reinserted local transactions from file");
     reth_primitives::fs::remove_file(file_path)?;

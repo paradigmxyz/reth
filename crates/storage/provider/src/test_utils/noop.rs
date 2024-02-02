@@ -16,7 +16,8 @@ use reth_primitives::{
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode,
     ChainInfo, ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
-    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, MAINNET, U256,
+    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
+    MAINNET, U256,
 };
 use reth_trie::updates::TrieUpdates;
 use revm::primitives::{BlockEnv, CfgEnvWithSpecId};
@@ -426,14 +427,14 @@ impl StageCheckpointReader for NoopProvider {
 }
 
 impl WithdrawalsProvider for NoopProvider {
-    fn latest_withdrawal(&self) -> ProviderResult<Option<reth_primitives::Withdrawal>> {
+    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         Ok(None)
     }
     fn withdrawals_by_block(
         &self,
         _id: BlockHashOrNumber,
         _timestamp: u64,
-    ) -> ProviderResult<Option<Vec<reth_primitives::Withdrawal>>> {
+    ) -> ProviderResult<Option<Withdrawals>> {
         Ok(None)
     }
 }

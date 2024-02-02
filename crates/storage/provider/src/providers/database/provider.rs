@@ -41,7 +41,7 @@ use reth_primitives::{
     ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
     PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment,
     StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_trie::{prefix_set::PrefixSetMut, updates::TrieUpdates, HashedPostState, StateRoot};
 use revm::primitives::{BlockEnv, CfgEnvWithSpecId, SpecId};
@@ -770,7 +770,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             // withdrawal can be missing
             let shanghai_is_active =
                 chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp);
-            let mut withdrawals = Some(Vec::new());
+            let mut withdrawals = Some(Withdrawals::default());
             if shanghai_is_active {
                 if let Some((block_number, _)) = block_withdrawals.as_ref() {
                     if *block_number == main_block_number {
@@ -1703,7 +1703,7 @@ impl<TX: DbTx> WithdrawalsProvider for DatabaseProvider<TX> {
         &self,
         id: BlockHashOrNumber,
         timestamp: u64,
-    ) -> ProviderResult<Option<Vec<Withdrawal>>> {
+    ) -> ProviderResult<Option<Withdrawals>> {
         if self.chain_spec.is_shanghai_active_at_timestamp(timestamp) {
             if let Some(number) = self.convert_hash_or_number(id)? {
                 // If we are past shanghai, then all blocks should have a withdrawal list, even if

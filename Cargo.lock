@@ -1832,6 +1832,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "custom-payload-builder"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "eyre",
+ "futures-util",
+ "reth",
+ "reth-basic-payload-builder",
+ "reth-node-api",
+ "reth-payload-builder",
+ "reth-primitives",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "darling"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2284,7 +2300,7 @@ dependencies = [
  "alloy-rlp",
  "reth-db",
  "reth-interfaces",
- "reth-node-builder",
+ "reth-node-ethereum",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -5760,8 +5776,9 @@ dependencies = [
  "reth-network-api",
  "reth-nippy-jar",
  "reth-node-api",
- "reth-node-builder",
  "reth-node-core",
+ "reth-node-ethereum",
+ "reth-node-optimism",
  "reth-optimism-payload-builder",
  "reth-payload-builder",
  "reth-payload-validator",
@@ -5805,7 +5822,7 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-interfaces",
  "reth-node-api",
- "reth-node-builder",
+ "reth-node-ethereum",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -5855,7 +5872,8 @@ dependencies = [
  "reth-interfaces",
  "reth-metrics",
  "reth-node-api",
- "reth-node-builder",
+ "reth-node-ethereum",
+ "reth-node-optimism",
  "reth-payload-builder",
  "reth-payload-validator",
  "reth-primitives",
@@ -5898,7 +5916,8 @@ dependencies = [
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
- "reth-node-builder",
+ "reth-node-ethereum",
+ "reth-node-optimism",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -6382,17 +6401,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-node-builder"
-version = "0.1.0-alpha.16"
-dependencies = [
- "reth-node-api",
- "reth-payload-builder",
- "reth-primitives",
- "reth-rpc-types",
- "serde",
-]
-
-[[package]]
 name = "reth-node-core"
 version = "0.1.0-alpha.16"
 dependencies = [
@@ -6459,6 +6467,28 @@ dependencies = [
  "tokio",
  "tracing",
  "vergen",
+]
+
+[[package]]
+name = "reth-node-ethereum"
+version = "0.1.0-alpha.16"
+dependencies = [
+ "reth-node-api",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-rpc-types",
+ "serde",
+]
+
+[[package]]
+name = "reth-node-optimism"
+version = "0.1.0-alpha.16"
+dependencies = [
+ "reth-node-api",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-rpc-types",
+ "serde",
 ]
 
 [[package]]
@@ -6624,7 +6654,8 @@ dependencies = [
  "reth-consensus-common",
  "reth-interfaces",
  "reth-node-api",
- "reth-node-builder",
+ "reth-node-ethereum",
+ "reth-node-optimism",
  "reth-primitives",
  "reth-provider",
  "reth-trie",
@@ -6663,7 +6694,8 @@ dependencies = [
  "reth-network",
  "reth-network-api",
  "reth-node-api",
- "reth-node-builder",
+ "reth-node-ethereum",
+ "reth-node-optimism",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -6730,7 +6762,8 @@ dependencies = [
  "reth-metrics",
  "reth-network-api",
  "reth-node-api",
- "reth-node-builder",
+ "reth-node-ethereum",
+ "reth-node-optimism",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
@@ -6766,7 +6799,8 @@ dependencies = [
  "reth-interfaces",
  "reth-metrics",
  "reth-node-api",
- "reth-node-builder",
+ "reth-node-ethereum",
+ "reth-node-optimism",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
@@ -6862,7 +6896,8 @@ dependencies = [
  "reth-eth-wire",
  "reth-interfaces",
  "reth-metrics",
- "reth-node-builder",
+ "reth-node-ethereum",
+ "reth-node-optimism",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -6931,6 +6966,7 @@ dependencies = [
  "paste",
  "proptest",
  "rand 0.8.5",
+ "reth-eth-wire",
  "reth-interfaces",
  "reth-metrics",
  "reth-primitives",

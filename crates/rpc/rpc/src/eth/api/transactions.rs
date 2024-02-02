@@ -251,7 +251,7 @@ pub trait EthTransactions: Send + Sync {
     async fn transaction_and_block(
         &self,
         hash: B256,
-    ) -> EthResult<Option<(TransactionSource, SealedBlock)>>;
+    ) -> EthResult<Option<(TransactionSource, SealedBlockWithSenders)>>;
 
     /// Retrieves the transaction if it exists and returns its trace.
     ///
@@ -732,7 +732,7 @@ where
     async fn transaction_and_block(
         &self,
         hash: B256,
-    ) -> EthResult<Option<(TransactionSource, SealedBlock)>> {
+    ) -> EthResult<Option<(TransactionSource, SealedBlockWithSenders)>> {
         let (transaction, at) = match self.transaction_by_hash_at(hash).await? {
             None => return Ok(None),
             Some(res) => res,
@@ -743,7 +743,7 @@ where
             BlockId::Hash(hash) => hash.block_hash,
             _ => return Ok(None),
         };
-        let block = self.cache().get_block(block_hash).await?;
+        let block = self.cache().get_block_with_senders(block_hash).await?;
         Ok(block.map(|block| (transaction, block.seal(block_hash))))
     }
 
@@ -770,7 +770,7 @@ where
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
         let parent_block = block.parent_hash;
-        let block_txs = block.body;
+        let block_txs = block.into_transactions_ecrecovered();
 
         self.spawn_with_state_at_block(parent_block.into(), move |state| {
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
@@ -1300,7 +1300,7 @@ mod tests {
         BlockingTaskPool, EthApi,
     };
     use reth_network_api::noop::NoopNetwork;
-    use reth_node_builder::EthEvmConfig;
+    use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};

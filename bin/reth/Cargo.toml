@@ -54,7 +54,8 @@ reth-snapshot = { workspace = true, features = ["clap"] }
 reth-trie.workspace = true
 reth-nippy-jar.workspace = true
 reth-node-api.workspace = true
-reth-node-builder.workspace = true
+reth-node-ethereum.workspace = true
+reth-node-optimism = { workspace = true, optional = true, features = ["optimism"] }
 reth-node-core.workspace = true
 
 # crypto
@@ -150,7 +151,7 @@ optimism = [
     "reth-optimism-payload-builder/optimism",
     "reth-ethereum-payload-builder/optimism",
     "reth-node-api/optimism",
-    "reth-node-builder/optimism",
+    "dep:reth-node-optimism",
     "reth-node-core/optimism",
 ]
 

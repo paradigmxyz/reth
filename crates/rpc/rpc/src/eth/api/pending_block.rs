@@ -199,7 +199,7 @@ impl PendingBlockEnv {
         let balance_increments = post_block_withdrawals_balance_increments(
             &chain_spec,
             block_env.timestamp.try_into().unwrap_or(u64::MAX),
-            withdrawals.clone().unwrap_or_default().as_ref(),
+            &withdrawals.clone().unwrap_or_default(),
         );
 
         // increment account balances for withdrawals

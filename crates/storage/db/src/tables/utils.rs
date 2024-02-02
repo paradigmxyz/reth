@@ -49,15 +49,16 @@ where
     T::Key: Decode,
     T::Value: Decompress,
 {
-    let key = match kv.0 {
-        Cow::Borrowed(k) => Decode::decode(k)?,
-        Cow::Owned(k) => Decode::decode(k)?,
-    };
-    let value = match kv.1 {
-        Cow::Borrowed(v) => Decompress::decompress(v)?,
-        Cow::Owned(v) => Decompress::decompress_owned(v)?,
-    };
-    Ok((key, value))
+    Ok((
+        match kv.0 {
+            Cow::Borrowed(k) => Decode::decode(k)?,
+            Cow::Owned(k) => Decode::decode(k)?,
+        },
+        match kv.1 {
+            Cow::Borrowed(v) => Decompress::decompress(v)?,
+            Cow::Owned(v) => Decompress::decompress_owned(v)?,
+        },
+    ))
 }
 
 /// Helper function to decode only a value from a `(key, value)` pair.

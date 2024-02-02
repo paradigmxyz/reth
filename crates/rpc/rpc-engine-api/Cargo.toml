@@ -41,7 +41,8 @@ serde.workspace = true
 
 [dev-dependencies]
 alloy-rlp.workspace = true
-reth-node-builder.workspace = true
+reth-node-ethereum.workspace = true
+reth-node-optimism.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
