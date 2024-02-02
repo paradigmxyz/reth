@@ -59,6 +59,8 @@ fn validate_blob_tx(
 
             if blob_sidecar.blobs.len() > num_blobs as usize {
                 blob_sidecar.blobs.truncate(num_blobs as usize);
+                blob_sidecar.proofs.truncate(num_blobs as usize);
+                blob_sidecar.commitments.truncate(num_blobs as usize);
             }
         }
 
