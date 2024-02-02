@@ -249,7 +249,9 @@ impl Command {
             Subcommands::Clear(command) => {
                 let db =
                     open_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?;
-                command.execute(&db)?;
+                let provider_factory = ProviderFactory::new(db, self.chain.clone())
+                    .with_snapshots(data_dir.snapshots_path())?;
+                command.execute(provider_factory)?;
             }
             Subcommands::Snapshot(command) => {
                 command.execute(&db_path, self.db.log_level, self.chain.clone())?;
