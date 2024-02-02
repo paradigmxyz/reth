@@ -13,9 +13,9 @@ use std::fs::File;
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db stats` command
 pub struct Command {
-    /// Show detailed sizes for snapshot files.
+    /// Show only the total size for snapshot files.
     #[arg(long, default_value_t = false)]
-    detailed_sizes: bool,
+    only_total_size: bool,
 }
 
 impl Command {
@@ -25,7 +25,7 @@ impl Command {
         data_dir: ChainPath<DataDirPath>,
         tool: &DbTool<'_, DatabaseEnv>,
     ) -> eyre::Result<()> {
-        let snapshots_stats_table = self.snapshots_stats_table(data_dir, self.detailed_sizes)?;
+        let snapshots_stats_table = self.snapshots_stats_table(data_dir, self.only_total_size)?;
         println!("{snapshots_stats_table}");
 
         println!("\n");
@@ -119,12 +119,12 @@ impl Command {
     fn snapshots_stats_table(
         &self,
         data_dir: ChainPath<DataDirPath>,
-        detailed_sizes: bool,
+        only_total_size: bool,
     ) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
 
-        if detailed_sizes {
+        if !only_total_size {
             table.set_header([
                 "Segment",
                 "Block Range",
@@ -181,7 +181,7 @@ impl Command {
                         tx_range.map_or("N/A".to_string(), |tx_range| format!("{tx_range:?}")),
                     ))
                     .add_cell(Cell::new(format!("{columns} x {rows}")));
-                if detailed_sizes {
+                if !only_total_size {
                     row.add_cell(Cell::new(human_bytes(data_size as f64)))
                         .add_cell(Cell::new(human_bytes(index_size as f64)))
                         .add_cell(Cell::new(human_bytes(offsets_size as f64)))
@@ -211,7 +211,7 @@ impl Command {
             .add_cell(Cell::new(""))
             .add_cell(Cell::new(""))
             .add_cell(Cell::new(""));
-        if detailed_sizes {
+        if !only_total_size {
             row.add_cell(Cell::new(human_bytes(total_data_size as f64)))
                 .add_cell(Cell::new(human_bytes(total_index_size as f64)))
                 .add_cell(Cell::new(human_bytes(total_offsets_size as f64)))
