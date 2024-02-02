@@ -6,7 +6,7 @@ use reth_primitives::{
     proofs,
     revm::env::tx_env_with_recovered,
     revm_primitives::{
-        BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
+        BlockEnv, CfgEnvWithSpecId, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
     },
     Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     Receipts, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
@@ -20,11 +20,11 @@ use reth_transaction_pool::TransactionPool;
 use revm::{db::states::bundle_state::BundleRetention, Database, DatabaseCommit, State};
 use std::time::Instant;
 
-/// Configured [BlockEnv] and [CfgEnv] for a pending block
+/// Configured [BlockEnv] and [CfgEnvWithSpec] for a pending block
 #[derive(Debug, Clone)]
 pub(crate) struct PendingBlockEnv {
-    /// Configured [CfgEnv] for the pending block.
-    pub(crate) cfg: CfgEnv,
+    /// Configured [CfgEnvWithSpec] for the pending block.
+    pub(crate) cfg: CfgEnvWithSpecId,
     /// Configured [BlockEnv] for the pending block.
     pub(crate) block_env: BlockEnv,
     /// Origin block for the config
@@ -128,7 +128,7 @@ impl PendingBlockEnv {
 
             // Configure the environment for the block.
             let env = Box::new(Env {
-                cfg: cfg.clone(),
+                cfg: cfg.cfg_env.clone(),
                 block: block_env.clone(),
                 tx: tx_env_with_recovered(&tx),
             });
@@ -232,10 +232,8 @@ impl PendingBlockEnv {
         let transactions_root = proofs::calculate_transaction_root(&executed_txs);
 
         // check if cancun is activated to set eip4844 header fields correctly
-        // TODO(revm) how to send spec_id
-        //let blob_gas_used  =
-        //    if cfg.spec_id >= SpecId::CANCUN { Some(sum_blob_gas_used) } else { None };
-        let blob_gas_used = None;
+        let blob_gas_used =
+            if cfg.spec_id >= SpecId::CANCUN { Some(sum_blob_gas_used) } else { None };
 
         let header = Header {
             parent_hash,
@@ -268,7 +266,7 @@ impl PendingBlockEnv {
 
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
-/// This constructs a new [EVM](revm::EVM) with the given DB, and environment ([CfgEnv] and
+/// This constructs a new [EVM](revm::EVM) with the given DB, and environment ([CfgEnvWithSpec] and
 /// [BlockEnv]) to execute the pre block contract call.
 ///
 /// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
@@ -277,7 +275,7 @@ fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit>(
     db: &mut DB,
     chain_spec: &ChainSpec,
     block_number: u64,
-    initialized_cfg: &CfgEnv,
+    initialized_cfg: &CfgEnvWithSpecId,
     initialized_block_env: &BlockEnv,
     parent_beacon_block_root: Option<B256>,
 ) -> EthResult<()>
@@ -286,13 +284,17 @@ where
 {
     // Configure the environment for the block.
     let env = Box::new(Env {
-        cfg: initialized_cfg.clone(),
+        cfg: initialized_cfg.cfg_env.clone(),
         block: initialized_block_env.clone(),
         ..Default::default()
     });
 
     // apply pre-block EIP-4788 contract call
-    let mut evm_pre_block = revm::Evm::builder().modify_env(|e| *e = env).with_db(db).build();
+    let mut evm_pre_block = revm::Evm::builder()
+        .modify_env(|e| *e = env)
+        .with_db(db)
+        .spec_id(initialized_cfg.spec_id)
+        .build();
 
     // initialize a block from the env, because the pre block call needs the block itself
     apply_beacon_root_contract_call(

@@ -31,7 +31,7 @@ use reth_revm::state_change::{
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{
-    primitives::{BlockEnv, CfgEnv, Env, SpecId},
+    primitives::{BlockEnv, CfgEnvWithSpecId, Env, SpecId},
     Database, DatabaseCommit, Evm, State,
 };
 use std::{
@@ -635,7 +635,7 @@ pub struct PayloadConfig<Attributes> {
     /// Pre-configured block environment.
     pub initialized_block_env: BlockEnv,
     /// Configuration for the environment.
-    pub initialized_cfg: CfgEnv,
+    pub initialized_cfg: CfgEnvWithSpecId,
     /// The parent block.
     pub parent_block: Arc<SealedBlock>,
     /// Block extra data.
@@ -849,8 +849,8 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
 
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
-/// This constructs a new [Evm](revm::EVM) with the given DB, and environment ([CfgEnv] and
-/// [BlockEnv]) to execute the pre block contract call.
+/// This constructs a new [Evm](revm::EVM) with the given DB, and environment ([CfgEnvWithSpecId]
+/// and [BlockEnv]) to execute the pre block contract call.
 ///
 /// The parent beacon block root used for the call is gathered from the given
 /// [PayloadBuilderAttributes].
@@ -861,7 +861,7 @@ pub fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit, Attrib
     db: &mut DB,
     chain_spec: &ChainSpec,
     block_number: u64,
-    initialized_cfg: &CfgEnv,
+    initialized_cfg: &CfgEnvWithSpecId,
     initialized_block_env: &BlockEnv,
     attributes: &Attributes,
 ) -> Result<(), PayloadBuilderError>
@@ -871,13 +871,17 @@ where
 {
     // Configure the environment for the block.
     let env = Box::new(Env {
-        cfg: initialized_cfg.clone(),
+        cfg: initialized_cfg.cfg_env.clone(),
         block: initialized_block_env.clone(),
         ..Default::default()
     });
 
     // apply pre-block EIP-4788 contract call
-    let mut evm_pre_block = Evm::builder().modify_env(|e| *e = env).with_db(db).build();
+    let mut evm_pre_block = Evm::builder()
+        .modify_env(|e| *e = env)
+        .with_db(db)
+        .spec_id(initialized_cfg.spec_id)
+        .build();
 
     // initialize a block from the env, because the pre block call needs the block itself
     apply_beacon_root_contract_call(

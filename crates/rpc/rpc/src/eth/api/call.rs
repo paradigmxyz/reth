@@ -25,10 +25,11 @@ use reth_rpc_types::{
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
-    primitives::{BlockEnv, CfgEnv, Env, ExecutionResult, HaltReason, TransactTo},
+    primitives::{
+        BlockEnv, CfgEnvWithSpecId, EnvWithSpecId, ExecutionResult, HaltReason, TransactTo,
+    },
     DatabaseCommit,
 };
-use revm_primitives::SpecId;
 use tracing::trace;
 
 // Gas per transaction not creating a contract.
@@ -125,7 +126,7 @@ where
                 let transactions = block.into_transactions_ecrecovered().take(num_txs);
                 for tx in transactions {
                     let tx = tx_env_with_recovered(&tx);
-                    let env = Box::new(Env { cfg: cfg.clone(), block: block_env.clone(), tx });
+                    let env = EnvWithSpecId::new_with_cfg_env(cfg.clone(), block_env.clone(), tx);
                     let (res, _) = transact(&mut db, env)?;
                     db.commit(res.state);
                 }
@@ -174,7 +175,7 @@ where
     /// This will execute the [CallRequest] and find the best gas limit via binary search
     pub fn estimate_gas_with<S>(
         &self,
-        mut cfg: CfgEnv,
+        mut cfg: CfgEnvWithSpecId,
         block: BlockEnv,
         request: CallRequest,
         state: S,
@@ -402,9 +403,7 @@ where
         // can consume the list since we're not using the request anymore
         let initial = request.access_list.take().unwrap_or_default();
 
-        // TODO(revm) SpecId
-        //let precompiles = get_precompiles(env.cfg.spec_id);
-        let precompiles = get_precompiles(SpecId::BERLIN);
+        let precompiles = get_precompiles(env.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
         let (result, env) = inspect(&mut db, env, &mut inspector)?;
 
@@ -421,9 +420,16 @@ where
 
         let access_list = inspector.into_access_list();
 
+        let cfg_with_spec_id = CfgEnvWithSpecId::new(env.cfg.clone(), env.spec_id);
         // calculate the gas used using the access list
         request.access_list = Some(access_list.clone());
-        let gas_used = self.estimate_gas_with(env.cfg, env.block, request, db.db.state(), None)?;
+        let gas_used = self.estimate_gas_with(
+            cfg_with_spec_id,
+            env.block.clone(),
+            request,
+            db.db.state(),
+            None,
+        )?;
 
         Ok(AccessListWithGasUsed { access_list, gas_used })
     }
@@ -434,7 +440,7 @@ where
 #[inline]
 fn map_out_of_gas_err<S>(
     env_gas_limit: U256,
-    mut env: Box<Env>,
+    mut env: EnvWithSpecId,
     mut db: &mut CacheDB<StateProviderDatabase<S>>,
 ) -> EthApiError
 where

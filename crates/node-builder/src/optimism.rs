@@ -6,7 +6,7 @@ use reth_node_api::{
 use reth_payload_builder::{EthBuiltPayload, OptimismPayloadBuilderAttributes};
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_op_tx_env},
-    revm_primitives::{AnalysisKind, CfgEnv, TxEnv},
+    revm_primitives::{AnalysisKind, CfgEnvWithSpecId, TxEnv},
     Address, Bytes, ChainSpec, Head, Header, Transaction, U256,
 };
 use reth_rpc_types::engine::OptimismPayloadAttributes;
@@ -46,7 +46,7 @@ impl EvmEnvConfig for OptimismEvmConfig {
     }
 
     fn fill_cfg_env(
-        cfg_env: &mut CfgEnv,
+        cfg_env: &mut CfgEnvWithSpecId,
         chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,

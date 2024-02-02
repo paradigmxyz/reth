@@ -17,7 +17,7 @@ use reth_primitives::{
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
 use reth_trie::updates::TrieUpdates;
-use revm::primitives::{BlockEnv, CfgEnv};
+use revm::primitives::{BlockEnv, CfgEnvWithSpecId};
 use std::{
     collections::{BTreeMap, HashMap},
     ops::{RangeBounds, RangeInclusive},
@@ -557,7 +557,7 @@ impl StateProvider for MockEthProvider {
 impl EvmEnvProvider for MockEthProvider {
     fn fill_env_at<EvmConfig>(
         &self,
-        _cfg: &mut CfgEnv,
+        _cfg: &mut CfgEnvWithSpecId,
         _block_env: &mut BlockEnv,
         _at: BlockHashOrNumber,
         _evm_config: EvmConfig,
@@ -570,7 +570,7 @@ impl EvmEnvProvider for MockEthProvider {
 
     fn fill_env_with_header<EvmConfig>(
         &self,
-        _cfg: &mut CfgEnv,
+        _cfg: &mut CfgEnvWithSpecId,
         _block_env: &mut BlockEnv,
         _header: &Header,
         _evm_config: EvmConfig,
@@ -599,7 +599,7 @@ impl EvmEnvProvider for MockEthProvider {
 
     fn fill_cfg_env_at<EvmConfig>(
         &self,
-        _cfg: &mut CfgEnv,
+        _cfg: &mut CfgEnvWithSpecId,
         _at: BlockHashOrNumber,
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
@@ -611,7 +611,7 @@ impl EvmEnvProvider for MockEthProvider {
 
     fn fill_cfg_env_with_header<EvmConfig>(
         &self,
-        _cfg: &mut CfgEnv,
+        _cfg: &mut CfgEnvWithSpecId,
         _header: &Header,
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>

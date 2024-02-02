@@ -240,12 +240,16 @@ mod builder {
 
             // Configure the environment for the block.
             let env = Box::new(Env {
-                cfg: initialized_cfg.clone(),
+                cfg: initialized_cfg.cfg_env.clone(),
                 block: initialized_block_env.clone(),
                 tx: tx_env_with_recovered(&tx),
             });
 
-            let mut evm = revm::Evm::builder().modify_env(|e| *e = env).with_db(&mut db).build();
+            let mut evm = revm::Evm::builder()
+                .modify_env(|e| *e = env)
+                .with_db(&mut db)
+                .spec_id(initialized_cfg.spec_id)
+                .build();
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,

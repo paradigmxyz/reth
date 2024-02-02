@@ -20,7 +20,7 @@ use reth_primitives::{
     SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
     Withdrawal, B256, U256,
 };
-use revm::primitives::{BlockEnv, CfgEnv};
+use revm::primitives::{BlockEnv, CfgEnvWithSpecId};
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
@@ -440,7 +440,7 @@ impl<DB: Database> StageCheckpointReader for ProviderFactory<DB> {
 impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
     fn fill_env_at<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithSpecId,
         block_env: &mut BlockEnv,
         at: BlockHashOrNumber,
         evm_config: EvmConfig,
@@ -453,7 +453,7 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
 
     fn fill_env_with_header<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithSpecId,
         block_env: &mut BlockEnv,
         header: &Header,
         evm_config: EvmConfig,
@@ -482,7 +482,7 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
 
     fn fill_cfg_env_at<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithSpecId,
         at: BlockHashOrNumber,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
@@ -494,7 +494,7 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
 
     fn fill_cfg_env_with_header<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithSpecId,
         header: &Header,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>

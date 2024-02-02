@@ -44,7 +44,7 @@ use reth_primitives::{
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
 };
 use reth_trie::{prefix_set::PrefixSetMut, updates::TrieUpdates, HashedPostState, StateRoot};
-use revm::primitives::{BlockEnv, CfgEnv, SpecId};
+use revm::primitives::{BlockEnv, CfgEnvWithSpecId, SpecId};
 use std::{
     collections::{hash_map, BTreeMap, BTreeSet, HashMap},
     fmt::Debug,
@@ -1729,7 +1729,7 @@ impl<TX: DbTx> WithdrawalsProvider for DatabaseProvider<TX> {
 impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
     fn fill_env_at<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithSpecId,
         block_env: &mut BlockEnv,
         at: BlockHashOrNumber,
         evm_config: EvmConfig,
@@ -1744,7 +1744,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
 
     fn fill_env_with_header<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithSpecId,
         block_env: &mut BlockEnv,
         header: &Header,
         _evm_config: EvmConfig,
@@ -1802,7 +1802,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
 
     fn fill_cfg_env_at<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithSpecId,
         at: BlockHashOrNumber,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
@@ -1816,7 +1816,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
 
     fn fill_cfg_env_with_header<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithSpecId,
         header: &Header,
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>

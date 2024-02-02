@@ -17,7 +17,7 @@ use reth_provider::{
 use revm::{
     db::{states::bundle_state::BundleRetention, EmptyDBTyped, StateDBBox},
     inspector_handle_register,
-    primitives::ResultAndState,
+    primitives::{CfgEnvWithSpecId, ResultAndState},
     Evm, State, StateBuilder,
 };
 use std::{sync::Arc, time::Instant};
@@ -181,14 +181,17 @@ where
 
         self.db_mut().set_state_clear_flag(state_clear_flag);
 
-        let env = &mut self.evm.as_mut().unwrap().context.evm.env;
+        let mut evm = self.evm.take().unwrap();
+        let mut cfg = CfgEnvWithSpecId::new(evm.context.evm.env.cfg.clone(), evm.spec_id());
         EvmConfig::fill_cfg_and_block_env(
-            &mut env.cfg,
-            &mut env.block,
+            &mut cfg,
+            &mut evm.context.evm.env.block,
             &self.chain_spec,
             header,
             total_difficulty,
         );
+        evm.context.evm.env.cfg = cfg.cfg_env;
+        self.evm = Some(evm.modify_spec_id(cfg.spec_id));
     }
 
     /// Applies the pre-block call to the EIP-4788 beacon block root contract.

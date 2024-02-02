@@ -19,12 +19,11 @@ use revm::{
     db::CacheDB,
     inspector_handle_register,
     precompile::{PrecompileSpecId, Precompiles},
-    primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId, TransactTo, TxEnv},
-    Database, GetInspector, Inspector,
-};
-use revm_primitives::{
-    db::{DatabaseCommit, DatabaseRef},
-    Bytecode,
+    primitives::{
+        db::DatabaseRef, BlockEnv, Bytecode, CfgEnvWithSpecId, Env, EnvWithSpecId, ResultAndState,
+        SpecId, TransactTo, TxEnv,
+    },
+    Database, GetInspector,
 };
 use tracing::trace;
 
@@ -122,35 +121,39 @@ pub(crate) fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Addre
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.
-pub(crate) fn transact<DB>(db: DB, env: Box<Env>) -> EthResult<(ResultAndState, Box<Env>)>
+pub(crate) fn transact<DB>(db: DB, env: EnvWithSpecId) -> EthResult<(ResultAndState, EnvWithSpecId)>
 where
     DB: Database,
     <DB as Database>::Error: Into<EthApiError>,
 {
-    let mut evm = revm::Evm::builder().modify_env(|e| *e = env).with_db(db).build();
+    let spec_id = env.spec_id;
+    let mut evm =
+        revm::Evm::builder().modify_env(|e| *e = env.env).with_db(db).spec_id(spec_id).build();
     let res = evm.transact()?;
-    Ok((res, evm.context.evm.env))
+    Ok((res, EnvWithSpecId::new(evm.context.evm.env, spec_id)))
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.
 pub(crate) fn inspect<DB, I>(
     db: DB,
-    env: Box<Env>,
+    env: EnvWithSpecId,
     inspector: I,
-) -> EthResult<(ResultAndState, Box<Env>)>
+) -> EthResult<(ResultAndState, EnvWithSpecId)>
 where
     DB: Database,
     <DB as Database>::Error: Into<EthApiError>,
     I: GetInspector<DB>,
 {
+    let spec_id = env.spec_id;
     let mut evm = revm::Evm::builder()
-        .modify_env(|e| *e = env)
+        .modify_env(|e| *e = env.env)
         .with_db(db)
+        .spec_id(spec_id)
         .with_external_context(inspector)
         .append_handler_register(inspector_handle_register)
         .build();
     let res = evm.transact()?;
-    Ok((res, evm.into_context().evm.env))
+    Ok((res, EnvWithSpecId::new(evm.into_context().evm.env, spec_id)))
 }
 
 /// Same as [inspect] but also returns the database again.
@@ -159,22 +162,24 @@ where
 /// this is still useful if there are certain trait bounds on the Inspector's database generic type
 pub(crate) fn inspect_and_return_db<DB, I>(
     db: DB,
-    env: Box<Env>,
+    env: EnvWithSpecId,
     inspector: I,
-) -> EthResult<(ResultAndState, Box<Env>, DB)>
+) -> EthResult<(ResultAndState, EnvWithSpecId, DB)>
 where
     DB: Database,
     <DB as Database>::Error: Into<EthApiError>,
     I: GetInspector<DB>,
 {
+    let spec_id = env.spec_id;
     let mut evm = revm::Evm::builder()
-        .modify_env(|e| *e = env)
+        .modify_env(|e| *e = env.env)
         .with_external_context(inspector)
+        .spec_id(spec_id)
         .with_db(db)
         .build();
     let res = evm.transact()?;
     let context = evm.into_context();
-    Ok((res, context.evm.env, context.evm.db))
+    Ok((res, EnvWithSpecId::new(context.evm.env, spec_id), context.evm.db))
 }
 
 /// Replays all the transactions until the target transaction is found.
@@ -186,7 +191,7 @@ where
 /// Returns the index of the target transaction in the given iterator.
 pub(crate) fn replay_transactions_until<DB, I, Tx>(
     db: &mut CacheDB<DB>,
-    cfg: CfgEnv,
+    cfg: CfgEnvWithSpecId,
     block_env: BlockEnv,
     transactions: I,
     target_tx_hash: B256,
@@ -197,8 +202,9 @@ where
     I: IntoIterator<Item = Tx>,
     Tx: FillableTransaction,
 {
-    let env = Box::new(Env { cfg, block: block_env, tx: TxEnv::default() });
-    let mut evm = revm::Evm::builder().modify_env(|e| *e = env).with_db(db).build();
+    let env = Box::new(Env { cfg: cfg.cfg_env, block: block_env, tx: TxEnv::default() });
+    let mut evm =
+        revm::Evm::builder().modify_env(|e| *e = env).with_db(db).spec_id(cfg.spec_id).build();
     let mut index = 0;
     for tx in transactions.into_iter() {
         if tx.hash() == target_tx_hash {
@@ -222,13 +228,13 @@ where
 ///  - `disable_eip3607` is set to `true`
 ///  - `disable_base_fee` is set to `true`
 pub(crate) fn prepare_call_env<DB>(
-    mut cfg: CfgEnv,
+    mut cfg: CfgEnvWithSpecId,
     block: BlockEnv,
     request: CallRequest,
     gas_limit: u64,
     db: &mut CacheDB<DB>,
     overrides: EvmOverrides,
-) -> EthResult<Box<Env>>
+) -> EthResult<EnvWithSpecId>
 where
     DB: DatabaseRef,
     EthApiError: From<<DB as DatabaseRef>::Error>,
@@ -262,7 +268,7 @@ where
             db.block_hashes
                 .extend(block_hashes.into_iter().map(|(num, hash)| (U256::from(num), hash)))
         }
-        apply_block_overrides(*block_overrides, &mut env.block);
+        apply_block_overrides(*block_overrides, &mut env.env.block);
     }
 
     if request_gas.is_none() {
@@ -289,12 +295,12 @@ where
 ///
 /// Note: this does _not_ access the Database to check the sender.
 pub(crate) fn build_call_evm_env(
-    cfg: CfgEnv,
+    cfg: CfgEnvWithSpecId,
     block: BlockEnv,
     request: CallRequest,
-) -> EthResult<Box<Env>> {
+) -> EthResult<EnvWithSpecId> {
     let tx = create_txn_env(&block, request)?;
-    Ok(Box::new(Env { cfg, block, tx }))
+    Ok(EnvWithSpecId::new(Box::new(Env { cfg: cfg.cfg_env, block, tx }), cfg.spec_id))
 }
 
 /// Configures a new [TxEnv]  for the [CallRequest]

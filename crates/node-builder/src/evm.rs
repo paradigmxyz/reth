@@ -1,7 +1,7 @@
 use reth_node_api::EvmEnvConfig;
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_tx_env},
-    revm_primitives::{AnalysisKind, CfgEnv, TxEnv},
+    revm_primitives::{AnalysisKind, CfgEnvWithSpecId, TxEnv},
     Address, ChainSpec, Head, Header, Transaction, U256,
 };
 
@@ -21,7 +21,7 @@ impl EvmEnvConfig for EthEvmConfig {
     }
 
     fn fill_cfg_env(
-        cfg_env: &mut CfgEnv,
+        cfg_env: &mut CfgEnvWithSpecId,
         chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
@@ -38,21 +38,21 @@ impl EvmEnvConfig for EthEvmConfig {
         );
 
         cfg_env.chain_id = chain_spec.chain().id();
-        // TODO Spec id is used when building EVM.
-        //cfg_env.spec_id = spec_id;
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
+
+        cfg_env.spec_id = spec_id;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::revm_primitives::BlockEnv;
+    use reth_primitives::revm_primitives::{BlockEnv, CfgEnv, SpecId};
 
     #[test]
     #[ignore]
     fn test_fill_cfg_and_block_env() {
-        let mut cfg_env = CfgEnv::default();
+        let mut cfg_env = CfgEnvWithSpecId::new(CfgEnv::default(), SpecId::LATEST);
         let mut block_env = BlockEnv::default();
         let header = Header::default();
         let chain_spec = ChainSpec::default();

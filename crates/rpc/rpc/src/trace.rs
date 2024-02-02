@@ -11,8 +11,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
 use reth_primitives::{
-    revm::env::tx_env_with_recovered, revm_primitives::db::DatabaseCommit, BlockId,
-    BlockNumberOrTag, Bytes, SealedHeader, B256, U256,
+    revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, SealedHeader, B256, U256,
 };
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
@@ -25,7 +24,10 @@ use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*, tracerequest::TraceCallRequest},
     BlockError, BlockOverrides, CallRequest, Index,
 };
-use revm::{db::CacheDB, primitives::Env};
+use revm::{
+    db::{CacheDB, DatabaseCommit},
+    primitives::EnvWithSpecId,
+};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -101,7 +103,7 @@ where
             .evm_env_at(block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)))
             .await?;
         let tx = tx_env_with_recovered(&tx.into_ecrecovered_transaction());
-        let env = Box::new(Env { cfg, block, tx });
+        let env = EnvWithSpecId::new_with_cfg_env(cfg, block, tx);
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
 

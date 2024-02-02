@@ -79,7 +79,8 @@ where
             .spawn_with_state_at_block(at, move |state| {
                 let coinbase = block_env.coinbase;
                 let basefee = Some(block_env.basefee.to::<u64>());
-                let env = Box::new(Env { cfg, block: block_env, tx: TxEnv::default() });
+                let env =
+                    Box::new(Env { cfg: cfg.cfg_env, block: block_env, tx: TxEnv::default() });
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let initial_coinbase = DatabaseRef::basic_ref(&db, coinbase)?
@@ -91,7 +92,11 @@ where
                 let mut total_gas_fess = U256::ZERO;
                 let mut hash_bytes = Vec::with_capacity(32 * transactions.len());
 
-                let mut evm = revm::Evm::builder().modify_env(|e| *e = env).with_db(db).build();
+                let mut evm = revm::Evm::builder()
+                    .modify_env(|e| *e = env)
+                    .with_db(db)
+                    .spec_id(cfg.spec_id)
+                    .build();
                 //evm.database(db);
 
                 let mut results = Vec::with_capacity(transactions.len());
