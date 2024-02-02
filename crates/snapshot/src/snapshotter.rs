@@ -176,6 +176,7 @@ impl<DB: Database> Snapshotter<DB> {
 mod tests {
     use crate::{snapshotter::SnapshotTargets, Snapshotter};
     use assert_matches::assert_matches;
+    use reth_db::{database::Database, transaction::DbTx};
     use reth_interfaces::{
         provider::ProviderError,
         test_utils::{
@@ -184,7 +185,8 @@ mod tests {
         },
         RethError,
     };
-    use reth_primitives::{snapshot::HighestSnapshots, PruneModes, B256};
+    use reth_primitives::{snapshot::HighestSnapshots, PruneModes, SnapshotSegment, B256, U256};
+    use reth_provider::providers::SnapshotWriter;
     use reth_stages::test_utils::TestStageDB;
 
     #[test]
@@ -195,6 +197,21 @@ mod tests {
 
         let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3);
         db.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        // Unwind headers from snapshots and manually insert them into the database, so we're able
+        // to check that snapshotter works
+        db.factory
+            .snapshot_provider()
+            .latest_writer(SnapshotSegment::Headers)
+            .expect("get snapshot writer for headers")
+            .prune_headers(blocks.len() as u64)
+            .expect("prune headers");
+        let tx = db.factory.db_ref().tx_mut().expect("init tx");
+        blocks.iter().for_each(|block| {
+            TestStageDB::insert_header(None, &tx, &block.header, U256::ZERO)
+                .expect("insert block header");
+        });
+        tx.commit().expect("commit tx");
+
         let mut receipts = Vec::new();
         for block in &blocks {
             for transaction in &block.body {

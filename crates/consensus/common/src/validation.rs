@@ -220,7 +220,7 @@ pub fn validate_block_standalone(
 
     // Check transaction root
     if let Err(error) = block.ensure_transaction_root_valid() {
-        return Err(ConsensusError::BodyTransactionRootDiff(error.into()));
+        return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
@@ -280,7 +280,7 @@ fn check_gas_limit(
             return Err(ConsensusError::GasLimitInvalidIncrease {
                 parent_gas_limit,
                 child_gas_limit: child.gas_limit,
-            });
+            })
         }
     }
     // Check for a decrease in gas limit beyond the allowed threshold.
@@ -288,11 +288,11 @@ fn check_gas_limit(
         return Err(ConsensusError::GasLimitInvalidDecrease {
             parent_gas_limit,
             child_gas_limit: child.gas_limit,
-        });
+        })
     }
     // Check if the child gas limit is below the minimum required limit.
     else if child.gas_limit < MINIMUM_GAS_LIMIT {
-        return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit });
+        return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit })
     }
 
     Ok(())
