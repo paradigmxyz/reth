@@ -6,37 +6,44 @@ use thiserror::Error;
 pub enum DatabaseError {
     /// Failed to open the database.
     #[error("failed to open the database: {0}")]
-    Open(DatabaseErrorInfo),
+    Open(Box<DatabaseErrorInfo>),
     /// Failed to create a table in the database.
     #[error("failed to create a table: {0}")]
-    CreateTable(DatabaseErrorInfo),
+    CreateTable(Box<DatabaseErrorInfo>),
     /// Failed to write a value into a table.
     #[error(transparent)]
-    Write(#[from] DatabaseWriteError),
+    Write(#[from] Box<DatabaseWriteError>),
     /// Failed to read a value from a table.
     #[error("failed to read a value from a database table: {0}")]
-    Read(DatabaseErrorInfo),
+    Read(Box<DatabaseErrorInfo>),
     /// Failed to delete a `(key, value)` pair from a table.
     #[error("database delete error code: {0}")]
-    Delete(DatabaseErrorInfo),
+    Delete(Box<DatabaseErrorInfo>),
     /// Failed to commit transaction changes into the database.
     #[error("failed to commit transaction changes: {0}")]
-    Commit(DatabaseErrorInfo),
+    Commit(Box<DatabaseErrorInfo>),
     /// Failed to initiate a transaction.
     #[error("failed to initialize a transaction: {0}")]
-    InitTx(DatabaseErrorInfo),
+    InitTx(Box<DatabaseErrorInfo>),
     /// Failed to initialize a cursor.
     #[error("failed to initialize a cursor: {0}")]
-    InitCursor(DatabaseErrorInfo),
+    InitCursor(Box<DatabaseErrorInfo>),
     /// Failed to decode a key from a table.
     #[error("failed to decode a key from a table")]
     Decode,
     /// Failed to get database stats.
     #[error("failed to get stats: {0}")]
-    Stats(DatabaseErrorInfo),
+    Stats(Box<DatabaseErrorInfo>),
     /// Failed to use the specified log level, as it's not available.
     #[error("log level {0:?} is not available")]
     LogLevelUnavailable(LogLevel),
+}
+
+impl From<DatabaseWriteError> for DatabaseError {
+    #[inline]
+    fn from(value: DatabaseWriteError) -> Self {
+        Self::Write(Box::new(value))
+    }
 }
 
 /// Common error struct to propagate implementation-specific error information.
@@ -56,6 +63,16 @@ where
     #[inline]
     fn from(value: E) -> Self {
         Self { message: value.to_string(), code: value.into() }
+    }
+}
+
+impl<E> From<E> for Box<DatabaseErrorInfo>
+where
+    E: Display + Into<i32>,
+{
+    #[inline]
+    fn from(value: E) -> Self {
+        Box::new(DatabaseErrorInfo { message: value.to_string(), code: value.into() })
     }
 }
 

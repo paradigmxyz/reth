@@ -58,7 +58,7 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
 /// Decodes a `(key, value)` pair from the database.
 #[allow(clippy::type_complexity)]
 pub fn decode<T>(
-    res: Result<Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)>, impl Into<DatabaseErrorInfo>>,
+    res: Result<Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)>, impl Into<Box<DatabaseErrorInfo>>>,
 ) -> PairResult<T>
 where
     T: Table,
