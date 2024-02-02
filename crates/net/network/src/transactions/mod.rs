@@ -87,8 +87,7 @@ const SOFT_LIMIT_BYTE_SIZE_FULL_TRANSACTIONS_MEMPOOL_MESSAGE: usize = 128 * 1024
 const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE: usize = 128 * 1024;
 
 /// The future for inserting a function into the pool
-pub type PoolImportFuture =
-    Pin<Box<dyn Future<Output = PoolResult<Vec<PoolResult<TxHash>>>> + Send + 'static>>;
+pub type PoolImportFuture = Pin<Box<dyn Future<Output = Vec<PoolResult<TxHash>>> + Send + 'static>>;
 
 /// Api to interact with [`TransactionsManager`] task.
 #[derive(Debug, Clone)]
@@ -1140,31 +1139,24 @@ where
 
             // Advance all imports
             if let Poll::Ready(Some(batch_import_res)) = this.pool_imports.poll_next_unpin(cx) {
-                match batch_import_res {
-                    Ok(single_import_results) => {
-                        for res in single_import_results {
-                            match res {
-                                Ok(hash) => {
-                                    this.on_good_import(hash);
-                                }
-                                Err(err) => {
-                                    // if we're _currently_ syncing and the transaction is bad we
-                                    // ignore it, otherwise we penalize the peer that sent the bad
-                                    // transaction with the assumption that the peer should have
-                                    // known that this transaction is bad. (e.g. consensus
-                                    // rules)
-                                    if err.is_bad_transaction() && !this.network.is_syncing() {
-                                        debug!(target: "net::tx", ?err, "bad pool transaction import");
-                                        this.on_bad_import(err.hash);
-                                        continue
-                                    }
-                                    this.on_good_import(err.hash);
-                                }
-                            }
+                for res in batch_import_res {
+                    match res {
+                        Ok(hash) => {
+                            this.on_good_import(hash);
                         }
-                    }
-                    Err(err) => {
-                        debug!(target: "net::tx", ?err, "bad pool transaction batch import");
+                        Err(err) => {
+                            // if we're _currently_ syncing and the transaction is bad we
+                            // ignore it, otherwise we penalize the peer that sent the bad
+                            // transaction with the assumption that the peer should have
+                            // known that this transaction is bad. (e.g. consensus
+                            // rules)
+                            if err.is_bad_transaction() && !this.network.is_syncing() {
+                                debug!(target: "net::tx", ?err, "bad pool transaction import");
+                                this.on_bad_import(err.hash);
+                                continue
+                            }
+                            this.on_good_import(err.hash);
+                        }
                     }
                 }
 
