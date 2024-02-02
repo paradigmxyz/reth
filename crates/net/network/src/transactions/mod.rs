@@ -1111,19 +1111,14 @@ where
                                 break
                             }
                         }
-                        Poll::Ready(None) => {
-                            break
-                        } // todo: handle stream closed as error
-                        Poll::Pending => {
-                            break
-                        }
+                        Poll::Ready(None) => break, // todo: handle stream closed as error
+                        Poll::Pending => break,
                     }
                 }
             };
         }
 
         loop {
-            println!("loop");
             // drain network/peer related events
             poll_nested_stream_with_yield_points!(
                 1,
@@ -1131,14 +1126,10 @@ where
                 |event| this.on_network_event(event)
             );
 
-            println!("command rx");
-
             // drain commands
             poll_nested_stream_with_yield_points!(1, this.command_rx.poll_next_unpin(cx), |cmd| {
                 this.on_command(cmd)
             });
-
-            println!("tx events");
 
             // drain incoming transaction events
             poll_nested_stream_with_yield_points!(
@@ -1148,8 +1139,6 @@ where
             );
 
             this.update_request_metrics();
-
-            println!("tx fetcher");
 
             // drain fetching transaction events
             poll_nested_stream_with_yield_points!(
@@ -1176,18 +1165,14 @@ where
             this.request_buffered_hashes();
             this.update_request_metrics();
 
-            println!("pool imports");
-
             // Advance all imports
             poll_nested_stream_with_yield_points!(
                 1,
                 this.pool_imports.poll_next_unpin(cx),
                 |batch_import_res: Vec<PoolResult<TxHash>>| {
                     for res in batch_import_res {
-                        println!("batch import res");
                         match res {
                             Ok(hash) => {
-                                println!("on good import");
                                 this.on_good_import(hash);
                             }
                             Err(err) => {
@@ -1211,7 +1196,6 @@ where
             // handle and propagate new transactions. this is highly prioritized, hence the budget
             // is high.
             let mut new_txs = Vec::new();
-println!("the long one");
             poll_nested_stream_with_yield_points!(
                 1024,
                 this.pending_transactions.poll_next_unpin(cx),
@@ -1224,7 +1208,6 @@ println!("the long one");
 
             // all channels are fully drained and import futures pending
             if !maybe_more_work {
-                println!("return pending");
                 return Poll::Pending
             }
 
