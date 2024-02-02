@@ -96,7 +96,8 @@ impl<Ext: RethCliExt> Cli<Ext> {
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        Ok(self.logs.init_tracing()?)
+        let guard = self.logs.init_tracing()?;
+        Ok(guard)
     }
 
     /// Configures the given node extension.
