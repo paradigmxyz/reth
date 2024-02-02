@@ -26,35 +26,40 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
     ///
     /// Derives the unique [PayloadId] for the given parent and attributes
     fn try_new(parent: B256, attributes: OptimismPayloadAttributes) -> Result<Self, DecodeError> {
-        let transactions: Vec<_> = attributes
-            .transactions
-            .as_deref()
-            .unwrap_or_default()
-            .iter()
-            .map(|tx| TransactionSigned::decode_enveloped(&mut tx.as_ref()))
-            .collect::<Result<_, _>>()?;
+        let (id, transactions) = {
+            let transactions: Vec<_> = attributes
+                .transactions
+                .as_deref()
+                .unwrap_or(&[])
+                .iter()
+                .map(|tx| TransactionSigned::decode_enveloped(&mut tx.as_ref()))
+                .collect::<Result<_, _>>()?;
+            (payload_id_optimism(&parent, &attributes, &transactions), transactions)
+        };
+
+        let payload_attributes = EthPayloadBuilderAttributes {
+            id,
+            parent,
+            timestamp: attributes.payload_attributes.timestamp,
+            suggested_fee_recipient: attributes.payload_attributes.suggested_fee_recipient,
+            prev_randao: attributes.payload_attributes.prev_randao,
+            withdrawals: attributes
+                .payload_attributes
+                .withdrawals
+                .map(|withdrawals| {
+                    Withdrawals::new(
+                        withdrawals
+                            .into_iter()
+                            .map(convert_standalone_withdraw_to_withdrawal)
+                            .collect(),
+                    )
+                })
+                .unwrap_or_default(),
+            parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
+        };
 
         Ok(Self {
-            payload_attributes: EthPayloadBuilderAttributes {
-                id: payload_id_optimism(&parent, &attributes, &transactions),
-                parent,
-                timestamp: attributes.payload_attributes.timestamp,
-                suggested_fee_recipient: attributes.payload_attributes.suggested_fee_recipient,
-                prev_randao: attributes.payload_attributes.prev_randao,
-                withdrawals: attributes
-                    .payload_attributes
-                    .withdrawals
-                    .map(|withdrawals| {
-                        Withdrawals::new(
-                            withdrawals
-                                .into_iter()
-                                .map(convert_standalone_withdraw_to_withdrawal) // Removed the parentheses here
-                                .collect(),
-                        )
-                    })
-                    .unwrap_or_default(),
-                parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
-            },
+            payload_attributes,
             no_tx_pool: attributes.no_tx_pool.unwrap_or_default(),
             transactions,
             gas_limit: attributes.gas_limit,
