@@ -184,11 +184,11 @@ alloy-dyn-abi = "0.6"
 alloy-sol-types = "0.6"
 alloy-rlp = "0.3"
 alloy-trie = "0.2"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy" }
-alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy" }
-alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", branch = "onbjerg/rm-callrequest" }
+alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", branch = "onbjerg/rm-callrequest" }
+alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", branch = "onbjerg/rm-callrequest" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", branch = "onbjerg/rm-callrequest" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", branch = "onbjerg/rm-callrequest" }
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }

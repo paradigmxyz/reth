@@ -13,7 +13,7 @@ use reth_rpc_types::{
         ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
-    BlockOverrides, CallRequest, Filter, Log, RichBlock, SyncStatus,
+    BlockOverrides, Filter, Log, RichBlock, SyncStatus, TransactionRequest,
 };
 
 // NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
@@ -183,7 +183,7 @@ pub trait EngineEthApi {
     #[method(name = "call")]
     async fn call(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
