@@ -376,8 +376,8 @@ where
                                 author: block.header.beneficiary,
                                 reward_type: RewardType::Uncle,
                                 value: U256::from(
-                                    block_reward(base_block_reward, block.ommers.len())
-                                        - base_block_reward,
+                                    block_reward(base_block_reward, block.ommers.len()) -
+                                        base_block_reward,
                                 ),
                             },
                         ));

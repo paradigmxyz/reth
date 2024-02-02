@@ -296,7 +296,8 @@ where
     Ok(env)
 }
 
-/// Creates a new [EnvWithHandlerCfg] to be used for executing the [TransactionRequest] in `eth_call`.
+/// Creates a new [EnvWithHandlerCfg] to be used for executing the [TransactionRequest] in
+/// `eth_call`.
 ///
 /// Note: this does _not_ access the Database to check the sender.
 pub(crate) fn build_call_evm_env(
@@ -310,8 +311,8 @@ pub(crate) fn build_call_evm_env(
 
 /// Configures a new [TxEnv]  for the [TransactionRequest]
 ///
-/// All [TxEnv] fields are derived from the given [TransactionRequest], if fields are `None`, they fall
-/// back to the [BlockEnv]'s settings.
+/// All [TxEnv] fields are derived from the given [TransactionRequest], if fields are `None`, they
+/// fall back to the [BlockEnv]'s settings.
 pub(crate) fn create_txn_env(
     block_env: &BlockEnv,
     request: TransactionRequest,

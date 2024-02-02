@@ -185,11 +185,11 @@ pub trait EthTransactions: Send + Sync {
     /// Returns the hash of the signed transaction.
     async fn send_transaction(&self, request: TransactionRequest) -> EthResult<B256>;
 
-    /// Prepares the state and env for the given [TransactionRequest] at the given [BlockId] and executes
-    /// the closure on a new task returning the result of the closure.
+    /// Prepares the state and env for the given [TransactionRequest] at the given [BlockId] and
+    /// executes the closure on a new task returning the result of the closure.
     ///
-    /// This returns the configured [EnvWithHandlerCfg] for the given [TransactionRequest] at the given
-    /// [BlockId] and with configured call settings: `prepare_call_env`.
+    /// This returns the configured [EnvWithHandlerCfg] for the given [TransactionRequest] at the
+    /// given [BlockId] and with configured call settings: `prepare_call_env`.
     async fn spawn_with_call_at<F, R>(
         &self,
         request: TransactionRequest,
