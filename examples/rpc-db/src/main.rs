@@ -35,12 +35,11 @@ pub mod myrpc_ext;
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     // 1. Setup the DB
-    let db = Arc::new(open_db_read_only(
-        Path::new(&std::env::var("RETH_DB_PATH")?),
-        Default::default(),
-    )?);
+    let db_path = std::env::var("RETH_DB_PATH")?;
+    let db_path = Path::new(&db_path);
+    let db = Arc::new(open_db_read_only(db_path.join("db").as_path(), Default::default())?);
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
-    let factory = ProviderFactory::new(db.clone(), spec.clone());
+    let factory = ProviderFactory::new(db.clone(), spec.clone(), db_path.join("snapshots"))?;
 
     // 2. Setup the blockchain provider using only the database provider and a noop for the tree to
     //    satisfy trait bounds. Tree is not used in this example since we are only operating on the

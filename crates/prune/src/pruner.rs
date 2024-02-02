@@ -196,28 +196,25 @@ impl<DB: Database> Pruner<DB> {
     fn snapshot_segments(&self) -> Vec<Box<dyn Segment<DB>>> {
         let mut segments = Vec::<Box<dyn Segment<DB>>>::new();
 
-        if let Some(snapshot_provider) = self.provider_factory.snapshot_provider() {
-            if let Some(to_block) =
-                snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Transactions)
-            {
-                segments.push(Box::new(segments::Transactions::new(PruneMode::before_inclusive(
-                    to_block,
-                ))))
-            }
+        let snapshot_provider = self.provider_factory.snapshot_provider();
 
-            if let Some(to_block) =
-                snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Headers)
-            {
-                segments
-                    .push(Box::new(segments::Headers::new(PruneMode::before_inclusive(to_block))))
-            }
+        if let Some(to_block) =
+            snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Transactions)
+        {
+            segments
+                .push(Box::new(segments::Transactions::new(PruneMode::before_inclusive(to_block))))
+        }
 
-            if let Some(to_block) =
-                snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Receipts)
-            {
-                segments
-                    .push(Box::new(segments::Receipts::new(PruneMode::before_inclusive(to_block))))
-            }
+        if let Some(to_block) =
+            snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Headers)
+        {
+            segments.push(Box::new(segments::Headers::new(PruneMode::before_inclusive(to_block))))
+        }
+
+        if let Some(to_block) =
+            snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Receipts)
+        {
+            segments.push(Box::new(segments::Receipts::new(PruneMode::before_inclusive(to_block))))
         }
 
         segments
@@ -249,14 +246,16 @@ impl<DB: Database> Pruner<DB> {
 #[cfg(test)]
 mod tests {
     use crate::Pruner;
-    use reth_db::test_utils::create_test_rw_db;
+    use reth_db::test_utils::{create_test_rw_db, create_test_snapshots_dir};
     use reth_primitives::MAINNET;
     use reth_provider::ProviderFactory;
 
     #[test]
     fn is_pruning_needed() {
         let db = create_test_rw_db();
-        let provider_factory = ProviderFactory::new(db, MAINNET.clone());
+        let provider_factory =
+            ProviderFactory::new(db, MAINNET.clone(), create_test_snapshots_dir())
+                .expect("create provide factory with snapshots");
         let mut pruner = Pruner::new(provider_factory, vec![], 5, 0, 5);
 
         // No last pruned block number was set before

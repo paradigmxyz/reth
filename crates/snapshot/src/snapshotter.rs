@@ -204,12 +204,8 @@ mod tests {
         }
         db.insert_receipts(receipts).expect("insert receipts");
 
-        let snapshots_dir = tempfile::TempDir::new().unwrap();
-        let provider_factory = db
-            .factory
-            .with_snapshots(snapshots_dir.path().to_path_buf())
-            .expect("factory with snapshots");
-        let snapshot_provider = provider_factory.snapshot_provider().unwrap();
+        let provider_factory = db.factory;
+        let snapshot_provider = provider_factory.snapshot_provider();
 
         let snapshotter =
             Snapshotter::new(provider_factory, snapshot_provider.clone(), PruneModes::default());

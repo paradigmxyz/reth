@@ -1016,9 +1016,11 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         let prometheus_handle = self.config.install_prometheus_recorder()?;
         info!(target: "reth::cli", "Database opened");
 
-        let provider_factory =
-            ProviderFactory::new(Arc::clone(&self.db), Arc::clone(&self.config.chain))
-                .with_snapshots(self.data_dir.snapshots_path())?;
+        let provider_factory = ProviderFactory::new(
+            Arc::clone(&self.db),
+            Arc::clone(&self.config.chain),
+            self.data_dir.snapshots_path(),
+        )?;
 
         self.config.start_metrics_endpoint(prometheus_handle, Arc::clone(&self.db)).await?;
 
@@ -1142,9 +1144,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
 
         let snapshotter = Snapshotter::new(
             provider_factory.clone(),
-            provider_factory
-                .snapshot_provider()
-                .expect("snapshot provider initialized via provider factory"),
+            provider_factory.snapshot_provider(),
             prune_config.clone().unwrap_or_default().segments,
         );
         hooks.add(SnapshotHook::new(snapshotter.clone(), Box::new(executor.clone())));

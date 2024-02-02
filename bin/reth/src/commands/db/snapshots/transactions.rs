@@ -3,37 +3,27 @@ use super::{
     Command, Compression, PerfectHashingFunction,
 };
 use rand::{seq::SliceRandom, Rng};
-use reth_db::{open_db_read_only, snapshot::TransactionMask};
-use reth_interfaces::db::LogLevel;
+use reth_db::{snapshot::TransactionMask, DatabaseEnv};
 use reth_primitives::{
     snapshot::{Filters, InclusionFilter},
-    ChainSpec, SnapshotSegment, TransactionSignedNoHash,
+    SnapshotSegment, TransactionSignedNoHash,
 };
 use reth_provider::{
     providers::SnapshotProvider, BlockNumReader, ProviderError, ProviderFactory,
     TransactionsProvider, TransactionsProviderExt,
 };
 
-use reth_db::mdbx::DatabaseArguments;
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::PathBuf, sync::Arc};
 
 impl Command {
     pub(crate) fn bench_transactions_snapshot(
         &self,
-        db_path: &Path,
-        log_level: Option<LogLevel>,
-        chain: Arc<ChainSpec>,
+        provider_factory: Arc<ProviderFactory<DatabaseEnv>>,
         compression: Compression,
         inclusion_filter: InclusionFilter,
         phf: Option<PerfectHashingFunction>,
     ) -> eyre::Result<()> {
-        let db_args = DatabaseArguments::default().log_level(log_level);
-
-        let factory = ProviderFactory::new(open_db_read_only(db_path, db_args)?, chain.clone());
-        let provider = factory.provider()?;
+        let provider = provider_factory.provider()?;
         let tip = provider.last_block_number()?;
         let block_range =
             self.block_ranges(tip).first().expect("has been generated before").clone();
@@ -64,7 +54,7 @@ impl Command {
         for bench_kind in [BenchKind::Walk, BenchKind::RandomAll] {
             bench(
                 bench_kind,
-                (open_db_read_only(db_path, db_args)?, chain.clone()),
+                provider_factory.clone(),
                 SnapshotSegment::Transactions,
                 filters,
                 compression,
@@ -96,7 +86,7 @@ impl Command {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())];
             bench(
                 BenchKind::RandomOne,
-                (open_db_read_only(db_path, db_args)?, chain.clone()),
+                provider_factory.clone(),
                 SnapshotSegment::Transactions,
                 filters,
                 compression,
@@ -117,15 +107,14 @@ impl Command {
         // BENCHMARK QUERYING A RANDOM TRANSACTION BY HASH
         {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())] as u64;
-            let transaction_hash =
-                ProviderFactory::new(open_db_read_only(db_path, db_args)?, chain.clone())
-                    .transaction_by_id(num)?
-                    .ok_or(ProviderError::TransactionNotFound(num.into()))?
-                    .hash();
+            let transaction_hash = provider_factory
+                .transaction_by_id(num)?
+                .ok_or(ProviderError::TransactionNotFound(num.into()))?
+                .hash();
 
             bench(
                 BenchKind::RandomHash,
-                (open_db_read_only(db_path, db_args)?, chain.clone()),
+                provider_factory,
                 SnapshotSegment::Transactions,
                 filters,
                 compression,

@@ -9,6 +9,7 @@ use reth_db::{
 };
 use reth_interfaces::db::LogLevel;
 use reth_nippy_jar::{NippyJar, NippyJarCursor};
+use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::{
     snapshot::{
         Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentConfig, SegmentHeader,
@@ -81,7 +82,7 @@ impl Command {
     /// Execute `db snapshot` command
     pub fn execute(
         self,
-        db_path: &Path,
+        data_dir: ChainPath<DataDirPath>,
         log_level: Option<LogLevel>,
         chain: Arc<ChainSpec>,
     ) -> eyre::Result<()> {
@@ -95,14 +96,16 @@ impl Command {
                 self.phf.iter().copied().map(Some).collect::<Vec<_>>()
             });
 
-        {
-            let db = open_db_read_only(
-                db_path,
-                DatabaseArguments::default()
-                    .max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
-            )?;
-            let factory = Arc::new(ProviderFactory::new(db, chain.clone()));
+        let db = open_db_read_only(
+            data_dir.db_path().as_path(),
+            DatabaseArguments::default()
+                .log_level(log_level)
+                .max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
+        )?;
+        let provider_factory =
+            Arc::new(ProviderFactory::new(db, chain.clone(), data_dir.snapshots_path())?);
 
+        {
             if !self.only_bench {
                 for ((mode, compression), phf) in all_combinations.clone() {
                     let filters = if let Some(phf) = self.with_filters.then_some(phf).flatten() {
@@ -113,17 +116,17 @@ impl Command {
 
                     match mode {
                         SnapshotSegment::Headers => self.generate_snapshot::<DatabaseEnv>(
-                            factory.clone(),
+                            provider_factory.clone(),
                             snap_segments::Headers,
                             SegmentConfig { filters, compression },
                         )?,
                         SnapshotSegment::Transactions => self.generate_snapshot::<DatabaseEnv>(
-                            factory.clone(),
+                            provider_factory.clone(),
                             snap_segments::Transactions,
                             SegmentConfig { filters, compression },
                         )?,
                         SnapshotSegment::Receipts => self.generate_snapshot::<DatabaseEnv>(
-                            factory.clone(),
+                            provider_factory.clone(),
                             snap_segments::Receipts,
                             SegmentConfig { filters, compression },
                         )?,
@@ -136,25 +139,19 @@ impl Command {
             for ((mode, compression), phf) in all_combinations {
                 match mode {
                     SnapshotSegment::Headers => self.bench_headers_snapshot(
-                        db_path,
-                        log_level,
-                        chain.clone(),
+                        provider_factory.clone(),
                         compression,
                         InclusionFilter::Cuckoo,
                         phf,
                     )?,
                     SnapshotSegment::Transactions => self.bench_transactions_snapshot(
-                        db_path,
-                        log_level,
-                        chain.clone(),
+                        provider_factory.clone(),
                         compression,
                         InclusionFilter::Cuckoo,
                         phf,
                     )?,
                     SnapshotSegment::Receipts => self.bench_receipts_snapshot(
-                        db_path,
-                        log_level,
-                        chain.clone(),
+                        provider_factory.clone(),
                         compression,
                         InclusionFilter::Cuckoo,
                         phf,

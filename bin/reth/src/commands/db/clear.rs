@@ -24,9 +24,7 @@ impl Command {
                 table.view(&ClearViewer { db: provider_factory.db_ref() })?
             }
             Subcommands::Snapshot { segment } => {
-                let snapshot_provider = provider_factory
-                    .snapshot_provider()
-                    .expect("snapshot provider initialized via provider factory");
+                let snapshot_provider = provider_factory.snapshot_provider();
                 let snapshots = iter_snapshots(snapshot_provider.directory())?;
 
                 if let Some(segment_snapshots) = snapshots.get(&segment) {

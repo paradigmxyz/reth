@@ -43,9 +43,7 @@
 //! # let executor_factory = EvmProcessorFactory::new(chain_spec.clone());
 //! # let snapshotter = Snapshotter::new(
 //! #    provider_factory.clone(),
-//! #    provider_factory
-//! #       .snapshot_provider()
-//! #       .expect("snapshot provider initialized via provider factory"),
+//! #    provider_factory.snapshot_provider(),
 //! #    PruneModes::default()
 //! # );
 //! // Create a pipeline that can fully sync
