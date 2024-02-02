@@ -56,6 +56,16 @@ pub struct DatabaseErrorInfo {
     pub code: i32,
 }
 
+impl<E> From<E> for DatabaseErrorInfo
+where
+    E: Display + Into<i32>,
+{
+    #[inline]
+    fn from(value: E) -> Self {
+        Self { message: value.to_string(), code: value.into() }
+    }
+}
+
 impl<E> From<E> for Box<DatabaseErrorInfo>
 where
     E: Display + Into<i32>,
@@ -69,12 +79,12 @@ where
 /// Database write error.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 #[error(
-    "write operation {operation:?} failed for key \"{key}\" in table {table_name:?} ({code})",
+    "write operation {operation:?} failed for key \"{key}\" in table {table_name:?}: {info}",
     key = reth_primitives::hex::encode(key),
 )]
 pub struct DatabaseWriteError {
-    /// The error code.
-    pub code: i32,
+    /// The error code and message.
+    pub info: DatabaseErrorInfo,
     /// The write operation type.
     pub operation: DatabaseWriteOperation,
     /// The table name.

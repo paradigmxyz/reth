@@ -310,7 +310,7 @@ impl DbTxMut for Tx<RW> {
             |tx| {
                 tx.put(self.get_dbi::<T>()?, key.as_ref(), value, WriteFlags::UPSERT).map_err(|e| {
                     DatabaseWriteError {
-                        code: e.into(),
+                        info: e.into(),
                         operation: DatabaseWriteOperation::Put,
                         table_name: T::NAME,
                         key: key.into(),
