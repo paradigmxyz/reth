@@ -1757,7 +1757,7 @@ impl ClayerConsensusEngine {
         info!(target: "consensus::cl","{}: Broadcast PBFT message: {}", state, msg);
 
         let mut to_all = false;
-        if msg_type ==PbftMessageType::AnnounceBlock{
+        if msg_type == PbftMessageType::AnnounceBlock {
             to_all = true;
         }
 
@@ -1769,7 +1769,7 @@ impl ClayerConsensusEngine {
         &mut self,
         msg: ParsedMessage,
         state: &mut PbftState,
-        all: bool,
+        to_all: bool,
     ) -> Result<(), PbftError> {
         // Broadcast to peers
         let message_bytes = msg.get_message_bytes();
@@ -1800,14 +1800,15 @@ impl ClayerConsensusEngine {
         clayer_msg.encode(&mut msg_out);
         let msg_bytes = reth_primitives::Bytes::copy_from_slice(msg_out.as_slice());
 
-        if all {
+        if to_all {
             self.agent.broadcast_consensus(vec![], msg_bytes);
+            return Ok(());
         } else {
             self.agent.broadcast_consensus(state.validators.member_ids().clone(), msg_bytes);
 
             // Send to self
             self.on_peer_message(msg, state)
-        }        
+        }
     }
 
     fn broadcast_block_new(
@@ -1815,6 +1816,7 @@ impl ClayerConsensusEngine {
         view: u64,
         seq_num: u64,
         payload: ClayerExecutionPayload,
+        payload_id: PayloadId,
         seal_bytes: reth_primitives::Bytes,
         state: &mut PbftState,
     ) -> Result<(), PbftError> {
@@ -1825,14 +1827,13 @@ impl ClayerConsensusEngine {
             signer_id: state.id.clone(),
         };
 
-        let msg: ClayerBlock = ClayerBlock { info, block: payload, seal_bytes };
+        let msg: ClayerBlock =
+            ClayerBlock { info, block: payload, seal_bytes, payload_id: payload_id.id() };
 
         trace!(target: "consensus::cl","{}: Created BlockNew message: {:?}", state, msg);
 
         self.broadcast_message(ParsedMessage::from_block_new_message(msg)?, state, false)
     }
-
-
 
     /// Build a consensus seal for the last block this node committed and send it to the node that
     /// requested the seal (the `recipient`)
