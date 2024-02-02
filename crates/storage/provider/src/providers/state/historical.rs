@@ -425,7 +425,7 @@ mod tests {
     fn history_provider_get_account() {
         let factory = create_test_provider_factory();
         let tx = factory.provider_rw().unwrap().into_tx();
-        let snapshot_provider = factory.snapshot_provider().expect("should exist");
+        let snapshot_provider = factory.snapshot_provider();
 
         tx.put::<tables::AccountHistory>(
             ShardedKey { key: ADDRESS, highest_block_number: 7 },
@@ -551,7 +551,7 @@ mod tests {
     fn history_provider_get_storage() {
         let factory = create_test_provider_factory();
         let tx = factory.provider_rw().unwrap().into_tx();
-        let snapshot_provider = factory.snapshot_provider().expect("should exist");
+        let snapshot_provider = factory.snapshot_provider();
 
         tx.put::<tables::StorageHistory>(
             StorageShardedKey {
@@ -657,7 +657,7 @@ mod tests {
     fn history_provider_unavailable() {
         let factory = create_test_provider_factory();
         let tx = factory.provider_rw().unwrap().into_tx();
-        let snapshot_provider = factory.snapshot_provider().expect("should exist");
+        let snapshot_provider = factory.snapshot_provider();
 
         // provider block_number < lowest available block number,
         // i.e. state at provider block is pruned

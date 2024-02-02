@@ -557,7 +557,7 @@ mod tests {
                 Ok(state_root_prehashed(accounts.into_iter()))
             })?;
 
-            let snapshot_provider = self.db.factory.snapshot_provider().expect("should exist");
+            let snapshot_provider = self.db.factory.snapshot_provider();
             let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers).unwrap();
             let mut last_header = last_block.header.header;
             last_header.state_root = root;

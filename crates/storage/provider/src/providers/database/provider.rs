@@ -84,9 +84,7 @@ impl<DB: Database> DerefMut for DatabaseProviderRW<DB> {
 impl<DB: Database> DatabaseProviderRW<DB> {
     /// Commit database transaction and snapshot if it exists.
     pub fn commit(self) -> ProviderResult<bool> {
-        if let Some(snapshot_provider) = &self.0.snapshot_provider {
-            snapshot_provider.commit()?;
-        }
+        self.0.snapshot_provider.commit()?;
         self.0.commit()
     }
 
@@ -105,20 +103,24 @@ pub struct DatabaseProvider<TX> {
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Snapshot provider
-    snapshot_provider: Option<Arc<SnapshotProvider>>,
+    snapshot_provider: Arc<SnapshotProvider>,
 }
 
 impl<TX> DatabaseProvider<TX> {
-    /// Returns a snapshot provider reference
-    pub fn snapshot_provider(&self) -> Option<&Arc<SnapshotProvider>> {
-        self.snapshot_provider.as_ref()
+    /// Returns a snapshot provider
+    pub fn snapshot_provider(&self) -> &Arc<SnapshotProvider> {
+        &self.snapshot_provider
     }
 }
 
 impl<TX: DbTxMut> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-write transaction.
-    pub fn new_rw(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { tx, chain_spec, snapshot_provider: None }
+    pub fn new_rw(
+        tx: TX,
+        chain_spec: Arc<ChainSpec>,
+        snapshot_provider: Arc<SnapshotProvider>,
+    ) -> Self {
+        Self { tx, chain_spec, snapshot_provider }
     }
 }
 
@@ -220,14 +222,12 @@ where
 
 impl<TX: DbTx> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-only transaction.
-    pub fn new(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { tx, chain_spec, snapshot_provider: None }
-    }
-
-    /// Creates a new [`Self`] with access to a [`SnapshotProvider`].
-    pub fn with_snapshot_provider(mut self, snapshot_provider: Arc<SnapshotProvider>) -> Self {
-        self.snapshot_provider = Some(snapshot_provider);
-        self
+    pub fn new(
+        tx: TX,
+        chain_spec: Arc<ChainSpec>,
+        snapshot_provider: Arc<SnapshotProvider>,
+    ) -> Self {
+        Self { tx, chain_spec, snapshot_provider }
     }
 
     /// Consume `DbTx` or `DbTxMut`.
@@ -292,23 +292,20 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     {
         let mut data = Vec::new();
 
-        if let Some(snapshot_provider) = &self.snapshot_provider {
-            // If there is, check the maximum block or transaction number of the segment.
-            if let Some(snapshot_upper_bound) = match segment {
-                SnapshotSegment::Headers => snapshot_provider.get_highest_snapshot_block(segment),
-                SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
-                    snapshot_provider.get_highest_snapshot_tx(segment)
-                }
-            } {
-                if block_or_tx_range.start <= snapshot_upper_bound {
-                    let end = block_or_tx_range.end.min(snapshot_upper_bound + 1);
-                    data.extend(fetch_from_snapshot(
-                        snapshot_provider,
-                        block_or_tx_range.start..end,
-                        &mut predicate,
-                    )?);
-                    block_or_tx_range.start = end;
-                }
+        if let Some(snapshot_upper_bound) = match segment {
+            SnapshotSegment::Headers => self.snapshot_provider.get_highest_snapshot_block(segment),
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                self.snapshot_provider.get_highest_snapshot_tx(segment)
+            }
+        } {
+            if block_or_tx_range.start <= snapshot_upper_bound {
+                let end = block_or_tx_range.end.min(snapshot_upper_bound + 1);
+                data.extend(fetch_from_snapshot(
+                    &self.snapshot_provider,
+                    block_or_tx_range.start..end,
+                    &mut predicate,
+                )?);
+                block_or_tx_range.start = end;
             }
         }
 
@@ -339,21 +336,18 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         FS: Fn(&SnapshotProvider) -> ProviderResult<Option<T>>,
         FD: Fn() -> ProviderResult<Option<T>>,
     {
-        if let Some(provider) = &self.snapshot_provider {
-            // If there is, check the maximum block or transaction number of the segment.
-            let snapshot_upper_bound = match segment {
-                SnapshotSegment::Headers => provider.get_highest_snapshot_block(segment),
-                SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
-                    provider.get_highest_snapshot_tx(segment)
-                }
-            };
-
-            if snapshot_upper_bound
-                .map_or(false, |snapshot_upper_bound| snapshot_upper_bound >= number)
-            {
-                return fetch_from_snapshot(provider)
+        let snapshot_upper_bound = match segment {
+            SnapshotSegment::Headers => self.snapshot_provider.get_highest_snapshot_block(segment),
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                self.snapshot_provider.get_highest_snapshot_tx(segment)
             }
+        };
+
+        if snapshot_upper_bound.map_or(false, |snapshot_upper_bound| snapshot_upper_bound >= number)
+        {
+            return fetch_from_snapshot(&self.snapshot_provider)
         }
+
         fetch_from_database()
     }
 
@@ -1054,7 +1048,7 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
         mode: HeaderSyncMode,
         highest_uninterrupted_block: BlockNumber,
     ) -> RethResult<HeaderSyncGap> {
-        let snapshot_provider = self.snapshot_provider().expect("should exist");
+        let snapshot_provider = self.snapshot_provider();
 
         // Make sure Headers static file is at the same height. If it's further, this
         // input execution was interrupted previously and we need to unwind the static file.
@@ -2388,11 +2382,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         // TODO: temporary to ease transition/tests. should we add a insert_historical_block?
         #[cfg(any(test, feature = "test-utils"))]
         {
-            let mut writer = self
-                .snapshot_provider
-                .as_ref()
-                .expect("should exist")
-                .latest_writer(SnapshotSegment::Headers)?;
+            let mut writer = self.snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
             writer.append_header(block.header.as_ref().clone(), ttd, block.hash())?;
             writer.commit()?;
         }
@@ -2569,12 +2559,11 @@ impl<TX: DbTxMut> PruneCheckpointWriter for DatabaseProvider<TX> {
 impl<TX: DbTx> StatsReader for DatabaseProvider<TX> {
     fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
         let db_entries = self.tx.entries::<T>()?;
-        let snapshot_entries =
-            match self.snapshot_provider.as_ref().map(|provider| provider.count_entries::<T>()) {
-                Some(Ok(entries)) => entries,
-                Some(Err(ProviderError::UnsupportedProvider)) | None => 0,
-                Some(Err(err)) => return Err(err),
-            };
+        let snapshot_entries = match self.snapshot_provider.count_entries::<T>() {
+            Ok(entries) => entries,
+            Err(ProviderError::UnsupportedProvider) => 0,
+            Err(err) => return Err(err),
+        };
 
         Ok(db_entries + snapshot_entries)
     }

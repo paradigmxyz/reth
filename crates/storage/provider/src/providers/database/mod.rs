@@ -42,13 +42,21 @@ pub struct ProviderFactory<DB> {
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Snapshot Provider
-    snapshot_provider: Option<Arc<SnapshotProvider>>,
+    snapshot_provider: Arc<SnapshotProvider>,
 }
 
 impl<DB> ProviderFactory<DB> {
     /// Create new database provider factory.
-    pub fn new(db: DB, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { db, chain_spec, snapshot_provider: None }
+    pub fn new(
+        db: DB,
+        chain_spec: Arc<ChainSpec>,
+        snapshots_path: PathBuf,
+    ) -> RethResult<ProviderFactory<DB>> {
+        Ok(Self {
+            db,
+            chain_spec,
+            snapshot_provider: Arc::new(SnapshotProvider::new(snapshots_path)?),
+        })
     }
 
     /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
@@ -57,18 +65,13 @@ impl<DB> ProviderFactory<DB> {
         path: P,
         chain_spec: Arc<ChainSpec>,
         args: DatabaseArguments,
+        snapshots_path: PathBuf,
     ) -> RethResult<ProviderFactory<DatabaseEnv>> {
         Ok(ProviderFactory::<DatabaseEnv> {
             db: init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?,
             chain_spec,
-            snapshot_provider: None,
+            snapshot_provider: Arc::new(SnapshotProvider::new(snapshots_path)?),
         })
-    }
-
-    /// Database provider that comes with a shared snapshot provider.
-    pub fn with_snapshots(mut self, snapshots_path: PathBuf) -> ProviderResult<Self> {
-        self.snapshot_provider = Some(Arc::new(SnapshotProvider::new(snapshots_path)?));
-        Ok(self)
     }
 
     /// Returns reference to the underlying database.
@@ -77,7 +80,7 @@ impl<DB> ProviderFactory<DB> {
     }
 
     /// Returns snapshot provider
-    pub fn snapshot_provider(&self) -> Option<Arc<SnapshotProvider>> {
+    pub fn snapshot_provider(&self) -> Arc<SnapshotProvider> {
         self.snapshot_provider.clone()
     }
 
@@ -94,13 +97,11 @@ impl<DB: Database> ProviderFactory<DB> {
     /// [`BlockHashReader`]. This may fail if the inner read database transaction fails to open.
     #[track_caller]
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
-        let mut provider = DatabaseProvider::new(self.db.tx()?, self.chain_spec.clone());
-
-        if let Some(snapshot_provider) = &self.snapshot_provider {
-            provider = provider.with_snapshot_provider(snapshot_provider.clone());
-        }
-
-        Ok(provider)
+        Ok(DatabaseProvider::new(
+            self.db.tx()?,
+            self.chain_spec.clone(),
+            self.snapshot_provider.clone(),
+        ))
     }
 
     /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
@@ -109,23 +110,18 @@ impl<DB: Database> ProviderFactory<DB> {
     /// open.
     #[track_caller]
     pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<DB>> {
-        let mut provider = DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone());
-
-        if let Some(snapshot_provider) = &self.snapshot_provider {
-            provider = provider.with_snapshot_provider(snapshot_provider.clone());
-        }
-
-        Ok(DatabaseProviderRW(provider))
+        Ok(DatabaseProviderRW(DatabaseProvider::new_rw(
+            self.db.tx_mut()?,
+            self.chain_spec.clone(),
+            self.snapshot_provider.clone(),
+        )))
     }
 
     /// Storage provider for latest block
     #[track_caller]
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Ok(Box::new(LatestStateProvider::new(
-            self.db.tx()?,
-            self.snapshot_provider().expect("should exist"),
-        )))
+        Ok(Box::new(LatestStateProvider::new(self.db.tx()?, self.snapshot_provider())))
     }
 
     /// Storage provider for state at that given block
@@ -140,7 +136,7 @@ impl<DB: Database> ProviderFactory<DB> {
         {
             return Ok(Box::new(LatestStateProvider::new(
                 provider.into_tx(),
-                self.snapshot_provider().expect("should exist"),
+                self.snapshot_provider(),
             )))
         }
 
@@ -155,7 +151,7 @@ impl<DB: Database> ProviderFactory<DB> {
         let mut state_provider = HistoricalStateProvider::new(
             provider.into_tx(),
             block_number,
-            self.snapshot_provider().expect("should exist"),
+            self.snapshot_provider(),
         );
 
         // If we pruned account or storage history, we can't return state on every historical block.
@@ -517,7 +513,11 @@ mod tests {
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use rand::Rng;
-    use reth_db::{tables, test_utils::ERROR_TEMPDIR, DatabaseEnv};
+    use reth_db::{
+        tables,
+        test_utils::{create_test_snapshots_dir, ERROR_TEMPDIR},
+        DatabaseEnv,
+    };
     use reth_interfaces::{
         provider::ProviderError,
         test_utils::{
@@ -566,6 +566,7 @@ mod tests {
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
             Default::default(),
+            create_test_snapshots_dir(),
         )
         .unwrap();
 
@@ -678,11 +679,8 @@ mod tests {
         );
 
         // Checkpoint and no gap
-        let mut snapshot_writer = provider
-            .snapshot_provider()
-            .expect("should exist")
-            .latest_writer(SnapshotSegment::Headers)
-            .unwrap();
+        let mut snapshot_writer =
+            provider.snapshot_provider().latest_writer(SnapshotSegment::Headers).unwrap();
         snapshot_writer.append_header(head.header.clone(), U256::ZERO, head.hash()).unwrap();
         snapshot_writer.commit().unwrap();
         drop(snapshot_writer);

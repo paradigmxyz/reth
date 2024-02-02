@@ -152,6 +152,32 @@ impl SnapshotProvider {
         self.map.remove(&(fixed_block_range_end, segment));
     }
 
+    /// Given a segment and block range it deletes the jar and all files associated with it.
+    ///
+    /// CAUTION: destructive. Deletes files on disk.
+    pub fn delete_jar(
+        &self,
+        segment: SnapshotSegment,
+        fixed_block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<()> {
+        let key = (*fixed_block_range.end(), segment);
+        let jar = if let Some((_, jar)) = self.map.remove(&key) {
+            jar.jar
+        } else {
+            NippyJar::<SegmentHeader>::load(&self.path.join(segment.filename(&fixed_block_range)))
+                .map(|jar| {
+                    if self.load_filters {
+                        return jar.load_filters()
+                    }
+                    Ok(jar)
+                })??
+        };
+
+        jar.delete()?;
+
+        Ok(())
+    }
+
     /// Given a segment and block range it returns a cached
     /// [`SnapshotJarProvider`]. TODO(joshie): we should check the size and pop N if there's too
     /// many.

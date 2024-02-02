@@ -94,7 +94,11 @@ impl Command {
                 self.network.discovery.addr,
                 self.network.discovery.port,
             )))
-            .build(ProviderFactory::new(db, self.chain.clone()))
+            .build(ProviderFactory::new(
+                db,
+                self.chain.clone(),
+                self.datadir.unwrap_or_chain_default(self.chain.chain).snapshots_path(),
+            )?)
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -114,7 +118,7 @@ impl Command {
         // initialize the database
         let db =
             Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
-        let factory = ProviderFactory::new(&db, self.chain.clone());
+        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.snapshots_path())?;
         let provider = factory.provider()?;
 
         // Look up merkle checkpoint
@@ -165,7 +169,7 @@ impl Command {
         let executor_factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
         let mut executor = executor_factory.with_state(LatestStateProviderRef::new(
             provider.tx_ref(),
-            factory.snapshot_provider().expect("should exist"),
+            factory.snapshot_provider(),
         ));
 
         let merkle_block_td =

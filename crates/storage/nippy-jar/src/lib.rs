@@ -207,6 +207,11 @@ impl<H: NippyJarHeader> NippyJar<H> {
         &self.user_header
     }
 
+    /// Gets total columns in jar.
+    pub fn columns(&self) -> usize {
+        self.columns
+    }
+
     /// Gets total rows in jar.
     pub fn rows(&self) -> usize {
         self.rows

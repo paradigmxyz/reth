@@ -56,8 +56,7 @@ impl<DB: Database, EF> TreeExternals<DB, EF> {
             .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?;
 
         if hashes.len() < num_hashes {
-            let snapshot_provider =
-                self.provider_factory.snapshot_provider().expect("should exist");
+            let snapshot_provider = self.provider_factory.snapshot_provider();
             let total_headers = snapshot_provider.count_entries::<tables::Headers>()? as u64;
             if total_headers > 0 {
                 let range = total_headers

@@ -79,11 +79,7 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
 
     // Insert header
     let tx = provider_rw.into_tx();
-    insert_genesis_header::<DB>(
-        &tx,
-        factory.snapshot_provider().expect("should exist"),
-        chain.clone(),
-    )?;
+    insert_genesis_header::<DB>(&tx, factory.snapshot_provider(), chain.clone())?;
 
     insert_genesis_state::<DB>(&tx, genesis)?;
 
@@ -293,14 +289,17 @@ mod tests {
     #[test]
     fn fail_init_inconsistent_db() {
         let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
-        let snapshot_provider = factory.snapshot_provider().expect("should exist");
+        let snapshot_provider = factory.snapshot_provider();
         init_genesis(factory.clone()).unwrap();
 
         // Try to init db with a different genesis block
         let genesis_hash = init_genesis(
-            ProviderFactory::new(factory.into_db(), MAINNET.clone())
-                .with_snapshots(snapshot_provider.path().into())
-                .unwrap(),
+            ProviderFactory::new(
+                factory.into_db(),
+                MAINNET.clone(),
+                snapshot_provider.path().into(),
+            )
+            .unwrap(),
         );
 
         assert_eq!(

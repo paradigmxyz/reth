@@ -32,9 +32,12 @@ impl Default for TestStageDB {
     /// Create a new instance of [TestStageDB]
     fn default() -> Self {
         Self {
-            factory: ProviderFactory::new(create_test_rw_db(), MAINNET.clone())
-                .with_snapshots(create_test_snapshots_dir())
-                .unwrap(),
+            factory: ProviderFactory::new(
+                create_test_rw_db(),
+                MAINNET.clone(),
+                create_test_snapshots_dir(),
+            )
+            .unwrap(),
         }
     }
 }
@@ -42,9 +45,12 @@ impl Default for TestStageDB {
 impl TestStageDB {
     pub fn new(path: &Path) -> Self {
         Self {
-            factory: ProviderFactory::new(create_test_rw_db_with_path(path), MAINNET.clone())
-                .with_snapshots(create_test_snapshots_dir())
-                .unwrap(),
+            factory: ProviderFactory::new(
+                create_test_rw_db_with_path(path),
+                MAINNET.clone(),
+                create_test_snapshots_dir(),
+            )
+            .unwrap(),
         }
     }
 
@@ -148,7 +154,7 @@ impl TestStageDB {
     where
         I: Iterator<Item = &'a SealedHeader>,
     {
-        let provider = self.factory.snapshot_provider().expect("should exist");
+        let provider = self.factory.snapshot_provider();
         let mut writer = provider.latest_writer(reth_primitives::SnapshotSegment::Headers)?;
         let tx = self.factory.provider_rw()?.into_tx();
         let mut td = U256::ZERO;
@@ -193,7 +199,7 @@ impl TestStageDB {
     where
         I: Iterator<Item = &'a SealedBlock>,
     {
-        let provider = self.factory.snapshot_provider().expect("should exist");
+        let provider = self.factory.snapshot_provider();
         let mut writer = provider.latest_writer(reth_primitives::SnapshotSegment::Headers)?;
         let tx = self.factory.provider_rw().unwrap().into_tx();
 

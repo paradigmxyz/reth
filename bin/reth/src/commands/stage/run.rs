@@ -127,7 +127,8 @@ impl Command {
             Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         info!(target: "reth::cli", "Database opened");
 
-        let factory = ProviderFactory::new(Arc::clone(&db), self.chain.clone());
+        let factory =
+            ProviderFactory::new(Arc::clone(&db), self.chain.clone(), data_dir.snapshots_path())?;
         let mut provider_rw = factory.provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
@@ -165,8 +166,11 @@ impl Command {
 
                     let default_peers_path = data_dir.known_peers_path();
 
-                    let provider_factory =
-                        Arc::new(ProviderFactory::new(db.clone(), self.chain.clone()));
+                    let provider_factory = Arc::new(ProviderFactory::new(
+                        db.clone(),
+                        self.chain.clone(),
+                        data_dir.snapshots_path(),
+                    )?);
 
                     let network = self
                         .network

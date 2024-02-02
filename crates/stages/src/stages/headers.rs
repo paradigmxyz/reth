@@ -276,7 +276,7 @@ where
 
         if self.sync_gap.as_ref().ok_or(StageError::MissingSyncGap)?.is_closed() {
             self.is_etl_ready = false;
-            return Ok(ExecOutput::done(current_checkpoint));
+            return Ok(ExecOutput::done(current_checkpoint))
         }
 
         // We should be here only after we have downloaded all headers into the disk buffer (ETL).
@@ -289,10 +289,8 @@ where
 
         // Write the headers and related tables to DB from ETL space
         let to_be_processed = self.hash_collector.len() as u64;
-        let last_header_number = self.write_headers::<DB>(
-            provider.tx_ref(),
-            provider.snapshot_provider().expect("should exist").clone(),
-        )?;
+        let last_header_number =
+            self.write_headers::<DB>(provider.tx_ref(), provider.snapshot_provider().clone())?;
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(last_header_number).with_headers_stage_checkpoint(
@@ -321,7 +319,7 @@ where
     ) -> Result<UnwindOutput, StageError> {
         self.sync_gap.take();
 
-        let snapshot_provider = provider.snapshot_provider().expect("should exist");
+        let snapshot_provider = provider.snapshot_provider();
         let highest_block = snapshot_provider
             .get_highest_snapshot_block(SnapshotSegment::Headers)
             .unwrap_or_default();
