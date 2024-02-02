@@ -555,7 +555,7 @@ In handling this request, the ETH requests task attempts, starting with `start_b
 fn get_headers_response(&self, request: GetBlockHeaders) -> Headers {
     let GetBlockHeaders { start_block, limit, skip, direction } = request;
 
-    let mut headers = Vec::new();
+    let mut headers = Headers::default();
 
     let mut block: BlockHashOrNumber = match start_block {
         BlockHashOrNumber::Hash(start) => start.into(),
