@@ -72,7 +72,7 @@ where
 {
     #[inline]
     fn from(value: E) -> Self {
-        Box::new(DatabaseErrorInfo::from(value))
+        Box::new(DatabaseErrorInfo { message: value.to_string(), code: value.into() })
     }
 }
 
