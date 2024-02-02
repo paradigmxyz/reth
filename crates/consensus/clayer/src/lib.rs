@@ -6,7 +6,8 @@ mod task;
 mod timing;
 use crate::engine_api::{
     auth::{strip_prefix, Auth, JwtKey},
-    http::HttpJsonRpc,
+    //http::HttpJsonRpc,
+    http_blocking::HttpJsonRpc,
 };
 use consensus::{clayer_block_from_genesis, PbftConfig, PbftState};
 pub use consensus::{ClayerConsensusEngine, ClayerConsensusMessagingAgent};
@@ -362,7 +363,8 @@ pub struct ConsensusBuilder<Client, Pool, CDB> {
     client: Client,
     pool: Pool,
     storage: ClStorage,
-    api: Arc<HttpJsonRpc>,
+    //api: Arc<HttpJsonRpc>,
+    api: (JwtKey, u16),
     network: NetworkHandle,
     consensus_agent: ClayerConsensusMessagingAgent,
     storages: CDB,
@@ -398,7 +400,7 @@ where
         };
 
         let jwt_key = JwtKey::from_slice(jwt_key_bytes).unwrap();
-        let api = Arc::new(create_auth_api_with_port(jwt_key, auth_port));
+        //let api = Arc::new(create_auth_api_with_port(jwt_key, auth_port));
         let config = PbftConfig::new();
         let mut state = PbftState::new(secret, latest_header.number, &config);
         // clayer_consensus.initialize(
@@ -412,7 +414,8 @@ where
             storage: ClStorage::new(latest_header.clone()),
             client,
             pool,
-            api,
+            //api,
+            api: (jwt_key, auth_port),
             network,
             consensus_agent: clayer_consensus_messaging_agent,
             storages,
@@ -442,7 +445,7 @@ where
             storage,
             client,
             pool,
-            Arc::clone(&api),
+            api,
             network.clone(),
             consensus_agent,
             storages,

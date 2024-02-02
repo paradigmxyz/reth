@@ -2,11 +2,15 @@ use crate::consensus::{
     clayer_block_from_genesis, ClayerConsensusMessagingAgent, PbftConfig, PbftError, PbftMode,
     PbftState,
 };
+use crate::create_auth_api_with_port;
+use crate::engine_api::auth::JwtKey;
 use crate::engine_api::{
     forkchoice_updated, forkchoice_updated_with_attributes, new_payload, ApiService,
 };
 use crate::engine_pbft::{handle_consensus_event, parse_consensus_message, ConsensusEvent};
-use crate::{consensus::ClayerConsensusEngine, engine_api::http::HttpJsonRpc, timing, ClStorage};
+use crate::{
+    consensus::ClayerConsensusEngine, engine_api::http_blocking::HttpJsonRpc, timing, ClStorage,
+};
 use alloy_primitives::B256;
 use futures_util::{future::BoxFuture, FutureExt};
 use rand::Rng;
@@ -58,7 +62,8 @@ pub struct ClTask<Client, Pool: TransactionPool, CDB> {
     /// The pipeline events to listen on
     pipe_line_events: Option<UnboundedReceiverStream<PipelineEvent>>,
     /// API
-    api: Arc<HttpJsonRpc>,
+    //api: Arc<HttpJsonRpc>,
+    api: (JwtKey, u16),
     ///
     block_publishing_ticker: timing::AsyncTicker,
     ///
@@ -81,7 +86,7 @@ impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
         storage: ClStorage,
         client: Client,
         pool: Pool,
-        api: Arc<HttpJsonRpc>,
+        api: (JwtKey, u16),
         network: NetworkHandle,
         consensus_agent: ClayerConsensusMessagingAgent,
         storages: CDB,
@@ -117,14 +122,16 @@ impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
 
     pub fn start_clayer_consensus_engine(&mut self) {
         let consensus_agent = self.consensus_agent.clone();
-        let api = self.api.clone();
-        let mut consensus_engine =
-            ClayerConsensusEngine::new(self.consensus_agent.clone(), ApiService::new(api));
+        let (jwt_key, auth_port) = self.api.clone();
+        let mut consensus_engine = ClayerConsensusEngine::new(self.consensus_agent.clone(), None);
         let pbft_state = self.pbft_state.clone();
         let pbft_config = self.pbft_config.clone();
 
         let startup_latest_header = self.startup_latest_header.clone();
         let thread_join_handle = std::thread::spawn(move || {
+            let api = Arc::new(create_auth_api_with_port(jwt_key, auth_port));
+            consensus_engine.set_apiservice(ApiService::new(api));
+
             let state = &mut *pbft_state.write();
 
             let receiver = consensus_agent.receiver();
