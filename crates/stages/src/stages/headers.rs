@@ -145,7 +145,7 @@ where
                 }
             })?;
 
-            // // Append to HeaderTD
+            // Append to Headers segment
             writer.append_header(header, td, header_hash)?;
         }
         writer.commit()?;
