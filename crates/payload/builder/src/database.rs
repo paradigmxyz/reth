@@ -7,7 +7,6 @@ use reth_primitives::{
     },
     U256,
 };
-
 use std::{
     cell::RefCell,
     collections::{hash_map::Entry, HashMap},
@@ -72,36 +71,27 @@ impl<'a, DB: DatabaseRef> Database for CachedReadsDbMut<'a, DB> {
     type Error = <DB as DatabaseRef>::Error;
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        let basic = match self.cached.accounts.entry(address) {
+        Ok(match self.cached.accounts.entry(address) {
             Entry::Occupied(entry) => entry.get().info.clone(),
             Entry::Vacant(entry) => {
                 entry.insert(CachedAccount::new(self.db.basic_ref(address)?)).info.clone()
             }
-        };
-        Ok(basic)
+        })
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        let code = match self.cached.contracts.entry(code_hash) {
+        Ok(match self.cached.contracts.entry(code_hash) {
             Entry::Occupied(entry) => entry.get().clone(),
             Entry::Vacant(entry) => entry.insert(self.db.code_by_hash_ref(code_hash)?).clone(),
-        };
-        Ok(code)
+        })
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         match self.cached.accounts.entry(address) {
-            Entry::Occupied(mut acc_entry) => {
-                let acc_entry = acc_entry.get_mut();
-                match acc_entry.storage.entry(index) {
-                    Entry::Occupied(entry) => Ok(*entry.get()),
-                    Entry::Vacant(entry) => {
-                        let slot = self.db.storage_ref(address, index)?;
-                        entry.insert(slot);
-                        Ok(slot)
-                    }
-                }
-            }
+            Entry::Occupied(mut acc_entry) => match acc_entry.get_mut().storage.entry(index) {
+                Entry::Occupied(entry) => Ok(*entry.get()),
+                Entry::Vacant(entry) => Ok(*entry.insert(self.db.storage_ref(address, index)?)),
+            },
             Entry::Vacant(acc_entry) => {
                 // acc needs to be loaded for us to access slots.
                 let info = self.db.basic_ref(address)?;
@@ -120,11 +110,10 @@ impl<'a, DB: DatabaseRef> Database for CachedReadsDbMut<'a, DB> {
     }
 
     fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
-        let code = match self.cached.block_hashes.entry(number) {
+        Ok(match self.cached.block_hashes.entry(number) {
             Entry::Occupied(entry) => *entry.get(),
             Entry::Vacant(entry) => *entry.insert(self.db.block_hash_ref(number)?),
-        };
-        Ok(code)
+        })
     }
 }
 
