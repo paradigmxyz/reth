@@ -11,6 +11,7 @@ use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
 use schnellru::{ByLength, Unlimited};
 use std::{
     any::TypeId,
+    fmt,
     marker::PhantomData,
     num::NonZeroUsize,
     pin::Pin,
@@ -74,7 +75,10 @@ impl IdentifyEthVersion for TxHash66 {
 /// Stores announcement data until the corresponding transaction is known, either because it's
 /// received over broadcast or by fetching it over rpc, whichever happens first.
 #[derive(Debug)]
-pub(super) struct AnnouncementDataStore<H> {
+pub(super) struct AnnouncementDataStore<T>
+where
+    T: fmt::Debug,
+{
     /// Hashes that are awaiting an idle peer so they can be fetched.
     pub(super) buffered_hashes: LruCache<TxHash>,
     /// Tracks all hashes that are currently being fetched or are buffered, mapping them to
@@ -82,10 +86,13 @@ pub(super) struct AnnouncementDataStore<H> {
     pub(super) unknown_hashes: LruMap<TxHash, (u8, LruCache<PeerId>), Unlimited>,
     /// Size metadata. Supported by eth68 hashes.
     pub(super) meta: Option<LruMap<TxHash, usize, Unlimited>>,
-    _phantom: PhantomData<H>,
+    _phantom: PhantomData<T>,
 }
 
-impl<N> AnnouncementDataStore<N> {
+impl<T> AnnouncementDataStore<T>
+where
+    T: fmt::Debug,
+{
     /// Removes the specified hashes from inflight tracking.
     #[inline]
     fn remove_from_unknown_hashes<I>(&mut self, hashes: I)
@@ -137,6 +144,7 @@ pub trait StoreAnnouncementData {
 impl<H> AnnouncementDataStore<H>
 where
     Self: IdentifyEthVersion,
+    H: fmt::Debug,
 {
     pub fn is_buffered(&self, hash: &TxHash) -> bool {
         self.buffered_hashes.contains(hash)
@@ -686,7 +694,7 @@ impl TransactionFetcher {
         }
     }
 
-    pub(super) fn buffer_hashes_for_retry<T>(&mut self, hashes: Vec<TxHash>)
+    pub(super) fn buffer_hashes_for_retry<T>(&mut self, mut hashes: Vec<TxHash>)
     where
         T: IdentifyEthVersion,
     {
@@ -695,7 +703,7 @@ impl TransactionFetcher {
             hashes.retain(|hash| self.store_eth68.unknown_hashes.get(hash).is_some());
             self.store_eth68.buffer_hashes(hashes, None)
         } else if T::version().is_eth66() {
-             // It could be that the txns have been received over broadcast in the time being.
+            // It could be that the txns have been received over broadcast in the time being.
             hashes.retain(|hash| self.store_eth66.unknown_hashes.get(hash).is_some());
             self.store_eth66.buffer_hashes(hashes, None)
         }
