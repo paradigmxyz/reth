@@ -239,14 +239,10 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
     ) -> Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)> {
-        let outcomes = futures_util::future::join_all(
-            transactions.into_iter().map(|tx| self.validate(origin, tx)),
-        )
-        .await
-        .into_iter()
-        .collect();
-
-        outcomes
+        futures_util::future::join_all(transactions.into_iter().map(|tx| self.validate(origin, tx)))
+            .await
+            .into_iter()
+            .collect()
     }
 
     /// Validates the given transaction
@@ -361,9 +357,7 @@ where
         }
         let validated = self.validate_all(origin, transactions).await;
 
-        let transactions =
-            self.pool.add_transactions(origin, validated.into_iter().map(|(_, tx)| tx));
-        transactions
+        self.pool.add_transactions(origin, validated.into_iter().map(|(_, tx)| tx))
     }
 
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {

@@ -87,8 +87,7 @@ const SOFT_LIMIT_BYTE_SIZE_FULL_TRANSACTIONS_MEMPOOL_MESSAGE: usize = 128 * 1024
 const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE: usize = 128 * 1024;
 
 /// The future for inserting a function into the pool
-pub type PoolImportFuture =
-    Pin<Box<dyn Future<Output = Vec<PoolResult<TxHash>>> + Send + 'static>>;
+pub type PoolImportFuture = Pin<Box<dyn Future<Output = Vec<PoolResult<TxHash>>> + Send + 'static>>;
 
 /// Api to interact with [`TransactionsManager`] task.
 #[derive(Debug, Clone)]
