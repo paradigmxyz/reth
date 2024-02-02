@@ -69,7 +69,7 @@ impl SubPoolLimit {
 
     /// Returns whether the size or amount constraint is violated.
     #[inline]
-    pub fn is_exceeded(&self, txs: usize, size: usize) -> bool {
+    pub const fn is_exceeded(&self, txs: usize, size: usize) -> bool {
         self.max_txs < txs || self.max_size < size
     }
 }
