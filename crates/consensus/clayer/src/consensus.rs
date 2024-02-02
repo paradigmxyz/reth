@@ -172,13 +172,17 @@ impl ClayerConsensusMessagingAgentInner {
 pub struct ClayerConsensusEngine {
     /// Log of messages this node has received and accepted
     pub msg_log: PbftLog,
-    service: ApiService,
+    service: Option<ApiService>,
     agent: ClayerConsensusMessagingAgent,
 }
 
 impl ClayerConsensusEngine {
-    pub fn new(agent: ClayerConsensusMessagingAgent, service: ApiService) -> Self {
+    pub fn new(agent: ClayerConsensusMessagingAgent, service: Option<ApiService>) -> Self {
         Self { msg_log: PbftLog::default(), service, agent }
+    }
+
+    pub fn set_apiservice(&mut self, service: ApiService) {
+        self.service = Some(service);
     }
 
     pub fn initialize(&mut self, block: ClayerBlock, config: &PbftConfig, state: &mut PbftState) {
@@ -207,18 +211,24 @@ impl ClayerConsensusEngine {
 
         // Primary initializes a block
         if state.is_primary() {
-            self.service.initialize_block(None).unwrap_or_else(|err| {
+            self.service_mut().unwrap().initialize_block(None).unwrap_or_else(|err| {
                 error!("Couldn't initialize block on startup due to error: {}", err)
             });
         }
     }
 
-    fn service(&mut self) -> &ApiService {
-        &self.service
+    fn service(&mut self) -> Result<&ApiService, PbftError> {
+        match self.service {
+            Some(ref s) => Ok(s),
+            None => Err(PbftError::ServiceError("".to_string(), "".to_string())),
+        }
     }
 
-    fn service_mut(&mut self) -> &mut ApiService {
-        &mut self.service
+    fn service_mut(&mut self) -> Result<&mut ApiService, PbftError> {
+        match self.service {
+            Some(ref mut s) => Ok(s),
+            None => Err(PbftError::ServiceError("".to_string(), "".to_string())),
+        }
     }
 
     fn parse_massage(
@@ -473,7 +483,7 @@ impl ClayerConsensusEngine {
                 > 2 * state.f;
 
             if has_matching_pre_prepare && has_required_commits {
-                self.service.commit_block(block_id.clone()).map_err(|err| {
+                self.service_mut()?.commit_block(block_id.clone()).map_err(|err| {
                     PbftError::ServiceError(
                         format!("Failed to commit block {:?}", hex::encode(&block_id)),
                         err.to_string(),
@@ -612,7 +622,7 @@ impl ClayerConsensusEngine {
 
         // If this node was the primary before, cancel any block that may have been initialized
         if state.is_primary() {
-            self.service.cancel_block().unwrap_or_else(|err| {
+            self.service_mut()?.cancel_block().unwrap_or_else(|err| {
                 info!(target: "consensus::cl","Failed to cancel block when becoming secondary: {:?}", err);
             });
         }
@@ -633,7 +643,7 @@ impl ClayerConsensusEngine {
 
         // Initialize a new block if this node is the new primary
         if state.is_primary() {
-            self.service.initialize_block(None).map_err(|err| {
+            self.service_mut()?.initialize_block(None).map_err(|err| {
                 PbftError::ServiceError(
                     "Couldn't initialize block after view change".into(),
                     err.to_string(),
@@ -730,7 +740,7 @@ impl ClayerConsensusEngine {
         let blockhash = msg.get_block_id();
 
         //self.broadcast_consensus(peers, data)
-        match self.service_mut().announce_block(blockhash) {
+        match self.service_mut()?.announce_block(blockhash) {
             Ok(_) => Ok(()),
             Err(_e) => {
                 Err(PbftError::ServiceError("announceblock".to_string(), "error".to_string()))
@@ -757,7 +767,7 @@ impl ClayerConsensusEngine {
 
         // Only future blocks should be considered since committed blocks are final
         if block.block_num() < state.seq_num {
-            self.service.fail_block(block.block_id()).unwrap_or_else(
+            self.service_mut()?.fail_block(block.block_id()).unwrap_or_else(
                 |err| error!(target: "consensus::cl","Couldn't fail block due to error: {:?}", err),
             );
             return Err(PbftError::InternalError(format!(
@@ -775,7 +785,7 @@ impl ClayerConsensusEngine {
             .get_block_with_id(block.previous_id())
             .or_else(|| self.msg_log.get_unvalidated_block_with_id(&block.previous_id()));
         if previous_block.is_none() {
-            self.service.fail_block(block.block_id().clone()).unwrap_or_else(
+            self.service_mut()?.fail_block(block.block_id().clone()).unwrap_or_else(
                 |err| error!(target: "consensus::cl","Couldn't fail block due to error: {:?}", err),
             );
             return Err(PbftError::InternalError(format!(
@@ -790,7 +800,7 @@ impl ClayerConsensusEngine {
         // are strictly monotically increasing by 1)
         let previous_block = previous_block.expect("Previous block's existence already checked");
         if previous_block.block_num() != block.block_num() - 1 {
-            self.service.fail_block(block.block_id()).unwrap_or_else(
+            self.service_mut()?.fail_block(block.block_id()).unwrap_or_else(
                 |err| error!(target: "consensus::cl","Couldn't fail block due to error: {:?}", err),
             );
             return Err(PbftError::InternalError(format!(
@@ -807,7 +817,7 @@ impl ClayerConsensusEngine {
         self.msg_log.add_unvalidated_block(block.clone());
 
         // Have the validator check the block
-        self.service.check_blocks(vec![block.block_id()]).map_err(|err| {
+        self.service_mut()?.check_blocks(vec![block.block_id()]).map_err(|err| {
             PbftError::ServiceError(
                 format!(
                     "Failed to check block {:?} / {:?}",
@@ -868,7 +878,7 @@ impl ClayerConsensusEngine {
         let seal = match self.verify_consensus_seal_from_block(&block, state) {
             Ok(seal) => seal,
             Err(err) => {
-                self.service.fail_block(block.block_id()).unwrap_or_else(
+                self.service_mut()?.fail_block(block.block_id()).unwrap_or_else(
                     |err| error!(target: "consensus::cl","Couldn't fail block due to error: {:?}", err),
                 );
                 return Err(PbftError::InvalidMessage(format!(
@@ -923,7 +933,7 @@ impl ClayerConsensusEngine {
         }
 
         // Fail the block
-        self.service.fail_block(block_id).unwrap_or_else(
+        self.service_mut()?.fail_block(block_id).unwrap_or_else(
             |err| error!(target: "consensus::cl","Couldn't fail block due to error: {:?}", err),
         );
 
@@ -957,7 +967,7 @@ impl ClayerConsensusEngine {
         }
 
         // Commit the block, stop the idle timeout, and skip straight to Finishing
-        self.service.commit_block(seal.block_id.clone()).map_err(|err| {
+        self.service_mut()?.commit_block(seal.block_id.clone()).map_err(|err| {
             PbftError::ServiceError(
                 format!(
                     "Failed to commit block with catch-up {:?} / {:?}",
@@ -1003,7 +1013,7 @@ impl ClayerConsensusEngine {
                 .collect::<Vec<_>>();
 
         for id in invalid_block_ids {
-            self.service.fail_block(id.clone()).unwrap_or_else(|err| {
+            self.service_mut()?.fail_block(id.clone()).unwrap_or_else(|err| {
                 error!(target: "consensus::cl","Couldn't fail block {:?} due to error: {:?}", &hex::encode(id), err)
             });
         }
@@ -1091,7 +1101,7 @@ impl ClayerConsensusEngine {
         // catching up
         if state.is_primary() {
             info!(target: "consensus::cl","{}: Initializing block on top of {}", state, hex::encode(&block_id));
-            self.service.initialize_block(Some(block_id)).map_err(|err| {
+            self.service_mut()?.initialize_block(Some(block_id)).map_err(|err| {
                 PbftError::ServiceError(
                     "Couldn't initialize block after commit".into(),
                     err.to_string(),
@@ -1646,7 +1656,7 @@ impl ClayerConsensusEngine {
 
         trace!(target: "consensus::cl","{}: Attempting to summarize block", state);
 
-        match self.service.summarize_block() {
+        match self.service_mut()?.summarize_block() {
             Ok(_) => {}
             Err(err) => {
                 trace!("Couldn't summarize, so not finalizing: {}", err);
@@ -1665,7 +1675,7 @@ impl ClayerConsensusEngine {
         };
         let seal_bytes = reth_primitives::Bytes::copy_from_slice(&data);
 
-        match self.service.finalize_block() {
+        match self.service_mut()?.finalize_block() {
             Ok(execution_payload) => {
                 let block_id = execution_payload.execution_payload.payload_inner.block_hash;
                 let payload = execution_payload_from_payload(&execution_payload);
