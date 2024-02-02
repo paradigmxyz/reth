@@ -54,7 +54,7 @@ where
     // Since we know all keys will be ordered, except for the key at the 0th index, there is no
     // need to re-sort the entire iterator.  All we need to do is insert the 0th index item at the
     // appropriate index (either rlp(0)==0x7f or last).  We can do this by merging two iterators:
-    // one one that contains only the first item, and one that contains the remaining items.
+    // one that contains only the first item, and one that contains the remaining items.
     first.merge_by(remaining, |(i, _a), (j, _b)| i < j).for_each(|(key, item)| {
         value_buffer.clear();
         encode(item, &mut value_buffer);
