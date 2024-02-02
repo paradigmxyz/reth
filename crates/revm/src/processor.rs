@@ -57,8 +57,6 @@ pub struct EVMProcessor<'a, EvmConfig> {
     pub(crate) chain_spec: Arc<ChainSpec>,
     /// revm instance that contains database and env environment.
     pub(crate) evm: Option<Evm<'a, InspectorStack, StateDBBox<'a, ProviderError>>>,
-    /// Hook and inspector stack that we want to invoke on that hook.
-    /// stack: InspectorStack,
     /// The collection of receipts.
     /// Outer vector stores receipts for each block sequentially.
     /// The inner vector stores receipts ordered by transaction number.
@@ -102,12 +100,12 @@ where
                 )
                 .build(),
             )
+            // Hook and inspector stack that we want to invoke on that hook.
             .with_external_context(InspectorStack::new(InspectorStackConfig::default()))
             .build();
         EVMProcessor {
             chain_spec,
             evm: Some(evm),
-            //stack: Some(),
             receipts: Receipts::new(),
             first_block: None,
             tip: None,
