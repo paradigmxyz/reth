@@ -89,7 +89,7 @@ impl Block {
             let Some(senders) =
                 TransactionSigned::recover_signers_unchecked(&self.body, self.body.len())
             else {
-                return Err(self)
+                return Err(self);
             };
             senders
         };
@@ -343,7 +343,7 @@ impl SealedBlock {
             return Err(GotExpected {
                 got: calculated_root,
                 expected: self.header.transactions_root,
-            })
+            });
         }
 
         Ok(())
@@ -498,17 +498,18 @@ impl BlockBody {
     /// Calculate the withdrawals root for the block body, if withdrawals exist. If there are no
     /// withdrawals, this will return `None`.
     pub fn calculate_withdrawals_root(&self) -> Option<B256> {
-        self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
+        self.withdrawals.as_ref().map(crate::proofs::calculate_withdrawals_root)
     }
 
     /// Calculates a heuristic for the in-memory size of the [BlockBody].
     #[inline]
     pub fn size(&self) -> usize {
-        self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
-            self.transactions.capacity() * std::mem::size_of::<TransactionSigned>() +
-            self.ommers.iter().map(Header::size).sum::<usize>() +
-            self.ommers.capacity() * std::mem::size_of::<Header>() +
-            self.withdrawals
+        self.transactions.iter().map(TransactionSigned::size).sum::<usize>()
+            + self.transactions.capacity() * std::mem::size_of::<TransactionSigned>()
+            + self.ommers.iter().map(Header::size).sum::<usize>()
+            + self.ommers.capacity() * std::mem::size_of::<Header>()
+            + self
+                .withdrawals
                 .as_ref()
                 .map(|w| w.size() + w.capacity() * std::mem::size_of::<Withdrawal>())
                 .unwrap_or(std::mem::size_of::<Option<Withdrawals>>())
