@@ -68,14 +68,14 @@ impl TransactionPool for NoopTransactionPool {
         &self,
         _origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
-    ) -> PoolResult<Vec<PoolResult<TxHash>>> {
-        Ok(transactions
+    ) -> Vec<PoolResult<TxHash>> {
+        transactions
             .into_iter()
             .map(|transaction| {
                 let hash = *transaction.hash();
                 Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
             })
-            .collect())
+            .collect()
     }
 
     fn transaction_event_listener(&self, _tx_hash: TxHash) -> Option<TransactionEvents> {

@@ -64,7 +64,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     async fn add_external_transactions(
         &self,
         transactions: Vec<Self::Transaction>,
-    ) -> PoolResult<Vec<PoolResult<TxHash>>> {
+    ) -> Vec<PoolResult<TxHash>> {
         self.add_transactions(TransactionOrigin::External, transactions).await
     }
 
@@ -98,7 +98,7 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
-    ) -> PoolResult<Vec<PoolResult<TxHash>>>;
+    ) -> Vec<PoolResult<TxHash>>;
 
     /// Returns a new transaction change event stream for the given transaction.
     ///
