@@ -462,6 +462,7 @@ impl NodeConfig {
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
             .with_head_timestamp(head.timestamp)
             .kzg_settings(self.kzg_settings()?)
+            // use an additional validation task so we can validate transactions in parallel
             .with_additional_tasks(1)
             .build_with_tasks(blockchain_db.clone(), executor.clone(), blob_store.clone());
 
