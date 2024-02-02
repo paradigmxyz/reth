@@ -12,7 +12,7 @@ pub enum DatabaseError {
     CreateTable(DatabaseErrorInfo),
     /// Failed to write a value into a table.
     #[error(transparent)]
-    Write(#[from] DatabaseWriteError),
+    Write(#[from] Box<DatabaseWriteError>),
     /// Failed to read a value from a table.
     #[error("failed to read a value from a database table: {0}")]
     Read(DatabaseErrorInfo),
@@ -56,6 +56,13 @@ where
     #[inline]
     fn from(value: E) -> Self {
         Self { message: value.to_string(), code: value.into() }
+    }
+}
+
+impl From<DatabaseWriteError> for DatabaseError {
+    #[inline]
+    fn from(value: DatabaseWriteError) -> Self {
+        Self::Write(Box::new(value))
     }
 }
 
