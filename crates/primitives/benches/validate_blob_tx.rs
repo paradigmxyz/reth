@@ -43,8 +43,7 @@ fn validate_blob_tx(
         let mut runner = TestRunner::new_with_rng(config, rng);
 
         // generate tx and sidecar
-        let mut tx =
-            any::<TxEip4844>().new_tree(&mut runner).unwrap().current();
+        let mut tx = any::<TxEip4844>().new_tree(&mut runner).unwrap().current();
         let mut blob_sidecar =
             any::<BlobTransactionSidecar>().new_tree(&mut runner).unwrap().current();
 
