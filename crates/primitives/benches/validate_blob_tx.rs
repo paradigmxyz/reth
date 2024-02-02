@@ -12,8 +12,8 @@ use proptest::{
     test_runner::{RngAlgorithm, TestRng, TestRunner},
 };
 use reth_primitives::{
-    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, eip4844::kzg_to_versioned_hash, BlobTransaction,
-    BlobTransactionSidecar, Signature, TxEip4844,
+    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, eip4844::kzg_to_versioned_hash,
+    BlobTransactionSidecar, TxEip4844,
 };
 use revm_primitives::MAX_BLOB_NUMBER_PER_BLOCK;
 
@@ -25,7 +25,7 @@ fn blob_validation(c: &mut Criterion) {
     let mut group = c.benchmark_group("Blob Transaction KZG validation");
     let kzg_settings = MAINNET_KZG_TRUSTED_SETUP.clone();
 
-    for num_blobs in 1..MAX_BLOB_NUMBER_PER_BLOCK {
+    for num_blobs in 1..=MAX_BLOB_NUMBER_PER_BLOCK {
         println!("Benchmarking validation for tx with {num_blobs} blobs");
         validate_blob_tx(&mut group, "ValidateBlob", num_blobs, kzg_settings.clone());
     }
@@ -43,8 +43,8 @@ fn validate_blob_tx(
         let mut runner = TestRunner::new_with_rng(config, rng);
 
         // generate tx and sidecar
-        let (mut tx, signature) =
-            any::<(TxEip4844, Signature)>().new_tree(&mut runner).unwrap().current();
+        let mut tx =
+            any::<TxEip4844>().new_tree(&mut runner).unwrap().current();
         let mut blob_sidecar =
             any::<BlobTransactionSidecar>().new_tree(&mut runner).unwrap().current();
 
@@ -72,20 +72,17 @@ fn validate_blob_tx(
             })
             .collect();
 
-        BlobTransaction {
-            transaction: tx,
-            sidecar: blob_sidecar,
-            signature,
-            hash: Default::default(),
-        }
+        (tx, blob_sidecar)
     };
 
     let group_id = format!("validate_blob | num blobs: {} | {}", num_blobs, description,);
 
     // for now we just use the default SubPoolLimit
     group.bench_function(group_id, |b| {
-        b.iter_with_setup(setup, |tx| {
-            tx.validate(&kzg_settings).unwrap();
+        b.iter_with_setup(setup, |(tx, blob_sidecar)| {
+            if let Err(err) = tx.validate_blob(&blob_sidecar, &kzg_settings) {
+                println!("Validation failed: {:?}", err);
+            }
             std::hint::black_box(());
         });
     });
