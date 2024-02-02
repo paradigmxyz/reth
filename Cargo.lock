@@ -5153,6 +5153,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22686f4785f02a4fcc856d3b3bb19bf6c8160d103f7a99cc258bddd0251dc7f2"
 
 [[package]]
+name = "polygon-p2p"
+version = "0.0.0"
+dependencies = [
+ "reth-discv4",
+ "reth-network",
+ "reth-primitives",
+ "reth-provider",
+ "reth-tracing",
+ "secp256k1 0.27.0",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
 name = "polyval"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -62,6 +62,7 @@ members = [
     "examples/rpc-db/",
     "examples/trace-transaction-cli/",
     "examples/custom-payload-builder/",
+    "examples/polygon-p2p/",
     "testing/ef-tests/",
 ]
 default-members = ["bin/reth"]
