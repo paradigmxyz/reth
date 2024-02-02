@@ -146,7 +146,7 @@ impl std::fmt::Display for HttpJsonRpc {
 }
 
 impl HttpJsonRpc {
-    pub fn upcheck_blocking(&self) -> Result<(), ClRpcError> {
+    pub fn upcheck(&self) -> Result<(), ClRpcError> {
         let result: serde_json::Value = self.rpc_request_blocking(
             ETH_SYNCING,
             json!([]),
@@ -165,7 +165,7 @@ impl HttpJsonRpc {
         }
     }
 
-    pub fn block_number_blocking(&self) -> Result<U256, ClRpcError> {
+    pub fn block_number(&self) -> Result<U256, ClRpcError> {
         let params = json!([]);
         self.rpc_request_blocking(
             ETH_BLOCK_NUMBER,
@@ -174,7 +174,7 @@ impl HttpJsonRpc {
         )
     }
 
-    pub fn get_block_by_number_blocking<'a>(
+    pub fn get_block_by_number<'a>(
         &self,
         query: String,
     ) -> Result<Option<ExecutionBlock>, ClRpcError> {
@@ -187,7 +187,7 @@ impl HttpJsonRpc {
         )
     }
 
-    pub fn get_block_by_hash_blocking(
+    pub fn get_block_by_hash(
         &self,
         block_hash: B256,
     ) -> Result<Option<ExecutionBlock>, ClRpcError> {
@@ -200,7 +200,7 @@ impl HttpJsonRpc {
         )
     }
 
-    pub fn exchange_capabilities_blocking(&self) -> Result<(), ClRpcError> {
+    pub fn exchange_capabilities(&self) -> Result<(), ClRpcError> {
         let params = json!([CL_CAPABILITIES]);
 
         let response: Result<HashSet<String>, _> = self.rpc_request_blocking(
@@ -224,31 +224,31 @@ impl HttpJsonRpc {
         }
     }
 
-    pub fn forkchoice_updated_v1_blocking(
+    pub fn forkchoice_updated_v1(
         &self,
         forkchoice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
     ) -> Result<ForkchoiceUpdated, ClRpcError> {
-        self.forkchoice_updated_version_blocking(
+        self.forkchoice_updated_version(
             forkchoice_state,
             payload_attributes,
             ENGINE_FORKCHOICE_UPDATED_V1,
         )
     }
 
-    pub fn forkchoice_updated_v2_blocking(
+    pub fn forkchoice_updated_v2(
         &self,
         forkchoice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
     ) -> Result<ForkchoiceUpdated, ClRpcError> {
-        self.forkchoice_updated_version_blocking(
+        self.forkchoice_updated_version(
             forkchoice_state,
             payload_attributes,
             ENGINE_FORKCHOICE_UPDATED_V2,
         )
     }
 
-    pub fn forkchoice_updated_version_blocking(
+    pub fn forkchoice_updated_version(
         &self,
         forkchoice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
@@ -287,10 +287,7 @@ impl HttpJsonRpc {
         Ok(response)
     }
 
-    pub fn get_payload_v1_blocking(
-        &self,
-        payload_id: PayloadId,
-    ) -> Result<ExecutionPayloadV1, ClRpcError> {
+    pub fn get_payload_v1(&self, payload_id: PayloadId) -> Result<ExecutionPayloadV1, ClRpcError> {
         let params = json!([payload_id.to_string()]);
         let response: ExecutionPayloadV1 = self.rpc_request_blocking(
             ENGINE_GET_PAYLOAD_V1,
@@ -301,7 +298,7 @@ impl HttpJsonRpc {
         Ok(response)
     }
 
-    pub fn get_payload_v2_blocking(
+    pub fn get_payload_v2(
         &self,
         payload_id: PayloadId,
     ) -> Result<ExecutionPayloadWrapperV2, ClRpcError> {
@@ -315,10 +312,7 @@ impl HttpJsonRpc {
         Ok(response)
     }
 
-    pub fn new_payload_v1_blocking(
-        &self,
-        payload: ExecutionPayloadV1,
-    ) -> Result<PayloadStatus, ClRpcError> {
+    pub fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> Result<PayloadStatus, ClRpcError> {
         let json_payload = match serde_json::to_string(&payload) {
             Ok(json) => json,
             Err(e) => return Err(ClRpcError::Json(e)),
@@ -339,7 +333,7 @@ impl HttpJsonRpc {
         Ok(response)
     }
 
-    pub fn new_payload_v2_blocking(
+    pub fn new_payload_v2(
         &self,
         payload: ExecutionPayloadInputV2,
     ) -> Result<PayloadStatus, ClRpcError> {
@@ -387,7 +381,7 @@ mod test {
     #[tokio::test]
     async fn block_number() {
         let secret =
-            JwtSecret::from_hex("d7068d842c0a42948c293d35c0cd7d9c95ce5e9558fd675c0f6a4b159235428e")
+            JwtSecret::from_hex("f95c94e1843a5532d7f6f77713e58b2a76f48fff4862e9d7e126d7de3d50b67f")
                 .unwrap();
         let jwt_key = JwtKey::from_slice(secret.as_bytes()).unwrap();
         let api = create_auth_api(jwt_key);
