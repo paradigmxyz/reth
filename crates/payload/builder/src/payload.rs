@@ -170,23 +170,24 @@ impl EthPayloadBuilderAttributes {
     ///
     /// Derives the unique [PayloadId] for the given parent and attributes
     pub fn new(parent: B256, attributes: PayloadAttributes) -> Self {
+        let id = payload_id(&parent, &attributes);
+
+        let withdraw = attributes.withdrawals.map(|withdrawals| {
+            Withdrawals::new(
+                withdrawals
+                    .into_iter()
+                    .map(convert_standalone_withdraw_to_withdrawal) // Removed the parentheses here
+                    .collect(),
+            )
+        });
+
         Self {
-            id: payload_id(&parent, &attributes),
+            id,
             parent,
             timestamp: attributes.timestamp,
             suggested_fee_recipient: attributes.suggested_fee_recipient,
             prev_randao: attributes.prev_randao,
-            withdrawals: attributes
-                .withdrawals
-                .map(|withdrawals| {
-                    Withdrawals::new(
-                        withdrawals
-                            .into_iter()
-                            .map(convert_standalone_withdraw_to_withdrawal)
-                            .collect(),
-                    )
-                })
-                .unwrap_or_default(),
+            withdrawals: withdraw.unwrap_or_default(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
         }
     }
