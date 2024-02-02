@@ -261,9 +261,7 @@ where
             return TransactionValidationOutcome::Invalid(transaction, err)
         }
 
-        let mut maybe_blob_sidecar = None;
-
-        // blob tx checks
+        // light blob tx pre-checks
         if transaction.is_eip4844() {
             // Cancun fork is required for blob txs
             if !self.fork_tracker.is_cancun_activated() {
@@ -295,54 +293,6 @@ where
                         },
                     ),
                 )
-            }
-
-            // extract the blob from the transaction
-            match transaction.take_blob() {
-                EthBlobTransactionSidecar::None => {
-                    // this should not happen
-                    return TransactionValidationOutcome::Invalid(
-                        transaction,
-                        InvalidTransactionError::TxTypeNotSupported.into(),
-                    )
-                }
-                EthBlobTransactionSidecar::Missing => {
-                    // This can happen for re-injected blob transactions (on re-org), since the blob
-                    // is stripped from the transaction and not included in a block.
-                    // check if the blob is in the store, if it's included we previously validated
-                    // it and inserted it
-                    if let Ok(true) = self.blob_store.contains(*transaction.hash()) {
-                        // validated transaction is already in the store
-                    } else {
-                        return TransactionValidationOutcome::Invalid(
-                            transaction,
-                            InvalidPoolTransactionError::Eip4844(
-                                Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
-                            ),
-                        )
-                    }
-                }
-                EthBlobTransactionSidecar::Present(blob) => {
-                    if let Some(eip4844) = transaction.as_eip4844() {
-                        // validate the blob
-                        if let Err(err) = eip4844.validate_blob(&blob, &self.kzg_settings) {
-                            return TransactionValidationOutcome::Invalid(
-                                transaction,
-                                InvalidPoolTransactionError::Eip4844(
-                                    Eip4844PoolTransactionError::InvalidEip4844Blob(err),
-                                ),
-                            )
-                        }
-                        // store the extracted blob
-                        maybe_blob_sidecar = Some(blob);
-                    } else {
-                        // this should not happen
-                        return TransactionValidationOutcome::Invalid(
-                            transaction,
-                            InvalidTransactionError::TxTypeNotSupported.into(),
-                        )
-                    }
-                }
             }
         }
 
@@ -429,6 +379,59 @@ where
                 )
                 .into(),
             )
+        }
+
+        let mut maybe_blob_sidecar = None;
+
+        // heavy blob tx validation
+        if transaction.is_eip4844() {
+            // extract the blob from the transaction
+            match transaction.take_blob() {
+                EthBlobTransactionSidecar::None => {
+                    // this should not happen
+                    return TransactionValidationOutcome::Invalid(
+                        transaction,
+                        InvalidTransactionError::TxTypeNotSupported.into(),
+                    )
+                }
+                EthBlobTransactionSidecar::Missing => {
+                    // This can happen for re-injected blob transactions (on re-org), since the blob
+                    // is stripped from the transaction and not included in a block.
+                    // check if the blob is in the store, if it's included we previously validated
+                    // it and inserted it
+                    if let Ok(true) = self.blob_store.contains(*transaction.hash()) {
+                        // validated transaction is already in the store
+                    } else {
+                        return TransactionValidationOutcome::Invalid(
+                            transaction,
+                            InvalidPoolTransactionError::Eip4844(
+                                Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
+                            ),
+                        )
+                    }
+                }
+                EthBlobTransactionSidecar::Present(blob) => {
+                    if let Some(eip4844) = transaction.as_eip4844() {
+                        // validate the blob
+                        if let Err(err) = eip4844.validate_blob(&blob, &self.kzg_settings) {
+                            return TransactionValidationOutcome::Invalid(
+                                transaction,
+                                InvalidPoolTransactionError::Eip4844(
+                                    Eip4844PoolTransactionError::InvalidEip4844Blob(err),
+                                ),
+                            )
+                        }
+                        // store the extracted blob
+                        maybe_blob_sidecar = Some(blob);
+                    } else {
+                        // this should not happen
+                        return TransactionValidationOutcome::Invalid(
+                            transaction,
+                            InvalidTransactionError::TxTypeNotSupported.into(),
+                        )
+                    }
+                }
+            }
         }
 
         // Return the valid transaction
@@ -670,6 +673,8 @@ impl EthTransactionValidatorBuilder {
             }));
         }
 
+        // we spawn them on critical tasks because validation, especially for EIP-4844 can be quite
+        // heavy
         tasks.spawn_critical_blocking(
             "transaction-validation-service",
             Box::pin(async move {
