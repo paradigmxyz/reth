@@ -8,7 +8,7 @@
 //!
 //! This launch the regular reth node overriding the engine api payload builder with our custom.
 //!
-//! Credits to: https://blog.merkle.io/blog/fastest-transaction-network-eth-polygon-bsc
+//! Credits to: <https://blog.merkle.io/blog/fastest-transaction-network-eth-polygon-bsc>
 use chain_cfg::{boot_nodes, chain_spec, head};
 use reth_network::{
     config::NetworkMode, NetworkConfig, NetworkEvent, NetworkEvents, NetworkManager,

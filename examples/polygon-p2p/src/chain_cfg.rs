@@ -12,7 +12,7 @@ pub(crate) fn chain_spec() -> Arc<ChainSpec> {
 
     ChainSpec {
         chain: Chain::from_id(137),
-        // https://github.com/maticnetwork/bor/blob/d521b8e266b97efe9c8fdce8167e9dd77b04637d/builder/files/genesis-mainnet-v1.json
+        // <https://github.com/maticnetwork/bor/blob/d521b8e266b97efe9c8fdce8167e9dd77b04637d/builder/files/genesis-mainnet-v1.json>
         genesis: serde_json::from_str(include_str!("./genesis.json")).expect("deserialize genesis"),
         genesis_hash: Some(GENESIS),
         fork_timestamps: ForkTimestamps::default().shanghai(1681338455),
@@ -33,7 +33,7 @@ pub(crate) fn chain_spec() -> Arc<ChainSpec> {
     .into()
 }
 
-/// Polygon mainnet boot nodes (https://github.com/maticnetwork/bor/blob/master/params/bootnodes.go#L79)
+/// Polygon mainnet boot nodes <https://github.com/maticnetwork/bor/blob/master/params/bootnodes.go#L79>
 static BOOTNODES : [&str; 4] = [
 	"enode://b8f1cc9c5d4403703fbf377116469667d2b1823c0daf16b7250aa576bacf399e42c3930ccfcb02c5df6879565a2b8931335565f0e8d3f8e72385ecf4a4bf160a@3.36.224.80:30303",
 	"enode://8729e0c825f3d9cad382555f3e46dcff21af323e89025a0e6312df541f4a9e73abfa562d64906f5e59c51fe6f0501b3e61b07979606c56329c020ed739910759@54.194.245.5:30303",
