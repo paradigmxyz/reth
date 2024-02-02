@@ -241,7 +241,6 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use futures_util::stream::StreamExt;
-    use reth_db::test_utils::{create_test_rw_db, create_test_snapshots_dir};
     use reth_interfaces::{
         p2p::{
             bodies::downloader::BodyDownloader,
@@ -249,17 +248,17 @@ mod tests {
         },
         test_utils::TestConsensus,
     };
-    use reth_primitives::{SealedHeader, MAINNET};
-    use reth_provider::ProviderFactory;
+    use reth_primitives::SealedHeader;
+    use reth_provider::test_utils::create_test_provider_factory;
     use std::sync::Arc;
 
     #[tokio::test]
     async fn streams_bodies_from_buffer() {
         // Generate some random blocks
-        let db = create_test_rw_db();
+        let factory = create_test_provider_factory();
         let (headers, mut bodies) = generate_bodies(0..=19);
 
-        insert_headers(db.db(), &headers);
+        insert_headers(factory.db_ref().db(), &headers);
 
         // create an empty file
         let file = tempfile::tempfile().unwrap();
@@ -269,8 +268,7 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone(), create_test_snapshots_dir())
-                .expect("create provider factory with snapshots"),
+            factory,
         );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
@@ -339,20 +337,19 @@ mod tests {
     #[tokio::test]
     async fn test_download_bodies_from_file() {
         // Generate some random blocks
-        let db = create_test_rw_db();
+        let factory = create_test_provider_factory();
         let (file, headers, mut bodies) = generate_bodies_file(0..=19).await;
 
         // now try to read them back
         let client = Arc::new(FileClient::from_file(file).await.unwrap());
 
         // insert headers in db for the bodies downloader
-        insert_headers(db.db(), &headers);
+        insert_headers(factory.db_ref().db(), &headers);
 
         let mut downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone(), create_test_snapshots_dir())
-                .expect("create provider factory with snapshots"),
+            factory,
         );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 

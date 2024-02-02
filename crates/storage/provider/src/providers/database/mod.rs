@@ -91,13 +91,11 @@ impl<DB: Database> ProviderFactory<DB> {
     /// [`BlockHashReader`]. This may fail if the inner read database transaction fails to open.
     #[track_caller]
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
-        let provider = DatabaseProvider::new(
+        Ok(DatabaseProvider::new(
             self.db.tx()?,
             self.chain_spec.clone(),
             self.snapshot_provider.clone(),
-        );
-
-        Ok(provider)
+        ))
     }
 
     /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
@@ -106,13 +104,11 @@ impl<DB: Database> ProviderFactory<DB> {
     /// open.
     #[track_caller]
     pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<DB>> {
-        let provider = DatabaseProvider::new_rw(
+        Ok(DatabaseProviderRW(DatabaseProvider::new_rw(
             self.db.tx_mut()?,
             self.chain_spec.clone(),
             self.snapshot_provider.clone(),
-        );
-
-        Ok(DatabaseProviderRW(provider))
+        )))
     }
 
     /// Storage provider for latest block
