@@ -579,14 +579,14 @@ where
                     from: Some(from),
                     to: request.to,
                     gas: request.gas,
-                    gas_price: Some(U256::from(gas_price)),
-                    max_fee_per_gas: Some(U256::from(max_fee_per_gas)),
+                    gas_price: Some(gas_price),
+                    max_fee_per_gas: Some(max_fee_per_gas),
                     value: request.value,
                     input: request.input.clone().into(),
                     nonce: request.nonce,
                     chain_id: Some(chain_id),
                     access_list: request.access_list.clone(),
-                    max_priority_fee_per_gas: Some(U256::from(max_fee_per_gas)),
+                    max_priority_fee_per_gas: Some(max_fee_per_gas),
                     transaction_type: None,
                     blob_versioned_hashes: None,
                     max_fee_per_blob_gas: None,
@@ -631,7 +631,7 @@ where
                     gas_price: gas_price.unwrap_or_default(),
                     gas_limit: gas.unwrap_or_default(),
                     value: value.unwrap_or_default(),
-                    input: data.unwrap_or_default(),
+                    input: data.into_input().unwrap_or_default(),
                     kind: match to {
                         Some(to) => TransactionKind::Call(to),
                         None => TransactionKind::Create,
@@ -647,7 +647,7 @@ where
                     gas_price: gas_price.unwrap_or_default(),
                     gas_limit: gas.unwrap_or_default(),
                     value: value.unwrap_or_default(),
-                    input: data.unwrap_or_default(),
+                    input: data.into_input().unwrap_or_default(),
                     kind: match to {
                         Some(to) => TransactionKind::Call(to),
                         None => TransactionKind::Create,
@@ -668,7 +668,7 @@ where
                     max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or_default(),
                     gas_limit: gas.unwrap_or_default(),
                     value: value.unwrap_or_default(),
-                    input: data.unwrap_or_default(),
+                    input: data.into_input().unwrap_or_default(),
                     kind: match to {
                         Some(to) => TransactionKind::Call(to),
                         None => TransactionKind::Create,
@@ -695,7 +695,7 @@ where
                     max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
                     gas_limit: gas.unwrap_or_default(),
                     value: value.unwrap_or_default(),
-                    input: data.unwrap_or_default(),
+                    input: data.into_input().unwrap_or_default(),
                     kind: match to {
                         Some(to) => TransactionKind::Call(to),
                         None => TransactionKind::Create,
@@ -716,28 +716,28 @@ where
             Some(TypedTransactionRequest::Legacy(mut m)) => {
                 m.chain_id = Some(chain_id.to());
                 m.gas_limit = gas_limit;
-                m.gas_price = gas_price;
+                m.gas_price = gas_price.unwrap_or_default();
 
                 TypedTransactionRequest::Legacy(m)
             }
             Some(TypedTransactionRequest::EIP2930(mut m)) => {
                 m.chain_id = chain_id.to();
                 m.gas_limit = gas_limit;
-                m.gas_price = gas_price;
+                m.gas_price = gas_price.unwrap_or_default();
 
                 TypedTransactionRequest::EIP2930(m)
             }
             Some(TypedTransactionRequest::EIP1559(mut m)) => {
                 m.chain_id = chain_id.to();
                 m.gas_limit = gas_limit;
-                m.max_fee_per_gas = max_fee_per_gas;
+                m.max_fee_per_gas = max_fee_per_gas.unwrap_or_default();
 
                 TypedTransactionRequest::EIP1559(m)
             }
             Some(TypedTransactionRequest::EIP4844(mut m)) => {
                 m.chain_id = chain_id.to();
                 m.gas_limit = gas_limit;
-                m.max_fee_per_gas = max_fee_per_gas;
+                m.max_fee_per_gas = max_fee_per_gas.unwrap_or_default();
 
                 TypedTransactionRequest::EIP4844(m)
             }

@@ -170,7 +170,7 @@ impl From<EthApiError> for ErrorObject<'static> {
             }
             err @ EthApiError::InternalBlockingTaskError => internal_rpc_err(err.to_string()),
             err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
-            err @ EthApiError::CallInputError(_) => invalid_params_rpc_err(err.to_string()),
+            err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
             #[cfg(feature = "optimism")]
             EthApiError::Optimism(err) => match err {
                 OptimismEthApiError::HyperError(err) => internal_rpc_err(err.to_string()),
