@@ -609,7 +609,7 @@ mod tests {
         let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
         let default_limits = SubPoolLimit::default();
 
-        // create a chain of transactions by sender A, B, C
+        // create a chain of transactions by sender A
         // make sure they are all one over half the limit
         let a_sender = address!("000000000000000000000000000000000000000a");
 
@@ -627,9 +627,9 @@ mod tests {
             pool.add_transaction(f.validated_arc(tx));
         }
 
-        // truncate the pool
+        // truncate the pool, it should remove at least one transaction
         let removed = pool.truncate_pool(default_limits);
-        assert_eq!(removed.len(), 0);
+        assert_eq!(removed.len(), 1);
     }
 
     #[test]

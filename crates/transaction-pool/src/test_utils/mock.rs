@@ -786,7 +786,14 @@ impl PoolTransaction for MockTransaction {
 
     /// Returns the size of the transaction.
     fn size(&self) -> usize {
-        0
+        match self {
+            MockTransaction::Legacy { size, .. } |
+            MockTransaction::Eip1559 { size, .. } |
+            MockTransaction::Eip4844 { size, .. } |
+            MockTransaction::Eip2930 { size, .. } => *size,
+            #[cfg(feature = "optimism")]
+            MockTransaction::Deposit(_) => 0,
+        }
     }
 
     /// Returns the transaction type as a byte identifier.
