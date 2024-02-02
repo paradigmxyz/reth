@@ -33,7 +33,7 @@ use reth_beacon_consensus::{
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
-use reth_clayer::{ClayerConsensusMessagingAgent, ConsensusBuilder};
+use reth_clayer::{AuthHttpConfig, ClayerConsensusMessagingAgent, ConsensusBuilder};
 use reth_config::{
     config::{PruneConfig, StageConfig},
     Config,
@@ -465,13 +465,18 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 .await?;
 
             // ===============================================================================
+
             // extract the jwt secret from the args if possible
             let consensus_db = ConsensusProvider::new(provider_factory.clone())?;
 
             let default_jwt_path = data_dir.jwt_path();
             let jwt_secret = self.rpc.auth_jwt_secret(default_jwt_path)?;
+            let auth_config = AuthHttpConfig {
+                address: self.rpc.auth_addr,
+                port: self.rpc.auth_port,
+                auth: jwt_secret.as_bytes().to_vec(),
+            };
             let mut task = ConsensusBuilder::new(
-                jwt_secret.as_bytes(),
                 secret_key,
                 Arc::clone(&self.chain),
                 blockchain_db.clone(),
@@ -479,7 +484,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 network.clone(),
                 clayer_consensus_messaging_agent,
                 consensus_db,
-                self.rpc.auth_port,
+                auth_config,
             )
             .build();
             let pipeline_events = pipeline.events();

@@ -10,8 +10,6 @@ use serde_derive::{Deserialize, Serialize};
 use std::{fmt, time::Duration};
 use tracing::{debug, info};
 
-pub const PRIMARY_FIXED: bool = true;
-
 /// Phases of the PBFT algorithm, in `Normal` mode
 #[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Serialize, Deserialize)]
 pub enum PbftPhase {
@@ -53,13 +51,13 @@ pub struct PbftState {
     /// This node's KeyPair
     pub kp: KeyPair,
 
-    /// The node's current sequence number
+    /// The node's current sequence number(next block number)
     pub seq_num: u64,
 
     /// The current view
     pub view: u64,
 
-    /// The block ID of the node's current chain head
+    /// The block ID of the node's current chain head(last committed block)
     pub chain_head: B256,
 
     /// Current phase of the algorithm
@@ -150,37 +148,21 @@ impl PbftState {
     }
     /// Obtain the ID for the primary node in the network
     pub fn get_primary_id(&self) -> PeerId {
-        let mut view = self.view;
-        if PRIMARY_FIXED {
-            view = 0;
-        }
-        self.validators.get_primary_id(view)
+        self.validators.get_primary_id(self.view)
     }
 
     pub fn get_primary_id_at_view(&self, view: u64) -> PeerId {
-        let mut view = view;
-        if PRIMARY_FIXED {
-            view = 0;
-        }
         let primary_index = (view as usize) % self.validators.len();
         self.validators.index(primary_index).clone()
     }
 
     /// Tell if this node is currently the primary
     pub fn is_primary(&self) -> bool {
-        let mut view = self.view;
-        if PRIMARY_FIXED {
-            view = 0;
-        }
-        self.validators.is_primary(self.id.clone(), view)
+        self.validators.is_primary(self.id.clone(), self.view)
     }
 
     /// Tell if this node is the primary at the specified view
     pub fn is_primary_at_view(&self, view: u64) -> bool {
-        let mut view = view;
-        if PRIMARY_FIXED {
-            view = 0;
-        }
         self.id == self.get_primary_id_at_view(view)
     }
 

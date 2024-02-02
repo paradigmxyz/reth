@@ -19,11 +19,11 @@ pub trait ClayerConsensusMessageAgentTrait: Send + Sync + Clone {
     fn push_received_cache_first(&self, peer_id: PeerId, msg: reth_primitives::Bytes);
     /// push network event(PeerConnected, PeerDisconnected)
     fn push_network_event(&self, peer_id: PeerId, connect: bool);
-    // /// pop network event(PeerConnected, PeerDisconnected)
-    // fn pop_event(&self) -> Option<ClayerConsensusEvent>;
+    /// pop network event(PeerConnected, PeerDisconnected)
+    fn pop_event(&self) -> Option<ClayerConsensusEvent>;
 
-    /// replace pop_event
-    fn receiver(&self) -> crossbeam_channel::Receiver<ClayerConsensusEvent>;
+    // /// replace pop_event
+    // fn receiver(&self) -> crossbeam_channel::Receiver<ClayerConsensusEvent>;
 
     /// broadcast consensus
     fn broadcast_consensus(&self, peers: Vec<PeerId>, data: reth_primitives::Bytes);

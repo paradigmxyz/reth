@@ -2,15 +2,13 @@ use crate::consensus::{
     clayer_block_from_genesis, ClayerConsensusMessagingAgent, PbftConfig, PbftError, PbftMode,
     PbftState,
 };
-use crate::create_auth_api_with_port;
-use crate::engine_api::auth::JwtKey;
+use crate::engine_api::http_blocking::HttpJsonRpcSync;
 use crate::engine_api::{
     forkchoice_updated, forkchoice_updated_with_attributes, new_payload, ApiService,
 };
 use crate::engine_pbft::{handle_consensus_event, parse_consensus_message, ConsensusEvent};
-use crate::{
-    consensus::ClayerConsensusEngine, engine_api::http_blocking::HttpJsonRpc, timing, ClStorage,
-};
+use crate::{consensus::ClayerConsensusEngine, engine_api::http::HttpJsonRpc, timing, ClStorage};
+use crate::{create_sync_api, AuthHttpConfig};
 use alloy_primitives::B256;
 use futures_util::{future::BoxFuture, FutureExt};
 use rand::Rng;
@@ -61,9 +59,6 @@ pub struct ClTask<Client, Pool: TransactionPool, CDB> {
     queued: VecDeque<u64>,
     /// The pipeline events to listen on
     pipe_line_events: Option<UnboundedReceiverStream<PipelineEvent>>,
-    /// API
-    //api: Arc<HttpJsonRpc>,
-    api: (JwtKey, u16),
     ///
     block_publishing_ticker: timing::AsyncTicker,
     ///
@@ -77,6 +72,7 @@ pub struct ClTask<Client, Pool: TransactionPool, CDB> {
     pbft_running_state: Arc<AtomicBool>,
     startup_latest_header: SealedHeader,
     consensus_engine_task_handle: Option<std::thread::JoinHandle<()>>,
+    auth_config: AuthHttpConfig,
 }
 
 impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
@@ -86,7 +82,7 @@ impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
         storage: ClStorage,
         client: Client,
         pool: Pool,
-        api: (JwtKey, u16),
+        auth_config: AuthHttpConfig,
         network: NetworkHandle,
         consensus_agent: ClayerConsensusMessagingAgent,
         storages: CDB,
@@ -102,8 +98,8 @@ impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
             pool,
             queued: Default::default(),
             pipe_line_events: None,
-            api,
-            block_publishing_ticker: timing::AsyncTicker::new(Duration::from_secs(12)),
+            auth_config,
+            block_publishing_ticker: timing::AsyncTicker::new(Duration::from_secs(30)),
             network,
             consensus_agent,
             storages,
@@ -122,19 +118,20 @@ impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
 
     pub fn start_clayer_consensus_engine(&mut self) {
         let consensus_agent = self.consensus_agent.clone();
-        let (jwt_key, auth_port) = self.api.clone();
-        let mut consensus_engine = ClayerConsensusEngine::new(self.consensus_agent.clone(), None);
+        let auth_config = self.auth_config.clone();
+
         let pbft_state = self.pbft_state.clone();
         let pbft_config = self.pbft_config.clone();
 
         let startup_latest_header = self.startup_latest_header.clone();
         let thread_join_handle = std::thread::spawn(move || {
-            let api = Arc::new(create_auth_api_with_port(jwt_key, auth_port));
-            consensus_engine.set_apiservice(ApiService::new(api));
-
             let state = &mut *pbft_state.write();
 
-            let receiver = consensus_agent.receiver();
+            let api = create_sync_api(&auth_config);
+            let mut consensus_engine =
+                ClayerConsensusEngine::new(consensus_agent.clone(), ApiService::new(Arc::new(api)));
+
+            // let receiver = consensus_agent.receiver();
             let mut block_publishing_ticker =
                 timing::SyncTicker::new(pbft_config.block_publishing_delay);
 
@@ -147,44 +144,39 @@ impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
             consensus_engine.start_idle_timeout(state);
 
             loop {
-                match receiver.recv_timeout(pbft_config.update_recv_timeout) {
-                    Ok(event) => {
-                        let incoming_event = match event {
-                            ClayerConsensusEvent::PeerNetWork(peer_id, connect) => {
-                                let e = if connect {
-                                    Some(ConsensusEvent::PeerConnected(peer_id))
-                                } else {
-                                    Some(ConsensusEvent::PeerConnected(peer_id))
-                                };
-                                e
-                            }
-                            ClayerConsensusEvent::PeerMessage(peer_id, bytes) => {
-                                let e = match parse_consensus_message(&bytes) {
-                                    Ok(msg) => Some(ConsensusEvent::PeerMessage(peer_id, msg)),
-                                    Err(e) => {
-                                        log_any_error(Err(e));
-                                        None
-                                    }
-                                };
-                                e
-                            }
-                        };
-                        if let Some(incoming_event) = incoming_event {
-                            match handle_consensus_event(
-                                &mut consensus_engine,
-                                incoming_event,
-                                state,
-                            ) {
-                                Ok(again) => {
-                                    if !again {
-                                        break;
-                                    }
+                if let Some(event) = consensus_agent.pop_event() {
+                    let incoming_event = match event {
+                        ClayerConsensusEvent::PeerNetWork(peer_id, connect) => {
+                            let e = if connect {
+                                Some(ConsensusEvent::PeerConnected(peer_id))
+                            } else {
+                                Some(ConsensusEvent::PeerConnected(peer_id))
+                            };
+                            e
+                        }
+                        ClayerConsensusEvent::PeerMessage(peer_id, bytes) => {
+                            let e = match parse_consensus_message(&bytes) {
+                                Ok(msg) => Some(ConsensusEvent::PeerMessage(peer_id, msg)),
+                                Err(e) => {
+                                    log_any_error(Err(e));
+                                    None
                                 }
-                                Err(err) => log_any_error(Err(err)),
+                            };
+                            e
+                        }
+                    };
+                    if let Some(incoming_event) = incoming_event {
+                        match handle_consensus_event(&mut consensus_engine, incoming_event, state) {
+                            Ok(again) => {
+                                if !again {
+                                    break;
+                                }
                             }
+                            Err(err) => log_any_error(Err(err)),
                         }
                     }
-                    Err(_) => {}
+                } else {
+                    sleep(pbft_config.update_recv_timeout);
                 }
 
                 // If the block publishing delay has passed, attempt to publish a block
@@ -230,10 +222,8 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        info!(target:"consensus::cl", "Starting consensus task");
         'first_layer: loop {
             if let Poll::Ready(x) = this.block_publishing_ticker.poll(cx) {
-                info!(target:"consensus::cl", "Attempting publish block");
                 this.queued.push_back(x);
 
                 if !this.pbft_running_state.load(Ordering::Relaxed) {
@@ -279,7 +269,6 @@ where
                 }
 
                 let timestamp = this.queued.pop_front().expect("not empty");
-                let api = this.api.clone();
                 let storage = this.storage.clone();
                 let chain_spec = Arc::clone(&this.chain_spec);
                 let client = this.client.clone();

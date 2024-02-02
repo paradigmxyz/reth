@@ -6,12 +6,12 @@ mod task;
 mod timing;
 use crate::engine_api::{
     auth::{strip_prefix, Auth, JwtKey},
-    //http::HttpJsonRpc,
-    http_blocking::HttpJsonRpc,
+    http::HttpJsonRpc,
 };
 use consensus::{clayer_block_from_genesis, PbftConfig, PbftState};
 pub use consensus::{ClayerConsensusEngine, ClayerConsensusMessagingAgent};
-use engine_api::ApiService;
+pub use engine_api::AuthHttpConfig;
+use engine_api::{http_blocking::HttpJsonRpcSync, ApiService};
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_interfaces::{
@@ -54,29 +54,13 @@ use tokio::time::Interval;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 use url::Url;
-/// Indicates the default jwt authenticated execution endpoint.
-pub const DEFAULT_EXECUTION_ENDPOINT: &str = "http://127.0.0.1:8551/";
 
-/// Name for the default file used for the jwt secret.
-pub const DEFAULT_JWT_FILE: &str = "jwt.hex";
-
-pub fn create_auth_api(jwt_key: JwtKey) -> HttpJsonRpc {
-    let execution_url = Url::from_str(DEFAULT_EXECUTION_ENDPOINT).unwrap();
+pub fn create_api(config: &AuthHttpConfig) -> HttpJsonRpc {
+    let str = format!("http://{}:{}", config.address, config.port);
+    let execution_url = Url::parse(&str).unwrap();
     let execution_timeout_multiplier = Option::from(3);
 
-    let auth = Auth::new(jwt_key, None, None);
-    let api = match HttpJsonRpc::new_with_auth(execution_url, auth, execution_timeout_multiplier) {
-        Ok(api) => api,
-        Err(e) => {
-            panic!("Failed to create execution api. Error: {:?}", e);
-        }
-    };
-    api
-}
-
-pub fn create_auth_api_with_port(jwt_key: JwtKey, auth_port: u16) -> HttpJsonRpc {
-    let execution_url = Url::from_str(format!("http://127.0.0.1:{}/", auth_port).as_str()).unwrap();
-    let execution_timeout_multiplier = Option::from(2);
+    let jwt_key = JwtKey::from_slice(&config.auth).unwrap();
 
     let auth = Auth::new(jwt_key, None, None);
     let api = match HttpJsonRpc::new_with_auth(execution_url, auth, execution_timeout_multiplier) {
@@ -88,16 +72,21 @@ pub fn create_auth_api_with_port(jwt_key: JwtKey, auth_port: u16) -> HttpJsonRpc
     api
 }
 
-pub fn create_api() -> HttpJsonRpc {
-    let execution_url = Url::from_str(DEFAULT_EXECUTION_ENDPOINT).unwrap();
-    let execution_timeout_multiplier = Option::from(1);
+pub fn create_sync_api(config: &AuthHttpConfig) -> HttpJsonRpcSync {
+    let str = format!("http://{}:{}", config.address, config.port);
+    let execution_url = Url::parse(&str).unwrap();
+    let execution_timeout_multiplier = Option::from(3);
 
-    let api = match HttpJsonRpc::new(execution_url, execution_timeout_multiplier) {
-        Ok(api) => api,
-        Err(e) => {
-            panic!("Failed to create execution api. Error: {:?}", e);
-        }
-    };
+    let jwt_key = JwtKey::from_slice(&config.auth).unwrap();
+
+    let auth = Auth::new(jwt_key, None, None);
+    let api =
+        match HttpJsonRpcSync::new_with_auth(execution_url, auth, execution_timeout_multiplier) {
+            Ok(api) => api,
+            Err(e) => {
+                panic!("Failed to create execution api. Error: {:?}", e);
+            }
+        };
     api
 }
 
@@ -363,14 +352,13 @@ pub struct ConsensusBuilder<Client, Pool, CDB> {
     client: Client,
     pool: Pool,
     storage: ClStorage,
-    //api: Arc<HttpJsonRpc>,
-    api: (JwtKey, u16),
     network: NetworkHandle,
     consensus_agent: ClayerConsensusMessagingAgent,
     storages: CDB,
     config: PbftConfig,
     state: PbftState,
     latest_header: SealedHeader,
+    auth_config: AuthHttpConfig,
 }
 
 impl<Client, Pool: TransactionPool, CDB> ConsensusBuilder<Client, Pool, CDB>
@@ -379,7 +367,6 @@ where
 {
     /// Creates a new builder instance to configure all parts.
     pub fn new(
-        jwt_key_bytes: &[u8],
         secret: SecretKey,
         chain_spec: Arc<ChainSpec>,
         client: Client,
@@ -387,7 +374,7 @@ where
         network: NetworkHandle,
         clayer_consensus_messaging_agent: ClayerConsensusMessagingAgent,
         storages: CDB,
-        auth_port: u16,
+        auth_config: AuthHttpConfig,
     ) -> Self {
         let latest_header = client
             .latest_header()
@@ -399,10 +386,8 @@ where
             _ => panic!("Failed to get latest block"),
         };
 
-        let jwt_key = JwtKey::from_slice(jwt_key_bytes).unwrap();
-        //let api = Arc::new(create_auth_api_with_port(jwt_key, auth_port));
         let config = PbftConfig::new();
-        let mut state = PbftState::new(secret, latest_header.number, &config);
+        let state = PbftState::new(secret, latest_header.number, &config);
         // clayer_consensus.initialize(
         //     clayer_block_from_genesis(&latest_header),
         //     ApiService::new(api.clone()),
@@ -414,14 +399,13 @@ where
             storage: ClStorage::new(latest_header.clone()),
             client,
             pool,
-            //api,
-            api: (jwt_key, auth_port),
             network,
             consensus_agent: clayer_consensus_messaging_agent,
             storages,
             config,
             state,
             latest_header,
+            auth_config,
         }
     }
     /// Consumes the type and returns all components
@@ -432,20 +416,20 @@ where
             client,
             pool,
             storage,
-            api,
             network,
             consensus_agent,
             storages,
             config,
             state,
             latest_header,
+            auth_config,
         } = self;
         let task = ClTask::new(
             Arc::clone(&chain_spec),
             storage,
             client,
             pool,
-            api,
+            auth_config,
             network.clone(),
             consensus_agent,
             storages,

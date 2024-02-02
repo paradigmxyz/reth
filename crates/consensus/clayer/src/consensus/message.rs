@@ -197,27 +197,40 @@ impl ParsedMessage {
                 panic!("ParsedPeerMessage.get_block_id found a new view message!")
             }
             PbftMessageWrapper::Seal(_) => {
-                panic!("ParsedPeerMessage.get_block_id found a seal response message!")
+                panic!("ParsedPeerMessage.get_block_id found a seal message!")
             }
             PbftMessageWrapper::BlockNew(_) => {
-                panic!("ParsedPeerMessage.get_block_id found a blocknew response message!")
+                panic!("ParsedPeerMessage.get_block_id found a blocknew message!")
             }
         }
     }
 
-    pub fn get_new_view_message(&self) -> &PbftNewView {
+    pub fn get_pbft(&self) -> &PbftMessage {
+        match &self.message {
+            PbftMessageWrapper::Message(m) => m,
+            PbftMessageWrapper::NewView(_) => {
+                panic!("ParsedPeerMessage.get_view_change_message found a new view message!")
+            }
+            PbftMessageWrapper::Seal(_) => {
+                panic!("ParsedPeerMessage.get_view_change_message found a seal message!")
+            }
+            PbftMessageWrapper::BlockNew(_) => {
+                panic!("ParsedPeerMessage.get_view_change_message found a blocknew message!")
+            }
+        }
+    }
+
+    pub fn get_new_view(&self) -> &PbftNewView {
         match &self.message {
             PbftMessageWrapper::Message(_) => {
                 panic!("ParsedPeerMessage.get_view_change_message found a pbft message!")
             }
             PbftMessageWrapper::NewView(m) => m,
             PbftMessageWrapper::Seal(_) => {
-                panic!("ParsedPeerMessage.get_view_change_message found a seal response message!")
+                panic!("ParsedPeerMessage.get_view_change_message found a seal message!")
             }
             PbftMessageWrapper::BlockNew(_) => {
-                panic!(
-                    "ParsedPeerMessage.get_view_change_message found a blocknew response message!"
-                )
+                panic!("ParsedPeerMessage.get_view_change_message found a blocknew message!")
             }
         }
     }

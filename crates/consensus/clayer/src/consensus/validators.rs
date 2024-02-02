@@ -41,7 +41,7 @@ impl Validators {
     }
 
     /// Tell if the set of validators is different
-    pub fn is_different(&self, validators: &Vec<PeerId>) -> bool {
+    pub fn is_same(&self, validators: &Vec<PeerId>) -> bool {
         let matching =
             self.validators.iter().zip(validators.iter()).filter(|&(a, b)| a == b).count();
         matching == self.validators.len() && matching == validators.len()

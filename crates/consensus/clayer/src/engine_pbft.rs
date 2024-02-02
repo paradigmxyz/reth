@@ -78,7 +78,7 @@ pub fn handle_consensus_event(
             consensus.on_peer_connected(peer_id, state)?
         }
         ConsensusEvent::PeerDisconnected(peer_id) => {
-            info!(target: "consensus::cl","Received PeerDisconnected for peer ID: {:?}", peer_id);
+            info!(target: "consensus::cl","Received PeerDisconnected message with peer ID: {:?}", peer_id);
         }
     }
 

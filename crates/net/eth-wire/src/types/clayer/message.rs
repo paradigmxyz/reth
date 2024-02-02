@@ -4,7 +4,7 @@ use reth_codecs::derive_arbitrary;
 use reth_primitives::{
     bytes::{Buf, BufMut},
     hex, keccak256, public_key_to_address, Address, Block, Bloom, Bytes, PeerId, Withdrawal, B256,
-    U256,
+    B64, U256,
 };
 use secp256k1::PublicKey;
 
@@ -77,6 +77,12 @@ pub struct PbftMessage {
     pub block_id: B256,
 }
 
+impl std::fmt::Display for PbftMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "info ({}) block_id ({:?})", self.info, hex::encode(self.block_id.clone()),)
+    }
+}
+
 /// Consensus layer message[Prepare]
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default, Hash)]
@@ -101,6 +107,12 @@ pub struct PbftSeal {
     pub block_id: B256,
     /// a list of Commit votes to prove the block commit (must contain at least 2f votes)
     pub commit_votes: Vec<PbftSignedVote>,
+}
+
+impl std::fmt::Display for PbftSeal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "info ({}) block_id ({:?})", self.info, hex::encode(self.block_id.clone()),)
+    }
 }
 
 /// Consensus message new view
@@ -180,12 +192,19 @@ pub struct ClayerBlock {
     pub block: ClayerExecutionPayload,
     /// seal
     pub seal_bytes: Bytes,
+    /// payload id
+    pub payload_id: B64,
 }
 
 impl ClayerBlock {
     /// Create a new `ClayerBlock`
-    pub fn new(info: PbftMessageInfo, block: ClayerExecutionPayload, seal_bytes: Bytes) -> Self {
-        ClayerBlock { info, block, seal_bytes }
+    pub fn new(
+        info: PbftMessageInfo,
+        block: ClayerExecutionPayload,
+        seal_bytes: Bytes,
+        payload_id: B64,
+    ) -> Self {
+        ClayerBlock { info, block, seal_bytes, payload_id }
     }
 
     /// Get the block id, call hash_slow for performance
@@ -216,7 +235,7 @@ impl std::fmt::Debug for ClayerBlock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ClayerBlock(block_num: {:?}, block_id: {:?}, previous_id: {:?}, signer_id: {:?}",
+            "ClayerBlock(block_num: {:?}, block_id: {:?}, previous_id: {:?}, signer_id: {:?})",
             self.block_num(),
             self.block_id(),
             self.previous_id(),
@@ -229,7 +248,7 @@ impl std::fmt::Display for ClayerBlock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ClayerBlock(block_num: {:?}, block_id: {:?}, previous_id: {:?}, signer_id: {:?}",
+            "ClayerBlock(block_num: {:?}, block_id: {:?}, previous_id: {:?}, signer_id: {:?})",
             self.block_num(),
             self.block_id(),
             self.previous_id(),
@@ -274,4 +293,6 @@ pub struct ClayerExecutionPayload {
     pub transactions: Vec<Bytes>,
     ///
     pub withdrawals: Vec<Withdrawal>,
+    ///
+    pub block_value: U256,
 }
