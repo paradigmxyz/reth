@@ -70,16 +70,13 @@ async fn main() {
     info!("Looking for Polygon peers...");
 
     while let Some(evt) = events.next().await {
-        match evt {
-            // For the sake of the example we only print the session established event
-            // with the chain specific details
-            NetworkEvent::SessionEstablished { status, client_version, .. } => {
-                let chain = status.chain;
-                info!(?chain, ?client_version, "Session established with a new peer.");
-            }
-            // More events here
-            _ => {}
+        // For the sake of the example we only print the session established event
+        // with the chain specific details
+        if let NetworkEvent::SessionEstablished { status, client_version, .. } = evt {
+            let chain = status.chain;
+            info!(?chain, ?client_version, "Session established with a new peer.");
         }
+        // More events here
     }
     // We will be disconnected from peers since we are not able to answer to network requests
 }
