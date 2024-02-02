@@ -2,7 +2,7 @@ use crate::{
     cache::{LruCache, LruMap},
     message::PeerRequest,
 };
-use derive_more::{Deref, DerefMut, Display};
+use derive_more::Display;
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{EthVersion, GetPooledTransactions, HandleAnnouncement};
@@ -131,12 +131,7 @@ impl<N> AnnouncementDataStore<N> {
 // inheritance
 pub trait StoreAnnouncementData {
     fn pack_hashes(&mut self, hashes: &mut Vec<TxHash>, peer_id: PeerId) -> Vec<TxHash>;
-    fn fill_request_from_buffer_for_peer(
-        &mut self,
-        hashes: &mut Vec<TxHash>,
-        peer_id: PeerId,
-        acc_size_response: Option<&mut usize>,
-    );
+    fn fill_request_from_buffer_for_peer(&mut self, hashes: &mut Vec<TxHash>, peer_id: PeerId);
 }
 
 impl<H> AnnouncementDataStore<H>
@@ -254,7 +249,7 @@ impl AnnouncementDataStore<TxHash68> {
     /// Returns `true` if hash is included in request. If there is still space in the respective
     /// response but not enough for the transaction of given hash, `false` is returned.
     fn include_eth68_hash(&self, acc_size_response: &mut usize, hash: TxHash) -> bool {
-        let meta = &mut self.meta.expect("metadata cache should be configured for eht68 type");
+        let meta = self.meta.as_ref().expect("metadata cache should be configured for eht68 type");
 
         debug_assert!(
             meta.peek(&hash).is_some(),
@@ -313,7 +308,7 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash68> {
     /// 3. Try to fill remaining space with hashes from buffer.
     /// 4. Return surplus hashes.
     fn pack_hashes(&mut self, hashes: &mut Vec<TxHash>, peer_id: PeerId) -> Vec<TxHash> {
-        let meta = &mut self.meta.expect("metadata cache should be configured for eht68 type");
+        let meta = self.meta.as_mut().expect("metadata cache should be configured for eht68 type");
 
         if let Some(hash) = hashes.first() {
             if let Some(size) = meta.get(hash) {
@@ -322,6 +317,8 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash68> {
                 }
             }
         }
+
+        let meta = self.meta.as_ref().expect("metadata cache should be configured for eht68 type");
 
         let mut acc_size_response = 0;
         let mut surplus_hashes = vec![];
@@ -359,34 +356,37 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash68> {
     /// 4. Check if peer is fallback peer for hash and remove, else skip to next iteration.
     /// 4. Add hash to hashes list parameter.
     /// 5. Overwrite eth68 acc size with copy.
-    fn fill_request_from_buffer_for_peer(
-        &mut self,
-        hashes: &mut Vec<TxHash>,
-        peer_id: PeerId,
-        acc_size_response: Option<&mut usize>,
-    ) {
-        let acc_size_response = acc_size_response.expect("acc size should be param for type");
+    fn fill_request_from_buffer_for_peer(&mut self, hashes: &mut Vec<TxHash>, peer_id: PeerId) {
+        debug_assert!(
+            hashes.first().is_some(),
+            "`%hashes` should have at least one hash to call function,
+`%hashes`: {hashes:?}",
+        );
 
-        if *acc_size_response >= POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE / 2 {
+        let Some(hash) = hashes.first() else { return };
+
+        debug_assert!(
+            hashes.first().is_some(),
+            "`%hashes` should contain an eth68 hash, but not size metadata found for `%hashes[0]`,
+`%hashes`: {hashes:?},
+`@meta`: {self:?}"
+        );
+
+        let Some(mut acc_size_response) = self
+            .meta
+            .as_mut()
+            .expect("meta should be configured for eth68 store")
+            .get(hash)
+            .copied()
+        else {
+            return
+        };
+
+        if acc_size_response >= POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE / 2 {
             return
         }
 
         // all hashes included in request and there is still a lot of space
-
-        debug_assert!(
-        {
-            let mut acc_size = 0;
-            for &hash in hashes.iter() {
-                _ = self.include_eth68_hash(&mut acc_size, hash);
-            }
-            acc_size == *acc_size_response
-        },
-        "an eth68 request is being assembled and caller has miscalculated accumulated size of corresponding transactions response, broken invariant `%acc_size_response` and `%hashes`,
-`%acc_size_response`: {:?},
-`%hashes`: {:?},
-`@self`: {:?}",
-        acc_size_response, hashes, self
-    );
 
         for hash in self.buffered_hashes.iter() {
             // fill request to 2/3 of the soft limit for the response size, or until the number of
@@ -397,7 +397,7 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash68> {
             }
 
             // copy acc size
-            let mut next_acc_size = *acc_size_response;
+            let mut next_acc_size = acc_size_response;
 
             // 1. Check acc size against limit, if so stop looping.
             if next_acc_size >= 2 * POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE / 3 {
@@ -412,7 +412,8 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash68> {
                 break
             }
             // 2. Check if this buffered hash is an eth68 hash, else skip to next iteration.
-            let meta = &mut self.meta.expect("metadata cache should be configured for eht68 type");
+            let meta =
+                self.meta.as_mut().expect("metadata cache should be configured for eht68 type");
 
             if meta.get(hash).is_none() {
                 continue
@@ -443,7 +444,7 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash68> {
                     // 4. Add hash to hashes list parameter.
                     hashes.push(*hash);
                     // 5. Overwrite eth68 acc size with copy.
-                    *acc_size_response = next_acc_size;
+                    acc_size_response = next_acc_size;
 
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
@@ -489,7 +490,7 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash66> {
     /// If necessary, takes hashes from buffer for which peer is listed as fallback peer.
     ///
     /// Returns left over hashes.
-    fn pack_hashes(&mut self, hashes: &mut Vec<TxHash>, peer_id: PeerId) -> Vec<TxHash> {
+    fn pack_hashes(&mut self, hashes: &mut Vec<TxHash>, _peer_id: PeerId) -> Vec<TxHash> {
         if hashes.len() < GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
             return vec![]
         }
@@ -508,19 +509,17 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash66> {
     /// 4. Add hash to hashes list parameter. This increases length i.e. hashes count.
     ///
     /// Removes hashes included in request from buffer.
-    fn fill_request_from_buffer_for_peer(
-        &mut self,
-        hashes: &mut Vec<TxHash>,
-        peer_id: PeerId,
-        acc_size_response: Option<&mut usize>,
-    ) {
+    fn fill_request_from_buffer_for_peer(&mut self, hashes: &mut Vec<TxHash>, peer_id: PeerId) {
         for hash in self.buffered_hashes.iter() {
             // 1. Check hashes count in request.
             if hashes.len() >= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
                 break
             }
             // 2. Check if this buffered hash is an eth66 hash.
-            let meta = &mut self.meta.expect("metadata cache should be configured for eht68 type");
+            let meta = &mut self
+                .meta
+                .as_mut()
+                .expect("metadata cache should be configured for eht68 type");
             if meta.get(hash).is_some() {
                 continue
             }
@@ -589,12 +588,42 @@ impl TransactionFetcher {
     #[inline]
     fn remove_from_unknown_hashes<I, T>(&mut self, hashes: I)
     where
+        T: 'static,
         I: IntoIterator<Item = TxHash>,
     {
         if TypeId::of::<T>() == TypeId::of::<TxHash68>() {
             self.store_eth68.remove_from_unknown_hashes(hashes);
         } else if TypeId::of::<T>() == TypeId::of::<TxHash66>() {
             self.store_eth66.remove_from_unknown_hashes(hashes);
+        }
+    }
+
+    pub(super) fn get_unknown_hashes<T>(
+        &mut self,
+        hash: &TxHash,
+    ) -> Option<&mut (u8, LruCache<PeerId>)>
+    where
+        T: IdentifyEthVersion,
+    {
+        if T::version().is_eth68() {
+            self.store_eth68.unknown_hashes.get(hash)
+        } else if T::version().is_eth66() {
+            self.store_eth66.unknown_hashes.get(hash)
+        } else {
+            unreachable!("no other eth versions for announcements")
+        }
+    }
+
+    pub(super) fn remove_buffered_hash<T>(&mut self, hash: &TxHash) -> bool
+    where
+        T: IdentifyEthVersion,
+    {
+        if T::version().is_eth68() {
+            self.store_eth68.buffered_hashes.remove(hash)
+        } else if T::version().is_eth66() {
+            self.store_eth66.buffered_hashes.remove(hash)
+        } else {
+            unreachable!("no other eth versions for announcements")
         }
     }
 
@@ -624,14 +653,100 @@ impl TransactionFetcher {
         false
     }
 
+    pub(super) fn get_idle_peer_for<T>(
+        &self,
+        hash: TxHash,
+        ended_sessions_buf: &mut Vec<PeerId>,
+        is_session_active: impl Fn(PeerId) -> bool,
+    ) -> Option<PeerId>
+    where
+        T: IdentifyEthVersion,
+    {
+        if T::version().is_eth68() {
+            self.store_eth68.get_idle_peer_for(
+                hash,
+                ended_sessions_buf,
+                is_session_active,
+                |peer_id| self.is_idle(peer_id),
+            )
+        } else if T::version().is_eth66() {
+            self.store_eth66.get_idle_peer_for(
+                hash,
+                ended_sessions_buf,
+                is_session_active,
+                |peer_id| self.is_idle(peer_id),
+            )
+        } else {
+            unreachable!("no other eth versions for announcements")
+        }
+    }
+
     pub(super) fn buffer_hashes_for_retry<T>(&mut self, hashes: Vec<TxHash>)
     where
         T: IdentifyEthVersion,
     {
-        if T::version().is_eth66() {
+        if T::version().is_eth68() {
             self.store_eth68.buffer_hashes(hashes, None)
-        } else if T::version().is_eth68() {
+        } else if T::version().is_eth66() {
             self.store_eth66.buffer_hashes(hashes, None)
+        }
+    }
+
+    pub(super) fn buffer_hashes<T>(&mut self, hashes: Vec<TxHash>, fallback_peer: Option<PeerId>)
+    where
+        T: IdentifyEthVersion,
+    {
+        if T::version().is_eth68() {
+            self.store_eth68.buffer_hashes(hashes, fallback_peer)
+        } else if T::version().is_eth66() {
+            self.store_eth66.buffer_hashes(hashes, fallback_peer)
+        }
+    }
+
+    pub(super) fn fill_request_from_buffer_for_peer<T>(
+        &mut self,
+        hashes: &mut Vec<TxHash>,
+        peer_id: PeerId,
+    ) where
+        T: IdentifyEthVersion,
+    {
+        if T::version().is_eth68() {
+            self.store_eth68.fill_request_from_buffer_for_peer(hashes, peer_id)
+        } else if T::version().is_eth66() {
+            self.store_eth66.fill_request_from_buffer_for_peer(hashes, peer_id)
+        }
+    }
+
+    pub(super) fn pack_hashes<T>(
+        &mut self,
+        hashes: &mut Vec<TxHash>,
+        peer_id: PeerId,
+    ) -> Vec<TxHash>
+    where
+        T: IdentifyEthVersion,
+    {
+        if T::version().is_eth68() {
+            return self.store_eth68.pack_hashes(hashes, peer_id)
+        } else if T::version().is_eth66() {
+            return self.store_eth66.pack_hashes(hashes, peer_id)
+        }
+
+        unreachable!("no other eth versions for announcements")
+    }
+
+    pub(super) fn filter_unseen_hashes<H, T>(
+        &mut self,
+        new_announced_hashes: &mut H,
+        peer_id: PeerId,
+        is_session_active: impl Fn(PeerId) -> bool,
+    ) where
+        H: HandleAnnouncement,
+        T: IdentifyEthVersion,
+    {
+        if T::version().is_eth68() {
+            self.store_eth68.filter_unseen_hashes(new_announced_hashes, peer_id, is_session_active)
+        } else if T::version().is_eth68() {
+            self.store_eth66.filter_unseen_hashes(new_announced_hashes, peer_id, is_session_active)
         }
     }
 
@@ -639,11 +754,13 @@ impl TransactionFetcher {
     ///
     /// This is called when we receive full transactions that are currently scheduled for fetching.
     #[inline]
-    pub(super) fn on_received_full_transactions_broadcast<T>(
+    pub(super) fn on_received_full_transactions_broadcast(
         &mut self,
-        hashes: impl IntoIterator<Item = TxHash>,
+        hashes: impl IntoIterator<Item = TxHash> + Clone,
     ) {
-        self.remove_from_unknown_hashes::<_, T>(hashes)
+        // atm we don't track if transactions are coming over an eth68 session or eth66 session,
+        self.remove_from_unknown_hashes::<_, TxHash68>(hashes.clone());
+        self.remove_from_unknown_hashes::<_, TxHash66>(hashes);
     }
 
     /// Requests the missing transactions from the announced hashes of the peer. Returns the
@@ -791,13 +908,15 @@ impl Stream for TransactionFetcher {
                         true
                     });
                     if version.is_eth68() {
+                        // remove successfully fetched hashes
                         self.remove_from_unknown_hashes::<_, TxHash68>(fetched);
-                        // buffer left over hashes
-                        self.buffer_hashes_for_retry(requested_hashes);
+                        // buffer hashes that couldn't be fetched
+                        self.buffer_hashes_for_retry::<TxHash68>(requested_hashes);
                     } else if version.is_eth66() {
+                        // remove successfully fetched hashes
                         self.remove_from_unknown_hashes::<_, TxHash66>(fetched);
-                        // buffer left over hashes
-                        self.buffer_hashes_for_retry(requested_hashes);
+                        // buffer hashes that couldn't be fetched
+                        self.buffer_hashes_for_retry::<TxHash66>(requested_hashes);
                     }
 
                     Poll::Ready(Some(FetchEvent::TransactionsFetched {
@@ -806,11 +925,23 @@ impl Stream for TransactionFetcher {
                     }))
                 }
                 Ok(Err(req_err)) => {
-                    self.buffer_hashes_for_retry(requested_hashes);
+                    if version.is_eth68() {
+                        // buffer hashes that couldn't be fetched
+                        self.buffer_hashes_for_retry::<TxHash68>(requested_hashes);
+                    } else if version.is_eth66() {
+                        // buffer hashes that couldn't be fetched
+                        self.buffer_hashes_for_retry::<TxHash66>(requested_hashes);
+                    }
                     Poll::Ready(Some(FetchEvent::FetchError { peer_id, error: req_err }))
                 }
                 Err(_) => {
-                    self.buffer_hashes_for_retry(requested_hashes);
+                    if version.is_eth68() {
+                        // buffer hashes that couldn't be fetched
+                        self.buffer_hashes_for_retry::<TxHash68>(requested_hashes);
+                    } else if version.is_eth66() {
+                        // buffer hashes that couldn't be fetched
+                        self.buffer_hashes_for_retry::<TxHash66>(requested_hashes);
+                    }
                     // request channel closed/dropped
                     Poll::Ready(Some(FetchEvent::FetchError {
                         peer_id,
@@ -826,7 +957,13 @@ impl Stream for TransactionFetcher {
 
 impl Default for TransactionFetcher {
     fn default() -> Self {
-        Self { active_peers: LruMap::new(MAX_CONCURRENT_TX_REQUESTS), ..Default::default() }
+        Self {
+            active_peers: LruMap::new(MAX_CONCURRENT_TX_REQUESTS),
+            inflight_requests: Default::default(),
+            store_eth68: Default::default(),
+            store_eth66: Default::default(),
+            filter_valid_hashes: Default::default(),
+        }
     }
 }
 
@@ -945,13 +1082,18 @@ mod test {
         // seen_eth68_hashes_sizes is lru!
 
         for i in (0..6).rev() {
-            tx_fetcher.unknown_hashes.insert(eth68_hashes[i], (0, default_cache()));
-            tx_fetcher.eth68_meta.insert(eth68_hashes[i], eth68_hashes_sizes[i]);
+            tx_fetcher.store_eth68.unknown_hashes.insert(eth68_hashes[i], (0, default_cache()));
+            tx_fetcher
+                .store_eth68
+                .meta
+                .as_mut()
+                .unwrap()
+                .insert(eth68_hashes[i], eth68_hashes_sizes[i]);
         }
 
         let mut eth68_hashes_to_request = eth68_hashes.clone().to_vec();
         let surplus_eth68_hashes =
-            tx_fetcher.pack_hashes_eth68(&mut eth68_hashes_to_request, peer_id);
+            tx_fetcher.store_eth68.pack_hashes(&mut eth68_hashes_to_request, peer_id);
 
         assert_eq!(surplus_eth68_hashes, vec!(eth68_hashes[1], eth68_hashes[3], eth68_hashes[5]));
         assert_eq!(
