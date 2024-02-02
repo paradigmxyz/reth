@@ -500,6 +500,8 @@ impl<T: TransactionOrdering> TxPool<T> {
             return Err(PoolError::new(*tx.hash(), PoolErrorKind::AlreadyImported))
         }
 
+        tracing::trace!(?on_chain_balance, ?on_chain_nonce, nonce=tx.nonce(), "adding transaction to the pool: {tx_hash}", tx_hash = tx.hash());
+
         // Update sender info with balance and nonce
         self.sender_info
             .entry(tx.sender_id())
@@ -787,8 +789,22 @@ impl<T: TransactionOrdering> TxPool<T> {
                         .$limit
                         .is_exceeded($this.$pool.len(), $this.$pool.size())
                     {
+                        tracing::trace!(
+                            "discarding worst transactions from {} pool",
+                            stringify!($pool)
+                        );
+
                         // 1. first remove the worst transaction from the subpool
                         let removed_from_subpool = $this.$pool.truncate_pool($this.config.$limit.clone());
+
+                        tracing::trace!(
+                            "removed {} transactions from {} pool, limit: {:?}, curr size: {}, curr len: {}",
+                            removed_from_subpool.len(),
+                            stringify!($pool),
+                            $this.config.$limit,
+                            $this.$pool.size(),
+                            $this.$pool.len()
+                        );
 
                         // 2. remove all transactions from the total set
                         for tx in removed_from_subpool {
@@ -2720,6 +2736,48 @@ mod tests {
         let outcome = pool.update_accounts(changed_senders);
         assert_eq!(outcome.discarded.len(), 1);
         assert_eq!(pool.pending_pool.len(), 1);
+    }
+
+    #[test]
+    fn discard_with_large_blob_txs() {
+        // init tracing
+        reth_tracing::init_test_tracing();
+
+        // this test adds large txs to the parked pool, then attempting to discard worst
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let default_limits = pool.config.blob_limit;
+
+        // create a chain of transactions by sender A
+        // make sure they are all one over half the limit
+        let a_sender = address!("000000000000000000000000000000000000000a");
+
+        // set the base fee of the pool
+        let mut block_info = pool.block_info();
+        block_info.pending_blob_fee = Some(100);
+        block_info.pending_basefee = 100;
+
+        // update
+        pool.set_block_info(block_info);
+
+        // 2 txs, that should put the pool over the size limit but not max txs
+        let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxType::EIP4844)
+            .into_iter()
+            .map(|mut tx| {
+                tx.set_size(default_limits.max_size / 2 + 1);
+                tx.set_max_fee((block_info.pending_basefee - 1).into());
+                tx
+            })
+            .collect::<Vec<_>>();
+
+        // add all the transactions to the parked pool
+        for tx in a_txs {
+            pool.add_transaction(f.validated(tx), U256::from(1_000), 0).unwrap();
+        }
+
+        // truncate the pool, it should remove at least one transaction
+        let removed = pool.discard_worst();
+        assert_eq!(removed.len(), 1);
     }
 
     #[test]

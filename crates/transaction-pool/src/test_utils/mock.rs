@@ -1370,11 +1370,10 @@ impl MockTransactionSet {
     /// The number of transactions created is determined by `tx_count`.
     pub fn dependent(sender: Address, from_nonce: u64, tx_count: usize, tx_type: TxType) -> Self {
         let mut txs = Vec::with_capacity(tx_count);
-        let mut curr_tx = MockTransaction::new_from_type(tx_type).with_nonce(from_nonce);
-        for i in 0..tx_count {
-            let _nonce = from_nonce + i as u64;
-            curr_tx = curr_tx.next().with_sender(sender);
+        let mut curr_tx = MockTransaction::new_from_type(tx_type).with_nonce(from_nonce).with_sender(sender);
+        for _ in 0..tx_count {
             txs.push(curr_tx.clone());
+            curr_tx = curr_tx.next();
         }
 
         Self::new(txs)
