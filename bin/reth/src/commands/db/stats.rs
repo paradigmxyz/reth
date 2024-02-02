@@ -23,7 +23,7 @@ impl Command {
     pub fn execute(
         self,
         data_dir: ChainPath<DataDirPath>,
-        tool: &DbTool<'_, DatabaseEnv>,
+        tool: &DbTool<DatabaseEnv>,
     ) -> eyre::Result<()> {
         let snapshots_stats_table = self.snapshots_stats_table(data_dir, self.only_total_size)?;
         println!("{snapshots_stats_table}");
@@ -36,7 +36,7 @@ impl Command {
         Ok(())
     }
 
-    fn db_stats_table(&self, tool: &DbTool<'_, DatabaseEnv>) -> eyre::Result<ComfyTable> {
+    fn db_stats_table(&self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
         table.set_header([
@@ -48,7 +48,7 @@ impl Command {
             "Total Size",
         ]);
 
-        tool.db.view(|tx| {
+        tool.provider_factory.db_ref().view(|tx| {
             let mut db_tables = Tables::ALL.iter().map(|table| table.name()).collect::<Vec<_>>();
             db_tables.sort();
             let mut total_size = 0;

@@ -18,13 +18,14 @@
 //! # use reth_interfaces::consensus::Consensus;
 //! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient};
 //! # use reth_revm::EvmProcessorFactory;
-//! # use reth_primitives::{PeerId, MAINNET, B256};
+//! # use reth_primitives::{PeerId, MAINNET, B256, PruneModes};
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
 //! # use tokio::sync::watch;
 //! # use reth_provider::ProviderFactory;
 //! # use reth_provider::HeaderSyncMode;
 //! # use reth_provider::test_utils::create_test_provider_factory;
+//! # use reth_snapshot::Snapshotter;
 //! #
 //! # let chain_spec = MAINNET.clone();
 //! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());
@@ -40,6 +41,13 @@
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(B256::default());
 //! # let executor_factory = EvmProcessorFactory::new(chain_spec.clone());
+//! # let snapshotter = Snapshotter::new(
+//! #    provider_factory.clone(),
+//! #    provider_factory
+//! #       .snapshot_provider()
+//! #       .expect("snapshot provider initialized via provider factory"),
+//! #    PruneModes::default()
+//! # );
 //! // Create a pipeline that can fully sync
 //! # let pipeline =
 //! Pipeline::builder()
@@ -52,6 +60,7 @@
 //!             headers_downloader,
 //!             bodies_downloader,
 //!             executor_factory,
+//!             snapshotter,
 //!         )
 //!         .unwrap(),
 //!     )

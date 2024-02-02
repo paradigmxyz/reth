@@ -66,7 +66,6 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 3500,
-        snapshot_block_interval: 500_000,
     }
     .into()
 });
@@ -110,7 +109,6 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
-        snapshot_block_interval: 1_000_000,
     }
     .into()
 });
@@ -158,7 +156,6 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
-        snapshot_block_interval: 1_000_000,
     }
     .into()
 });
@@ -201,7 +198,6 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
-        snapshot_block_interval: 1_000_000,
     }
     .into()
 });
@@ -289,7 +285,6 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             .into(),
         ),
         prune_delete_limit: 1700,
-        snapshot_block_interval: 1_000_000,
         ..Default::default()
     }
     .into()
@@ -338,7 +333,6 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             .into(),
         ),
         prune_delete_limit: 1700,
-        snapshot_block_interval: 1_000_000,
         ..Default::default()
     }
     .into()
@@ -387,7 +381,6 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             .into(),
         ),
         prune_delete_limit: 1700,
-        snapshot_block_interval: 1_000_000,
         ..Default::default()
     }
     .into()
@@ -436,7 +429,6 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             .into(),
         ),
         prune_delete_limit: 1700,
-        snapshot_block_interval: 1_000_000,
         ..Default::default()
     }
     .into()
@@ -609,9 +601,6 @@ pub struct ChainSpec {
     /// data coming in.
     #[serde(default)]
     pub prune_delete_limit: usize,
-
-    /// The block interval for creating snapshots. Each snapshot will have that much blocks in it.
-    pub snapshot_block_interval: u64,
 }
 
 impl Default for ChainSpec {
@@ -626,7 +615,6 @@ impl Default for ChainSpec {
             deposit_contract: Default::default(),
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: MAINNET.prune_delete_limit,
-            snapshot_block_interval: Default::default(),
         }
     }
 }

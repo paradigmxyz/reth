@@ -6,9 +6,9 @@ use crate::{
 };
 use futures::FutureExt;
 use reth_db::database::Database;
-use reth_interfaces::{RethError, RethResult};
+use reth_interfaces::RethResult;
 use reth_primitives::BlockNumber;
-use reth_snapshot::{Snapshotter, SnapshotterError, SnapshotterWithResult};
+use reth_snapshot::{Snapshotter, SnapshotterWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
@@ -140,15 +140,4 @@ enum SnapshotterState<DB> {
     Idle(Option<Snapshotter<DB>>),
     /// Snapshotter is running and waiting for a response
     Running(oneshot::Receiver<SnapshotterWithResult<DB>>),
-}
-
-impl From<SnapshotterError> for EngineHookError {
-    fn from(err: SnapshotterError) -> Self {
-        match err {
-            SnapshotterError::InconsistentData(_) => EngineHookError::Internal(Box::new(err)),
-            SnapshotterError::Interface(err) => err.into(),
-            SnapshotterError::Database(err) => RethError::Database(err).into(),
-            SnapshotterError::Provider(err) => RethError::Provider(err).into(),
-        }
-    }
 }

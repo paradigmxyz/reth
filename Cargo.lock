@@ -6830,6 +6830,7 @@ version = "0.1.0-alpha.16"
 dependencies = [
  "assert_matches",
  "clap",
+ "rayon",
  "reth-db",
  "reth-interfaces",
  "reth-nippy-jar",
@@ -6872,6 +6873,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "reth-snapshot",
  "reth-tokio-util",
  "reth-trie",
  "revm",

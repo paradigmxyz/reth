@@ -1,6 +1,7 @@
 //! Support for snapshotting.
 
-use crate::{segments, segments::Segment, SnapshotterError};
+use crate::{segments, segments::Segment};
+use rayon::prelude::*;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
 use reth_primitives::{snapshot::HighestSnapshots, BlockNumber, PruneModes};
@@ -12,13 +13,13 @@ use std::{ops::RangeInclusive, sync::Arc, time::Instant};
 use tracing::{debug, trace};
 
 /// Result of [Snapshotter::run] execution.
-pub type SnapshotterResult = Result<SnapshotTargets, SnapshotterError>;
+pub type SnapshotterResult = RethResult<SnapshotTargets>;
 
 /// The snapshotter type itself with the result of [Snapshotter::run]
 pub type SnapshotterWithResult<DB> = (Snapshotter<DB>, SnapshotterResult);
 
 /// Snapshotting routine. See [Snapshotter::run] for more detailed description.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Snapshotter<DB> {
     /// Provider factory
     provider_factory: ProviderFactory<DB>,
@@ -77,7 +78,7 @@ impl<DB: Database> Snapshotter<DB> {
     ///
     /// For each [Some] target in [SnapshotTargets], initializes a corresponding [Segment] and runs
     /// it with the provided block range using [SnapshotProvider] and a read-only database
-    /// transaction from [ProviderFactory].
+    /// transaction from [ProviderFactory]. All segments are run in parallel.
     ///
     /// NOTE: it doesn't delete the data from database, and the actual deleting (aka pruning) logic
     /// lives in the `prune` crate.
@@ -100,18 +101,20 @@ impl<DB: Database> Snapshotter<DB> {
             segments.push((Box::new(segments::Receipts), block_range));
         }
 
-        for (segment, block_range) in &segments {
+        segments.par_iter().try_for_each(|(segment, block_range)| -> RethResult<()> {
             debug!(target: "snapshot", segment = %segment.segment(), ?block_range, "Snapshotting segment");
             let start = Instant::now();
 
             // Create a new database transaction on every segment to prevent long-lived read-only
             // transactions
-            let provider = self.provider_factory.provider()?;
+            let provider = self.provider_factory.provider()?.disable_long_read_transaction_safety();
             segment.snapshot(provider, self.snapshot_provider.clone(), block_range.clone())?;
 
             let elapsed = start.elapsed(); // TODO(alexey): track in metrics
             debug!(target: "snapshot", segment = %segment.segment(), ?block_range, ?elapsed, "Finished snapshotting segment");
-        }
+
+            Ok(())
+        })?;
 
         self.snapshot_provider.commit()?;
         for (segment, block_range) in segments {
@@ -171,7 +174,7 @@ impl<DB: Database> Snapshotter<DB> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{snapshotter::SnapshotTargets, Snapshotter, SnapshotterError};
+    use crate::{snapshotter::SnapshotTargets, Snapshotter};
     use assert_matches::assert_matches;
     use reth_interfaces::{
         provider::ProviderError,
@@ -179,6 +182,7 @@ mod tests {
             generators,
             generators::{random_block_range, random_receipt},
         },
+        RethError,
     };
     use reth_primitives::{snapshot::HighestSnapshots, PruneModes, B256};
     use reth_stages::test_utils::TestStageDB;
@@ -251,7 +255,7 @@ mod tests {
         );
         assert_matches!(
             snapshotter.run(targets),
-            Err(SnapshotterError::Provider(ProviderError::BlockBodyIndicesNotFound(4)))
+            Err(RethError::Provider(ProviderError::BlockBodyIndicesNotFound(4)))
         );
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),

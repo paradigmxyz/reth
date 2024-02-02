@@ -8,7 +8,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable,
 };
-use reth_interfaces::db::DatabaseError;
+use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     keccak256,
     stage::{
@@ -16,7 +16,7 @@ use reth_primitives::{
         StageId,
     },
 };
-use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter};
+use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader};
 use std::{
     cmp::max,
     fmt::Debug,
@@ -289,10 +289,10 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 
 fn stage_checkpoint_progress<DB: Database>(
     provider: &DatabaseProviderRW<DB>,
-) -> Result<EntitiesCheckpoint, DatabaseError> {
+) -> ProviderResult<EntitiesCheckpoint> {
     Ok(EntitiesCheckpoint {
-        processed: provider.tx_ref().entries::<tables::HashedAccount>()? as u64,
-        total: provider.tx_ref().entries::<tables::PlainAccountState>()? as u64,
+        processed: provider.count_entries::<tables::HashedAccount>()? as u64,
+        total: provider.count_entries::<tables::PlainAccountState>()? as u64,
     })
 }
 

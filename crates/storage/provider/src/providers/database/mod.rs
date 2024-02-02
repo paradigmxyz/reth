@@ -9,7 +9,7 @@ use crate::{
     PruneCheckpointReader, StageCheckpointReader, StateProviderBox, TransactionVariant,
     TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
+use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv, RawValue};
 use reth_interfaces::{provider::ProviderResult, RethError, RethResult};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
@@ -35,7 +35,7 @@ use reth_db::mdbx::DatabaseArguments;
 /// A common provider that fetches data from a database.
 ///
 /// This provider implements most provider or provider factory traits.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProviderFactory<DB> {
     /// Database
     db: DB,
@@ -43,16 +43,6 @@ pub struct ProviderFactory<DB> {
     chain_spec: Arc<ChainSpec>,
     /// Snapshot Provider
     snapshot_provider: Option<Arc<SnapshotProvider>>,
-}
-
-impl<DB: Clone> Clone for ProviderFactory<DB> {
-    fn clone(&self) -> Self {
-        Self {
-            db: self.db.clone(),
-            chain_spec: Arc::clone(&self.chain_spec),
-            snapshot_provider: self.snapshot_provider.clone(),
-        }
-    }
 }
 
 impl<DB> ProviderFactory<DB> {
@@ -373,6 +363,13 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
         self.provider()?.transactions_by_tx_range(range)
+    }
+
+    fn raw_transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
+        self.provider()?.raw_transactions_by_tx_range(range)
     }
 
     fn senders_by_tx_range(

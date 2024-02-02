@@ -15,6 +15,7 @@ use reth_db::{
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
 };
 use reth_primitives::ChainSpec;
+use reth_provider::ProviderFactory;
 use std::{
     io::{self, Write},
     sync::Arc,
@@ -95,28 +96,47 @@ impl Command {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
-        let database_arguments = DatabaseArguments::default().log_level(self.db.log_level);
 
         match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats(command) => {
-                let db = open_db_read_only(&db_path, database_arguments)?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
+                let db = open_db_read_only(
+                    &db_path,
+                    DatabaseArguments::default().log_level(self.db.log_level),
+                )?;
+                let provider_factory = ProviderFactory::new(db, self.chain.clone())
+                    .with_snapshots(data_dir.snapshots_path())?;
+                let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(data_dir, &tool)?;
             }
             Subcommands::List(command) => {
-                let db = open_db_read_only(&db_path, database_arguments)?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
+                let db = open_db_read_only(
+                    &db_path,
+                    DatabaseArguments::default().log_level(self.db.log_level),
+                )?;
+                let provider_factory = ProviderFactory::new(db, self.chain.clone())
+                    .with_snapshots(data_dir.snapshots_path())?;
+                let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(&tool)?;
             }
             Subcommands::Diff(command) => {
-                let db = open_db_read_only(&db_path, database_arguments)?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
+                let db = open_db_read_only(
+                    &db_path,
+                    DatabaseArguments::default().log_level(self.db.log_level),
+                )?;
+                let provider_factory = ProviderFactory::new(db, self.chain.clone())
+                    .with_snapshots(data_dir.snapshots_path())?;
+                let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(&tool)?;
             }
             Subcommands::Get(command) => {
-                let db = open_db_read_only(&db_path, database_arguments)?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
+                let db = open_db_read_only(
+                    &db_path,
+                    DatabaseArguments::default().log_level(self.db.log_level),
+                )?;
+                let provider_factory = ProviderFactory::new(db, self.chain.clone())
+                    .with_snapshots(data_dir.snapshots_path())?;
+                let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(&tool)?;
             }
             Subcommands::Drop { force } => {
@@ -135,13 +155,19 @@ impl Command {
                     }
                 }
 
-                let db = open_db(&db_path, database_arguments)?;
-                let mut tool = DbTool::new(&db, self.chain.clone())?;
+                let db =
+                    open_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?;
+                let provider_factory = ProviderFactory::new(db, self.chain.clone())
+                    .with_snapshots(data_dir.snapshots_path())?;
+                let mut tool = DbTool::new(provider_factory, self.chain.clone())?;
                 tool.drop(db_path)?;
             }
             Subcommands::Clear(command) => {
-                let db = open_db(&db_path, database_arguments)?;
-                command.execute(&db)?;
+                let db =
+                    open_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?;
+                let provider_factory = ProviderFactory::new(db, self.chain.clone())
+                    .with_snapshots(data_dir.snapshots_path())?;
+                command.execute(provider_factory)?;
             }
             Subcommands::Snapshot(command) => {
                 command.execute(&db_path, self.db.log_level, self.chain.clone())?;

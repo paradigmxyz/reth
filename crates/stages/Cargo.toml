@@ -27,6 +27,7 @@ reth-provider.workspace = true
 reth-trie.workspace = true
 reth-tokio-util.workspace = true
 reth-etl.workspace = true
+reth-snapshot.workspace = true
 
 # revm
 revm.workspace = true
@@ -84,7 +85,7 @@ criterion = { workspace = true, features = ["async_futures"] }
 serde_json.workspace = true
 
 [features]
-test-utils = ["reth-interfaces/test-utils", "reth-db/test-utils"]
+test-utils = ["reth-interfaces/test-utils", "reth-db/test-utils", "reth-provider/test-utils"]
 
 [[bench]]
 name = "criterion"
