@@ -748,8 +748,17 @@ where
     }
 
     /// Enforces the size limits of pool and returns the discarded transactions if violated.
+    ///
+    /// If some of the transactions are blob transactions, they are also removed from the blob
+    /// store.
     pub(crate) fn discard_worst(&self) -> HashSet<TxHash> {
-        self.pool.write().discard_worst().into_iter().map(|tx| *tx.hash()).collect()
+        let discarded = self.pool.write().discard_worst();
+
+        // delete any blobs associated with discarded blob transactions
+        self.delete_discarded_blobs(discarded.iter());
+
+        // then collect into tx hashes
+        discarded.into_iter().map(|tx| *tx.hash()).collect()
     }
 
     /// Inserts a blob transaction into the blob store
