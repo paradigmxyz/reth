@@ -21,6 +21,7 @@ use reth_db::{
     Tables,
 };
 use reth_primitives::ChainSpec;
+use reth_provider::ProviderFactory;
 use std::{
     io::{self, Write},
     sync::Arc,
@@ -108,7 +109,9 @@ impl Command {
                     &db_path,
                     DatabaseArguments::default().log_level(self.db.log_level),
                 )?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
+                let provider_factory = ProviderFactory::new(db, self.chain.clone())
+                    .with_snapshots(data_dir.snapshots_path())?;
+                let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 let mut stats_table = ComfyTable::new();
                 stats_table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
                 stats_table.set_header([
@@ -120,7 +123,7 @@ impl Command {
                     "Total Size",
                 ]);
 
-                tool.db.view(|tx| {
+                tool.provider_factory.db_ref().view(|tx| {
                     let mut tables =
                         Tables::ALL.iter().map(|table| table.name()).collect::<Vec<_>>();
                     tables.sort();
@@ -195,7 +198,9 @@ impl Command {
                     &db_path,
                     DatabaseArguments::default().log_level(self.db.log_level),
                 )?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
+                let provider_factory = ProviderFactory::new(db, self.chain.clone())
+                    .with_snapshots(data_dir.snapshots_path())?;
+                let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(&tool)?;
             }
             Subcommands::Diff(command) => {
@@ -203,7 +208,9 @@ impl Command {
                     &db_path,
                     DatabaseArguments::default().log_level(self.db.log_level),
                 )?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
+                let provider_factory = ProviderFactory::new(db, self.chain.clone())
+                    .with_snapshots(data_dir.snapshots_path())?;
+                let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(&tool)?;
             }
             Subcommands::Get(command) => {
@@ -211,7 +218,9 @@ impl Command {
                     &db_path,
                     DatabaseArguments::default().log_level(self.db.log_level),
                 )?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
+                let provider_factory = ProviderFactory::new(db, self.chain.clone())
+                    .with_snapshots(data_dir.snapshots_path())?;
+                let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(&tool)?;
             }
             Subcommands::Drop { force } => {
@@ -232,7 +241,9 @@ impl Command {
 
                 let db =
                     open_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?;
-                let mut tool = DbTool::new(&db, self.chain.clone())?;
+                let provider_factory = ProviderFactory::new(db, self.chain.clone())
+                    .with_snapshots(data_dir.snapshots_path())?;
+                let mut tool = DbTool::new(provider_factory, self.chain.clone())?;
                 tool.drop(db_path)?;
             }
             Subcommands::Clear(command) => {
