@@ -11,7 +11,7 @@ use crate::{
     tables::utils::*,
     DatabaseError,
 };
-use reth_interfaces::db::{DatabaseCommonError, DatabaseWriteError, DatabaseWriteOperation};
+use reth_interfaces::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{self, Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds};
 
@@ -58,7 +58,7 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
 /// Decodes a `(key, value)` pair from the database.
 #[allow(clippy::type_complexity)]
 pub fn decode<T>(
-    res: Result<Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)>, impl Into<Box<DatabaseCommonError>>>,
+    res: Result<Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)>, impl Into<Box<DatabaseErrorInfo>>>,
 ) -> PairResult<T>
 where
     T: Table,
