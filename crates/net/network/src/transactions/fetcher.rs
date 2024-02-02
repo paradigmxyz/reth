@@ -145,13 +145,18 @@ where
     /// Buffers hashes. Note: Only peers that haven't yet tried to request the hashes should be
     /// passed as `fallback_peer` parameter! Hashes that have been re-requested
     /// [`MAX_REQUEST_RETRIES_PER_TX_HASH`], are dropped.
-    pub(super) fn buffer_hashes(&mut self, mut hashes: Vec<TxHash>, fallback_peer: Option<PeerId>) {
+    pub(super) fn buffer_hashes(&mut self, hashes: Vec<TxHash>, fallback_peer: Option<PeerId>) {
         let mut max_retried_and_evicted_hashes = vec![];
 
-        // It could be that the txns have been received over broadcast in the time being.
-        hashes.retain(|hash| self.unknown_hashes.peek(hash).is_some());
-
         for hash in hashes {
+            // todo: enforce by adding new types UnknownTxHash66 and UnknownTxHash68
+            debug_assert!(
+                self.unknown_hashes.peek(&hash).is_some(),
+                "`%hash` in `@buffered_hashes` that's not in `@unknown_hashes`, `@buffered_hashes` should be a subset of keys in `@unknown_hashes`, broken invariant `@buffered_hashes` and `@unknown_hashes`,
+`%hash`: {hash},
+`@self`: {self:?}",
+            );
+
             let Some((retries, peers)) = self.unknown_hashes.get(&hash) else { return };
 
             if let Some(peer_id) = fallback_peer {
@@ -686,8 +691,12 @@ impl TransactionFetcher {
         T: IdentifyEthVersion,
     {
         if T::version().is_eth68() {
+            // It could be that the txns have been received over broadcast in the time being.
+            hashes.retain(|hash| self.store_eth68.unknown_hashes.get(hash).is_some());
             self.store_eth68.buffer_hashes(hashes, None)
         } else if T::version().is_eth66() {
+             // It could be that the txns have been received over broadcast in the time being.
+            hashes.retain(|hash| self.store_eth66.unknown_hashes.get(hash).is_some());
             self.store_eth66.buffer_hashes(hashes, None)
         }
     }
