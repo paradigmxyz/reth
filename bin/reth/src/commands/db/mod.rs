@@ -9,16 +9,10 @@ use crate::{
     utils::DbTool,
 };
 use clap::{Parser, Subcommand};
-use comfy_table::{Cell, Row, Table as ComfyTable};
-use eyre::WrapErr;
-use human_bytes::human_bytes;
 use reth_db::{
-    database::Database,
-    mdbx,
     mdbx::DatabaseArguments,
     open_db, open_db_read_only,
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
-    Tables,
 };
 use reth_primitives::ChainSpec;
 use reth_provider::ProviderFactory;
@@ -32,6 +26,7 @@ mod diff;
 mod get;
 mod list;
 mod snapshots;
+mod stats;
 /// DB List TUI
 mod tui;
 
@@ -72,7 +67,7 @@ pub struct Command {
 /// `reth db` subcommands
 pub enum Subcommands {
     /// Lists all the tables, their entry count and their size
-    Stats,
+    Stats(stats::Command),
     /// Lists the contents of a table
     List(list::Command),
     /// Create a diff between two database tables or two entire databases.
@@ -104,7 +99,7 @@ impl Command {
 
         match self.command {
             // TODO: We'll need to add this on the DB trait.
-            Subcommands::Stats { .. } => {
+            Subcommands::Stats(command) => {
                 let db = open_db_read_only(
                     &db_path,
                     DatabaseArguments::default().log_level(self.db.log_level),
@@ -112,86 +107,7 @@ impl Command {
                 let provider_factory = ProviderFactory::new(db, self.chain.clone())
                     .with_snapshots(data_dir.snapshots_path())?;
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
-                let mut stats_table = ComfyTable::new();
-                stats_table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
-                stats_table.set_header([
-                    "Table Name",
-                    "# Entries",
-                    "Branch Pages",
-                    "Leaf Pages",
-                    "Overflow Pages",
-                    "Total Size",
-                ]);
-
-                tool.provider_factory.db_ref().view(|tx| {
-                    let mut tables =
-                        Tables::ALL.iter().map(|table| table.name()).collect::<Vec<_>>();
-                    tables.sort();
-                    let mut total_size = 0;
-                    for table in tables {
-                        let table_db =
-                            tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
-
-                        let stats = tx
-                            .inner
-                            .db_stat(&table_db)
-                            .wrap_err(format!("Could not find table: {table}"))?;
-
-                        // Defaults to 16KB right now but we should
-                        // re-evaluate depending on the DB we end up using
-                        // (e.g. REDB does not have these options as configurable intentionally)
-                        let page_size = stats.page_size() as usize;
-                        let leaf_pages = stats.leaf_pages();
-                        let branch_pages = stats.branch_pages();
-                        let overflow_pages = stats.overflow_pages();
-                        let num_pages = leaf_pages + branch_pages + overflow_pages;
-                        let table_size = page_size * num_pages;
-
-                        total_size += table_size;
-                        let mut row = Row::new();
-                        row.add_cell(Cell::new(table))
-                            .add_cell(Cell::new(stats.entries()))
-                            .add_cell(Cell::new(branch_pages))
-                            .add_cell(Cell::new(leaf_pages))
-                            .add_cell(Cell::new(overflow_pages))
-                            .add_cell(Cell::new(human_bytes(table_size as f64)));
-                        stats_table.add_row(row);
-                    }
-
-                    let max_widths = stats_table.column_max_content_widths();
-
-                    let mut seperator = Row::new();
-                    for width in max_widths {
-                        seperator.add_cell(Cell::new("-".repeat(width as usize)));
-                    }
-                    stats_table.add_row(seperator);
-
-                    let mut row = Row::new();
-                    row.add_cell(Cell::new("Total DB size"))
-                        .add_cell(Cell::new(""))
-                        .add_cell(Cell::new(""))
-                        .add_cell(Cell::new(""))
-                        .add_cell(Cell::new(""))
-                        .add_cell(Cell::new(human_bytes(total_size as f64)));
-                    stats_table.add_row(row);
-
-                    let freelist = tx.inner.env().freelist()?;
-                    let freelist_size = freelist *
-                        tx.inner.db_stat(&mdbx::Database::freelist_db())?.page_size() as usize;
-
-                    let mut row = Row::new();
-                    row.add_cell(Cell::new("Freelist size"))
-                        .add_cell(Cell::new(freelist))
-                        .add_cell(Cell::new(""))
-                        .add_cell(Cell::new(""))
-                        .add_cell(Cell::new(""))
-                        .add_cell(Cell::new(human_bytes(freelist_size as f64)));
-                    stats_table.add_row(row);
-
-                    Ok::<(), eyre::Report>(())
-                })??;
-
-                println!("{stats_table}");
+                command.execute(data_dir, &tool)?;
             }
             Subcommands::List(command) => {
                 let db = open_db_read_only(
