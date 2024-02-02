@@ -732,8 +732,8 @@ where
         T: IdentifyEthVersion,
     {
         loop {
-            let mut hashes = vec![];
-            let Some(peer_id) = self.pop_any_idle_peer::<T>(&mut hashes) else { return };
+            let mut hashes_to_request = vec![];
+            let Some(peer_id) = self.pop_any_idle_peer::<T>(&mut hashes_to_request) else { return };
 
             debug_assert!(
                 self.peers.contains_key(&peer_id),
@@ -747,23 +747,28 @@ where
             // fill the request with other buffered hashes that have been announced by the peer
             let Some(peer) = self.peers.get(&peer_id) else { return };
 
-            if hashes.first().is_none() {
+            if hashes_to_request.first().is_none() {
                 return
             };
 
-            self.transaction_fetcher.fill_request_from_buffer_for_peer::<T>(&mut hashes, peer_id);
+            self.transaction_fetcher.fill_request_from_buffer_for_peer::<T>(
+                &mut hashes_to_request,
+                peer.get_transaction_hashes::<T>().iter(),
+                peer_id,
+            );
 
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                hashes=?hashes,
+                hashes=?hashes_to_request,
                 msg_version=%T::version(),
                 "requesting buffered hashes from idle peer"
             );
 
             // request the buffered missing transactions
             let metrics = &self.metrics;
-            if let Some(failed_to_request_hashes) =
-                self.transaction_fetcher.request_transactions_from_peer::<T>(hashes, peer, || {
+            if let Some(failed_to_request_hashes) = self
+                .transaction_fetcher
+                .request_transactions_from_peer::<T>(hashes_to_request, peer, || {
                     metrics.egress_peer_channel_full.increment(1)
                 })
             {
@@ -903,7 +908,13 @@ where
                     let hashes = self
                         .peers
                         .get(&peer_id)
-                        .map(|peer| peer.transactions.iter().copied().collect::<HashSet<_>>())
+                        .map(|peer| {
+                            peer.transactions_eth68
+                                .iter()
+                                .chain(peer.transactions_eth66.iter())
+                                .copied()
+                                .collect::<HashSet<_>>()
+                        })
                         .unwrap_or_default();
                     res.insert(peer_id, hashes);
                 }
@@ -930,7 +941,10 @@ where
                 self.peers.insert(
                     peer_id,
                     Peer {
-                        transactions: LruCache::new(
+                        transactions_eth68: LruCache::new(
+                            NonZeroUsize::new(PEER_TRANSACTION_CACHE_LIMIT).unwrap(),
+                        ),
+                        transactions_eth66: LruCache::new(
                             NonZeroUsize::new(PEER_TRANSACTION_CACHE_LIMIT).unwrap(),
                         ),
                         request_tx: messages,
@@ -958,7 +972,11 @@ where
                     }
 
                     for pooled_tx in pooled_txs.into_iter() {
-                        peer.transactions.insert(*pooled_tx.hash());
+                        if msg_builder.version().is_eth68() {
+                            peer.transactions_eth68.insert(*pooled_tx.hash());
+                        } else if msg_builder.version().is_eth66() {
+                            peer.transactions_eth66.insert(*pooled_tx.hash());
+                        }
                         msg_builder.push_pooled(pooled_tx);
                     }
 
@@ -1257,6 +1275,14 @@ enum PooledTransactionsHashesBuilder {
 // === impl PooledTransactionsHashesBuilder ===
 
 impl PooledTransactionsHashesBuilder {
+    /// Returns the version of messages that this builder builds.
+    pub fn version(&self) -> EthVersion {
+        match self {
+            PooledTransactionsHashesBuilder::Eth66(_) => EthVersion::Eth66,
+            PooledTransactionsHashesBuilder::Eth68(_) => EthVersion::Eth68,
+        }
+    }
+
     /// Push a transaction from the pool to the list.
     fn push_pooled<T: PoolTransaction>(&mut self, pooled_tx: Arc<ValidPoolTransaction<T>>) {
         match self {
@@ -1318,14 +1344,31 @@ impl TransactionSource {
 /// Tracks a single peer
 #[derive(Debug)]
 struct Peer {
-    /// Keeps track of transactions that we know the peer has seen.
-    transactions: LruCache<B256>,
+    /// Keeps track of transactions from eth68 messages that we know the peer has seen.
+    transactions_eth68: LruCache<B256>,
+    /// Keeps track of transactions from eth66 messages that we know the peer has seen.
+    transactions_eth66: LruCache<B256>,
     /// A communication channel directly to the peer's session task.
     request_tx: PeerRequestSender,
     /// negotiated version of the session.
     version: EthVersion,
     /// The peer's client version.
     client_version: Arc<str>,
+}
+
+impl Peer {
+    fn get_transaction_hashes<T>(&self) -> &LruCache<TxHash>
+    where
+        T: IdentifyEthVersion,
+    {
+        if T::version().is_eth68() {
+            &self.transactions_eth68
+        } else if T::version().is_eth66() {
+            &self.transactions_eth66
+        } else {
+            unreachable!("eth versions limited by versions supported for announcement")
+        }
+    }
 }
 
 /// Commands to send to the [`TransactionsManager`]

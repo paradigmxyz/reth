@@ -138,7 +138,12 @@ where
 // inheritance
 pub trait StoreAnnouncementData {
     fn pack_hashes(&mut self, hashes: &mut Vec<TxHash>, peer_id: PeerId) -> Vec<TxHash>;
-    fn fill_request_from_buffer_for_peer(&mut self, hashes: &mut Vec<TxHash>, peer_id: PeerId);
+    fn fill_request_from_buffer_for_peer<'a>(
+        &mut self,
+        hashes_to_request: &mut Vec<TxHash>,
+        hashes_seen_by_peer: impl Iterator<Item = &'a TxHash>,
+        peer_id: PeerId,
+    );
 }
 
 impl<H> AnnouncementDataStore<H>
@@ -368,19 +373,24 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash68> {
     /// 4. Check if peer is fallback peer for hash and remove, else skip to next iteration.
     /// 4. Add hash to hashes list parameter.
     /// 5. Overwrite eth68 acc size with copy.
-    fn fill_request_from_buffer_for_peer(&mut self, hashes: &mut Vec<TxHash>, peer_id: PeerId) {
+    fn fill_request_from_buffer_for_peer<'a>(
+        &mut self,
+        hashes_to_request: &mut Vec<TxHash>,
+        hashes_seen_by_peer: impl Iterator<Item = &'a TxHash>,
+        peer_id: PeerId,
+    ) {
         debug_assert!(
-            hashes.first().is_some(),
+            hashes_to_request.first().is_some(),
             "`%hashes` should have at least one hash to call function,
-`%hashes`: {hashes:?}",
+`%hashes`: {hashes_to_request:?}",
         );
 
-        let Some(hash) = hashes.first() else { return };
+        let Some(hash) = hashes_to_request.first() else { return };
 
         debug_assert!(
-            hashes.first().is_some(),
+            hashes_to_request.first().is_some(),
             "`%hashes` should contain an eth68 hash, but not size metadata found for `%hashes[0]`,
-`%hashes`: {hashes:?},
+`%hashes`: {hashes_to_request:?},
 `@meta`: {self:?}"
         );
 
@@ -400,11 +410,15 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash68> {
 
         // all hashes included in request and there is still a lot of space
 
-        for hash in self.buffered_hashes.iter() {
+        for hash in hashes_seen_by_peer {
+            if !self.buffered_hashes.remove(hash) {
+                continue;
+            }
+
             // fill request to 2/3 of the soft limit for the response size, or until the number of
             // hashes reaches the soft limit number for a request (like in eth66), whatever
             // happens first
-            if hashes.len() > GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
+            if hashes_to_request.len() > GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
                 break
             }
 
@@ -454,7 +468,7 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash68> {
                 // peer.
                 if fallback_peers.remove(&peer_id) {
                     // 4. Add hash to hashes list parameter.
-                    hashes.push(*hash);
+                    hashes_to_request.push(*hash);
                     // 5. Overwrite eth68 acc size with copy.
                     acc_size_response = next_acc_size;
 
@@ -471,7 +485,7 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash68> {
         }
 
         // remove hashes that will be included in request from buffer
-        for hash in hashes {
+        for hash in hashes_to_request {
             self.buffered_hashes.remove(hash);
         }
     }
@@ -521,20 +535,21 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash66> {
     /// 4. Add hash to hashes list parameter. This increases length i.e. hashes count.
     ///
     /// Removes hashes included in request from buffer.
-    fn fill_request_from_buffer_for_peer(&mut self, hashes: &mut Vec<TxHash>, peer_id: PeerId) {
-        for hash in self.buffered_hashes.iter() {
+    fn fill_request_from_buffer_for_peer<'a>(
+        &mut self,
+        hashes_to_request: &mut Vec<TxHash>,
+        hashes_seen_by_peer: impl Iterator<Item = &'a TxHash>,
+        peer_id: PeerId,
+    ) {
+        for hash in hashes_seen_by_peer {
             // 1. Check hashes count in request.
-            if hashes.len() >= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
+            if hashes_to_request.len() >= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
                 break
             }
 
-            debug_assert!(
-                self.unknown_hashes.get(hash).is_some(),
-                "can't find buffered `%hash` in `@unknown_hashes`, `@buffered_hashes` should be a subset of keys in `@unknown_hashes`, broken invariant `@buffered_hashes` and `@unknown_hashes`,
-`%hash`: {},
-`@self`: {:?}",
-                hash, self
-            );
+            if !self.buffered_hashes.remove(hash) {
+                continue;
+            }
 
             if let Some((_, fallback_peers)) = self.unknown_hashes.get(hash) {
                 // 2. Check if peer is fallback peer for hash and remove.
@@ -544,7 +559,7 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash66> {
                 // peer.
                 if fallback_peers.remove(&peer_id) {
                     // 4. Add hash to hashes list parameter.
-                    hashes.push(*hash);
+                    hashes_to_request.push(*hash);
 
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
@@ -558,7 +573,7 @@ impl StoreAnnouncementData for AnnouncementDataStore<TxHash66> {
         }
 
         // remove hashes that will be included in request from buffer
-        for hash in hashes {
+        for hash in hashes_to_request {
             self.buffered_hashes.remove(hash);
         }
     }
@@ -711,17 +726,26 @@ impl TransactionFetcher {
         }
     }
 
-    pub(super) fn fill_request_from_buffer_for_peer<T>(
+    pub(super) fn fill_request_from_buffer_for_peer<'a, T>(
         &mut self,
-        hashes: &mut Vec<TxHash>,
+        hashes_to_request: &mut Vec<TxHash>,
+        hashes_seen_by_peer: impl Iterator<Item = &'a TxHash>,
         peer_id: PeerId,
     ) where
         T: IdentifyEthVersion,
     {
         if T::version().is_eth68() {
-            self.store_eth68.fill_request_from_buffer_for_peer(hashes, peer_id)
+            self.store_eth68.fill_request_from_buffer_for_peer(
+                hashes_to_request,
+                hashes_seen_by_peer,
+                peer_id,
+            )
         } else if T::version().is_eth66() {
-            self.store_eth66.fill_request_from_buffer_for_peer(hashes, peer_id)
+            self.store_eth66.fill_request_from_buffer_for_peer(
+                hashes_to_request,
+                hashes_seen_by_peer,
+                peer_id,
+            )
         }
     }
 
