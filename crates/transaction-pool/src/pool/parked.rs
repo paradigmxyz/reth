@@ -604,6 +604,30 @@ mod tests {
     }
 
     #[test]
+    fn test_truncate_parked_with_large_tx() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
+        let default_limits = SubPoolLimit::default();
+
+        // create a chain of transactions by sender A, B, C
+        // make sure they are all one over half the limit
+        let a_sender = address!("000000000000000000000000000000000000000a");
+
+        // 2 txs, that should put the pool over the size limit but not max txs
+        let a = MockTransactionSet::dependent(a_sender, 0, 2, TxType::EIP1559);
+        let a_txs = a.clone().into_vec();
+
+        // add all the transactions to the pool
+        for tx in a_txs {
+            pool.add_transaction(f.validated_arc(tx));
+        }
+
+        // truncate the pool
+        let removed = pool.truncate_pool(default_limits);
+        assert_eq!(removed.len(), 0);
+    }
+
+    #[test]
     fn test_senders_by_submission_id() {
         // this test ensures that we evict from the pending pool by sender
         let mut f = MockTransactionFactory::default();

@@ -167,6 +167,8 @@ pub enum MockTransaction {
         value: U256,
         /// The transaction input data.
         input: Bytes,
+        /// The size of the transaction, returned in the implementation of [PoolTransaction].
+        size: usize,
     },
     /// EIP-1559 transaction type.
     Eip1559 {
@@ -190,6 +192,8 @@ pub enum MockTransaction {
         accesslist: AccessList,
         /// The transaction input data.
         input: Bytes,
+        /// The size of the transaction, returned in the implementation of [PoolTransaction].
+        size: usize,
     },
     /// EIP-4844 transaction type.
     Eip4844 {
@@ -217,6 +221,8 @@ pub enum MockTransaction {
         input: Bytes,
         /// The sidecar information for the transaction.
         sidecar: BlobTransactionSidecar,
+        /// The size of the transaction, returned in the implementation of [PoolTransaction].
+        size: usize,
     },
     /// EIP-2930 transaction type.
     Eip2930 {
@@ -238,6 +244,8 @@ pub enum MockTransaction {
         gas_price: u128,
         /// The access list associated with the transaction.
         accesslist: AccessList,
+        /// The size of the transaction, returned in the implementation of [PoolTransaction].
+        size: usize,
     },
     #[cfg(feature = "optimism")]
     /// Deposit transaction type (Optimism feature).
@@ -253,7 +261,8 @@ impl MockTransaction {
         sender => Address;
         gas_limit => u64;
         value => U256;
-        input => Bytes
+        input => Bytes;
+        size => usize
     }
 
     /// Returns a new legacy transaction with random address and hash and empty values
@@ -267,6 +276,7 @@ impl MockTransaction {
             to: TransactionKind::Call(Address::random()),
             value: Default::default(),
             input: Default::default(),
+            size: Default::default(),
         }
     }
 
@@ -283,6 +293,7 @@ impl MockTransaction {
             value: Default::default(),
             input: Bytes::new(),
             accesslist: Default::default(),
+            size: Default::default(),
         }
     }
 
@@ -301,6 +312,7 @@ impl MockTransaction {
             input: Bytes::new(),
             accesslist: Default::default(),
             sidecar: Default::default(),
+            size: Default::default(),
         }
     }
 
@@ -316,6 +328,7 @@ impl MockTransaction {
             value: Default::default(),
             gas_price: 0,
             accesslist: Default::default(),
+            size: Default::default(),
         }
     }
 
@@ -810,6 +823,7 @@ impl FromRecoveredTransaction for MockTransaction {
         let sender = tx.signer();
         let transaction = tx.into_signed();
         let hash = transaction.hash();
+        let size = transaction.size();
         match transaction.transaction {
             Transaction::Legacy(TxLegacy {
                 chain_id: _,
@@ -828,6 +842,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 to,
                 value: value.into(),
                 input,
+                size,
             },
             Transaction::Eip1559(TxEip1559 {
                 chain_id: _,
@@ -850,6 +865,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 value: value.into(),
                 input,
                 accesslist: access_list,
+                size,
             },
             Transaction::Eip4844(TxEip4844 {
                 chain_id: _,
@@ -876,6 +892,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 input,
                 accesslist: access_list,
                 sidecar: BlobTransactionSidecar::default(),
+                size,
             },
             Transaction::Eip2930(TxEip2930 {
                 chain_id: _,
@@ -896,6 +913,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 value: value.into(),
                 input,
                 accesslist: access_list,
+                size,
             },
             #[cfg(feature = "optimism")]
             Transaction::Deposit(TxDeposit {
@@ -953,6 +971,7 @@ impl From<MockTransaction> for Transaction {
                 to,
                 value,
                 input,
+                size: _,
             } => Self::Legacy(TxLegacy {
                 chain_id: Some(1),
                 nonce,
@@ -973,6 +992,7 @@ impl From<MockTransaction> for Transaction {
                 value,
                 accesslist,
                 input,
+                size: _,
             } => Self::Eip1559(TxEip1559 {
                 chain_id: 1,
                 nonce,
@@ -997,6 +1017,7 @@ impl From<MockTransaction> for Transaction {
                 accesslist,
                 input,
                 sidecar: _,
+                size: _,
             } => Self::Eip4844(TxEip4844 {
                 chain_id: 1,
                 nonce,
@@ -1020,6 +1041,7 @@ impl From<MockTransaction> for Transaction {
                 value,
                 gas_price,
                 accesslist,
+                size: _,
             } => Self::Eip2930(TxEip2930 {
                 chain_id: 1,
                 nonce,
@@ -1070,6 +1092,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     to: *to,
                     value: (*value).into(),
                     input: (*input).clone(),
+                    size: tx.size(),
                 },
                 Transaction::Eip1559(TxEip1559 {
                     nonce,
@@ -1092,6 +1115,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     value: (*value).into(),
                     input: (*input).clone(),
                     accesslist: (*access_list).clone(),
+                    size: tx.size(),
                 },
                 Transaction::Eip4844(TxEip4844 {
                     nonce,
@@ -1119,6 +1143,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     // only generate a sidecar if it is a 4844 tx - also for the sake of
                     // performance just use a default sidecar
                     sidecar: BlobTransactionSidecar::default(),
+                    size: tx.size(),
                 },
                 #[allow(unreachable_patterns)]
                 _ => unimplemented!(),
