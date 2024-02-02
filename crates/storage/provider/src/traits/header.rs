@@ -1,6 +1,8 @@
 use auto_impl::auto_impl;
 use reth_interfaces::provider::ProviderResult;
-use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, Header, SealedHeader, U256};
+use reth_primitives::{
+    BlockHash, BlockHashOrNumber, BlockNumber, Header, Headers, SealedHeader, U256,
+};
 use std::ops::RangeBounds;
 
 /// Client trait for fetching `Header` related data.
@@ -35,7 +37,7 @@ pub trait HeaderProvider: Send + Sync {
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>>;
 
     /// Get headers in range of block numbers
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>>;
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Headers>;
 
     /// Get a single sealed header by block number.
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>>;

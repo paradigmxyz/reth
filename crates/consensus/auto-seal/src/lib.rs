@@ -23,8 +23,8 @@ use reth_node_api::{EngineTypes, EvmEnvConfig};
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom,
-    ChainSpec, Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, B256,
-    EMPTY_OMMER_ROOT_HASH, U256,
+    ChainSpec, Header, Headers, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned,
+    B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{
     BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender,
@@ -399,9 +399,12 @@ impl StorageInner {
     {
         let header = self.build_header_template(&transactions, chain_spec.clone());
 
-        let block = Block { header, body: transactions, ommers: vec![], withdrawals: None }
-            .with_recovered_senders()
-            .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
+        let block =
+            Block { header, body: transactions, ommers: Headers::default(), withdrawals: None }
+                .with_recovered_senders()
+                .ok_or(BlockExecutionError::Validation(
+                    BlockValidationError::SenderRecoveryError,
+                ))?;
 
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
@@ -415,7 +418,7 @@ impl StorageInner {
         let (bundle_state, gas_used) = self.execute(&block, &mut executor)?;
 
         let Block { header, body, .. } = block.block;
-        let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };
+        let body = BlockBody { transactions: body, ommers: Headers::default(), withdrawals: None };
 
         trace!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");
 

@@ -23,7 +23,7 @@ mod builder {
         constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
         proofs,
         revm::{compat::into_reth_log, env::tx_env_with_recovered},
-        Block, Hardfork, Header, IntoRecoveredTransaction, Receipt, Receipts,
+        Block, Hardfork, Header, Headers, IntoRecoveredTransaction, Receipt, Receipts,
         EMPTY_OMMER_ROOT_HASH, U256,
     };
     use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
@@ -181,7 +181,7 @@ mod builder {
                 parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
             };
 
-            let block = Block { header, body: vec![], ommers: vec![], withdrawals };
+            let block = Block { header, body: vec![], ommers: Headers::default(), withdrawals };
             let sealed_block = block.seal_slow();
 
             Ok(EthBuiltPayload::new(
@@ -502,7 +502,7 @@ mod builder {
         };
 
         // seal the block
-        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
+        let block = Block { header, body: executed_txs, ommers: Headers::default(), withdrawals };
 
         let sealed_block = block.seal_slow();
         debug!(target: "payload_builder", ?sealed_block, "sealed built block");

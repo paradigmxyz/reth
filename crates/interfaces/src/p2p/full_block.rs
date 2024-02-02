@@ -9,7 +9,8 @@ use crate::{
 };
 use futures::Stream;
 use reth_primitives::{
-    BlockBody, GotExpected, Header, HeadersDirection, SealedBlock, SealedHeader, WithPeerId, B256,
+    BlockBody, GotExpected, Header, Headers, HeadersDirection, SealedBlock, SealedHeader,
+    WithPeerId, B256,
 };
 use std::{
     cmp::Reverse,
@@ -474,7 +475,7 @@ where
         Some(response)
     }
 
-    fn on_headers_response(&mut self, headers: WithPeerId<Vec<Header>>) {
+    fn on_headers_response(&mut self, headers: WithPeerId<Headers>) {
         let (peer, mut headers_falling) =
             headers.map(|h| h.into_iter().map(|h| h.seal_slow()).collect::<Vec<_>>()).split();
 
@@ -727,7 +728,7 @@ where
 // The result of a request for headers or block bodies. This is yielded by the
 // `FullBlockRangeRequest` future.
 enum RangeResponseResult {
-    Header(PeerRequestResult<Vec<Header>>),
+    Header(PeerRequestResult<Headers>),
     Body(PeerRequestResult<Vec<BlockBody>>),
 }
 

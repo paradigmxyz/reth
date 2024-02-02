@@ -586,7 +586,7 @@ mod tests {
 
         assert!(state.active_peers.contains_key(&peer_id));
 
-        let body = BlockBody { ommers: vec![Header::default()], ..Default::default() };
+        let body = BlockBody { ommers: vec![Header::default()].into(), ..Default::default() };
 
         let body_response = body.clone();
 

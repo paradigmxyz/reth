@@ -8,7 +8,7 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_primitives::{
-    BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId, WithPeerId, B256,
+    BlockBody, BlockHashOrNumber, Headers, HeadersDirection, PeerId, WithPeerId, B256,
 };
 use std::fmt::Debug;
 use tracing::{trace, warn};
@@ -28,12 +28,12 @@ impl AutoSealClient {
         Self { storage }
     }
 
-    async fn fetch_headers(&self, request: HeadersRequest) -> Vec<Header> {
+    async fn fetch_headers(&self, request: HeadersRequest) -> Headers {
         trace!(target: "consensus::auto", ?request, "received headers request");
 
         let storage = self.storage.read().await;
         let HeadersRequest { start, limit, direction } = request;
-        let mut headers = Vec::new();
+        let mut headers = Headers::default();
 
         let mut block: BlockHashOrNumber = match start {
             BlockHashOrNumber::Hash(start) => start.into(),

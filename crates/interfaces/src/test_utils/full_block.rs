@@ -7,8 +7,8 @@ use crate::p2p::{
 };
 use parking_lot::Mutex;
 use reth_primitives::{
-    BlockBody, BlockHashOrNumber, BlockNumHash, Header, HeadersDirection, PeerId, SealedBlock,
-    SealedHeader, WithPeerId, B256,
+    BlockBody, BlockHashOrNumber, BlockNumHash, Header, Headers, HeadersDirection, PeerId,
+    SealedBlock, SealedHeader, WithPeerId, B256,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -66,7 +66,7 @@ impl BodiesClient for NoopFullBlockClient {
 impl HeadersClient for NoopFullBlockClient {
     /// The output type representing a future containing a peer request result with a vector of
     /// headers.
-    type Output = futures::future::Ready<PeerRequestResult<Vec<Header>>>;
+    type Output = futures::future::Ready<PeerRequestResult<Headers>>;
 
     /// Retrieves headers with a specified priority level.
     ///
@@ -86,7 +86,7 @@ impl HeadersClient for NoopFullBlockClient {
         _request: HeadersRequest,
         _priority: Priority,
     ) -> Self::Output {
-        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), vec![])))
+        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), Headers::default())))
     }
 }
 
@@ -153,7 +153,7 @@ impl DownloadClient for TestFullBlockClient {
 /// Implements the `HeadersClient` trait for the `TestFullBlockClient` struct.
 impl HeadersClient for TestFullBlockClient {
     /// Specifies the associated output type.
-    type Output = futures::future::Ready<PeerRequestResult<Vec<Header>>>;
+    type Output = futures::future::Ready<PeerRequestResult<Headers>>;
 
     /// Retrieves headers with a given priority level.
     ///
@@ -199,7 +199,7 @@ impl HeadersClient for TestFullBlockClient {
             .collect::<Vec<_>>();
 
         // Returns a future containing the retrieved headers with a random peer ID.
-        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), resp)))
+        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), Headers::new(resp))))
     }
 }
 

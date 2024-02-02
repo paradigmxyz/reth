@@ -7,7 +7,7 @@ use reth_eth_wire::{
     Receipts,
 };
 use reth_interfaces::p2p::error::RequestResult;
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId};
+use reth_primitives::{BlockBody, BlockHashOrNumber, Headers, HeadersDirection, PeerId};
 use reth_provider::{BlockReader, HeaderProvider, ReceiptProvider};
 use std::{
     borrow::Borrow,
@@ -82,10 +82,10 @@ where
     C: BlockReader + HeaderProvider + ReceiptProvider,
 {
     /// Returns the list of requested headers
-    fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
+    fn get_headers_response(&self, request: GetBlockHeaders) -> Headers {
         let GetBlockHeaders { start_block, limit, skip, direction } = request;
 
-        let mut headers = Vec::new();
+        let mut headers = Headers::default();
 
         let mut block: BlockHashOrNumber = match start_block {
             BlockHashOrNumber::Hash(start) => start.into(),

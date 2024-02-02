@@ -2,7 +2,7 @@ use super::headers::client::HeadersRequest;
 use crate::{consensus::ConsensusError, db::DatabaseError, provider::ProviderError};
 use reth_network_api::ReputationChangeKind;
 use reth_primitives::{
-    BlockHashOrNumber, BlockNumber, GotExpected, GotExpectedBoxed, Header, WithPeerId, B256,
+    BlockHashOrNumber, BlockNumber, GotExpected, GotExpectedBoxed, Headers, WithPeerId, B256,
 };
 use std::ops::RangeInclusive;
 use thiserror::Error;
@@ -23,7 +23,7 @@ pub trait EthResponseValidator {
     fn reputation_change_err(&self) -> Option<ReputationChangeKind>;
 }
 
-impl EthResponseValidator for RequestResult<Vec<Header>> {
+impl EthResponseValidator for RequestResult<Headers> {
     fn is_likely_bad_headers_response(&self, request: &HeadersRequest) -> bool {
         match self {
             Ok(headers) => {
@@ -207,12 +207,12 @@ mod tests {
     fn test_is_likely_bad_headers_response() {
         let request =
             HeadersRequest { start: 0u64.into(), limit: 0, direction: Default::default() };
-        let headers: Vec<Header> = vec![];
+        let headers: Headers = Headers::default();
         assert!(!Ok(headers).is_likely_bad_headers_response(&request));
 
         let request =
             HeadersRequest { start: 0u64.into(), limit: 1, direction: Default::default() };
-        let headers: Vec<Header> = vec![];
+        let headers: Headers = Headers::default();
         assert!(Ok(headers).is_likely_bad_headers_response(&request));
     }
 }

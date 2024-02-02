@@ -26,7 +26,8 @@ mod builder {
         eip4844::calculate_excess_blob_gas,
         proofs,
         revm::{compat::into_reth_log, env::tx_env_with_recovered},
-        Block, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH, U256,
+        Block, Header, Headers, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH,
+        U256,
     };
     use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
     use reth_revm::database::StateProviderDatabase;
@@ -162,7 +163,7 @@ mod builder {
                 parent_beacon_block_root: attributes.parent_beacon_block_root,
             };
 
-            let block = Block { header, body: vec![], ommers: vec![], withdrawals };
+            let block = Block { header, body: vec![], ommers: Headers::default(), withdrawals };
             let sealed_block = block.seal_slow();
 
             Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO))
@@ -405,7 +406,7 @@ mod builder {
         };
 
         // seal the block
-        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
+        let block = Block { header, body: executed_txs, ommers: Headers::default(), withdrawals };
 
         let sealed_block = block.seal_slow();
         debug!(target: "payload_builder", ?sealed_block, "sealed built block");

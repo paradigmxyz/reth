@@ -3,7 +3,9 @@ use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_node_api::{EngineTypes, EvmEnvConfig};
-use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
+use reth_primitives::{
+    Block, ChainSpec, Headers, IntoRecoveredTransaction, SealedBlockWithSenders,
+};
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_stages::PipelineEvent;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
@@ -192,7 +194,7 @@ where
                             let block = Block {
                                 header: new_header.clone().unseal(),
                                 body: transactions,
-                                ommers: vec![],
+                                ommers: Headers::default(),
                                 withdrawals: None,
                             };
                             let sealed_block = block.seal_slow();

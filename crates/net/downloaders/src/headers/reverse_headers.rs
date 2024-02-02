@@ -19,7 +19,7 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{
-    BlockHashOrNumber, BlockNumber, GotExpected, Header, HeadersDirection, PeerId, SealedHeader,
+    BlockHashOrNumber, BlockNumber, GotExpected, Headers, HeadersDirection, PeerId, SealedHeader,
     B256,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -246,12 +246,13 @@ where
     fn process_next_headers(
         &mut self,
         request: HeadersRequest,
-        headers: Vec<Header>,
+        headers: Headers,
         peer_id: PeerId,
     ) -> Result<(), ReverseHeadersDownloaderError> {
         let mut validated = Vec::with_capacity(headers.len());
 
-        let sealed_headers = headers.into_par_iter().map(|h| h.seal_slow()).collect::<Vec<_>>();
+        let sealed_headers =
+            headers.into_vec().into_par_iter().map(|h| h.seal_slow()).collect::<Vec<_>>();
         for parent in sealed_headers {
             // Validate that the header is the parent header of the last validated header.
             if let Some(validated_header) =
@@ -899,7 +900,7 @@ struct HeadersRequestFuture<F> {
 
 impl<F> Future for HeadersRequestFuture<F>
 where
-    F: Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send + Unpin,
+    F: Future<Output = PeerRequestResult<Headers>> + Sync + Send + Unpin,
 {
     type Output = HeadersRequestOutcome;
 
@@ -915,7 +916,7 @@ where
 /// The outcome of the [HeadersRequestFuture]
 struct HeadersRequestOutcome {
     request: HeadersRequest,
-    outcome: PeerRequestResult<Vec<Header>>,
+    outcome: PeerRequestResult<Headers>,
 }
 
 // === impl OrderedHeadersResponse ===
@@ -928,7 +929,7 @@ impl HeadersRequestOutcome {
 
 /// Wrapper type to order responses
 struct OrderedHeadersResponse {
-    headers: Vec<Header>,
+    headers: Headers,
     request: HeadersRequest,
     peer_id: PeerId,
 }
@@ -1223,7 +1224,7 @@ mod tests {
     use crate::headers::test_utils::child_header;
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
-    use reth_primitives::SealedHeader;
+    use reth_primitives::{Header, SealedHeader};
 
     /// Tests that `replace_number` works the same way as Option::replace
     #[test]
@@ -1381,14 +1382,14 @@ mod tests {
         let mut heap = BinaryHeap::new();
         let hi = 1u64;
         heap.push(OrderedHeadersResponse {
-            headers: vec![],
+            headers: vec![].into(),
             request: HeadersRequest { start: hi.into(), limit: 0, direction: Default::default() },
             peer_id: Default::default(),
         });
 
         let lo = 0u64;
         heap.push(OrderedHeadersResponse {
-            headers: vec![],
+            headers: vec![].into(),
             request: HeadersRequest { start: lo.into(), limit: 0, direction: Default::default() },
             peer_id: Default::default(),
         });

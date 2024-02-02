@@ -12,7 +12,7 @@ use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_node_api::EvmEnvConfig;
 use reth_primitives::{
     keccak256, trie::AccountProof, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId,
-    BlockNumber, BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Receipt,
+    BlockNumber, BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Headers, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
@@ -155,10 +155,10 @@ impl HeaderProvider for MockEthProvider {
         Ok(Some(sum))
     }
 
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Headers> {
         let lock = self.headers.lock();
 
-        let mut headers: Vec<_> =
+        let mut headers: Headers =
             lock.values().filter(|header| range.contains(&header.number)).cloned().collect();
         headers.sort_by_key(|header| header.number);
 
@@ -455,7 +455,7 @@ impl BlockReader for MockEthProvider {
         Ok(None)
     }
 
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
+    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Headers>> {
         Ok(None)
     }
 
@@ -501,7 +501,7 @@ impl BlockReaderIdExt for MockEthProvider {
         }
     }
 
-    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Header>>> {
+    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Headers>> {
         match id {
             BlockId::Number(num) => self.ommers_by_number_or_tag(num),
             BlockId::Hash(hash) => self.ommers(BlockHashOrNumber::Hash(hash.block_hash)),

@@ -1,7 +1,7 @@
 use crate::p2p::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use futures::{Future, FutureExt};
 pub use reth_eth_wire::BlockHeaders;
-use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection};
+use reth_primitives::{BlockHashOrNumber, Header, Headers, HeadersDirection};
 use std::{
     fmt::Debug,
     pin::Pin,
@@ -21,13 +21,13 @@ pub struct HeadersRequest {
 }
 
 /// The headers future type
-pub type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<Header>>> + Send + Sync>>;
+pub type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<Headers>> + Send + Sync>>;
 
 /// The block headers downloader client
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeadersClient: DownloadClient {
     /// The headers future type
-    type Output: Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send + Unpin;
+    type Output: Future<Output = PeerRequestResult<Headers>> + Sync + Send + Unpin;
 
     /// Sends the header request to the p2p network and returns the header response received from a
     /// peer.
@@ -74,7 +74,7 @@ pub struct SingleHeaderRequest<Fut> {
 
 impl<Fut> Future for SingleHeaderRequest<Fut>
 where
-    Fut: Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send + Unpin,
+    Fut: Future<Output = PeerRequestResult<Headers>> + Sync + Send + Unpin,
 {
     type Output = PeerRequestResult<Option<Header>>;
 

@@ -14,7 +14,7 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::AccountProof,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode,
-    ChainInfo, ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock,
+    ChainInfo, ChainSpec, Header, Headers, PruneCheckpoint, PruneSegment, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     MAINNET, U256,
@@ -95,7 +95,7 @@ impl BlockReader for NoopProvider {
         Ok(None)
     }
 
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
+    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Headers>> {
         Ok(None)
     }
 
@@ -129,7 +129,7 @@ impl BlockReaderIdExt for NoopProvider {
         Ok(None)
     }
 
-    fn ommers_by_id(&self, _id: BlockId) -> ProviderResult<Option<Vec<Header>>> {
+    fn ommers_by_id(&self, _id: BlockId) -> ProviderResult<Option<Headers>> {
         Ok(None)
     }
 }
@@ -252,8 +252,8 @@ impl HeaderProvider for NoopProvider {
         Ok(None)
     }
 
-    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        Ok(vec![])
+    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> ProviderResult<Headers> {
+        Ok(Headers::default())
     }
 
     fn sealed_header(&self, _number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {

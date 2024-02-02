@@ -9,7 +9,7 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{BlockBody, Header, PeerId, B256};
+use reth_primitives::{BlockBody, Headers, PeerId, B256};
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
@@ -33,8 +33,7 @@ pub use client::FetchClient;
 #[derive(Debug)]
 pub struct StateFetcher {
     /// Currently active [`GetBlockHeaders`] requests
-    inflight_headers_requests:
-        HashMap<PeerId, Request<HeadersRequest, PeerRequestResult<Vec<Header>>>>,
+    inflight_headers_requests: HashMap<PeerId, Request<HeadersRequest, PeerRequestResult<Headers>>>,
     /// Currently active [`GetBlockBodies`] requests
     inflight_bodies_requests:
         HashMap<PeerId, Request<Vec<B256>, PeerRequestResult<Vec<BlockBody>>>>,
@@ -231,7 +230,7 @@ impl StateFetcher {
     pub(crate) fn on_block_headers_response(
         &mut self,
         peer_id: PeerId,
-        res: RequestResult<Vec<Header>>,
+        res: RequestResult<Headers>,
     ) -> Option<BlockResponseOutcome> {
         let is_error = res.is_err();
         let maybe_reputation_change = res.reputation_change_err();
@@ -367,7 +366,7 @@ pub(crate) enum DownloadRequest {
     /// Download the requested headers and send response through channel
     GetBlockHeaders {
         request: HeadersRequest,
-        response: oneshot::Sender<PeerRequestResult<Vec<Header>>>,
+        response: oneshot::Sender<PeerRequestResult<Headers>>,
         priority: Priority,
     },
     /// Download the requested headers and send response through channel
@@ -506,7 +505,7 @@ mod tests {
         let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
         let peer_id = B512::random();
 
-        assert_eq!(fetcher.on_block_headers_response(peer_id, Ok(vec![Header::default()])), None);
+        assert_eq!(fetcher.on_block_headers_response(peer_id, Ok(Headers::default())), None);
 
         assert_eq!(
             fetcher.on_block_headers_response(peer_id, Err(RequestError::Timeout)),
@@ -561,7 +560,7 @@ mod tests {
         let (req, header) = request_pair();
         fetcher.inflight_headers_requests.insert(peer_id, req);
 
-        let outcome = fetcher.on_block_headers_response(peer_id, Ok(vec![header]));
+        let outcome = fetcher.on_block_headers_response(peer_id, Ok(vec![header].into()));
         assert!(outcome.is_none());
         assert!(fetcher.peers[&peer_id].state.is_idle());
 

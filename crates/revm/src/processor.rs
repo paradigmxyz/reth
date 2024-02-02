@@ -698,7 +698,7 @@ mod tests {
                     block: Block {
                         header: header.clone(),
                         body: vec![],
-                        ommers: vec![],
+                        ommers: vec![].into(),
                         withdrawals: None,
                     },
                     senders: vec![],
@@ -723,7 +723,7 @@ mod tests {
                     block: Block {
                         header: header.clone(),
                         body: vec![],
-                        ommers: vec![],
+                        ommers: vec![].into(),
                         withdrawals: None,
                     },
                     senders: vec![],
@@ -794,7 +794,7 @@ mod tests {
                     block: Block {
                         header: header.clone(),
                         body: vec![],
-                        ommers: vec![],
+                        ommers: vec![].into(),
                         withdrawals: None,
                     },
                     senders: vec![],
@@ -862,7 +862,7 @@ mod tests {
                     block: Block {
                         header: header.clone(),
                         body: vec![],
-                        ommers: vec![],
+                        ommers: vec![].into(),
                         withdrawals: None,
                     },
                     senders: vec![],
@@ -920,7 +920,7 @@ mod tests {
                     block: Block {
                         header: header.clone(),
                         body: vec![],
-                        ommers: vec![],
+                        ommers: vec![].into(),
                         withdrawals: None,
                     },
                     senders: vec![],
@@ -942,7 +942,7 @@ mod tests {
                     block: Block {
                         header: header.clone(),
                         body: vec![],
-                        ommers: vec![],
+                        ommers: vec![].into(),
                         withdrawals: None,
                     },
                     senders: vec![],
@@ -1016,7 +1016,7 @@ mod tests {
                     block: Block {
                         header: header.clone(),
                         body: vec![],
-                        ommers: vec![],
+                        ommers: vec![].into(),
                         withdrawals: None,
                     },
                     senders: vec![],

@@ -3,9 +3,9 @@ use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
-    proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, Log, Receipt, SealedBlock,
-    SealedHeader, StorageEntry, Transaction, TransactionKind, TransactionSigned, TxLegacy, B256,
-    U256,
+    proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, Headers, Log, Receipt,
+    SealedBlock, SealedHeader, StorageEntry, Transaction, TransactionKind, TransactionSigned,
+    TxLegacy, B256, U256,
 };
 use secp256k1::{KeyPair, Secp256k1};
 use std::{
@@ -159,7 +159,7 @@ pub fn random_block<R: Rng>(
         }
         .seal_slow(),
         body: transactions,
-        ommers,
+        ommers: Headers::from(ommers),
         withdrawals: None,
     }
 }

@@ -60,7 +60,7 @@ pub use constants::{
 };
 pub use error::{GotExpected, GotExpectedBoxed};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
-pub use header::{Header, HeadersDirection, SealedHeader};
+pub use header::{Header, Headers, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
 pub use log::{logs_bloom, Log};
 pub use net::{

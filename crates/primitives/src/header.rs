@@ -5,7 +5,10 @@ use crate::{
     keccak256, Address, BaseFeeParams, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, B256,
     B64, U256,
 };
-use alloy_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
+use alloy_rlp::{
+    length_of_length, Decodable, Encodable, RlpDecodableWrapper, RlpEncodableWrapper,
+    EMPTY_LIST_CODE, EMPTY_STRING_CODE,
+};
 use bytes::{Buf, BufMut, BytesMut};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
@@ -574,6 +577,67 @@ impl Decodable for Header {
     }
 }
 
+/// A list of [`Header`]s.
+#[main_codec]
+#[derive(Debug, Default, PartialEq, Eq, Clone, RlpEncodableWrapper, RlpDecodableWrapper)]
+pub struct Headers(Vec<Header>);
+
+impl Headers {
+    /// Create a new Headers instance.
+    pub fn new(headers: Vec<Header>) -> Self {
+        Headers(headers)
+    }
+
+    /// Get an iterator over the headers.
+    pub fn iter(&self) -> std::slice::Iter<'_, Header> {
+        self.0.iter()
+    }
+
+    /// Get a mutable iterator over the headers.
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Header> {
+        self.0.iter_mut()
+    }
+
+    /// Convert [Headers] into a Vec<[Header]>
+    pub fn into_vec(self) -> Vec<Header> {
+        self.0
+    }
+}
+
+impl IntoIterator for Headers {
+    type Item = Header;
+    type IntoIter = std::vec::IntoIter<Header>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl From<Vec<Header>> for Headers {
+    fn from(headers: Vec<Header>) -> Self {
+        Headers(headers)
+    }
+}
+
+impl FromIterator<Header> for Headers {
+    fn from_iter<T: IntoIterator<Item = Header>>(iter: T) -> Self {
+        Headers(iter.into_iter().collect())
+    }
+}
+
+impl Deref for Headers {
+    type Target = Vec<Header>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Headers {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
 #[add_arbitrary_tests(rlp)]

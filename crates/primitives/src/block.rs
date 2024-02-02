@@ -1,6 +1,6 @@
 use crate::{
-    Address, GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered,
-    Withdrawal, Withdrawals, B256,
+    Address, GotExpected, Header, Headers, SealedHeader, TransactionSigned,
+    TransactionSignedEcRecovered, Withdrawal, Withdrawals, B256,
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
@@ -25,7 +25,7 @@ pub struct Block {
     /// Transactions in this block.
     pub body: Vec<TransactionSigned>,
     /// Ommers/uncles header.
-    pub ommers: Vec<Header>,
+    pub ommers: Headers,
     /// Block withdrawals.
     pub withdrawals: Option<Withdrawals>,
 }
@@ -217,7 +217,7 @@ pub struct SealedBlock {
     /// Transactions with signatures.
     pub body: Vec<TransactionSigned>,
     /// Ommer/uncle headers
-    pub ommers: Vec<Header>,
+    pub ommers: Headers,
     /// Block withdrawals.
     pub withdrawals: Option<Withdrawals>,
 }
@@ -238,7 +238,7 @@ impl SealedBlock {
 
     /// Splits the sealed block into underlying components
     #[inline]
-    pub fn split(self) -> (SealedHeader, Vec<TransactionSigned>, Vec<Header>) {
+    pub fn split(self) -> (SealedHeader, Vec<TransactionSigned>, Headers) {
         (self.header, self.body, self.ommers)
     }
 
@@ -461,11 +461,9 @@ pub struct BlockBody {
     /// Uncle headers for the given block
     #[cfg_attr(
         any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<Header>(), 0..=2)"
-        )
+        proptest(strategy = "proptest::arbitrary::any::<Headers>()")
     )]
-    pub ommers: Vec<Header>,
+    pub ommers: Headers,
     /// Withdrawals in the block.
     #[cfg_attr(
         any(test, feature = "arbitrary"),

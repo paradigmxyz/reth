@@ -8,8 +8,8 @@ use reth_primitives::{
     revm_primitives::{
         BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
     },
-    Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    Receipts, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Block, BlockId, BlockNumberOrTag, ChainSpec, Header, Headers, IntoRecoveredTransaction,
+    Receipt, Receipts, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -256,7 +256,7 @@ impl PendingBlockEnv {
         };
 
         // seal the block
-        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
+        let block = Block { header, body: executed_txs, ommers: Headers::default(), withdrawals };
         Ok(SealedBlockWithSenders { block: block.seal_slow(), senders })
     }
 }

@@ -7,7 +7,7 @@ use reth_primitives::{
     hex_literal::hex,
     proofs::{state_root_unhashed, storage_root_unhashed},
     revm::compat::into_reth_acc,
-    Address, BlockNumber, Bytes, Header, Log, Receipt, Receipts, SealedBlock,
+    Address, BlockNumber, Bytes, Header, Headers, Log, Receipt, Receipts, SealedBlock,
     SealedBlockWithSenders, TxType, Withdrawal, Withdrawals, B256, U256,
 };
 use revm::{
@@ -88,7 +88,7 @@ pub fn genesis() -> SealedBlock {
         header: Header { number: 0, difficulty: U256::from(1), ..Default::default() }
             .seal(B256::ZERO),
         body: vec![],
-        ommers: vec![],
+        ommers: Headers::default(),
         withdrawals: Some(Withdrawals::default()),
     }
 }

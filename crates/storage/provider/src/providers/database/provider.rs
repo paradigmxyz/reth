@@ -38,10 +38,11 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
-    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment,
-    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
+    ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, Headers, PruneCheckpoint,
+    PruneModes, PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    SnapshotSegment, StorageEntry, TransactionMeta, TransactionSigned,
+    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
+    Withdrawals, B256, U256,
 };
 use reth_trie::{prefix_set::PrefixSetMut, updates::TrieUpdates, HashedPostState, StateRoot};
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
@@ -759,7 +760,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             let (body, senders) = tx.into_iter().map(|tx| tx.to_components()).unzip();
 
             // Ommers can be missing
-            let mut ommers = Vec::new();
+            let mut ommers = Headers::default();
             if let Some((block_number, _)) = block_ommers.as_ref() {
                 if *block_number == main_block_number {
                     ommers = block_ommers.take().unwrap().1.ommers;
@@ -1128,16 +1129,18 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
         )
     }
 
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        self.get_range_with_snapshot(
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Headers> {
+        let headers_range = self.get_range_with_snapshot(
             SnapshotSegment::Headers,
             to_range(range),
-            |snapshot, range, _| snapshot.headers_range(range),
+            |snapshot, range, _| snapshot.headers_range(range).map(|h| h.into_vec()),
             |range, _| {
                 self.cursor_read_collect::<tables::Headers, _>(range, Ok).map_err(Into::into)
             },
             |_| true,
-        )
+        );
+
+        Ok(headers_range?.into())
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
@@ -1285,12 +1288,12 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         Ok(None)
     }
 
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Headers>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
             // If the Paris (Merge) hardfork block is known and block is after it, return empty
             // ommers.
             if self.chain_spec.final_paris_total_difficulty(number).is_some() {
-                return Ok(Some(Vec::new()))
+                return Ok(Some(Headers::default()))
             }
 
             let ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
@@ -1411,7 +1414,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                             None
                         };
                     let ommers = if self.chain_spec.final_paris_total_difficulty(num).is_some() {
-                        Vec::new()
+                        Headers::default()
                     } else {
                         ommers_cursor.seek_exact(num)?.map(|(_, o)| o.ommers).unwrap_or_default()
                     };

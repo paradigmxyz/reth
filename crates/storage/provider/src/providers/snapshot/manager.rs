@@ -15,7 +15,7 @@ use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     snapshot::HighestSnapshots, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber,
-    BlockWithSenders, ChainInfo, Header, Receipt, SealedBlock, SealedBlockWithSenders,
+    BlockWithSenders, ChainInfo, Header, Headers, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
     TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
@@ -395,13 +395,14 @@ impl HeaderProvider for SnapshotProvider {
             .header_td_by_number(num)
     }
 
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        self.fetch_range(
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Headers> {
+        let headers_range = self.fetch_range(
             SnapshotSegment::Headers,
             to_range(range),
             |cursor, number| cursor.get_one::<HeaderMask<Header>>(number.into()),
             |_| true,
-        )
+        );
+        Ok(headers_range?.into())
     }
 
     fn sealed_header(&self, num: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
@@ -644,7 +645,7 @@ impl BlockReader for SnapshotProvider {
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
+    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Headers>> {
         // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }

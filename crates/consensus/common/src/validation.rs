@@ -477,8 +477,8 @@ mod tests {
     };
     use reth_primitives::{
         constants::eip4844::DATA_GAS_PER_BLOB, hex_literal::hex, proofs, Account, Address,
-        BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, Header, Signature,
-        TransactionKind, TransactionSigned, Withdrawal, Withdrawals, MAINNET, U256,
+        BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, Header, Headers,
+        Signature, TransactionKind, TransactionSigned, Withdrawal, Withdrawals, MAINNET, U256,
     };
     use std::ops::RangeBounds;
 
@@ -551,11 +551,8 @@ mod tests {
             Ok(None)
         }
 
-        fn headers_range(
-            &self,
-            _range: impl RangeBounds<BlockNumber>,
-        ) -> ProviderResult<Vec<Header>> {
-            Ok(vec![])
+        fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> ProviderResult<Headers> {
+            Ok(vec![].into())
         }
 
         fn sealed_header(
@@ -664,7 +661,7 @@ mod tests {
         parent.number -= 1;
         parent.timestamp -= 1;
 
-        let ommers = Vec::new();
+        let ommers = Headers::default();
         let body = Vec::new();
 
         (SealedBlock { header: header.seal_slow(), body, ommers, withdrawals: None }, parent)
@@ -807,7 +804,7 @@ mod tests {
 
         let body = BlockBody {
             transactions: vec![transaction],
-            ommers: vec![],
+            ommers: vec![].into(),
             withdrawals: Some(Withdrawals::default()),
         };
 

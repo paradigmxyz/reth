@@ -15,7 +15,7 @@ use crate::{
 };
 use futures::{Future, FutureExt, Stream, StreamExt};
 use reth_primitives::{
-    Header, HeadersDirection, PeerId, SealedBlock, SealedHeader, WithPeerId, U256,
+    Header, Headers, HeadersDirection, PeerId, SealedBlock, SealedHeader, WithPeerId, U256,
 };
 use std::{
     fmt,
@@ -93,7 +93,7 @@ impl Stream for TestHeaderDownloader {
     }
 }
 
-type TestHeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send>>;
+type TestHeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<Headers>> + Sync + Send>>;
 
 struct TestDownload {
     client: TestHeadersClient,
@@ -178,7 +178,7 @@ impl Stream for TestDownload {
 /// A test client for fetching headers
 #[derive(Debug, Default, Clone)]
 pub struct TestHeadersClient {
-    responses: Arc<Mutex<Vec<Header>>>,
+    responses: Arc<Mutex<Headers>>,
     error: Arc<Mutex<Option<RequestError>>>,
     request_attempts: Arc<AtomicU64>,
 }
@@ -238,8 +238,8 @@ impl HeadersClient for TestHeadersClient {
 
             let mut lock = responses.lock().await;
             let len = lock.len().min(request.limit as usize);
-            let resp = lock.drain(..len).collect();
-            let with_peer_id = WithPeerId::from((PeerId::default(), resp));
+            let resp: Vec<Header> = lock.drain(..len).collect();
+            let with_peer_id = WithPeerId::from((PeerId::default(), Headers::from(resp)));
             Ok(with_peer_id)
         })
     }

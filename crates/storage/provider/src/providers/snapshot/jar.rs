@@ -9,8 +9,9 @@ use reth_db::{
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
-    Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, Receipt, SealedHeader,
-    TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
+    Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, Headers, Receipt,
+    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
+    B256, U256,
 };
 use std::ops::{Deref, RangeBounds};
 
@@ -77,7 +78,7 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
         Ok(self.cursor()?.get_one::<HeaderMask<CompactU256>>(num.into())?.map(Into::into))
     }
 
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Headers> {
         let range = to_range(range);
 
         let mut cursor = self.cursor()?;
@@ -89,7 +90,7 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
             }
         }
 
-        Ok(headers)
+        Ok(headers.into())
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {

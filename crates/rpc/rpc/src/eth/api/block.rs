@@ -9,7 +9,7 @@ use crate::{
 };
 use reth_network_api::NetworkInfo;
 use reth_node_api::EvmEnvConfig;
-use reth_primitives::{BlockId, TransactionMeta};
+use reth_primitives::{BlockId, Headers, TransactionMeta};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{Index, RichBlock, TransactionReceipt};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
@@ -27,10 +27,7 @@ where
     /// Returns the uncle headers of the given block
     ///
     /// Returns an empty vec if there are none.
-    pub(crate) fn ommers(
-        &self,
-        block_id: impl Into<BlockId>,
-    ) -> EthResult<Option<Vec<reth_primitives::Header>>> {
+    pub(crate) fn ommers(&self, block_id: impl Into<BlockId>) -> EthResult<Option<Headers>> {
         let block_id = block_id.into();
         Ok(self.provider().ommers_by_id(block_id)?)
     }

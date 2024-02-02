@@ -11,7 +11,7 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{Header, PeerId, B256};
+use reth_primitives::{Headers, PeerId, B256};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -50,7 +50,7 @@ impl DownloadClient for FetchClient {
 type HeadersClientFuture<T> = Either<FlattenedResponse<T>, future::Ready<T>>;
 
 impl HeadersClient for FetchClient {
-    type Output = HeadersClientFuture<PeerRequestResult<Vec<Header>>>;
+    type Output = HeadersClientFuture<PeerRequestResult<Headers>>;
 
     /// Sends a `GetBlockHeaders` request to an available peer.
     fn get_headers_with_priority(

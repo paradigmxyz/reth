@@ -3,7 +3,7 @@
 
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, B256};
+use reth_primitives::{BlockBody, BlockHashOrNumber, Headers, HeadersDirection, B256};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -43,11 +43,11 @@ pub struct GetBlockHeaders {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BlockHeaders(
     /// The requested headers.
-    pub Vec<Header>,
+    pub Headers,
 );
 
-impl From<Vec<Header>> for BlockHeaders {
-    fn from(headers: Vec<Header>) -> Self {
+impl From<Headers> for BlockHeaders {
+    fn from(headers: Headers) -> Self {
         BlockHeaders(headers)
     }
 }
@@ -262,7 +262,7 @@ mod tests {
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
                 },
-            ]),
+            ].into()),
         }.encode(&mut data);
         assert_eq!(data, expected);
     }
@@ -296,7 +296,7 @@ mod tests {
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
                 },
-            ]),
+            ].into()),
         };
         let result = RequestPair::decode(&mut &data[..]);
         assert_eq!(result.unwrap(), expected);
@@ -411,7 +411,7 @@ mod tests {
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
                         },
-                    ],
+                    ].into(),
                     withdrawals: None,
                 }
             ]),
@@ -498,7 +498,7 @@ mod tests {
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
                         },
-                    ],
+                    ].into(),
                     withdrawals: None,
                 }
             ]),

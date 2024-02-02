@@ -1,7 +1,7 @@
 //! Block related models and types.
 
 use reth_codecs::{main_codec, Compact};
-use reth_primitives::{Header, TxNumber, Withdrawals, B256};
+use reth_primitives::{Headers, TxNumber, Withdrawals, B256};
 use std::ops::Range;
 
 /// Total number of transactions.
@@ -72,7 +72,7 @@ impl StoredBlockBodyIndices {
 #[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct StoredBlockOmmers {
     /// The block headers of this block's uncles.
-    pub ommers: Vec<Header>,
+    pub ommers: Headers,
 }
 
 /// The storage representation of block withdrawals.
@@ -90,7 +90,7 @@ pub type HeaderHash = B256;
 mod tests {
     use super::*;
     use crate::table::{Compress, Decompress};
-
+    use reth_primitives::Header;
     #[test]
     fn test_ommer() {
         let mut ommer = StoredBlockOmmers::default();

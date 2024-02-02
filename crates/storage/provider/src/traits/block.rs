@@ -7,7 +7,7 @@ use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, ChainSpec,
-    Header, PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, B256,
+    Header, Headers, PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, B256,
 };
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::ops::RangeInclusive;
@@ -97,7 +97,7 @@ pub trait BlockReader:
     /// Returns the ommers/uncle headers of the given block from the database.
     ///
     /// Returns `None` if block is not found.
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>>;
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Headers>>;
 
     /// Returns the block with matching hash from the database.
     ///
@@ -243,14 +243,14 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Header>>;
 
     /// Returns the ommers with the matching tag from the database.
-    fn ommers_by_number_or_tag(&self, id: BlockNumberOrTag) -> ProviderResult<Option<Vec<Header>>> {
+    fn ommers_by_number_or_tag(&self, id: BlockNumberOrTag) -> ProviderResult<Option<Headers>> {
         self.convert_block_number(id)?.map_or_else(|| Ok(None), |num| self.ommers(num.into()))
     }
 
     /// Returns the ommers with the matching `BlockId` from the database.
     ///
     /// Returns `None` if block is not found.
-    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Header>>>;
+    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Headers>>;
 }
 
 /// BlockExecution Writer
