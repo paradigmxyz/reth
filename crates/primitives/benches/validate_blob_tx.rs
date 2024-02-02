@@ -26,6 +26,7 @@ fn blob_validation(c: &mut Criterion) {
     let kzg_settings = MAINNET_KZG_TRUSTED_SETUP.clone();
 
     for num_blobs in 1..MAX_BLOB_NUMBER_PER_BLOCK {
+        println!("Benchmarking validation for tx with {num_blobs} blobs");
         validate_blob_tx(&mut group, "ValidateBlob", num_blobs, kzg_settings.clone());
     }
 }
