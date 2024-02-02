@@ -600,6 +600,10 @@ mod tests {
         // deserialize payload
         let payload: ExecutionPayload =
             serde_json::from_str::<ExecutionPayloadV3>(deser_block).unwrap().into();
+
+        // NOTE: the actual block hash here is incorrect, it is a result of a bug, this was the
+        // fix:
+        // <https://github.com/paradigmxyz/reth/pull/6328>
         let block_hash_with_blob_fee_fields =
             b256!("a7cdd5f9e54147b53a15833a8c45dffccbaed534d7fdc23458f45102a4bf71b0");
 
