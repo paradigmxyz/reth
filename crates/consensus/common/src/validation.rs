@@ -781,7 +781,7 @@ mod tests {
 
         let header = Header {
             base_fee_per_gas: Some(1337u64),
-            withdrawals_root: Some(proofs::calculate_withdrawals_root(&Withdrawals::default())),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(Withdrawals::default())),
             ..Default::default()
         }
         .seal_slow();
@@ -798,7 +798,7 @@ mod tests {
 
         let header = Header {
             base_fee_per_gas: Some(1337u64),
-            withdrawals_root: Some(proofs::calculate_withdrawals_root(&Withdrawals::default())),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(Withdrawals::default())),
             blob_gas_used: Some(1),
             transactions_root: proofs::calculate_transaction_root(&[transaction.clone()]),
             ..Default::default()

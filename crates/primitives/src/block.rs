@@ -504,12 +504,11 @@ impl BlockBody {
     /// Calculates a heuristic for the in-memory size of the [BlockBody].
     #[inline]
     pub fn size(&self) -> usize {
-        self.transactions.iter().map(TransactionSigned::size).sum::<usize>()
-            + self.transactions.capacity() * std::mem::size_of::<TransactionSigned>()
-            + self.ommers.iter().map(Header::size).sum::<usize>()
-            + self.ommers.capacity() * std::mem::size_of::<Header>()
-            + self
-                .withdrawals
+        self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
+            self.transactions.capacity() * std::mem::size_of::<TransactionSigned>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() +
+            self.ommers.capacity() * std::mem::size_of::<Header>() +
+            self.withdrawals
                 .as_ref()
                 .map(|w| w.size() + w.capacity() * std::mem::size_of::<Withdrawal>())
                 .unwrap_or(std::mem::size_of::<Option<Withdrawals>>())

@@ -110,8 +110,8 @@ where
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp)
-        && !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
+    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp) &&
+        !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
     {
         let receipts = receipts.into_iter().map(|r| {
             let mut r = r.as_ref().to_owned();
@@ -159,8 +159,8 @@ where
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp)
-        && !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
+    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp) &&
+        !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
     {
         let receipts = receipts.into_iter().map(|r| {
             let mut r = r.as_ref().to_owned();
@@ -615,15 +615,15 @@ mod tests {
             #[cfg(feature = "optimism")]
             deposit_receipt_version: None,
         };
-        let receipts_ref = vec![&receipt];
+        let receipts_ref = [&receipt];
         let root_from_ref = calculate_receipt_root_ref(
-            &receipts_ref,
+            receipts_ref.iter(),
             #[cfg(feature = "optimism")]
             crate::OP_GOERLI.as_ref(),
             #[cfg(feature = "optimism")]
             0,
         );
-        let receipts = vec![ReceiptWithBloom::from(receipt)];
+        let receipts = [ReceiptWithBloom::from(receipt)];
         let root = calculate_receipt_root(
             &receipts,
             #[cfg(feature = "optimism")]
