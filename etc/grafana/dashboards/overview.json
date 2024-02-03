@@ -3499,6 +3499,17 @@
           "legendFormat": "Queued pool size",
           "range": true,
           "refId": "C"
+        },
+	{
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blob_pool_size_bytes{instance=~\"$instance\"}",
+          "legendFormat": "Blob pool size",
+          "range": true,
+          "refId": "D"
         }
       ],
       "title": "Subpool sizes in bytes",
@@ -3616,6 +3627,17 @@
           "legendFormat": "Queued pool transactions",
           "range": true,
           "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blob_pool_transactions{instance=~\"$instance\"}",
+          "legendFormat": "Blob pool transactions",
+          "range": true,
+          "refId": "D"
         }
       ],
       "title": "Subpool transaction count",
