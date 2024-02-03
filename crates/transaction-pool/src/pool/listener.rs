@@ -30,7 +30,7 @@ pub struct TransactionEvents {
 
 impl TransactionEvents {
     /// The hash for this transaction
-    pub fn hash(&self) -> TxHash {
+    pub const fn hash(&self) -> TxHash {
         self.hash
     }
 }

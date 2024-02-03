@@ -59,7 +59,7 @@ pub struct LocalTransactionBackupConfig {
 
 impl LocalTransactionBackupConfig {
     /// Receive path to transactions backup and return initialized config
-    pub fn with_local_txs_backup(transactions_path: PathBuf) -> Self {
+    pub const fn with_local_txs_backup(transactions_path: PathBuf) -> Self {
         Self { transactions_path: Some(transactions_path) }
     }
 }
@@ -436,7 +436,7 @@ struct FinalizedBlockTracker {
 }
 
 impl FinalizedBlockTracker {
-    fn new(last_finalized_block: Option<BlockNumber>) -> Self {
+    const fn new(last_finalized_block: Option<BlockNumber>) -> Self {
         Self { last_finalized_block }
     }
 
@@ -473,7 +473,7 @@ enum MaintainedPoolState {
 impl MaintainedPoolState {
     /// Returns `true` if the pool is assumed to be out of sync with the current state.
     #[inline]
-    fn is_drifted(&self) -> bool {
+    const fn is_drifted(&self) -> bool {
         matches!(self, MaintainedPoolState::Drifted)
     }
 }

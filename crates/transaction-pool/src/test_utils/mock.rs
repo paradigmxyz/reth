@@ -397,7 +397,7 @@ impl MockTransaction {
     }
 
     /// Gets the priority fee for dynamic fee transactions (EIP-1559 and EIP-4844)
-    pub fn get_priority_fee(&self) -> Option<u128> {
+    pub const fn get_priority_fee(&self) -> Option<u128> {
         match self {
             MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } |
             MockTransaction::Eip4844 { max_priority_fee_per_gas, .. } => {
@@ -424,7 +424,7 @@ impl MockTransaction {
     }
 
     /// Gets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
-    pub fn get_max_fee(&self) -> Option<u128> {
+    pub const fn get_max_fee(&self) -> Option<u128> {
         match self {
             MockTransaction::Eip1559 { max_fee_per_gas, .. } |
             MockTransaction::Eip4844 { max_fee_per_gas, .. } => Some(*max_fee_per_gas),
@@ -492,7 +492,7 @@ impl MockTransaction {
     }
 
     /// Gets the gas price for the transaction.
-    pub fn get_gas_price(&self) -> u128 {
+    pub const fn get_gas_price(&self) -> u128 {
         match self {
             MockTransaction::Legacy { gas_price, .. } |
             MockTransaction::Eip2930 { gas_price, .. } => *gas_price,
@@ -596,7 +596,7 @@ impl MockTransaction {
     }
 
     /// Returns the transaction type identifier associated with the current [MockTransaction].
-    pub fn tx_type(&self) -> u8 {
+    pub const fn tx_type(&self) -> u8 {
         match self {
             Self::Legacy { .. } => LEGACY_TX_TYPE_ID,
             Self::Eip1559 { .. } => EIP1559_TX_TYPE_ID,
@@ -608,22 +608,22 @@ impl MockTransaction {
     }
 
     /// Checks if the transaction is of the legacy type.
-    pub fn is_legacy(&self) -> bool {
+    pub const fn is_legacy(&self) -> bool {
         matches!(self, MockTransaction::Legacy { .. })
     }
 
     /// Checks if the transaction is of the EIP-1559 type.
-    pub fn is_eip1559(&self) -> bool {
+    pub const fn is_eip1559(&self) -> bool {
         matches!(self, MockTransaction::Eip1559 { .. })
     }
 
     /// Checks if the transaction is of the EIP-4844 type.
-    pub fn is_eip4844(&self) -> bool {
+    pub const fn is_eip4844(&self) -> bool {
         matches!(self, MockTransaction::Eip4844 { .. })
     }
 
     /// Checks if the transaction is of the EIP-2930 type.
-    pub fn is_eip2930(&self) -> bool {
+    pub const fn is_eip2930(&self) -> bool {
         matches!(self, MockTransaction::Eip2930 { .. })
     }
 }

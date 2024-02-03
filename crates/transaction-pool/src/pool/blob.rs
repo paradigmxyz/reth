@@ -82,7 +82,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     }
 
     /// Returns all transactions that satisfy the given basefee and blob_fee.
-    pub(crate) fn satisfy_attributes(
+    pub(crate) const fn satisfy_attributes(
         &self,
         _best_transactions_attributes: BestTransactionsAttributes,
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
