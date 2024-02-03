@@ -726,7 +726,7 @@ where
     /// buffer and put into a request to that peer. Before sending, the request is filled with
     /// additional hashes out of the buffer, for which the peer is listed as fallback, as long as
     /// space remains in the respective transactions response.
-    fn request_buffered_hashes(&mut self) {
+    fn request_buffered_hashes(&mut self, mut budget: u32) {
         loop {
             let mut hashes = vec![];
             let Some(peer_id) = self.pop_any_idle_peer(&mut hashes) else { return };
@@ -775,6 +775,11 @@ where
                 );
 
                 self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
+                return
+            }
+
+            budget = budget.saturating_sub(1);
+            if budget == 0 {
                 return
             }
         }
@@ -1161,8 +1166,9 @@ where
                 }
             );
 
-            // try drain buffered transactions
-            this.request_buffered_hashes();
+            // try drain buffered transactions with respect to budget
+            let budget_refetch = 256;
+            this.request_buffered_hashes(budget_refetch);
             this.update_request_metrics();
 
             // Advance all imports
@@ -1852,7 +1858,7 @@ mod tests {
         assert!(tx_fetcher.is_idle(peer_id_1));
 
         // sends request for buffered hashes to peer_1
-        tx_manager.request_buffered_hashes();
+        tx_manager.request_buffered_hashes(1);
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
