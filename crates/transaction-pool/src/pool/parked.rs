@@ -154,19 +154,6 @@ impl<T: ParkedOrd> ParkedPool<T> {
         self.len() > limit.max_txs || self.size() > limit.max_size
     }
 
-    /// Check if the given list of transactions, if dropped, would put the pool under the given
-    /// [SubPoolLimit].
-    ///
-    /// Returns `true` if the pool would be under the limits, `false` otherwise.
-    pub(crate) fn would_move_pool_under_limit(
-        &self,
-        limit: SubPoolLimit,
-        num_txs: usize,
-        total_size: usize,
-    ) -> bool {
-        self.len() - num_txs <= limit.max_txs && self.size() - total_size <= limit.max_size
-    }
-
     /// Truncates the pool by removing transactions, until the given [SubPoolLimit] has been met.
     ///
     /// This is done by first ordering senders by the last time they have submitted a transaction,
@@ -193,19 +180,8 @@ impl<T: ParkedOrd> ParkedPool<T> {
             // SAFETY: This will not panic due to `!addresses.is_empty()`
             let sender_id = sender_ids.pop().unwrap().sender_id;
             let list = self.get_txs_by_sender_with_size(sender_id);
-            let list_size = list.iter().map(|(_, size)| *size).sum::<usize>();
 
-            // Drop all transactions if they are less than the overflow
-            if !self.would_move_pool_under_limit(limit, list.len(), list_size) {
-                for (txid, _) in &list {
-                    if let Some(tx) = self.remove_transaction(txid) {
-                        removed.push(tx);
-                    }
-                }
-                continue
-            }
-
-            // Otherwise drop only last few transactions
+            // Drop transactions from this sender until the pool is under limits
             for (txid, _) in list.into_iter().rev() {
                 if let Some(tx) = self.remove_transaction(&txid) {
                     removed.push(tx);
