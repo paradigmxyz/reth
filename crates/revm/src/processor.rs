@@ -266,7 +266,12 @@ where
         {
             let mut envelope_buf = Vec::with_capacity(transaction.length_without_header());
             transaction.encode_enveloped(&mut envelope_buf);
-            fill_op_tx_env(&mut self.evm.env.tx, transaction, sender, envelope_buf.into());
+            fill_op_tx_env(
+                &mut self.evm.as_mut().unwrap().context.evm.env.tx,
+                transaction,
+                sender,
+                envelope_buf.into(),
+            );
         }
 
         let hash = transaction.hash();

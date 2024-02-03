@@ -93,11 +93,6 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
         let mut cfg = CfgEnv::default();
         cfg.chain_id = chain_spec.chain().id();
 
-        #[cfg(feature = "optimism")]
-        {
-            cfg.optimism = chain_spec.is_optimism();
-        }
-
         // ensure we're not missing any timestamp based hardforks
         let spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp());
 

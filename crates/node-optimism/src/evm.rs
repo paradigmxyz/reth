@@ -42,6 +42,7 @@ impl EvmEnvConfig for OptimismEvmConfig {
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 
         // optimism-specific configuration
+        // TODO:
         cfg_env.optimism = chain_spec.is_optimism();
     }
 }
@@ -49,12 +50,12 @@ impl EvmEnvConfig for OptimismEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::revm_primitives::BlockEnv;
+    use reth_primitives::revm_primitives::{BlockEnv, CfgEnv, SpecId};
 
     #[test]
     #[ignore]
     fn test_fill_cfg_and_block_env() {
-        let mut cfg_env = CfgEnv::default();
+        let mut cfg_env = CfgEnvWithSpecId::new(CfgEnv::default(), SpecId::LATEST);
         let mut block_env = BlockEnv::default();
         let header = Header::default();
         let chain_spec = ChainSpec::default();
