@@ -298,7 +298,7 @@ pub struct NoopInsertError {
 }
 
 impl NoopInsertError {
-    fn new(tx: EthPooledTransaction) -> Self {
+    const fn new(tx: EthPooledTransaction) -> Self {
         Self { tx }
     }
 

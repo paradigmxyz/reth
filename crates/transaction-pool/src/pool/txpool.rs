@@ -106,7 +106,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Returns access to the [`AllTransactions`] container.
-    pub(crate) fn all(&self) -> &AllTransactions<T::Transaction> {
+    pub(crate) const fn all(&self) -> &AllTransactions<T::Transaction> {
         &self.all_transactions
     }
 
@@ -131,7 +131,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Returns the currently tracked block values
-    pub(crate) fn block_info(&self) -> BlockInfo {
+    pub(crate) const fn block_info(&self) -> BlockInfo {
         BlockInfo {
             last_seen_block_hash: self.all_transactions.last_seen_block_hash,
             last_seen_block_number: self.all_transactions.last_seen_block_number,
@@ -887,15 +887,15 @@ impl<T: TransactionOrdering> Drop for TxPool<T> {
 #[cfg(any(test, feature = "test-utils"))]
 #[allow(dead_code)]
 impl<T: TransactionOrdering> TxPool<T> {
-    pub(crate) fn pending(&self) -> &PendingPool<T> {
+    pub(crate) const fn pending(&self) -> &PendingPool<T> {
         &self.pending_pool
     }
 
-    pub(crate) fn base_fee(&self) -> &ParkedPool<BasefeeOrd<T::Transaction>> {
+    pub(crate) const fn base_fee(&self) -> &ParkedPool<BasefeeOrd<T::Transaction>> {
         &self.basefee_pool
     }
 
-    pub(crate) fn queued(&self) -> &ParkedPool<QueuedOrd<T::Transaction>> {
+    pub(crate) const fn queued(&self) -> &ParkedPool<QueuedOrd<T::Transaction>> {
         &self.queued_pool
     }
 }
@@ -2018,7 +2018,7 @@ mod tests {
 
     impl PromotionTest {
         /// Returns the test case for the opposite update
-        fn opposite(&self) -> Self {
+        const fn opposite(&self) -> Self {
             Self {
                 basefee: self.basefee_update,
                 blobfee: self.blobfee_update,

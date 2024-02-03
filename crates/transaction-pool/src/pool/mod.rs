@@ -177,7 +177,7 @@ where
     }
 
     /// Returns the configured blob store.
-    pub(crate) fn blob_store(&self) -> &S {
+    pub(crate) const fn blob_store(&self) -> &S {
         &self.blob_store
     }
 
@@ -222,12 +222,12 @@ where
     }
 
     /// Get the config the pool was configured with.
-    pub fn config(&self) -> &PoolConfig {
+    pub const fn config(&self) -> &PoolConfig {
         &self.config
     }
 
     /// Get the validator reference.
-    pub fn validator(&self) -> &V {
+    pub const fn validator(&self) -> &V {
         &self.validator
     }
 
@@ -999,7 +999,7 @@ pub enum AddedTransaction<T: PoolTransaction> {
 
 impl<T: PoolTransaction> AddedTransaction<T> {
     /// Returns whether the transaction has been added to the pending pool.
-    pub(crate) fn as_pending(&self) -> Option<&AddedPendingTransaction<T>> {
+    pub(crate) const fn as_pending(&self) -> Option<&AddedPendingTransaction<T>> {
         match self {
             AddedTransaction::Pending(tx) => Some(tx),
             _ => None,
@@ -1007,7 +1007,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the replaced transaction if there was one
-    pub(crate) fn replaced(&self) -> Option<&Arc<ValidPoolTransaction<T>>> {
+    pub(crate) const fn replaced(&self) -> Option<&Arc<ValidPoolTransaction<T>>> {
         match self {
             AddedTransaction::Pending(tx) => tx.replaced.as_ref(),
             AddedTransaction::Parked { replaced, .. } => replaced.as_ref(),
@@ -1049,7 +1049,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
 
     /// Returns the subpool this transaction was added to
     #[cfg(test)]
-    pub(crate) fn subpool(&self) -> SubPool {
+    pub(crate) const fn subpool(&self) -> SubPool {
         match self {
             AddedTransaction::Pending(_) => SubPool::Pending,
             AddedTransaction::Parked { subpool, .. } => *subpool,
