@@ -227,6 +227,9 @@ pub struct TransactionsManager<Pool> {
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
     /// TransactionsManager metrics
     metrics: TransactionsManagerMetrics,
+    /// Configures wether or not to handle hashes from an announcement that didn't fit in the
+    /// request. If set to `false`, hashes that don't fit will be dropped.
+    enable_tx_refetch: bool,
 }
 
 impl<Pool: TransactionPool> TransactionsManager<Pool> {
@@ -1133,8 +1136,10 @@ where
                 some_ready = true;
             }
 
-            // try drain buffered transactions
-            this.request_buffered_hashes();
+            if self.enable_tx_refetch {
+                // try drain buffered transactions
+                this.request_buffered_hashes();
+            }
             this.update_request_metrics();
 
             // Advance all imports
