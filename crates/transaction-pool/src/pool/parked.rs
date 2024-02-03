@@ -149,39 +149,28 @@ impl<T: ParkedOrd> ParkedPool<T> {
         &mut self,
         limit: SubPoolLimit,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        if self.len() <= limit.max_txs {
+        if !limit.is_exceeded(self.len(), self.size()) {
             // if we are below the limits, we don't need to drop anything
             return Vec::new()
         }
 
         let mut removed = Vec::new();
         let mut sender_ids = self.get_senders_by_submission_id();
-        let queued = self.len();
-        let mut drop = queued - limit.max_txs;
 
-        while drop > 0 && !sender_ids.is_empty() {
+        while limit.is_exceeded(self.len(), self.size()) && !sender_ids.is_empty() {
             // SAFETY: This will not panic due to `!addresses.is_empty()`
             let sender_id = sender_ids.pop().unwrap().sender_id;
-            let mut list = self.get_txs_by_sender(sender_id);
+            let list = self.get_txs_by_sender(sender_id);
 
-            // Drop all transactions if they are less than the overflow
-            if list.len() <= drop {
-                for txid in &list {
-                    if let Some(tx) = self.remove_transaction(txid) {
-                        removed.push(tx);
-                    }
-                }
-                drop -= list.len();
-                continue
-            }
-
-            // Otherwise drop only last few transactions
-            // SAFETY: This will not panic because `list.len() > drop`
-            for txid in list.split_off(drop) {
+            // Drop transactions from this sender until the pool is under limits
+            for txid in list.into_iter().rev() {
                 if let Some(tx) = self.remove_transaction(&txid) {
                     removed.push(tx);
                 }
-                drop -= 1;
+
+                if !limit.is_exceeded(self.len(), self.size()) {
+                    break
+                }
             }
         }
 
@@ -601,6 +590,35 @@ mod tests {
         // get the inner txs from the parked txs
         let parked = parked.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
         assert_eq!(parked, expected_parked);
+    }
+
+    #[test]
+    fn test_truncate_parked_with_large_tx() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
+        let default_limits = SubPoolLimit::default();
+
+        // create a chain of transactions by sender A
+        // make sure they are all one over half the limit
+        let a_sender = address!("000000000000000000000000000000000000000a");
+
+        // 2 txs, that should put the pool over the size limit but not max txs
+        let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxType::EIP1559)
+            .into_iter()
+            .map(|mut tx| {
+                tx.set_size(default_limits.max_size / 2 + 1);
+                tx
+            })
+            .collect::<Vec<_>>();
+
+        // add all the transactions to the pool
+        for tx in a_txs {
+            pool.add_transaction(f.validated_arc(tx));
+        }
+
+        // truncate the pool, it should remove at least one transaction
+        let removed = pool.truncate_pool(default_limits);
+        assert_eq!(removed.len(), 1);
     }
 
     #[test]
