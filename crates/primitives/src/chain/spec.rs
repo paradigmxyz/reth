@@ -1372,21 +1372,15 @@ impl ForkCondition {
     ///
     /// For timestamp conditions, this will always return false.
     pub fn active_at_block(&self, current_block: BlockNumber) -> bool {
-        match self {
-            ForkCondition::Block(block) => current_block >= *block,
-            ForkCondition::TTD { fork_block: Some(block), .. } => current_block >= *block,
-            _ => false,
-        }
+        matches!(self, ForkCondition::Block(block)
+        | ForkCondition::TTD { fork_block: Some(block), .. } if current_block >= *block)
     }
 
     /// Checks if the given block is the first block that satisfies the fork condition.
     ///
     /// This will return false for any condition that is not block based.
     pub fn transitions_at_block(&self, current_block: BlockNumber) -> bool {
-        match self {
-            ForkCondition::Block(block) => current_block == *block,
-            _ => false,
-        }
+        matches!(self, ForkCondition::Block(block) if current_block == *block)
     }
 
     /// Checks whether the fork condition is satisfied at the given total difficulty and difficulty
@@ -1399,22 +1393,15 @@ impl ForkCondition {
     ///
     /// This will return false for any condition that is not TTD-based.
     pub fn active_at_ttd(&self, ttd: U256, difficulty: U256) -> bool {
-        if let ForkCondition::TTD { total_difficulty, .. } = self {
-            ttd.saturating_sub(difficulty) >= *total_difficulty
-        } else {
-            false
-        }
+        matches!(self, ForkCondition::TTD { total_difficulty, .. }
+            if ttd.saturating_sub(difficulty) >= *total_difficulty)
     }
 
     /// Checks whether the fork condition is satisfied at the given timestamp.
     ///
     /// This will return false for any condition that is not timestamp-based.
     pub fn active_at_timestamp(&self, timestamp: u64) -> bool {
-        if let ForkCondition::Timestamp(time) = self {
-            timestamp >= *time
-        } else {
-            false
-        }
+        matches!(self, ForkCondition::Timestamp(time) if timestamp >= *time)
     }
 
     /// Checks whether the fork condition is satisfied at the given head block.
@@ -2797,6 +2784,137 @@ Post-merge hard forks (timestamp based):
             hex!("5ae31c6522bd5856129f66be3d582b842e4e9faaa87f21cce547128339a9db3c").into();
         let hash = chainspec.genesis_header().hash_slow();
         assert_eq!(hash, expected_hash);
+    }
+
+    #[test]
+    fn test_hive_paris_block_genesis_json() {
+        // this tests that we can handle `parisBlock` in the genesis json and can use it to output
+        // a correct forkid
+        let hive_paris = r#"
+        {
+          "config": {
+            "ethash": {},
+            "chainId": 3503995874084926,
+            "homesteadBlock": 0,
+            "eip150Block": 6,
+            "eip155Block": 12,
+            "eip158Block": 12,
+            "byzantiumBlock": 18,
+            "constantinopleBlock": 24,
+            "petersburgBlock": 30,
+            "istanbulBlock": 36,
+            "muirGlacierBlock": 42,
+            "berlinBlock": 48,
+            "londonBlock": 54,
+            "arrowGlacierBlock": 60,
+            "grayGlacierBlock": 66,
+            "mergeNetsplitBlock": 72,
+            "terminalTotalDifficulty": 9454784,
+            "shanghaiTime": 780,
+            "cancunTime": 840
+          },
+          "nonce": "0x0",
+          "timestamp": "0x0",
+          "extraData": "0x68697665636861696e",
+          "gasLimit": "0x23f3e20",
+          "difficulty": "0x20000",
+          "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "coinbase": "0x0000000000000000000000000000000000000000",
+          "alloc": {
+            "000f3df6d732807ef1319fb7b8bb8522d0beac02": {
+              "code": "0x3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500",
+              "balance": "0x2a"
+            },
+            "0c2c51a0990aee1d73c1228de158688341557508": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "14e46043e63d0e3cdcf2530519f4cfaf35058cb2": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "16c57edf7fa9d9525378b0b81bf8a3ced0620c1c": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "1f4924b14f34e24159387c0a4cdbaa32f3ddb0cf": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "1f5bde34b4afc686f136c7a3cb6ec376f7357759": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "2d389075be5be9f2246ad654ce152cf05990b209": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "3ae75c08b4c907eb63a8960c45b86e1e9ab6123c": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "4340ee1b812acb40a1eb561c019c327b243b92df": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "4a0f1452281bcec5bd90c3dce6162a5995bfe9df": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "4dde844b71bcdf95512fb4dc94e84fb67b512ed8": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "5f552da00dfb4d3749d9e62dcee3c918855a86a0": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "654aa64f5fbefb84c270ec74211b81ca8c44a72e": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "717f8aa2b982bee0e29f573d31df288663e1ce16": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "7435ed30a8b4aeb0877cef0c6e8cffe834eb865f": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "83c7e323d189f18725ac510004fdc2941f8c4a78": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "84e75c28348fb86acea1a93a39426d7d60f4cc46": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "8bebc8ba651aee624937e7d897853ac30c95a067": {
+              "storage": {
+                "0x0000000000000000000000000000000000000000000000000000000000000001": "0x0000000000000000000000000000000000000000000000000000000000000001",
+                "0x0000000000000000000000000000000000000000000000000000000000000002": "0x0000000000000000000000000000000000000000000000000000000000000002",
+                "0x0000000000000000000000000000000000000000000000000000000000000003": "0x0000000000000000000000000000000000000000000000000000000000000003"
+              },
+              "balance": "0x1",
+              "nonce": "0x1"
+            },
+            "c7b99a164efd027a93f147376cc7da7c67c6bbe0": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "d803681e487e6ac18053afc5a6cd813c86ec3e4d": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "e7d13f7aa2a838d24c59b40186a0aca1e21cffcc": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            },
+            "eda8645ba6948855e3b3cd596bbb07596d59c603": {
+              "balance": "0xc097ce7bc90715b34b9f1000000000"
+            }
+          },
+          "number": "0x0",
+          "gasUsed": "0x0",
+          "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "baseFeePerGas": null,
+          "excessBlobGas": null,
+          "blobGasUsed": null
+        }
+        "#;
+
+        // check that it deserializes properly
+        let genesis: Genesis = serde_json::from_str(hive_paris).unwrap();
+        let chainspec = ChainSpec::from(genesis);
+
+        // make sure we are at ForkHash("bc0c2605") with Head post-cancun
+        let expected_forkid = ForkId { hash: ForkHash([0xbc, 0x0c, 0x26, 0x05]), next: 0 };
+        let got_forkid =
+            chainspec.fork_id(&Head { number: 73, timestamp: 840, ..Default::default() });
+
+        // check that they're the same
+        assert_eq!(got_forkid, expected_forkid);
     }
 
     #[test]

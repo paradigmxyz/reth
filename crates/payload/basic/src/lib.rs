@@ -20,7 +20,7 @@ use reth_payload_builder::{
 use reth_primitives::{
     bytes::BytesMut,
     constants::{EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION},
-    proofs, BlockNumberOrTag, Bytes, ChainSpec, SealedBlock, Withdrawal, B256, U256,
+    proofs, BlockNumberOrTag, Bytes, ChainSpec, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
@@ -794,7 +794,7 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
 #[derive(Default, Debug)]
 pub struct WithdrawalsOutcome {
     /// committed withdrawals, if any.
-    pub withdrawals: Option<Vec<Withdrawal>>,
+    pub withdrawals: Option<Withdrawals>,
     /// withdrawals root if any.
     pub withdrawals_root: Option<B256>,
 }
@@ -807,7 +807,10 @@ impl WithdrawalsOutcome {
 
     /// No withdrawals
     pub fn empty() -> Self {
-        Self { withdrawals: Some(vec![]), withdrawals_root: Some(EMPTY_WITHDRAWALS) }
+        Self {
+            withdrawals: Some(Withdrawals::default()),
+            withdrawals_root: Some(EMPTY_WITHDRAWALS),
+        }
     }
 }
 
@@ -820,7 +823,7 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
     db: &mut State<DB>,
     chain_spec: &ChainSpec,
     timestamp: u64,
-    withdrawals: Vec<Withdrawal>,
+    withdrawals: Withdrawals,
 ) -> RethResult<WithdrawalsOutcome> {
     if !chain_spec.is_shanghai_active_at_timestamp(timestamp) {
         return Ok(WithdrawalsOutcome::pre_shanghai())

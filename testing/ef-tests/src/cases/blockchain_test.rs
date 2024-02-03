@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy_rlp::Decodable;
 use reth_db::test_utils::create_test_rw_db;
-use reth_node_builder::EthEvmConfig;
+use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{BlockBody, SealedBlock};
 use reth_provider::{BlockWriter, HashingWriter, ProviderFactory};
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};

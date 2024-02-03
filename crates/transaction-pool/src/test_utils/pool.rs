@@ -85,7 +85,7 @@ impl<R: Rng> MockTransactionSimulator<R> {
         let senders = config.addresses(&mut rng);
         Self {
             base_fee: config.base_fee,
-            balances: senders.iter().copied().map(|a| (a, config.balance)).collect(),
+            balances: senders.iter().copied().map(|a| (a, rng.gen())).collect(),
             nonces: senders.iter().copied().map(|a| (a, 0)).collect(),
             senders,
             scenarios: config.scenarios,
@@ -151,8 +151,6 @@ impl<R: Rng> MockTransactionSimulator<R> {
 pub(crate) struct MockSimulatorConfig {
     /// How many senders to generate.
     pub(crate) num_senders: usize,
-    // TODO(mattsse): add a way to generate different balances
-    pub(crate) balance: U256,
     /// Scenarios to test
     pub(crate) scenarios: Vec<ScenarioType>,
     /// The start base fee
@@ -210,17 +208,29 @@ pub(crate) struct ExecutedScenarios {
     scenarios: Vec<ExecutedScenario>,
 }
 
-#[test]
-fn test_on_chain_nonce_scenario() {
-    let config = MockSimulatorConfig {
-        num_senders: 10,
-        balance: U256::from(200_000u64),
-        scenarios: vec![ScenarioType::OnchainNonce],
-        base_fee: 10,
-        tx_generator: MockTransactionDistribution::new(30, 10..100),
-    };
-    let mut simulator = MockTransactionSimulator::new(rand::thread_rng(), config);
-    let mut pool = MockPool::default();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::MockTransactionRatio;
 
-    simulator.next(&mut pool);
+    #[test]
+    fn test_on_chain_nonce_scenario() {
+        let transaction_ratio = MockTransactionRatio::new(30, 70, 0, 0);
+        let config = MockSimulatorConfig {
+            num_senders: 10,
+            scenarios: vec![ScenarioType::OnchainNonce],
+            base_fee: 10,
+            tx_generator: MockTransactionDistribution::new(
+                transaction_ratio,
+                10..100,
+                10..100,
+                100..110,
+                1..100,
+            ),
+        };
+        let mut simulator = MockTransactionSimulator::new(rand::thread_rng(), config);
+        let mut pool = MockPool::default();
+
+        simulator.next(&mut pool);
+    }
 }

@@ -118,6 +118,10 @@ name = "recover_ecdsa_crit"
 harness = false
 
 [[bench]]
+name = "validate_blob_tx"
+harness = false
+
+[[bench]]
 name = "trie_root"
 required-features = ["arbitrary", "test-utils"]
 harness = false

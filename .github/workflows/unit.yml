@@ -21,6 +21,8 @@ jobs:
     name: test / ${{ matrix.network }} (${{ matrix.partition }}/2)
     runs-on:
       group: Reth
+    env:
+      RUST_BACKTRACE: 1
     strategy:
       matrix:
         partition: [1, 2]
@@ -47,6 +49,7 @@ jobs:
       group: Reth
     env:
       RUST_LOG: info,sync=error
+      RUST_BACKTRACE: 1
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -68,6 +71,8 @@ jobs:
     name: doc tests (${{ matrix.network }})
     runs-on:
       group: Reth
+    env:
+      RUST_BACKTRACE: 1
     timeout-minutes: 30
     strategy:
       matrix:

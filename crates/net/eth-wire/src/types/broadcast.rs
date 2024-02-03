@@ -5,9 +5,9 @@ use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{Block, Bytes, TransactionSigned, B256, U128};
+use reth_primitives::{Block, Bytes, TransactionSigned, TxHash, B256, U128};
 
-use std::sync::Arc;
+use std::{collections::HashMap, mem, sync::Arc};
 
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
@@ -159,6 +159,14 @@ impl NewPooledTransactionHashes {
         }
     }
 
+    /// Returns an immutable reference to transaction hashes.
+    pub fn hashes(&self) -> &Vec<B256> {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => &msg.0,
+            NewPooledTransactionHashes::Eth68(msg) => &msg.hashes,
+        }
+    }
+
     /// Returns a mutable reference to transaction hashes.
     pub fn hashes_mut(&mut self) -> &mut Vec<B256> {
         match self {
@@ -212,12 +220,43 @@ impl NewPooledTransactionHashes {
         }
     }
 
-    /// Returns an iterator over tx hashes zipped with corresponding eth68 metadata if this is
-    /// an eth68 message.
+    /// Returns an immutable reference to the inner type if this an eth68 announcement.
     pub fn as_eth68(&self) -> Option<&NewPooledTransactionHashes68> {
         match self {
             NewPooledTransactionHashes::Eth66(_) => None,
             NewPooledTransactionHashes::Eth68(msg) => Some(msg),
+        }
+    }
+
+    /// Returns a mutable reference to the inner type if this an eth68 announcement.
+    pub fn as_eth68_mut(&mut self) -> Option<&mut NewPooledTransactionHashes68> {
+        match self {
+            NewPooledTransactionHashes::Eth66(_) => None,
+            NewPooledTransactionHashes::Eth68(msg) => Some(msg),
+        }
+    }
+
+    /// Returns a mutable reference to the inner type if this an eth66 announcement.
+    pub fn as_eth66_mut(&mut self) -> Option<&mut NewPooledTransactionHashes66> {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => Some(msg),
+            NewPooledTransactionHashes::Eth68(_) => None,
+        }
+    }
+
+    /// Returns the inner type if this an eth68 announcement.
+    pub fn take_eth68(&mut self) -> Option<NewPooledTransactionHashes68> {
+        match self {
+            NewPooledTransactionHashes::Eth66(_) => None,
+            NewPooledTransactionHashes::Eth68(msg) => Some(mem::take(msg)),
+        }
+    }
+
+    /// Returns the inner type if this an eth66 announcement.
+    pub fn take_eth66(&mut self) -> Option<NewPooledTransactionHashes66> {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => Some(mem::take(msg)),
+            NewPooledTransactionHashes::Eth68(_) => None,
         }
     }
 }
@@ -398,6 +437,99 @@ impl Decodable for NewPooledTransactionHashes68 {
         }
 
         Ok(msg)
+    }
+}
+
+/// Interface for handling announcement data in filters in the transaction manager and transaction
+/// pool. Note: this trait may disappear when distinction between eth66 and eth68 hashes is more
+/// clearly defined, see <https://github.com/paradigmxyz/reth/issues/6148>.
+pub trait HandleAnnouncement {
+    /// The announcement contains no entries.
+    fn is_empty(&self) -> bool;
+
+    /// Retain only entries for which the hash in the entry, satisfies a given predicate.
+    fn retain_by_hash(&mut self, f: impl FnMut(TxHash) -> bool);
+}
+
+impl HandleAnnouncement for NewPooledTransactionHashes {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn retain_by_hash(&mut self, f: impl FnMut(TxHash) -> bool) {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => msg.retain_by_hash(f),
+            NewPooledTransactionHashes::Eth68(msg) => msg.retain_by_hash(f),
+        }
+    }
+}
+
+impl HandleAnnouncement for NewPooledTransactionHashes68 {
+    fn is_empty(&self) -> bool {
+        self.hashes.is_empty()
+    }
+
+    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
+        let mut indices_to_remove = vec![];
+        for (i, &hash) in self.hashes.iter().enumerate() {
+            if !f(hash) {
+                indices_to_remove.push(i);
+            }
+        }
+
+        for index in indices_to_remove.into_iter().rev() {
+            self.hashes.remove(index);
+            self.types.remove(index);
+            self.sizes.remove(index);
+        }
+    }
+}
+
+impl HandleAnnouncement for NewPooledTransactionHashes66 {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
+        let mut indices_to_remove = vec![];
+        for (i, &hash) in self.0.iter().enumerate() {
+            if !f(hash) {
+                indices_to_remove.push(i);
+            }
+        }
+
+        for index in indices_to_remove.into_iter().rev() {
+            self.0.remove(index);
+        }
+    }
+}
+
+/// Announcement data that has been validated according to the configured network. For an eth68
+/// announcement, values of the map are `Some((u8, usize))` - the tx metadata. For an eth66
+/// announcement, values of the map are `None`.
+pub type ValidAnnouncementData = HashMap<TxHash, Option<(u8, usize)>>;
+
+impl HandleAnnouncement for ValidAnnouncementData {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
+        self.retain(|&hash, _| f(hash))
+    }
+}
+
+/// Hashes extracted from valid announcement data. For an eth68 announcement, this means the eth68
+/// metadata should have been cached already.
+pub type ValidTxHashes = Vec<TxHash>;
+
+impl HandleAnnouncement for ValidTxHashes {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
+        self.retain(|&hash| f(hash))
     }
 }
 

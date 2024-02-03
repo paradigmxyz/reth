@@ -34,7 +34,7 @@ pub(crate) mod node_iter;
 
 /// In-memory hashed state.
 mod state;
-pub use state::{HashedPostState, HashedStorage};
+pub use state::*;
 
 /// Merkle proof generation.
 pub mod proof;

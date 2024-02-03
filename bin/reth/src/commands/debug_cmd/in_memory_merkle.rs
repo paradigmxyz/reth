@@ -17,7 +17,7 @@ use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_interfaces::executor::BlockValidationError;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_node_builder::EthEvmConfig;
+use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
 use reth_provider::{
     AccountExtReader, BlockWriter, ExecutorFactory, HashingWriter, HeaderProvider,
@@ -25,7 +25,7 @@ use reth_provider::{
     StorageReader,
 };
 use reth_tasks::TaskExecutor;
-use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, updates::TrieKey, StateRoot};
+use reth_trie::{updates::TrieKey, StateRoot};
 use std::{
     net::{SocketAddr, SocketAddrV4},
     path::PathBuf,
@@ -181,15 +181,8 @@ impl Command {
         let block_state = executor.take_output_state();
 
         // Unpacked `BundleState::state_root_slow` function
-        let hashed_post_state = block_state.hash_state_slow().sorted();
-        let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
-        let tx = provider.tx_ref();
-        let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &hashed_post_state);
-        let (in_memory_state_root, in_memory_updates) = StateRoot::from_tx(tx)
-            .with_hashed_cursor_factory(hashed_cursor_factory)
-            .with_changed_account_prefixes(account_prefix_set)
-            .with_changed_storage_prefixes(storage_prefix_set)
-            .root_with_updates()?;
+        let (in_memory_state_root, in_memory_updates) =
+            block_state.hash_state_slow().state_root_with_updates(provider.tx_ref())?;
 
         if in_memory_state_root == block.state_root {
             info!(target: "reth::cli", state_root = ?in_memory_state_root, "Computed in-memory state root matches");

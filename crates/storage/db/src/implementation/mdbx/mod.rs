@@ -363,6 +363,7 @@ mod tests {
         AccountChangeSet,
     };
     use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
+    use reth_libmdbx::Error;
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};
     use std::{path::Path, str::FromStr, sync::Arc};
     use tempfile::TempDir;
@@ -725,7 +726,7 @@ mod tests {
         assert_eq!(
             cursor.insert(key_to_insert, B256::ZERO),
             Err(DatabaseWriteError {
-                code: -30799,
+                info: Error::KeyExist.into(),
                 operation: DatabaseWriteOperation::CursorInsert,
                 table_name: CanonicalHeaders::NAME,
                 key: key_to_insert.encode().into(),
@@ -869,7 +870,7 @@ mod tests {
         assert_eq!(
             cursor.append(key_to_append, B256::ZERO),
             Err(DatabaseWriteError {
-                code: -30418,
+                info: Error::KeyMismatch.into(),
                 operation: DatabaseWriteOperation::CursorAppend,
                 table_name: CanonicalHeaders::NAME,
                 key: key_to_append.encode().into(),
@@ -951,7 +952,7 @@ mod tests {
                 AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
             ),
             Err(DatabaseWriteError {
-                code: -30418,
+                info: Error::KeyMismatch.into(),
                 operation: DatabaseWriteOperation::CursorAppendDup,
                 table_name: AccountChangeSet::NAME,
                 key: transition_id.encode().into(),
@@ -964,7 +965,7 @@ mod tests {
                 AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
             ),
             Err(DatabaseWriteError {
-                code: -30418,
+                info: Error::KeyMismatch.into(),
                 operation: DatabaseWriteOperation::CursorAppend,
                 table_name: AccountChangeSet::NAME,
                 key: (transition_id - 1).encode().into(),

@@ -43,7 +43,7 @@ async fn test_large_tx_req() {
 
     // insert generated txs into responding peer's pool
     let pool1 = testing_pool();
-    pool1.add_external_transactions(txs).await.unwrap();
+    pool1.add_external_transactions(txs).await;
 
     // install transactions managers
     net.peers_mut()[0].install_transactions_manager(testing_pool());

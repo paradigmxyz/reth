@@ -32,6 +32,7 @@ use std::{
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
 };
+use tracing::trace;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A pool that manages transactions.
@@ -638,7 +639,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         hashes.into_iter().filter_map(|hash| self.remove_transaction_by_hash(&hash)).collect()
     }
 
-    /// Remove the transaction from the entire pool.
+    /// Remove the transaction from the __entire__ pool.
     ///
     /// This includes the total set of transaction and the subpool it currently resides in.
     fn remove_transaction(
@@ -704,7 +705,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    /// Removes _only_ the descendants of the given transaction from the entire pool.
+    /// Removes _only_ the descendants of the given transaction from the __entire__ pool.
     ///
     /// All removed transactions are added to the `removed` vec.
     fn remove_descendants(
@@ -771,6 +772,8 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// If the current size exceeds the given bounds, the worst transactions are evicted from the
     /// pool and returned.
+    ///
+    /// This returns all transactions that were removed from the entire pool.
     pub(crate) fn discard_worst(&mut self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
 
@@ -783,9 +786,37 @@ impl<T: TransactionOrdering> TxPool<T> {
                         .$limit
                         .is_exceeded($this.$pool.len(), $this.$pool.size())
                     {
-                        removed = $this.$pool.truncate_pool($this.config.$limit.clone());
-                        for tx in removed.clone().iter() {
-                            $this.remove_descendants(tx.id(), &mut $removed);
+                        trace!(
+                            "discarding transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
+                            stringify!($pool),
+                            $this.config.$limit,
+                            $this.$pool.size(),
+                            $this.$pool.len(),
+                        );
+
+                        // 1. first remove the worst transaction from the subpool
+                        let removed_from_subpool = $this.$pool.truncate_pool($this.config.$limit.clone());
+
+                        trace!(
+                            "removed {} transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
+                            removed_from_subpool.len(),
+                            stringify!($pool),
+                            $this.config.$limit,
+                            $this.$pool.size(),
+                            $this.$pool.len()
+                        );
+
+                        // 2. remove all transactions from the total set
+                        for tx in removed_from_subpool {
+                            $this.all_transactions.remove_transaction(tx.id());
+
+                            let id = *tx.id();
+
+                            // keep track of removed transaction
+                            removed.push(tx);
+
+                            // 3. remove all its descendants from the entire pool
+                            $this.remove_descendants(&id, &mut $removed);
                         }
                     }
 
@@ -1808,10 +1839,13 @@ impl SenderInfo {
 
 #[cfg(test)]
 mod tests {
+    use reth_primitives::{address, TxType};
+
     use super::*;
     use crate::{
-        test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
+        test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         traits::TransactionOrigin,
+        SubPoolLimit,
     };
 
     #[test]
@@ -2663,5 +2697,145 @@ mod tests {
         let outcome = pool.update_accounts(changed_senders);
         assert_eq!(outcome.discarded.len(), 1);
         assert_eq!(pool.pending_pool.len(), 1);
+    }
+
+    #[test]
+    fn discard_with_large_blob_txs() {
+        // init tracing
+        reth_tracing::init_test_tracing();
+
+        // this test adds large txs to the parked pool, then attempting to discard worst
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let default_limits = pool.config.blob_limit;
+
+        // create a chain of transactions by sender A
+        // make sure they are all one over half the limit
+        let a_sender = address!("000000000000000000000000000000000000000a");
+
+        // set the base fee of the pool
+        let mut block_info = pool.block_info();
+        block_info.pending_blob_fee = Some(100);
+        block_info.pending_basefee = 100;
+
+        // update
+        pool.set_block_info(block_info);
+
+        // 2 txs, that should put the pool over the size limit but not max txs
+        let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxType::EIP4844)
+            .into_iter()
+            .map(|mut tx| {
+                tx.set_size(default_limits.max_size / 2 + 1);
+                tx.set_max_fee((block_info.pending_basefee - 1).into());
+                tx
+            })
+            .collect::<Vec<_>>();
+
+        // add all the transactions to the parked pool
+        for tx in a_txs {
+            pool.add_transaction(f.validated(tx), U256::from(1_000), 0).unwrap();
+        }
+
+        // truncate the pool, it should remove at least one transaction
+        let removed = pool.discard_worst();
+        assert_eq!(removed.len(), 1);
+    }
+
+    #[test]
+    fn discard_with_parked_large_txs() {
+        // init tracing
+        reth_tracing::init_test_tracing();
+
+        // this test adds large txs to the parked pool, then attempting to discard worst
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let default_limits = pool.config.queued_limit;
+
+        // create a chain of transactions by sender A
+        // make sure they are all one over half the limit
+        let a_sender = address!("000000000000000000000000000000000000000a");
+
+        // set the base fee of the pool
+        let pool_base_fee = 100;
+        pool.update_basefee(pool_base_fee);
+
+        // 2 txs, that should put the pool over the size limit but not max txs
+        let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxType::EIP1559)
+            .into_iter()
+            .map(|mut tx| {
+                tx.set_size(default_limits.max_size / 2 + 1);
+                tx.set_max_fee((pool_base_fee - 1).into());
+                tx
+            })
+            .collect::<Vec<_>>();
+
+        // add all the transactions to the parked pool
+        for tx in a_txs {
+            pool.add_transaction(f.validated(tx), U256::from(1_000), 0).unwrap();
+        }
+
+        // truncate the pool, it should remove at least one transaction
+        let removed = pool.discard_worst();
+        assert_eq!(removed.len(), 1);
+    }
+
+    #[test]
+    fn discard_at_capacity() {
+        let mut f = MockTransactionFactory::default();
+        let queued_limit = SubPoolLimit::new(1000, usize::MAX);
+        let mut pool =
+            TxPool::new(MockOrdering::default(), PoolConfig { queued_limit, ..Default::default() });
+
+        // insert a bunch of transactions into the queued pool
+        for _ in 0..queued_limit.max_txs {
+            let tx = MockTransaction::eip1559().inc_price_by(10).inc_nonce();
+            let validated = f.validated(tx.clone());
+            let _id = *validated.id();
+            pool.add_transaction(validated, U256::from(1_000), 0).unwrap();
+        }
+
+        let size = pool.size();
+        assert_eq!(size.queued, queued_limit.max_txs);
+
+        for _ in 0..queued_limit.max_txs {
+            let tx = MockTransaction::eip1559().inc_price_by(10).inc_nonce();
+            let validated = f.validated(tx.clone());
+            let _id = *validated.id();
+            pool.add_transaction(validated, U256::from(1_000), 0).unwrap();
+
+            pool.discard_worst();
+            pool.assert_invariants();
+            assert!(pool.size().queued <= queued_limit.max_txs);
+        }
+    }
+
+    #[test]
+    fn discard_blobs_at_capacity() {
+        let mut f = MockTransactionFactory::default();
+        let blob_limit = SubPoolLimit::new(1000, usize::MAX);
+        let mut pool =
+            TxPool::new(MockOrdering::default(), PoolConfig { blob_limit, ..Default::default() });
+        pool.all_transactions.pending_fees.blob_fee = 10000;
+        // insert a bunch of transactions into the queued pool
+        for _ in 0..blob_limit.max_txs {
+            let tx = MockTransaction::eip4844().inc_price_by(100).with_blob_fee(100);
+            let validated = f.validated(tx.clone());
+            let _id = *validated.id();
+            pool.add_transaction(validated, U256::from(1_000), 0).unwrap();
+        }
+
+        let size = pool.size();
+        assert_eq!(size.blob, blob_limit.max_txs);
+
+        for _ in 0..blob_limit.max_txs {
+            let tx = MockTransaction::eip4844().inc_price_by(100).with_blob_fee(100);
+            let validated = f.validated(tx.clone());
+            let _id = *validated.id();
+            pool.add_transaction(validated, U256::from(1_000), 0).unwrap();
+
+            pool.discard_worst();
+            pool.assert_invariants();
+            assert!(pool.size().blob <= blob_limit.max_txs);
+        }
     }
 }

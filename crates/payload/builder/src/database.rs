@@ -7,7 +7,6 @@ use reth_primitives::{
     },
     U256,
 };
-
 use std::{
     cell::RefCell,
     collections::{hash_map::Entry, HashMap},
@@ -91,17 +90,10 @@ impl<'a, DB: DatabaseRef> Database for CachedReadsDbMut<'a, DB> {
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         match self.cached.accounts.entry(address) {
-            Entry::Occupied(mut acc_entry) => {
-                let acc_entry = acc_entry.get_mut();
-                match acc_entry.storage.entry(index) {
-                    Entry::Occupied(entry) => Ok(*entry.get()),
-                    Entry::Vacant(entry) => {
-                        let slot = self.db.storage_ref(address, index)?;
-                        entry.insert(slot);
-                        Ok(slot)
-                    }
-                }
-            }
+            Entry::Occupied(mut acc_entry) => match acc_entry.get_mut().storage.entry(index) {
+                Entry::Occupied(entry) => Ok(*entry.get()),
+                Entry::Vacant(entry) => Ok(*entry.insert(self.db.storage_ref(address, index)?)),
+            },
             Entry::Vacant(acc_entry) => {
                 // acc needs to be loaded for us to access slots.
                 let info = self.db.basic_ref(address)?;

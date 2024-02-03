@@ -17,12 +17,6 @@ pub use engine::EthEngineTypes;
 pub mod evm;
 pub use evm::EthEvmConfig;
 
-/// Exports optimism-specific types that implement traits in [reth_node_api].
-#[cfg(feature = "optimism")]
-pub mod optimism;
-#[cfg(feature = "optimism")]
-pub use optimism::{OptimismEngineTypes, OptimismEvmConfig};
-
 /// Node event hooks.
 pub mod hooks;
 

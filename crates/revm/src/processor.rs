@@ -213,7 +213,7 @@ where
             block.timestamp,
             total_difficulty,
             &block.ommers,
-            block.withdrawals.as_deref(),
+            block.withdrawals.as_ref(),
         );
 
         // Irregular state change at Ethereum DAO hardfork
@@ -556,7 +556,7 @@ pub fn verify_receipt<'a>(
 mod tests {
     use super::*;
     use reth_interfaces::provider::ProviderResult;
-    use reth_node_builder::EthEvmConfig;
+    use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},

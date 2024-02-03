@@ -8,7 +8,7 @@ use reth_primitives::{
     proofs::{state_root_unhashed, storage_root_unhashed},
     revm::compat::into_reth_acc,
     Address, BlockNumber, Bytes, Header, Log, Receipt, Receipts, SealedBlock,
-    SealedBlockWithSenders, TxType, Withdrawal, B256, U256,
+    SealedBlockWithSenders, TxType, Withdrawal, Withdrawals, B256, U256,
 };
 use revm::{
     db::BundleState,
@@ -89,7 +89,7 @@ pub fn genesis() -> SealedBlock {
             .seal(B256::ZERO),
         body: vec![],
         ommers: vec![],
-        withdrawals: Some(vec![]),
+        withdrawals: Some(Withdrawals::default()),
     }
 }
 
@@ -152,7 +152,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
     );
 
     let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
-    block.withdrawals = Some(vec![Withdrawal::default()]);
+    block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = block.header.clone().unseal();
     header.number = number;
     header.state_root = state_root;
@@ -212,7 +212,7 @@ fn block2(
     );
 
     let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
-    block.withdrawals = Some(vec![Withdrawal::default()]);
+    block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = block.header.clone().unseal();
     header.number = number;
     header.state_root = state_root;

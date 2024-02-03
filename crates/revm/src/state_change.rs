@@ -2,7 +2,7 @@ use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     constants::SYSTEM_ADDRESS, revm::env::fill_tx_env_with_beacon_root_contract_call, Address,
-    ChainSpec, Header, Withdrawal, B256, U256,
+    ChainSpec, Header, Withdrawals, B256, U256,
 };
 use revm::{Database, DatabaseCommit, EVM};
 use std::collections::HashMap;
@@ -21,7 +21,7 @@ pub fn post_block_balance_increments(
     block_timestamp: u64,
     total_difficulty: U256,
     ommers: &[Header],
-    withdrawals: Option<&[Withdrawal]>,
+    withdrawals: Option<&Withdrawals>,
 ) -> HashMap<Address, u128> {
     let mut balance_increments = HashMap::new();
 
@@ -124,7 +124,7 @@ where
 pub fn post_block_withdrawals_balance_increments(
     chain_spec: &ChainSpec,
     block_timestamp: u64,
-    withdrawals: &[Withdrawal],
+    withdrawals: &Withdrawals,
 ) -> HashMap<Address, u128> {
     let mut balance_increments = HashMap::with_capacity(withdrawals.len());
     insert_post_block_withdrawals_balance_increments(
@@ -144,13 +144,13 @@ pub fn post_block_withdrawals_balance_increments(
 pub fn insert_post_block_withdrawals_balance_increments(
     chain_spec: &ChainSpec,
     block_timestamp: u64,
-    withdrawals: Option<&[Withdrawal]>,
+    withdrawals: Option<&Withdrawals>,
     balance_increments: &mut HashMap<Address, u128>,
 ) {
     // Process withdrawals
     if chain_spec.is_shanghai_active_at_timestamp(block_timestamp) {
         if let Some(withdrawals) = withdrawals {
-            for withdrawal in withdrawals {
+            for withdrawal in withdrawals.iter() {
                 if withdrawal.amount > 0 {
                     *balance_increments.entry(withdrawal.address).or_default() +=
                         withdrawal.amount_wei();

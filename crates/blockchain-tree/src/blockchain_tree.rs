@@ -1239,7 +1239,7 @@ mod tests {
     use linked_hash_set::LinkedHashSet;
     use reth_db::{tables, test_utils::TempDatabase, transaction::DbTxMut, DatabaseEnv};
     use reth_interfaces::test_utils::TestConsensus;
-    use reth_node_builder::EthEvmConfig;
+    use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH, ETHEREUM_BLOCK_GAS_LIMIT},
         keccak256,
@@ -1248,7 +1248,7 @@ mod tests {
         stage::StageCheckpoint,
         Account, Address, ChainSpecBuilder, Genesis, GenesisAccount, Header, Signature,
         Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
-        B256, MAINNET,
+        Withdrawals, B256, MAINNET,
     };
     use reth_provider::{
         test_utils::{
@@ -1492,7 +1492,7 @@ mod tests {
                     .seal_slow(),
                     body: body.clone().into_iter().map(|tx| tx.into_signed()).collect(),
                     ommers: Vec::new(),
-                    withdrawals: Some(Vec::new()),
+                    withdrawals: Some(Withdrawals::default()),
                 },
                 body.iter().map(|tx| tx.signer()).collect(),
             )

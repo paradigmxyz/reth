@@ -310,7 +310,7 @@ impl DbTxMut for Tx<RW> {
             |tx| {
                 tx.put(self.get_dbi::<T>()?, key.as_ref(), value, WriteFlags::UPSERT).map_err(|e| {
                     DatabaseWriteError {
-                        code: e.into(),
+                        info: e.into(),
                         operation: DatabaseWriteOperation::Put,
                         table_name: T::NAME,
                         key: key.into(),
@@ -383,7 +383,7 @@ mod tests {
 
         assert_eq!(
             tx.get::<tables::Transactions>(0).err(),
-            Some(DatabaseError::Open(reth_libmdbx::Error::NotFound.to_err_code()))
+            Some(DatabaseError::Open(reth_libmdbx::Error::NotFound.into()))
         ); // Transaction is not timeout-ed
         assert!(!tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed)); // Backtrace is not recorded
     }
@@ -402,7 +402,7 @@ mod tests {
 
         assert_eq!(
             tx.get::<tables::Transactions>(0).err(),
-            Some(DatabaseError::Open(reth_libmdbx::Error::ReadTransactionAborted.to_err_code()))
+            Some(DatabaseError::Open(reth_libmdbx::Error::ReadTransactionAborted.into()))
         ); // Transaction is timeout-ed
         assert!(tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed)); // Backtrace is recorded
     }
