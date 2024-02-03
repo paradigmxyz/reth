@@ -9,10 +9,7 @@ use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
 use schnellru::{ByLength, Unlimited};
 use std::{
-    mem,
-    num::NonZeroUsize,
-    pin::Pin,
-    task::{Context, Poll},
+    collections::HashSet, mem, num::NonZeroUsize, pin::Pin, task::{Context, Poll}
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tracing::{debug, trace};
@@ -153,6 +150,48 @@ impl TransactionFetcher {
         }
 
         None
+    }
+
+        /// Returns any idle peer for any buffered unknown hash, and writes that hash to the request's
+    /// hashes buffer that is passed as parameter.
+    ///
+    /// Loops through the fallback peers of each buffered hashes, until an idle fallback peer is
+    /// found. As a side effect, dead fallback peers are filtered out for visited hashes.
+    fn pop_any_idle_peer(&mut self, hashes: &mut Vec<TxHash>, peers: &HashSet<PeerId>) -> Option<PeerId> {
+        let mut ended_sessions = vec![];
+        let mut buffered_hashes_iter = self.hashes_pending_fetch.iter();
+
+        let idle_peer = loop {
+            let Some(&hash) = buffered_hashes_iter.next() else { break None };
+
+            let idle_peer =
+                self.get_idle_peer_for(hash, &mut ended_sessions, |peer_id| {
+                    peers.contains(&peer_id)
+                });
+            for peer_id in ended_sessions.drain(..) {
+                let peers = self
+                    .hashes_unknown_to_pool
+                    .peek_mut(&hash)?
+                    .fallback_peers_mut();
+                _ = peers.remove(&peer_id);
+            }
+            if idle_peer.is_some() {
+                hashes.push(hash);
+                break idle_peer
+            }
+        };
+
+        let peer_id = &idle_peer?;
+        let hash = hashes.first()?;
+
+        let peers = self.hashes_unknown_to_pool.get(hash)?.fallback_peers_mut();
+        // pop peer from fallback peers
+        _ = peers.remove(peer_id);
+        // pop hash that is loaded in request buffer from buffered hashes
+        drop(buffered_hashes_iter);
+        _ = self.hashes_pending_fetch.remove(hash);
+
+        idle_peer
     }
 
     /// Packages hashes for [`GetPooledTxRequest`] up to limit as defined by protocol version 66.
