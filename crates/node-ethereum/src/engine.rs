@@ -7,7 +7,7 @@ use reth_primitives::ChainSpec;
 use reth_rpc_types::engine::PayloadAttributes as EthPayloadAttributes;
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Deserialize)]
 #[non_exhaustive]
 pub struct EthEngineTypes;
 
