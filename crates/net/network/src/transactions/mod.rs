@@ -783,7 +783,7 @@ where
     /// found. As a side effect, dead fallback peers are filtered out for visited hashes.
     fn pop_any_idle_peer(&mut self, hashes: &mut Vec<TxHash>) -> Option<PeerId> {
         let mut ended_sessions = vec![];
-        let mut buffered_hashes_iter = self.transaction_fetcher.buffered_hashes.iter();
+        let mut buffered_hashes_iter = self.transaction_fetcher.hashes_pending_fetch.iter();
         let peers = &self.peers;
 
         let idle_peer = loop {
@@ -794,7 +794,7 @@ where
                     peers.contains_key(&peer_id)
                 });
             for peer_id in ended_sessions.drain(..) {
-                let (_, peers) = self.transaction_fetcher.unknown_hashes.peek_mut(&hash)?;
+                let (_, peers) = self.transaction_fetcher.hashes_unknown_to_pool.peek_mut(&hash)?;
                 _ = peers.remove(&peer_id);
             }
             if idle_peer.is_some() {
@@ -806,12 +806,12 @@ where
         let peer_id = &idle_peer?;
         let hash = hashes.first()?;
 
-        let (_, peers) = self.transaction_fetcher.unknown_hashes.get(hash)?;
+        let (_, peers) = self.transaction_fetcher.hashes_unknown_to_pool.get(hash)?;
         // pop peer from fallback peers
         _ = peers.remove(peer_id);
         // pop hash that is loaded in request buffer from buffered hashes
         drop(buffered_hashes_iter);
-        _ = self.transaction_fetcher.buffered_hashes.remove(hash);
+        _ = self.transaction_fetcher.hashes_pending_fetch.remove(hash);
 
         idle_peer
     }
@@ -1780,10 +1780,10 @@ mod tests {
         let retries = 1;
         let mut backups = default_cache();
         backups.insert(peer_id_1);
-        tx_fetcher.unknown_hashes.insert(seen_hashes[1], (retries, backups.clone()));
-        tx_fetcher.unknown_hashes.insert(seen_hashes[0], (retries, backups));
-        tx_fetcher.buffered_hashes.insert(seen_hashes[1]);
-        tx_fetcher.buffered_hashes.insert(seen_hashes[0]);
+        tx_fetcher.hashes_unknown_to_pool.insert(seen_hashes[1], (retries, backups.clone()));
+        tx_fetcher.hashes_unknown_to_pool.insert(seen_hashes[0], (retries, backups));
+        tx_fetcher.hashes_pending_fetch.insert(seen_hashes[1]);
+        tx_fetcher.hashes_pending_fetch.insert(seen_hashes[0]);
 
         // peer_1 is idle
         assert!(tx_fetcher.is_idle(peer_id_1));
@@ -1793,7 +1793,7 @@ mod tests {
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
-        assert!(tx_fetcher.buffered_hashes.is_empty());
+        assert!(tx_fetcher.hashes_pending_fetch.is_empty());
         // as long as request is in inflight peer_1 is not idle
         assert!(!tx_fetcher.is_idle(peer_id_1));
 
@@ -1818,7 +1818,7 @@ mod tests {
         // request has resolved, peer_1 is idle again
         assert!(tx_fetcher.is_idle(peer_id));
         // failing peer_1's request buffers requested hashes for retry
-        assert_eq!(tx_fetcher.buffered_hashes.len(), 2);
+        assert_eq!(tx_fetcher.hashes_pending_fetch.len(), 2);
 
         let (peer_2, mut to_mock_session_rx) = new_mock_session(peer_id_2, eth_version);
         tx_manager.peers.insert(peer_id_2, peer_2);
@@ -1831,9 +1831,9 @@ mod tests {
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
         // since hashes are already seen, no changes to length of unknown hashes
-        assert_eq!(tx_fetcher.unknown_hashes.len(), 2);
+        assert_eq!(tx_fetcher.hashes_unknown_to_pool.len(), 2);
         // but hashes are taken out of buffer and packed into request to peer_2
-        assert!(tx_fetcher.buffered_hashes.is_empty());
+        assert!(tx_fetcher.hashes_pending_fetch.is_empty());
 
         // mock session of peer_2 receives request
         let req = to_mock_session_rx
@@ -1850,7 +1850,7 @@ mod tests {
 
         // `MAX_REQUEST_RETRIES_PER_TX_HASH`, 2, for hashes reached however this time won't be
         // buffered for retry
-        assert!(tx_fetcher.buffered_hashes.is_empty());
+        assert!(tx_fetcher.hashes_pending_fetch.is_empty());
     }
 
     /*#[tokio::test]

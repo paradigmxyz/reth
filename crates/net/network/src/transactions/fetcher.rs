@@ -61,10 +61,10 @@ pub(super) struct TransactionFetcher {
     pub(super) inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
     /// Hashes that are awaiting an idle peer so they can be fetched.
     // todo: store buffered eth68 and eth66 hashes separately
-    pub(super) buffered_hashes: LruCache<TxHash>,
+    pub(super) hashes_pending_fetch: LruCache<TxHash>,
     /// Tracks all hashes that are currently being fetched or are buffered, mapping them to
     /// request retries and last recently seen fallback peers (max one request try for any peer).
-    pub(super) unknown_hashes: LruMap<TxHash, (u8, LruCache<PeerId>), Unlimited>,
+    pub(super) hashes_unknown_to_pool: LruMap<TxHash, (u8, LruCache<PeerId>), Unlimited>,
     /// Size metadata for unknown eth68 hashes.
     pub(super) eth68_meta: LruMap<TxHash, usize, Unlimited>,
     /// Filter for valid eth68 announcements.
@@ -81,9 +81,9 @@ impl TransactionFetcher {
         I: IntoIterator<Item = TxHash>,
     {
         for hash in hashes {
-            self.unknown_hashes.remove(&hash);
+            self.hashes_unknown_to_pool.remove(&hash);
             self.eth68_meta.remove(&hash);
-            self.buffered_hashes.remove(&hash);
+            self.hashes_pending_fetch.remove(&hash);
         }
     }
 
@@ -121,7 +121,7 @@ impl TransactionFetcher {
         ended_sessions_buf: &mut Vec<PeerId>,
         is_session_active: impl Fn(PeerId) -> bool,
     ) -> Option<PeerId> {
-        let (_, peers) = self.unknown_hashes.peek(&hash)?;
+        let (_, peers) = self.hashes_unknown_to_pool.peek(&hash)?;
 
         for &peer_id in peers.iter() {
             if self.is_idle(peer_id) {
@@ -242,7 +242,7 @@ impl TransactionFetcher {
 
     pub(super) fn buffer_hashes_for_retry(&mut self, mut hashes: Vec<TxHash>) {
         // It could be that the txns have been received over broadcast in the time being.
-        hashes.retain(|hash| self.unknown_hashes.get(hash).is_some());
+        hashes.retain(|hash| self.hashes_unknown_to_pool.get(hash).is_some());
 
         self.buffer_hashes(hashes, None)
     }
@@ -256,13 +256,13 @@ impl TransactionFetcher {
         for hash in hashes {
             // todo: enforce by adding new types UnknownTxHash66 and UnknownTxHash68
             debug_assert!(
-                self.unknown_hashes.peek(&hash).is_some(),
+                self.hashes_unknown_to_pool.peek(&hash).is_some(),
                 "`%hash` in `@buffered_hashes` that's not in `@unknown_hashes`, `@buffered_hashes` should be a subset of keys in `@unknown_hashes`, broken invariant `@buffered_hashes` and `@unknown_hashes`,
 `%hash`: {hash},
 `@self`: {self:?}",
             );
 
-            let Some((retries, peers)) = self.unknown_hashes.get(&hash) else { return };
+            let Some((retries, peers)) = self.hashes_unknown_to_pool.get(&hash) else { return };
 
             if let Some(peer_id) = fallback_peer {
                 // peer has not yet requested hash
@@ -290,7 +290,7 @@ impl TransactionFetcher {
                 }
                 *retries += 1;
             }
-            if let (_, Some(evicted_hash)) = self.buffered_hashes.insert_and_get_evicted(hash) {
+            if let (_, Some(evicted_hash)) = self.hashes_pending_fetch.insert_and_get_evicted(hash) {
                 max_retried_and_evicted_hashes.push(evicted_hash);
             }
         }
@@ -318,9 +318,9 @@ impl TransactionFetcher {
         // filter out inflight hashes, and register the peer as fallback for all inflight hashes
         new_announced_hashes.retain_by_hash(|hash| {
             // occupied entry
-            if let Some((_retries, ref mut backups)) = self.unknown_hashes.peek_mut(&hash) {
+            if let Some((_retries, ref mut backups)) = self.hashes_unknown_to_pool.peek_mut(&hash) {
                 // hash has been seen but is not inflight
-                if self.buffered_hashes.remove(&hash) {
+                if self.hashes_pending_fetch.remove(&hash) {
                     return true
                 }
                 // hash has been seen and is in flight. store peer as fallback peer.
@@ -353,7 +353,7 @@ impl TransactionFetcher {
             // todo: allow `MAX_ALTERNATIVE_PEERS_PER_TX` to be zero
             let limit = NonZeroUsize::new(MAX_ALTERNATIVE_PEERS_PER_TX.into()).expect("MAX_ALTERNATIVE_PEERS_PER_TX should be non-zero");
 
-            if self.unknown_hashes.get_or_insert(*hash, ||
+            if self.hashes_unknown_to_pool.get_or_insert(*hash, ||
                 (0, LruCache::new(limit))
             ).is_none() {
 
@@ -433,7 +433,7 @@ impl TransactionFetcher {
         debug_assert!(
             || -> bool {
                 for hash in &new_announced_hashes {
-                    if self.buffered_hashes.contains(hash) {
+                    if self.hashes_pending_fetch.contains(hash) {
                         return false
                     }
                 }
@@ -514,7 +514,7 @@ impl TransactionFetcher {
             acc_size_response, hashes, self
         );
 
-        for hash in self.buffered_hashes.iter() {
+        for hash in self.hashes_pending_fetch.iter() {
             // fill request to 2/3 of the soft limit for the response size, or until the number of
             // hashes reaches the soft limit number for a request (like in eth66), whatever
             // happens first
@@ -549,14 +549,14 @@ impl TransactionFetcher {
             }
 
             debug_assert!(
-                self.unknown_hashes.get(hash).is_some(),
+                self.hashes_unknown_to_pool.get(hash).is_some(),
                 "can't find buffered `%hash` in `@unknown_hashes`, `@buffered_hashes` should be a subset of keys in `@unknown_hashes`, broken invariant `@buffered_hashes` and `@unknown_hashes`,
 `%hash`: {},
 `@self`: {:?}",
                 hash, self
             );
 
-            if let Some((_, fallback_peers)) = self.unknown_hashes.get(hash) {
+            if let Some((_, fallback_peers)) = self.hashes_unknown_to_pool.get(hash) {
                 // 4. Check if peer is fallback peer for hash and remove, else skip to next
                 // iteration.
                 //
@@ -583,7 +583,7 @@ impl TransactionFetcher {
 
         // remove hashes that will be included in request from buffer
         for hash in hashes {
-            self.buffered_hashes.remove(hash);
+            self.hashes_pending_fetch.remove(hash);
         }
     }
 
@@ -604,7 +604,7 @@ impl TransactionFetcher {
         hashes: &mut Vec<TxHash>,
         peer_id: PeerId,
     ) {
-        for hash in self.buffered_hashes.iter() {
+        for hash in self.hashes_pending_fetch.iter() {
             // 1. Check hashes count in request.
             if hashes.len() >= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
                 break
@@ -615,14 +615,14 @@ impl TransactionFetcher {
             }
 
             debug_assert!(
-                self.unknown_hashes.get(hash).is_some(),
+                self.hashes_unknown_to_pool.get(hash).is_some(),
                 "can't find buffered `%hash` in `@unknown_hashes`, `@buffered_hashes` should be a subset of keys in `@unknown_hashes`, broken invariant `@buffered_hashes` and `@unknown_hashes`,
 `%hash`: {},
 `@self`: {:?}",
                 hash, self
             );
 
-            if let Some((_, fallback_peers)) = self.unknown_hashes.get(hash) {
+            if let Some((_, fallback_peers)) = self.hashes_unknown_to_pool.get(hash) {
                 // 3. Check if peer is fallback peer for hash and remove.
                 //
                 // upgrade this peer from fallback peer, soon to be active peer with inflight
@@ -645,7 +645,7 @@ impl TransactionFetcher {
 
         // remove hashes that will be included in request from buffer
         for hash in hashes {
-            self.buffered_hashes.remove(hash);
+            self.hashes_pending_fetch.remove(hash);
         }
     }
 }
@@ -720,11 +720,11 @@ impl Default for TransactionFetcher {
         Self {
             active_peers: LruMap::new(MAX_CONCURRENT_TX_REQUESTS),
             inflight_requests: Default::default(),
-            buffered_hashes: LruCache::new(
+            hashes_pending_fetch: LruCache::new(
                 NonZeroUsize::new(MAX_CAPACITY_BUFFERED_HASHES)
                     .expect("buffered cache limit should be non-zero"),
             ),
-            unknown_hashes: LruMap::new_unlimited(),
+            hashes_unknown_to_pool: LruMap::new_unlimited(),
             eth68_meta: LruMap::new_unlimited(),
             filter_valid_hashes: Default::default(),
         }
@@ -842,7 +842,7 @@ mod test {
         // seen_eth68_hashes_sizes is lru!
 
         for i in (0..6).rev() {
-            tx_fetcher.unknown_hashes.insert(eth68_hashes[i], (0, default_cache()));
+            tx_fetcher.hashes_unknown_to_pool.insert(eth68_hashes[i], (0, default_cache()));
             tx_fetcher.eth68_meta.insert(eth68_hashes[i], eth68_hashes_sizes[i]);
         }
 
