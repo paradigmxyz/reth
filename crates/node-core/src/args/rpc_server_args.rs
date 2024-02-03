@@ -273,7 +273,7 @@ impl RpcServerArgs {
     /// Returns the handles for the launched regular RPC server(s) (if any) and the server handle
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
-    pub async fn start_servers<Reth, Engine, Conf, EngineT: EngineTypes>(
+    pub async fn start_servers<Reth, Engine, Conf, EngineT>(
         &self,
         components: &Reth,
         engine_api: Engine,
@@ -281,8 +281,9 @@ impl RpcServerArgs {
         conf: &mut Conf,
     ) -> eyre::Result<RethRpcServerHandles>
     where
-        Reth: RethNodeComponents,
+        EngineT: EngineTypes + 'static,
         Engine: EngineApiServer<EngineT>,
+        Reth: RethNodeComponents,
         Conf: RethNodeCommandConfig,
     {
         let auth_config = self.auth_server_config(jwt_secret)?;

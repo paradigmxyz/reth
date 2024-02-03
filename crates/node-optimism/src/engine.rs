@@ -7,7 +7,7 @@ use reth_primitives::{ChainSpec, Hardfork};
 use reth_rpc_types::engine::OptimismPayloadAttributes;
 
 /// The types used in the optimism beacon consensus engine.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Deserialize)]
 #[non_exhaustive]
 pub struct OptimismEngineTypes;
 

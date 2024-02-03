@@ -115,7 +115,7 @@
 //!
 //! /// Custom engine types - uses a custom payload attributes RPC type, but uses the default
 //! /// payload builder attributes type.
-//! #[derive(Clone, Debug, Default)]
+//! #[derive(Clone, Debug, Default, serde::Deserialize)]
 //! #[non_exhaustive]
 //! pub struct CustomEngineTypes;
 //!
@@ -150,7 +150,7 @@ pub mod payload;
 pub use payload::PayloadOrAttributes;
 
 /// The types that are used by the engine.
-pub trait EngineTypes: Send + Sync {
+pub trait EngineTypes: serde::de::DeserializeOwned + Send + Sync {
     /// The RPC payload attributes type the CL node emits via the engine API.
     type PayloadAttributes: PayloadAttributes + Unpin;
 
