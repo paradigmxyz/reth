@@ -290,7 +290,8 @@ impl TransactionFetcher {
                 }
                 *retries += 1;
             }
-            if let (_, Some(evicted_hash)) = self.hashes_pending_fetch.insert_and_get_evicted(hash) {
+            if let (_, Some(evicted_hash)) = self.hashes_pending_fetch.insert_and_get_evicted(hash)
+            {
                 max_retried_and_evicted_hashes.push(evicted_hash);
             }
         }
