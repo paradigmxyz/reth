@@ -264,6 +264,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
             metrics: Default::default(),
+            enable_tx_refetch: false,
         }
     }
 }
