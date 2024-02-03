@@ -6973,6 +6973,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-tasks",
+ "reth-tracing",
  "revm",
  "schnellru",
  "serde",
