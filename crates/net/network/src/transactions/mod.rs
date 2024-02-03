@@ -28,11 +28,7 @@
 //! enough to buffer many hashes during network failure, to allow for recovery.
 
 use crate::{
-    cache::LruCache,
-    manager::NetworkEvent,
-    message::{PeerRequest, PeerRequestSender},
-    metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
-    NetworkEvents, NetworkHandle,
+    cache::LruCache, manager::NetworkEvent, message::{PeerRequest, PeerRequestSender}, metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE}, NetworkEvents, NetworkHandle
 };
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
@@ -68,10 +64,8 @@ use tracing::{debug, trace};
 mod fetcher;
 mod validation;
 
-use fetcher::{FetchEvent, TransactionFetcher};
+use fetcher::{FetchEvent, TransactionFetcher, MAX_CAPACITY_CACHE_FOR_HASHES_PENDING_FETCH};
 pub use validation::*;
-
-
 
 /// Cache limit of transactions to keep track of for a single peer.
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
@@ -692,12 +686,9 @@ where
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
         let metrics = &self.metrics;
         if let Some(failed_to_request_hashes) =
-            self.transaction_fetcher.request_transactions_from_peer(
-                hashes_to_request,
-                peer,
-                || metrics.egress_peer_channel_full.increment(1),
-                msg_version,
-            )
+            self.transaction_fetcher.request_transactions_from_peer(hashes_to_request, peer, || {
+                metrics.egress_peer_channel_full.increment(1)
+            })
         {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
@@ -716,70 +707,70 @@ where
         }
     }
 
-    /// Tries to request hashes in buffer.
+    /// Tries to request hashes pending fetch.
     ///
-    /// If any idle fallback peer exists for any hash in the buffer, that hash is taken out of the
-    /// buffer and put into a request to that peer. Before sending, the request is filled with
-    /// additional hashes out of the buffer, for which the peer is listed as fallback, as long as
-    /// space remains in the respective transactions response.
-    /* fn request_buffered_hashes(&mut self, mut budget: u32) {
-            loop {
-                let mut hashes = vec![];
-                let Some(peer_id) = self.pop_any_idle_peer(&mut hashes) else { return };
+    /// Finds the first buffered hash with a fallback peer that is idle, if any. Fills the rest of
+    /// the request by checking the transactions seen by the peer against the buffer.
+    fn request_hashes_pending_fetch(&mut self, mut budget: usize) {
+        loop {
+            let mut hashes_to_request = vec![];
+            let peers = &self.peers;
+            let is_session_active = |peer_id| peers.contains_key(&peer_id);
 
-                debug_assert!(
-                    self.peers.contains_key(&peer_id),
-                    "a dead peer has been returned as idle by `@pop_any_idle_peer`, broken invariant `@peers` and `@transaction_fetcher`,
-    `%peer_id`: {},
-    `@peers`: {:?},
-    `@transaction_fetcher`: {:?}",
-                    peer_id, self.peers, self.transaction_fetcher
-                );
+            // budget to look for an idle peer before giving up
+            let budget_find_idle_peer = 256;
 
-                // fill the request with other buffered hashes that have been announced by the peer
-                let Some(peer) = self.peers.get(&peer_id) else { return };
+            let Some(peer_id) = self
+                .transaction_fetcher
+                .pop_any_idle_peer(&mut hashes_to_request, is_session_active, budget_find_idle_peer)
+            else {
+                // no peers are idle or budget is depleted
+                return
+            };
+            let Some(peer) = self.peers.get(&peer_id) else { return };
 
-                let Some(hash) = hashes.first() else { return };
+            // fill the request with other buffered hashes that have been announced by the peer.
+            // look up the given number of lru hashes that are pending fetch, in the hashes seen
+            // by this peer, before giving up and sending a request with the single tx popped
+            // above.
+            let budget_lru_hashes_pending_fetch = MAX_CAPACITY_CACHE_FOR_HASHES_PENDING_FETCH / 2;
 
-                if let Some(ref mut size) = eth68_size {
-                    //self.transaction_fetcher.fill_eth68_request_for_peer(&mut hashes, peer_id, size);
-                } else {
-                    //self.transaction_fetcher.fill_eth66_request_for_peer(&mut hashes, peer_id);
-                }
+            self.transaction_fetcher.fill_request_from_hashes_pending_fetch(
+                &mut hashes_to_request,
+                &peer.transactions,
+                budget_lru_hashes_pending_fetch,
+            );
 
-                let msg_version = || eth68_size.map(|_| EthVersion::Eth68).unwrap_or(EthVersion::Eth66);
+            trace!(target: "net::tx",
+                peer_id=format!("{peer_id:#}"),
+                hashes=?hashes_to_request,
+                "requesting hashes that were stored pending fetch from peer"
+            );
 
-                trace!(target: "net::tx",
+            // request the buffered missing transactions
+            let metrics = &self.metrics;
+            if let Some(failed_to_request_hashes) = self
+                .transaction_fetcher
+                .request_transactions_from_peer(hashes_to_request, peer, || {
+                    metrics.egress_peer_channel_full.increment(1)
+                })
+            {
+                debug!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
-                    hashes=?hashes,
-                    msg_version=%msg_version(),
-                    "requesting buffered hashes from idle peer"
+                    failed_to_request_hashes=?failed_to_request_hashes,
+                    "failed sending request to peer's session, buffering hashes"
                 );
 
-                // request the buffered missing transactions
-                let metrics = &self.metrics;
-                if let Some(failed_to_request_hashes) =
-                    self.transaction_fetcher.request_transactions_from_peer(hashes, peer, || {
-                        metrics.egress_peer_channel_full.increment(1)
-                    })
-                {
-                    debug!(target: "net::tx",
-                        peer_id=format!("{peer_id:#}"),
-                        failed_to_request_hashes=?failed_to_request_hashes,
-                        msg_version=%msg_version(),
-                        "failed sending request to peer's session, buffering hashes"
-                    );
-
-                    self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
-                    return
-                }
-
-                budget = budget.saturating_sub(1);
-                if budget == 0 {
-                    return
-                }
+                self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
+                return
             }
-        }*/
+
+            budget = budget.saturating_sub(1);
+            if budget == 0 {
+                return
+            }
+        }
+    }
 
     /// Handles dedicated transaction events related to the `eth` protocol.
     fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
@@ -1079,8 +1070,8 @@ where
 
         if this.enable_tx_refetch {
             // try drain buffered transactions with respect to budget
-            let _budget_refetch = 256;
-            //this.request_buffered_hashes(budget_refetch);
+            let budget_refetch = 256;
+            this.request_hashes_pending_fetch(budget_refetch);
         }
 
         this.update_request_metrics();
@@ -1334,6 +1325,7 @@ mod tests {
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use secp256k1::SecretKey;
     use std::{future::poll_fn, hash};
+    use tests::fetcher::TxUnknownToPool;
 
     async fn new_tx_manager() -> TransactionsManager<impl TransactionPool> {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -1728,7 +1720,7 @@ mod tests {
         }
     }
 
-    /*#[tokio::test]
+    #[tokio::test]
     async fn max_retries_tx_request() {
         reth_tracing::init_test_tracing();
 
@@ -1740,7 +1732,9 @@ mod tests {
         let eth_version = EthVersion::Eth66;
         let seen_hashes = [B256::from_slice(&[1; 32]), B256::from_slice(&[2; 32])];
 
-        let (peer_1, mut to_mock_session_rx) = new_mock_session(peer_id_1, eth_version);
+        let (mut peer_1, mut to_mock_session_rx) = new_mock_session(peer_id_1, eth_version);
+        peer_1.transactions.insert(seen_hashes[0]);
+        peer_1.transactions.insert(seen_hashes[1]);
         tx_manager.peers.insert(peer_id_1, peer_1);
 
         // hashes are seen and currently not inflight, with one fallback peer, and are buffered
@@ -1761,7 +1755,7 @@ mod tests {
         assert!(tx_fetcher.is_idle(peer_id_1));
 
         // sends request for buffered hashes to peer_1
-        tx_manager.request_buffered_hashes(1);
+        tx_manager.request_hashes_pending_fetch(1);
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
@@ -1823,7 +1817,7 @@ mod tests {
         // `MAX_REQUEST_RETRIES_PER_TX_HASH`, 2, for hashes reached however this time won't be
         // buffered for retry
         assert!(tx_fetcher.hashes_pending_fetch.is_empty());
-    }*/
+    }
 
     /*#[tokio::test]
     async fn fill_eth68_request_for_peer() {
