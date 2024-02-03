@@ -1137,7 +1137,7 @@ where
                 some_ready = true;
             }
 
-            if self.enable_tx_refetch {
+            if this.enable_tx_refetch {
                 // try drain buffered transactions
                 this.request_buffered_hashes();
             }
