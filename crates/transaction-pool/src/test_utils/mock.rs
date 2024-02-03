@@ -546,6 +546,42 @@ impl MockTransaction {
         self.clone().with_gas_limit(self.get_gas_limit() + 1)
     }
 
+    /// Returns a new transaction with a higher blob fee +1
+    ///
+    /// If it's an EIP-4844 transaction.
+    pub fn inc_blob_fee(&self) -> Self {
+        self.inc_blob_fee_by(1)
+    }
+
+    /// Returns a new transaction with a higher blob fee
+    ///
+    /// If it's an EIP-4844 transaction.
+    pub fn inc_blob_fee_by(&self, value: u128) -> Self {
+        let mut this = self.clone();
+        if let MockTransaction::Eip4844 { max_fee_per_blob_gas, .. } = &mut this {
+            *max_fee_per_blob_gas = max_fee_per_blob_gas.checked_add(value).unwrap();
+        }
+        this
+    }
+
+    /// Returns a new transaction with a lower blob fee -1
+    ///
+    /// If it's an EIP-4844 transaction.
+    pub fn decr_blob_fee(&self) -> Self {
+        self.decr_price_by(1)
+    }
+
+    /// Returns a new transaction with a lower blob fee
+    ///
+    /// If it's an EIP-4844 transaction.
+    pub fn decr_blob_fee_by(&self, value: u128) -> Self {
+        let mut this = self.clone();
+        if let MockTransaction::Eip4844 { max_fee_per_blob_gas, .. } = &mut this {
+            *max_fee_per_blob_gas = max_fee_per_blob_gas.checked_sub(value).unwrap();
+        }
+        this
+    }
+
     /// Returns the transaction type identifier associated with the current [MockTransaction].
     pub fn tx_type(&self) -> u8 {
         match self {
