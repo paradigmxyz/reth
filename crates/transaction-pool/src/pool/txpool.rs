@@ -32,6 +32,7 @@ use std::{
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
 };
+use tracing::trace;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A pool that manages transactions.
@@ -785,7 +786,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         .$limit
                         .is_exceeded($this.$pool.len(), $this.$pool.size())
                     {
-                        tracing::trace!(
+                        trace!(
                             "discarding transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
                             stringify!($pool),
                             $this.config.$limit,
@@ -796,7 +797,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         // 1. first remove the worst transaction from the subpool
                         let removed_from_subpool = $this.$pool.truncate_pool($this.config.$limit.clone());
 
-                        tracing::trace!(
+                        trace!(
                             "removed {} transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
                             removed_from_subpool.len(),
                             stringify!($pool),

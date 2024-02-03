@@ -95,18 +95,6 @@ impl<T: ParkedOrd> ParkedPool<T> {
             .collect()
     }
 
-    /// Get transactions, with size, by sender
-    pub(crate) fn get_txs_by_sender_with_size(
-        &self,
-        sender: SenderId,
-    ) -> Vec<(TransactionId, usize)> {
-        self.by_id
-            .range((sender.start_bound(), Unbounded))
-            .take_while(move |(other, _)| sender == other.sender)
-            .map(|(tx_id, tx)| (*tx_id, tx.transaction.size()))
-            .collect()
-    }
-
     /// Returns sender ids sorted by each sender's last submission id. Senders with older last
     /// submission ids are first. Note that _last_ submission ids are the newest submission id for
     /// that sender, so this sorts senders by the last time they submitted a transaction in
@@ -172,10 +160,10 @@ impl<T: ParkedOrd> ParkedPool<T> {
         while limit.is_exceeded(self.len(), self.size()) && !sender_ids.is_empty() {
             // SAFETY: This will not panic due to `!addresses.is_empty()`
             let sender_id = sender_ids.pop().unwrap().sender_id;
-            let list = self.get_txs_by_sender_with_size(sender_id);
+            let list = self.get_txs_by_sender(sender_id);
 
             // Drop transactions from this sender until the pool is under limits
-            for (txid, _) in list.into_iter().rev() {
+            for txid in list.into_iter().rev() {
                 if let Some(tx) = self.remove_transaction(&txid) {
                     removed.push(tx);
                 }
