@@ -2708,4 +2708,34 @@ mod tests {
             assert!(pool.size().queued <= queued_limit.max_txs);
         }
     }
+
+    #[test]
+    fn discard_blobs_at_capacity() {
+        let mut f = MockTransactionFactory::default();
+        let blob_limit = SubPoolLimit::new(1000, usize::MAX);
+        let mut pool =
+            TxPool::new(MockOrdering::default(), PoolConfig { blob_limit, ..Default::default() });
+        pool.all_transactions.pending_fees.blob_fee = 10000;
+        // insert a bunch of transactions into the queued pool
+        for _ in 0..blob_limit.max_txs {
+            let tx = MockTransaction::eip4844().inc_price_by(100).with_blob_fee(100);
+            let validated = f.validated(tx.clone());
+            let _id = *validated.id();
+            pool.add_transaction(validated, U256::from(1_000), 0).unwrap();
+        }
+
+        let size = pool.size();
+        assert_eq!(size.blob, blob_limit.max_txs);
+
+        for _ in 0..blob_limit.max_txs {
+            let tx = MockTransaction::eip4844().inc_price_by(100).with_blob_fee(100);
+            let validated = f.validated(tx.clone());
+            let _id = *validated.id();
+            pool.add_transaction(validated, U256::from(1_000), 0).unwrap();
+
+            pool.discard_worst();
+            pool.assert_invariants();
+            assert!(pool.size().blob <= blob_limit.max_txs);
+        }
+    }
 }
