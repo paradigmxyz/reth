@@ -325,7 +325,7 @@ impl<T: ParkedOrd> Ord for ParkedPoolTransaction<T> {
 
 /// Includes a [SenderId] and `submission_id`. This is used to sort senders by their last
 /// submission id.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct SubmissionSenderId {
     /// The sender id
     pub(crate) sender_id: SenderId,
@@ -335,7 +335,7 @@ pub struct SubmissionSenderId {
 
 impl SubmissionSenderId {
     /// Creates a new [SubmissionSenderId] based on the [SenderId] and `submission_id`.
-    fn new(sender_id: SenderId, submission_id: u64) -> Self {
+    const fn new(sender_id: SenderId, submission_id: u64) -> Self {
         Self { sender_id, submission_id }
     }
 }

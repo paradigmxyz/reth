@@ -401,7 +401,7 @@ pub enum TransactionListenerKind {
 impl TransactionListenerKind {
     /// Returns true if we're only interested in transactions that are allowed to be propagated.
     #[inline]
-    pub fn is_propagate_only(&self) -> bool {
+    pub const fn is_propagate_only(&self) -> bool {
         matches!(self, Self::PropagateOnly)
     }
 }
@@ -457,7 +457,7 @@ pub enum PropagateKind {
 
 impl PropagateKind {
     /// Returns the peer the transaction was sent to
-    pub fn peer(&self) -> &PeerId {
+    pub const fn peer(&self) -> &PeerId {
         match self {
             PropagateKind::Full(peer) => peer,
             PropagateKind::Hash(peer) => peer,
@@ -613,7 +613,7 @@ pub struct ChangedAccount {
 
 impl ChangedAccount {
     /// Creates a new `ChangedAccount` with the given address and 0 balance and nonce.
-    pub(crate) fn empty(address: Address) -> Self {
+    pub(crate) const fn empty(address: Address) -> Self {
         Self { address, nonce: 0, balance: U256::ZERO }
     }
 }
@@ -695,17 +695,17 @@ pub struct BestTransactionsAttributes {
 
 impl BestTransactionsAttributes {
     /// Creates a new `BestTransactionsAttributes` with the given basefee and blob fee.
-    pub fn new(basefee: u64, blob_fee: Option<u64>) -> Self {
+    pub const fn new(basefee: u64, blob_fee: Option<u64>) -> Self {
         Self { basefee, blob_fee }
     }
 
     /// Creates a new `BestTransactionsAttributes` with the given basefee.
-    pub fn base_fee(basefee: u64) -> Self {
+    pub const fn base_fee(basefee: u64) -> Self {
         Self::new(basefee, None)
     }
 
     /// Sets the given blob fee.
-    pub fn with_blob_fee(mut self, blob_fee: u64) -> Self {
+    pub const fn with_blob_fee(mut self, blob_fee: u64) -> Self {
         self.blob_fee = Some(blob_fee);
         self
     }
@@ -899,7 +899,7 @@ impl EthPooledTransaction {
     }
 
     /// Return the reference to the underlying transaction.
-    pub fn transaction(&self) -> &TransactionSignedEcRecovered {
+    pub const fn transaction(&self) -> &TransactionSignedEcRecovered {
         &self.transaction
     }
 }
@@ -1092,7 +1092,7 @@ impl IntoRecoveredTransaction for EthPooledTransaction {
 }
 
 /// Represents the current status of the pool.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct PoolSize {
     /// Number of transactions in the _pending_ sub-pool.
     pub pending: usize,
@@ -1157,7 +1157,7 @@ pub enum GetPooledTransactionLimit {
 impl GetPooledTransactionLimit {
     /// Returns true if the given size exceeds the limit.
     #[inline]
-    pub fn exceeds(&self, size: usize) -> bool {
+    pub const fn exceeds(&self, size: usize) -> bool {
         match self {
             GetPooledTransactionLimit::None => false,
             GetPooledTransactionLimit::ResponseSizeSoftLimit(limit) => size > *limit,
@@ -1177,7 +1177,7 @@ pub struct NewSubpoolTransactionStream<Tx: PoolTransaction> {
 
 impl<Tx: PoolTransaction> NewSubpoolTransactionStream<Tx> {
     /// Create a new stream that yields full transactions from the subpool
-    pub fn new(st: Receiver<NewTransactionEvent<Tx>>, subpool: SubPool) -> Self {
+    pub const fn new(st: Receiver<NewTransactionEvent<Tx>>, subpool: SubPool) -> Self {
         Self { st, subpool }
     }
 
