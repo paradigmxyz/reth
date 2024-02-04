@@ -25,8 +25,10 @@ where
     /// Creates a new [NoopPayloadBuilderService].
     pub fn new() -> (Self, PayloadBuilderHandle<Engine>) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
-        let handle = PayloadBuilderHandle::new(service_tx);
-        (Self { command_rx: UnboundedReceiverStream::new(command_rx) }, handle)
+        (
+            Self { command_rx: UnboundedReceiverStream::new(command_rx) },
+            PayloadBuilderHandle::new(service_tx),
+        )
     }
 }
 

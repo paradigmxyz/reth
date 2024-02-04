@@ -15,7 +15,8 @@ The main difference between metrics and traces is therefore that metrics are sys
 
 ### How to add a metric
 
-To add metrics use the [`metrics`][metrics] crate. 
+To add metrics use the [`metrics`][metrics] crate.
+
 1. Add the code emitting the metric.
 2. Add the metrics description in the crate's metrics describer module, e.g.: [stages metrics describer](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/metrics.rs).
 3. Document the metric in this file.
@@ -83,6 +84,8 @@ This list may be non-exhaustive.
 - `transaction_pool.basefee_pool_size_bytes`: Total amount of memory used by the transactions in the basefee sub-pool in bytes
 - `transaction_pool.queued_pool_transactions`: Number of transactions in the queued sub-pool
 - `transaction_pool.queued_pool_size_bytes`: Total amount of memory used by the transactions in the queued sub-pool in bytes
+- `transaction_pool.blob_pool_transactions`: Number of transactions in the blob sub-pool
+- `transaction_pool.blob_pool_size_bytes`: Total amount of memory used by the transactions in the blob sub-pool in bytes
 
 #### Component: Network
 
