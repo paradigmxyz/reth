@@ -72,9 +72,9 @@ impl TestPoolWrapper {
     }
 }
 
-impl Into<TestPool> for TestPoolWrapper {
-    fn into(self) -> TestPool {
-        self.0
+impl From<TestPoolWrapper> for TestPool {
+    fn from(wrapper: TestPoolWrapper) -> Self {
+        wrapper.0
     }
 }
 
