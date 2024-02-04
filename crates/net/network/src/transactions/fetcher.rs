@@ -103,7 +103,7 @@ pub(super) struct TxUnknownToPool {
     fallback_peers: LruCache<PeerId>,
     // todo: store all seen sizes as a `(size, peer_id)` tuple to catch peers that respond with
     // another size tx than they announced. alt enter in request (won't catch peers announcing
-    // wrong size incase of refetch if stored in request fut)
+    // wrong size for requests assembled from hashes pending fetch if stored in request fut)
     tx_encoded_length: Option<usize>,
 }
 
@@ -157,7 +157,7 @@ impl TransactionFetcher {
         }
     }
 
-    /// Returns `true` if peer is idle.
+    /// Returns `true` if peer is idle with respect to `self.inflight_requests`.
     pub(super) fn is_idle(&self, peer_id: &PeerId) -> bool {
         let Some(inflight_count) = self.active_peers.peek(peer_id) else { return true };
         if *inflight_count < MAX_CONCURRENT_TX_REQUESTS_PER_PEER {
@@ -166,8 +166,7 @@ impl TransactionFetcher {
         false
     }
 
-    /// Returns any idle peer for the given hash. Writes peer IDs of any ended sessions to buffer
-    /// passed as parameter.
+    /// Returns any idle peer for the given hash.
     pub(super) fn get_idle_peer_for(
         &self,
         hash: TxHash,
@@ -184,14 +183,14 @@ impl TransactionFetcher {
         None
     }
 
-    /// Returns any idle peer for any buffered unknown hash, and writes that hash to the request's
-    /// hashes buffer that is passed as parameter.
+    /// Returns any idle peer for any hash pending fetch. If one is found, the corresponding
+    /// hash is written to the request buffer that is passed as parameter.
     ///
-    /// Loops through the fallback peers of each buffered hashes, until an idle fallback peer is
-    /// found. As a side effect, dead fallback peers are filtered out for visited hashes.
+    /// Loops through the hashes pending fetch in lru order until one is found with an idle
+    /// fallback peer, or the budget passed as parameter is depleted, whatever happens first.
     pub(super) fn find_any_idle_fallback_peer_for_any_pending_hash(
         &mut self,
-        hashes: &mut Vec<TxHash>,
+        hashes_to_request: &mut Vec<TxHash>,
         is_session_active: impl Fn(&PeerId) -> bool,
         mut budget: Option<usize>, // try to find `budget` idle peers before giving up
     ) -> Option<PeerId> {
@@ -203,7 +202,7 @@ impl TransactionFetcher {
             let idle_peer = self.get_idle_peer_for(hash, &is_session_active);
 
             if idle_peer.is_some() {
-                hashes.push(hash);
+                hashes_to_request.push(hash);
                 break idle_peer.copied()
             }
 
@@ -214,7 +213,7 @@ impl TransactionFetcher {
                 }
             }
         };
-        let hash = hashes.first()?;
+        let hash = hashes_to_request.first()?;
 
         // pop hash that is loaded in request buffer from cache of hashes pending fetch
         drop(hashes_pending_fetch_iter);
@@ -224,7 +223,6 @@ impl TransactionFetcher {
     }
 
     /// Packages hashes for [`GetPooledTxRequest`] up to limit as defined by protocol version 66.
-    /// If necessary, takes hashes from buffer for which peer is listed as fallback peer.
     ///
     /// Returns left over hashes.
     pub(super) fn pack_hashes_eth66(
@@ -245,12 +243,11 @@ impl TransactionFetcher {
         surplus_hashes
     }
 
-    /// Evaluates wether or not to include a hash in a `GetPooledTransactions` version eth68
-    /// request, based on the size of the transaction and the accumulated size of the
-    /// corresponding `PooledTransactions` response.
+    /// Evaluates wether or not to include a hash in a [`GetPooledTransactions`] version eth68
+    /// request. It does so based on the size of the transaction and the accumulated size of the
+    /// corresponding [`PooledTransactions`] response.
     ///
-    /// Returns `true` if hash is included in request. If there is still space in the respective
-    /// response but not enough for the transaction of given hash, `false` is returned.
+    /// Returns `true` if the hash fits and the size has been accumulated.
     fn fold_size_of_eth68_response(&self, acc_size_response: &mut usize, size: usize) -> bool {
         let next_acc_size = *acc_size_response + size;
 
@@ -265,24 +262,18 @@ impl TransactionFetcher {
     }
 
     /// Packages hashes for [`GetPooledTxRequest`] up to limit as defined by protocol version 68.
-    /// If necessary, takes hashes from buffer for which peer is listed as fallback peer. Returns
-    /// left over hashes.
+    /// Returns left over hashes.
     ///
-    /// 1. Loops through hashes passed as parameter, calculating the accumulated size of the
-    /// response that this request would generate if filled with requested hashes.
-    /// 2.a. All hashes fit in response and there is no more space. Returns empty vector.
-    /// 2.b. Some hashes didn't fit in and there is no more space. Returns surplus hashes.
-    /// 2.c. All hashes fit in response and there is still space. Surplus hashes = empty vector.
-    /// 2.d. Some hashes didn't fit in but there is still space. Surplus hashes != empty vector.
-    /// 3. Try to fill remaining space with hashes from buffer.
-    /// 4. Return surplus hashes.
+    /// Loops through hashes passed as parameter and checks if a hash fits in the expected
+    /// response. If no, it's add to surplus hashes. If yes, it's add to hashes to request and
+    /// expected response size is accumulated.
     pub(super) fn pack_hashes_eth68(
         &mut self,
         hashes_to_request: &mut Vec<TxHash>,
         hashes_from_announcement: ValidAnnouncementData,
     ) -> Vec<TxHash> {
         let mut acc_size_response = 0;
-        let mut surplus_hashes = vec![];
+        let mut surplus_hashes = Vec::with_capacity(hashes_to_request.len() / 2);
 
         for (hash, metadata) in hashes_from_announcement {
             let Some((_ty, size)) = metadata else {
@@ -298,6 +289,8 @@ impl TransactionFetcher {
         surplus_hashes
     }
 
+    /// Tries to buffer hashes for retry. Hashes that have been re-requested
+    /// [`MAX_REQUEST_RETRIES_PER_TX_HASH`], are dropped.
     pub(super) fn buffer_hashes_for_retry(
         &mut self,
         mut hashes: Vec<TxHash>,
@@ -318,8 +311,8 @@ impl TransactionFetcher {
     }
 
     /// Buffers hashes. Note: Only peers that haven't yet tried to request the hashes should be
-    /// passed as `fallback_peer` parameter! Hashes that have been re-requested
-    /// [`MAX_REQUEST_RETRIES_PER_TX_HASH`], are dropped.
+    /// passed as `fallback_peer` parameter! For re-buffering hashes on failed request, use
+    /// [`TransactionFetcher::buffer_hashes_for_retry`].
     pub(super) fn buffer_hashes(&mut self, hashes: Vec<TxHash>, fallback_peer: Option<PeerId>) {
         let mut max_retried_and_evicted_hashes = vec![];
 
@@ -432,6 +425,8 @@ impl TransactionFetcher {
         self.remove_from_unknown_hashes(hashes)
     }
 
+    /// Filters out hashes that have been seen before. For hashes that have already been seen, the
+    /// peer is added as fallback peer.
     pub(super) fn filter_unseen_hashes(
         &mut self,
         new_announced_hashes: &mut ValidAnnouncementData,
@@ -510,9 +505,9 @@ impl TransactionFetcher {
         });
     }
 
-    /// Requests the missing transactions from the announced hashes of the peer. Returns the
-    /// requested hashes if concurrency limit is reached or if the request fails to send over the
-    /// channel to the peer's session task.
+    /// Requests the missing transactions from the previously unseen announced hashes of the peer.
+    /// Returns the requested hashes if the request concurrency limit is reached or if the request
+    /// fails to send over the channel to the peer's session task.
     ///
     /// This filters all announced hashes that are already in flight, and requests the missing,
     /// while marking the given peer as an alternative peer for the hashes that are already in
@@ -607,19 +602,18 @@ impl TransactionFetcher {
 
     /// Tries to fill request with hashes pending fetch so that the expected tx response is full
     /// enough. A mutable reference to a list of hashes to request is passed as parameter. A
-    /// budget is passed as parameter. This ensures that the node stops searching for more hashes
-    /// after the budget is depleted. Under bad network conditions, the cache of tx hashes pending
+    /// budget is passed as parameter, this ensures that the node stops searching for more hashes
+    /// after the budget is depleted. Under bad network conditions, the cache of hashes pending
     /// fetch may become very full for a while. As the node recovers, the hashes pending fetch
-    /// cache should get smaller. The budget aims to be big enough to loop through all buffered
-    /// hashes in good network conditions.
+    /// cache should get smaller. The budget should aim to be big enough to loop through all
+    /// buffered hashes in good network conditions.
     ///
-    /// The request id filled as if it's an eth68 request, i.e. smartly assemble the request based
-    /// on expected response size. For any hash missing size metadata, it is guessed at
-    /// [`TX_ENCODED_LENGTH_AVERAGE`].
+    /// The request hashes buffer is filled as if it's an eth68 request, i.e. smartly assemble
+    /// the request based on expected response size. For any hash missing size metadata, it is
+    /// guessed at [`TX_ENCODED_LENGTH_AVERAGE`].
     ///
-    /// Loops through buffered hashes and does:
+    /// Loops through hashes pending fetch and does:
     ///
-    /// 1. Check if budget is depleted, if so stop looping.
     /// 1. Check if a hash pending fetch is seen by peer.
     /// 2. Optimistically include the hash in the request.
     /// 3. Accumulate expected total response size.
@@ -652,7 +646,7 @@ impl TransactionFetcher {
                 break
             }
 
-            // 1. Check if a hash seen by peer is pending fetch.
+            // 1. Check if a hash pending fetch is seen by peer.
             if !seen_hashes.contains(hash) {
                 continue;
             };
@@ -687,6 +681,7 @@ impl TransactionFetcher {
         }
     }
 
+    /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes.
     pub(super) fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
         let info = &self.tx_fetcher_info;
 
@@ -694,6 +689,8 @@ impl TransactionFetcher {
             self.hashes_pending_fetch.len() > info.max_hashes_pending_fetch
     }
 
+    /// Returns `Some(limit)` if [`TransactionFetcher`] is operating close to full capacity.
+    /// Returns `None`, unlimited, if [`TransactionFetcher`] is not that busy.
     pub(super) fn search_breadth_budget_find_idle_fallback_peer(&self) -> Option<usize> {
         let info = &self.tx_fetcher_info;
 
@@ -710,11 +707,13 @@ impl TransactionFetcher {
         } else {
             // limited breadth of search for idle peer
             trace!(target: "net::tx",
-              inflight_requests=inflight_requests,
-              soft_limit_inflight_requests=soft_limit_inflight_requests,
-              hashes_pending_fetch=hashes_pending_fetch,
-              limit_hashes_pending_fetch=limit_hashes_pending_fetch,
-              "search breadth limited in search for idle fallback peer for hashes pending fetch");
+                inflight_requests=inflight_requests,
+                soft_limit_inflight_requests=soft_limit_inflight_requests,
+                hashes_pending_fetch=hashes_pending_fetch,
+                limit_hashes_pending_fetch=limit_hashes_pending_fetch,
+                "search breadth limited in search for idle fallback peer for hashes pending fetch"
+            );
+
             Some(BUDGET_FIND_IDLE_FALLBACK_PEER)
         }
     }
@@ -873,7 +872,7 @@ impl Future for GetPooledTxRequestFut {
     }
 }
 
-/// Tracks stats about the [`TransactionsManager`].
+/// Tracks stats about the [`TransactionFetcher`].
 #[derive(Debug)]
 pub struct TransactionFetcherInfo {
     /// Currently active outgoing [`GetPooledTransactions`] requests.

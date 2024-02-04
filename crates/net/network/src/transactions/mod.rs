@@ -903,7 +903,7 @@ where
                 // `peer.seen_transactions.transactions_received_in_full_or_sent` here. The
                 // division of the `seen_transactions` list, just serves as a hint for tx fetcher
                 // of which hashes are missing. It's good enough without reallocating hashes.
-                //
+
                 if source.is_broadcast() && peer.seen_transactions.has_seen_transaction(tx.hash()) {
                     num_already_seen += 1;
                 }
@@ -1238,6 +1238,7 @@ impl TransactionSource {
     }
 }
 
+/// Tracks transactions a peer has seen.
 #[derive(Debug)]
 struct TransactionsSeenByPeer {
     /// Keeps track of transactions that we know the peer has seen because they were announced by
@@ -1249,29 +1250,37 @@ struct TransactionsSeenByPeer {
 }
 
 impl TransactionsSeenByPeer {
+    /// Returns `true` if peer has seen transaction.
     fn has_seen_transaction(&self, hash: &TxHash) -> bool {
         self.transactions_received_in_full_or_sent.contains(hash) ||
             self.transactions_received_as_hash.contains(hash)
     }
 
+    /// Inserts a transaction hash that has been seen in an announcement.
     fn seen_in_announcement(&mut self, hash: TxHash) {
         _ = self.transactions_received_as_hash.insert(hash);
     }
 
+    /// Inserts a hash of a transaction that has either been sent to the peer, or has been
+    /// received in full from the peer over broadcast.
     fn seen_by_peer_and_in_pool(&mut self, hash: TxHash) {
         _ = self.transactions_received_in_full_or_sent.insert(hash);
     }
 
+    /// Inserts a list of transactions that have either been sent to the peer, or have been
+    /// received in full from the peer over broadcast.
     fn extend_seen_by_peer_and_in_pool(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
         self.transactions_received_in_full_or_sent.extend(hashes)
     }
 
+    /// Returns an iterator over all transactions that the peer has seen.
     fn iter_transaction_hashes(&self) -> impl Iterator<Item = &TxHash> {
         self.transactions_received_as_hash
             .iter()
             .chain(self.transactions_received_in_full_or_sent.iter())
     }
 
+    /// Returns an iterator over all transaction hashes that the peer has sent in an announcement.
     fn maybe_pending_transaction_hashes(&self) -> &LruCache<TxHash> {
         &self.transactions_received_as_hash
     }
@@ -1801,6 +1810,8 @@ mod tests {
         let seen_hashes = [B256::from_slice(&[1; 32]), B256::from_slice(&[2; 32])];
 
         let (mut peer_1, mut to_mock_session_rx) = new_mock_session(peer_id_1, eth_version);
+        // mark hashes as seen by peer so it can fish them out from the cache for hashes pending
+        // fetch
         peer_1.seen_transactions.seen_in_announcement(seen_hashes[0]);
         peer_1.seen_transactions.seen_in_announcement(seen_hashes[1]);
         tx_manager.peers.insert(peer_id_1, peer_1);
