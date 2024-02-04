@@ -150,10 +150,7 @@ impl TransactionFetcher {
     /// If necessary, takes hashes from buffer for which peer is listed as fallback peer.
     ///
     /// Returns left over hashes.
-    pub(super) fn pack_hashes_eth66(
-        &mut self,
-        hashes: &mut Vec<TxHash>,
-    ) -> Vec<TxHash> {
+    pub(super) fn pack_hashes_eth66(&mut self, hashes: &mut Vec<TxHash>) -> Vec<TxHash> {
         if hashes.len() <= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
             return vec![]
         }
