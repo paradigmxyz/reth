@@ -69,6 +69,12 @@ const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES_ON_FETCH_PENDING: usize =
 const TX_ENCODED_LENGTH_AVERAGE: usize =
     POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE / NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT;
 
+/// Default budget for finding an idle fallback peer for any hash pending fetch in
+/// [`TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash`], when said search is
+/// budget constrained.
+const BUDGET_FIND_IDLE_FALLBACK_PEER: usize =
+    DEFAULT_MAX_HASHES_PENDING_FETCH / 6 / MAX_ALTERNATIVE_PEERS_PER_TX as usize;
+
 /// The type responsible for fetching missing transactions from peers.
 ///
 /// This will keep track of unique transaction hashes that are currently being fetched and submits
@@ -183,18 +189,20 @@ impl TransactionFetcher {
     ///
     /// Loops through the fallback peers of each buffered hashes, until an idle fallback peer is
     /// found. As a side effect, dead fallback peers are filtered out for visited hashes.
-    pub(super) fn pop_any_idle_peer(
+    pub(super) fn find_any_idle_fallback_peer_for_any_pending_hash(
         &mut self,
         hashes: &mut Vec<TxHash>,
         is_session_active: impl Fn(&PeerId) -> bool,
-        mut budget: usize, // try to find `budget` idle peers before giving up
+        mut budget: Option<usize>, // try to find `budget` idle peers before giving up
     ) -> Option<PeerId> {
         let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
 
         let idle_peer = loop {
-            budget = budget.saturating_sub(1);
-            if budget == 0 {
-                return None
+            if let Some(bud) = budget {
+                budget = Some(bud.saturating_sub(1));
+                if budget == Some(0) {
+                    return None
+                }
             }
 
             let &hash = hashes_pending_fetch_iter.next()?;
@@ -203,7 +211,7 @@ impl TransactionFetcher {
 
             if idle_peer.is_some() {
                 hashes.push(hash);
-                break idle_peer.map(|p| *p)
+                break idle_peer.copied()
             }
         };
         let hash = hashes.first()?;
@@ -363,16 +371,16 @@ impl TransactionFetcher {
         &mut self,
         peers: &HashMap<PeerId, Peer>,
         metrics: &TransactionsManagerMetrics,
-        budget_find_idle_peer: usize,
+        budget_find_idle_fallback_peer: Option<usize>,
     ) {
         let mut hashes_to_request = vec![];
         let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
 
         // budget to look for an idle peer before giving up
-        let Some(peer_id) = self.pop_any_idle_peer(
+        let Some(peer_id) = self.find_any_idle_fallback_peer_for_any_pending_hash(
             &mut hashes_to_request,
             is_session_active,
-            budget_find_idle_peer,
+            budget_find_idle_fallback_peer,
         ) else {
             // no peers are idle or budget is depleted
             return
@@ -679,11 +687,36 @@ impl TransactionFetcher {
         }
     }
 
-    pub(super) fn has_capacity_for_fetching_pending_hashes(&mut self) -> bool {
-        let info = &mut self.tx_fetcher_info;
+    pub(super) fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
+        let info = &self.tx_fetcher_info;
 
         self.inflight_requests.len() < info.max_inflight_transaction_requests ||
             self.hashes_pending_fetch.len() > info.max_hashes_pending_fetch
+    }
+
+    pub(super) fn search_breadth_budget_find_idle_fallback_peer(&self) -> Option<usize> {
+        let info = &self.tx_fetcher_info;
+
+        let inflight_requests = self.inflight_requests.len();
+        let soft_limit_inflight_requests = info.max_inflight_transaction_requests / 2;
+        let hashes_pending_fetch = self.hashes_pending_fetch.len();
+        let limit_hashes_pending_fetch = info.max_hashes_pending_fetch;
+
+        if inflight_requests < soft_limit_inflight_requests ||
+            hashes_pending_fetch > info.max_hashes_pending_fetch
+        {
+            // unlimited search breadth
+            None
+        } else {
+            // limited breadth of search for idle peer
+            trace!(target: "net::tx",
+              inflight_requests=inflight_requests,
+              soft_limit_inflight_requests=soft_limit_inflight_requests,
+              hashes_pending_fetch=hashes_pending_fetch,
+              limit_hashes_pending_fetch=limit_hashes_pending_fetch,
+              "search breadth limited in search for idle fallback peer for hashes pending fetch");
+            Some(BUDGET_FIND_IDLE_FALLBACK_PEER)
+        }
     }
 }
 

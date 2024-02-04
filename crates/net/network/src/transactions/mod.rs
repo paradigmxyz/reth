@@ -983,16 +983,14 @@ where
         }
     }
 
-    fn has_capacity_for_fetching_pending_hashes(&mut self) -> bool {
+    fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
         if self.network.is_initially_syncing() {
             return false
         }
-        let info = &mut self.pool_imports_info;
+        let info = &self.pool_imports_info;
 
-        if info.pending_pool_imports.load(Ordering::Relaxed) > info.max_pending_pool_imports {
-            return false
-        }
-        self.transaction_fetcher.has_capacity_for_fetching_pending_hashes()
+        info.pending_pool_imports.load(Ordering::Relaxed) < info.max_pending_pool_imports &&
+            self.transaction_fetcher.has_capacity_for_fetching_pending_hashes()
     }
 }
 
@@ -1039,12 +1037,11 @@ where
         }
 
         if this.has_capacity_for_fetching_pending_hashes() {
-            // try drain buffered transactions with respect to budget
-            let budget_refetch = 256;
+            // try drain buffered transactions.
             this.transaction_fetcher.request_hashes_pending_fetch(
                 &this.peers,
                 &this.metrics,
-                budget_refetch,
+                this.transaction_fetcher.search_breadth_budget_find_idle_fallback_peer(),
             );
         }
 
@@ -1744,7 +1741,7 @@ mod tests {
         assert!(tx_fetcher.is_idle(&peer_id_1));
 
         // sends request for buffered hashes to peer_1
-        tx_fetcher.request_hashes_pending_fetch(&tx_manager.peers, &tx_manager.metrics, 1);
+        tx_fetcher.request_hashes_pending_fetch(&tx_manager.peers, &tx_manager.metrics, Some(1));
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
