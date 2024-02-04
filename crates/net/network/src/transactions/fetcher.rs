@@ -170,10 +170,8 @@ impl TransactionFetcher {
         let TxUnknownToPool { fallback_peers, .. } = self.hashes_unknown_to_pool.peek(&hash)?;
 
         for &peer_id in fallback_peers.iter() {
-            if self.is_idle(peer_id) {
-                if is_session_active(peer_id) {
-                    return Some(peer_id)
-                }
+            if self.is_idle(peer_id) && is_session_active(peer_id) {
+                return Some(peer_id)
             }
         }
 
@@ -199,7 +197,7 @@ impl TransactionFetcher {
                 return None
             }
 
-            let Some(&hash) = hashes_pending_fetch_iter.next() else { return None };
+            let &hash = hashes_pending_fetch_iter.next()?;
 
             let idle_peer = self.get_idle_peer_for(hash, &is_session_active);
 
@@ -236,7 +234,7 @@ impl TransactionFetcher {
 
         _ = mem::replace(hashes_to_request, hashes);
 
-        return surplus_hashes;
+        surplus_hashes
     }
 
     /// Evaluates wether or not to include a hash in a `GetPooledTransactions` version eth68
@@ -454,7 +452,7 @@ impl TransactionFetcher {
                 }
 
                 // hash has been seen but is not inflight
-                if self.hashes_pending_fetch.remove(&hash) {
+                if self.hashes_pending_fetch.remove(hash) {
                     return true
                 }
                 // hash has been seen and is in flight. store peer as fallback peer.
@@ -475,7 +473,7 @@ impl TransactionFetcher {
             }
 
             // vacant entry
-            let msg_version = || metadata.is_some().then(|| EthVersion::Eth68).unwrap_or(EthVersion::Eth66);
+            let msg_version = || if metadata.is_some() { EthVersion::Eth68 } else { EthVersion::Eth66 };
 
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
@@ -630,8 +628,7 @@ impl TransactionFetcher {
         let mut acc_size_response = self
             .hashes_unknown_to_pool
             .get(hash)
-            .map(|entry| entry.tx_encoded_len())
-            .flatten()
+            .and_then(|entry| entry.tx_encoded_len())
             .unwrap_or(TX_ENCODED_LENGTH_AVERAGE);
 
         // if request full enough already, we're satisfied, send request for single tx
@@ -659,8 +656,7 @@ impl TransactionFetcher {
             let size = self
                 .hashes_unknown_to_pool
                 .get(hash)
-                .map(|entry| entry.tx_encoded_len())
-                .flatten()
+                .and_then(|entry| entry.tx_encoded_len())
                 .unwrap_or(TX_ENCODED_LENGTH_AVERAGE);
 
             acc_size_response += size;

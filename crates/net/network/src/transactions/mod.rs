@@ -71,7 +71,10 @@ use tracing::{debug, trace};
 mod fetcher;
 mod validation;
 
-use fetcher::{FetchEvent, TransactionFetcher, DEFAULT_MAX_CONCURRENT_TX_REQUESTS,GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES};
+use fetcher::{
+    FetchEvent, TransactionFetcher, DEFAULT_MAX_CONCURRENT_TX_REQUESTS,
+    GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES,
+};
 pub use validation::*;
 
 /// Cache limit of transactions to keep track of for a single peer.
@@ -87,7 +90,8 @@ const NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT: usize = 4096;
 const POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE: usize = 2 * 1024 * 1024;
 
 /// Default maximum pending pool imports to tolerate.
-const DEFAULT_MAX_PENDING_POOL_IMPORTS: usize = GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES * DEFAULT_MAX_CONCURRENT_TX_REQUESTS as usize;
+const DEFAULT_MAX_PENDING_POOL_IMPORTS: usize =
+    GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES * DEFAULT_MAX_CONCURRENT_TX_REQUESTS as usize;
 
 /// The future for inserting a function into the pool
 pub type PoolImportFuture =
@@ -1291,9 +1295,7 @@ struct PoolImportsInfo {
 }
 
 impl PoolImportsInfo {
-    pub fn new(
-        max_pending_pool_imports: usize,
-    ) -> Self {
+    pub fn new(max_pending_pool_imports: usize) -> Self {
         Self { pending_pool_imports: Arc::new(AtomicUsize::default()), max_pending_pool_imports }
     }
 }
