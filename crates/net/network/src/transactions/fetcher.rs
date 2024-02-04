@@ -395,7 +395,7 @@ impl TransactionFetcher {
 
         self.fill_request_from_hashes_pending_fetch(
             &mut hashes_to_request,
-            &peer.transactions,
+            peer.seen_transactions.maybe_pending_transaction_hashes(),
             budget_lru_hashes_pending_fetch,
         );
 

@@ -4,6 +4,8 @@ use crate::{EthMessage, EthVersion};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
+use derive_more::{Deref, DerefMut, From};
+use futures::SinkExt;
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Block, Bytes, TransactionSigned, TxHash, B256, U128};
 
@@ -447,8 +449,9 @@ pub trait HandleAnnouncement {
     /// The announcement contains no entries.
     fn is_empty(&self) -> bool;
 
-    /// Retain only entries for which the hash in the entry, satisfies a given predicate.
-    fn retain_by_hash(&mut self, f: impl FnMut(TxHash) -> bool);
+    /// Retain only entries for which the hash in the entry satisfies a given predicate, return 
+    /// the rest.
+    fn retain_by_hash(&mut self, f: impl FnMut(&TxHash) -> bool) -> Self;
 }
 
 impl HandleAnnouncement for NewPooledTransactionHashes {
@@ -456,10 +459,10 @@ impl HandleAnnouncement for NewPooledTransactionHashes {
         self.is_empty()
     }
 
-    fn retain_by_hash(&mut self, f: impl FnMut(TxHash) -> bool) {
+    fn retain_by_hash(&mut self, f: impl FnMut(&TxHash) -> bool) -> Self {
         match self {
-            NewPooledTransactionHashes::Eth66(msg) => msg.retain_by_hash(f),
-            NewPooledTransactionHashes::Eth68(msg) => msg.retain_by_hash(f),
+            NewPooledTransactionHashes::Eth66(msg) => Self::Eth66(msg.retain_by_hash(f)),
+            NewPooledTransactionHashes::Eth68(msg) => Self::Eth68(msg.retain_by_hash(f)),
         }
     }
 }
@@ -469,19 +472,28 @@ impl HandleAnnouncement for NewPooledTransactionHashes68 {
         self.hashes.is_empty()
     }
 
-    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
+    fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
         let mut indices_to_remove = vec![];
-        for (i, &hash) in self.hashes.iter().enumerate() {
+        for (i, hash) in self.hashes.iter().enumerate() {
             if !f(hash) {
                 indices_to_remove.push(i);
             }
         }
 
+        let mut removed_hashes = Vec::with_capacity(indices_to_remove.len());
+        let mut removed_types = Vec::with_capacity(indices_to_remove.len());
+        let mut removed_sizes = Vec::with_capacity(indices_to_remove.len());
+
         for index in indices_to_remove.into_iter().rev() {
-            self.hashes.remove(index);
-            self.types.remove(index);
-            self.sizes.remove(index);
+            let hash = self.hashes.remove(index);
+            removed_hashes.push(hash);
+            let ty = self.types.remove(index);
+            removed_types.push(ty);
+            let size = self.sizes.remove(index);
+            removed_sizes.push(size);
         }
+
+        Self{hashes: removed_hashes, types: removed_types, sizes: removed_sizes}
     }
 }
 
@@ -490,23 +502,27 @@ impl HandleAnnouncement for NewPooledTransactionHashes66 {
         self.0.is_empty()
     }
 
-    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
+    fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
         let mut indices_to_remove = vec![];
-        for (i, &hash) in self.0.iter().enumerate() {
+        for (i, hash) in self.0.iter().enumerate() {
             if !f(hash) {
                 indices_to_remove.push(i);
             }
         }
 
+        let mut removed_hashes = Vec::with_capacity(indices_to_remove.len());
+
         for index in indices_to_remove.into_iter().rev() {
-            self.0.remove(index);
+            let hash = self.0.remove(index);
+removed_hashes.push(hash);
         }
+
+        Self(removed_hashes)
     }
 }
 
-/// Announcement data that has been validated according to the configured network. For an eth68
-/// announcement, values of the map are `Some((u8, usize))` - the tx metadata. For an eth66
-/// announcement, values of the map are `None`.
+/// Data extracted from an announcement. For an eth68 announcement, values of the map are `Some
+/// ((u8, usize))` - the tx metadata. For an eth66 announcement, values of the map are `None`.
 pub type ValidAnnouncementData = HashMap<TxHash, Option<(u8, usize)>>;
 
 impl HandleAnnouncement for ValidAnnouncementData {
@@ -514,8 +530,13 @@ impl HandleAnnouncement for ValidAnnouncementData {
         self.is_empty()
     }
 
-    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
-        self.retain(|&hash, _| f(hash))
+    fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
+        let data = std::mem::replace(self, HashMap::new());
+        let (keep, rest) = data.into_iter().partition(|(hash, _)| f(hash));
+
+        *self = keep;
+
+        rest
     }
 }
 
@@ -528,8 +549,13 @@ impl HandleAnnouncement for ValidTxHashes {
         self.is_empty()
     }
 
-    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
-        self.retain(|&hash| f(hash))
+    fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
+        let data = std::mem::replace(self, Vec::new());
+        let (keep, rest) = data.into_iter().partition(|hash| f(hash));
+
+        *self = keep;
+
+        rest
     }
 }
 
