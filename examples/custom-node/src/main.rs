@@ -15,17 +15,23 @@
 //! Once traits are implemented and custom types are defined, the [EngineTypes] trait can be
 //! implemented:
 
-use reth::builder::spawn_node;
-use reth_rpc_api::{EthApiClient, EngineApiClient};
-use reth_rpc_types::{withdrawal::Withdrawal, engine::{PayloadAttributes as EthPayloadAttributes, PayloadId, ForkchoiceState}};
-use reth_node_api::{EngineTypes, EngineApiMessageVersion, validate_version_specific_fields, AttributesValidationError, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes};
-use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_payload_builder::{EthPayloadBuilderAttributes, EthBuiltPayload};
-use reth_primitives::{B256, U256, ChainSpec, Genesis, Address, Withdrawals};
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-use std::convert::Infallible;
 use alloy_chains::Chain;
+use reth::builder::spawn_node;
+use reth_node_api::{
+    validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion,
+    EngineTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
+};
+use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
+use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
+use reth_primitives::{Address, ChainSpec, Genesis, Withdrawals, B256, U256};
+use reth_rpc_api::{EngineApiClient, EthApiClient};
+use reth_rpc_types::{
+    engine::{ForkchoiceState, PayloadAttributes as EthPayloadAttributes, PayloadId},
+    withdrawal::Withdrawal,
+};
+use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
+use thiserror::Error;
 // use jsonrpsee::{core::Error, http_client::HttpClient, types::error::INVALID_PARAMS_CODE};
 use jsonrpsee::http_client::HttpClient;
 
@@ -42,8 +48,8 @@ pub struct CustomPayloadAttributes {
 /// Custom error type used in payload attributes validation
 #[derive(Debug, Error)]
 pub enum CustomError {
-   #[error("Custom field is not zero")]
-   CustomFieldIsNotZero,
+    #[error("Custom field is not zero")]
+    CustomFieldIsNotZero,
 }
 
 impl PayloadAttributes for CustomPayloadAttributes {
@@ -68,9 +74,7 @@ impl PayloadAttributes for CustomPayloadAttributes {
 
         // custom validation logic - ensure that the custom field is not zero
         if self.custom == 0 {
-            return Err(AttributesValidationError::invalid_params(
-                CustomError::CustomFieldIsNotZero,
-            ))
+            return Err(AttributesValidationError::invalid_params(CustomError::CustomFieldIsNotZero))
         }
 
         Ok(())
@@ -125,17 +129,17 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
 pub struct CustomEngineTypes;
 
 impl EngineTypes for CustomEngineTypes {
-   type PayloadAttributes = CustomPayloadAttributes;
-   type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
-   type BuiltPayload = EthBuiltPayload;
+    type PayloadAttributes = CustomPayloadAttributes;
+    type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
+    type BuiltPayload = EthBuiltPayload;
 
-   fn validate_version_specific_fields(
-       chain_spec: &ChainSpec,
-       version: EngineApiMessageVersion,
-       payload_or_attrs: PayloadOrAttributes<'_, CustomPayloadAttributes>,
-   ) -> Result<(), AttributesValidationError> {
-       validate_version_specific_fields(chain_spec, version, payload_or_attrs)
-   }
+    fn validate_version_specific_fields(
+        chain_spec: &ChainSpec,
+        version: EngineApiMessageVersion,
+        payload_or_attrs: PayloadOrAttributes<'_, CustomPayloadAttributes>,
+    ) -> Result<(), AttributesValidationError> {
+        validate_version_specific_fields(chain_spec, version, payload_or_attrs)
+    }
 }
 
 #[tokio::main]
