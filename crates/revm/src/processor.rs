@@ -205,7 +205,7 @@ where
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,
-            &mut self.evm.as_mut().unwrap(),
+            self.evm.as_mut().unwrap(),
         )?;
         Ok(())
     }

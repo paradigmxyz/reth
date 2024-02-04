@@ -31,7 +31,7 @@ mod builder {
     use reth_transaction_pool::TransactionPool;
     use revm::{
         db::states::bundle_state::BundleRetention,
-        primitives::{EVMError, Env, InvalidTransaction, ResultAndState},
+        primitives::{EVMError, EnvWithSpecId, InvalidTransaction, ResultAndState},
         DatabaseCommit, State,
     };
     use tracing::{debug, trace, warn};
@@ -209,11 +209,6 @@ mod builder {
         Client: StateProviderFactory,
         Pool: TransactionPool,
     {
-        debug_assert!(
-            args.config.initialized_cfg.optimism,
-            "optimism payload builder called on non-optimism chain"
-        );
-
         let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
         let state_provider = client.state_by_block_hash(config.parent_block.hash)?;
@@ -296,15 +291,14 @@ mod builder {
                     ))
                 })?;
 
-            // Configure the environment for the block.
-            let env = Env {
-                cfg: initialized_cfg.clone(),
-                block: initialized_block_env.clone(),
-                tx: tx_env_with_recovered(&sequencer_tx),
-            };
-
-            let mut evm = revm::EVM::with_env(env);
-            evm.database(&mut db);
+            let mut evm = revm::Evm::builder()
+                .with_db(&mut db)
+                .with_env_with_spec_id(EnvWithSpecId::new_with_cfg_env(
+                    initialized_cfg.clone(),
+                    initialized_block_env.clone(),
+                    tx_env_with_recovered(&sequencer_tx),
+                ))
+                .build();
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,
@@ -322,6 +316,8 @@ mod builder {
                 }
             };
 
+            // to realease the db reference drop evm.
+            drop(evm);
             // commit changes
             db.commit(state);
 
@@ -372,14 +368,15 @@ mod builder {
                 let tx = pool_tx.to_recovered_transaction();
 
                 // Configure the environment for the block.
-                let env = Env {
-                    cfg: initialized_cfg.clone(),
-                    block: initialized_block_env.clone(),
-                    tx: tx_env_with_recovered(&tx),
-                };
 
-                let mut evm = revm::EVM::with_env(env);
-                evm.database(&mut db);
+                let mut evm = revm::Evm::builder()
+                    .with_db(&mut db)
+                    .with_env_with_spec_id(EnvWithSpecId::new_with_cfg_env(
+                        initialized_cfg.clone(),
+                        initialized_block_env.clone(),
+                        tx_env_with_recovered(&tx),
+                    ))
+                    .build();
 
                 let ResultAndState { result, state } = match evm.transact() {
                     Ok(res) => res,
@@ -405,7 +402,8 @@ mod builder {
                         }
                     }
                 };
-
+                // to realease the db reference drop evm.
+                drop(evm);
                 // commit changes
                 db.commit(state);
 

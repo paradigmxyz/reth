@@ -33,7 +33,7 @@ mod builder {
     use reth_transaction_pool::TransactionPool;
     use revm::{
         db::states::bundle_state::BundleRetention,
-        primitives::{EVMError, Env, InvalidTransaction, ResultAndState},
+        primitives::{EVMError, EnvWithSpecId, InvalidTransaction, ResultAndState},
         DatabaseCommit, State,
     };
     use tracing::{debug, trace, warn};
@@ -258,16 +258,13 @@ mod builder {
             }
 
             // Configure the environment for the block.
-            let env = Box::new(Env {
-                cfg: initialized_cfg.cfg_env.clone(),
-                block: initialized_block_env.clone(),
-                tx: tx_env_with_recovered(&tx),
-            });
-
             let mut evm = revm::Evm::builder()
-                .modify_env(|e| *e = env)
                 .with_db(&mut db)
-                .spec_id(initialized_cfg.spec_id)
+                .with_env_with_spec_id(EnvWithSpecId::new_with_cfg_env(
+                    initialized_cfg.clone(),
+                    initialized_block_env.clone(),
+                    tx_env_with_recovered(&tx),
+                ))
                 .build();
 
             let ResultAndState { result, state } = match evm.transact() {

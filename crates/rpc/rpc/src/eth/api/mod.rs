@@ -294,7 +294,7 @@ where
 
         #[cfg(feature = "optimism")]
         {
-            cfg.cfg_env.optimism = self.provider().chain_spec().is_optimism();
+            cfg.is_optimism = self.provider().chain_spec().is_optimism();
         }
 
         let mut block_env = BlockEnv::default();

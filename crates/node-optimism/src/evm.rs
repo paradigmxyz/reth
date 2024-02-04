@@ -41,9 +41,10 @@ impl EvmEnvConfig for OptimismEvmConfig {
         cfg_env.spec_id = spec_id;
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 
-        // optimism-specific configuration
-        // TODO:
-        cfg_env.optimism = chain_spec.is_optimism();
+        #[cfg(feature = "optimism")]
+        {
+            cfg_env.is_optimism = chain_spec.is_optimism();
+        }
     }
 }
 

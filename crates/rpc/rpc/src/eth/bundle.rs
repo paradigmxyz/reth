@@ -20,8 +20,9 @@ use reth_rpc_api::EthCallBundleApiServer;
 use reth_rpc_types::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use revm::{
     db::CacheDB,
-    primitives::{Env, ResultAndState, TxEnv},
+    primitives::{ResultAndState, TxEnv},
 };
+use revm_primitives::EnvWithSpecId;
 use std::sync::Arc;
 
 /// `Eth` bundle implementation.
@@ -79,8 +80,7 @@ where
             .spawn_with_state_at_block(at, move |state| {
                 let coinbase = block_env.coinbase;
                 let basefee = Some(block_env.basefee.to::<u64>());
-                let env =
-                    Box::new(Env { cfg: cfg.cfg_env, block: block_env, tx: TxEnv::default() });
+                let env = EnvWithSpecId::new_with_cfg_env(cfg, block_env, TxEnv::default());
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let initial_coinbase = DatabaseRef::basic_ref(&db, coinbase)?
@@ -92,12 +92,7 @@ where
                 let mut total_gas_fess = U256::ZERO;
                 let mut hash_bytes = Vec::with_capacity(32 * transactions.len());
 
-                let mut evm = revm::Evm::builder()
-                    .modify_env(|e| *e = env)
-                    .with_db(db)
-                    .spec_id(cfg.spec_id)
-                    .build();
-                //evm.database(db);
+                let mut evm = revm::Evm::builder().with_db(db).with_env_with_spec_id(env).build();
 
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut transactions = transactions.into_iter().peekable();

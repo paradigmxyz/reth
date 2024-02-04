@@ -126,11 +126,10 @@ where
     DB: Database,
     <DB as Database>::Error: Into<EthApiError>,
 {
-    let spec_id = env.spec_id;
-    let mut evm =
-        revm::Evm::builder().modify_env(|e| *e = env.env).with_db(db).spec_id(spec_id).build();
+    let mut evm = revm::Evm::builder().with_db(db).with_env_with_spec_id(env).build();
     let res = evm.transact()?;
-    Ok((res, EnvWithSpecId::new(evm.context.evm.env, spec_id)))
+    let (_, env) = evm.into_db_and_env_with_spec_id();
+    Ok((res, env))
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.
@@ -144,16 +143,15 @@ where
     <DB as Database>::Error: Into<EthApiError>,
     I: GetInspector<DB>,
 {
-    let spec_id = env.spec_id;
     let mut evm = revm::Evm::builder()
-        .modify_env(|e| *e = env.env)
         .with_db(db)
-        .spec_id(spec_id)
         .with_external_context(inspector)
+        .with_env_with_spec_id(env)
         .append_handler_register(inspector_handle_register)
         .build();
     let res = evm.transact()?;
-    Ok((res, EnvWithSpecId::new(evm.into_context().evm.env, spec_id)))
+    let (_, env) = evm.into_db_and_env_with_spec_id();
+    Ok((res, env))
 }
 
 /// Same as [inspect] but also returns the database again.
@@ -170,16 +168,16 @@ where
     <DB as Database>::Error: Into<EthApiError>,
     I: GetInspector<DB>,
 {
-    let spec_id = env.spec_id;
     let mut evm = revm::Evm::builder()
-        .modify_env(|e| *e = env.env)
         .with_external_context(inspector)
-        .spec_id(spec_id)
         .with_db(db)
+        .with_env_with_spec_id(env)
+        .append_handler_register(inspector_handle_register)
         .build();
     let res = evm.transact()?;
-    let context = evm.into_context();
-    Ok((res, EnvWithSpecId::new(context.evm.env, spec_id), context.evm.db))
+    let (db, env) = evm.into_db_and_env_with_spec_id();
+    // TODO(revm)
+    Ok((res, env, db))
 }
 
 /// Replays all the transactions until the target transaction is found.
@@ -202,9 +200,10 @@ where
     I: IntoIterator<Item = Tx>,
     Tx: FillableTransaction,
 {
-    let env = Box::new(Env { cfg: cfg.cfg_env, block: block_env, tx: TxEnv::default() });
-    let mut evm =
-        revm::Evm::builder().modify_env(|e| *e = env).with_db(db).spec_id(cfg.spec_id).build();
+    let mut evm = revm::Evm::builder()
+        .with_db(db)
+        .with_env_with_spec_id(EnvWithSpecId::new_with_cfg_env(cfg, block_env, Default::default()))
+        .build();
     let mut index = 0;
     for tx in transactions.into_iter() {
         if tx.hash() == target_tx_hash {

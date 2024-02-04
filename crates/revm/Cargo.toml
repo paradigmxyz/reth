@@ -33,7 +33,7 @@ reth-node-optimism.workspace = true
 
 [features]
 optimism = [
-  "revm/optimism_default_handler",
+  "revm/optimism",
   "reth-primitives/optimism",
   "reth-consensus-common/optimism",
   "reth-interfaces/optimism",

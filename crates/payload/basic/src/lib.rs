@@ -31,7 +31,7 @@ use reth_revm::state_change::{
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{
-    primitives::{BlockEnv, CfgEnvWithSpecId, Env, SpecId},
+    primitives::{BlockEnv, CfgEnvWithSpecId, EnvWithSpecId, SpecId},
     Database, DatabaseCommit, Evm, State,
 };
 use std::{
@@ -872,18 +872,14 @@ where
     DB::Error: std::fmt::Display,
     Attributes: PayloadBuilderAttributes,
 {
-    // Configure the environment for the block.
-    let env = Box::new(Env {
-        cfg: initialized_cfg.cfg_env.clone(),
-        block: initialized_block_env.clone(),
-        ..Default::default()
-    });
-
     // apply pre-block EIP-4788 contract call
     let mut evm_pre_block = Evm::builder()
-        .modify_env(|e| *e = env)
         .with_db(db)
-        .spec_id(initialized_cfg.spec_id)
+        .with_env_with_spec_id(EnvWithSpecId::new_with_cfg_env(
+            initialized_cfg.clone(),
+            initialized_block_env.clone(),
+            Default::default(),
+        ))
         .build();
 
     // initialize a block from the env, because the pre block call needs the block itself
