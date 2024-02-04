@@ -82,7 +82,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     }
 
     /// Returns all transactions that satisfy the given basefee and blob_fee.
-    pub(crate) fn satisfy_attributes(
+    pub(crate) const fn satisfy_attributes(
         &self,
         _best_transactions_attributes: BestTransactionsAttributes,
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
@@ -189,7 +189,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
         let mut removed = Vec::new();
 
-        while self.size() > limit.max_size && self.len() > limit.max_txs {
+        while limit.is_exceeded(self.len(), self.size()) {
             let tx = self.all.last().expect("pool is not empty");
             let id = *tx.transaction.id();
             removed.push(self.remove_transaction(&id).expect("transaction exists"));

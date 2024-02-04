@@ -241,6 +241,7 @@ mod tests {
             difficulty: U256::ZERO,
             mix_hash: B256::ZERO,
             coinbase: Address::ZERO,
+            number: Some(0),
             ..Default::default()
         };
 
