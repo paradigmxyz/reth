@@ -77,11 +77,11 @@ use fetcher::{
 };
 pub use validation::*;
 
-/// Cache limit of transactions to keep track of for a single peer, that the peer's pool and local 
+/// Cache limit of transactions to keep track of for a single peer, that the peer's pool and local
 /// pool have in common.
 const CAPACITY_CACHE_TRANSACTION_HASHES_SEEN_BY_PEER_AND_IN_POOL: usize = 7 * 1024;
 
-/// Cache limit of transactions to keep track of for a single peer, that are in the peer's pool 
+/// Cache limit of transactions to keep track of for a single peer, that are in the peer's pool
 /// but maybe not in the local pool yet.
 const CAPACITY_CACHE_TRANSACTION_HASHES_SENT_BY_PEER_AND_MAYBE_IN_POOL: usize = 3 * 1024;
 
@@ -97,11 +97,6 @@ const POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE: usize = 2 * 1024 * 1024
 /// Default maximum pending pool imports to tolerate.
 const DEFAULT_MAX_PENDING_POOL_IMPORTS: usize =
     GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES * DEFAULT_MAX_CONCURRENT_TX_REQUESTS as usize;
-
-/// The number of peers to broadcast transactions to in full.
-const fn full_transaction_peers_count(total_peers_len: usize) -> usize {
-    (total_peers_len as f64).sqrt() as usize + 1
-}
 
 /// The future for inserting a function into the pool
 pub type PoolImportFuture =
@@ -387,7 +382,7 @@ where
 
         // send full transactions to a fraction fo the connected peers (square root of the total
         // number of connected peers)
-        let max_num_full = full_transaction_peers_count(self.peers.len());
+        let max_num_full = (self.peers.len() as f64).sqrt() as usize + 1;
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
         for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
@@ -401,7 +396,7 @@ where
             for tx in to_propagate.iter() {
                 if !peer.seen_transactions.has_seen_transaction(&tx.hash()) {
                     peer.seen_transactions.seen_by_peer_and_in_pool(tx.hash());
-                    
+
                     hashes.push(tx);
 
                     // Do not send full 4844 transaction hashes to peers.
@@ -533,7 +528,8 @@ where
             let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
 
             for tx in to_propagate {
-                if peer.seen_transactions.seen_by_peer_and_in_pool(tx.hash()) {
+                if peer.seen_transactions.has_seen_transaction(&tx.hash()) {
+                    peer.seen_transactions.seen_by_peer_and_in_pool(tx.hash());
                     hashes.push(&tx);
                 }
             }
@@ -600,15 +596,17 @@ where
         let mut num_already_seen = 0;
         if let Some(pools_intersection) = already_known_by_pool {
             for tx in pools_intersection.into_hashes() {
-                if !peer.seen_transactions.seen_by_peer_and_in_pool(tx) {
+                if peer.seen_transactions.has_seen_transaction(&tx) {
                     num_already_seen += 1;
                 }
+                peer.seen_transactions.seen_by_peer_and_in_pool(tx);
             }
         }
         for tx in msg.iter_hashes().copied() {
-            if !peer.seen_transactions.seen_in_announcement(tx) {
+            if peer.seen_transactions.has_seen_transaction(&tx) {
                 num_already_seen += 1;
             }
+            peer.seen_transactions.seen_in_announcement(tx);
         }
 
         if msg.is_empty() {
@@ -899,14 +897,14 @@ where
                 // track that the peer knows this transaction, but only if this is a new broadcast.
                 // If we received the transactions as the response to our GetPooledTransactions
                 // requests (based on received `NewPooledTransactionHashes`) then we already
-                // recorded the hashes in [`Self::on_new_pooled_transaction_hashes`]. We don't 
-                // move these from `peer.seen_transactions.transactions_received_as_hash` to 
-                // `peer.seen_transactions.transactions_received_in_full_or_sent` here, because 
-                // the separation of the lists just serves as a hint for tx fetcher of which 
-                // hashes are missing. It's good enough without reallocating hashes.
-                // 
-                if source.is_broadcast() &&
-                    !peer.seen_transactions.has_seen_transaction(&tx.hash())
+                // recorded the hashes in [`Self::on_new_pooled_transaction_hashes`] as  `peer.
+                // seen_transactions.transactions_received_as_hash`. In that case, we don't move
+                // hashes from `peer.seen_transactions.transactions_received_as_hash` to
+                // `peer.seen_transactions.transactions_received_in_full_or_sent` here. The
+                // division of the `seen_transactions` list, just serves as a hint for tx fetcher
+                // of which hashes are missing. It's good enough without reallocating hashes.
+                //
+                if source.is_broadcast() && peer.seen_transactions.has_seen_transaction(tx.hash())
                 {
                     num_already_seen += 1;
                 }
@@ -1284,7 +1282,7 @@ impl Default for TransactionsSeenByPeer {
     fn default() -> Self {
         Self {
             transactions_received_as_hash: LruCache::new(
-                NonZeroUsize::new(CAPACITY_CACHE_TRANSACTION_HASHES_SEEN_BY_PEER_AND_IN_POOL)
+                NonZeroUsize::new(CAPACITY_CACHE_TRANSACTION_HASHES_SENT_BY_PEER_AND_MAYBE_IN_POOL)
                     .unwrap(),
             ),
             transactions_received_in_full_or_sent: LruCache::new(
@@ -1804,8 +1802,8 @@ mod tests {
         let seen_hashes = [B256::from_slice(&[1; 32]), B256::from_slice(&[2; 32])];
 
         let (mut peer_1, mut to_mock_session_rx) = new_mock_session(peer_id_1, eth_version);
-        peer_1.transactions.insert(seen_hashes[0]);
-        peer_1.transactions.insert(seen_hashes[1]);
+        peer_1.seen_transactions.seen_in_announcement(seen_hashes[0]);
+        peer_1.seen_transactions.seen_in_announcement(seen_hashes[1]);
         tx_manager.peers.insert(peer_id_1, peer_1);
 
         // hashes are seen and currently not inflight, with one fallback peer, and are buffered

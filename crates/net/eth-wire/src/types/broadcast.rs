@@ -449,7 +449,7 @@ pub trait HandleAnnouncement {
     /// The announcement contains no entries.
     fn is_empty(&self) -> bool;
 
-    /// Retain only entries for which the hash in the entry satisfies a given predicate, return 
+    /// Retain only entries for which the hash in the entry satisfies a given predicate, return
     /// the rest.
     fn retain_by_hash(&mut self, f: impl FnMut(&TxHash) -> bool) -> Self;
 }
@@ -493,7 +493,7 @@ impl HandleAnnouncement for NewPooledTransactionHashes68 {
             removed_sizes.push(size);
         }
 
-        Self{hashes: removed_hashes, types: removed_types, sizes: removed_sizes}
+        Self { hashes: removed_hashes, types: removed_types, sizes: removed_sizes }
     }
 }
 
@@ -514,7 +514,7 @@ impl HandleAnnouncement for NewPooledTransactionHashes66 {
 
         for index in indices_to_remove.into_iter().rev() {
             let hash = self.0.remove(index);
-removed_hashes.push(hash);
+            removed_hashes.push(hash);
         }
 
         Self(removed_hashes)
