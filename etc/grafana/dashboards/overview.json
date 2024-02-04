@@ -6701,14 +6701,14 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "query_result(up)",
+        "definition": "reth_info",
         "hide": 0,
         "includeAll": false,
         "multi": false,
         "name": "instance",
         "options": [],
         "query": {
-          "query": "query_result(up)",
+          "query": "reth_info",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
