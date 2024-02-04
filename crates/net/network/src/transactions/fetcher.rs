@@ -23,9 +23,6 @@ use super::{
     NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT, POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
 };
 
-/// Maximum concurrent [`GetPooledTxRequest`]s to allow per peer.
-pub(super) const MAX_CONCURRENT_TX_REQUESTS_PER_PEER: u8 = 1;
-
 /// How many peers we keep track of for each missing transaction.
 pub(super) const MAX_ALTERNATIVE_PEERS_PER_TX: u8 =
     MAX_REQUEST_RETRIES_PER_TX_HASH + MARGINAL_FALLBACK_PEERS_PER_TX;
@@ -38,17 +35,23 @@ const MARGINAL_FALLBACK_PEERS_PER_TX: u8 = 1;
 /// an announcement after it has been ejected from the hash buffer.
 const MAX_REQUEST_RETRIES_PER_TX_HASH: u8 = 2;
 
-/// Maximum concurrent [`GetPooledTxRequest`]s.
-const MAX_CONCURRENT_TX_REQUESTS: u32 = 10000;
+/// Default maximum concurrent [`GetPooledTxRequest`]s.
+pub(super) const DEFAULT_MAX_CONCURRENT_TX_REQUESTS: u32 = 10000;
+
+/// Maximum concurrent [`GetPooledTxRequest`]s to allow per peer.
+pub(super) const MAX_CONCURRENT_TX_REQUESTS_PER_PEER: u8 = 1;
 
 /// Cache limit of transactions waiting for idle peer to be fetched.
 pub(super) const MAX_CAPACITY_CACHE_FOR_HASHES_PENDING_FETCH: usize =
     100 * GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES;
 
+/// Default maximum number of hashes pending fetch to tolerate at any time.
+const DEFAULT_MAX_HASHES_PENDING_FETCH: usize = MAX_CAPACITY_CACHE_FOR_HASHES_PENDING_FETCH / 2;
+
 /// Recommended soft limit for the number of hashes in a GetPooledTransactions message (8kb)
 ///
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>
-const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES: usize = 256;
+pub(super) const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES: usize = 256;
 
 /// Soft limit for a [`PooledTransactions`] response if request is filled from hashes pending
 /// fetch.
@@ -84,6 +87,8 @@ pub(super) struct TransactionFetcher<T = TxUnknownToPool> {
     pub(super) hashes_unknown_to_pool: LruMap<TxHash, T, Unlimited>,
     /// Filter for valid eth68 announcements.
     pub(super) filter_valid_hashes: AnnouncementFilter,
+    /// Info on capacity of the transaction fetcher.
+    tx_fetcher_info: TransactionFetcherInfo,
 }
 
 #[derive(Debug)]
@@ -515,12 +520,12 @@ impl TransactionFetcher {
         let peer_id: PeerId = peer.request_tx.peer_id;
         let msg_version = peer.version;
 
-        if self.active_peers.len() as u32 >= MAX_CONCURRENT_TX_REQUESTS {
+        if self.active_peers.len() >= self.tx_fetcher_info.max_inflight_transaction_requests {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 new_announced_hashes=?new_announced_hashes,
                 msg_version=%msg_version,
-                limit=MAX_CONCURRENT_TX_REQUESTS,
+                max_inflight_transaction_requests=self.tx_fetcher_info.max_inflight_transaction_requests,
                 "limit for concurrent `GetPooledTransactions` requests reached, dropping request for hashes to peer"
             );
             return Some(new_announced_hashes)
@@ -541,7 +546,7 @@ impl TransactionFetcher {
                 peer_id=format!("{peer_id:#}"),
                 new_announced_hashes=?new_announced_hashes,
                 msg_version=%msg_version,
-                limit=MAX_CONCURRENT_TX_REQUESTS_PER_PEER,
+                MAX_CONCURRENT_TX_REQUESTS_PER_PEER=MAX_CONCURRENT_TX_REQUESTS_PER_PEER,
                 "limit for concurrent `GetPooledTransactions` requests per peer reached"
             );
             return Some(new_announced_hashes)
@@ -677,6 +682,13 @@ impl TransactionFetcher {
             self.hashes_pending_fetch.remove(hash);
         }
     }
+
+    pub(super) fn has_capacity_for_fetching_pending_hashes(&mut self) -> bool {
+        let info = &mut self.tx_fetcher_info;
+
+        self.inflight_requests.len() < info.max_inflight_transaction_requests ||
+            self.hashes_pending_fetch.len() > info.max_hashes_pending_fetch
+    }
 }
 
 impl Stream for TransactionFetcher {
@@ -747,7 +759,7 @@ impl Stream for TransactionFetcher {
 impl Default for TransactionFetcher {
     fn default() -> Self {
         Self {
-            active_peers: LruMap::new(MAX_CONCURRENT_TX_REQUESTS),
+            active_peers: LruMap::new(DEFAULT_MAX_CONCURRENT_TX_REQUESTS),
             inflight_requests: Default::default(),
             hashes_pending_fetch: LruCache::new(
                 NonZeroUsize::new(MAX_CAPACITY_CACHE_FOR_HASHES_PENDING_FETCH)
@@ -755,6 +767,10 @@ impl Default for TransactionFetcher {
             ),
             hashes_unknown_to_pool: LruMap::new_unlimited(),
             filter_valid_hashes: Default::default(),
+            tx_fetcher_info: TransactionFetcherInfo::new(
+                DEFAULT_MAX_CONCURRENT_TX_REQUESTS as usize,
+                DEFAULT_MAX_HASHES_PENDING_FETCH,
+            ),
         }
     }
 }
@@ -827,6 +843,21 @@ impl Future for GetPooledTxRequestFut {
                 Poll::Pending
             }
         }
+    }
+}
+
+/// Tracks stats about the [`TransactionsManager`].
+#[derive(Debug)]
+pub struct TransactionFetcherInfo {
+    /// Currently active outgoing [`GetPooledTransactions`] requests.
+    max_inflight_transaction_requests: usize,
+    /// Number of pending hashes.
+    max_hashes_pending_fetch: usize,
+}
+
+impl TransactionFetcherInfo {
+    pub fn new(max_inflight_transaction_requests: usize, max_hashes_pending_fetch: usize) -> Self {
+        Self { max_inflight_transaction_requests, max_hashes_pending_fetch }
     }
 }
 

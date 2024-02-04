@@ -58,7 +58,10 @@ use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     num::NonZeroUsize,
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
 };
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
@@ -68,7 +71,7 @@ use tracing::{debug, trace};
 mod fetcher;
 mod validation;
 
-use fetcher::{FetchEvent, TransactionFetcher, MAX_CAPACITY_CACHE_FOR_HASHES_PENDING_FETCH};
+use fetcher::{FetchEvent, TransactionFetcher, DEFAULT_MAX_CONCURRENT_TX_REQUESTS,GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES};
 pub use validation::*;
 
 /// Cache limit of transactions to keep track of for a single peer.
@@ -82,6 +85,9 @@ const NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT: usize = 4096;
 ///
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
 const POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE: usize = 2 * 1024 * 1024;
+
+/// Default maximum pending pool imports to tolerate.
+const DEFAULT_MAX_PENDING_POOL_IMPORTS: usize = GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES * DEFAULT_MAX_CONCURRENT_TX_REQUESTS as usize;
 
 /// The future for inserting a function into the pool
 pub type PoolImportFuture =
@@ -213,6 +219,8 @@ pub struct TransactionsManager<Pool> {
     transactions_by_peers: HashMap<TxHash, Vec<PeerId>>,
     /// Transactions that are currently imported into the `Pool`
     pool_imports: FuturesUnordered<PoolImportFuture>,
+    /// Stats on pool imports that help the node self-monitor.
+    pool_imports_info: PoolImportsInfo,
     /// All the connected peers.
     peers: HashMap<PeerId, Peer>,
     /// Send half for the command channel.
@@ -225,9 +233,6 @@ pub struct TransactionsManager<Pool> {
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
     /// TransactionsManager metrics
     metrics: TransactionsManagerMetrics,
-    /// Configures wether or not to handle hashes from an announcement that didn't fit in the
-    /// request. If set to `false`, hashes that don't fit will be dropped.
-    enable_tx_refetch: bool,
 }
 
 impl<Pool: TransactionPool> TransactionsManager<Pool> {
@@ -262,7 +267,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
             metrics: Default::default(),
-            enable_tx_refetch: false,
+            pool_imports_info: PoolImportsInfo::new(DEFAULT_MAX_PENDING_POOL_IMPORTS),
         }
     }
 }
@@ -895,15 +900,25 @@ where
             // import new transactions as a batch to minimize lock contention on the underlying pool
             if !new_txs.is_empty() {
                 let pool = self.pool.clone();
+                // update metrics
                 let metric_pending_pool_imports = self.metrics.pending_pool_imports.clone();
-
                 metric_pending_pool_imports.increment(new_txs.len() as f64);
+
+                // update self-monitoring info
+                self.pool_imports_info
+                    .pending_pool_imports
+                    .fetch_add(new_txs.len(), Ordering::Relaxed);
+                let tx_manager_info_pending_pool_imports =
+                    self.pool_imports_info.pending_pool_imports.clone();
 
                 let import = Box::pin(async move {
                     let added = new_txs.len();
                     let res = pool.add_external_transactions(new_txs).await;
 
+                    // update metrics
                     metric_pending_pool_imports.decrement(added as f64);
+                    // update self-monitoring info
+                    tx_manager_info_pending_pool_imports.fetch_sub(added, Ordering::Relaxed);
 
                     res
                 });
@@ -963,6 +978,18 @@ where
             }
         }
     }
+
+    fn has_capacity_for_fetching_pending_hashes(&mut self) -> bool {
+        if self.network.is_initially_syncing() {
+            return false
+        }
+        let info = &mut self.pool_imports_info;
+
+        if info.pending_pool_imports.load(Ordering::Relaxed) > info.max_pending_pool_imports {
+            return false
+        }
+        self.transaction_fetcher.has_capacity_for_fetching_pending_hashes()
+    }
 }
 
 /// An endless future.
@@ -1007,7 +1034,7 @@ where
             }
         }
 
-        if this.enable_tx_refetch {
+        if this.has_capacity_for_fetching_pending_hashes() {
             // try drain buffered transactions with respect to budget
             let budget_refetch = 256;
             this.transaction_fetcher.request_hashes_pending_fetch(
@@ -1252,6 +1279,23 @@ pub enum NetworkTransactionEvent {
         /// The sender for responding to the request with a result of `PooledTransactions`.
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     },
+}
+
+/// Tracks stats about the [`TransactionsManager`].
+#[derive(Debug)]
+struct PoolImportsInfo {
+    /// Number of transactions about to be imported into the pool.
+    pending_pool_imports: Arc<AtomicUsize>,
+    /// Max number of transactions about to be imported into the pool.
+    max_pending_pool_imports: usize,
+}
+
+impl PoolImportsInfo {
+    pub fn new(
+        max_pending_pool_imports: usize,
+    ) -> Self {
+        Self { pending_pool_imports: Arc::new(AtomicUsize::default()), max_pending_pool_imports }
+    }
 }
 
 #[cfg(test)]
@@ -1698,7 +1742,7 @@ mod tests {
         assert!(tx_fetcher.is_idle(peer_id_1));
 
         // sends request for buffered hashes to peer_1
-        tx_manager.request_hashes_pending_fetch(1);
+        tx_fetcher.request_hashes_pending_fetch(&tx_manager.peers, &tx_manager.metrics, 1);
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
