@@ -198,13 +198,6 @@ impl TransactionFetcher {
         let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
 
         let idle_peer = loop {
-            if let Some(bud) = budget {
-                budget = Some(bud.saturating_sub(1));
-                if budget == Some(0) {
-                    return None
-                }
-            }
-
             let &hash = hashes_pending_fetch_iter.next()?;
 
             let idle_peer = self.get_idle_peer_for(hash, &is_session_active);
@@ -212,6 +205,13 @@ impl TransactionFetcher {
             if idle_peer.is_some() {
                 hashes.push(hash);
                 break idle_peer.copied()
+            }
+
+            if let Some(bud) = budget {
+                budget = Some(bud.saturating_sub(1));
+                if budget == Some(0) {
+                    return None
+                }
             }
         };
         let hash = hashes.first()?;

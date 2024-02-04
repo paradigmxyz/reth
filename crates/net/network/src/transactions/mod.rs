@@ -1882,8 +1882,8 @@ mod tests {
             .expect("should send peer_2 response to tx manager");
         let Some(FetchEvent::FetchError { .. }) = tx_fetcher.next().await else { unreachable!() };
 
-        // `MAX_REQUEST_RETRIES_PER_TX_HASH`, 2, for hashes reached however this time won't be
-        // buffered for retry
+        // `MAX_REQUEST_RETRIES_PER_TX_HASH`, 2, for hashes reached so this time won't be buffered
+        // for retry
         assert!(tx_fetcher.hashes_pending_fetch.is_empty());
     }
 
