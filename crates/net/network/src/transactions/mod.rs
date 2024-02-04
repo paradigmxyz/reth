@@ -711,72 +711,6 @@ where
         }
     }
 
-    /// Tries to request hashes pending fetch.
-    ///
-    /// Finds the first buffered hash with a fallback peer that is idle, if any. Fills the rest of
-    /// the request by checking the transactions seen by the peer against the buffer.
-    fn request_hashes_pending_fetch(&mut self, mut budget: usize) {
-        loop {
-            let mut hashes_to_request = vec![];
-            let peers = &self.peers;
-            let is_session_active = |peer_id| peers.contains_key(&peer_id);
-
-            // budget to look for an idle peer before giving up
-            let budget_find_idle_peer = 256;
-
-            let Some(peer_id) = self.transaction_fetcher.pop_any_idle_peer(
-                &mut hashes_to_request,
-                is_session_active,
-                budget_find_idle_peer,
-            ) else {
-                // no peers are idle or budget is depleted
-                return
-            };
-            let Some(peer) = self.peers.get(&peer_id) else { return };
-
-            // fill the request with other buffered hashes that have been announced by the peer.
-            // look up the given number of lru hashes that are pending fetch, in the hashes seen
-            // by this peer, before giving up and sending a request with the single tx popped
-            // above.
-            let budget_lru_hashes_pending_fetch = MAX_CAPACITY_CACHE_FOR_HASHES_PENDING_FETCH / 2;
-
-            self.transaction_fetcher.fill_request_from_hashes_pending_fetch(
-                &mut hashes_to_request,
-                &peer.transactions,
-                budget_lru_hashes_pending_fetch,
-            );
-
-            trace!(target: "net::tx",
-                peer_id=format!("{peer_id:#}"),
-                hashes=?hashes_to_request,
-                "requesting hashes that were stored pending fetch from peer"
-            );
-
-            // request the buffered missing transactions
-            let metrics = &self.metrics;
-            if let Some(failed_to_request_hashes) = self
-                .transaction_fetcher
-                .request_transactions_from_peer(hashes_to_request, peer, || {
-                    metrics.egress_peer_channel_full.increment(1)
-                })
-            {
-                debug!(target: "net::tx",
-                    peer_id=format!("{peer_id:#}"),
-                    failed_to_request_hashes=?failed_to_request_hashes,
-                    "failed sending request to peer's session, buffering hashes"
-                );
-
-                self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
-                return
-            }
-
-            budget = budget.saturating_sub(1);
-            if budget == 0 {
-                return
-            }
-        }
-    }
-
     /// Handles dedicated transaction events related to the `eth` protocol.
     fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
         match event {
@@ -1076,7 +1010,11 @@ where
         if this.enable_tx_refetch {
             // try drain buffered transactions with respect to budget
             let budget_refetch = 256;
-            this.request_hashes_pending_fetch(budget_refetch);
+            this.transaction_fetcher.request_hashes_pending_fetch(
+                &this.peers,
+                &this.metrics,
+                budget_refetch,
+            );
         }
 
         this.update_request_metrics();
