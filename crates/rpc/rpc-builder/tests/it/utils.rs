@@ -103,7 +103,7 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
 > {
     RpcModuleBuilder::default()
         .with_provider(NoopProvider::default())
-        .with_pool(TestPoolWrapper::default())
+        .with_pool(TestPoolWrapper::default().into())
         .with_network(NoopNetwork::default())
         .with_executor(TokioTaskExecutor::default())
         .with_events(TestCanonStateSubscriptions::default())
