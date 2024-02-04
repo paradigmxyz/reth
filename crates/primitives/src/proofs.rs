@@ -625,10 +625,8 @@ mod tests {
 
         for (test_addr, expected_root) in fixtures {
             let mut genesis_alloc = HashMap::new();
-            genesis_alloc.insert(
-                test_addr,
-                GenesisAccount { nonce: None, balance: U256::MAX, code: None, storage: None },
-            );
+            genesis_alloc
+                .insert(test_addr, GenesisAccount { balance: U256::MAX, ..Default::default() });
             let root = state_root_unhashed(genesis_alloc);
 
             assert_eq!(root, expected_root);
