@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 const SHANGAI_BLOCK: u64 = 50523000;
 
-pub(crate) fn chain_spec() -> Arc<ChainSpec> {
+pub(crate) fn polygon_chain_spec() -> Arc<ChainSpec> {
     const GENESIS: B256 = b256!("a9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b");
 
     ChainSpec {
