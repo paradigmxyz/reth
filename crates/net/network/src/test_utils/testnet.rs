@@ -19,9 +19,8 @@ use reth_provider::{
 };
 use reth_tasks::TokioTaskExecutor;
 use reth_transaction_pool::{
-    blobstore::InMemoryBlobStore,
-    test_utils::{testing_pool, TestPool},
-    EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
+    blobstore::InMemoryBlobStore, test_utils::TestPool, EthTransactionPool, TransactionPool,
+    TransactionValidationTaskExecutor,
 };
 use secp256k1::SecretKey;
 use std::{
@@ -423,9 +422,9 @@ impl<C> Peer<C>
 where
     C: BlockReader + HeaderProvider + Clone,
 {
-    /// Installs a new [testing_pool]
+    /// Installs a new [TestPool]
     pub fn install_test_pool(&mut self) {
-        self.install_transactions_manager(testing_pool())
+        self.install_transactions_manager(TestPool::default())
     }
 }
 
