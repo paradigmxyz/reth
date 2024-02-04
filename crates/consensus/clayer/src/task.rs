@@ -66,7 +66,7 @@ pub struct ClTask<Client, Pool: TransactionPool, CDB> {
     ///
     consensus_agent: ClayerConsensusMessagingAgent,
     ///
-    storages: CDB,
+    storages: Arc<CDB>,
     pbft_config: PbftConfig,
     pbft_state: Arc<parking_lot::RwLock<PbftState>>,
     pbft_running_state: Arc<AtomicBool>,
@@ -75,7 +75,10 @@ pub struct ClTask<Client, Pool: TransactionPool, CDB> {
     auth_config: AuthHttpConfig,
 }
 
-impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
+impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB>
+where
+    CDB: ConsensusNumberReader + ConsensusNumberWriter + 'static,
+{
     /// Creates a new instance of the task
     pub(crate) fn new(
         chain_spec: Arc<ChainSpec>,
@@ -102,7 +105,7 @@ impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
             block_publishing_ticker: timing::AsyncTicker::new(Duration::from_secs(30)),
             network,
             consensus_agent,
-            storages,
+            storages: Arc::new(storages),
             pbft_config,
             pbft_state: Arc::new(parking_lot::RwLock::new(pbft_state)),
             pbft_running_state: Arc::new(AtomicBool::new(false)),
@@ -123,9 +126,39 @@ impl<Client, Pool: TransactionPool, CDB> ClTask<Client, Pool, CDB> {
         let pbft_state = self.pbft_state.clone();
         let pbft_config = self.pbft_config.clone();
 
+        let cdb: Arc<CDB> = self.storages.clone();
+
         let startup_latest_header = self.startup_latest_header.clone();
         let thread_join_handle = std::thread::spawn(move || {
             let state = &mut *pbft_state.write();
+
+            let mut rng = rand::thread_rng();
+            let cn = rng.gen();
+            let hash = B256::with_last_byte(cn);
+
+            match cdb.save_consensus_number(hash, cn as u64) {
+                Ok(o) => {
+                    info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: {}-{}", cn, hash, cn);
+                    if o {
+                        info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: ture", cn);
+                    } else {
+                        info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: false", cn);
+                    }
+                }
+                Err(_e) => {
+                    info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: error!", cn)
+                }
+            }
+
+            // if cdb.consensus_number(hash).is_ok() {
+            //     if let Some(num) = cdb.consensus_number(hash).unwrap() {
+            //         info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages get{}: {}-{}",cn, hash, num);
+            //     } else {
+            //         info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages get{}: NOne", cn);
+            //     }
+            // } else {
+            //     info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ received get{}: error!", cn);
+            // }
 
             let api = create_sync_api(&auth_config);
             let mut consensus_engine =
@@ -216,7 +249,7 @@ where
     Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
-    CDB: ConsensusNumberReader + ConsensusNumberWriter + Unpin,
+    CDB: ConsensusNumberReader + ConsensusNumberWriter + Unpin + 'static,
 {
     type Output = ();
 
