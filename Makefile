@@ -43,6 +43,14 @@ help: ## Display this help.
 
 ##@ Build
 
+.PHONY: build
+build: ## Build the reth binary into `target` directory.
+	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
+
+.PHONY: build-op
+build-op: ## Build the op-reth binary into `target` directory.
+	cargo build --bin op-reth --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
+
 .PHONY: install
 install: ## Build and install the reth binary under `~/.cargo/bin`.
 	cargo install --path bin/reth --bin reth --force --locked \
