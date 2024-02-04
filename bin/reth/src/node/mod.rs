@@ -471,11 +471,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
             let default_jwt_path = data_dir.jwt_path();
             let jwt_secret = self.rpc.auth_jwt_secret(default_jwt_path)?;
-            let auth_config = AuthHttpConfig {
-                address: self.rpc.auth_addr,
-                port: self.rpc.auth_port,
-                auth: jwt_secret.as_bytes().to_vec(),
-            };
+            let auth_config =
+                AuthHttpConfig { port: self.rpc.auth_port, auth: jwt_secret.as_bytes().to_vec() };
             let mut task = ConsensusBuilder::new(
                 secret_key,
                 Arc::clone(&self.chain),

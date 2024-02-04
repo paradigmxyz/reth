@@ -80,7 +80,6 @@ pub static CL_CAPABILITIES: &[&str] = &[
 
 #[derive(Clone)]
 pub struct AuthHttpConfig {
-    pub address: IpAddr,
     pub port: u16,
     pub auth: Vec<u8>,
 }

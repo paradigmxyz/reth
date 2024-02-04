@@ -56,7 +56,7 @@ use tracing::*;
 use url::Url;
 
 pub fn create_api(config: &AuthHttpConfig) -> HttpJsonRpc {
-    let str = format!("http://{}:{}", config.address, config.port);
+    let str = format!("http://127.0.0.1:{}/", config.port);
     let execution_url = Url::parse(&str).unwrap();
     let execution_timeout_multiplier = Option::from(3);
 
@@ -73,7 +73,7 @@ pub fn create_api(config: &AuthHttpConfig) -> HttpJsonRpc {
 }
 
 pub fn create_sync_api(config: &AuthHttpConfig) -> HttpJsonRpcSync {
-    let str = format!("http://{}:{}", config.address, config.port);
+    let str = format!("http://127.0.0.1:{}/", config.port);
     let execution_url = Url::parse(&str).unwrap();
     let execution_timeout_multiplier = Option::from(3);
 
