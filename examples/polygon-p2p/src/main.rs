@@ -13,7 +13,6 @@ use chain_cfg::{boot_nodes, chain_spec, head};
 use reth_network::{
     config::NetworkMode, NetworkConfig, NetworkEvent, NetworkEvents, NetworkManager,
 };
-
 use reth_discv4::Discv4ConfigBuilder;
 use reth_provider::test_utils::NoopProvider;
 use reth_tracing::{
