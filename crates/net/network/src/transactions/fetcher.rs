@@ -41,7 +41,8 @@ const MAX_REQUEST_RETRIES_PER_TX_HASH: u8 = 2;
 const MAX_CONCURRENT_TX_REQUESTS: u32 = 10000;
 
 /// Cache limit of transactions waiting for idle peer to be fetched.
-pub(super) const MAX_CAPACITY_CACHE_FOR_HASHES_PENDING_FETCH: usize = 100 * GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES;
+pub(super) const MAX_CAPACITY_CACHE_FOR_HASHES_PENDING_FETCH: usize =
+    100 * GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES;
 
 /// Recommended soft limit for the number of hashes in a GetPooledTransactions message (8kb)
 ///
@@ -61,8 +62,8 @@ const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES_ON_FETCH_PENDING: usize =
 /// Average byte size of an encoded transaction. Estimated by the standard recommended max
 /// response size divided by the recommended max count of hashes in an [`GetPooledTransactions`]
 /// request.
-const TX_ENCODED_LENGTH_AVERAGE: usize = POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE /
-    NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT;
+const TX_ENCODED_LENGTH_AVERAGE: usize =
+    POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE / NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT;
 
 /// The type responsible for fetching missing transactions from peers.
 ///
@@ -158,7 +159,6 @@ impl TransactionFetcher {
     pub(super) fn get_idle_peer_for(
         &self,
         hash: TxHash,
-        ended_sessions_buf: &mut Vec<PeerId>,
         is_session_active: impl Fn(PeerId) -> bool,
     ) -> Option<PeerId> {
         let TxUnknownToPool { fallback_peers, .. } = self.hashes_unknown_to_pool.peek(&hash)?;
@@ -167,8 +167,6 @@ impl TransactionFetcher {
             if self.is_idle(peer_id) {
                 if is_session_active(peer_id) {
                     return Some(peer_id)
-                } else {
-                    ended_sessions_buf.push(peer_id);
                 }
             }
         }
@@ -187,7 +185,6 @@ impl TransactionFetcher {
         is_session_active: impl Fn(PeerId) -> bool,
         mut budget: usize, // try to find `budget` idle peers before giving up
     ) -> Option<PeerId> {
-        let mut ended_sessions = vec![];
         let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
 
         let idle_peer = loop {
@@ -198,25 +195,16 @@ impl TransactionFetcher {
 
             let Some(&hash) = hashes_pending_fetch_iter.next() else { return None };
 
-            let idle_peer = self.get_idle_peer_for(hash, &mut ended_sessions, &is_session_active);
+            let idle_peer = self.get_idle_peer_for(hash, &is_session_active);
 
-            for peer_id in ended_sessions.drain(..) {
-                let peers = self.hashes_unknown_to_pool.peek_mut(&hash)?.fallback_peers_mut();
-                _ = peers.remove(&peer_id);
-            }
             if idle_peer.is_some() {
                 hashes.push(hash);
                 break idle_peer
             }
         };
-
-        let peer_id = &idle_peer?;
         let hash = hashes.first()?;
 
-        let peers = self.hashes_unknown_to_pool.get(hash)?.fallback_peers_mut();
-        // pop peer from fallback peers
-        _ = peers.remove(peer_id);
-        // pop hash that is loaded in request buffer from buffered hashes
+        // pop hash that is loaded in request buffer from cache of hashes pending fetch
         drop(hashes_pending_fetch_iter);
         _ = self.hashes_pending_fetch.remove(hash);
 
@@ -298,9 +286,21 @@ impl TransactionFetcher {
         surplus_hashes
     }
 
-    pub(super) fn buffer_hashes_for_retry(&mut self, mut hashes: Vec<TxHash>) {
-        // It could be that the txns have been received over broadcast in the time being.
-        hashes.retain(|hash| self.hashes_unknown_to_pool.get(hash).is_some());
+    pub(super) fn buffer_hashes_for_retry(
+        &mut self,
+        mut hashes: Vec<TxHash>,
+        peer_failed_to_serve: PeerId,
+    ) {
+        // It could be that the txns have been received over broadcast in the time being. Remove
+        // the peer as fallback peer so it isn't request again for these hashes.
+        hashes.retain(|hash| {
+            if let Some(entry) = self.hashes_unknown_to_pool.get(hash) {
+                entry.fallback_peers_mut().remove(&peer_failed_to_serve);
+                return true
+            }
+            // tx has been seen over broadcast in the time it took for the request to resolve
+            false
+        });
 
         self.buffer_hashes(hashes, None)
     }
@@ -371,7 +371,7 @@ impl TransactionFetcher {
         // filter out inflight hashes, and register the peer as fallback for all inflight hashes
         new_announced_hashes.retain(|hash, metadata| {
             // occupied entry
-            if let Some(TxUnknownToPool{fallback_peers: ref mut backups, tx_encoded_length: ref mut previously_seen_size, ..}) = self.hashes_unknown_to_pool.peek_mut(hash) {
+            if let Some(TxUnknownToPool{ref mut fallback_peers, tx_encoded_length: ref mut previously_seen_size, ..}) = self.hashes_unknown_to_pool.peek_mut(hash) {
                 // update size metadata if available
                 if let Some((_ty, size)) = metadata {
                     if let Some(prev_size) = previously_seen_size {
@@ -398,13 +398,13 @@ impl TransactionFetcher {
                 // remove any ended sessions, so that in case of a full cache, alive peers aren't 
                 // removed in favour of lru dead peers
                 let mut ended_sessions = vec!();
-                for &peer_id in backups.iter() {
+                for &peer_id in fallback_peers.iter() {
                     if is_session_active(peer_id) {
                         ended_sessions.push(peer_id);
                     }
                 }
                 for peer_id in ended_sessions {
-                    backups.remove(&peer_id);
+                    fallback_peers.remove(&peer_id);
                 }
 
                 return false
@@ -563,8 +563,12 @@ impl TransactionFetcher {
     ) {
         let Some(hash) = hashes_to_request.first() else { return };
 
-        let mut acc_size_response =
-            self.hashes_unknown_to_pool.get(hash).map(|entry| entry.tx_encoded_len()).flatten().unwrap_or(TX_ENCODED_LENGTH_AVERAGE);
+        let mut acc_size_response = self
+            .hashes_unknown_to_pool
+            .get(hash)
+            .map(|entry| entry.tx_encoded_len())
+            .flatten()
+            .unwrap_or(TX_ENCODED_LENGTH_AVERAGE);
 
         // if request full enough already, we're satisfied, send request for single tx
         if acc_size_response >= SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING {
@@ -591,7 +595,8 @@ impl TransactionFetcher {
             let size = self
                 .hashes_unknown_to_pool
                 .get(hash)
-                .map(|entry| entry.tx_encoded_len()).flatten()
+                .map(|entry| entry.tx_encoded_len())
+                .flatten()
                 .unwrap_or(TX_ENCODED_LENGTH_AVERAGE);
 
             acc_size_response += size;
@@ -601,7 +606,8 @@ impl TransactionFetcher {
             // satisfied
             if acc_size_response >=
                 SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING ||
-                hashes_to_request.len() > GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES_ON_FETCH_PENDING
+                hashes_to_request.len() >
+                    GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES_ON_FETCH_PENDING
             {
                 break
             }
@@ -653,7 +659,7 @@ impl Stream for TransactionFetcher {
                     });
                     self.remove_from_unknown_hashes(fetched);
                     // buffer left over hashes
-                    self.buffer_hashes_for_retry(requested_hashes);
+                    self.buffer_hashes_for_retry(requested_hashes, peer_id);
 
                     Poll::Ready(Some(FetchEvent::TransactionsFetched {
                         peer_id,
@@ -661,11 +667,11 @@ impl Stream for TransactionFetcher {
                     }))
                 }
                 Ok(Err(req_err)) => {
-                    self.buffer_hashes_for_retry(requested_hashes);
+                    self.buffer_hashes_for_retry(requested_hashes, peer_id);
                     Poll::Ready(Some(FetchEvent::FetchError { peer_id, error: req_err }))
                 }
                 Err(_) => {
-                    self.buffer_hashes_for_retry(requested_hashes);
+                    self.buffer_hashes_for_retry(requested_hashes, peer_id);
                     // request channel closed/dropped
                     Poll::Ready(Some(FetchEvent::FetchError {
                         peer_id,

@@ -28,7 +28,11 @@
 //! enough to buffer many hashes during network failure, to allow for recovery.
 
 use crate::{
-    cache::LruCache, manager::NetworkEvent, message::{PeerRequest, PeerRequestSender}, metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE}, NetworkEvents, NetworkHandle
+    cache::LruCache,
+    manager::NetworkEvent,
+    message::{PeerRequest, PeerRequestSender},
+    metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
+    NetworkEvents, NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
@@ -720,10 +724,11 @@ where
             // budget to look for an idle peer before giving up
             let budget_find_idle_peer = 256;
 
-            let Some(peer_id) = self
-                .transaction_fetcher
-                .pop_any_idle_peer(&mut hashes_to_request, is_session_active, budget_find_idle_peer)
-            else {
+            let Some(peer_id) = self.transaction_fetcher.pop_any_idle_peer(
+                &mut hashes_to_request,
+                is_session_active,
+                budget_find_idle_peer,
+            ) else {
                 // no peers are idle or budget is depleted
                 return
             };
