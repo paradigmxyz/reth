@@ -156,7 +156,8 @@ pub use transactions::{AnnouncementFilter, FilterAnnouncement, ValidateTx68};
 #[cfg(not(feature = "discv5"))]
 pub type Discovery = discovery::Discovery;
 
-/// Discovery using [`reth_discv5::Discv5WithDiscv4Downgrade`], which supports downgrading to [`Discv4`].
+/// Discovery using [`reth_discv5::Discv5WithDiscv4Downgrade`], which supports downgrading to
+/// [`Discv4`].
 #[cfg(feature = "discv5")]
 pub type Discovery = discovery::Discovery<
     Discv5WithDiscv4Downgrade,
