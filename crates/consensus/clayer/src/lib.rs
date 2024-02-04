@@ -27,7 +27,8 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts, CanonChainTracker,
-    CanonStateNotificationSender, Chain, StateProviderFactory,
+    CanonStateNotificationSender, Chain, ConsensusNumberReader, ConsensusNumberWriter,
+    StateProviderFactory,
 };
 use reth_revm::{
     database::StateProviderDatabase, db::states::bundle_state::BundleRetention,
@@ -410,7 +411,10 @@ where
     }
     /// Consumes the type and returns all components
     #[track_caller]
-    pub fn build(self) -> ClTask<Client, Pool, CDB> {
+    pub fn build(self) -> ClTask<Client, Pool, CDB>
+    where
+        CDB: ConsensusNumberReader + ConsensusNumberWriter + 'static,
+    {
         let Self {
             chain_spec,
             client,
