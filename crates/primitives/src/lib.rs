@@ -73,7 +73,6 @@ pub use prune::{
     ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
 };
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
-pub use serde_helper::JsonU256;
 pub use snapshot::SnapshotSegment;
 pub use storage::StorageEntry;
 

@@ -1,3 +1,8 @@
+//! Server traits for the engine API
+//!
+//! This contains the `engine_` namespace and the subset of the `eth_` namespace that is exposed to
+//! the consensus client.
+
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_node_api::EngineTypes;
 use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64};
@@ -10,6 +15,13 @@ use reth_rpc_types::{
     state::StateOverride,
     BlockOverrides, CallRequest, Filter, Log, RichBlock, SyncStatus,
 };
+
+// NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
+// generic here. It would be nice if the rpc macro would understand which types need to have serde.
+// By default, if the trait has a generic, the rpc macro will add e.g. `Engine: DeserializeOwned` to
+// the trait bounds, which is not what we want, because `Types` is not used directly in any of the
+// trait methods. Instead, we have to add the bounds manually. This would be disastrous if we had
+// more than one associated type used in the trait methods.
 
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "engine", client_bounds(Engine::PayloadAttributes: jsonrpsee::core::Serialize + Clone), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned)))]
@@ -147,13 +159,6 @@ pub trait EngineApi<Engine: EngineTypes> {
     #[method(name = "exchangeCapabilities")]
     async fn exchange_capabilities(&self, capabilities: Vec<String>) -> RpcResult<Vec<String>>;
 }
-
-// NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
-// generic here. It would be nice if the rpc macro would understand which types need to have serde.
-// By default, if the trait has a generic, the rpc macro will add e.g. `Engine: DeserializeOwned` to
-// the trait bounds, which is not what we want, because `Types` is not used directly in any of the
-// trait methods. Instead, we have to add the bounds manually. This would be disastrous if we had
-// more than one associated type used in the trait methods.
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 ///
