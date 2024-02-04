@@ -411,7 +411,7 @@ fn block5(
                 HashMap::from_iter(
                     slot_range
                         .clone()
-                        .take(50) // TODO:
+                        .take(50)
                         .map(|slot| (U256::from(slot), (U256::from(slot), U256::from(slot * 4)))),
                 ),
             );
