@@ -2183,7 +2183,7 @@ dependencies = [
  "hex",
  "hkdf",
  "lazy_static",
- "lru 0.12.2",
+ "lru 0.7.8",
  "more-asserts",
  "parking_lot 0.11.2",
  "rand 0.8.5",
@@ -3751,7 +3751,7 @@ version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "321f0f839cd44a4686e9504b0a62b4d69a50b62072144c71c68f5873c167b8d9"
 dependencies = [
- "ahash",
+ "ahash 0.8.7",
  "indexmap 2.2.2",
  "is-terminal",
  "itoa",
@@ -6046,7 +6046,7 @@ dependencies = [
  "discv5",
  "enr",
  "generic-array",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "parking_lot 0.12.1",
  "rand 0.8.5",
  "reth-net-common",

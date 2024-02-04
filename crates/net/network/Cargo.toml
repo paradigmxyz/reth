@@ -34,8 +34,11 @@ reth-provider.workspace = true
 reth-rpc-types.workspace = true
 reth-tokio-util.workspace = true
 
+
 # ethereum
 enr = { workspace = true, features = ["rust-secp256k1"], optional = true }
+discv5.workspace = true
+rlp = "0.5.2"
 alloy-rlp.workspace = true
 
 # async/futures
@@ -71,11 +74,6 @@ schnellru.workspace = true
 itertools.workspace = true
 tempfile = { workspace = true, optional = true }
 smallvec.workspace = true
-
-# ethereum
-enr = { workspace = true, features = ["rust-secp256k1"], optional = true }
-discv5.workspace = true
-rlp = "0.5.2"
 
 [dev-dependencies]
 # reth
