@@ -623,12 +623,14 @@ where
 
     /// Returns an iterator that yields transactions that are ready to be included in the block with
     /// the given base fee.
+    #[allow(dead_code)]
     pub(crate) fn best_transactions_with_base_fee(
         &self,
         base_fee: u64,
     ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
     {
-        self.get_pool_data().best_transactions_with_base_fee(base_fee)
+        self.get_pool_data()
+            .best_transactions_with_attributes(BestTransactionsAttributes::new(base_fee, None))
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block with

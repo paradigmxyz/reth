@@ -294,6 +294,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Returns an iterator that yields transactions that are ready to be included in the block with
     /// the given base fee.
+    #[allow(dead_code)]
     pub(crate) fn best_transactions_with_base_fee(
         &self,
         basefee: u64,
