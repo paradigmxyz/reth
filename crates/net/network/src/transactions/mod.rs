@@ -603,11 +603,11 @@ where
                 valid_data.into_iter().map(|(hash, metadata)| {
                     // cache eth68 metadata
                     if let Some((_ty, size)) = metadata {
-                        // check if this peer is announcing a different size for an already seen 
+                        // check if this peer is announcing a different size for an already seen
                         // hash
                         if let Some(previously_seen_size) = self.transaction_fetcher.eth68_meta.get(&hash) {
                             if size != *previously_seen_size {
-                                // todo: store both sizes as a `(size, peer_id)` tuple to catch peers 
+                                // todo: store both sizes as a `(size, peer_id)` tuple to catch peers
                                 // that respond with another size tx than they announced
                                 debug!(target: "net::tx",
                                     peer_id=format!("{peer_id:#}"),
@@ -1395,7 +1395,7 @@ mod tests {
     use reth_network_api::NetworkInfo;
     use reth_primitives::hex;
     use reth_provider::test_utils::NoopProvider;
-    use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
+    use reth_transaction_pool::test_utils::{MockTransaction, TestPool, TestPoolWrapper};
     use secp256k1::SecretKey;
     use std::{future::poll_fn, hash};
 
@@ -1409,7 +1409,7 @@ mod tests {
             .disable_discovery()
             .build(client);
 
-        let pool = testing_pool();
+        let pool: TestPool = TestPoolWrapper::default().into();
 
         let (_network_handle, _network, transactions, _) = NetworkManager::new(config)
             .await
@@ -1461,7 +1461,7 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let client = NoopProvider::default();
-        let pool = testing_pool();
+        let pool: TestPool = TestPoolWrapper::default().into();
         let config = NetworkConfigBuilder::new(secret_key)
             .disable_discovery()
             .listener_port(0)
@@ -1543,7 +1543,7 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let client = NoopProvider::default();
-        let pool = testing_pool();
+        let pool: TestPool = TestPoolWrapper::default().into();
         let config = NetworkConfigBuilder::new(secret_key)
             .disable_discovery()
             .listener_port(0)
@@ -1631,7 +1631,7 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let client = NoopProvider::default();
-        let pool = testing_pool();
+        let pool: TestPool = TestPoolWrapper::default().into();
         let config = NetworkConfigBuilder::new(secret_key)
             .disable_discovery()
             .listener_port(0)
@@ -1720,7 +1720,7 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let client = NoopProvider::default();
-        let pool = testing_pool();
+        let pool: TestPool = TestPoolWrapper::default().into();
         let config = NetworkConfigBuilder::new(secret_key)
             .disable_discovery()
             .listener_port(0)

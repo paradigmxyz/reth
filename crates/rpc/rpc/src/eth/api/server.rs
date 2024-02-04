@@ -415,7 +415,7 @@ mod tests {
     };
     use reth_rpc_api::EthApiServer;
     use reth_rpc_types::FeeHistory;
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_transaction_pool::test_utils::{TestPool, TestPoolWrapper};
 
     fn build_test_eth_api<
         P: BlockReaderIdExt
@@ -436,7 +436,7 @@ mod tests {
 
         EthApi::new(
             provider.clone(),
-            testing_pool(),
+            TestPoolWrapper::default().into(),
             NoopNetwork::default(),
             cache.clone(),
             GasPriceOracle::new(provider.clone(), Default::default(), cache.clone()),

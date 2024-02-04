@@ -1,12 +1,12 @@
 use assert_matches::assert_matches;
 use reth_transaction_pool::{
-    test_utils::{testing_pool, MockTransactionFactory},
+    test_utils::{MockTransactionFactory, TestPoolWrapper},
     TransactionOrigin, TransactionPool,
 };
 
 #[tokio::test(flavor = "multi_thread")]
 async fn txpool_new_pending_txs() {
-    let txpool = testing_pool();
+    let txpool = TestPoolWrapper::default();
     let mut mock_tx_factory = MockTransactionFactory::default();
     let transaction = mock_tx_factory.create_eip1559();
 

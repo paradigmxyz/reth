@@ -2,13 +2,13 @@
 
 use reth_transaction_pool::{
     error::PoolErrorKind,
-    test_utils::{testing_pool, MockTransaction, MockTransactionFactory},
+    test_utils::{MockTransaction, MockTransactionFactory, TestPoolWrapper},
     TransactionOrigin, TransactionPool,
 };
 
 #[tokio::test(flavor = "multi_thread")]
 async fn blobs_exclusive() {
-    let txpool = testing_pool();
+    let txpool = TestPoolWrapper::default();
     let mut mock_tx_factory = MockTransactionFactory::default();
     let blob_tx = mock_tx_factory.create_eip4844();
 
