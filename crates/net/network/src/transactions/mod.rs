@@ -633,7 +633,7 @@ where
         //
         self.transaction_fetcher.filter_unseen_hashes(
             &mut valid_announcement_data,
-            peer_id,
+            &peer_id,
             |peer_id| self.peers.contains_key(&peer_id),
         );
 
@@ -651,7 +651,7 @@ where
 
         // only send request for hashes to idle peer, otherwise buffer hashes storing peer as
         // fallback
-        if !self.transaction_fetcher.is_idle(peer_id) {
+        if !self.transaction_fetcher.is_idle(&peer_id) {
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 hashes=?valid_announcement_data.keys(),
@@ -1741,7 +1741,7 @@ mod tests {
         tx_fetcher.hashes_pending_fetch.insert(seen_hashes[0]);
 
         // peer_1 is idle
-        assert!(tx_fetcher.is_idle(peer_id_1));
+        assert!(tx_fetcher.is_idle(&peer_id_1));
 
         // sends request for buffered hashes to peer_1
         tx_fetcher.request_hashes_pending_fetch(&tx_manager.peers, &tx_manager.metrics, 1);
@@ -1750,7 +1750,7 @@ mod tests {
 
         assert!(tx_fetcher.hashes_pending_fetch.is_empty());
         // as long as request is in inflight peer_1 is not idle
-        assert!(!tx_fetcher.is_idle(peer_id_1));
+        assert!(!tx_fetcher.is_idle(&peer_id_1));
 
         // mock session of peer_1 receives request
         let req = to_mock_session_rx
@@ -1771,7 +1771,7 @@ mod tests {
         };
 
         // request has resolved, peer_1 is idle again
-        assert!(tx_fetcher.is_idle(peer_id));
+        assert!(tx_fetcher.is_idle(&peer_id));
         // failing peer_1's request buffers requested hashes for retry
         assert_eq!(tx_fetcher.hashes_pending_fetch.len(), 2);
 

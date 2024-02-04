@@ -135,9 +135,9 @@ impl TransactionFetcher {
     }
 
     /// Updates peer's activity status upon a resolved [`GetPooledTxRequest`].
-    fn decrement_inflight_request_count_for(&mut self, peer_id: PeerId) {
+    fn decrement_inflight_request_count_for(&mut self, peer_id: &PeerId) {
         let remove = || -> bool {
-            if let Some(inflight_count) = self.active_peers.get(&peer_id) {
+            if let Some(inflight_count) = self.active_peers.get(peer_id) {
                 if *inflight_count <= MAX_CONCURRENT_TX_REQUESTS_PER_PEER {
                     return true
                 }
@@ -147,13 +147,13 @@ impl TransactionFetcher {
         }();
 
         if remove {
-            self.active_peers.remove(&peer_id);
+            self.active_peers.remove(peer_id);
         }
     }
 
     /// Returns `true` if peer is idle.
-    pub(super) fn is_idle(&self, peer_id: PeerId) -> bool {
-        let Some(inflight_count) = self.active_peers.peek(&peer_id) else { return true };
+    pub(super) fn is_idle(&self, peer_id: &PeerId) -> bool {
+        let Some(inflight_count) = self.active_peers.peek(peer_id) else { return true };
         if *inflight_count < MAX_CONCURRENT_TX_REQUESTS_PER_PEER {
             return true
         }
@@ -165,11 +165,11 @@ impl TransactionFetcher {
     pub(super) fn get_idle_peer_for(
         &self,
         hash: TxHash,
-        is_session_active: impl Fn(PeerId) -> bool,
-    ) -> Option<PeerId> {
+        is_session_active: impl Fn(&PeerId) -> bool,
+    ) -> Option<&PeerId> {
         let TxUnknownToPool { fallback_peers, .. } = self.hashes_unknown_to_pool.peek(&hash)?;
 
-        for &peer_id in fallback_peers.iter() {
+        for peer_id in fallback_peers.iter() {
             if self.is_idle(peer_id) && is_session_active(peer_id) {
                 return Some(peer_id)
             }
@@ -186,7 +186,7 @@ impl TransactionFetcher {
     pub(super) fn pop_any_idle_peer(
         &mut self,
         hashes: &mut Vec<TxHash>,
-        is_session_active: impl Fn(PeerId) -> bool,
+        is_session_active: impl Fn(&PeerId) -> bool,
         mut budget: usize, // try to find `budget` idle peers before giving up
     ) -> Option<PeerId> {
         let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
@@ -203,7 +203,7 @@ impl TransactionFetcher {
 
             if idle_peer.is_some() {
                 hashes.push(hash);
-                break idle_peer
+                break idle_peer.map(|p| *p)
             }
         };
         let hash = hashes.first()?;
@@ -293,13 +293,13 @@ impl TransactionFetcher {
     pub(super) fn buffer_hashes_for_retry(
         &mut self,
         mut hashes: Vec<TxHash>,
-        peer_failed_to_serve: PeerId,
+        peer_failed_to_serve: &PeerId,
     ) {
         // It could be that the txns have been received over broadcast in the time being. Remove
         // the peer as fallback peer so it isn't request again for these hashes.
         hashes.retain(|hash| {
             if let Some(entry) = self.hashes_unknown_to_pool.get(hash) {
-                entry.fallback_peers_mut().remove(&peer_failed_to_serve);
+                entry.fallback_peers_mut().remove(peer_failed_to_serve);
                 return true
             }
             // tx has been seen over broadcast in the time it took for the request to resolve
@@ -366,7 +366,7 @@ impl TransactionFetcher {
         budget_find_idle_peer: usize,
     ) {
         let mut hashes_to_request = vec![];
-        let is_session_active = |peer_id| peers.contains_key(&peer_id);
+        let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
 
         // budget to look for an idle peer before giving up
         let Some(peer_id) = self.pop_any_idle_peer(
@@ -427,7 +427,7 @@ impl TransactionFetcher {
     pub(super) fn filter_unseen_hashes(
         &mut self,
         new_announced_hashes: &mut ValidAnnouncementData,
-        peer_id: PeerId,
+        peer_id: &PeerId,
         is_session_active: impl Fn(PeerId) -> bool,
     ) {
         // filter out inflight hashes, and register the peer as fallback for all inflight hashes
@@ -698,7 +698,7 @@ impl Stream for TransactionFetcher {
         if let Poll::Ready(Some(response)) = res {
             // update peer activity, requests for buffered hashes can only be made to idle
             // fallback peers
-            let GetPooledTxResponse { peer_id, .. } = response;
+            let GetPooledTxResponse { peer_id, mut requested_hashes, result } = response;
 
             debug_assert!(
                 self.active_peers.get(&peer_id).is_some(),
@@ -708,9 +708,7 @@ impl Stream for TransactionFetcher {
                 peer_id, self
             );
 
-            self.decrement_inflight_request_count_for(peer_id);
-
-            let GetPooledTxResponse { peer_id, mut requested_hashes, result } = response;
+            self.decrement_inflight_request_count_for(&peer_id);
 
             return match result {
                 Ok(Ok(transactions)) => {
@@ -726,7 +724,7 @@ impl Stream for TransactionFetcher {
                     });
                     self.remove_from_unknown_hashes(fetched);
                     // buffer left over hashes
-                    self.buffer_hashes_for_retry(requested_hashes, peer_id);
+                    self.buffer_hashes_for_retry(requested_hashes, &peer_id);
 
                     Poll::Ready(Some(FetchEvent::TransactionsFetched {
                         peer_id,
@@ -734,11 +732,11 @@ impl Stream for TransactionFetcher {
                     }))
                 }
                 Ok(Err(req_err)) => {
-                    self.buffer_hashes_for_retry(requested_hashes, peer_id);
+                    self.buffer_hashes_for_retry(requested_hashes, &peer_id);
                     Poll::Ready(Some(FetchEvent::FetchError { peer_id, error: req_err }))
                 }
                 Err(_) => {
-                    self.buffer_hashes_for_retry(requested_hashes, peer_id);
+                    self.buffer_hashes_for_retry(requested_hashes, &peer_id);
                     // request channel closed/dropped
                     Poll::Ready(Some(FetchEvent::FetchError {
                         peer_id,
