@@ -424,7 +424,7 @@ where
 {
     /// Installs a new [TestPool]
     pub fn install_test_pool(&mut self) {
-        self.install_transactions_manager(TestPool::default())
+        self.install_transactions_manager(testing_pool())
     }
 }
 
