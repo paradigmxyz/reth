@@ -1,7 +1,7 @@
 use assert_matches::assert_matches;
 use reth_transaction_pool::{
     noop::MockTransactionValidator,
-    test_utils::{testing_pool, testing_pool_with_validator, MockTransactionFactory, TestPool},
+    test_utils::{testing_pool, testing_pool_with_validator, MockTransactionFactory},
     FullTransactionEvent, TransactionEvent, TransactionListenerKind, TransactionOrigin,
     TransactionPool,
 };
