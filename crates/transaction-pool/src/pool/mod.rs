@@ -686,7 +686,7 @@ where
             return None
         }
         let pool = self.get_pool_data();
-        Some(announcement.retain_by_hash(|tx| !pool.contains(&tx)))
+        Some(announcement.retain_by_hash(|tx| !pool.contains(tx)))
     }
 
     /// Returns the transaction by hash.

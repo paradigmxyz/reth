@@ -4,8 +4,7 @@ use crate::{EthMessage, EthVersion};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
-use derive_more::{Deref, DerefMut, From};
-use futures::SinkExt;
+
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Block, Bytes, TransactionSigned, TxHash, B256, U128};
 
@@ -531,7 +530,7 @@ impl HandleAnnouncement for ValidAnnouncementData {
     }
 
     fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
-        let data = std::mem::replace(self, HashMap::new());
+        let data = std::mem::take(self);
         let (keep, rest) = data.into_iter().partition(|(hash, _)| f(hash));
 
         *self = keep;
@@ -550,7 +549,7 @@ impl HandleAnnouncement for ValidTxHashes {
     }
 
     fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
-        let data = std::mem::replace(self, Vec::new());
+        let data = std::mem::take(self);
         let (keep, rest) = data.into_iter().partition(|hash| f(hash));
 
         *self = keep;

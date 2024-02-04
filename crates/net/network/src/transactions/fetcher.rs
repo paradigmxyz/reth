@@ -927,9 +927,8 @@ mod test {
         let possible_outcome_2 =
             [eth68_hashes[0], eth68_hashes[4]].into_iter().collect::<HashSet<_>>();
         let possible_outcome_3 = [eth68_hashes[1]].into_iter().collect::<HashSet<_>>();
-        let possible_outcome_4 = [eth68_hashes[2], eth68_hashes[3], eth68_hashes[4]]
-            .into_iter()
-            .collect::<HashSet<_>>();
+        let possible_outcome_4 =
+            [eth68_hashes[2], eth68_hashes[3], eth68_hashes[4]].into_iter().collect::<HashSet<_>>();
 
         let possible_outcomes =
             [possible_outcome_1, possible_outcome_2, possible_outcome_3, possible_outcome_4];

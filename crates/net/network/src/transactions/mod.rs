@@ -904,8 +904,7 @@ where
                 // division of the `seen_transactions` list, just serves as a hint for tx fetcher
                 // of which hashes are missing. It's good enough without reallocating hashes.
                 //
-                if source.is_broadcast() && peer.seen_transactions.has_seen_transaction(tx.hash())
-                {
+                if source.is_broadcast() && peer.seen_transactions.has_seen_transaction(tx.hash()) {
                     num_already_seen += 1;
                 }
 
