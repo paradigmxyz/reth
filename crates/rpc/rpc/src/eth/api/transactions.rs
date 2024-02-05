@@ -72,7 +72,8 @@ pub(crate) type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
 /// There are subtle differences between when transacting [CallRequest]:
 ///
 /// The endpoints `eth_call` and `eth_estimateGas` and `eth_createAccessList` should always
-/// __disable__ the base fee check in the [EnvWithHandlerCfg] [Cfg](revm_primitives::CfgEnvWithHandlerCfg).
+/// __disable__ the base fee check in the [EnvWithHandlerCfg]
+/// [Cfg](revm_primitives::CfgEnvWithHandlerCfg).
 ///
 /// The behaviour for tracing endpoints is not consistent across clients.
 /// Geth also disables the basefee check for tracing: <https://github.com/ethereum/go-ethereum/blob/bc0b87ca196f92e5af49bd33cc190ef0ec32b197/eth/tracers/api.go#L955-L955>
@@ -1071,7 +1072,7 @@ where
                 return match signer.sign_transaction(request, from) {
                     Ok(tx) => Ok(tx),
                     Err(e) => Err(e.into()),
-                };
+                }
             }
         }
         Err(EthApiError::InvalidTransactionSignature)
@@ -1096,7 +1097,7 @@ where
                     block_number,
                     base_fee_per_gas,
                     index.into(),
-                )));
+                )))
             }
         }
 

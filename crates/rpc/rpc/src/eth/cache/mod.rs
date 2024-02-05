@@ -480,8 +480,10 @@ where
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
-                                    let mut cfg =
-                                        CfgEnvWithHandlerCfg::new(CfgEnv::default(), SpecId::LATEST);
+                                    let mut cfg = CfgEnvWithHandlerCfg::new(
+                                        CfgEnv::default(),
+                                        SpecId::LATEST,
+                                    );
                                     let mut block_env = BlockEnv::default();
                                     let res = provider
                                         .fill_env_at(

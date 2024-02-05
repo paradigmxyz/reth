@@ -93,7 +93,7 @@ impl TransactionFetcher {
         let remove = || -> bool {
             if let Some(inflight_count) = self.active_peers.get(&peer_id) {
                 if *inflight_count <= MAX_CONCURRENT_TX_REQUESTS_PER_PEER {
-                    return true;
+                    return true
                 }
                 *inflight_count -= 1;
             }
@@ -109,7 +109,7 @@ impl TransactionFetcher {
     pub(super) fn is_idle(&self, peer_id: PeerId) -> bool {
         let Some(inflight_count) = self.active_peers.peek(&peer_id) else { return true };
         if *inflight_count < MAX_CONCURRENT_TX_REQUESTS_PER_PEER {
-            return true;
+            return true
         }
         false
     }
@@ -127,7 +127,7 @@ impl TransactionFetcher {
         for &peer_id in peers.iter() {
             if self.is_idle(peer_id) {
                 if is_session_active(peer_id) {
-                    return Some(peer_id);
+                    return Some(peer_id)
                 } else {
                     ended_sessions_buf.push(peer_id);
                 }
@@ -142,7 +142,7 @@ impl TransactionFetcher {
         let Some(hash) = hashes.first() else { return vec![] };
 
         if self.eth68_meta.get(hash).is_some() {
-            return self.pack_hashes_eth68(hashes, peer_id);
+            return self.pack_hashes_eth68(hashes, peer_id)
         }
         self.pack_hashes_eth66(hashes)
     }
@@ -153,7 +153,7 @@ impl TransactionFetcher {
     /// Returns left over hashes.
     pub(super) fn pack_hashes_eth66(&mut self, hashes: &mut Vec<TxHash>) -> Vec<TxHash> {
         if hashes.len() <= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
-            return vec![];
+            return vec![]
         }
         hashes.split_off(GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES - 1)
     }
@@ -180,7 +180,7 @@ impl TransactionFetcher {
                 // only update accumulated size of tx response if tx will fit in without exceeding
                 // soft limit
                 *acc_size_response = next_acc_size;
-                return true;
+                return true
             }
         }
 
@@ -207,7 +207,7 @@ impl TransactionFetcher {
         if let Some(hash) = hashes.first() {
             if let Some(size) = self.eth68_meta.get(hash) {
                 if *size >= SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE {
-                    return hashes.split_off(1);
+                    return hashes.split_off(1)
                 }
             }
         }
@@ -400,7 +400,7 @@ impl TransactionFetcher {
                 limit=MAX_CONCURRENT_TX_REQUESTS,
                 "limit for concurrent `GetPooledTransactions` requests reached, dropping request for hashes to peer"
             );
-            return Some(new_announced_hashes);
+            return Some(new_announced_hashes)
         }
 
         let Some(inflight_count) = self.active_peers.get_or_insert(peer_id, || 0) else {
@@ -410,7 +410,7 @@ impl TransactionFetcher {
                 msg_version=%msg_version(),
                 "failed to cache active peer in schnellru::LruMap, dropping request to peer"
             );
-            return Some(new_announced_hashes);
+            return Some(new_announced_hashes)
         };
 
         if *inflight_count >= MAX_CONCURRENT_TX_REQUESTS_PER_PEER {
@@ -421,7 +421,7 @@ impl TransactionFetcher {
                 limit=MAX_CONCURRENT_TX_REQUESTS_PER_PEER,
                 "limit for concurrent `GetPooledTransactions` requests per peer reached"
             );
-            return Some(new_announced_hashes);
+            return Some(new_announced_hashes)
         }
 
         *inflight_count += 1;
@@ -456,7 +456,7 @@ impl TransactionFetcher {
                     let req = req.into_get_pooled_transactions().expect("is get pooled tx");
 
                     metrics_increment_egress_peer_channel_full();
-                    return Some(req.0);
+                    return Some(req.0)
                 }
             }
         } else {
@@ -493,7 +493,7 @@ impl TransactionFetcher {
         acc_size_response: &mut usize,
     ) {
         if *acc_size_response >= SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE / 2 {
-            return;
+            return
         }
 
         // all hashes included in request and there is still a lot of space
@@ -518,7 +518,7 @@ impl TransactionFetcher {
             // hashes reaches the soft limit number for a request (like in eth66), whatever
             // happens first
             if hashes.len() > GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
-                break;
+                break
             }
 
             // copy acc size
@@ -534,17 +534,17 @@ impl TransactionFetcher {
                     "request to peer full"
                 );
 
-                break;
+                break
             }
             // 2. Check if this buffered hash is an eth68 hash, else skip to next iteration.
             if self.eth68_meta.get(hash).is_none() {
-                continue;
+                continue
             }
             // 3. Check if hash can be included with respect to size metadata and acc size copy.
             //
             // mutates acc size copy
             if !self.include_eth68_hash(&mut next_acc_size, *hash) {
-                continue;
+                continue
             }
 
             debug_assert!(
@@ -606,11 +606,11 @@ impl TransactionFetcher {
         for hash in self.buffered_hashes.iter() {
             // 1. Check hashes count in request.
             if hashes.len() >= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
-                break;
+                break
             }
             // 2. Check if this buffered hash is an eth66 hash.
             if self.eth68_meta.get(hash).is_some() {
-                continue;
+                continue
             }
 
             debug_assert!(
@@ -682,7 +682,7 @@ impl Stream for TransactionFetcher {
                         if transactions.hashes().any(|hash| hash == requested_hash) {
                             // hash is now known, stop tracking
                             fetched.push(*requested_hash);
-                            return false;
+                            return false
                         }
                         true
                     });
@@ -707,7 +707,7 @@ impl Stream for TransactionFetcher {
                         error: RequestError::ChannelClosed,
                     }))
                 }
-            };
+            }
         }
 
         Poll::Pending

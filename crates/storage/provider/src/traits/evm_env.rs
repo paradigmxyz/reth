@@ -4,7 +4,7 @@ use reth_primitives::{BlockHashOrNumber, Header};
 use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 
 /// A provider type that knows chain specific information required to configure an
-/// [Env](revm::primitives::Env).
+/// [CfgEnvWithHandlerCfg].
 ///
 /// This type is mainly used to provide required data to configure the EVM environment.
 #[auto_impl::auto_impl(&, Arc)]
@@ -21,8 +21,8 @@ pub trait EvmEnvProvider: Send + Sync {
     where
         EvmConfig: EvmEnvConfig;
 
-    /// Fills the default [CfgEnvWithHandlerCfg] and [BlockEnv] fields with values specific to the given
-    /// [Header].
+    /// Fills the default [CfgEnvWithHandlerCfg] and [BlockEnv] fields with values specific to the
+    /// given [Header].
     fn env_with_header<EvmConfig>(
         &self,
         header: &Header,
@@ -63,7 +63,8 @@ pub trait EvmEnvProvider: Send + Sync {
         header: &Header,
     ) -> ProviderResult<()>;
 
-    /// Fills the [CfgEnvWithHandlerCfg] fields with values specific to the given [BlockHashOrNumber].
+    /// Fills the [CfgEnvWithHandlerCfg] fields with values specific to the given
+    /// [BlockHashOrNumber].
     fn fill_cfg_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,

@@ -99,7 +99,7 @@ impl PendingBlockEnv {
                 // which also removes all dependent transaction from the iterator before we can
                 // continue
                 best_txs.mark_invalid(&pool_tx);
-                continue;
+                continue
             }
 
             if pool_tx.origin.is_private() {
@@ -107,7 +107,7 @@ impl PendingBlockEnv {
                 // them as invalid here which removes all dependent transactions from the iterator
                 // before we can continue
                 best_txs.mark_invalid(&pool_tx);
-                continue;
+                continue
             }
 
             // convert tx to a signed transaction
@@ -123,7 +123,7 @@ impl PendingBlockEnv {
                     // the iterator. This is similar to the gas limit condition
                     // for regular transactions above.
                     best_txs.mark_invalid(&pool_tx);
-                    continue;
+                    continue
                 }
             }
 
@@ -148,11 +148,11 @@ impl PendingBlockEnv {
                                 // descendants
                                 best_txs.mark_invalid(&pool_tx);
                             }
-                            continue;
+                            continue
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(err.into());
+                            return Err(err.into())
                         }
                     }
                 }
@@ -267,8 +267,8 @@ impl PendingBlockEnv {
 
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
-/// This constructs a new [EVM](revm::Evm) with the given DB, and environment [CfgEnvWithHandlerCfg] and
-/// [BlockEnv]) to execute the pre block contract call.
+/// This constructs a new [EVM](revm::Evm) with the given DB, and environment [CfgEnvWithHandlerCfg]
+/// and [BlockEnv]) to execute the pre block contract call.
 ///
 /// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
 /// change.
