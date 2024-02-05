@@ -6,7 +6,7 @@ use reth_primitives::{
     proofs,
     revm::env::tx_env_with_recovered,
     revm_primitives::{
-        BlockEnv, CfgEnvWithSpecId, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
+        BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
     },
     Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     Receipts, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
@@ -18,14 +18,14 @@ use reth_revm::{
 };
 use reth_transaction_pool::TransactionPool;
 use revm::{db::states::bundle_state::BundleRetention, Database, DatabaseCommit, State};
-use revm_primitives::EnvWithSpecId;
+use revm_primitives::EnvWithHandlerCfg;
 use std::time::Instant;
 
-/// Configured [BlockEnv] and [CfgEnvWithSpecId] for a pending block
+/// Configured [BlockEnv] and [CfgEnvWithHandlerCfg] for a pending block
 #[derive(Debug, Clone)]
 pub(crate) struct PendingBlockEnv {
-    /// Configured [CfgEnvWithSpecId] for the pending block.
-    pub(crate) cfg: CfgEnvWithSpecId,
+    /// Configured [CfgEnvWithHandlerCfg] for the pending block.
+    pub(crate) cfg: CfgEnvWithHandlerCfg,
     /// Configured [BlockEnv] for the pending block.
     pub(crate) block_env: BlockEnv,
     /// Origin block for the config
@@ -99,7 +99,7 @@ impl PendingBlockEnv {
                 // which also removes all dependent transaction from the iterator before we can
                 // continue
                 best_txs.mark_invalid(&pool_tx);
-                continue
+                continue;
             }
 
             if pool_tx.origin.is_private() {
@@ -107,7 +107,7 @@ impl PendingBlockEnv {
                 // them as invalid here which removes all dependent transactions from the iterator
                 // before we can continue
                 best_txs.mark_invalid(&pool_tx);
-                continue
+                continue;
             }
 
             // convert tx to a signed transaction
@@ -123,7 +123,7 @@ impl PendingBlockEnv {
                     // the iterator. This is similar to the gas limit condition
                     // for regular transactions above.
                     best_txs.mark_invalid(&pool_tx);
-                    continue
+                    continue;
                 }
             }
 
@@ -148,11 +148,11 @@ impl PendingBlockEnv {
                                 // descendants
                                 best_txs.mark_invalid(&pool_tx);
                             }
-                            continue
+                            continue;
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(err.into())
+                            return Err(err.into());
                         }
                     }
                 }
@@ -234,7 +234,7 @@ impl PendingBlockEnv {
 
         // check if cancun is activated to set eip4844 header fields correctly
         let blob_gas_used =
-            if cfg.spec_id >= SpecId::CANCUN { Some(sum_blob_gas_used) } else { None };
+            if cfg.handler_cfg.spec_id >= SpecId::CANCUN { Some(sum_blob_gas_used) } else { None };
 
         let header = Header {
             parent_hash,
@@ -267,7 +267,7 @@ impl PendingBlockEnv {
 
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
-/// This constructs a new [EVM](revm::Evm) with the given DB, and environment [CfgEnvWithSpecId] and
+/// This constructs a new [EVM](revm::Evm) with the given DB, and environment [CfgEnvWithHandlerCfg] and
 /// [BlockEnv]) to execute the pre block contract call.
 ///
 /// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
@@ -276,7 +276,7 @@ fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit>(
     db: &mut DB,
     chain_spec: &ChainSpec,
     block_number: u64,
-    initialized_cfg: &CfgEnvWithSpecId,
+    initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
     parent_beacon_block_root: Option<B256>,
 ) -> EthResult<()>
@@ -286,7 +286,7 @@ where
     // apply pre-block EIP-4788 contract call
     let mut evm_pre_block = revm::Evm::builder()
         .with_db(db)
-        .with_env_with_spec_id(EnvWithSpecId::new_with_cfg_env(
+        .with_env_with_spec_id(EnvWithHandlerCfg::new_with_cfg_env(
             initialized_cfg.clone(),
             initialized_block_env.clone(),
             Default::default(),

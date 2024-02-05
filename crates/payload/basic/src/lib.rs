@@ -31,7 +31,7 @@ use reth_revm::state_change::{
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{
-    primitives::{BlockEnv, CfgEnvWithSpecId, EnvWithSpecId, SpecId},
+    primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId},
     Database, DatabaseCommit, Evm, State,
 };
 use std::{
@@ -635,7 +635,7 @@ pub struct PayloadConfig<Attributes> {
     /// Pre-configured block environment.
     pub initialized_block_env: BlockEnv,
     /// Configuration for the environment.
-    pub initialized_cfg: CfgEnvWithSpecId,
+    pub initialized_cfg: CfgEnvWithHandlerCfg,
     /// The parent block.
     pub parent_block: Arc<SealedBlock>,
     /// Block extra data.
@@ -852,7 +852,7 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
 
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
-/// This constructs a new [Evm](revm::Evm) with the given DB, and environment ([CfgEnvWithSpecId]
+/// This constructs a new [Evm](revm::Evm) with the given DB, and environment ([CfgEnvWithHandlerCfg]
 /// and [BlockEnv]) to execute the pre block contract call.
 ///
 /// The parent beacon block root used for the call is gathered from the given
@@ -864,7 +864,7 @@ pub fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit, Attrib
     db: &mut DB,
     chain_spec: &ChainSpec,
     block_number: u64,
-    initialized_cfg: &CfgEnvWithSpecId,
+    initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
     attributes: &Attributes,
 ) -> Result<(), PayloadBuilderError>
@@ -875,7 +875,7 @@ where
     // apply pre-block EIP-4788 contract call
     let mut evm_pre_block = Evm::builder()
         .with_db(db)
-        .with_env_with_spec_id(EnvWithSpecId::new_with_cfg_env(
+        .with_env_with_spec_id(EnvWithHandlerCfg::new_with_cfg_env(
             initialized_cfg.clone(),
             initialized_block_env.clone(),
             Default::default(),

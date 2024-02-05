@@ -31,7 +31,7 @@ use reth_rpc_types::{
 };
 use revm::{
     db::CacheDB,
-    primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithSpecId, Env, EnvWithSpecId},
+    primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
 };
 use revm_inspectors::tracing::{
     js::{JsInspector, TransactionContext},
@@ -74,7 +74,7 @@ where
         &self,
         at: BlockId,
         transactions: Vec<TransactionSignedEcRecovered>,
-        cfg: CfgEnvWithSpecId,
+        cfg: CfgEnvWithHandlerCfg,
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
     ) -> EthResult<Vec<TraceResult>> {
@@ -90,9 +90,9 @@ where
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
                     let tx = tx_env_with_recovered(&tx);
-                    let env = EnvWithSpecId::new(
+                    let env = EnvWithHandlerCfg::new(
                         Box::new(Env { cfg: cfg.cfg_env.clone(), block: block_env.clone(), tx }),
-                        cfg.spec_id,
+                        cfg.handler_cfg.spec_id,
                     );
                     let (result, state_changes) = this
                         .trace_transaction(
@@ -237,13 +237,13 @@ where
                     tx.hash,
                 )?;
 
-                let env = EnvWithSpecId::new(
+                let env = EnvWithHandlerCfg::new(
                     Box::new(Env {
                         cfg: cfg.cfg_env.clone(),
                         block: block_env,
                         tx: tx_env_with_recovered(&tx),
                     }),
-                    cfg.spec_id,
+                    cfg.handler_cfg.spec_id,
                 );
                 this.trace_transaction(
                     opts,
@@ -437,13 +437,13 @@ where
                     // Execute all transactions until index
                     for tx in transactions {
                         let tx = tx_env_with_recovered(&tx);
-                        let env = EnvWithSpecId::new(
+                        let env = EnvWithHandlerCfg::new(
                             Box::new(Env {
                                 cfg: cfg.cfg_env.clone(),
                                 block: block_env.clone(),
                                 tx,
                             }),
-                            cfg.spec_id,
+                            cfg.handler_cfg.spec_id,
                         );
                         let (res, _) = transact(&mut db, env)?;
                         db.commit(res.state);
@@ -501,7 +501,7 @@ where
     fn trace_transaction(
         &self,
         opts: GethDebugTracingOptions,
-        env: EnvWithSpecId,
+        env: EnvWithHandlerCfg,
         db: &mut SubState<StateProviderBox>,
         transaction_context: Option<TransactionContext>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {

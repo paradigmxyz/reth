@@ -17,7 +17,7 @@ use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_node_api::EvmEnvConfig;
 use reth_primitives::{
-    revm_primitives::{BlockEnv, CfgEnvWithSpecId},
+    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, B256, U256, U64,
 };
 
@@ -266,7 +266,7 @@ where
     Network: NetworkInfo + Send + Sync + 'static,
     EvmConfig: EvmEnvConfig + Clone + 'static,
 {
-    /// Configures the [CfgEnvWithSpecId] and [BlockEnv] for the pending block
+    /// Configures the [CfgEnvWithHandlerCfg] and [BlockEnv] for the pending block
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     pub(crate) fn pending_block_env_and_cfg(&self) -> EthResult<PendingBlockEnv> {
@@ -290,11 +290,11 @@ where
             PendingBlockEnvOrigin::DerivedFromLatest(latest)
         };
 
-        let mut cfg = CfgEnvWithSpecId::new(CfgEnv::default(), SpecId::LATEST);
+        let mut cfg = CfgEnvWithHandlerCfg::new(CfgEnv::default(), SpecId::LATEST);
 
         #[cfg(feature = "optimism")]
         {
-            cfg.is_optimism = self.provider().chain_spec().is_optimism();
+            cfg.handler_cfg.is_optimism = self.provider().chain_spec().is_optimism();
         }
 
         let mut block_env = BlockEnv::default();

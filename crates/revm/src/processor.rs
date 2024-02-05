@@ -17,7 +17,7 @@ use reth_provider::{
 use revm::{
     db::{states::bundle_state::BundleRetention, EmptyDBTyped, StateDBBox},
     inspector_handle_register,
-    primitives::{CfgEnvWithSpecId, ResultAndState},
+    primitives::{CfgEnvWithHandlerCfg, ResultAndState},
     Evm, State, StateBuilder,
 };
 use std::{sync::Arc, time::Instant};
@@ -180,7 +180,7 @@ where
         self.db_mut().set_state_clear_flag(state_clear_flag);
 
         let mut evm = self.evm.take().unwrap();
-        let mut cfg = CfgEnvWithSpecId::new(evm.context.evm.env.cfg.clone(), evm.spec_id());
+        let mut cfg = CfgEnvWithHandlerCfg::new(evm.context.evm.env.cfg.clone(), evm.spec_id());
         EvmConfig::fill_cfg_and_block_env(
             &mut cfg,
             &mut evm.context.evm.env.block,
@@ -189,7 +189,7 @@ where
             total_difficulty,
         );
         evm.context.evm.env.cfg = cfg.cfg_env;
-        self.evm = Some(evm.modify_spec_id(cfg.spec_id));
+        self.evm = Some(evm.modify_spec_id(cfg.handler_cfg.spec_id));
     }
 
     /// Applies the pre-block call to the EIP-4788 beacon block root contract.
@@ -319,7 +319,7 @@ where
                 gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
                 gas_spent_by_tx: receipts.gas_spent_by_tx()?,
             }
-            .into())
+            .into());
         }
         let time = Instant::now();
         self.apply_post_execution_state_change(block, total_difficulty)?;
@@ -330,8 +330,8 @@ where
             !self
                 .prune_modes
                 .account_history
-                .map_or(false, |mode| mode.should_prune(block.number, tip)) &&
-                !self
+                .map_or(false, |mode| mode.should_prune(block.number, tip))
+                && !self
                     .prune_modes
                     .storage_history
                     .map_or(false, |mode| mode.should_prune(block.number, tip))
@@ -378,7 +378,7 @@ where
             self.prune_modes.receipts.map_or(false, |mode| mode.should_prune(block_number, tip))
         {
             receipts.clear();
-            return Ok(())
+            return Ok(());
         }
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
@@ -386,7 +386,7 @@ where
         let prunable_receipts =
             PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(block_number, tip);
         if !prunable_receipts {
-            return Ok(())
+            return Ok(());
         }
 
         let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
@@ -447,7 +447,7 @@ where
                 verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
             {
                 debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
-                return Err(error)
+                return Err(error);
             };
             self.stats.receipt_root_duration += time.elapsed();
         }
@@ -464,7 +464,7 @@ where
 
         // perf: do not execute empty blocks
         if block.body.is_empty() {
-            return Ok((Vec::new(), 0))
+            return Ok((Vec::new(), 0));
         }
 
         let mut cumulative_gas_used = 0;
@@ -479,7 +479,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into())
+                .into());
             }
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, *sender)?;
@@ -565,7 +565,7 @@ pub fn verify_receipt<'a>(
         return Err(BlockValidationError::ReceiptRootDiff(
             GotExpected { got: receipts_root, expected: expected_receipts_root }.into(),
         )
-        .into())
+        .into());
     }
 
     // Create header log bloom.
@@ -574,7 +574,7 @@ pub fn verify_receipt<'a>(
         return Err(BlockValidationError::BloomLogDiff(
             GotExpected { got: logs_bloom, expected: expected_logs_bloom }.into(),
         )
-        .into())
+        .into());
     }
 
     Ok(())

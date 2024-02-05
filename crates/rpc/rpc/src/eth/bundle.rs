@@ -22,7 +22,7 @@ use revm::{
     db::CacheDB,
     primitives::{ResultAndState, TxEnv},
 };
-use revm_primitives::EnvWithSpecId;
+use revm_primitives::EnvWithHandlerCfg;
 use std::sync::Arc;
 
 /// `Eth` bundle implementation.
@@ -80,7 +80,7 @@ where
             .spawn_with_state_at_block(at, move |state| {
                 let coinbase = block_env.coinbase;
                 let basefee = Some(block_env.basefee.to::<u64>());
-                let env = EnvWithSpecId::new_with_cfg_env(cfg, block_env, TxEnv::default());
+                let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, TxEnv::default());
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let initial_coinbase = DatabaseRef::basic_ref(&db, coinbase)?

@@ -1,7 +1,7 @@
 use crate::{validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion};
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge,
-    revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithSpecId, SpecId},
+    revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
     Address, ChainSpec, Header, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::{
@@ -74,7 +74,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     /// Returns the withdrawals for the running payload job.
     fn withdrawals(&self) -> &Withdrawals;
 
-    /// Returns the configured [CfgEnvWithSpecId] and [BlockEnv] for the targeted payload (that has
+    /// Returns the configured [CfgEnvWithHandlerCfg] and [BlockEnv] for the targeted payload (that has
     /// the `parent` as its parent).
     ///
     /// The `chain_spec` is used to determine the correct chain id and hardfork for the payload
@@ -87,8 +87,8 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
         &self,
         chain_spec: &ChainSpec,
         parent: &Header,
-    ) -> (SpecId, CfgEnvWithSpecId, BlockEnv) {
-        // TODO: should be different once revm has configurable CfgEnvWithSpecId
+    ) -> (SpecId, CfgEnvWithHandlerCfg, BlockEnv) {
+        // TODO: should be different once revm has configurable CfgEnvWithHandlerCfg
         // configure evm env based on parent block
         let mut cfg = CfgEnv::default();
         cfg.chain_id = chain_spec.chain().id();
@@ -130,7 +130,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
             blob_excess_gas_and_price,
         };
 
-        (spec_id, CfgEnvWithSpecId::new(cfg, spec_id), block_env)
+        (spec_id, CfgEnvWithHandlerCfg::new(cfg, spec_id), block_env)
     }
 }
 

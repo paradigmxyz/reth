@@ -1,7 +1,7 @@
 use reth_node_api::EvmEnvConfig;
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_tx_env},
-    revm_primitives::{AnalysisKind, CfgEnvWithSpecId, TxEnv},
+    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     Address, ChainSpec, Head, Header, Transaction, U256,
 };
 
@@ -21,7 +21,7 @@ impl EvmEnvConfig for EthEvmConfig {
     }
 
     fn fill_cfg_env(
-        cfg_env: &mut CfgEnvWithSpecId,
+        cfg_env: &mut CfgEnvWithHandlerCfg,
         chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
@@ -40,7 +40,7 @@ impl EvmEnvConfig for EthEvmConfig {
         cfg_env.chain_id = chain_spec.chain().id();
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 
-        cfg_env.spec_id = spec_id;
+        cfg_env.handler_cfg.spec_id = spec_id;
     }
 }
 
@@ -52,7 +52,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_fill_cfg_and_block_env() {
-        let mut cfg_env = CfgEnvWithSpecId::new(CfgEnv::default(), SpecId::LATEST);
+        let mut cfg_env = CfgEnvWithHandlerCfg::new(CfgEnv::default(), SpecId::LATEST);
         let mut block_env = BlockEnv::default();
         let header = Header::default();
         let chain_spec = ChainSpec::default();

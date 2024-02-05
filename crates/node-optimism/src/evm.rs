@@ -1,7 +1,7 @@
 use reth_node_api::EvmEnvConfig;
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_op_tx_env},
-    revm_primitives::{AnalysisKind, CfgEnvWithSpecId, TxEnv},
+    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     Address, Bytes, ChainSpec, Head, Header, Transaction, U256,
 };
 
@@ -21,7 +21,7 @@ impl EvmEnvConfig for OptimismEvmConfig {
     }
 
     fn fill_cfg_env(
-        cfg_env: &mut CfgEnvWithSpecId,
+        cfg_env: &mut CfgEnvWithHandlerCfg,
         chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
@@ -38,12 +38,12 @@ impl EvmEnvConfig for OptimismEvmConfig {
         );
 
         cfg_env.chain_id = chain_spec.chain().id();
-        cfg_env.spec_id = spec_id;
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 
+        cfg_env.handler_cfg.spec_id = spec_id;
         #[cfg(feature = "optimism")]
         {
-            cfg_env.is_optimism = chain_spec.is_optimism();
+            cfg_env.handler_cfg.is_optimism = chain_spec.is_optimism();
         }
     }
 }
@@ -56,7 +56,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_fill_cfg_and_block_env() {
-        let mut cfg_env = CfgEnvWithSpecId::new(CfgEnv::default(), SpecId::LATEST);
+        let mut cfg_env = CfgEnvWithHandlerCfg::new(CfgEnv::default(), SpecId::LATEST);
         let mut block_env = BlockEnv::default();
         let header = Header::default();
         let chain_spec = ChainSpec::default();

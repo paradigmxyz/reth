@@ -20,8 +20,8 @@ use revm::{
     inspector_handle_register,
     precompile::{PrecompileSpecId, Precompiles},
     primitives::{
-        db::DatabaseRef, BlockEnv, Bytecode, CfgEnvWithSpecId, Env, EnvWithSpecId, ResultAndState,
-        SpecId, TransactTo, TxEnv,
+        db::DatabaseRef, BlockEnv, Bytecode, CfgEnvWithHandlerCfg, EnvWithHandlerCfg,
+        ResultAndState, SpecId, TransactTo, TxEnv,
     },
     Database, GetInspector,
 };
@@ -121,7 +121,10 @@ pub(crate) fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Addre
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.
-pub(crate) fn transact<DB>(db: DB, env: EnvWithSpecId) -> EthResult<(ResultAndState, EnvWithSpecId)>
+pub(crate) fn transact<DB>(
+    db: DB,
+    env: EnvWithHandlerCfg,
+) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
 where
     DB: Database,
     <DB as Database>::Error: Into<EthApiError>,
@@ -135,9 +138,9 @@ where
 /// Executes the [Env] against the given [Database] without committing state changes.
 pub(crate) fn inspect<DB, I>(
     db: DB,
-    env: EnvWithSpecId,
+    env: EnvWithHandlerCfg,
     inspector: I,
-) -> EthResult<(ResultAndState, EnvWithSpecId)>
+) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
 where
     DB: Database,
     <DB as Database>::Error: Into<EthApiError>,
@@ -160,9 +163,9 @@ where
 /// this is still useful if there are certain trait bounds on the Inspector's database generic type
 pub(crate) fn inspect_and_return_db<DB, I>(
     db: DB,
-    env: EnvWithSpecId,
+    env: EnvWithHandlerCfg,
     inspector: I,
-) -> EthResult<(ResultAndState, EnvWithSpecId, DB)>
+) -> EthResult<(ResultAndState, EnvWithHandlerCfg, DB)>
 where
     DB: Database,
     <DB as Database>::Error: Into<EthApiError>,
@@ -189,7 +192,7 @@ where
 /// Returns the index of the target transaction in the given iterator.
 pub(crate) fn replay_transactions_until<DB, I, Tx>(
     db: &mut CacheDB<DB>,
-    cfg: CfgEnvWithSpecId,
+    cfg: CfgEnvWithHandlerCfg,
     block_env: BlockEnv,
     transactions: I,
     target_tx_hash: B256,
@@ -202,13 +205,17 @@ where
 {
     let mut evm = revm::Evm::builder()
         .with_db(db)
-        .with_env_with_spec_id(EnvWithSpecId::new_with_cfg_env(cfg, block_env, Default::default()))
+        .with_env_with_spec_id(EnvWithHandlerCfg::new_with_cfg_env(
+            cfg,
+            block_env,
+            Default::default(),
+        ))
         .build();
     let mut index = 0;
     for tx in transactions.into_iter() {
         if tx.hash() == target_tx_hash {
             // reached the target transaction
-            break
+            break;
         }
 
         tx.try_fill_tx_env(&mut evm.context.evm.env.tx)?;
@@ -227,13 +234,13 @@ where
 ///  - `disable_eip3607` is set to `true`
 ///  - `disable_base_fee` is set to `true`
 pub(crate) fn prepare_call_env<DB>(
-    mut cfg: CfgEnvWithSpecId,
+    mut cfg: CfgEnvWithHandlerCfg,
     block: BlockEnv,
     request: CallRequest,
     gas_limit: u64,
     db: &mut CacheDB<DB>,
     overrides: EvmOverrides,
-) -> EthResult<EnvWithSpecId>
+) -> EthResult<EnvWithHandlerCfg>
 where
     DB: DatabaseRef,
     EthApiError: From<<DB as DatabaseRef>::Error>,
@@ -294,12 +301,12 @@ where
 ///
 /// Note: this does _not_ access the Database to check the sender.
 pub(crate) fn build_call_evm_env(
-    cfg: CfgEnvWithSpecId,
+    cfg: CfgEnvWithHandlerCfg,
     block: BlockEnv,
     request: CallRequest,
-) -> EthResult<EnvWithSpecId> {
+) -> EthResult<EnvWithHandlerCfg> {
     let tx = create_txn_env(&block, request)?;
-    Ok(EnvWithSpecId::new(Box::new(Env { cfg: cfg.cfg_env, block, tx }), cfg.spec_id))
+    Ok(EnvWithHandlerCfg::new_with_cfg_env(cfg, block, tx))
 }
 
 /// Configures a new [TxEnv]  for the [CallRequest]
@@ -309,7 +316,7 @@ pub(crate) fn build_call_evm_env(
 pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthResult<TxEnv> {
     // Ensure that if versioned hashes are set, they're not empty
     if request.has_empty_blob_hashes() {
-        return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
+        return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into());
     }
 
     let CallRequest {
@@ -457,7 +464,7 @@ impl CallFees {
                     return Err(
                         // `max_priority_fee_per_gas` is greater than the `max_fee_per_gas`
                         RpcInvalidTransactionError::TipAboveFeeCap.into(),
-                    )
+                    );
                 }
             }
             Ok(())
@@ -494,7 +501,7 @@ impl CallFees {
                 // Ensure blob_hashes are present
                 if !has_blob_hashes {
                     // Blob transaction but no blob hashes
-                    return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
+                    return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into());
                 }
 
                 Ok(CallFees {
