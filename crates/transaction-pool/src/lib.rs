@@ -354,7 +354,7 @@ where
         transactions: Vec<Self::Transaction>,
     ) -> Vec<PoolResult<TxHash>> {
         if transactions.is_empty() {
-            return Vec::new();
+            return Vec::new()
         }
         let validated = self.validate_all(origin, transactions).await;
 
@@ -421,7 +421,7 @@ where
         &self,
         base_fee: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
-        self.pool.best_transactions_with_base_fee(base_fee)
+        self.pool.best_transactions_with_attributes(BestTransactionsAttributes::base_fee(base_fee))
     }
 
     fn best_transactions_with_attributes(

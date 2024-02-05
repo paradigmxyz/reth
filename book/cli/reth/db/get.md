@@ -70,7 +70,7 @@ Logging:
       --log.stdout.filter <FILTER>
           The filter to use for logs written to stdout
           
-          [default: info]
+          [default: ]
 
       --log.file.format <FORMAT>
           The format to use for logs written to the log file
