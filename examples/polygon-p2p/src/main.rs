@@ -34,8 +34,8 @@ async fn main() {
     let _ = RethTracer::new()
         .with_stdout(LayerInfo::new(
             LogFormat::Terminal,
-            "info".to_string(),
-            LevelFilter::INFO.into(),
+            LevelFilter::INFO.to_string(),
+            "".to_string(),
             Some("always".to_string()),
         ))
         .init();
