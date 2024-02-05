@@ -240,8 +240,10 @@ mod builder {
         let base_fee = initialized_block_env.basefee.to::<u64>();
 
         let mut executed_txs = Vec::new();
-        let mut best_txs =
-            pool.best_transactions_with_attributes(BestTransactionsAttributes::base_fee(base_fee));
+        let mut best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
+            base_fee,
+            initialized_block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
+        ));
 
         let mut total_fees = U256::ZERO;
 

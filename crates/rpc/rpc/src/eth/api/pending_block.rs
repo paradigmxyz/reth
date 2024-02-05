@@ -62,8 +62,10 @@ impl PendingBlockEnv {
 
         let mut executed_txs = Vec::new();
         let mut senders = Vec::new();
-        let mut best_txs =
-            pool.best_transactions_with_attributes(BestTransactionsAttributes::base_fee(base_fee));
+        let mut best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
+            base_fee,
+            block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
+        ));
 
         let (withdrawals, withdrawals_root) = match origin {
             PendingBlockEnvOrigin::ActualPending(ref block) => {
