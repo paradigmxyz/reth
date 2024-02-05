@@ -2,7 +2,7 @@ use reth_primitives::{revm::env::fill_block_env, Address, ChainSpec, Header, Tra
 use revm_primitives::{BlockEnv, CfgEnv, SpecId, TxEnv};
 
 /// This represents the set of methods used to configure the EVM before execution.
-pub trait EvmEnvConfig: Send + Sync + Unpin + Clone {
+pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     /// The type of the transaction metadata.
     type TxMeta;
 
@@ -19,7 +19,7 @@ pub trait EvmEnvConfig: Send + Sync + Unpin + Clone {
         total_difficulty: U256,
     );
 
-    /// Convenience function to call both [fill_cfg_env](EvmEnvConfig::fill_cfg_env) and
+    /// Convenience function to call both [fill_cfg_env](ConfigureEvmEnv::fill_cfg_env) and
     /// [fill_block_env].
     fn fill_cfg_and_block_env(
         cfg: &mut CfgEnv,

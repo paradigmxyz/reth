@@ -12,7 +12,7 @@ use crate::{
 };
 use jsonrpsee::core::RpcResult as Result;
 use reth_network_api::NetworkInfo;
-use reth_node_api::EvmEnvConfig;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     serde_helper::{num::U64HexOrNumber, JsonStorageKey},
     Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
@@ -45,7 +45,7 @@ where
         + EvmEnvProvider
         + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: EvmEnvConfig + 'static,
+    EvmConfig: ConfigureEvmEnv + 'static,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> Result<U64> {

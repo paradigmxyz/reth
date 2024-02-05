@@ -9,7 +9,7 @@ use crate::{
 };
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_interfaces::provider::ProviderResult;
-use reth_node_api::EvmEnvConfig;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::AccountProof,
@@ -324,7 +324,7 @@ impl EvmEnvProvider for NoopProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         Ok(())
     }
@@ -337,7 +337,7 @@ impl EvmEnvProvider for NoopProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         Ok(())
     }
@@ -365,7 +365,7 @@ impl EvmEnvProvider for NoopProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         Ok(())
     }
@@ -377,7 +377,7 @@ impl EvmEnvProvider for NoopProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         Ok(())
     }

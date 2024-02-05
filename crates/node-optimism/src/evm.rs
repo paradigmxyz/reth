@@ -1,4 +1,4 @@
-use reth_node_api::EvmEnvConfig;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_op_tx_env},
     revm_primitives::{AnalysisKind, CfgEnv, TxEnv},
@@ -10,7 +10,7 @@ use reth_primitives::{
 #[non_exhaustive]
 pub struct OptimismEvmConfig;
 
-impl EvmEnvConfig for OptimismEvmConfig {
+impl ConfigureEvmEnv for OptimismEvmConfig {
     type TxMeta = Bytes;
 
     fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address, meta: Bytes)

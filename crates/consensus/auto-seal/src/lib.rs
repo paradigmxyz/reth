@@ -19,7 +19,7 @@ use reth_interfaces::{
     consensus::{Consensus, ConsensusError},
     executor::{BlockExecutionError, BlockValidationError},
 };
-use reth_node_api::{EngineTypes, EvmEnvConfig};
+use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom,
@@ -318,7 +318,7 @@ impl StorageInner {
         executor: &mut EVMProcessor<'_, EvmConfig>,
     ) -> Result<(BundleStateWithReceipts, u64), BlockExecutionError>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
         // TODO: there isn't really a parent beacon block root here, so not sure whether or not to
@@ -395,7 +395,7 @@ impl StorageInner {
         evm_config: EvmConfig,
     ) -> Result<(SealedHeader, BundleStateWithReceipts), BlockExecutionError>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         let header = self.build_header_template(&transactions, chain_spec.clone());
 
