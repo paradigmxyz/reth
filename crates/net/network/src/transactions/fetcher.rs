@@ -144,23 +144,18 @@ impl TransactionFetcher {
         if self.eth68_meta.get(hash).is_some() {
             return self.pack_hashes_eth68(hashes, peer_id)
         }
-        self.pack_hashes_eth66(hashes, peer_id)
+        self.pack_hashes_eth66(hashes)
     }
 
     /// Packages hashes for [`GetPooledTxRequest`] up to limit as defined by protocol version 66.
     /// If necessary, takes hashes from buffer for which peer is listed as fallback peer.
     ///
     /// Returns left over hashes.
-    pub(super) fn pack_hashes_eth66(
-        &mut self,
-        hashes: &mut Vec<TxHash>,
-        peer_id: PeerId,
-    ) -> Vec<TxHash> {
-        if hashes.len() < GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
-            self.fill_eth66_request_for_peer(hashes, peer_id);
+    pub(super) fn pack_hashes_eth66(&mut self, hashes: &mut Vec<TxHash>) -> Vec<TxHash> {
+        if hashes.len() <= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
             return vec![]
         }
-        hashes.split_off(GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES)
+        hashes.split_off(GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES - 1)
     }
 
     /// Evaluates wether or not to include a hash in a `GetPooledTransactions` version eth68
