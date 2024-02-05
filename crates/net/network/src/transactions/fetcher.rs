@@ -282,7 +282,7 @@ impl TransactionFetcher {
                     );
 
                     max_retried_and_evicted_hashes.push(hash);
-                    continue;
+                    continue
                 }
                 *retries += 1;
             }
