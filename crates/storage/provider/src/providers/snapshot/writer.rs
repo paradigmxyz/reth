@@ -168,7 +168,7 @@ impl<'a> SnapshotProviderRW<'a> {
                     NippyJar::<SegmentHeader>::load(&previous_snap)?.delete()?;
                 } else {
                     // Update `SegmentHeader`
-                    self.writer.user_header_mut().prune(num_rows);
+                    self.writer.user_header_mut().prune(len);
                     self.writer.prune_rows(len as usize)?;
                     break
                 }
