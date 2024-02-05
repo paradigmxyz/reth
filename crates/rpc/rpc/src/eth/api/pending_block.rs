@@ -266,7 +266,7 @@ impl PendingBlockEnv {
 
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
-/// This constructs a new [EVM](revm::EVM) with the given DB, and environment ([CfgEnv] and
+/// This constructs a new [`EVM`] with the given DB, and environment ([CfgEnv] and
 /// [BlockEnv]) to execute the pre block contract call.
 ///
 /// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
