@@ -20,7 +20,7 @@ use reth_provider::{
 use reth_tasks::TokioTaskExecutor;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore,
-    test_utils::{TestPool, TestPoolWrapper},
+    test_utils::{TestPool, TestPoolBuilder},
     EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
 };
 use secp256k1::SecretKey;
@@ -425,7 +425,7 @@ where
 {
     /// Installs a new [TestPool]
     pub fn install_test_pool(&mut self) {
-        self.install_transactions_manager(TestPoolWrapper::default().into())
+        self.install_transactions_manager(TestPoolBuilder::default().into())
     }
 }
 

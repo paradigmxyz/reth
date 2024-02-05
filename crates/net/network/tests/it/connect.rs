@@ -17,7 +17,7 @@ use reth_network::{
 use reth_network_api::{NetworkInfo, Peers, PeersInfo};
 use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord, PeerId};
 use reth_provider::test_utils::NoopProvider;
-use reth_transaction_pool::test_utils::{TestPool, TestPoolWrapper};
+use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
 use std::{collections::HashSet, net::SocketAddr, time::Duration};
 use tokio::task;
@@ -265,7 +265,7 @@ async fn test_connect_to_trusted_peer() {
         .unwrap()
         .into_builder()
         .request_handler(client)
-        .transactions::<TestPool>(TestPoolWrapper::default().into())
+        .transactions(testing_pool())
         .split_with_handle();
 
     let mut events = handle.event_listener();

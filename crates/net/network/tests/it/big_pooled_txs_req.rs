@@ -7,10 +7,7 @@ use reth_network::{
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::{Signature, TransactionSigned, B256};
 use reth_provider::test_utils::MockEthProvider;
-use reth_transaction_pool::{
-    test_utils::{MockTransaction, TestPool, TestPoolWrapper},
-    TransactionPool,
-};
+use reth_transaction_pool::{test_utils::MockTransaction, TransactionPool};
 
 use tokio::sync::oneshot;
 // peer0: `GetPooledTransactions` requestor
@@ -43,11 +40,11 @@ async fn test_large_tx_req() {
     net.for_each_mut(|peer| peer.install_request_handler());
 
     // insert generated txs into responding peer's pool
-    let pool1: TestPool = TestPoolWrapper::default().into();
+    let pool1 = testing_pool();
     pool1.add_external_transactions(txs).await;
 
     // install transactions managers
-    net.peers_mut()[0].install_transactions_manager(TestPoolWrapper::default().into());
+    net.peers_mut()[0].install_transactions_manager(testing_pool());
     net.peers_mut()[1].install_transactions_manager(pool1);
 
     // connect peers together and check for connection existance

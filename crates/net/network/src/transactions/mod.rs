@@ -1395,7 +1395,7 @@ mod tests {
     use reth_network_api::NetworkInfo;
     use reth_primitives::hex;
     use reth_provider::test_utils::NoopProvider;
-    use reth_transaction_pool::test_utils::{MockTransaction, TestPool, TestPoolWrapper};
+    use reth_transaction_pool::test_utils::MockTransaction;
     use secp256k1::SecretKey;
     use std::{future::poll_fn, hash};
 
@@ -1409,7 +1409,7 @@ mod tests {
             .disable_discovery()
             .build(client);
 
-        let pool: TestPool = TestPoolWrapper::default().into();
+        let pool = testing_pool();
 
         let (_network_handle, _network, transactions, _) = NetworkManager::new(config)
             .await
@@ -1461,7 +1461,7 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let client = NoopProvider::default();
-        let pool: TestPool = TestPoolWrapper::default().into();
+        let pool = testing_pool();
         let config = NetworkConfigBuilder::new(secret_key)
             .disable_discovery()
             .listener_port(0)
@@ -1543,7 +1543,7 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let client = NoopProvider::default();
-        let pool: TestPool = TestPoolWrapper::default().into();
+        let pool = testing_pool();
         let config = NetworkConfigBuilder::new(secret_key)
             .disable_discovery()
             .listener_port(0)
@@ -1631,7 +1631,7 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let client = NoopProvider::default();
-        let pool: TestPool = TestPoolWrapper::default().into();
+        let pool = testing_pool();
         let config = NetworkConfigBuilder::new(secret_key)
             .disable_discovery()
             .listener_port(0)
@@ -1720,7 +1720,7 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let client = NoopProvider::default();
-        let pool: TestPool = TestPoolWrapper::default().into();
+        let pool = testing_pool();
         let config = NetworkConfigBuilder::new(secret_key)
             .disable_discovery()
             .listener_port(0)

@@ -17,9 +17,9 @@ pub type TestPool =
 
 /// Structure encapsulating a [TestPool] used for testing
 #[derive(Debug, Clone)]
-pub struct TestPoolWrapper(TestPool);
+pub struct TestPoolBuilder(TestPool);
 
-impl Default for TestPoolWrapper {
+impl Default for TestPoolBuilder {
     fn default() -> Self {
         Self(Pool::new(
             MockTransactionValidator::default(),
@@ -30,8 +30,8 @@ impl Default for TestPoolWrapper {
     }
 }
 
-impl TestPoolWrapper {
-    /// Returns a new [TestPoolWrapper] with a custom validator used for testing purposes
+impl TestPoolBuilder {
+    /// Returns a new [TestPoolBuilder] with a custom validator used for testing purposes
     pub fn with_validator(self, validator: MockTransactionValidator<MockTransaction>) -> Self {
         Self(Pool::new(
             validator,
@@ -41,7 +41,7 @@ impl TestPoolWrapper {
         ))
     }
 
-    /// Returns a new [TestPoolWrapper] with a custom ordering used for testing purposes
+    /// Returns a new [TestPoolBuilder] with a custom ordering used for testing purposes
     pub fn with_ordering(self, ordering: MockOrdering) -> Self {
         Self(Pool::new(
             self.pool.validator().clone(),
@@ -51,7 +51,7 @@ impl TestPoolWrapper {
         ))
     }
 
-    /// Returns a new [TestPoolWrapper] with a custom blob store used for testing purposes
+    /// Returns a new [TestPoolBuilder] with a custom blob store used for testing purposes
     pub fn with_blob_store(self, blob_store: InMemoryBlobStore) -> Self {
         Self(Pool::new(
             self.pool.validator().clone(),
@@ -61,7 +61,7 @@ impl TestPoolWrapper {
         ))
     }
 
-    /// Returns a new [TestPoolWrapper] with a custom configuration used for testing purposes
+    /// Returns a new [TestPoolBuilder] with a custom configuration used for testing purposes
     pub fn with_config(self, config: PoolConfig) -> Self {
         Self(Pool::new(
             self.pool.validator().clone(),
@@ -72,16 +72,21 @@ impl TestPoolWrapper {
     }
 }
 
-impl From<TestPoolWrapper> for TestPool {
-    fn from(wrapper: TestPoolWrapper) -> Self {
+impl From<TestPoolBuilder> for TestPool {
+    fn from(wrapper: TestPoolBuilder) -> Self {
         wrapper.0
     }
 }
 
-impl Deref for TestPoolWrapper {
+impl Deref for TestPoolBuilder {
     type Target = TestPool;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
+}
+
+/// Returns a new [Pool] with default field values used for testing purposes
+pub fn testing_pool() -> TestPool {
+    TestPoolBuilder::default().into()
 }

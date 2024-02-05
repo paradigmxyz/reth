@@ -1298,17 +1298,14 @@ mod tests {
     use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
-    use reth_transaction_pool::{
-        test_utils::{TestPool, TestPoolWrapper},
-        TransactionPool,
-    };
+    use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
 
     #[tokio::test]
     async fn send_raw_transaction() {
         let noop_provider = NoopProvider::default();
         let noop_network_provider = NoopNetwork::default();
 
-        let pool: TestPool = TestPoolWrapper::default().into();
+        let pool = testing_pool();
 
         let evm_config = EthEvmConfig::default();
         let cache = EthStateCache::spawn(noop_provider, Default::default(), evm_config);

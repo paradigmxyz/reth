@@ -136,13 +136,13 @@ mod tests {
     use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, StorageKey, StorageValue};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
-    use reth_transaction_pool::test_utils::{TestPool, TestPoolWrapper};
+    use reth_transaction_pool::test_utils::{TestPool, TestPoolBuilder};
     use std::collections::HashMap;
 
     #[tokio::test]
     async fn test_storage() {
         // === Noop ===
-        let pool: TestPool = TestPoolWrapper::default().into();
+        let pool: TestPool = TestPoolBuilder::default().into();
         let evm_config = EthEvmConfig::default();
 
         let cache = EthStateCache::spawn(NoopProvider::default(), Default::default(), evm_config);

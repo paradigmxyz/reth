@@ -1,7 +1,7 @@
 use assert_matches::assert_matches;
 use reth_transaction_pool::{
     noop::MockTransactionValidator,
-    test_utils::{MockTransactionFactory, TestPoolWrapper},
+    test_utils::{MockTransactionFactory, TestPoolBuilder},
     FullTransactionEvent, TransactionEvent, TransactionListenerKind, TransactionOrigin,
     TransactionPool,
 };
@@ -10,7 +10,7 @@ use tokio_stream::StreamExt;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn txpool_listener_by_hash() {
-    let txpool = TestPoolWrapper::default();
+    let txpool = TestPoolBuilder::default();
     let mut mock_tx_factory = MockTransactionFactory::default();
     let transaction = mock_tx_factory.create_eip1559();
 
@@ -25,7 +25,7 @@ async fn txpool_listener_by_hash() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn txpool_listener_all() {
-    let txpool = TestPoolWrapper::default();
+    let txpool = TestPoolBuilder::default();
     let mut mock_tx_factory = MockTransactionFactory::default();
     let transaction = mock_tx_factory.create_eip1559();
 
@@ -44,7 +44,7 @@ async fn txpool_listener_all() {
 #[tokio::test(flavor = "multi_thread")]
 async fn txpool_listener_propagate_only() {
     let txpool =
-        TestPoolWrapper::default().with_validator(MockTransactionValidator::no_propagate_local());
+        TestPoolBuilder::default().with_validator(MockTransactionValidator::no_propagate_local());
     let mut mock_tx_factory = MockTransactionFactory::default();
     let transaction = mock_tx_factory.create_eip1559();
     let expected = *transaction.hash();
@@ -68,7 +68,7 @@ async fn txpool_listener_propagate_only() {
 #[tokio::test(flavor = "multi_thread")]
 async fn txpool_listener_new_propagate_only() {
     let txpool =
-        TestPoolWrapper::default().with_validator(MockTransactionValidator::no_propagate_local());
+        TestPoolBuilder::default().with_validator(MockTransactionValidator::no_propagate_local());
     let mut mock_tx_factory = MockTransactionFactory::default();
     let transaction = mock_tx_factory.create_eip1559();
     let expected = *transaction.hash();
