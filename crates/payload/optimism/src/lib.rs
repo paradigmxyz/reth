@@ -241,7 +241,7 @@ mod builder {
 
         let mut executed_txs = Vec::new();
         let mut best_txs =
-            pool.best_transactions_with_attributes(BestTransactionsAttributes::new(base_fee, None));
+            pool.best_transactions_with_attributes(BestTransactionsAttributes::base_fee(base_fee));
 
         let mut total_fees = U256::ZERO;
 
