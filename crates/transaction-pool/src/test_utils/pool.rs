@@ -211,21 +211,33 @@ pub(crate) struct ExecutedScenarios {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::MockTransactionRatio;
+    use crate::test_utils::{MockFeeRange, MockTransactionRatio};
 
     #[test]
     fn test_on_chain_nonce_scenario() {
-        let transaction_ratio = MockTransactionRatio::new(30, 70, 0, 0);
+        let transaction_ratio = MockTransactionRatio {
+            legacy_pct: 30,
+            dynamic_fee_pct: 70,
+            access_list_pct: 0,
+            blob_pct: 0,
+        };
+
+        let fee_ranges = MockFeeRange {
+            gas_price: (10u128..100).into(),
+            priority_fee: (10u128..100).into(),
+            max_fee: (100u128..110).into(),
+            max_fee_blob: (1u128..100).into(),
+        };
+
         let config = MockSimulatorConfig {
             num_senders: 10,
             scenarios: vec![ScenarioType::OnchainNonce],
             base_fee: 10,
             tx_generator: MockTransactionDistribution::new(
                 transaction_ratio,
+                fee_ranges,
                 10..100,
                 10..100,
-                100..110,
-                1..100,
             ),
         };
         let mut simulator = MockTransactionSimulator::new(rand::thread_rng(), config);
