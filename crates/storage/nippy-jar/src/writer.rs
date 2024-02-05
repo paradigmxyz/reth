@@ -147,7 +147,7 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
 
         // First byte of the offset file is the size of one offset in bytes
         offsets_file.write_all(&[OFFSET_SIZE_BYTES as u8])?;
-        // offsets_file.sync_all()?;
+        offsets_file.sync_all()?;
         offsets_file.seek(SeekFrom::End(0))?;
 
         Ok((data_file, offsets_file, is_created))
@@ -383,8 +383,8 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
             }
         }
 
-        // self.offsets_file.sync_all()?;
-        // self.data_file.sync_all()?;
+        self.offsets_file.sync_all()?;
+        self.data_file.sync_all()?;
 
         self.offsets_file.seek(SeekFrom::End(0))?;
         self.data_file.seek(SeekFrom::End(0))?;
@@ -411,7 +411,7 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
 
     /// Commits configuration and offsets to disk. It drains the internal offset list.
     pub fn commit(&mut self) -> Result<(), NippyJarError> {
-        // self.data_file.sync_all()?;
+        self.data_file.sync_all()?;
 
         self.commit_offsets()?;
 
@@ -446,7 +446,7 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
             }
             self.offsets_file.write_all(&offset.to_le_bytes())?;
         }
-        // self.offsets_file.sync_all()?;
+        self.offsets_file.sync_all()?;
 
         Ok(())
     }
