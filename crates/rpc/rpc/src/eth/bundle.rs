@@ -92,7 +92,8 @@ where
                 let mut total_gas_fess = U256::ZERO;
                 let mut hash_bytes = Vec::with_capacity(32 * transactions.len());
 
-                let mut evm = revm::Evm::builder().with_db(db).with_env_with_spec_id(env).build();
+                let mut evm =
+                    revm::Evm::builder().with_db(db).with_env_with_handler_cfg(env).build();
 
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut transactions = transactions.into_iter().peekable();

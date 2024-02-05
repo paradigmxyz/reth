@@ -286,7 +286,7 @@ where
     // apply pre-block EIP-4788 contract call
     let mut evm_pre_block = revm::Evm::builder()
         .with_db(db)
-        .with_env_with_spec_id(EnvWithHandlerCfg::new_with_cfg_env(
+        .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
             initialized_cfg.clone(),
             initialized_block_env.clone(),
             Default::default(),

@@ -260,7 +260,7 @@ mod builder {
             // Configure the environment for the block.
             let mut evm = revm::Evm::builder()
                 .with_db(&mut db)
-                .with_env_with_spec_id(EnvWithHandlerCfg::new_with_cfg_env(
+                .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
                     initialized_cfg.clone(),
                     initialized_block_env.clone(),
                     tx_env_with_recovered(&tx),

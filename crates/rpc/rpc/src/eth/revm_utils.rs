@@ -129,7 +129,7 @@ where
     DB: Database,
     <DB as Database>::Error: Into<EthApiError>,
 {
-    let mut evm = revm::Evm::builder().with_db(db).with_env_with_spec_id(env).build();
+    let mut evm = revm::Evm::builder().with_db(db).with_env_with_handler_cfg(env).build();
     let res = evm.transact()?;
     let (_, env) = evm.into_db_and_env_with_spec_id();
     Ok((res, env))
@@ -149,7 +149,7 @@ where
     let mut evm = revm::Evm::builder()
         .with_db(db)
         .with_external_context(inspector)
-        .with_env_with_spec_id(env)
+        .with_env_with_handler_cfg(env)
         .append_handler_register(inspector_handle_register)
         .build();
     let res = evm.transact()?;
@@ -174,7 +174,7 @@ where
     let mut evm = revm::Evm::builder()
         .with_external_context(inspector)
         .with_db(db)
-        .with_env_with_spec_id(env)
+        .with_env_with_handler_cfg(env)
         .append_handler_register(inspector_handle_register)
         .build();
     let res = evm.transact()?;
@@ -205,7 +205,7 @@ where
 {
     let mut evm = revm::Evm::builder()
         .with_db(db)
-        .with_env_with_spec_id(EnvWithHandlerCfg::new_with_cfg_env(
+        .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
             cfg,
             block_env,
             Default::default(),

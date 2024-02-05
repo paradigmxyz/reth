@@ -271,7 +271,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-trace-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#2be621406132ba034e6c9729e3f1fbd0e26bda4d"
+source = "git+https://github.com/alloy-rs/alloy#6d457a507dffc773bc6af6401f8566def02a89d5"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
@@ -282,7 +282,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#2be621406132ba034e6c9729e3f1fbd0e26bda4d"
+source = "git+https://github.com/alloy-rs/alloy#6d457a507dffc773bc6af6401f8566def02a89d5"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -7051,7 +7051,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.5.0"
-source = "git+https://github.com/bluealloy/revm?branch=tweeks#b0fba2da5b798e3b5f123d483bc7ee3228befaef"
+source = "git+https://github.com/bluealloy/revm?branch=main#a799ef2956c32c61f1674c5bf61cbee61869212f"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -7064,7 +7064,7 @@ dependencies = [
 [[package]]
 name = "revm-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/evm-inspectors?branch=matt/migrate-revm#7d7d261302e35d5d50947b22696797b7394b84fc"
+source = "git+https://github.com/paradigmxyz/evm-inspectors?branch=matt/migrate-revm#621ccff547583ea713bd928224289d6263d1d88a"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-trace-types",
@@ -7081,7 +7081,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.3.0"
-source = "git+https://github.com/bluealloy/revm?branch=tweeks#b0fba2da5b798e3b5f123d483bc7ee3228befaef"
+source = "git+https://github.com/bluealloy/revm?branch=main#a799ef2956c32c61f1674c5bf61cbee61869212f"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -7090,7 +7090,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "2.2.0"
-source = "git+https://github.com/bluealloy/revm?branch=tweeks#b0fba2da5b798e3b5f123d483bc7ee3228befaef"
+source = "git+https://github.com/bluealloy/revm?branch=main#a799ef2956c32c61f1674c5bf61cbee61869212f"
 dependencies = [
  "aurora-engine-modexp",
  "c-kzg",
@@ -7106,7 +7106,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.3.0"
-source = "git+https://github.com/bluealloy/revm?branch=tweeks#b0fba2da5b798e3b5f123d483bc7ee3228befaef"
+source = "git+https://github.com/bluealloy/revm?branch=main#a799ef2956c32c61f1674c5bf61cbee61869212f"
 dependencies = [
  "alloy-primitives",
  "auto_impl",
