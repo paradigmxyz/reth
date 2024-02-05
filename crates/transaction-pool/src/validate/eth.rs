@@ -182,7 +182,6 @@ where
                     )
                 }
             }
-
             _ => {
                 return TransactionValidationOutcome::Invalid(
                     transaction,

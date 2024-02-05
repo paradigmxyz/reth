@@ -21,6 +21,7 @@ reth-transaction-pool.workspace = true
 reth-revm.workspace = true
 
 # misc
+async-trait.workspace = true
 serde.workspace = true
 
 [features]

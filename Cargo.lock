@@ -6523,6 +6523,8 @@ dependencies = [
 name = "reth-node-optimism"
 version = "0.1.0-alpha.16"
 dependencies = [
+ "async-trait",
+ "parking_lot 0.12.1",
  "reth-node-api",
  "reth-payload-builder",
  "reth-primitives",
