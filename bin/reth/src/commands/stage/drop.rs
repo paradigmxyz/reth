@@ -62,6 +62,7 @@ impl Command {
             open_db(db_path.as_ref(), DatabaseArguments::default().log_level(self.db.log_level))?;
         let provider_factory =
             ProviderFactory::new(db, self.chain.clone(), data_dir.snapshots_path())?;
+        let snapshot_provider = provider_factory.snapshot_provider();
 
         let tool = DbTool::new(provider_factory, self.chain.clone())?;
 
@@ -74,7 +75,7 @@ impl Command {
                     tx.clear::<tables::BlockOmmers>()?;
                     tx.clear::<tables::BlockWithdrawals>()?;
                     tx.put::<tables::SyncStage>(StageId::Bodies.to_string(), Default::default())?;
-                    insert_genesis_header::<DatabaseEnv>(tx, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, snapshot_provider, self.chain)?;
                 }
                 StageEnum::Senders => {
                     tx.clear::<tables::TxSenders>()?;
@@ -159,7 +160,7 @@ impl Command {
                         StageId::TotalDifficulty.to_string(),
                         Default::default(),
                     )?;
-                    insert_genesis_header::<DatabaseEnv>(tx, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, snapshot_provider, self.chain)?;
                 }
                 StageEnum::TxLookup => {
                     tx.clear::<tables::TxHashNumber>()?;
@@ -167,7 +168,7 @@ impl Command {
                         StageId::TransactionLookup.to_string(),
                         Default::default(),
                     )?;
-                    insert_genesis_header::<DatabaseEnv>(tx, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, snapshot_provider, self.chain)?;
                 }
                 _ => {
                     info!("Nothing to do for stage {:?}", self.stage);

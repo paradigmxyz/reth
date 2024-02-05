@@ -214,7 +214,7 @@ impl Command {
             ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.snapshots_path())?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
-        init_genesis(provider_factory.clone(), self.chain.clone())?;
+        init_genesis(provider_factory.clone())?;
 
         let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
 

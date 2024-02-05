@@ -227,7 +227,7 @@ pub(crate) fn mdbx_result_with_tx_kind<K: TransactionKind>(
         err_code == ffi::MDBX_EBADSIGN &&
         txn_manager.remove_aborted_read_transaction(txn).is_some()
     {
-        return Err(Error::ReadTransactionAborted);
+        return Err(Error::ReadTransactionAborted)
     }
 
     mdbx_result(err_code)

@@ -1,14 +1,20 @@
 //! Reth genesis initialization utility functions.
 
-use reth_db::{database::Database, tables, transaction::DbTxMut};
+use reth_db::{
+    database::Database,
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
 use reth_primitives::{
-    stage::StageId, Account, Bytecode, ChainSpec, Receipts, StorageEntry, B256, U256,
+    stage::StageId, Account, Bytecode, ChainSpec, Receipts, SnapshotSegment, StorageEntry, B256,
+    U256,
 };
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
-    BlockHashReader, BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HistoryWriter,
-    OriginalValuesKnown, ProviderError, ProviderFactory,
+    providers::{SnapshotProvider, SnapshotWriter},
+    BlockHashReader, BundleStateWithReceipts, ChainSpecProvider, DatabaseProviderRW, HashingWriter,
+    HistoryWriter, OriginalValuesKnown, ProviderError, ProviderFactory,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -41,49 +47,48 @@ impl From<DatabaseError> for InitDatabaseError {
 }
 
 /// Write the genesis block if it has not already been written
-pub fn init_genesis<DB: Database>(
-    provider_factory: ProviderFactory<DB>,
-    chain: Arc<ChainSpec>,
-) -> Result<B256, InitDatabaseError> {
+pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, InitDatabaseError> {
+    let chain = factory.chain_spec();
     let genesis = chain.genesis();
 
     let hash = chain.genesis_hash();
 
-    let provider = provider_factory.provider()?;
-    if let Some(db_hash) = provider.block_hash(0)? {
-        if db_hash == hash {
-            debug!("Genesis already written, skipping.");
-            return Ok(hash)
-        }
+    // Check if we already have the genesis header or if we have the wrong one.
+    match factory.block_hash(0) {
+        Ok(None) | Err(ProviderError::MissingSnapshotBlock(SnapshotSegment::Headers, 0)) => {}
+        Ok(Some(block_hash)) => {
+            if block_hash == hash {
+                debug!("Genesis already written, skipping.");
+                return Ok(hash)
+            }
 
-        return Err(InitDatabaseError::GenesisHashMismatch {
-            chainspec_hash: hash,
-            database_hash: db_hash,
-        })
+            return Err(InitDatabaseError::GenesisHashMismatch {
+                chainspec_hash: hash,
+                database_hash: block_hash,
+            })
+        }
+        Err(e) => return Err(dbg!(e).into()),
     }
 
-    drop(provider);
     debug!("Writing genesis block.");
 
     // use transaction to insert genesis header
-    let mut provider_rw = provider_factory.provider_rw()?;
+    let provider_rw = factory.provider_rw()?;
     insert_genesis_hashes(&provider_rw, genesis)?;
     insert_genesis_history(&provider_rw, genesis)?;
 
     // Insert header
-    {
-        let tx = provider_rw.tx_mut();
-        insert_genesis_header::<DB>(tx, chain.clone())?;
+    let tx = provider_rw.into_tx();
+    insert_genesis_header::<DB>(&tx, factory.snapshot_provider(), chain.clone())?;
 
-        insert_genesis_state::<DB>(tx, genesis)?;
+    insert_genesis_state::<DB>(&tx, genesis)?;
 
-        // insert sync stage
-        for stage in StageId::ALL.iter() {
-            tx.put::<tables::SyncStage>(stage.to_string(), Default::default())?;
-        }
+    // insert sync stage
+    for stage in StageId::ALL.iter() {
+        tx.put::<tables::SyncStage>(stage.to_string(), Default::default())?;
     }
 
-    provider_rw.commit()?;
+    tx.commit()?;
 
     Ok(hash)
 }
@@ -204,15 +209,24 @@ pub fn insert_genesis_history<DB: Database>(
 /// Inserts header for the genesis state.
 pub fn insert_genesis_header<DB: Database>(
     tx: &<DB as Database>::TXMut,
+    snapshot_provider: Arc<SnapshotProvider>,
     chain: Arc<ChainSpec>,
 ) -> ProviderResult<()> {
     let header = chain.sealed_genesis_header();
 
-    tx.put::<tables::CanonicalHeaders>(0, header.hash)?;
+    match snapshot_provider.block_hash(0) {
+        Ok(None) | Err(ProviderError::MissingSnapshotBlock(SnapshotSegment::Headers, 0)) => {
+            let (difficulty, hash) = (header.difficulty, header.hash);
+            let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
+            writer.append_header(header.header, difficulty, hash)?;
+            writer.commit()?;
+        }
+        Ok(Some(_)) => {}
+        Err(e) => return Err(e),
+    }
+
     tx.put::<tables::HeaderNumbers>(header.hash, 0)?;
     tx.put::<tables::BlockBodyIndices>(0, Default::default())?;
-    tx.put::<tables::HeaderTD>(0, header.difficulty.into())?;
-    tx.put::<tables::Headers>(0, header.header)?;
 
     Ok(())
 }
@@ -247,8 +261,8 @@ mod tests {
 
     #[test]
     fn success_init_genesis_mainnet() {
-        let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
-        let genesis_hash = init_genesis(factory, MAINNET.clone()).unwrap();
+        let genesis_hash =
+            init_genesis(create_test_provider_factory_with_chain_spec(MAINNET.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, MAINNET_GENESIS_HASH);
@@ -256,8 +270,8 @@ mod tests {
 
     #[test]
     fn success_init_genesis_goerli() {
-        let factory = create_test_provider_factory_with_chain_spec(GOERLI.clone());
-        let genesis_hash = init_genesis(factory, GOERLI.clone()).unwrap();
+        let genesis_hash =
+            init_genesis(create_test_provider_factory_with_chain_spec(GOERLI.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, GOERLI_GENESIS_HASH);
@@ -265,8 +279,8 @@ mod tests {
 
     #[test]
     fn success_init_genesis_sepolia() {
-        let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
-        let genesis_hash = init_genesis(factory, SEPOLIA.clone()).unwrap();
+        let genesis_hash =
+            init_genesis(create_test_provider_factory_with_chain_spec(SEPOLIA.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS_HASH);
@@ -275,10 +289,18 @@ mod tests {
     #[test]
     fn fail_init_inconsistent_db() {
         let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
-        init_genesis(factory.clone(), SEPOLIA.clone()).unwrap();
+        let snapshot_provider = factory.snapshot_provider();
+        init_genesis(factory.clone()).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash = init_genesis(factory, MAINNET.clone());
+        let genesis_hash = init_genesis(
+            ProviderFactory::new(
+                factory.into_db(),
+                MAINNET.clone(),
+                snapshot_provider.path().into(),
+            )
+            .unwrap(),
+        );
 
         assert_eq!(
             genesis_hash.unwrap_err(),
@@ -320,10 +342,11 @@ mod tests {
             ..Default::default()
         });
 
-        let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
-        init_genesis(factory.clone(), chain_spec).unwrap();
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(factory.clone()).unwrap();
 
-        let provider = factory.provider().expect("failed to init provider");
+        let provider = factory.provider().unwrap();
+
         let tx = provider.tx_ref();
 
         assert_eq!(

@@ -108,9 +108,9 @@ impl Headers {
 mod tests {
     use crate::segments::{Headers, PruneInput, PruneOutput, Segment};
     use assert_matches::assert_matches;
-    use reth_db::tables;
+    use reth_db::{tables, transaction::DbTx};
     use reth_interfaces::test_utils::{generators, generators::random_header_range};
-    use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256};
+    use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256, U256};
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::TestStageDB;
 
@@ -120,7 +120,11 @@ mod tests {
         let mut rng = generators::rng();
 
         let headers = random_header_range(&mut rng, 0..100, B256::ZERO);
-        db.insert_headers_with_td(headers.iter()).expect("insert headers");
+        let tx = db.factory.provider_rw().unwrap().into_tx();
+        for header in headers.iter() {
+            TestStageDB::insert_header(None, &tx, header, U256::ZERO).unwrap();
+        }
+        tx.commit().unwrap();
 
         assert_eq!(db.table::<tables::CanonicalHeaders>().unwrap().len(), headers.len());
         assert_eq!(db.table::<tables::Headers>().unwrap().len(), headers.len());

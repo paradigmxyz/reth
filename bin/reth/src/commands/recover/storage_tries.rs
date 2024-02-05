@@ -53,7 +53,7 @@ impl Command {
         let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.snapshots_path())?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
-        init_genesis(factory.clone(), self.chain.clone())?;
+        init_genesis(factory.clone())?;
 
         let mut provider = factory.provider_rw()?;
         let best_block = provider.best_block_number()?;

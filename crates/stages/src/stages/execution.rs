@@ -7,10 +7,10 @@ use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::BlockNumberAddress,
+    snapshot::HeaderMask,
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
@@ -18,7 +18,7 @@ use reth_primitives::{
     BlockNumber, Header, PruneModes, SnapshotSegment, U256,
 };
 use reth_provider::{
-    providers::{SnapshotProviderRWRefMut, SnapshotWriter},
+    providers::{SnapshotProvider, SnapshotProviderRWRefMut, SnapshotWriter},
     BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, StatsReader, TransactionVariant,
 };
@@ -122,6 +122,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let start_block = input.next_block();
         let max_block = input.target();
         let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
+        let snapshot_provider = provider.snapshot_provider();
 
         // We only use static files for Receipts, if there is no receipt pruning of any kind.
         let mut snapshotter = None;
@@ -130,15 +131,17 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         }
 
         // Build executor
-        let mut executor =
-            self.executor_factory.with_state(LatestStateProviderRef::new(provider.tx_ref()));
+        let mut executor = self.executor_factory.with_state(LatestStateProviderRef::new(
+            provider.tx_ref(),
+            provider.snapshot_provider().clone(),
+        ));
         executor.set_prune_modes(prune_modes);
         executor.set_tip(max_block);
 
         // Progress tracking
         let mut stage_progress = start_block;
         let mut stage_checkpoint =
-            execution_checkpoint(provider, start_block, max_block, input.checkpoint())?;
+            execution_checkpoint(snapshot_provider, start_block, max_block, input.checkpoint())?;
 
         let mut fetch_block_duration = Duration::default();
         let mut execution_duration = Duration::default();
@@ -254,12 +257,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     }
 }
 
-fn execution_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
+fn execution_checkpoint(
+    provider: &SnapshotProvider,
     start_block: BlockNumber,
     max_block: BlockNumber,
     checkpoint: StageCheckpoint,
-) -> Result<ExecutionCheckpoint, DatabaseError> {
+) -> Result<ExecutionCheckpoint, ProviderError> {
     Ok(match checkpoint.execution_stage_checkpoint() {
         // If checkpoint block range fully matches our range,
         // we take the previously used stage checkpoint as-is.
@@ -321,15 +324,20 @@ fn execution_checkpoint<DB: Database>(
     })
 }
 
-fn calculate_gas_used_from_headers<DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
+fn calculate_gas_used_from_headers(
+    provider: &SnapshotProvider,
     range: RangeInclusive<BlockNumber>,
-) -> Result<u64, DatabaseError> {
+) -> Result<u64, ProviderError> {
     let mut gas_total = 0;
 
     let start = Instant::now();
-    for entry in provider.tx_ref().cursor_read::<tables::Headers>()?.walk_range(range.clone())? {
-        let (_, Header { gas_used, .. }) = entry?;
+
+    for entry in provider.fetch_range_iter(
+        SnapshotSegment::Headers,
+        *range.start()..*range.end() + 1,
+        |cursor, number| cursor.get_one::<HeaderMask<Header>>(number.into()),
+    )? {
+        let Header { gas_used, .. } = entry?;
         gas_total += gas_used;
     }
 
@@ -591,9 +599,7 @@ mod tests {
         Bytecode, ChainSpecBuilder, PruneMode, PruneModes, ReceiptsLogPruneConfig, SealedBlock,
         StorageEntry, B256, U256,
     };
-    use reth_provider::{
-        test_utils::create_test_provider_factory, AccountReader, BlockWriter, ReceiptProvider,
-    };
+    use reth_provider::{test_utils::create_test_provider_factory, AccountReader, ReceiptProvider};
     use reth_revm::EvmProcessorFactory;
     use std::{collections::BTreeMap, sync::Arc};
 
@@ -617,7 +623,6 @@ mod tests {
     #[test]
     fn execution_checkpoint_matches() {
         let factory = create_test_provider_factory();
-        let tx = factory.provider_rw().unwrap();
 
         let previous_stage_checkpoint = ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 0, to: 0 },
@@ -629,7 +634,7 @@ mod tests {
         };
 
         let stage_checkpoint = execution_checkpoint(
-            &tx,
+            &factory.snapshot_provider(),
             previous_stage_checkpoint.block_range.from,
             previous_stage_checkpoint.block_range.to,
             previous_checkpoint,
@@ -648,7 +653,7 @@ mod tests {
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
         provider
-            .insert_block(
+            .insert_historical_block(
                 genesis
                     .try_seal_with_senders()
                     .map_err(|_| BlockValidationError::SenderRecoveryError)
@@ -656,7 +661,15 @@ mod tests {
                 None,
             )
             .unwrap();
-        provider.insert_block(block.clone().try_seal_with_senders().unwrap(), None).unwrap();
+        provider
+            .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
+            .unwrap();
+        provider
+            .snapshot_provider()
+            .latest_writer(SnapshotSegment::Headers)
+            .unwrap()
+            .commit()
+            .unwrap();
         provider.commit().unwrap();
 
         let previous_stage_checkpoint = ExecutionCheckpoint {
@@ -668,8 +681,8 @@ mod tests {
             stage_checkpoint: Some(StageUnitCheckpoint::Execution(previous_stage_checkpoint)),
         };
 
-        let provider = factory.provider_rw().unwrap();
-        let stage_checkpoint = execution_checkpoint(&provider, 1, 1, previous_checkpoint);
+        let stage_checkpoint =
+            execution_checkpoint(&factory.snapshot_provider(), 1, 1, previous_checkpoint);
 
         assert_matches!(stage_checkpoint, Ok(ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 1, to: 1 },
@@ -690,8 +703,16 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        provider.insert_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
-        provider.insert_block(block.clone().try_seal_with_senders().unwrap(), None).unwrap();
+        provider.insert_historical_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
+        provider
+            .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
+            .unwrap();
+        provider
+            .snapshot_provider()
+            .latest_writer(SnapshotSegment::Headers)
+            .unwrap()
+            .commit()
+            .unwrap();
         provider.commit().unwrap();
 
         let previous_stage_checkpoint = ExecutionCheckpoint {
@@ -703,8 +724,8 @@ mod tests {
             stage_checkpoint: Some(StageUnitCheckpoint::Execution(previous_stage_checkpoint)),
         };
 
-        let provider = factory.provider_rw().unwrap();
-        let stage_checkpoint = execution_checkpoint(&provider, 1, 1, previous_checkpoint);
+        let stage_checkpoint =
+            execution_checkpoint(&factory.snapshot_provider(), 1, 1, previous_checkpoint);
 
         assert_matches!(stage_checkpoint, Ok(ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 1, to: 1 },
@@ -725,14 +746,22 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        provider.insert_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
-        provider.insert_block(block.clone().try_seal_with_senders().unwrap(), None).unwrap();
+        provider.insert_historical_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
+        provider
+            .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
+            .unwrap();
+        provider
+            .snapshot_provider()
+            .latest_writer(SnapshotSegment::Headers)
+            .unwrap()
+            .commit()
+            .unwrap();
         provider.commit().unwrap();
 
         let previous_checkpoint = StageCheckpoint { block_number: 1, stage_checkpoint: None };
 
-        let provider = factory.provider_rw().unwrap();
-        let stage_checkpoint = execution_checkpoint(&provider, 1, 1, previous_checkpoint);
+        let stage_checkpoint =
+            execution_checkpoint(&factory.snapshot_provider(), 1, 1, previous_checkpoint);
 
         assert_matches!(stage_checkpoint, Ok(ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 1, to: 1 },
@@ -754,8 +783,16 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        provider.insert_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
-        provider.insert_block(block.clone().try_seal_with_senders().unwrap(), None).unwrap();
+        provider.insert_historical_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
+        provider
+            .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
+            .unwrap();
+        provider
+            .snapshot_provider()
+            .latest_writer(SnapshotSegment::Headers)
+            .unwrap()
+            .commit()
+            .unwrap();
         provider.commit().unwrap();
 
         // insert pre state
@@ -891,8 +928,16 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        provider.insert_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
-        provider.insert_block(block.clone().try_seal_with_senders().unwrap(), None).unwrap();
+        provider.insert_historical_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
+        provider
+            .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
+            .unwrap();
+        provider
+            .snapshot_provider()
+            .latest_writer(SnapshotSegment::Headers)
+            .unwrap()
+            .commit()
+            .unwrap();
         provider.commit().unwrap();
 
         // variables
@@ -996,8 +1041,16 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        provider.insert_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
-        provider.insert_block(block.clone().try_seal_with_senders().unwrap(), None).unwrap();
+        provider.insert_historical_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
+        provider
+            .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
+            .unwrap();
+        provider
+            .snapshot_provider()
+            .latest_writer(SnapshotSegment::Headers)
+            .unwrap()
+            .commit()
+            .unwrap();
         provider.commit().unwrap();
 
         // variables

@@ -1,6 +1,7 @@
 use super::SnapshotProvider;
 use dashmap::mapref::one::RefMut;
 use reth_codecs::Compact;
+use reth_db::codecs::CompactU256;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
@@ -79,12 +80,25 @@ impl<'a> SnapshotProviderRW<'a> {
         // Commits offsets and new user_header to disk
         self.writer.commit()?;
 
-        self.reader.update_index(
-            self.writer.user_header().segment(),
-            Some(self.writer.user_header().block_end()),
-        )?;
+        self.reader.update_index(self.writer.user_header().segment(), self.get_max_block())?;
 
         Ok(())
+    }
+
+    /// Get the maximum block of the current writer if it exists.
+    fn get_max_block(&self) -> Option<BlockNumber> {
+        let user_header = self.writer.user_header();
+        let mut max_block = Some(user_header.block_end());
+
+        if matches!(self.writer.user_header().segment(), SnapshotSegment::Headers) {
+            // This can be a scenario where we pruned all blocks from the static file, including the
+            // genesis block.
+            if user_header.block_end() == 0 && self.writer.rows() == 0 {
+                max_block = None
+            }
+        };
+
+        max_block
     }
 
     /// Allows to increment the [`SegmentHeader`] end block. It will commit the current snapshot,
@@ -92,6 +106,11 @@ impl<'a> SnapshotProviderRW<'a> {
     ///
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn increment_block(&mut self, segment: SnapshotSegment) -> ProviderResult<BlockNumber> {
+        debug_assert!(
+            (self.writer.rows() as u64 + self.writer.user_header().block_end()) != 0
+            || !matches!(segment, SnapshotSegment::Headers),
+            "This function should only be called by append_header when dealing with SnapshotSegment::Headers.");
+
         let last_block = self.writer.user_header().block_end();
         let writer_range_end = *find_fixed_range(last_block).end();
 
@@ -154,7 +173,9 @@ impl<'a> SnapshotProviderRW<'a> {
                     NippyJar::<SegmentHeader>::load(&previous_snap)?.delete()?;
                 } else {
                     // Update `SegmentHeader`
-                    self.writer.user_header_mut().prune(num_rows);
+                    self.writer.user_header_mut().prune(len);
+                    self.writer.prune_rows(len as usize)?;
+                    break
                 }
 
                 num_rows -= len;
@@ -213,6 +234,9 @@ impl<'a> SnapshotProviderRW<'a> {
 
     /// Appends header to snapshot file.
     ///
+    /// It **CALLS** `increment_block()` since the number of headers is equal to the number of
+    /// blocks.
+    ///
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn append_header(
         &mut self,
@@ -222,14 +246,22 @@ impl<'a> SnapshotProviderRW<'a> {
     ) -> ProviderResult<BlockNumber> {
         debug_assert!(self.writer.user_header().segment() == SnapshotSegment::Headers);
 
+        // Only increment the block number if this is NOT the genesis header
+        if !(self.writer.rows() == 0 && self.writer.user_header().block_end() == 0) {
+            self.increment_block(SnapshotSegment::Headers)?;
+        }
+
         self.append_column(header)?;
-        self.append_column(terminal_difficulty)?;
+        self.append_column(CompactU256::from(terminal_difficulty))?;
         self.append_column(hash)?;
 
         Ok(self.writer.user_header().block_end())
     }
 
     /// Appends transaction to snapshot file.
+    ///
+    /// It **DOES NOT CALL** `increment_block()`, it should be handled elsewhere. There might be
+    /// empty blocks and this function wouldn't be called.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
     pub fn append_transaction(
@@ -241,6 +273,9 @@ impl<'a> SnapshotProviderRW<'a> {
     }
 
     /// Appends receipt to snapshot file.
+    ///
+    /// It **DOES NOT** call `increment_block()`, it should be handled elsewhere. There might be
+    /// empty blocks and this function wouldn't be called.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
     pub fn append_receipt(
@@ -279,6 +314,17 @@ impl<'a> SnapshotProviderRW<'a> {
         debug_assert!(self.writer.user_header().segment() == segment);
 
         self.truncate(segment, to_delete, Some(last_block))
+    }
+
+    /// Prunes `to_delete` number of headers from snapshots.
+    ///
+    /// # Note
+    /// Commits to the configuration file at the end.
+    pub fn prune_headers(&mut self, to_delete: u64) -> ProviderResult<()> {
+        let segment = SnapshotSegment::Headers;
+        debug_assert!(self.writer.user_header().segment() == segment);
+
+        self.truncate(segment, to_delete, None)
     }
 
     #[cfg(any(test, feature = "test-utils"))]

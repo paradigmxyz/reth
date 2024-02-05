@@ -1,6 +1,6 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    BundleStateWithReceipts, StateProvider, StateRootProvider,
+    providers::{state::macros::delegate_provider_impls, SnapshotProvider},
+    AccountReader, BlockHashReader, BundleStateWithReceipts, StateProvider, StateRootProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -9,21 +9,25 @@ use reth_db::{
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
-    trie::AccountProof, Account, Address, BlockNumber, Bytecode, StorageKey, StorageValue, B256,
+    trie::AccountProof, Account, Address, BlockNumber, Bytecode, SnapshotSegment, StorageKey,
+    StorageValue, B256,
 };
 use reth_trie::{proof::Proof, updates::TrieUpdates};
+use std::sync::Arc;
 
 /// State provider over latest state that takes tx reference.
 #[derive(Debug)]
 pub struct LatestStateProviderRef<'b, TX: DbTx> {
     /// database transaction
     db: &'b TX,
+    /// Snapshot provider
+    snapshot_provider: Arc<SnapshotProvider>,
 }
 
 impl<'b, TX: DbTx> LatestStateProviderRef<'b, TX> {
     /// Create new state provider
-    pub fn new(db: &'b TX) -> Self {
-        Self { db }
+    pub fn new(db: &'b TX, snapshot_provider: Arc<SnapshotProvider>) -> Self {
+        Self { db, snapshot_provider }
     }
 }
 
@@ -37,7 +41,12 @@ impl<'b, TX: DbTx> AccountReader for LatestStateProviderRef<'b, TX> {
 impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.db.get::<tables::CanonicalHeaders>(number).map_err(Into::into)
+        self.snapshot_provider.get_with_snapshot_or_database(
+            SnapshotSegment::Headers,
+            number,
+            |snapshot| snapshot.block_hash(number),
+            || Ok(self.db.get::<tables::CanonicalHeaders>(number)?),
+        )
     }
 
     fn canonical_hashes_range(
@@ -45,16 +54,23 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        let range = start..end;
-        self.db
-            .cursor_read::<tables::CanonicalHeaders>()
-            .map(|mut cursor| {
-                cursor
-                    .walk_range(range)?
-                    .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
-                    .collect::<ProviderResult<Vec<_>>>()
-            })?
-            .map_err(Into::into)
+        self.snapshot_provider.get_range_with_snapshot_or_database(
+            SnapshotSegment::Headers,
+            start..end,
+            |snapshot, range, _| snapshot.canonical_hashes_range(range.start, range.end),
+            |range, _| {
+                self.db
+                    .cursor_read::<tables::CanonicalHeaders>()
+                    .map(|mut cursor| {
+                        cursor
+                            .walk_range(range)?
+                            .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
+                            .collect::<ProviderResult<Vec<_>>>()
+                    })?
+                    .map_err(Into::into)
+            },
+            |_| true,
+        )
     }
 }
 
@@ -110,18 +126,20 @@ impl<'b, TX: DbTx> StateProvider for LatestStateProviderRef<'b, TX> {
 pub struct LatestStateProvider<TX: DbTx> {
     /// database transaction
     db: TX,
+    /// Snapshot provider
+    snapshot_provider: Arc<SnapshotProvider>,
 }
 
 impl<TX: DbTx> LatestStateProvider<TX> {
     /// Create new state provider
-    pub fn new(db: TX) -> Self {
-        Self { db }
+    pub fn new(db: TX, snapshot_provider: Arc<SnapshotProvider>) -> Self {
+        Self { db, snapshot_provider }
     }
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
     fn as_ref(&self) -> LatestStateProviderRef<'_, TX> {
-        LatestStateProviderRef::new(&self.db)
+        LatestStateProviderRef::new(&self.db, self.snapshot_provider.clone())
     }
 }
 

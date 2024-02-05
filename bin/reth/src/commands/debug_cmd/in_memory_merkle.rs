@@ -19,9 +19,8 @@ use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
 use reth_provider::{
-    AccountExtReader, BlockWriter, ExecutorFactory, HashingWriter, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
-    StorageReader,
+    AccountExtReader, ExecutorFactory, HashingWriter, HeaderProvider, LatestStateProviderRef,
+    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StorageReader,
 };
 use reth_tasks::TaskExecutor;
 use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, updates::TrieKey, StateRoot};
@@ -167,8 +166,10 @@ impl Command {
             .await?;
 
         let executor_factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
-        let mut executor =
-            executor_factory.with_state(LatestStateProviderRef::new(provider.tx_ref()));
+        let mut executor = executor_factory.with_state(LatestStateProviderRef::new(
+            provider.tx_ref(),
+            factory.snapshot_provider(),
+        ));
 
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
@@ -201,7 +202,7 @@ impl Command {
         let provider_rw = factory.provider_rw()?;
 
         // Insert block, state and hashes
-        provider_rw.insert_block(
+        provider_rw.insert_historical_block(
             block
                 .clone()
                 .try_seal_with_senders()

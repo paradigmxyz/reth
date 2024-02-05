@@ -5,7 +5,7 @@ use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTxMut,
     RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
@@ -18,9 +18,13 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
     },
-    BlockHash, BlockNumber, SealedHeader, U256,
+    BlockHash, BlockNumber, SealedHeader, SnapshotSegment,
 };
-use reth_provider::{DatabaseProviderRW, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode};
+use reth_provider::{
+    providers::{SnapshotProvider, SnapshotWriter},
+    BlockHashReader, DatabaseProviderRW, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+    HeaderSyncMode,
+};
 use std::{
     sync::Arc,
     task::{ready, Context, Poll},
@@ -95,34 +99,29 @@ where
     fn write_headers<DB: Database>(
         &mut self,
         tx: &<DB as Database>::TXMut,
+        snapshot_provider: Arc<SnapshotProvider>,
     ) -> Result<BlockNumber, StageError> {
         let total_headers = self.header_collector.len();
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing headers");
 
-        let mut cursor_header = tx.cursor_write::<RawTable<tables::Headers>>()?;
-        let mut cursor_canonical = tx.cursor_write::<RawTable<tables::CanonicalHeaders>>()?;
-        let mut cursor_td = tx.cursor_write::<tables::HeaderTD>()?;
-
-        let mut last_header_number = tx
-            .cursor_read::<tables::Headers>()?
-            .last()?
-            .map(|(_, header)| header.number)
+        // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
+        // when poll_execute_ready is polled.
+        let mut last_header_number = snapshot_provider
+            .get_highest_snapshot_block(SnapshotSegment::Headers)
             .unwrap_or_default();
 
         // Find the latest total difficulty
-        let mut td: U256 = cursor_td
-            .seek_exact(last_header_number)?
-            .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?
-            .1
-            .into();
+        let mut td = snapshot_provider
+            .header_td_by_number(last_header_number)?
+            .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?;
 
         // Although headers were downloaded in reverse order, the collector iterates it in ascending
         // order
-
+        let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
         let interval = (total_headers / 10).max(1);
         for (index, header) in self.header_collector.iter()?.enumerate() {
-            let (number, header_buf) = header?;
+            let (_, header_buf) = header?;
 
             if index > 0 && index % interval == 0 {
                 info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers");
@@ -146,16 +145,10 @@ where
                 }
             })?;
 
-            // Append to HeaderTD
-            cursor_td.append(header.number, td.into())?;
-
-            // Append to CanonicalHeaders
-            cursor_canonical
-                .append(RawKey::<BlockNumber>::from_vec(number.clone()), header_hash.into())?;
-
-            // Append to Headers
-            cursor_header.append(RawKey::<BlockNumber>::from_vec(number), header.into())?;
+            // Append to Headers segment
+            writer.append_header(header, td, header_hash)?;
         }
+        writer.commit()?;
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing header hash index");
 
@@ -178,7 +171,7 @@ where
             let (hash, number) = hash_to_number?;
 
             if index > 0 && index % interval == 0 {
-                info!(target: "sync::stages::headers", progress = ((index as f64 / total_headers as f64) * 100.0).round(), "Writing headers hash index");
+                info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers hash index");
             }
 
             if first_sync {
@@ -283,7 +276,7 @@ where
 
         if self.sync_gap.as_ref().ok_or(StageError::MissingSyncGap)?.is_closed() {
             self.is_etl_ready = false;
-            return Ok(ExecOutput::done(current_checkpoint));
+            return Ok(ExecOutput::done(current_checkpoint))
         }
 
         // We should be here only after we have downloaded all headers into the disk buffer (ETL).
@@ -296,7 +289,8 @@ where
 
         // Write the headers and related tables to DB from ETL space
         let to_be_processed = self.hash_collector.len() as u64;
-        let last_header_number = self.write_headers::<DB>(provider.tx_ref())?;
+        let last_header_number =
+            self.write_headers::<DB>(provider.tx_ref(), provider.snapshot_provider().clone())?;
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(last_header_number).with_headers_stage_checkpoint(
@@ -325,22 +319,28 @@ where
     ) -> Result<UnwindOutput, StageError> {
         self.sync_gap.take();
 
-        provider.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
-            input.unwind_to + 1,
-        )?;
-        provider.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-        let unwound_headers = provider.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
+        let snapshot_provider = provider.snapshot_provider();
+        let highest_block = snapshot_provider
+            .get_highest_snapshot_block(SnapshotSegment::Headers)
+            .unwrap_or_default();
+        let unwound_headers = highest_block - input.unwind_to;
 
-        provider.unwind_table_by_num::<tables::HeaderTD>(input.unwind_to)?;
+        for block in (input.unwind_to + 1)..=highest_block {
+            let header_hash = snapshot_provider
+                .block_hash(block)?
+                .ok_or(ProviderError::HeaderNotFound(block.into()))?;
+
+            provider.tx_ref().delete::<tables::HeaderNumbers>(header_hash, None)?;
+        }
+
+        let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
+        writer.prune_headers(unwound_headers)?;
 
         let stage_checkpoint =
             input.checkpoint.headers_stage_checkpoint().map(|stage_checkpoint| HeadersCheckpoint {
                 block_range: stage_checkpoint.block_range,
                 progress: EntitiesCheckpoint {
-                    processed: stage_checkpoint
-                        .progress
-                        .processed
-                        .saturating_sub(unwound_headers as u64),
+                    processed: stage_checkpoint.progress.processed.saturating_sub(unwound_headers),
                     total: stage_checkpoint.progress.total,
                 },
             });
@@ -377,7 +377,6 @@ mod tests {
             generators, generators::random_header_range, TestConsensus, TestHeaderDownloader,
             TestHeadersClient,
         };
-        use reth_primitives::U256;
         use reth_provider::{BlockHashReader, BlockNumReader, HeaderProvider};
         use std::sync::Arc;
         use tempfile::TempDir;
@@ -436,8 +435,9 @@ mod tests {
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let mut rng = generators::rng();
                 let start = input.checkpoint().block_number;
-                let head = random_header(&mut rng, start, None);
-                self.db.insert_headers_with_td(std::iter::once(&head))?;
+                let headers = random_header_range(&mut rng, 0..start + 1, B256::ZERO);
+                let head = headers.last().cloned().unwrap();
+                self.db.insert_headers_with_td(headers.iter())?;
 
                 // use previous checkpoint as seed size
                 let end = input.target.unwrap_or_default() + 1;
@@ -461,7 +461,9 @@ mod tests {
                 match output {
                     Some(output) if output.checkpoint.block_number > initial_checkpoint => {
                         let provider = self.db.factory.provider()?;
-                        let mut td = U256::ZERO;
+                        let mut td = provider
+                            .header_td_by_number(initial_checkpoint.saturating_sub(1))?
+                            .unwrap_or_default();
 
                         for block_num in initial_checkpoint..output.checkpoint.block_number {
                             // look up the header hash
@@ -582,8 +584,6 @@ mod tests {
             from == checkpoint && to == previous_stage &&
             // -1 because we don't need to download the local head
             processed == checkpoint + headers.len() as u64 - 1 && total == tip.number
-            // +1 because of the seeded execution that inserts the first block
-            && previous_stage - checkpoint + 1  == runner.db().table::<tables::HeaderTD>().unwrap().len() as u64
         );
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
     }

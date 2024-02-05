@@ -83,6 +83,12 @@ impl<DB> ProviderFactory<DB> {
     pub fn snapshot_provider(&self) -> Arc<SnapshotProvider> {
         self.snapshot_provider.clone()
     }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    /// Consumes Self and returns DB
+    pub fn into_db(self) -> DB {
+        self.db
+    }
 }
 
 impl<DB: Database> ProviderFactory<DB> {
@@ -115,7 +121,7 @@ impl<DB: Database> ProviderFactory<DB> {
     #[track_caller]
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Ok(Box::new(LatestStateProvider::new(self.db.tx()?)))
+        Ok(Box::new(LatestStateProvider::new(self.db.tx()?, self.snapshot_provider())))
     }
 
     /// Storage provider for state at that given block
@@ -128,7 +134,10 @@ impl<DB: Database> ProviderFactory<DB> {
         if block_number == provider.best_block_number().unwrap_or_default() &&
             block_number == provider.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProvider::new(provider.into_tx())))
+            return Ok(Box::new(LatestStateProvider::new(
+                provider.into_tx(),
+                self.snapshot_provider(),
+            )))
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -139,7 +148,11 @@ impl<DB: Database> ProviderFactory<DB> {
         let storage_history_prune_checkpoint =
             provider.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
-        let mut state_provider = HistoricalStateProvider::new(provider.into_tx(), block_number);
+        let mut state_provider = HistoricalStateProvider::new(
+            provider.into_tx(),
+            block_number,
+            self.snapshot_provider(),
+        );
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
@@ -494,8 +507,8 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
 mod tests {
     use super::ProviderFactory;
     use crate::{
-        test_utils::create_test_provider_factory, BlockHashReader, BlockNumReader, BlockWriter,
-        HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
+        providers::SnapshotWriter, test_utils::create_test_provider_factory, BlockHashReader,
+        BlockNumReader, BlockWriter, HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
     };
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
@@ -503,7 +516,6 @@ mod tests {
     use reth_db::{
         tables,
         test_utils::{create_test_snapshots_dir, ERROR_TEMPDIR},
-        transaction::DbTxMut,
         DatabaseEnv,
     };
     use reth_interfaces::{
@@ -515,7 +527,8 @@ mod tests {
         RethError,
     };
     use reth_primitives::{
-        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, TxNumber, B256,
+        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, SnapshotSegment,
+        TxNumber, B256, U256,
     };
     use std::{ops::RangeInclusive, sync::Arc};
     use tokio::sync::watch;
@@ -657,8 +670,6 @@ mod tests {
         // Genesis
         let checkpoint = 0;
         let head = random_header(&mut rng, 0, None);
-        let gap_fill = random_header(&mut rng, 1, Some(head.hash()));
-        let gap_tip = random_header(&mut rng, 2, Some(gap_fill.hash()));
 
         // Empty database
         assert_matches!(
@@ -668,46 +679,14 @@ mod tests {
         );
 
         // Checkpoint and no gap
-        provider
-            .tx_ref()
-            .put::<tables::CanonicalHeaders>(head.number, head.hash())
-            .expect("failed to write canonical");
-        provider
-            .tx_ref()
-            .put::<tables::Headers>(head.number, head.clone().unseal())
-            .expect("failed to write header");
+        let mut snapshot_writer =
+            provider.snapshot_provider().latest_writer(SnapshotSegment::Headers).unwrap();
+        snapshot_writer.append_header(head.header.clone(), U256::ZERO, head.hash()).unwrap();
+        snapshot_writer.commit().unwrap();
+        drop(snapshot_writer);
 
         let gap = provider.sync_gap(mode.clone(), checkpoint).unwrap();
         assert_eq!(gap.local_head, head);
         assert_eq!(gap.target.tip(), consensus_tip.into());
-
-        // Checkpoint and gap
-        provider
-            .tx_ref()
-            .put::<tables::CanonicalHeaders>(gap_tip.number, gap_tip.hash())
-            .expect("failed to write canonical");
-        provider
-            .tx_ref()
-            .put::<tables::Headers>(gap_tip.number, gap_tip.clone().unseal())
-            .expect("failed to write header");
-
-        let gap = provider.sync_gap(mode.clone(), checkpoint).unwrap();
-        assert_eq!(gap.local_head, head);
-        assert_eq!(gap.target.tip(), gap_tip.parent_hash.into());
-
-        // Checkpoint and gap closed
-        provider
-            .tx_ref()
-            .put::<tables::CanonicalHeaders>(gap_fill.number, gap_fill.hash())
-            .expect("failed to write canonical");
-        provider
-            .tx_ref()
-            .put::<tables::Headers>(gap_fill.number, gap_fill.clone().unseal())
-            .expect("failed to write header");
-
-        assert_matches!(
-            provider.sync_gap(mode, checkpoint),
-            Err(RethError::Provider(ProviderError::InconsistentHeaderGap))
-        );
     }
 }

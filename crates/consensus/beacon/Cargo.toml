@@ -58,6 +58,7 @@ reth-downloaders.workspace = true
 reth-node-builder.workspace = true
 
 assert_matches.workspace = true
+tempfile.workspace = true
 
 [features]
 optimism = [

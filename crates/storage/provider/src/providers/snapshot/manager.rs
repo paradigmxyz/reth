@@ -296,7 +296,11 @@ impl SnapshotProvider {
                 } else if let Some(1) = tx_index.get(&segment).map(|index| index.len()) {
                     // Only happens if we unwind all the txs/receipts from the first static file.
                     // Should only happen in test scenarios.
-                    if matches!(segment, SnapshotSegment::Receipts | SnapshotSegment::Transactions)
+                    if jar.user_header().block_start() == 0 &&
+                        matches!(
+                            segment,
+                            SnapshotSegment::Receipts | SnapshotSegment::Transactions
+                        )
                     {
                         tx_index.remove(&segment);
                     }
@@ -398,7 +402,7 @@ impl SnapshotProvider {
     /// This function iteratively retrieves data using `get_fn` for each item in the given range.
     /// It continues fetching until the end of the range is reached or the provided `predicate`
     /// returns false.
-    pub fn fetch_range<T, F, P>(
+    pub fn fetch_range_with_predicate<T, F, P>(
         &self,
         segment: SnapshotSegment,
         range: Range<u64>,
@@ -443,8 +447,131 @@ impl SnapshotProvider {
         Ok(result)
     }
 
+    /// Fetches data within a specified range across multiple snapshot files.
+    ///
+    /// Returns an iterator over the data
+    pub fn fetch_range_iter<'a, T, F>(
+        &'a self,
+        segment: SnapshotSegment,
+        range: Range<u64>,
+        get_fn: F,
+    ) -> ProviderResult<impl Iterator<Item = ProviderResult<T>> + 'a>
+    where
+        F: Fn(&mut SnapshotCursor<'_>, u64) -> ProviderResult<Option<T>> + 'a,
+        T: std::fmt::Debug,
+    {
+        let get_provider = move |start: u64| match segment {
+            SnapshotSegment::Headers => self.get_segment_provider_from_block(segment, start, None),
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                self.get_segment_provider_from_transaction(segment, start, None)
+            }
+        };
+        let mut provider = get_provider(range.start)?;
+
+        Ok(range.filter_map(move |number| {
+            match get_fn(&mut provider.cursor().ok()?, number).transpose() {
+                Some(result) => Some(result),
+                None => {
+                    provider = get_provider(number).ok()?;
+                    get_fn(&mut provider.cursor().ok()?, number).transpose()
+                }
+            }
+        }))
+    }
+
     /// Returns directory where snapshots are located.
     pub fn directory(&self) -> &Path {
+        &self.path
+    }
+
+    /// Retrieves data from the database or snapshot, wherever it's available.
+    ///
+    /// # Arguments
+    /// * `segment` - The segment of the snapshot to check against.
+    /// * `index_key` - Requested index key, usually a block or transaction number.
+    /// * `fetch_from_snapshot` - A closure that defines how to fetch the data from the snapshot
+    ///   provider.
+    /// * `fetch_from_database` - A closure that defines how to fetch the data from the database
+    ///   when the snapshot doesn't contain the required data or is not available.
+    pub fn get_with_snapshot_or_database<T, FS, FD>(
+        &self,
+        segment: SnapshotSegment,
+        number: u64,
+        fetch_from_snapshot: FS,
+        fetch_from_database: FD,
+    ) -> ProviderResult<Option<T>>
+    where
+        FS: Fn(&SnapshotProvider) -> ProviderResult<Option<T>>,
+        FD: Fn() -> ProviderResult<Option<T>>,
+    {
+        // If there is, check the maximum block or transaction number of the segment.
+        let snapshot_upper_bound = match segment {
+            SnapshotSegment::Headers => self.get_highest_snapshot_block(segment),
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                self.get_highest_snapshot_tx(segment)
+            }
+        };
+
+        if snapshot_upper_bound.map_or(false, |snapshot_upper_bound| snapshot_upper_bound >= number)
+        {
+            return fetch_from_snapshot(self)
+        }
+        fetch_from_database()
+    }
+
+    /// Gets data within a specified range, potentially spanning different snapshots and database.
+    ///
+    /// # Arguments
+    /// * `segment` - The segment of the snapshot to query.
+    /// * `block_range` - The range of data to fetch.
+    /// * `fetch_from_snapshot` - A function to fetch data from the snapshot.
+    /// * `fetch_from_database` - A function to fetch data from the database.
+    /// * `predicate` - A function used to evaluate each item in the fetched data. Fetching is
+    ///   terminated when this function returns false, thereby filtering the data based on the
+    ///   provided condition.
+    pub fn get_range_with_snapshot_or_database<T, P, FS, FD>(
+        &self,
+        segment: SnapshotSegment,
+        mut block_or_tx_range: Range<u64>,
+        fetch_from_snapshot: FS,
+        mut fetch_from_database: FD,
+        mut predicate: P,
+    ) -> ProviderResult<Vec<T>>
+    where
+        FS: Fn(&SnapshotProvider, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
+        FD: FnMut(Range<u64>, P) -> ProviderResult<Vec<T>>,
+        P: FnMut(&T) -> bool,
+    {
+        let mut data = Vec::new();
+
+        // If there is, check the maximum block or transaction number of the segment.
+        if let Some(snapshot_upper_bound) = match segment {
+            SnapshotSegment::Headers => self.get_highest_snapshot_block(segment),
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                self.get_highest_snapshot_tx(segment)
+            }
+        } {
+            if block_or_tx_range.start <= snapshot_upper_bound {
+                let end = block_or_tx_range.end.min(snapshot_upper_bound + 1);
+                data.extend(fetch_from_snapshot(
+                    self,
+                    block_or_tx_range.start..end,
+                    &mut predicate,
+                )?);
+                block_or_tx_range.start = end;
+            }
+        }
+
+        if block_or_tx_range.end > block_or_tx_range.start {
+            data.extend(fetch_from_database(block_or_tx_range, predicate)?)
+        }
+
+        Ok(data)
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    /// Returns snapshots directory
+    pub fn path(&self) -> &Path {
         &self.path
     }
 }
@@ -474,6 +601,7 @@ impl SnapshotWriter for Arc<SnapshotProvider> {
         block: BlockNumber,
         segment: SnapshotSegment,
     ) -> ProviderResult<SnapshotProviderRWRefMut<'_>> {
+        tracing::trace!(target: "providers::static_file", ?block, ?segment, "Getting static file writer.");
         Ok(match self.writers.entry(segment) {
             DashMapEntry::Occupied(entry) => entry.into_ref(),
             DashMapEntry::Vacant(entry) => {
@@ -532,7 +660,7 @@ impl HeaderProvider for SnapshotProvider {
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        self.fetch_range(
+        self.fetch_range_with_predicate(
             SnapshotSegment::Headers,
             to_range(range),
             |cursor, number| cursor.get_one::<HeaderMask<Header>>(number.into()),
@@ -550,7 +678,7 @@ impl HeaderProvider for SnapshotProvider {
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.fetch_range(
+        self.fetch_range_with_predicate(
             SnapshotSegment::Headers,
             to_range(range),
             |cursor, number| {
@@ -573,7 +701,7 @@ impl BlockHashReader for SnapshotProvider {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.fetch_range(
+        self.fetch_range_with_predicate(
             SnapshotSegment::Headers,
             start..end,
             |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(number.into()),
@@ -603,7 +731,7 @@ impl ReceiptProvider for SnapshotProvider {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
-        self.fetch_range(
+        self.fetch_range_with_predicate(
             SnapshotSegment::Receipts,
             to_range(range),
             |cursor, number| cursor.get_one::<ReceiptMask<Receipt>>(number.into()),
@@ -617,7 +745,7 @@ impl TransactionsProviderExt for SnapshotProvider {
         &self,
         tx_range: Range<TxNumber>,
     ) -> ProviderResult<Vec<(TxHash, TxNumber)>> {
-        self.fetch_range(
+        self.fetch_range_with_predicate(
             SnapshotSegment::Transactions,
             tx_range,
             |cursor, number| {
@@ -711,7 +839,7 @@ impl TransactionsProvider for SnapshotProvider {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
-        self.fetch_range(
+        self.fetch_range_with_predicate(
             SnapshotSegment::Transactions,
             to_range(range),
             |cursor, number| {
@@ -725,7 +853,7 @@ impl TransactionsProvider for SnapshotProvider {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
-        self.fetch_range(
+        self.fetch_range_with_predicate(
             SnapshotSegment::Transactions,
             to_range(range),
             |cursor, number| {
@@ -845,14 +973,18 @@ impl StatsReader for SnapshotProvider {
     fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
         match T::NAME {
             tables::CanonicalHeaders::NAME | tables::Headers::NAME | tables::HeaderTD::NAME => {
-                Ok(self.get_highest_snapshot_block(SnapshotSegment::Headers).unwrap_or_default()
-                    as usize)
+                Ok(self
+                    .get_highest_snapshot_block(SnapshotSegment::Headers)
+                    .map(|block| block + 1)
+                    .unwrap_or_default() as usize)
             }
             tables::Receipts::NAME => Ok(self
                 .get_highest_snapshot_tx(SnapshotSegment::Receipts)
+                .map(|receipts| receipts + 1)
                 .unwrap_or_default() as usize),
             tables::Transactions::NAME => Ok(self
                 .get_highest_snapshot_tx(SnapshotSegment::Transactions)
+                .map(|txs| txs + 1)
                 .unwrap_or_default() as usize),
             _ => Err(ProviderError::UnsupportedProvider),
         }

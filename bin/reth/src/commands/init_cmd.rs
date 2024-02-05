@@ -61,7 +61,8 @@ impl InitCommand {
             ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.snapshots_path())?;
 
         info!(target: "reth::cli", "Writing genesis block");
-        let hash = init_genesis(provider_factory, self.chain)?;
+
+        let hash = init_genesis(provider_factory)?;
 
         info!(target: "reth::cli", hash = ?hash, "Genesis block written");
         Ok(())
