@@ -62,6 +62,11 @@ impl Withdrawals {
     pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Withdrawal> {
         self.0.iter_mut()
     }
+
+    /// Convert [Self] into raw vec of withdrawals.
+    pub fn into_inner(self) -> Vec<Withdrawal> {
+        self.0
+    }
 }
 
 impl IntoIterator for Withdrawals {
@@ -70,6 +75,12 @@ impl IntoIterator for Withdrawals {
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
+    }
+}
+
+impl AsRef<[Withdrawal]> for Withdrawals {
+    fn as_ref(&self) -> &[Withdrawal] {
+        &self.0
     }
 }
 
