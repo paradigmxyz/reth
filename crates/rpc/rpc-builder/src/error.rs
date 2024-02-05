@@ -17,6 +17,18 @@ pub enum ServerKind {
     Auth(SocketAddr),
 }
 
+impl ServerKind {
+    /// Returns the appropriate flags for each variant.
+    pub fn flags(&self) -> &'static str {
+        match self {
+            ServerKind::Http(_) => "--http.port",
+            ServerKind::WS(_) => "--ws.port",
+            ServerKind::WsHttp(_) => "--ws.port and --http.port",
+            ServerKind::Auth(_) => "--authrpc.port",
+        }
+    }
+}
+
 impl std::fmt::Display for ServerKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -35,7 +47,7 @@ pub enum RpcError {
     #[error(transparent)]
     RpcError(#[from] JsonRpseeError),
     /// Address already in use.
-    #[error("address {kind} is already in use (os error 98)")]
+    #[error("address {kind} is already in use (os error 98). Choose a different port using {}", kind.flags())]
     AddressAlreadyInUse {
         /// Server kind.
         kind: ServerKind,
@@ -95,4 +107,29 @@ pub enum WsHttpSamePortError {
         /// Ws modules.
         ws_modules: Vec<RethRpcModule>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{Ipv4Addr, SocketAddrV4};
+    #[test]
+    fn test_address_in_use_message() {
+        let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234));
+        let kinds = [
+            ServerKind::Http(addr),
+            ServerKind::WS(addr),
+            ServerKind::WsHttp(addr),
+            ServerKind::Auth(addr),
+        ];
+
+        for kind in &kinds {
+            let err = RpcError::AddressAlreadyInUse {
+                kind: *kind,
+                error: io::Error::from(ErrorKind::AddrInUse),
+            };
+
+            assert!(err.to_string().contains(kind.flags()));
+        }
+    }
 }

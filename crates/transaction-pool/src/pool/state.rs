@@ -48,19 +48,19 @@ impl TxState {
     ///   - enough fee cap
     ///   - enough blob fee cap
     #[inline]
-    pub(crate) fn is_pending(&self) -> bool {
+    pub(crate) const fn is_pending(&self) -> bool {
         self.bits() >= TxState::PENDING_POOL_BITS.bits()
     }
 
     /// Whether this transaction is a blob transaction.
     #[inline]
-    pub(crate) fn is_blob(&self) -> bool {
+    pub(crate) const fn is_blob(&self) -> bool {
         self.contains(TxState::BLOB_TRANSACTION)
     }
 
     /// Returns `true` if the transaction has a nonce gap.
     #[inline]
-    pub(crate) fn has_nonce_gap(&self) -> bool {
+    pub(crate) const fn has_nonce_gap(&self) -> bool {
         !self.intersects(TxState::NO_NONCE_GAPS)
     }
 }
@@ -86,25 +86,25 @@ pub enum SubPool {
 impl SubPool {
     /// Whether this transaction is to be moved to the pending sub-pool.
     #[inline]
-    pub fn is_pending(&self) -> bool {
+    pub const fn is_pending(&self) -> bool {
         matches!(self, SubPool::Pending)
     }
 
     /// Whether this transaction is in the queued pool.
     #[inline]
-    pub fn is_queued(&self) -> bool {
+    pub const fn is_queued(&self) -> bool {
         matches!(self, SubPool::Queued)
     }
 
     /// Whether this transaction is in the base fee pool.
     #[inline]
-    pub fn is_base_fee(&self) -> bool {
+    pub const fn is_base_fee(&self) -> bool {
         matches!(self, SubPool::BaseFee)
     }
 
     /// Whether this transaction is in the blob pool.
     #[inline]
-    pub fn is_blob(&self) -> bool {
+    pub const fn is_blob(&self) -> bool {
         matches!(self, SubPool::Blob)
     }
 

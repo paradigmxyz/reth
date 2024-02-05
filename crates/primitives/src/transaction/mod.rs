@@ -500,7 +500,7 @@ impl Transaction {
 
     /// Calculates a heuristic for the in-memory size of the [Transaction].
     #[inline]
-    fn size(&self) -> usize {
+    pub fn size(&self) -> usize {
         match self {
             Transaction::Legacy(tx) => tx.size(),
             Transaction::Eip2930(tx) => tx.size(),

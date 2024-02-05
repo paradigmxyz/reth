@@ -21,7 +21,7 @@ use reth_primitives::{
     TxEip1559, TxEip2930, TxEip4844, TxHash, TxLegacy, TxType, B256, EIP1559_TX_TYPE_ID,
     EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
 };
-use std::{ops::Range, sync::Arc, time::Instant};
+use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [MockOrdering] for transaction ordering.
 ///
@@ -167,6 +167,8 @@ pub enum MockTransaction {
         value: U256,
         /// The transaction input data.
         input: Bytes,
+        /// The size of the transaction, returned in the implementation of [PoolTransaction].
+        size: usize,
     },
     /// EIP-1559 transaction type.
     Eip1559 {
@@ -190,6 +192,8 @@ pub enum MockTransaction {
         accesslist: AccessList,
         /// The transaction input data.
         input: Bytes,
+        /// The size of the transaction, returned in the implementation of [PoolTransaction].
+        size: usize,
     },
     /// EIP-4844 transaction type.
     Eip4844 {
@@ -217,6 +221,8 @@ pub enum MockTransaction {
         input: Bytes,
         /// The sidecar information for the transaction.
         sidecar: BlobTransactionSidecar,
+        /// The size of the transaction, returned in the implementation of [PoolTransaction].
+        size: usize,
     },
     /// EIP-2930 transaction type.
     Eip2930 {
@@ -238,6 +244,8 @@ pub enum MockTransaction {
         gas_price: u128,
         /// The access list associated with the transaction.
         accesslist: AccessList,
+        /// The size of the transaction, returned in the implementation of [PoolTransaction].
+        size: usize,
     },
     #[cfg(feature = "optimism")]
     /// Deposit transaction type (Optimism feature).
@@ -253,7 +261,8 @@ impl MockTransaction {
         sender => Address;
         gas_limit => u64;
         value => U256;
-        input => Bytes
+        input => Bytes;
+        size => usize
     }
 
     /// Returns a new legacy transaction with random address and hash and empty values
@@ -267,6 +276,7 @@ impl MockTransaction {
             to: TransactionKind::Call(Address::random()),
             value: Default::default(),
             input: Default::default(),
+            size: Default::default(),
         }
     }
 
@@ -283,6 +293,7 @@ impl MockTransaction {
             value: Default::default(),
             input: Bytes::new(),
             accesslist: Default::default(),
+            size: Default::default(),
         }
     }
 
@@ -301,6 +312,7 @@ impl MockTransaction {
             input: Bytes::new(),
             accesslist: Default::default(),
             sidecar: Default::default(),
+            size: Default::default(),
         }
     }
 
@@ -316,6 +328,7 @@ impl MockTransaction {
             value: Default::default(),
             gas_price: 0,
             accesslist: Default::default(),
+            size: Default::default(),
         }
     }
 
@@ -384,7 +397,7 @@ impl MockTransaction {
     }
 
     /// Gets the priority fee for dynamic fee transactions (EIP-1559 and EIP-4844)
-    pub fn get_priority_fee(&self) -> Option<u128> {
+    pub const fn get_priority_fee(&self) -> Option<u128> {
         match self {
             MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } |
             MockTransaction::Eip4844 { max_priority_fee_per_gas, .. } => {
@@ -411,7 +424,7 @@ impl MockTransaction {
     }
 
     /// Gets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
-    pub fn get_max_fee(&self) -> Option<u128> {
+    pub const fn get_max_fee(&self) -> Option<u128> {
         match self {
             MockTransaction::Eip1559 { max_fee_per_gas, .. } |
             MockTransaction::Eip4844 { max_fee_per_gas, .. } => Some(*max_fee_per_gas),
@@ -479,7 +492,7 @@ impl MockTransaction {
     }
 
     /// Gets the gas price for the transaction.
-    pub fn get_gas_price(&self) -> u128 {
+    pub const fn get_gas_price(&self) -> u128 {
         match self {
             MockTransaction::Legacy { gas_price, .. } |
             MockTransaction::Eip2930 { gas_price, .. } => *gas_price,
@@ -546,8 +559,44 @@ impl MockTransaction {
         self.clone().with_gas_limit(self.get_gas_limit() + 1)
     }
 
+    /// Returns a new transaction with a higher blob fee +1
+    ///
+    /// If it's an EIP-4844 transaction.
+    pub fn inc_blob_fee(&self) -> Self {
+        self.inc_blob_fee_by(1)
+    }
+
+    /// Returns a new transaction with a higher blob fee
+    ///
+    /// If it's an EIP-4844 transaction.
+    pub fn inc_blob_fee_by(&self, value: u128) -> Self {
+        let mut this = self.clone();
+        if let MockTransaction::Eip4844 { max_fee_per_blob_gas, .. } = &mut this {
+            *max_fee_per_blob_gas = max_fee_per_blob_gas.checked_add(value).unwrap();
+        }
+        this
+    }
+
+    /// Returns a new transaction with a lower blob fee -1
+    ///
+    /// If it's an EIP-4844 transaction.
+    pub fn decr_blob_fee(&self) -> Self {
+        self.decr_price_by(1)
+    }
+
+    /// Returns a new transaction with a lower blob fee
+    ///
+    /// If it's an EIP-4844 transaction.
+    pub fn decr_blob_fee_by(&self, value: u128) -> Self {
+        let mut this = self.clone();
+        if let MockTransaction::Eip4844 { max_fee_per_blob_gas, .. } = &mut this {
+            *max_fee_per_blob_gas = max_fee_per_blob_gas.checked_sub(value).unwrap();
+        }
+        this
+    }
+
     /// Returns the transaction type identifier associated with the current [MockTransaction].
-    pub fn tx_type(&self) -> u8 {
+    pub const fn tx_type(&self) -> u8 {
         match self {
             Self::Legacy { .. } => LEGACY_TX_TYPE_ID,
             Self::Eip1559 { .. } => EIP1559_TX_TYPE_ID,
@@ -559,22 +608,22 @@ impl MockTransaction {
     }
 
     /// Checks if the transaction is of the legacy type.
-    pub fn is_legacy(&self) -> bool {
+    pub const fn is_legacy(&self) -> bool {
         matches!(self, MockTransaction::Legacy { .. })
     }
 
     /// Checks if the transaction is of the EIP-1559 type.
-    pub fn is_eip1559(&self) -> bool {
+    pub const fn is_eip1559(&self) -> bool {
         matches!(self, MockTransaction::Eip1559 { .. })
     }
 
     /// Checks if the transaction is of the EIP-4844 type.
-    pub fn is_eip4844(&self) -> bool {
+    pub const fn is_eip4844(&self) -> bool {
         matches!(self, MockTransaction::Eip4844 { .. })
     }
 
     /// Checks if the transaction is of the EIP-2930 type.
-    pub fn is_eip2930(&self) -> bool {
+    pub const fn is_eip2930(&self) -> bool {
         matches!(self, MockTransaction::Eip2930 { .. })
     }
 }
@@ -683,7 +732,7 @@ impl PoolTransaction for MockTransaction {
 
         // If the maximum fee per gas is less than the base fee, return None
         if max_fee_per_gas < base_fee {
-            return None;
+            return None
         }
 
         // Calculate the fee by subtracting the base fee from the maximum fee per gas
@@ -692,7 +741,7 @@ impl PoolTransaction for MockTransaction {
         // If the maximum priority fee per gas is available, return the minimum of fee and priority
         // fee
         if let Some(priority_fee) = self.max_priority_fee_per_gas() {
-            return Some(fee.min(priority_fee));
+            return Some(fee.min(priority_fee))
         }
 
         // Otherwise, return the calculated fee
@@ -737,7 +786,14 @@ impl PoolTransaction for MockTransaction {
 
     /// Returns the size of the transaction.
     fn size(&self) -> usize {
-        0
+        match self {
+            MockTransaction::Legacy { size, .. } |
+            MockTransaction::Eip1559 { size, .. } |
+            MockTransaction::Eip4844 { size, .. } |
+            MockTransaction::Eip2930 { size, .. } => *size,
+            #[cfg(feature = "optimism")]
+            MockTransaction::Deposit(_) => 0,
+        }
     }
 
     /// Returns the transaction type as a byte identifier.
@@ -774,6 +830,7 @@ impl FromRecoveredTransaction for MockTransaction {
         let sender = tx.signer();
         let transaction = tx.into_signed();
         let hash = transaction.hash();
+        let size = transaction.size();
         match transaction.transaction {
             Transaction::Legacy(TxLegacy {
                 chain_id: _,
@@ -792,6 +849,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 to,
                 value: value.into(),
                 input,
+                size,
             },
             Transaction::Eip1559(TxEip1559 {
                 chain_id: _,
@@ -814,6 +872,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 value: value.into(),
                 input,
                 accesslist: access_list,
+                size,
             },
             Transaction::Eip4844(TxEip4844 {
                 chain_id: _,
@@ -840,6 +899,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 input,
                 accesslist: access_list,
                 sidecar: BlobTransactionSidecar::default(),
+                size,
             },
             Transaction::Eip2930(TxEip2930 {
                 chain_id: _,
@@ -860,6 +920,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 value: value.into(),
                 input,
                 accesslist: access_list,
+                size,
             },
             #[cfg(feature = "optimism")]
             Transaction::Deposit(TxDeposit {
@@ -917,6 +978,7 @@ impl From<MockTransaction> for Transaction {
                 to,
                 value,
                 input,
+                size: _,
             } => Self::Legacy(TxLegacy {
                 chain_id: Some(1),
                 nonce,
@@ -937,6 +999,7 @@ impl From<MockTransaction> for Transaction {
                 value,
                 accesslist,
                 input,
+                size: _,
             } => Self::Eip1559(TxEip1559 {
                 chain_id: 1,
                 nonce,
@@ -961,6 +1024,7 @@ impl From<MockTransaction> for Transaction {
                 accesslist,
                 input,
                 sidecar: _,
+                size: _,
             } => Self::Eip4844(TxEip4844 {
                 chain_id: 1,
                 nonce,
@@ -984,6 +1048,7 @@ impl From<MockTransaction> for Transaction {
                 value,
                 gas_price,
                 accesslist,
+                size: _,
             } => Self::Eip2930(TxEip2930 {
                 chain_id: 1,
                 nonce,
@@ -1034,6 +1099,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     to: *to,
                     value: (*value).into(),
                     input: (*input).clone(),
+                    size: tx.size(),
                 },
                 Transaction::Eip1559(TxEip1559 {
                     nonce,
@@ -1056,6 +1122,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     value: (*value).into(),
                     input: (*input).clone(),
                     accesslist: (*access_list).clone(),
+                    size: tx.size(),
                 },
                 Transaction::Eip4844(TxEip4844 {
                     nonce,
@@ -1083,6 +1150,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     // only generate a sidecar if it is a 4844 tx - also for the sake of
                     // performance just use a default sidecar
                     sidecar: BlobTransactionSidecar::default(),
+                    size: tx.size(),
                 },
                 #[allow(unreachable_patterns)]
                 _ => unimplemented!(),
@@ -1302,11 +1370,11 @@ impl MockTransactionSet {
     /// The number of transactions created is determined by `tx_count`.
     pub fn dependent(sender: Address, from_nonce: u64, tx_count: usize, tx_type: TxType) -> Self {
         let mut txs = Vec::with_capacity(tx_count);
-        let mut curr_tx = MockTransaction::new_from_type(tx_type).with_nonce(from_nonce);
-        for i in 0..tx_count {
-            let _nonce = from_nonce + i as u64;
-            curr_tx = curr_tx.next().with_sender(sender);
+        let mut curr_tx =
+            MockTransaction::new_from_type(tx_type).with_nonce(from_nonce).with_sender(sender);
+        for _ in 0..tx_count {
             txs.push(curr_tx.clone());
+            curr_tx = curr_tx.next();
         }
 
         Self::new(txs)
@@ -1332,6 +1400,25 @@ impl MockTransactionSet {
     /// Extract the inner [Vec] of [MockTransaction]s
     pub fn into_vec(self) -> Vec<MockTransaction> {
         self.transactions
+    }
+
+    /// Returns an iterator over the contained transactions in the set
+    pub fn iter(&self) -> impl Iterator<Item = &MockTransaction> {
+        self.transactions.iter()
+    }
+
+    /// Returns a mutable iterator over the contained transactions in the set.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut MockTransaction> {
+        self.transactions.iter_mut()
+    }
+}
+
+impl IntoIterator for MockTransactionSet {
+    type Item = MockTransaction;
+    type IntoIter = IntoIter<MockTransaction>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.transactions.into_iter()
     }
 }
 
