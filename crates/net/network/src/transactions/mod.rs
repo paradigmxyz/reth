@@ -603,7 +603,7 @@ where
                 valid_data.into_iter().map(|(hash, metadata)| {
                     // cache eth68 metadata
                     if let Some((_ty, size)) = metadata {
-                        // check if this peer is announcing a different size for an already seen
+                        // check if this peer is announcing a different size for an already seen 
                         // hash
                         if let Some(previously_seen_size) = self.transaction_fetcher.eth68_meta.get(&hash) {
                             if size != *previously_seen_size {
