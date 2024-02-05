@@ -16,6 +16,7 @@
 //! implemented:
 
 use alloy_chains::Chain;
+use jsonrpsee::http_client::HttpClient;
 use reth::builder::spawn_node;
 use reth_node_api::{
     validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion,
@@ -32,8 +33,6 @@ use reth_rpc_types::{
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use thiserror::Error;
-// use jsonrpsee::{core::Error, http_client::HttpClient, types::error::INVALID_PARAMS_CODE};
-use jsonrpsee::http_client::HttpClient;
 
 /// A custom payload attributes type.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,12 +92,12 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
         Ok(Self(EthPayloadBuilderAttributes::new(parent, attributes.inner)))
     }
 
-    fn parent(&self) -> B256 {
-        self.0.parent
-    }
-
     fn payload_id(&self) -> PayloadId {
         self.0.id
+    }
+
+    fn parent(&self) -> B256 {
+        self.0.parent
     }
 
     fn timestamp(&self) -> u64 {
