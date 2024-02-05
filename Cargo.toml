@@ -58,10 +58,11 @@ members = [
     "examples/additional-rpc-namespace-in-cli/",
     "examples/beacon-api-sse/",
     "examples/cli-extension-event-hooks/",
+    "examples/custom-node/",
+    "examples/custom-payload-builder/",
     "examples/manual-p2p/",
     "examples/rpc-db/",
     "examples/trace-transaction-cli/",
-    "examples/custom-payload-builder/",
     "examples/polygon-p2p/",
     "testing/ef-tests/",
 ]
