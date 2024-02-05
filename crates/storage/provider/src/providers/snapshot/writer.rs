@@ -106,6 +106,8 @@ impl<'a> SnapshotProviderRW<'a> {
     ///
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn increment_block(&mut self, segment: SnapshotSegment) -> ProviderResult<BlockNumber> {
+        debug_assert_ne!(self.writer.rows() + self.writer.user_header().block_end() as usize, 0, "This function should only be called by append_header when dealing with SnapshotSegment::Headers.");
+
         let last_block = self.writer.user_header().block_end();
         let writer_range_end = *find_fixed_range(last_block).end();
 
