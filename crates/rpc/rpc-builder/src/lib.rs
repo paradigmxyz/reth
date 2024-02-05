@@ -169,7 +169,7 @@ use jsonrpsee::{
 };
 use reth_node_api::{EngineTypes, EvmEnvConfig};
 use serde::{Deserialize, Serialize, Serializer};
-use strum::{AsRefStr, EnumIter, EnumVariantNames, IntoStaticStr, ParseError, VariantNames};
+use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
 use tower::layer::util::{Identity, Stack};
 use tower_http::cors::CorsLayer;
 use tracing::{instrument, trace};
@@ -628,9 +628,9 @@ impl RpcModuleSelection {
     pub const STANDARD_MODULES: [RethRpcModule; 3] =
         [RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3];
 
-    /// Returns a selection of [RethRpcModule] with all [RethRpcModule::VARIANTS].
+    /// Returns a selection of [RethRpcModule] with all [RethRpcModule::all_variants].
     pub fn all_modules() -> Vec<RethRpcModule> {
-        RpcModuleSelection::try_from_selection(RethRpcModule::VARIANTS.iter().copied())
+        RpcModuleSelection::try_from_selection(RethRpcModule::all_variants().iter().copied())
             .expect("valid selection")
             .into_selection()
     }
@@ -823,7 +823,8 @@ impl fmt::Display for RpcModuleSelection {
     Hash,
     AsRefStr,
     IntoStaticStr,
-    EnumVariantNames,
+    VariantNames,
+    VariantArray,
     EnumIter,
     Deserialize,
 )]
@@ -860,9 +861,14 @@ pub enum RethRpcModule {
 // === impl RethRpcModule ===
 
 impl RethRpcModule {
+    /// Returns all variant names of the enum
+    pub const fn all_variant_names() -> &'static [&'static str] {
+        <Self as VariantNames>::VARIANTS
+    }
+
     /// Returns all variants of the enum
-    pub const fn all_variants() -> &'static [&'static str] {
-        Self::VARIANTS
+    pub const fn all_variants() -> &'static [Self] {
+        <Self as VariantArray>::VARIANTS
     }
 
     /// Returns all variants of the enum
