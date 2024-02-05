@@ -12,7 +12,7 @@ use jsonrpsee::{
     Methods,
 };
 use reth_network_api::{NetworkInfo, Peers};
-use reth_node_api::{EngineTypes, ConfigureEvmEnv};
+use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
     StateProviderFactory,

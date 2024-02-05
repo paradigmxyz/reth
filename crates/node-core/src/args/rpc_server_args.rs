@@ -19,7 +19,7 @@ use clap::{
 use futures::TryFutureExt;
 use rand::Rng;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_node_api::{EngineTypes, ConfigureEvmEnv};
+use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, StateProviderFactory,

@@ -78,7 +78,7 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_node_api::{EngineTypes, ConfigureEvmEnv};
+//! use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 //! use reth_provider::{
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -167,7 +167,7 @@ use jsonrpsee::{
     server::{IdProvider, Server, ServerHandle},
     Methods, RpcModule,
 };
-use reth_node_api::{EngineTypes, ConfigureEvmEnv};
+use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use serde::{Deserialize, Serialize, Serializer};
 use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
 use tower::layer::util::{Identity, Stack};

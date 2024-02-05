@@ -14,7 +14,7 @@
 pub mod engine;
 pub use engine::OptimismEngineTypes;
 
-/// Exports optimism-specific implementations of the [ConfigureEvmEnv](reth_node_api::ConfigureEvmEnv)
-/// trait.
+/// Exports optimism-specific implementations of the
+/// [ConfigureEvmEnv](reth_node_api::ConfigureEvmEnv) trait.
 pub mod evm;
 pub use evm::OptimismEvmConfig;
