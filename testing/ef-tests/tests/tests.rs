@@ -12,6 +12,7 @@ macro_rules! general_state_test {
                 .stack_size(
                     1024 * 1024 * 8, // 8MB
                 )
+                .name(stringify!($test_name).to_string())
                 .spawn(move || {
                     BlockchainTests::new(format!("GeneralStateTests/{}", stringify!($dir))).run();
                 })

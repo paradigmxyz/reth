@@ -286,7 +286,6 @@ where
             // execution with inspector.
             let evm = self.evm.take().unwrap();
             let mut evm = evm.modify().append_handler_register(inspector_handle_register).build();
-            // TODO add optimism handler register.
             let output = evm.transact();
             tracing::trace!(
                 target: "evm",
@@ -294,9 +293,6 @@ where
                 "Executed transaction"
             );
 
-            //let context = evm.into_context();
-
-            // TODO add optimism handler
             self.evm = Some(evm.modify().reset_handler().build());
             output
         } else {

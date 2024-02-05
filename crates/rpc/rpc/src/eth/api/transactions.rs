@@ -179,8 +179,8 @@ pub trait EthTransactions: Send + Sync {
     /// Prepares the state and env for the given [CallRequest] at the given [BlockId] and executes
     /// the closure on a new task returning the result of the closure.
     ///
-    /// This returns the configured [EnvWithSpecId] for the given [CallRequest] at the given [BlockId] and
-    /// with configured call settings: `prepare_call_env`.
+    /// This returns the configured [EnvWithSpecId] for the given [CallRequest] at the given
+    /// [BlockId] and with configured call settings: `prepare_call_env`.
     async fn spawn_with_call_at<F, R>(
         &self,
         request: CallRequest,
