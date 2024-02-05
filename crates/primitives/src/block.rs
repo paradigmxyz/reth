@@ -1,6 +1,6 @@
 use crate::{
-    Address, GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered,
-    Withdrawal, Withdrawals, B256,
+    Address, Bytes, GotExpected, Header, SealedHeader, TransactionSigned,
+    TransactionSignedEcRecovered, Withdrawal, Withdrawals, B256,
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
@@ -347,6 +347,18 @@ impl SealedBlock {
         }
 
         Ok(())
+    }
+
+    /// Returns a vector of raw formated transactions.
+    pub fn raw_transactions(&self) -> Vec<Bytes> {
+        self.body
+            .iter()
+            .map(|tx| {
+                let mut encoded = Vec::new();
+                tx.encode_enveloped(&mut encoded);
+                encoded.into()
+            })
+            .collect()
     }
 }
 
