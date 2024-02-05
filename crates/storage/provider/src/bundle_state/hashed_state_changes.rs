@@ -1,12 +1,12 @@
+use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     tables,
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
-use reth_primitives::{Account, StorageEntry, B256, U256};
+use reth_primitives::{StorageEntry, U256};
 use reth_trie::HashedPostState;
-use std::collections::BTreeMap;
 
 /// Changes to the hashed state.
 #[derive(Debug, Default)]
@@ -15,15 +15,10 @@ pub struct HashedStateChanges(pub HashedPostState);
 impl HashedStateChanges {
     /// Write the bundle state to the database.
     pub fn write_to_db<TX: DbTxMut + DbTx>(self, tx: &TX) -> Result<(), DatabaseError> {
-        // Collect hashed account changes.
-        let mut hashed_accounts = BTreeMap::<B256, Option<Account>>::default();
-        for (hashed_address, account) in self.0.accounts() {
-            hashed_accounts.insert(hashed_address, account);
-        }
-
         // Write hashed account updates.
+        let sorted_accounts = self.0.accounts.into_iter().sorted_unstable_by_key(|(key, _)| *key);
         let mut hashed_accounts_cursor = tx.cursor_write::<tables::HashedAccount>()?;
-        for (hashed_address, account) in hashed_accounts {
+        for (hashed_address, account) in sorted_accounts {
             if let Some(account) = account {
                 hashed_accounts_cursor.upsert(hashed_address, account)?;
             } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
@@ -31,24 +26,16 @@ impl HashedStateChanges {
             }
         }
 
-        // Collect hashed storage changes.
-        let mut hashed_storages = BTreeMap::<B256, (bool, BTreeMap<B256, U256>)>::default();
-        for (hashed_address, storage) in self.0.storages() {
-            let entry = hashed_storages.entry(*hashed_address).or_default();
-            entry.0 |= storage.wiped();
-            for (hashed_slot, value) in storage.storage_slots() {
-                entry.1.insert(hashed_slot, value);
-            }
-        }
-
         // Write hashed storage changes.
+        let sorted_storages = self.0.storages.into_iter().sorted_by_key(|(key, _)| *key);
         let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorage>()?;
-        for (hashed_address, (wiped, storage)) in hashed_storages {
-            if wiped && hashed_storage_cursor.seek_exact(hashed_address)?.is_some() {
+        for (hashed_address, storage) in sorted_storages {
+            if storage.wiped && hashed_storage_cursor.seek_exact(hashed_address)?.is_some() {
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
 
-            for (hashed_slot, value) in storage {
+            let sorted_storage = storage.storage.into_iter().sorted_by_key(|(key, _)| *key);
+            for (hashed_slot, value) in sorted_storage {
                 let entry = StorageEntry { key: hashed_slot, value };
                 if let Some(db_entry) =
                     hashed_storage_cursor.seek_by_key_subkey(hashed_address, entry.key)?
@@ -72,7 +59,7 @@ impl HashedStateChanges {
 mod tests {
     use super::*;
     use crate::test_utils::create_test_provider_factory;
-    use reth_primitives::{keccak256, Address};
+    use reth_primitives::{keccak256, Account, Address, B256};
     use reth_trie::HashedStorage;
 
     #[test]
@@ -104,8 +91,8 @@ mod tests {
         }
 
         let mut hashed_state = HashedPostState::default();
-        hashed_state.insert_account(destroyed_address_hashed, None);
-        hashed_state.insert_hashed_storage(destroyed_address_hashed, HashedStorage::new(true));
+        hashed_state.accounts.insert(destroyed_address_hashed, None);
+        hashed_state.storages.insert(destroyed_address_hashed, HashedStorage::new(true));
 
         let provider_rw = provider_factory.provider_rw().unwrap();
         assert_eq!(HashedStateChanges(hashed_state).write_to_db(provider_rw.tx_ref()), Ok(()));

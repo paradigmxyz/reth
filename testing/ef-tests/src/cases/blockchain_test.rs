@@ -156,6 +156,7 @@ pub fn should_skip(path: &Path) -> bool {
         // funky test with `bigint 0x00` value in json :) not possible to happen on mainnet and require
         // custom json parser. https://github.com/ethereum/tests/issues/971
         | "ValueOverflow.json"
+        | "ValueOverflowParis.json"
 
         // txbyte is of type 02 and we dont parse tx bytes for this test to fail.
         | "typeTwoBerlin.json"
@@ -168,6 +169,7 @@ pub fn should_skip(path: &Path) -> bool {
         // Test check if gas price overflows, we handle this correctly but does not match tests specific
         // exception.
         | "HighGasPrice.json"
+        | "HighGasPriceParis.json"
 
         // Skip test where basefee/accesslist/difficulty is present but it shouldn't be supported in
         // London/Berlin/TheMerge. https://github.com/ethereum/tests/blob/5b7e1ab3ffaf026d99d20b17bb30f533a2c80c8b/GeneralStateTests/stExample/eip1559.json#L130

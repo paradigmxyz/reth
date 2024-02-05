@@ -28,7 +28,7 @@ mod builder {
     };
     use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
     use reth_revm::database::StateProviderDatabase;
-    use reth_transaction_pool::TransactionPool;
+    use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
     use revm::{
         db::states::bundle_state::BundleRetention,
         primitives::{EVMError, Env, InvalidTransaction, ResultAndState},
@@ -240,7 +240,10 @@ mod builder {
         let base_fee = initialized_block_env.basefee.to::<u64>();
 
         let mut executed_txs = Vec::new();
-        let mut best_txs = pool.best_transactions_with_base_fee(base_fee);
+        let mut best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
+            base_fee,
+            initialized_block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
+        ));
 
         let mut total_fees = U256::ZERO;
 

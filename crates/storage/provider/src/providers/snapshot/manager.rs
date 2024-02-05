@@ -17,7 +17,7 @@ use reth_primitives::{
     snapshot::HighestSnapshots, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber,
     BlockWithSenders, ChainInfo, Header, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
-    TxHash, TxNumber, Withdrawal, B256, U256,
+    TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
@@ -674,7 +674,7 @@ impl WithdrawalsProvider for SnapshotProvider {
         &self,
         _id: BlockHashOrNumber,
         _timestamp: u64,
-    ) -> ProviderResult<Option<Vec<Withdrawal>>> {
+    ) -> ProviderResult<Option<Withdrawals>> {
         // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }

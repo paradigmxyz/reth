@@ -1,7 +1,7 @@
 use crate::EthPayloadBuilderAttributes;
 use alloy_rlp::{Encodable, Error as DecodeError};
 use reth_node_api::PayloadBuilderAttributes;
-use reth_primitives::{Address, TransactionSigned, Withdrawal, B256};
+use reth_primitives::{Address, TransactionSigned, Withdrawals, B256};
 use reth_rpc_types::engine::{OptimismPayloadAttributes, PayloadId};
 use reth_rpc_types_compat::engine::payload::convert_standalone_withdraw_to_withdrawal;
 
@@ -37,14 +37,11 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
             (payload_id_optimism(&parent, &attributes, &transactions), transactions)
         };
 
-        let withdraw = attributes.payload_attributes.withdrawals.map(
-            |withdrawals: Vec<reth_rpc_types::withdrawal::Withdrawal>| {
-                withdrawals
-                    .into_iter()
-                    .map(convert_standalone_withdraw_to_withdrawal) // Removed the parentheses here
-                    .collect::<Vec<_>>()
-            },
-        );
+        let withdraw = attributes.payload_attributes.withdrawals.map(|withdrawals| {
+            Withdrawals::new(
+                withdrawals.into_iter().map(convert_standalone_withdraw_to_withdrawal).collect(),
+            )
+        });
 
         let payload_attributes = EthPayloadBuilderAttributes {
             id,
@@ -88,7 +85,7 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
         self.payload_attributes.prev_randao
     }
 
-    fn withdrawals(&self) -> &Vec<Withdrawal> {
+    fn withdrawals(&self) -> &Withdrawals {
         &self.payload_attributes.withdrawals
     }
 }

@@ -14,7 +14,8 @@ use reth_primitives::{
     keccak256, trie::AccountProof, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId,
     BlockNumber, BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
-    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
+    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
+    U256,
 };
 use reth_trie::updates::TrieUpdates;
 use revm::primitives::{BlockEnv, CfgEnv};
@@ -689,14 +690,14 @@ impl StateProviderFactory for Arc<MockEthProvider> {
 }
 
 impl WithdrawalsProvider for MockEthProvider {
-    fn latest_withdrawal(&self) -> ProviderResult<Option<reth_primitives::Withdrawal>> {
+    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         Ok(None)
     }
     fn withdrawals_by_block(
         &self,
         _id: BlockHashOrNumber,
         _timestamp: u64,
-    ) -> ProviderResult<Option<Vec<reth_primitives::Withdrawal>>> {
+    ) -> ProviderResult<Option<Withdrawals>> {
         Ok(None)
     }
 }

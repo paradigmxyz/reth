@@ -85,22 +85,24 @@ const CAPACITY_CACHE_TRANSACTION_HASHES_SEEN_BY_PEER_AND_IN_POOL: usize = 7 * 10
 /// but maybe not in the local pool yet.
 const CAPACITY_CACHE_TRANSACTION_HASHES_SENT_BY_PEER_AND_MAYBE_IN_POOL: usize = 3 * 1024;
 
-/// Soft limit for NewPooledTransactions.
-const NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT: usize = 4096;
+/// Soft limit for NewPooledTransactions
+const SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_MEMPOOL_PACKET: usize = 4096;
 
-/// Soft limit for the response size of a GetPooledTransactions message (2MB) in bytes. Standard
-/// maximum response size. See specs
+/// Soft limit for the message of full transactions in bytes.
+const SOFT_LIMIT_BYTE_SIZE_FULL_TRANSACTIONS_MEMPOOL_MESSAGE: usize = 128 * 1024;
+
+/// Soft limit for the response size of a [`GetPooledTransactions`] message (128 KiB) in bytes.
+/// Standard maximum response size is 2 MiB. See specs
 ///
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
-const POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE: usize = 2 * 1024 * 1024;
+const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE: usize = 128 * 1024;
 
 /// Default maximum pending pool imports to tolerate.
 const DEFAULT_MAX_PENDING_POOL_IMPORTS: usize =
     GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES * DEFAULT_MAX_CONCURRENT_TX_REQUESTS as usize;
 
 /// The future for inserting a function into the pool
-pub type PoolImportFuture =
-    Pin<Box<dyn Future<Output = PoolResult<Vec<PoolResult<TxHash>>>> + Send + 'static>>;
+pub type PoolImportFuture = Pin<Box<dyn Future<Output = Vec<PoolResult<TxHash>>> + Send + 'static>>;
 
 /// Api to interact with [`TransactionsManager`] task.
 #[derive(Debug, Clone)]
@@ -242,6 +244,9 @@ pub struct TransactionsManager<Pool> {
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
     /// TransactionsManager metrics
     metrics: TransactionsManagerMetrics,
+    /// Configures wether or not to handle hashes from an announcement that didn't fit in the
+    /// request. If set to `false`, hashes that don't fit will be dropped.
+    enable_tx_refetch: bool,
 }
 
 impl<Pool: TransactionPool> TransactionsManager<Pool> {
@@ -319,7 +324,7 @@ where
             let transactions = self.pool.get_pooled_transaction_elements(
                 request.0,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
-                    POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
+                    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE,
                 ),
             );
 
@@ -420,7 +425,9 @@ where
                 if peer_idx > max_num_full || full_transactions.is_empty() {
                     // enforce tx soft limit per message for the (unlikely) event the number of
                     // hashes exceeds it
-                    new_pooled_hashes.truncate(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT);
+                    new_pooled_hashes.truncate(
+                        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_MEMPOOL_PACKET,
+                    );
 
                     for hash in new_pooled_hashes.iter_hashes().copied() {
                         propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
@@ -842,8 +849,9 @@ where
 
                     let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
 
-                    let pooled_txs =
-                        self.pool.pooled_transactions_max(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT);
+                    let pooled_txs = self.pool.pooled_transactions_max(
+                        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_MEMPOOL_PACKET,
+                    );
                     if pooled_txs.is_empty() {
                         // do not send a message if there are no transactions in the pool
                         return
@@ -1016,7 +1024,8 @@ where
     }
 }
 
-/// An endless future.
+/// An endless future. Preemption ensure that future is non-blocking, nonetheless. See
+/// [`crate::NetworkManager`] for more context on the design pattern.
 ///
 /// This should be spawned or used as part of `tokio::select!`.
 impl<Pool> Future for TransactionsManager<Pool>
@@ -1028,35 +1037,18 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        // drain network/peer related events
-        while let Poll::Ready(Some(event)) = this.network_events.poll_next_unpin(cx) {
-            this.on_network_event(event);
-        }
+        // If the budget is exhausted we manually yield back control to tokio. See
+        // `NetworkManager` for more context on the design pattern.
+        let mut budget = 1024;
 
-        // drain commands
-        while let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
-            this.on_command(cmd);
-        }
+        loop {
+            let mut some_ready = false;
 
-        // drain incoming transaction events
-        while let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
-            this.on_network_tx_event(event);
-        }
-
-        this.update_request_metrics();
-
-        // drain fetching transaction events
-        while let Poll::Ready(Some(fetch_event)) = this.transaction_fetcher.poll_next_unpin(cx) {
-            match fetch_event {
-                FetchEvent::TransactionsFetched { peer_id, transactions } => {
-                    this.import_transactions(peer_id, transactions, TransactionSource::Response);
-                }
-                FetchEvent::FetchError { peer_id, error } => {
-                    trace!(target: "net::tx", ?peer_id, ?error, "requesting transactions from peer failed");
-                    this.on_request_error(peer_id, error);
-                }
+            // drain network/peer related events
+            if let Poll::Ready(Some(event)) = this.network_events.poll_next_unpin(cx) {
+                this.on_network_event(event);
+                some_ready = true;
             }
-        }
 
         if this.has_capacity_for_fetching_pending_hashes() {
             // try drain buffered transactions.
@@ -1066,53 +1058,95 @@ where
                 this.transaction_fetcher.search_breadth_budget_find_idle_fallback_peer(),
             );
         }
+            // drain commands
+            if let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
+                this.on_command(cmd);
+                some_ready = true;
+            }
 
-        this.update_request_metrics();
+            // drain incoming transaction events
+            if let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
+                this.on_network_tx_event(event);
+                some_ready = true;
+            }
 
-        // Advance all imports
-        while let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
-            let import_res = match import_res {
-                Ok(res) => res,
-                Err(err) => {
-                    debug!(target: "net::tx", ?err, "bad pool transaction batch import");
-                    continue
-                }
-            };
+            this.update_request_metrics();
 
-            for res in import_res {
-                match res {
-                    Ok(hash) => {
-                        this.on_good_import(hash);
+            // drain fetching transaction events
+            if let Poll::Ready(Some(fetch_event)) = this.transaction_fetcher.poll_next_unpin(cx) {
+                match fetch_event {
+                    FetchEvent::TransactionsFetched { peer_id, transactions } => {
+                        this.import_transactions(
+                            peer_id,
+                            transactions,
+                            TransactionSource::Response,
+                        );
                     }
-                    Err(err) => {
-                        // if we're _currently_ syncing and the transaction is bad we ignore it,
-                        // otherwise we penalize the peer that sent the bad
-                        // transaction with the assumption that the peer should have
-                        // known that this transaction is bad. (e.g. consensus
-                        // rules)
-                        if err.is_bad_transaction() && !this.network.is_syncing() {
-                            debug!(target: "net::tx", ?err, "bad pool transaction import");
-                            this.on_bad_import(err.hash);
-                            continue
+                    FetchEvent::FetchError { peer_id, error } => {
+                        trace!(target: "net::tx", ?peer_id, ?error, "requesting transactions from peer failed");
+                        this.on_request_error(peer_id, error);
+                    }
+                }
+                some_ready = true;
+            }
+
+            if this.enable_tx_refetch {
+                // try drain buffered transactions
+                this.request_buffered_hashes();
+            }
+            this.update_request_metrics();
+
+            // Advance all imports
+            if let Poll::Ready(Some(batch_import_res)) = this.pool_imports.poll_next_unpin(cx) {
+                for res in batch_import_res {
+                    match res {
+                        Ok(hash) => {
+                            this.on_good_import(hash);
                         }
-                        this.on_good_import(err.hash);
+                        Err(err) => {
+                            // if we're _currently_ syncing and the transaction is bad we
+                            // ignore it, otherwise we penalize the peer that sent the bad
+                            // transaction with the assumption that the peer should have
+                            // known that this transaction is bad. (e.g. consensus
+                            // rules)
+                            if err.is_bad_transaction() && !this.network.is_syncing() {
+                                debug!(target: "net::tx", ?err, "bad pool transaction import");
+                                this.on_bad_import(err.hash);
+                                continue
+                            }
+                            this.on_good_import(err.hash);
+                        }
                     }
                 }
+
+                some_ready = true;
+            }
+
+            // handle and propagate new transactions.
+            //
+            // higher priority! stream is drained
+            //
+            let mut new_txs = Vec::new();
+            while let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
+                new_txs.push(hash);
+                some_ready = true;
+            }
+            if !new_txs.is_empty() {
+                this.on_new_transactions(new_txs);
+            }
+
+            // all channels are fully drained and import futures pending
+            if !some_ready {
+                return Poll::Pending
+            }
+
+            budget -= 1;
+            if budget <= 0 {
+                // Make sure we're woken up again
+                cx.waker().wake_by_ref();
+                return Poll::Pending
             }
         }
-
-        // handle and propagate new transactions
-        let mut new_txs = Vec::new();
-        while let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
-            new_txs.push(hash);
-        }
-        if !new_txs.is_empty() {
-            this.on_new_transactions(new_txs);
-        }
-
-        // all channels are fully drained and import futures pending
-
-        Poll::Pending
     }
 }
 
@@ -1138,7 +1172,7 @@ impl PropagateTransaction {
 }
 
 /// Helper type for constructing the full transaction message that enforces the
-/// [`POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE`].
+/// [`SOFT_LIMIT_BYTE_SIZE_FULL_TRANSACTIONS_MEMPOOL_MESSAGE`].
 #[derive(Default)]
 struct FullTransactionsBuilder {
     total_size: usize,
@@ -1148,10 +1182,15 @@ struct FullTransactionsBuilder {
 // === impl FullTransactionsBuilder ===
 
 impl FullTransactionsBuilder {
-    /// Append a transaction to the list if it doesn't exceed the maximum target size.
+    /// Append a transaction to the list if the total message bytes size doesn't exceed the soft
+    /// maximum target byte size. The limit is soft, meaning if one single transaction goes over
+    /// the limit, it will be broadcasted in its own [`Transactions`] message. The same pattern is
+    /// followed in filling a [`GetPooledTransactions`] request in
+    /// [`TransactionFetcher::fill_eth68_request_for_peer`].
     fn push(&mut self, transaction: &PropagateTransaction) {
         let new_size = self.total_size + transaction.size;
-        if new_size > POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
+        if new_size > SOFT_LIMIT_BYTE_SIZE_FULL_TRANSACTIONS_MEMPOOL_MESSAGE && self.total_size > 0
+        {
             return
         }
 

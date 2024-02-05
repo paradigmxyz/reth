@@ -220,7 +220,7 @@ pub fn validate_block_standalone(
 
     // Check transaction root
     if let Err(error) = block.ensure_transaction_root_valid() {
-        return Err(ConsensusError::BodyTransactionRootDiff(error.into()));
+        return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
@@ -280,7 +280,7 @@ fn check_gas_limit(
             return Err(ConsensusError::GasLimitInvalidIncrease {
                 parent_gas_limit,
                 child_gas_limit: child.gas_limit,
-            });
+            })
         }
     }
     // Check for a decrease in gas limit beyond the allowed threshold.
@@ -288,11 +288,11 @@ fn check_gas_limit(
         return Err(ConsensusError::GasLimitInvalidDecrease {
             parent_gas_limit,
             child_gas_limit: child.gas_limit,
-        });
+        })
     }
     // Check if the child gas limit is below the minimum required limit.
     else if child.gas_limit < MINIMUM_GAS_LIMIT {
-        return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit });
+        return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit })
     }
 
     Ok(())
@@ -478,7 +478,7 @@ mod tests {
     use reth_primitives::{
         constants::eip4844::DATA_GAS_PER_BLOB, hex_literal::hex, proofs, Account, Address,
         BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, Header, Signature,
-        TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
+        TransactionKind, TransactionSigned, Withdrawal, Withdrawals, MAINNET, U256,
     };
     use std::ops::RangeBounds;
 
@@ -492,7 +492,7 @@ mod tests {
                 &self,
                 _id: BlockHashOrNumber,
                 _timestamp: u64,
-            ) -> ProviderResult<Option<Vec<Withdrawal>>> ;
+            ) -> ProviderResult<Option<Withdrawals>> ;
         }
     }
 
@@ -579,7 +579,7 @@ mod tests {
             &self,
             _id: BlockHashOrNumber,
             _timestamp: u64,
-        ) -> ProviderResult<Option<Vec<Withdrawal>>> {
+        ) -> ProviderResult<Option<Withdrawals>> {
             self.withdrawals_provider.withdrawals_by_block(_id, _timestamp)
         }
 
@@ -729,10 +729,12 @@ mod tests {
         let chain_spec = ChainSpecBuilder::mainnet().shanghai_activated().build();
 
         let create_block_with_withdrawals = |indexes: &[u64]| {
-            let withdrawals = indexes
-                .iter()
-                .map(|idx| Withdrawal { index: *idx, ..Default::default() })
-                .collect::<Vec<_>>();
+            let withdrawals = Withdrawals::new(
+                indexes
+                    .iter()
+                    .map(|idx| Withdrawal { index: *idx, ..Default::default() })
+                    .collect(),
+            );
             SealedBlock {
                 header: Header {
                     withdrawals_root: Some(proofs::calculate_withdrawals_root(&withdrawals)),
@@ -806,7 +808,7 @@ mod tests {
         let body = BlockBody {
             transactions: vec![transaction],
             ommers: vec![],
-            withdrawals: Some(vec![]),
+            withdrawals: Some(Withdrawals::default()),
         };
 
         let block = SealedBlock::new(header, body);

@@ -118,7 +118,6 @@ optimism = [
     "reth-blockchain-tree/optimism",
     "reth-beacon-consensus/optimism",
     "reth-optimism-payload-builder/optimism",
-    "reth-node-api/optimism",
 ]
 
 jemalloc = ["dep:jemalloc-ctl"]

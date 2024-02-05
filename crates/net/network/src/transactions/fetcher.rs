@@ -20,7 +20,7 @@ use tracing::{debug, trace};
 
 use super::{
     AnnouncementFilter, Peer, PooledTransactions, TransactionsManagerMetrics,
-    NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT, POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE,
+    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE,
 };
 
 /// How many peers we keep track of for each missing transaction.
@@ -612,6 +612,7 @@ impl TransactionFetcher {
     /// the request based on expected response size. For any hash missing size metadata, it is
     /// guessed at [`TX_ENCODED_LENGTH_AVERAGE`].
     ///
+
     /// Loops through hashes pending fetch and does:
     ///
     /// 1. Check if a hash pending fetch is seen by peer.

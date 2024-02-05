@@ -79,7 +79,7 @@ pub enum TransactionEvent {
 impl TransactionEvent {
     /// Returns `true` if the event is final and no more events are expected for this transaction
     /// hash.
-    pub fn is_final(&self) -> bool {
+    pub const fn is_final(&self) -> bool {
         matches!(
             self,
             TransactionEvent::Replaced(_) |

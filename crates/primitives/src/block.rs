@@ -1,6 +1,6 @@
 use crate::{
     Address, GotExpected, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered,
-    Withdrawal, B256,
+    Withdrawal, Withdrawals, B256,
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
@@ -27,7 +27,7 @@ pub struct Block {
     /// Ommers/uncles header.
     pub ommers: Vec<Header>,
     /// Block withdrawals.
-    pub withdrawals: Option<Vec<Withdrawal>>,
+    pub withdrawals: Option<Withdrawals>,
 }
 
 impl Block {
@@ -119,7 +119,7 @@ impl Block {
             // take into account capacity
             self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
-            self.withdrawals.as_ref().map(|w| w.iter().map(Withdrawal::size).sum::<usize>() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
+            self.withdrawals.as_ref().map(|w| w.size() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Withdrawals>>())
     }
 }
 
@@ -219,7 +219,7 @@ pub struct SealedBlock {
     /// Ommer/uncle headers
     pub ommers: Vec<Header>,
     /// Block withdrawals.
-    pub withdrawals: Option<Vec<Withdrawal>>,
+    pub withdrawals: Option<Withdrawals>,
 }
 
 impl SealedBlock {
@@ -316,7 +316,7 @@ impl SealedBlock {
             // take into account capacity
             self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
-            self.withdrawals.as_ref().map(|w| w.iter().map(Withdrawal::size).sum::<usize>() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
+            self.withdrawals.as_ref().map(|w| w.size() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Withdrawals>>())
     }
 
     /// Calculates the total gas used by blob transactions in the sealed block.
@@ -469,11 +469,9 @@ pub struct BlockBody {
     /// Withdrawals in the block.
     #[cfg_attr(
         any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::option::of(proptest::collection::vec(proptest::arbitrary::any::<Withdrawal>(), 0..=16))"
-        )
+        proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Withdrawals>())")
     )]
-    pub withdrawals: Option<Vec<Withdrawal>>,
+    pub withdrawals: Option<Withdrawals>,
 }
 
 impl BlockBody {
@@ -512,11 +510,8 @@ impl BlockBody {
             self.ommers.capacity() * std::mem::size_of::<Header>() +
             self.withdrawals
                 .as_ref()
-                .map(|w| {
-                    w.iter().map(Withdrawal::size).sum::<usize>() +
-                        w.capacity() * std::mem::size_of::<Withdrawal>()
-                })
-                .unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
+                .map(|w| w.size() + w.capacity() * std::mem::size_of::<Withdrawal>())
+                .unwrap_or(std::mem::size_of::<Option<Withdrawals>>())
     }
 }
 
