@@ -136,7 +136,7 @@ impl LayerInfo {
     ///      - `LogFormat::Json` for JSON formatting.
     ///      - `LogFormat::LogFmt` for logfmt (key=value) formatting.
     ///      - `LogFormat::Terminal` for human-readable, terminal-friendly formatting.
-    ///  * `defaut_directive` - Directive for filtering log messages.
+    ///  * `default_directive` - Directive for filtering log messages.
     ///  * `filters` - Additional filtering parameters as a string.
     ///  * `color` - Optional color configuration for the log messages.
     pub fn new(
