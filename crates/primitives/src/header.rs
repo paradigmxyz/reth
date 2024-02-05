@@ -668,7 +668,7 @@ pub enum SealedHeaderError {
 /// to modify header.
 #[add_arbitrary_tests(rlp)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct v {
+pub struct SealedHeader {
     /// Locked Header fields.
     pub header: Header,
     /// Locked Header hash.
