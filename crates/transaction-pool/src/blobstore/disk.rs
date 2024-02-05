@@ -293,6 +293,7 @@ impl DiskFileBlobStoreInner {
 
     /// Retries the blob data for the given transaction hash.
     #[inline]
+    #[allow(dead_code)]
     fn delete_one(&self, tx: B256) -> Result<(), DiskFileBlobStoreError> {
         trace!( target:"txpool::blob", "[{:?}] deleting blob file", tx);
         let path = self.blob_disk_file(tx);
@@ -305,6 +306,7 @@ impl DiskFileBlobStoreInner {
 
     /// Retries the blob data for the given transaction hash.
     #[inline]
+    #[allow(dead_code)]
     fn delete_many(
         &self,
         txs: impl IntoIterator<Item = TxHash>,
