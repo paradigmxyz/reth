@@ -607,7 +607,7 @@ where
                         // hash
                         if let Some(previously_seen_size) = self.transaction_fetcher.eth68_meta.get(&hash) {
                             if size != *previously_seen_size {
-                                // todo: store both sizes as a `(size, peer_id)` tuple to catch peers
+                                // todo: store both sizes as a `(size, peer_id)` tuple to catch peers 
                                 // that respond with another size tx than they announced
                                 debug!(target: "net::tx",
                                     peer_id=format!("{peer_id:#}"),
