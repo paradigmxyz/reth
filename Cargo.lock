@@ -5881,6 +5881,7 @@ dependencies = [
  "reqwest",
  "reth",
  "reth-beacon-consensus",
+ "reth-db",
  "reth-ecies",
  "reth-eth-wire",
  "reth-interfaces",

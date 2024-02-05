@@ -12,6 +12,7 @@ use crate::{create_sync_api, AuthHttpConfig};
 use alloy_primitives::B256;
 use futures_util::{future::BoxFuture, FutureExt};
 use rand::Rng;
+use reth_db::models::consensus::ConsensusBytes;
 use reth_interfaces::clayer::{ClayerConsensusEvent, ClayerConsensusMessageAgentTrait};
 use reth_network::NetworkHandle;
 use reth_primitives::{hex, SealedHeader, TransactionSigned};
@@ -136,7 +137,7 @@ where
             let cn = rng.gen();
             let hash = B256::with_last_byte(cn);
 
-            match cdb.save_consensus_number(hash, cn as u64) {
+            match cdb.save_consensus_content(hash, ConsensusBytes { content: vec![cn] }) {
                 Ok(o) => {
                     info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: {}-{}", cn, hash, cn);
                     if o {
@@ -149,6 +150,30 @@ where
                     info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: error!", cn)
                 }
             }
+
+            if cdb.consensus_content(hash).is_ok() {
+                if let Some(num) = cdb.consensus_content(hash).unwrap() {
+                    info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages get{}: {}-{:?}",cn, hash, num);
+                } else {
+                    info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages get{}: NOne", cn);
+                }
+            } else {
+                info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ received get{}: error!", cn);
+            }
+
+            // match cdb.save_consensus_number(hash, cn as u64) {
+            //     Ok(o) => {
+            //         info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: {}-{}", cn, hash, cn);
+            //         if o {
+            //             info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: ture", cn);
+            //         } else {
+            //             info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: false", cn);
+            //         }
+            //     }
+            //     Err(_e) => {
+            //         info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: error!", cn)
+            //     }
+            // }
 
             // if cdb.consensus_number(hash).is_ok() {
             //     if let Some(num) = cdb.consensus_number(hash).unwrap() {
