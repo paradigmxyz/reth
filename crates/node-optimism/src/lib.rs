@@ -18,3 +18,5 @@ pub use engine::OptimismEngineTypes;
 /// trait.
 pub mod evm;
 pub use evm::OptimismEvmConfig;
+
+pub mod txpool;

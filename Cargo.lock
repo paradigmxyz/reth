@@ -6526,7 +6526,10 @@ dependencies = [
  "reth-node-api",
  "reth-payload-builder",
  "reth-primitives",
+ "reth-provider",
+ "reth-revm",
  "reth-rpc-types",
+ "reth-transaction-pool",
  "serde",
 ]
 
