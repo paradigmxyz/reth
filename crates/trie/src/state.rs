@@ -150,7 +150,7 @@ impl HashedPostState {
         let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
 
         // Populate account prefix set.
-        for (hashed_address, _) in &self.accounts {
+        for hashed_address in self.accounts.keys() {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
         }
 
@@ -159,7 +159,7 @@ impl HashedPostState {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
 
             let storage_prefix_set_entry = storage_prefix_set.entry(*hashed_address).or_default();
-            for (hashed_slot, _) in &hashed_storage.storage {
+            for hashed_slot in hashed_storage.storage.keys() {
                 storage_prefix_set_entry.insert(Nibbles::unpack(hashed_slot));
             }
         }
