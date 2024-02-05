@@ -18,10 +18,10 @@ use reth_primitives::{
     AccessList, Address, BlobTransactionSidecar, Bytes, FromRecoveredPooledTransaction,
     FromRecoveredTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
     Signature, Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered,
-    TxEip1559, TxEip2930, TxEip4844, TxHash, TxLegacy, TxType, TxValue, B256, EIP1559_TX_TYPE_ID,
+    TxEip1559, TxEip2930, TxEip4844, TxHash, TxLegacy, TxType, B256, EIP1559_TX_TYPE_ID,
     EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
 };
-use std::{mem, ops::Range, sync::Arc, time::Instant, vec::IntoIter};
+use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [MockOrdering] for transaction ordering.
 ///
@@ -1353,6 +1353,8 @@ pub struct MockTransactionDistribution {
     transaction_ratio: WeightedIndex<u32>,
     /// generates the gas limit
     gas_limit_range: Uniform<u64>,
+    /// generates the transaction's fake size
+    size_range: Uniform<usize>,
     /// generates fees for the given transaction types
     fee_ranges: MockFeeRange,
 }
@@ -1363,11 +1365,13 @@ impl MockTransactionDistribution {
         transaction_ratio: MockTransactionRatio,
         fee_ranges: MockFeeRange,
         gas_limit_range: Range<u64>,
+        size_range: Range<usize>,
     ) -> Self {
         Self {
             transaction_ratio: transaction_ratio.weighted_index(),
             gas_limit_range: gas_limit_range.into(),
             fee_ranges,
+            size_range: size_range.into(),
         }
     }
 
@@ -1391,7 +1395,9 @@ impl MockTransactionDistribution {
             unreachable!("unknown transaction type returned by the weighted index")
         };
 
-        tx.with_nonce(nonce).with_gas_limit(self.gas_limit_range.sample(rng))
+        let size = self.size_range.sample(rng);
+
+        tx.with_nonce(nonce).with_gas_limit(self.gas_limit_range.sample(rng)).with_size(size)
     }
 }
 
