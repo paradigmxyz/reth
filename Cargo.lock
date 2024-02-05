@@ -1831,6 +1831,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "custom-node"
+version = "0.0.0"
+dependencies = [
+ "alloy-chains",
+ "eyre",
+ "jsonrpsee",
+ "reth",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-rpc-api",
+ "reth-rpc-types",
+ "serde",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "custom-payload-builder"
 version = "0.0.0"
 dependencies = [
@@ -6413,7 +6432,6 @@ dependencies = [
 name = "reth-node-api"
 version = "0.1.0-alpha.16"
 dependencies = [
- "reth-payload-builder",
  "reth-primitives",
  "reth-rpc-types",
  "revm-primitives",
