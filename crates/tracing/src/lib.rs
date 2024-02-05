@@ -19,8 +19,8 @@
 //!  fn main() -> eyre::Result<()> {
 //!      let tracer = RethTracer::new().with_stdout(LayerInfo::new(
 //!          LogFormat::Json,
+//!          LevelFilter::INFO.to_string(),
 //!          "debug".to_string(),
-//!          LevelFilter::INFO.into(),
 //!          None,
 //!      ));
 //!
