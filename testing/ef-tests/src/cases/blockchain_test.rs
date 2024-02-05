@@ -168,6 +168,7 @@ pub fn should_skip(path: &Path) -> bool {
         // Test check if gas price overflows, we handle this correctly but does not match tests specific
         // exception.
         | "HighGasPrice.json"
+        | "HighGasPriceParis.json"
 
         // Skip test where basefee/accesslist/difficulty is present but it shouldn't be supported in
         // London/Berlin/TheMerge. https://github.com/ethereum/tests/blob/5b7e1ab3ffaf026d99d20b17bb30f533a2c80c8b/GeneralStateTests/stExample/eip1559.json#L130
