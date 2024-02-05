@@ -6585,7 +6585,6 @@ dependencies = [
 name = "reth-primitives"
 version = "0.1.0-alpha.17"
 dependencies = [
- "ahash",
  "alloy-chains",
  "alloy-genesis",
  "alloy-primitives",
@@ -6637,7 +6636,6 @@ dependencies = [
 name = "reth-provider"
 version = "0.1.0-alpha.17"
 dependencies = [
- "ahash",
  "alloy-rlp",
  "assert_matches",
  "auto_impl",
@@ -7026,7 +7024,6 @@ dependencies = [
 name = "reth-trie"
 version = "0.1.0-alpha.17"
 dependencies = [
- "ahash",
  "alloy-chains",
  "alloy-rlp",
  "auto_impl",
