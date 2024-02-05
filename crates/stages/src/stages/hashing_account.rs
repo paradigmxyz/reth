@@ -15,11 +15,8 @@ use reth_primitives::{
         AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, StageCheckpoint,
         StageId,
     },
-    SnapshotSegment,
 };
-use reth_provider::{
-    providers::SnapshotWriter, AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader,
-};
+use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader};
 use std::{
     cmp::max,
     fmt::Debug,
@@ -91,6 +88,7 @@ impl AccountHashingStage {
             generators::{random_block_range, random_eoa_account_range},
         };
         use reth_primitives::{Account, B256, U256};
+        use reth_provider::providers::SnapshotWriter;
 
         let mut rng = generators::rng();
 
@@ -101,7 +99,7 @@ impl AccountHashingStage {
         }
         provider
             .snapshot_provider()
-            .latest_writer(SnapshotSegment::Headers)
+            .latest_writer(reth_primitives::SnapshotSegment::Headers)
             .unwrap()
             .commit()
             .unwrap();
