@@ -59,11 +59,11 @@ install-op: ## Build and install the op-reth binary under `~/.cargo/bin`.
 
 .PHONY: build
 build: ## Build the reth binary into `target` directory.
-	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
+	$(MAKE) build-native-$(shell rustc -Vv | grep host | cut -d ' ' -f2)
 
 .PHONY: build-op
 build-op: ## Build the op-reth binary into `target` directory.
-	cargo build --bin op-reth --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
+	$(MAKE) op-build-native-$(shell rustc -Vv | grep host | cut -d ' ' -f2)
 
 # Builds the reth binary natively.
 build-native-%:
