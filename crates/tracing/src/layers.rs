@@ -173,7 +173,7 @@ fn build_env_filter(
 
     DEFAULT_ENV_FILTER_DIRECTIVES
         .into_iter()
-        .chain(directives.split(','))
+        .chain(directives.split(',').filter(|d| !d.is_empty()))
         .try_fold(env_filter, |env_filter, directive| {
             Ok(env_filter.add_directive(directive.parse()?))
         })

@@ -150,7 +150,7 @@ pub struct Verbosity {
     /// -vvv    Info
     /// -vvvv   Debug
     /// -vvvvv  Traces (warning: very verbose!)
-    #[clap(short, long, action = ArgAction::Count, global = true, default_value_t = 3, verbatim_doc_comment, help_heading = "Display")]
+    #[clap(short, long, action = ArgAction::Count, global = true, verbatim_doc_comment, help_heading = "Display")]
     verbosity: u8,
 
     /// Silence all log output.
@@ -161,11 +161,11 @@ pub struct Verbosity {
 impl Verbosity {
     /// Get the corresponding [Directive] for the given verbosity, or none if the verbosity
     /// corresponds to silent.
-    pub fn directive(&self) -> Directive {
+    pub fn directive(&self) -> Option<Directive> {
         if self.quiet {
-            LevelFilter::OFF.into()
+            Some(LevelFilter::OFF.into())
         } else {
-            let level = match self.verbosity - 1 {
+            let level = match self.verbosity.checked_sub(1)? {
                 0 => Level::ERROR,
                 1 => Level::WARN,
                 2 => Level::INFO,
@@ -173,7 +173,7 @@ impl Verbosity {
                 _ => Level::TRACE,
             };
 
-            level.into()
+            Some(level.into())
         }
     }
 }

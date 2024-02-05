@@ -125,8 +125,8 @@ impl Default for RethTracer {
 #[derive(Debug, Clone)]
 pub struct LayerInfo {
     format: LogFormat,
-    filters: String,
-    directive: Directive,
+    default_directive: String,
+    filters: Option<Directive>,
     color: Option<String>,
 }
 
@@ -143,11 +143,11 @@ impl LayerInfo {
     ///  * `color` - Optional color configuration for the log messages.
     pub fn new(
         format: LogFormat,
-        filters: String,
-        directive: Directive,
+        default_directive: String,
+        filters: Option<Directive>,
         color: Option<String>,
     ) -> Self {
-        Self { format, directive, filters, color }
+        Self { format, default_directive, filters, color }
     }
 }
 
@@ -159,8 +159,8 @@ impl Default for LayerInfo {
     fn default() -> Self {
         Self {
             format: LogFormat::Terminal,
-            directive: LevelFilter::INFO.into(),
-            filters: "debug".to_string(),
+            default_directive: LevelFilter::INFO.to_string(),
+            filters: None,
             color: Some("always".to_string()),
         }
     }
@@ -196,8 +196,8 @@ impl Tracer for RethTracer {
 
         layers.stdout(
             self.stdout.format,
-            self.stdout.directive,
-            &self.stdout.filters,
+            self.stdout.default_directive.parse()?,
+            &self.stdout.filters.as_ref().map_or("".to_string(), |d| d.to_string()),
             self.stdout.color,
         )?;
 
@@ -206,7 +206,11 @@ impl Tracer for RethTracer {
         }
 
         let file_guard = if let Some((config, file_info)) = self.file {
-            Some(layers.file(config.format, &config.filters, file_info)?)
+            Some(layers.file(
+                config.format,
+                &config.filters.as_ref().map_or("".to_string(), |d| d.to_string()),
+                file_info,
+            )?)
         } else {
             None
         };
