@@ -21,10 +21,10 @@ use revm::{db::states::bundle_state::BundleRetention, Database, DatabaseCommit, 
 use revm_primitives::EnvWithSpecId;
 use std::time::Instant;
 
-/// Configured [BlockEnv] and [CfgEnvWithSpec] for a pending block
+/// Configured [BlockEnv] and [CfgEnvWithSpecId] for a pending block
 #[derive(Debug, Clone)]
 pub(crate) struct PendingBlockEnv {
-    /// Configured [CfgEnvWithSpec] for the pending block.
+    /// Configured [CfgEnvWithSpecId] for the pending block.
     pub(crate) cfg: CfgEnvWithSpecId,
     /// Configured [BlockEnv] for the pending block.
     pub(crate) block_env: BlockEnv,
@@ -267,7 +267,7 @@ impl PendingBlockEnv {
 
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
-/// This constructs a new [EVM](revm::EVM) with the given DB, and environment ([CfgEnvWithSpec] and
+/// This constructs a new [EVM](revm::Evm) with the given DB, and environment ([CfgEnvWithSpec] and
 /// [BlockEnv]) to execute the pre block contract call.
 ///
 /// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state

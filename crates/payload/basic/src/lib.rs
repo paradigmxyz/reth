@@ -852,7 +852,7 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
 
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
-/// This constructs a new [Evm](revm::EVM) with the given DB, and environment ([CfgEnvWithSpecId]
+/// This constructs a new [Evm](revm::Evm) with the given DB, and environment ([CfgEnvWithSpecId]
 /// and [BlockEnv]) to execute the pre block contract call.
 ///
 /// The parent beacon block root used for the call is gathered from the given

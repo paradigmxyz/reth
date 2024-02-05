@@ -72,7 +72,7 @@ pub(crate) type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
 /// There are subtle differences between when transacting [CallRequest]:
 ///
 /// The endpoints `eth_call` and `eth_estimateGas` and `eth_createAccessList` should always
-/// __disable__ the base fee check in the [Env] [Cfg](revm_primitives::CfgEnvWithSpecId).
+/// __disable__ the base fee check in the [EnvWithSpecId] [Cfg](revm_primitives::CfgEnvWithSpecId).
 ///
 /// The behaviour for tracing endpoints is not consistent across clients.
 /// Geth also disables the basefee check for tracing: <https://github.com/ethereum/go-ethereum/blob/bc0b87ca196f92e5af49bd33cc190ef0ec32b197/eth/tracers/api.go#L955-L955>
@@ -179,7 +179,7 @@ pub trait EthTransactions: Send + Sync {
     /// Prepares the state and env for the given [CallRequest] at the given [BlockId] and executes
     /// the closure on a new task returning the result of the closure.
     ///
-    /// This returns the configured [Env] for the given [CallRequest] at the given [BlockId] and
+    /// This returns the configured [EnvWithSpecId] for the given [CallRequest] at the given [BlockId] and
     /// with configured call settings: `prepare_call_env`.
     async fn spawn_with_call_at<F, R>(
         &self,
@@ -216,7 +216,7 @@ pub trait EthTransactions: Send + Sync {
     /// config.
     ///
     /// The callback is then called with the [TracingInspector] and the [ResultAndState] after the
-    /// configured [Env] was inspected.
+    /// configured [EnvWithSpecId] was inspected.
     ///
     /// Caution: this is blocking
     fn trace_at<F, R>(
@@ -235,7 +235,7 @@ pub trait EthTransactions: Send + Sync {
     /// config.
     ///
     /// The callback is then called with the [TracingInspector] and the [ResultAndState] after the
-    /// configured [Env] was inspected.
+    /// configured [EnvWithSpecId] was inspected.
     async fn spawn_trace_at_with_state<F, R>(
         &self,
         env: EnvWithSpecId,
