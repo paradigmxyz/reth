@@ -89,7 +89,7 @@ impl Block {
             let Some(senders) =
                 TransactionSigned::recover_signers_unchecked(&self.body, self.body.len())
             else {
-                return Err(self);
+                return Err(self)
             };
             senders
         };
@@ -343,7 +343,7 @@ impl SealedBlock {
             return Err(GotExpected {
                 got: calculated_root,
                 expected: self.header.transactions_root,
-            });
+            })
         }
 
         Ok(())

@@ -36,12 +36,6 @@ impl Withdrawal {
     }
 }
 
-impl AsRef<Withdrawal> for Withdrawal {
-    fn as_ref(&self) -> &Self {
-        self
-    }
-}
-
 /// Represents a collection of Withdrawals.
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodableWrapper, RlpDecodableWrapper)]

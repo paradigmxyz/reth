@@ -11,6 +11,7 @@ use alloy_primitives::U256;
 use alloy_rlp::Encodable;
 use bytes::{BufMut, BytesMut};
 use itertools::Itertools;
+use std::borrow::Borrow;
 
 /// Adjust the index of an item for rlp encoding.
 pub const fn adjust_index_for_rlp(i: usize, len: usize) -> usize {
@@ -79,9 +80,9 @@ where
 pub fn calculate_withdrawals_root<I, T>(withdrawals: I) -> B256
 where
     I: IntoIterator<Item = T>,
-    T: AsRef<Withdrawal>,
+    T: Borrow<Withdrawal>,
 {
-    ordered_trie_root_with_encoder(withdrawals, |w, buf| w.as_ref().encode(buf))
+    ordered_trie_root_with_encoder(withdrawals, |w, buf| w.borrow().encode(buf))
 }
 
 /// Calculates the receipt root for a header.
@@ -89,9 +90,9 @@ where
 pub fn calculate_receipt_root<I, T>(receipts: I) -> B256
 where
     I: IntoIterator<Item = T>,
-    T: AsRef<ReceiptWithBloom>,
+    T: Borrow<ReceiptWithBloom>,
 {
-    ordered_trie_root_with_encoder(receipts, |r, buf| r.as_ref().encode_inner(buf, false))
+    ordered_trie_root_with_encoder(receipts, |r, buf| r.borrow().encode_inner(buf, false))
 }
 
 /// Calculates the receipt root for a header.
@@ -103,7 +104,7 @@ pub fn calculate_receipt_root<I, T>(
 ) -> B256
 where
     I: IntoIterator<Item = T>,
-    T: AsRef<ReceiptWithBloom>,
+    T: Borrow<ReceiptWithBloom>,
 {
     // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
     // the receipt root calculation does not include the deposit nonce in the receipt
@@ -114,17 +115,15 @@ where
         !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
     {
         let receipts = receipts.into_iter().map(|r| {
-            let mut r = r.as_ref().to_owned();
+            let mut r = r.borrow().to_owned();
             r.receipt.deposit_nonce = None;
             r
         });
 
-        return ordered_trie_root_with_encoder(receipts, |r, buf| {
-            r.as_ref().encode_inner(buf, false)
-        });
+        return ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false));
     }
 
-    ordered_trie_root_with_encoder(receipts, |r, buf| r.as_ref().encode_inner(buf, false))
+    ordered_trie_root_with_encoder(receipts, |r, buf| r.borrow().encode_inner(buf, false))
 }
 
 /// Calculates the receipt root for a header for the reference type of [Receipt].
@@ -134,10 +133,10 @@ where
 pub fn calculate_receipt_root_ref<I, T>(receipts: I) -> B256
 where
     I: IntoIterator<Item = T>,
-    T: AsRef<Receipt>,
+    T: Borrow<Receipt>,
 {
     ordered_trie_root_with_encoder(receipts, |r, buf| {
-        ReceiptWithBloomRef::from(r.as_ref()).encode_inner(buf, false)
+        ReceiptWithBloomRef::from(r.borrow()).encode_inner(buf, false)
     })
 }
 
@@ -152,7 +151,7 @@ pub fn calculate_receipt_root_ref<I, T>(
 ) -> B256
 where
     I: IntoIterator<Item = T>,
-    T: AsRef<Receipt>,
+    T: Borrow<Receipt>,
 {
     // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
     // the receipt root calculation does not include the deposit nonce in the receipt
@@ -163,7 +162,7 @@ where
         !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
     {
         let receipts = receipts.into_iter().map(|r| {
-            let mut r = r.as_ref().to_owned();
+            let mut r = r.borrow().to_owned();
             r.deposit_nonce = None;
             r
         });
@@ -174,7 +173,7 @@ where
     }
 
     ordered_trie_root_with_encoder(receipts, |r, buf| {
-        ReceiptWithBloomRef::from(r.as_ref()).encode_inner(buf, false)
+        ReceiptWithBloomRef::from(r.borrow()).encode_inner(buf, false)
     })
 }
 
@@ -182,7 +181,7 @@ where
 pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
     // Check if `ommers` list is empty
     if ommers.is_empty() {
-        return EMPTY_OMMER_ROOT_HASH;
+        return EMPTY_OMMER_ROOT_HASH
     }
     // RLP Encode
     let mut ommers_rlp = Vec::new();
@@ -615,9 +614,9 @@ mod tests {
             #[cfg(feature = "optimism")]
             deposit_receipt_version: None,
         };
-        let receipts_ref = [&receipt];
+        let receipts = [receipt.clone()];
         let root_from_ref = calculate_receipt_root_ref(
-            receipts_ref.iter(),
+            &receipts,
             #[cfg(feature = "optimism")]
             crate::OP_GOERLI.as_ref(),
             #[cfg(feature = "optimism")]
@@ -643,6 +642,8 @@ mod tests {
         assert!(block.withdrawals.is_some());
         let withdrawals = block.withdrawals.as_ref().unwrap();
         assert_eq!(withdrawals.len(), 1);
+        let withdrawals_root = calculate_withdrawals_root(withdrawals);
+        assert_eq!(block.withdrawals_root, Some(withdrawals_root));
         let withdrawals_root = calculate_withdrawals_root(withdrawals);
         assert_eq!(block.withdrawals_root, Some(withdrawals_root));
 
