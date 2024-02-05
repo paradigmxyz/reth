@@ -156,6 +156,7 @@ pub fn should_skip(path: &Path) -> bool {
         // funky test with `bigint 0x00` value in json :) not possible to happen on mainnet and require
         // custom json parser. https://github.com/ethereum/tests/issues/971
         | "ValueOverflow.json"
+        | "ValueOverflowParis.json"
 
         // txbyte is of type 02 and we dont parse tx bytes for this test to fail.
         | "typeTwoBerlin.json"
