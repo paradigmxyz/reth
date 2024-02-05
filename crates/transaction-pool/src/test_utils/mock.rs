@@ -8,7 +8,6 @@ use crate::{
     traits::TransactionOrigin,
     PoolTransaction, Priority, TransactionOrdering, ValidPoolTransaction,
 };
-use std::mem;
 use paste::paste;
 use rand::{
     distributions::{Uniform, WeightedIndex},
@@ -19,10 +18,10 @@ use reth_primitives::{
     AccessList, Address, BlobTransactionSidecar, Bytes, FromRecoveredPooledTransaction,
     FromRecoveredTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
     Signature, Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered,
-    TxEip1559, TxEip2930, TxEip4844, TxHash, TxLegacy, TxType, B256, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256, TxValue,
+    TxEip1559, TxEip2930, TxEip4844, TxHash, TxLegacy, TxType, TxValue, B256, EIP1559_TX_TYPE_ID,
+    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
 };
-use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
+use std::{mem, ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [MockOrdering] for transaction ordering.
 ///
@@ -1314,7 +1313,12 @@ impl MockFeeRange {
             max_fee.start <= priority_fee.end,
             "max_fee_range should be strictly below the priority fee range"
         );
-        Self { gas_price: gas_price.into(), priority_fee: priority_fee.into(), max_fee: max_fee.into(), max_fee_blob: max_fee_blob.into() }
+        Self {
+            gas_price: gas_price.into(),
+            priority_fee: priority_fee.into(),
+            max_fee: max_fee.into(),
+            max_fee_blob: max_fee_blob.into(),
+        }
     }
 
     /// Returns a sample of `gas_price` for legacy and access list transactions with the given
@@ -1323,8 +1327,8 @@ impl MockFeeRange {
         self.gas_price.sample(rng)
     }
 
-    /// Returns a sample of `max_priority_fee_per_gas` for EIP-1559 and EIP-4844 transactions with the given
-    /// [Rng](rand::Rng).
+    /// Returns a sample of `max_priority_fee_per_gas` for EIP-1559 and EIP-4844 transactions with
+    /// the given [Rng](rand::Rng).
     pub fn sample_priority_fee(&self, rng: &mut impl rand::Rng) -> u128 {
         self.priority_fee.sample(rng)
     }
@@ -1360,7 +1364,6 @@ impl MockTransactionDistribution {
         fee_ranges: MockFeeRange,
         gas_limit_range: Range<u64>,
     ) -> Self {
-
         Self {
             transaction_ratio: transaction_ratio.weighted_index(),
             gas_limit_range: gas_limit_range.into(),
@@ -1372,11 +1375,9 @@ impl MockTransactionDistribution {
     pub fn tx(&self, nonce: u64, rng: &mut impl rand::Rng) -> MockTransaction {
         let transaction_sample = self.transaction_ratio.sample(rng);
         let tx = if transaction_sample == 0 {
-            MockTransaction::legacy()
-                .with_gas_price(self.fee_ranges.sample_gas_price(rng))
+            MockTransaction::legacy().with_gas_price(self.fee_ranges.sample_gas_price(rng))
         } else if transaction_sample == 1 {
-            MockTransaction::eip2930()
-                .with_gas_price(self.fee_ranges.sample_gas_price(rng))
+            MockTransaction::eip2930().with_gas_price(self.fee_ranges.sample_gas_price(rng))
         } else if transaction_sample == 2 {
             MockTransaction::eip1559()
                 .with_priority_fee(self.fee_ranges.sample_priority_fee(rng))
