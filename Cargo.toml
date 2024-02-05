@@ -167,11 +167,11 @@ reth-trie = { path = "crates/trie" }
 
 # revm
 revm = { git = "https://github.com/bluealloy/revm", branch = "tweeks", features = [
-    #"std",
+    "std",
     "secp256k1",
 ], default-features = false }
 revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "tweeks", features = [
-    #"std",
+    "std",
 ], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", branch = "matt/migrate-revm" }
 
