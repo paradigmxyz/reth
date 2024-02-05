@@ -56,6 +56,9 @@ pub use optimism::TxDeposit;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 
+/// Either a transaction hash or number.
+pub type TxHashOrNumber = BlockHashOrNumber;
+
 // Expected number of transactions where we can expect a speed-up by recovering the senders in
 // parallel.
 pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
@@ -1570,9 +1573,6 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     }
 }
 
-/// Either a transaction hash or number.
-pub type TxHashOrNumber = BlockHashOrNumber;
-
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -1581,7 +1581,8 @@ mod tests {
             signature::Signature, TransactionKind, TxEip1559, TxLegacy,
             PARALLEL_SENDER_RECOVERY_THRESHOLD,
         },
-        Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, B256, U256,
+        Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
+        TxHashOrNumber, B256, U256,
     };
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
