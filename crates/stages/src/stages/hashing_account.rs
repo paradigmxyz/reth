@@ -15,8 +15,11 @@ use reth_primitives::{
         AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, StageCheckpoint,
         StageId,
     },
+    SnapshotSegment,
 };
-use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader};
+use reth_provider::{
+    providers::SnapshotWriter, AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader,
+};
 use std::{
     cmp::max,
     fmt::Debug,
@@ -88,15 +91,20 @@ impl AccountHashingStage {
             generators::{random_block_range, random_eoa_account_range},
         };
         use reth_primitives::{Account, B256, U256};
-        use reth_provider::BlockWriter;
 
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, opts.blocks.clone(), B256::ZERO, opts.txs);
 
         for block in blocks {
-            provider.insert_block(block.try_seal_with_senders().unwrap(), None).unwrap();
+            provider.insert_historical_block(block.try_seal_with_senders().unwrap(), None).unwrap();
         }
+        provider
+            .snapshot_provider()
+            .latest_writer(SnapshotSegment::Headers)
+            .unwrap()
+            .commit()
+            .unwrap();
         let mut accounts = random_eoa_account_range(&mut rng, opts.accounts);
         {
             // Account State generator

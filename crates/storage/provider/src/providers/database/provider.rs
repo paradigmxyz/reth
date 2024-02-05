@@ -172,6 +172,29 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     }
 }
 
+impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
+    #[cfg(any(test, feature = "test-utils"))]
+    /// Inserts an historical block. Used for setting up test environments
+    pub fn insert_historical_block(
+        &self,
+        block: SealedBlockWithSenders,
+        prune_modes: Option<&PruneModes>,
+    ) -> ProviderResult<StoredBlockBodyIndices> {
+        let ttd = if block.number == 0 {
+            block.difficulty
+        } else {
+            let parent_block_number = block.number - 1;
+            let parent_ttd = self.header_td_by_number(parent_block_number)?.unwrap_or_default();
+            parent_ttd + block.difficulty
+        };
+
+        let mut writer = self.snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
+        writer.append_header(block.header.as_ref().clone(), ttd, block.hash())?;
+
+        self.insert_block(block, prune_modes)
+    }
+}
+
 /// For a given key, unwind all history shards that are below the given block number.
 ///
 /// S - Sharded key subtype.
@@ -2378,14 +2401,6 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         self.tx.put::<tables::HeaderTD>(block_number, ttd.into())?;
         durations_recorder.record_relative(metrics::Action::InsertHeaderTD);
-
-        // TODO: temporary to ease transition/tests. should we add a insert_historical_block?
-        #[cfg(any(test, feature = "test-utils"))]
-        {
-            let mut writer = self.snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
-            writer.append_header(block.header.as_ref().clone(), ttd, block.hash())?;
-            writer.commit()?;
-        }
 
         // insert body ommers data
         if !block.ommers.is_empty() {

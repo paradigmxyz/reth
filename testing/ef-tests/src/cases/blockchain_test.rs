@@ -6,8 +6,8 @@ use crate::{
 };
 use alloy_rlp::Decodable;
 use reth_db::test_utils::{create_test_rw_db, create_test_snapshots_dir};
-use reth_primitives::{BlockBody, SealedBlock};
-use reth_provider::{BlockWriter, HashingWriter, ProviderFactory};
+use reth_primitives::{BlockBody, SealedBlock, SnapshotSegment};
+use reth_provider::{providers::SnapshotWriter, HashingWriter, ProviderFactory};
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
@@ -87,7 +87,7 @@ impl Case for BlockchainTestCase {
 
             // Insert initial test state into the provider.
             provider
-                .insert_block(
+                .insert_historical_block(
                     SealedBlock::new(
                         case.genesis_block_header.clone().into(),
                         BlockBody::default(),
@@ -103,10 +103,16 @@ impl Case for BlockchainTestCase {
             let last_block = case.blocks.iter().try_fold(None, |_, block| {
                 let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
                 provider
-                    .insert_block(decoded.clone().try_seal_with_senders().unwrap(), None)
+                    .insert_historical_block(decoded.clone().try_seal_with_senders().unwrap(), None)
                     .map_err(|err| Error::RethError(err.into()))?;
                 Ok::<Option<SealedBlock>, Error>(Some(decoded))
             })?;
+            provider
+                .snapshot_provider()
+                .latest_writer(SnapshotSegment::Headers)
+                .unwrap()
+                .commit()
+                .unwrap();
 
             // Execute the execution stage using the EVM processor factory for the test case
             // network.
