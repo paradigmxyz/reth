@@ -42,8 +42,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use tracing_subscriber::filter::Directive;
-
 // Re-export tracing crates
 pub use tracing;
 pub use tracing_subscriber;
@@ -126,7 +124,7 @@ impl Default for RethTracer {
 pub struct LayerInfo {
     format: LogFormat,
     default_directive: String,
-    filters: Option<Directive>,
+    filters: String,
     color: Option<String>,
 }
 
@@ -138,13 +136,13 @@ impl LayerInfo {
     ///      - `LogFormat::Json` for JSON formatting.
     ///      - `LogFormat::LogFmt` for logfmt (key=value) formatting.
     ///      - `LogFormat::Terminal` for human-readable, terminal-friendly formatting.
+    ///  * `defaut_directive` - Directive for filtering log messages.
     ///  * `filters` - Additional filtering parameters as a string.
-    ///  * `directive` - Directive for filtering log messages.
     ///  * `color` - Optional color configuration for the log messages.
     pub fn new(
         format: LogFormat,
         default_directive: String,
-        filters: Option<Directive>,
+        filters: String,
         color: Option<String>,
     ) -> Self {
         Self { format, default_directive, filters, color }
@@ -160,7 +158,7 @@ impl Default for LayerInfo {
         Self {
             format: LogFormat::Terminal,
             default_directive: LevelFilter::INFO.to_string(),
-            filters: None,
+            filters: "".to_string(),
             color: Some("always".to_string()),
         }
     }
@@ -197,7 +195,7 @@ impl Tracer for RethTracer {
         layers.stdout(
             self.stdout.format,
             self.stdout.default_directive.parse()?,
-            &self.stdout.filters.as_ref().map_or("".to_string(), |d| d.to_string()),
+            &self.stdout.filters,
             self.stdout.color,
         )?;
 
@@ -206,11 +204,7 @@ impl Tracer for RethTracer {
         }
 
         let file_guard = if let Some((config, file_info)) = self.file {
-            Some(layers.file(
-                config.format,
-                &config.filters.as_ref().map_or("".to_string(), |d| d.to_string()),
-                file_info,
-            )?)
+            Some(layers.file(config.format, &config.filters, file_info)?)
         } else {
             None
         };

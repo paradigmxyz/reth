@@ -35,7 +35,7 @@ async fn main() {
         .with_stdout(LayerInfo::new(
             LogFormat::Terminal,
             LevelFilter::INFO.to_string(),
-            None,
+            "".to_string(),
             Some("always".to_string()),
         ))
         .init();

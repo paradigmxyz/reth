@@ -71,11 +71,11 @@ impl Layers {
     pub(crate) fn stdout(
         &mut self,
         format: LogFormat,
-        directive: Directive,
-        filter: &str,
+        default_directive: Directive,
+        filters: &str,
         color: Option<String>,
     ) -> eyre::Result<()> {
-        let filter = build_env_filter(Some(directive), filter)?;
+        let filter = build_env_filter(Some(default_directive), filters)?;
         let layer = format.apply(filter, color, None);
         self.inner.push(layer.boxed());
         Ok(())
