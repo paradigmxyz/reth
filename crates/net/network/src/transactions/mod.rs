@@ -244,9 +244,6 @@ pub struct TransactionsManager<Pool> {
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
     /// TransactionsManager metrics
     metrics: TransactionsManagerMetrics,
-    /// Configures wether or not to handle hashes from an announcement that didn't fit in the
-    /// request. If set to `false`, hashes that don't fit will be dropped.
-    enable_tx_refetch: bool,
 }
 
 impl<Pool: TransactionPool> TransactionsManager<Pool> {
@@ -1050,14 +1047,14 @@ where
                 some_ready = true;
             }
 
-        if this.has_capacity_for_fetching_pending_hashes() {
-            // try drain buffered transactions.
-            this.transaction_fetcher.request_hashes_pending_fetch(
-                &this.peers,
-                &this.metrics,
-                this.transaction_fetcher.search_breadth_budget_find_idle_fallback_peer(),
-            );
-        }
+            if this.has_capacity_for_fetching_pending_hashes() {
+                // try drain buffered transactions.
+                this.transaction_fetcher.request_hashes_pending_fetch(
+                    &this.peers,
+                    &this.metrics,
+                    this.transaction_fetcher.search_breadth_budget_find_idle_fallback_peer(),
+                );
+            }
             // drain commands
             if let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
                 this.on_command(cmd);
@@ -1090,10 +1087,6 @@ where
                 some_ready = true;
             }
 
-            if this.enable_tx_refetch {
-                // try drain buffered transactions
-                this.request_buffered_hashes();
-            }
             this.update_request_metrics();
 
             // Advance all imports

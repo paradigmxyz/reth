@@ -21,6 +21,7 @@ use tracing::{debug, trace};
 use super::{
     AnnouncementFilter, Peer, PooledTransactions, TransactionsManagerMetrics,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE,
+    SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_MEMPOOL_PACKET,
 };
 
 /// How many peers we keep track of for each missing transaction.
@@ -56,7 +57,7 @@ pub(super) const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES: usize = 256;
 /// Soft limit for a [`PooledTransactions`] response if request is filled from hashes pending
 /// fetch.
 const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING: usize =
-    POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE / 2;
+    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE / 2;
 
 /// Soft limit for the number of hashes in a [`GetPooledTransactions`] request is filled from
 /// hashes pending fetch.
@@ -66,8 +67,8 @@ const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES_ON_FETCH_PENDING: usize =
 /// Average byte size of an encoded transaction. Estimated by the standard recommended max
 /// response size divided by the recommended max count of hashes in an [`GetPooledTransactions`]
 /// request.
-const TX_ENCODED_LENGTH_AVERAGE: usize =
-    POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE / NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT;
+const TX_ENCODED_LENGTH_AVERAGE: usize = SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE /
+    SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_MEMPOOL_PACKET;
 
 /// Default budget for finding an idle fallback peer for any hash pending fetch in
 /// [`TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash`], when said search is
@@ -251,7 +252,7 @@ impl TransactionFetcher {
     fn fold_size_of_eth68_response(&self, acc_size_response: &mut usize, size: usize) -> bool {
         let next_acc_size = *acc_size_response + size;
 
-        if next_acc_size <= POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE {
+        if next_acc_size <= SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE {
             // only update accumulated size of tx response if tx will fit in without exceeding
             // soft limit
             *acc_size_response = next_acc_size;
@@ -611,7 +612,6 @@ impl TransactionFetcher {
     /// The request hashes buffer is filled as if it's an eth68 request, i.e. smartly assemble
     /// the request based on expected response size. For any hash missing size metadata, it is
     /// guessed at [`TX_ENCODED_LENGTH_AVERAGE`].
-    ///
 
     /// Loops through hashes pending fetch and does:
     ///
@@ -910,8 +910,8 @@ mod test {
             B256::from_slice(&[5; 32]),
         ];
         let eth68_hashes_sizes = [
-            POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE - 2,
-            POOLED_TRANSACTIONS_RESPONSE_SOFT_LIMIT_BYTE_SIZE, // this one will not fit
+            SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE - 2,
+            SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE, // this one will not fit
             2,
             9, // this one won't
             2,
