@@ -1,5 +1,5 @@
 use reth_interfaces::provider::ProviderResult;
-use reth_node_api::EvmEnvConfig;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{BlockHashOrNumber, Header};
 use revm::primitives::{BlockEnv, CfgEnv};
 
@@ -19,7 +19,7 @@ pub trait EvmEnvProvider: Send + Sync {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig;
+        EvmConfig: ConfigureEvmEnv;
 
     /// Fills the default [CfgEnv] and [BlockEnv] fields with values specific to the given [Header].
     fn env_with_header<EvmConfig>(
@@ -28,7 +28,7 @@ pub trait EvmEnvProvider: Send + Sync {
         evm_config: EvmConfig,
     ) -> ProviderResult<(CfgEnv, BlockEnv)>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         let mut cfg = CfgEnv::default();
         let mut block_env = BlockEnv::default();
@@ -45,7 +45,7 @@ pub trait EvmEnvProvider: Send + Sync {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig;
+        EvmConfig: ConfigureEvmEnv;
 
     /// Fills the [BlockEnv] fields with values specific to the given [BlockHashOrNumber].
     fn fill_block_env_at(
@@ -69,7 +69,7 @@ pub trait EvmEnvProvider: Send + Sync {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig;
+        EvmConfig: ConfigureEvmEnv;
 
     /// Fills the [CfgEnv] fields with values specific to the given [Header].
     fn fill_cfg_env_with_header<EvmConfig>(
@@ -79,5 +79,5 @@ pub trait EvmEnvProvider: Send + Sync {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig;
+        EvmConfig: ConfigureEvmEnv;
 }
