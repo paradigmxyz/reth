@@ -9,7 +9,7 @@ use reth_node_api::EvmEnvConfig;
 use reth_primitives::{
     Address, Block, BlockNumber, BlockWithSenders, Bloom, ChainSpec, GotExpected, Hardfork, Header,
     PruneMode, PruneModes, PruneSegmentError, Receipt, ReceiptWithBloom, Receipts,
-    TransactionSigned, B256, MINIMUM_PRUNING_DISTANCE, U256,
+    TransactionSigned, Withdrawals, B256, MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_provider::{
     BlockExecutor, BlockExecutorStats, ProviderError, PrunableBlockExecutor, StateProvider,
@@ -213,7 +213,7 @@ where
             block.timestamp,
             total_difficulty,
             &block.ommers,
-            block.withdrawals.as_ref(),
+            block.withdrawals.as_ref().map(Withdrawals::as_ref),
         );
 
         // Irregular state change at Ethereum DAO hardfork
