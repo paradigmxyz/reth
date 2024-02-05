@@ -726,4 +726,11 @@ mod tests {
             "holesky state root mismatch"
         );
     }
+
+    #[test]
+    fn check_ordered_trie_root_many() {
+        let items = (0..0x99).map(|i: u32| i.to_be_bytes());
+        let root = ordered_trie_root(items);
+        assert_eq!(root, b256!("77d1b5deb309b84a0cd4d27afc17b13ff51cd172d6c0fea1f37f37a7ebfecf00"));
+    }
 }
