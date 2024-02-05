@@ -80,12 +80,25 @@ impl<'a> SnapshotProviderRW<'a> {
         // Commits offsets and new user_header to disk
         self.writer.commit()?;
 
-        self.reader.update_index(
-            self.writer.user_header().segment(),
-            Some(self.writer.user_header().block_end()),
-        )?;
+        self.reader.update_index(self.writer.user_header().segment(), self.get_max_block())?;
 
         Ok(())
+    }
+
+    /// Get the maximum block of the current writer if it exists.
+    fn get_max_block(&mut self) -> Option<BlockNumber> {
+        let user_header = self.writer.user_header();
+        let mut max_block = Some(user_header.block_end());
+
+        if matches!(self.writer.user_header().segment(), SnapshotSegment::Headers) {
+            // This can be a scenario where we pruned all blocks from the static file, including the
+            // genesis block.
+            if user_header.block_end() == 0 && self.writer.rows() == 0 {
+                max_block = None
+            }
+        };
+
+        max_block
     }
 
     /// Allows to increment the [`SegmentHeader`] end block. It will commit the current snapshot,
@@ -156,6 +169,8 @@ impl<'a> SnapshotProviderRW<'a> {
                 } else {
                     // Update `SegmentHeader`
                     self.writer.user_header_mut().prune(num_rows);
+                    self.writer.prune_rows(len as usize)?;
+                    break
                 }
 
                 num_rows -= len;
