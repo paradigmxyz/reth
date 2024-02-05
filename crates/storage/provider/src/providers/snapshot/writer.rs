@@ -86,7 +86,7 @@ impl<'a> SnapshotProviderRW<'a> {
     }
 
     /// Get the maximum block of the current writer if it exists.
-    fn get_max_block(&mut self) -> Option<BlockNumber> {
+    fn get_max_block(&self) -> Option<BlockNumber> {
         let user_header = self.writer.user_header();
         let mut max_block = Some(user_header.block_end());
 
