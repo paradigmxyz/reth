@@ -19,7 +19,6 @@ pub mod storage_sharded_key;
 pub use accounts::*;
 pub use blocks::*;
 pub use sharded_key::ShardedKey;
-
 /// Macro that implements [`Encode`] and [`Decode`] for uint types.
 macro_rules! impl_uints {
     ($($name:tt),+) => {

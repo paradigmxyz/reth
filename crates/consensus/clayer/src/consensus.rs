@@ -10,6 +10,8 @@ mod pbft_error;
 pub use pbft_error::*;
 mod state;
 use reqwest::header;
+use reth_db::models::consensus::ConsensusBytes;
+use reth_provider::{ConsensusNumberReader, ConsensusNumberWriter};
 use reth_rpc_types::{engine::PayloadId, ExecutionPayloadV1, ExecutionPayloadV2, PeerId};
 pub use state::*;
 mod test_helpers;
@@ -169,16 +171,20 @@ impl ClayerConsensusMessagingAgentInner {
     }
 }
 
-pub struct ClayerConsensusEngine {
+pub struct ClayerConsensusEngine<CDB> {
     /// Log of messages this node has received and accepted
     pub msg_log: PbftLog,
     service: ApiService,
     agent: ClayerConsensusMessagingAgent,
+    db: Arc<CDB>,
 }
 
-impl ClayerConsensusEngine {
-    pub fn new(agent: ClayerConsensusMessagingAgent, service: ApiService) -> Self {
-        Self { msg_log: PbftLog::default(), service, agent }
+impl<CDB> ClayerConsensusEngine<CDB>
+where
+    CDB: ConsensusNumberReader + ConsensusNumberWriter + 'static,
+{
+    pub fn new(agent: ClayerConsensusMessagingAgent, service: ApiService, db: Arc<CDB>) -> Self {
+        Self { msg_log: PbftLog::default(), service, agent, db }
     }
 
     pub fn initialize(&mut self, block: ClayerBlock, config: &PbftConfig, state: &mut PbftState) {
@@ -816,6 +822,9 @@ impl ClayerConsensusEngine {
         // Add the currently unvalidated block to the log
         self.msg_log.add_unvalidated_block(block.clone());
 
+        if block.payload_id == B64::ZERO {
+            return Err(PbftError::InternalError(format!("BlockNew payload_id is zero")));
+        }
         // Have the validator check the block
         self.service
             .check_blocks(
@@ -1030,6 +1039,12 @@ impl ClayerConsensusEngine {
         state.phase = PbftPhase::PrePreparing;
         state.chain_head = block_id.clone();
 
+        // create the seal
+        let seal = self.build_seal(state).map_err(|err| {
+            PbftError::InternalError(format!("Failed to build requested seal due to: {}", err))
+        })?;
+        self.save_seal(&seal)?;
+
         // If node(s) are waiting for a seal to commit the last block, send it now
         let requesters = self
             .msg_log
@@ -1039,7 +1054,7 @@ impl ClayerConsensusEngine {
             .collect::<Vec<_>>();
 
         for req in requesters {
-            self.send_seal_response(state, &req).unwrap_or_else(|err| {
+            self.send_seal_response_v2(state, &req, &seal).unwrap_or_else(|err| {
                 error!(target: "consensus::cl","Failed to send seal response due to: {:?}", err);
             });
         }
@@ -1353,7 +1368,7 @@ impl ClayerConsensusEngine {
             .iter()
             .map(|&p| format!("{}", p.get_pbft().info.signer_id))
             .collect::<Vec<_>>();
-        info!(target: "consensus::cl","Seal created: {} {}", seal,vote_ids.join(","));
+        info!(target: "consensus::cl","Seal created: {} vote_ids [{}]", seal,vote_ids.join(" ,"));
 
         Ok(seal)
     }
@@ -1883,6 +1898,80 @@ impl ClayerConsensusEngine {
         Ok(())
     }
 
+    /// Build a consensus seal for the last block this node committed and send it to the node that
+    /// requested the seal (the `recipient`)
+    #[allow(clippy::ptr_arg)]
+    fn send_seal_response_v2(
+        &mut self,
+        state: &PbftState,
+        recipient: &PeerId,
+        seal: &PbftSeal,
+    ) -> Result<(), PbftError> {
+        let mut msg_out = vec![];
+        seal.encode(&mut msg_out);
+        let message_bytes = reth_primitives::Bytes::copy_from_slice(msg_out.as_slice());
+
+        //create header
+        let header = ClayerConsensusMessageHeader {
+            message_type: seal.info.ptype,
+            content_hash: keccak256(&message_bytes),
+            signer_id: state.id.clone(),
+        };
+        let mut header_out = vec![];
+        header.encode(&mut header_out);
+        let header_bytes = reth_primitives::Bytes::copy_from_slice(header_out.as_slice());
+
+        //sign header
+        let signature_hash = keccak256(&header_bytes);
+        let signature =
+            sign_message(B256::from_slice(&state.kp.secret_bytes()[..]), signature_hash).map_err(
+                |err| PbftError::SigningError(format!("signing header error: {}", err.to_string())),
+            )?;
+
+        let clayer_msg = ClayerConsensusMessage {
+            header_bytes,
+            header_signature: ClayerSignature(signature),
+            message_bytes,
+        };
+        let mut msg_out = vec![];
+        clayer_msg.encode(&mut msg_out);
+        let msg_bytes = reth_primitives::Bytes::copy_from_slice(msg_out.as_slice());
+
+        // Send the seal to the requester
+        self.agent.broadcast_consensus(vec![recipient.clone()], msg_bytes);
+
+        Ok(())
+    }
+
+    fn save_seal(&mut self, seal: &PbftSeal) -> Result<(), PbftError> {
+        let mut msg_out = vec![];
+        seal.encode(&mut msg_out);
+        self.db
+            .save_consensus_content(seal.block_id, ConsensusBytes { content: msg_out })
+            .map_err(|err| {
+                PbftError::InternalError(format!("Failed to save seal due to: {}", err))
+            })?;
+        Ok(())
+    }
+
+    pub fn load_seal(&self, block_id: B256) -> Result<Option<PbftSeal>, PbftError> {
+        let result = self.db.consensus_content(block_id).map_err(|err| {
+            PbftError::InternalError(format!("Failed to load seal due to: {}", err))
+        })?;
+        match result {
+            Some(content) => {
+                let seal = PbftSeal::decode(&mut content.content.as_slice()).map_err(|err| {
+                    PbftError::SerializationError(
+                        "Error parsing seal for verification".into(),
+                        err.to_string(),
+                    )
+                })?;
+                Ok(Some(seal))
+            }
+            None => Ok(None),
+        }
+    }
+
     // ---------- Miscellaneous methods ----------
 
     /// Start a view change when this node suspects that the primary is faulty
@@ -2003,6 +2092,7 @@ fn execution_payload_to_payload(payload: &ClayerExecutionPayload) -> ExecutionPa
     }
 }
 
+/// for initialize, broadcast_bootstrap_commit
 pub fn clayer_block_from_genesis(genesis_header: &SealedHeader) -> ClayerBlock {
     let block = ClayerExecutionPayload {
         parent_hash: genesis_header.parent_hash,
@@ -2039,6 +2129,44 @@ pub fn clayer_block_from_genesis(genesis_header: &SealedHeader) -> ClayerBlock {
         seal_bytes: reth_primitives::Bytes::default(),
         payload_id: B64::ZERO,
     }
+}
+
+/// for initialize, broadcast_bootstrap_commit
+pub fn clayer_block_from_seal(header: &SealedHeader, seal: PbftSeal) -> ClayerBlock {
+    let block = ClayerExecutionPayload {
+        parent_hash: header.parent_hash,
+        fee_recipient: reth_primitives::Address::ZERO,
+        state_root: header.state_root,
+        receipts_root: header.receipts_root,
+        logs_bloom: header.logs_bloom,
+        prev_randao: B256::ZERO,
+        block_number: header.number,
+        gas_limit: header.gas_limit,
+        gas_used: header.gas_used,
+        timestamp: header.timestamp,
+        extra_data: header.extra_data.clone(),
+        base_fee_per_gas: if let Some(base_fee_per_gas) = header.base_fee_per_gas {
+            reth_primitives::U256::from(base_fee_per_gas)
+        } else {
+            reth_primitives::U256::from(0)
+        },
+        block_hash: header.hash,
+        transactions: Vec::new(),
+        withdrawals: Vec::new(),
+        block_value: reth_primitives::U256::from(0),
+    };
+    let info = PbftMessageInfo {
+        ptype: PbftMessageType::BlockNew as u8,
+        view: seal.info.view,
+        seq_num: seal.info.seq_num,
+        signer_id: seal.info.signer_id,
+    };
+
+    let mut msg_out = vec![];
+    seal.encode(&mut msg_out);
+    let message_bytes = reth_primitives::Bytes::copy_from_slice(msg_out.as_slice());
+
+    ClayerBlock { info, block, seal_bytes: message_bytes, payload_id: B64::ZERO }
 }
 
 #[cfg(test)]

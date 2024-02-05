@@ -1,6 +1,6 @@
 use crate::consensus::{
-    clayer_block_from_genesis, ClayerConsensusMessagingAgent, PbftConfig, PbftError, PbftMode,
-    PbftState,
+    clayer_block_from_genesis, clayer_block_from_seal, ClayerConsensusMessagingAgent, PbftConfig,
+    PbftError, PbftMode, PbftState,
 };
 use crate::engine_api::http_blocking::HttpJsonRpcSync;
 use crate::engine_api::{
@@ -12,7 +12,6 @@ use crate::{create_sync_api, AuthHttpConfig};
 use alloy_primitives::B256;
 use futures_util::{future::BoxFuture, FutureExt};
 use rand::Rng;
-use reth_db::models::consensus::ConsensusBytes;
 use reth_interfaces::clayer::{ClayerConsensusEvent, ClayerConsensusMessageAgentTrait};
 use reth_network::NetworkHandle;
 use reth_primitives::{hex, SealedHeader, TransactionSigned};
@@ -127,77 +126,41 @@ where
         let pbft_state = self.pbft_state.clone();
         let pbft_config = self.pbft_config.clone();
 
-        let cdb: Arc<CDB> = self.storages.clone();
+        let cdb = self.storages.clone();
 
         let startup_latest_header = self.startup_latest_header.clone();
         let thread_join_handle = std::thread::spawn(move || {
             let state = &mut *pbft_state.write();
 
-            let mut rng = rand::thread_rng();
-            let cn = rng.gen();
-            let hash = B256::with_last_byte(cn);
-
-            match cdb.save_consensus_content(hash, ConsensusBytes { content: vec![cn] }) {
-                Ok(o) => {
-                    info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: {}-{}", cn, hash, cn);
-                    if o {
-                        info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: ture", cn);
-                    } else {
-                        info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: false", cn);
-                    }
-                }
-                Err(_e) => {
-                    info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: error!", cn)
-                }
-            }
-
-            if cdb.consensus_content(hash).is_ok() {
-                if let Some(num) = cdb.consensus_content(hash).unwrap() {
-                    info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages get{}: {}-{:?}",cn, hash, num);
-                } else {
-                    info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages get{}: NOne", cn);
-                }
-            } else {
-                info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ received get{}: error!", cn);
-            }
-
-            // match cdb.save_consensus_number(hash, cn as u64) {
-            //     Ok(o) => {
-            //         info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: {}-{}", cn, hash, cn);
-            //         if o {
-            //             info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: ture", cn);
-            //         } else {
-            //             info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: false", cn);
-            //         }
-            //     }
-            //     Err(_e) => {
-            //         info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages set{}: error!", cn)
-            //     }
-            // }
-
-            // if cdb.consensus_number(hash).is_ok() {
-            //     if let Some(num) = cdb.consensus_number(hash).unwrap() {
-            //         info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages get{}: {}-{}",cn, hash, num);
-            //     } else {
-            //         info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ storages get{}: NOne", cn);
-            //     }
-            // } else {
-            //     info!(target:"consensus::cl","trace-consensus ~~~~~~~~~ received get{}: error!", cn);
-            // }
-
             let api = create_sync_api(&auth_config);
-            let mut consensus_engine =
-                ClayerConsensusEngine::new(consensus_agent.clone(), ApiService::new(Arc::new(api)));
+            let mut consensus_engine = ClayerConsensusEngine::new(
+                consensus_agent.clone(),
+                ApiService::new(Arc::new(api)),
+                cdb,
+            );
 
             // let receiver = consensus_agent.receiver();
             let mut block_publishing_ticker =
                 timing::SyncTicker::new(pbft_config.block_publishing_delay);
 
-            consensus_engine.initialize(
-                clayer_block_from_genesis(&startup_latest_header),
-                &pbft_config,
-                state,
-            );
+            let seal = match consensus_engine.load_seal(startup_latest_header.hash) {
+                Ok(seal) => seal,
+                Err(e) => {
+                    log_any_error(Err(e));
+                    panic!("Failed to load seal");
+                }
+            };
+            let block = if startup_latest_header.number == 0 {
+                clayer_block_from_genesis(&startup_latest_header)
+            } else {
+                if let Some(seal) = seal {
+                    clayer_block_from_seal(&startup_latest_header, seal)
+                } else {
+                    error!(target: "consensus::cl","block {} no seal",startup_latest_header.number);
+                    panic!("block {} no seal", startup_latest_header.number);
+                }
+            };
+            consensus_engine.initialize(block, &pbft_config, state);
 
             consensus_engine.start_idle_timeout(state);
 

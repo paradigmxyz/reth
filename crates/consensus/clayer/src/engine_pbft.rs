@@ -1,6 +1,7 @@
 use alloy_primitives::B256;
 use alloy_rlp::Decodable;
 use reth_eth_wire::{ClayerBlock, ClayerConsensusMessage, ClayerConsensusMessageHeader};
+use reth_provider::{ConsensusNumberReader, ConsensusNumberWriter};
 use reth_rpc_types::PeerId;
 use tracing::info;
 
@@ -48,11 +49,14 @@ fn parse_consensus_message_header(
     })
 }
 
-pub fn handle_consensus_event(
-    consensus: &mut ClayerConsensusEngine,
+pub fn handle_consensus_event<CDB>(
+    consensus: &mut ClayerConsensusEngine<CDB>,
     incoming_event: ConsensusEvent,
     state: &mut PbftState,
-) -> Result<bool, PbftError> {
+) -> Result<bool, PbftError>
+where
+    CDB: ConsensusNumberReader + ConsensusNumberWriter + 'static,
+{
     match incoming_event {
         // ConsensusEvent::BlockNew(block) => consensus.on_block_new(block, state)?,
         // ConsensusEvent::BlockValid(block_id) => consensus.on_block_valid(block_id, state)?,
