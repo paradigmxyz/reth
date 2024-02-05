@@ -1245,10 +1245,11 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
             if !transaction.is_deposit() {
                 op_fields.l1_fee = optimism_tx_meta.l1_fee;
-                op_fields.l1_gas_used =
-                    optimism_tx_meta.l1_data_gas.map(|dg| dg + l1_block_info.l1_fee_overhead);
+                op_fields.l1_gas_used = optimism_tx_meta
+                    .l1_data_gas
+                    .map(|dg| dg + l1_block_info.l1_fee_overhead.unwrap_or_default());
                 op_fields.l1_fee_scalar =
-                    Some(l1_block_info.l1_fee_scalar.div(U256::from(1_000_000)));
+                    Some(l1_block_info.l1_base_fee_scalar.div(U256::from(1_000_000)));
                 op_fields.l1_gas_price = Some(l1_block_info.l1_base_fee);
             }
         }

@@ -86,8 +86,6 @@ pub fn parse_l1_info_tx(data: &[u8]) -> Result<L1BlockInfo, BlockExecutionError>
         ),
     )?;
 
-    // TODO (optimism): fix thisas other filed need to be parsed and some
-    // local variables need to be renamed.
     let mut l1block = L1BlockInfo::default();
     l1block.l1_base_fee = l1_base_fee;
     l1block.l1_fee_overhead = Some(l1_fee_overhead);
@@ -236,6 +234,6 @@ mod test_l1_fee {
         let l1_info: L1BlockInfo = super::extract_l1_info(&mock_block).unwrap();
         assert_eq!(l1_info.l1_base_fee, U256::from(652_114));
         assert_eq!(l1_info.l1_fee_overhead, Some(U256::from(2100)));
-        assert_eq!(l1_info.l1_fee_scalar, U256::from(1_000_000));
+        assert_eq!(l1_info.l1_base_fee_scalar, U256::from(1_000_000));
     }
 }

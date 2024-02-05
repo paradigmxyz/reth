@@ -117,7 +117,7 @@ impl FillableTransaction for TransactionSigned {
 #[inline]
 pub(crate) fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Address> {
     let spec = PrecompileSpecId::from_spec_id(spec_id);
-    Precompiles::new(spec).addresses().into_iter().copied().map(Address::from)
+    Precompiles::new(spec).addresses().copied().map(Address::from)
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.
@@ -208,7 +208,7 @@ where
     for tx in transactions.into_iter() {
         if tx.hash() == target_tx_hash {
             // reached the target transaction
-            break
+            break;
         }
 
         tx.try_fill_tx_env(&mut evm.context.evm.env.tx)?;
@@ -309,7 +309,7 @@ pub(crate) fn build_call_evm_env(
 pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthResult<TxEnv> {
     // Ensure that if versioned hashes are set, they're not empty
     if request.has_empty_blob_hashes() {
-        return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
+        return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into());
     }
 
     let CallRequest {
@@ -457,7 +457,7 @@ impl CallFees {
                     return Err(
                         // `max_priority_fee_per_gas` is greater than the `max_fee_per_gas`
                         RpcInvalidTransactionError::TipAboveFeeCap.into(),
-                    )
+                    );
                 }
             }
             Ok(())
@@ -494,7 +494,7 @@ impl CallFees {
                 // Ensure blob_hashes are present
                 if !has_blob_hashes {
                     // Blob transaction but no blob hashes
-                    return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
+                    return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into());
                 }
 
                 Ok(CallFees {
