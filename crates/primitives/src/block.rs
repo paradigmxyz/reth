@@ -349,7 +349,7 @@ impl SealedBlock {
         Ok(())
     }
 
-    /// Returns a vector of raw formated transactions.
+    /// Returns a vector of transactions RLP encoded with [TransactionSigned::encode_enveloped].
     pub fn raw_transactions(&self) -> Vec<Bytes> {
         self.body
             .iter()
