@@ -211,9 +211,9 @@ impl TransactionFetcher {
                 break idle_peer.copied()
             }
 
-            if let Some(bud) = budget {
-                budget = Some(bud.saturating_sub(1));
-                if budget == Some(0) {
+            if let Some(ref mut bud) = budget {
+                *bud = bud.saturating_sub(1);
+                if *bud == 0 {
                     return None
                 }
             }
@@ -250,7 +250,7 @@ impl TransactionFetcher {
     /// Returns left over hashes.
     ///
     /// Loops through hashes passed as parameter and checks if a hash fits in the expected
-    /// response. If no, it's add to surplus hashes. If yes, it's add to hashes to request and
+    /// response. If no, it's added to surplus hashes. If yes, it's added to hashes to the request and
     /// expected response size is accumulated.
     pub(super) fn pack_hashes_eth68(
         &mut self,
