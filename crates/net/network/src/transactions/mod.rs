@@ -37,8 +37,8 @@ use crate::{
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
     EthVersion, GetPooledTransactions, HandleAnnouncement, NewPooledTransactionHashes,
-    NewPooledTransactionHashes66, NewPooledTransactionHashes68, PooledTransactions, Transactions,
-    ValidTxHashes,
+    NewPooledTransactionHashes66, NewPooledTransactionHashes68, PooledTransactions,
+    RequestTxHashes, Transactions,
 };
 use reth_interfaces::{
     p2p::error::{RequestError, RequestResult},
@@ -648,6 +648,11 @@ where
             }
         };
 
+        if valid_announcement_data.is_empty() {
+            // no valid announcement data
+            return
+        }
+
         // 3. filter out already seen unknown hashes
         //
         // seen hashes are already in the tx fetcher, pending fetch.
@@ -676,27 +681,36 @@ where
         // only send request for hashes to idle peer, otherwise buffer hashes storing peer as
         // fallback
         if !self.transaction_fetcher.is_idle(&peer_id) {
-            let hashes = valid_announcement_data.into_keys().collect::<Vec<_>>();
-            self.transaction_fetcher.buffer_hashes(hashes, Some(peer_id));
-          
+            // load message version before announcement data is destructed in packing
+            let msg_version = valid_announcement_data.msg_version();
+            let (hashes, _version) = valid_announcement_data.into_request_hashes();
+
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                hashes=?hashes,
-                msg_version=%valid_announcement_data.msg_version(),
-                "buffered hashes announced by busy peer"
+                hashes=?*hashes,
+                msg_version=%msg_version,
+                "buffering hashes announced by busy peer"
             );
+
+            self.transaction_fetcher.buffer_hashes(hashes, Some(peer_id));
+
             return
         }
+
+        // load message version before announcement data is destructed in packing
+        let msg_version = valid_announcement_data.msg_version();
         // demand recommended soft limit on response, however the peer may enforce an arbitrary
         // limit on the response (2MB)
-        let mut hashes_to_request = ValidTxHashes::new(Vec::with_capacity(valid_announcement_data.len(), valid_announcement_data.version());
-        let surplus_hashes = self.transaction_fetcher.pack_hashes(&mut hashes_to_request, valid_announcement_data);
-          
+        let mut hashes_to_request = RequestTxHashes::with_capacity(valid_announcement_data.len());
+        let surplus_hashes =
+            self.transaction_fetcher.pack_hashes(&mut hashes_to_request, valid_announcement_data);
+        hashes_to_request.shrink_to_fit();
+
         if !surplus_hashes.is_empty() {
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 surplus_hashes=?*surplus_hashes,
-                msg_version=%surplus_hashes.msg_version(),
+                msg_version=%msg_version,
                 "some hashes in announcement from peer didn't fit in `GetPooledTransactions` request, buffering surplus hashes"
             );
 
@@ -705,8 +719,8 @@ where
 
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            hashes=?*hashes,
-            msg_version=%hashes.msg_version(),
+            hashes=?*hashes_to_request,
+            msg_version=%msg_version,
             "sending hashes in `GetPooledTransactions` request to peer's session"
         );
 
@@ -720,10 +734,12 @@ where
                 metrics.egress_peer_channel_full.increment(1)
             })
         {
+            let conn_eth_version = peer.version;
+
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 failed_to_request_hashes=?*failed_to_request_hashes,
-                msg_version=%failed_to_request_hashes.msg_version(),
+                conn_eth_version=%conn_eth_version,
                 "sending `GetPooledTransactions` request to peer's session failed, buffering hashes"
             );
             self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
@@ -735,46 +751,6 @@ where
             trace!(target: "net::tx", num_hashes=%num_already_seen, ?peer_id, client=?peer.client_version, "Peer sent already seen hashes");
             self.report_already_seen(peer_id);
         }
-    }
-
-    /// Returns any idle peer for any buffered unknown hash, and writes that hash to the request's
-    /// hashes buffer that is passed as parameter.
-    ///
-    /// Loops through the fallback peers of each buffered hashes, until an idle fallback peer is
-    /// found. As a side effect, dead fallback peers are filtered out for visited hashes.
-    fn pop_any_idle_peer(&mut self, hashes: &mut Vec<TxHash>) -> Option<PeerId> {
-        let mut ended_sessions = vec![];
-        let mut buffered_hashes_iter = self.transaction_fetcher.buffered_hashes.iter();
-        let peers = &self.peers;
-
-        let idle_peer = loop {
-            let Some(&hash) = buffered_hashes_iter.next() else { break None };
-
-            let idle_peer =
-                self.transaction_fetcher.get_idle_peer_for(hash, &mut ended_sessions, |peer_id| {
-                    peers.contains_key(&peer_id)
-                });
-            for peer_id in ended_sessions.drain(..) {
-                let (_, peers) = self.transaction_fetcher.unknown_hashes.peek_mut(&hash)?;
-                _ = peers.remove(&peer_id);
-            }
-            if idle_peer.is_some() {
-                hashes.push(hash);
-                break idle_peer
-            }
-        };
-
-        let peer_id = &idle_peer?;
-        let hash = hashes.first()?;
-
-        let (_, peers) = self.transaction_fetcher.unknown_hashes.get(hash)?;
-        // pop peer from fallback peers
-        _ = peers.remove(peer_id);
-        // pop hash that is loaded in request buffer from buffered hashes
-        drop(buffered_hashes_iter);
-        _ = self.transaction_fetcher.buffered_hashes.remove(hash);
-
-        idle_peer
     }
 
     /// Handles dedicated transaction events related to the `eth` protocol.
@@ -1211,7 +1187,7 @@ impl FullTransactionsBuilder {
     /// maximum target byte size. The limit is soft, meaning if one single transaction goes over
     /// the limit, it will be broadcasted in its own [`Transactions`] message. The same pattern is
     /// followed in filling a [`GetPooledTransactions`] request in
-    /// [`TransactionFetcher::fill_eth68_request_for_peer`].
+    /// [`TransactionFetcher::fill_request_from_hashes_pending_fetch`].
     fn push(&mut self, transaction: &PropagateTransaction) {
         let new_size = self.total_size + transaction.size;
         if new_size > SOFT_LIMIT_BYTE_SIZE_FULL_TRANSACTIONS_MEMPOOL_MESSAGE && self.total_size > 0
