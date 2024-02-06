@@ -315,8 +315,6 @@ impl TransactionFetcher {
         peer_id: PeerId,
         is_session_active: impl Fn(PeerId) -> bool,
     ) {
-        #[cfg(debug_assertions)]
-        let mut previously_unseen_hashes = Vec::with_capacity(new_announced_hashes.len() / 4);
         let msg_version = new_announced_hashes.msg_version();
 
         // filter out inflight hashes, and register the peer as fallback for all inflight hashes
@@ -345,8 +343,6 @@ impl TransactionFetcher {
             }
 
             // vacant entry
-            #[cfg(debug_assertions)]
-            previously_unseen_hashes.push(hash);
 
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
@@ -376,8 +372,6 @@ impl TransactionFetcher {
 
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            previously_unseen_hashes_len=previously_unseen_hashes.len(),
-            previously_unseen_hashes=?previously_unseen_hashes,
             msg_version=%msg_version,
             "received previously unseen hashes in announcement from peer"
         );
