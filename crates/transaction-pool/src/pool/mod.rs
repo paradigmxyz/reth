@@ -82,6 +82,7 @@ use crate::{
 };
 use best::BestTransactions;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
+use reth_eth_wire::HandleAnnouncement;
 use reth_primitives::{
     Address, BlobTransaction, BlobTransactionSidecar, IntoRecoveredTransaction,
     PooledTransactionsElement, TransactionSigned, TxHash, B256,
@@ -95,9 +96,6 @@ use std::{
 use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
 mod events;
-pub use events::{FullTransactionEvent, TransactionEvent};
-
-mod listener;
 use crate::{
     blobstore::BlobStore,
     metrics::BlobStoreMetrics,
@@ -106,13 +104,16 @@ use crate::{
     validate::ValidTransaction,
 };
 use alloy_rlp::Encodable;
+pub use best::BestTransactionFilter;
+pub use blob::{blob_tx_priority, fee_delta};
+pub use events::{FullTransactionEvent, TransactionEvent};
 pub use listener::{AllTransactionsEvents, TransactionEvents};
 pub use parked::{BasefeeOrd, ParkedOrd, ParkedPool};
 pub use pending::PendingPool;
 
 mod best;
 mod blob;
-pub use blob::{blob_tx_priority, fee_delta};
+mod listener;
 mod parked;
 pub(crate) mod pending;
 pub(crate) mod size;
@@ -176,7 +177,7 @@ where
     }
 
     /// Returns the configured blob store.
-    pub(crate) fn blob_store(&self) -> &S {
+    pub(crate) const fn blob_store(&self) -> &S {
         &self.blob_store
     }
 
@@ -221,12 +222,12 @@ where
     }
 
     /// Get the config the pool was configured with.
-    pub fn config(&self) -> &PoolConfig {
+    pub const fn config(&self) -> &PoolConfig {
         &self.config
     }
 
     /// Get the validator reference.
-    pub fn validator(&self) -> &V {
+    pub const fn validator(&self) -> &V {
         &self.validator
     }
 
@@ -497,8 +498,10 @@ where
             return added
         }
 
-        let mut listener = self.event_listener.write();
-        discarded.iter().for_each(|tx| listener.discarded(tx));
+        {
+            let mut listener = self.event_listener.write();
+            discarded.iter().for_each(|tx| listener.discarded(tx));
+        }
 
         // It may happen that a newly added transaction is immediately discarded, so we need to
         // adjust the result here
@@ -621,16 +624,6 @@ where
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block with
-    /// the given base fee.
-    pub(crate) fn best_transactions_with_base_fee(
-        &self,
-        base_fee: u64,
-    ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
-    {
-        self.get_pool_data().best_transactions_with_base_fee(base_fee)
-    }
-
-    /// Returns an iterator that yields transactions that are ready to be included in the block with
     /// the given base fee and optional blob fee attributes.
     pub(crate) fn best_transactions_with_attributes(
         &self,
@@ -677,12 +670,15 @@ where
     }
 
     /// Removes all transactions that are present in the pool.
-    pub(crate) fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {
-        if hashes.is_empty() {
+    pub(crate) fn retain_unknown<A: HandleAnnouncement>(&self, announcement: &mut A)
+    where
+        A: HandleAnnouncement,
+    {
+        if announcement.is_empty() {
             return
         }
         let pool = self.get_pool_data();
-        hashes.retain(|tx| !pool.contains(tx))
+        announcement.retain_by_hash(|tx| !pool.contains(&tx))
     }
 
     /// Returns the transaction by hash.
@@ -744,8 +740,17 @@ where
     }
 
     /// Enforces the size limits of pool and returns the discarded transactions if violated.
+    ///
+    /// If some of the transactions are blob transactions, they are also removed from the blob
+    /// store.
     pub(crate) fn discard_worst(&self) -> HashSet<TxHash> {
-        self.pool.write().discard_worst().into_iter().map(|tx| *tx.hash()).collect()
+        let discarded = self.pool.write().discard_worst();
+
+        // delete any blobs associated with discarded blob transactions
+        self.delete_discarded_blobs(discarded.iter());
+
+        // then collect into tx hashes
+        discarded.into_iter().map(|tx| *tx.hash()).collect()
     }
 
     /// Inserts a blob transaction into the blob store
@@ -986,7 +991,7 @@ pub enum AddedTransaction<T: PoolTransaction> {
 
 impl<T: PoolTransaction> AddedTransaction<T> {
     /// Returns whether the transaction has been added to the pending pool.
-    pub(crate) fn as_pending(&self) -> Option<&AddedPendingTransaction<T>> {
+    pub(crate) const fn as_pending(&self) -> Option<&AddedPendingTransaction<T>> {
         match self {
             AddedTransaction::Pending(tx) => Some(tx),
             _ => None,
@@ -994,7 +999,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the replaced transaction if there was one
-    pub(crate) fn replaced(&self) -> Option<&Arc<ValidPoolTransaction<T>>> {
+    pub(crate) const fn replaced(&self) -> Option<&Arc<ValidPoolTransaction<T>>> {
         match self {
             AddedTransaction::Pending(tx) => tx.replaced.as_ref(),
             AddedTransaction::Parked { replaced, .. } => replaced.as_ref(),
@@ -1036,7 +1041,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
 
     /// Returns the subpool this transaction was added to
     #[cfg(test)]
-    pub(crate) fn subpool(&self) -> SubPool {
+    pub(crate) const fn subpool(&self) -> SubPool {
         match self {
             AddedTransaction::Pending(_) => SubPool::Pending,
             AddedTransaction::Parked { subpool, .. } => *subpool,

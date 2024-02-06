@@ -12,9 +12,10 @@ use reth_db::{
 };
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
-    trie::AccountProof, Account, Address, BlockNumber, Bytecode, StorageKey, StorageValue, B256,
+    constants::EPOCH_SLOTS, trie::AccountProof, Account, Address, BlockNumber, Bytecode,
+    StorageKey, StorageValue, B256,
 };
-use reth_trie::updates::TrieUpdates;
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 
 /// State provider for a given block number which takes a tx reference.
 ///
@@ -93,6 +94,31 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             |key| key.address == address && key.sharded_key.key == storage_key,
             self.lowest_available_blocks.storage_history_block_number,
         )
+    }
+
+    /// Retrieve revert hashed state for this history provider.
+    fn revert_state(&self) -> ProviderResult<HashedPostState> {
+        if !self.lowest_available_blocks.is_account_history_available(self.block_number) ||
+            !self.lowest_available_blocks.is_storage_history_available(self.block_number)
+        {
+            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+        }
+
+        let (tip, _) = self
+            .tx
+            .cursor_read::<tables::CanonicalHeaders>()?
+            .last()?
+            .ok_or(ProviderError::BestBlockNotFound)?;
+
+        if tip.saturating_sub(self.block_number) > EPOCH_SLOTS {
+            tracing::warn!(
+                target: "provider::historical_sp",
+                target = self.block_number,
+                "Attempt to calculate state root for an old block might result in OOM, tread carefully"
+            );
+        }
+
+        Ok(HashedPostState::from_revert_range(self.tx, self.block_number..=tip)?)
     }
 
     fn history_info<T, K>(
@@ -199,15 +225,21 @@ impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
 }
 
 impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
-    fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
-        Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
+    fn state_root(&self, state: &BundleStateWithReceipts) -> ProviderResult<B256> {
+        let mut revert_state = self.revert_state()?;
+        revert_state.extend(state.hash_state_slow());
+        revert_state.state_root(self.tx).map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn state_root_with_updates(
         &self,
-        _bundle_state: &BundleStateWithReceipts,
+        state: &BundleStateWithReceipts,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
+        let mut revert_state = self.revert_state()?;
+        revert_state.extend(state.hash_state_slow());
+        revert_state
+            .state_root_with_updates(self.tx)
+            .map_err(|err| ProviderError::Database(err.into()))
     }
 }
 

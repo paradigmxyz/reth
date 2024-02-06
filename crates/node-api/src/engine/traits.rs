@@ -2,22 +2,20 @@ use crate::{validate_version_specific_fields, AttributesValidationError, EngineA
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge,
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId},
-    Address, ChainSpec, Header, SealedBlock, B256, U256,
+    Address, ChainSpec, Header, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, OptimismPayloadAttributes,
-        PayloadAttributes as EthPayloadAttributes, PayloadId, Withdrawal,
+        PayloadAttributes as EthPayloadAttributes, PayloadId,
     },
+    withdrawal::Withdrawal,
     ExecutionPayloadV1,
 };
 
 /// Represents a built payload type that contains a built [SealedBlock] and can be converted into
 /// engine API execution payloads.
 pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
-    /// Initializes the payload with the given initial block.
-    fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self;
-
     /// Returns the built block (sealed)
     fn block(&self) -> &SealedBlock;
 
@@ -74,7 +72,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     fn prev_randao(&self) -> B256;
 
     /// Returns the withdrawals for the running payload job.
-    fn withdrawals(&self) -> &Vec<reth_primitives::Withdrawal>;
+    fn withdrawals(&self) -> &Withdrawals;
 
     /// Returns the configured [CfgEnv] and [BlockEnv] for the targeted payload (that has the
     /// `parent` as its parent).

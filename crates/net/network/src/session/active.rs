@@ -160,7 +160,7 @@ impl ActiveSession {
                             // request was already timed out internally
                             self.update_request_timeout(req.timestamp, Instant::now());
                         }
-                    };
+                    }
                 } else {
                     // we received a response to a request we never sent
                     self.on_bad_message();

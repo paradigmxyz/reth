@@ -18,7 +18,9 @@ mod otterscan;
 mod peer;
 pub mod relay;
 mod rpc;
-pub mod serde_helpers;
+
+// re-export for convenience
+pub use alloy_rpc_types::serde_helpers;
 
 // Ethereum specific rpc types coming from alloy.
 pub use alloy_rpc_types::*;
@@ -32,9 +34,7 @@ pub use eth::{
     engine::{
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
     },
-    transaction::{
-        self, BlobTransactionSidecar, TransactionKind, TransactionRequest, TypedTransactionRequest,
-    },
+    transaction::{self, TransactionKind, TransactionRequest, TypedTransactionRequest},
 };
 
 pub use admin::*;

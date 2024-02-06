@@ -12,7 +12,8 @@ use metrics::{gauge, Label};
 use once_cell::sync::Lazy;
 use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
-    DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, PageSize, SyncMode, RO, RW,
+    DatabaseFlags, Environment, EnvironmentFlags, Geometry, MaxReadTransactionDuration, Mode,
+    PageSize, SyncMode, RO, RW,
 };
 use reth_tracing::tracing::error;
 use std::{ops::Deref, path::Path};
@@ -52,6 +53,32 @@ pub enum DatabaseEnvKind {
     RO,
     /// Read-write MDBX environment.
     RW,
+}
+
+/// Arguments for database initialization.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DatabaseArguments {
+    /// Database log level. If [None], the default value is used.
+    log_level: Option<LogLevel>,
+    /// Maximum duration of a read transaction. If [None], the default value is used.
+    max_read_transaction_duration: Option<MaxReadTransactionDuration>,
+}
+
+impl DatabaseArguments {
+    /// Set the log level.
+    pub fn log_level(mut self, log_level: Option<LogLevel>) -> Self {
+        self.log_level = log_level;
+        self
+    }
+
+    /// Set the maximum duration of a read transaction.
+    pub fn max_read_transaction_duration(
+        mut self,
+        max_read_transaction_duration: Option<MaxReadTransactionDuration>,
+    ) -> Self {
+        self.max_read_transaction_duration = max_read_transaction_duration;
+        self
+    }
 }
 
 /// Wrapper for the libmdbx environment: [Environment]
@@ -164,7 +191,7 @@ impl DatabaseEnv {
     pub fn open(
         path: &Path,
         kind: DatabaseEnvKind,
-        log_level: Option<LogLevel>,
+        args: DatabaseArguments,
     ) -> Result<DatabaseEnv, DatabaseError> {
         let mut inner_env = Environment::builder();
 
@@ -250,7 +277,7 @@ impl DatabaseEnv {
         // https://github.com/paradigmxyz/reth/blob/fa2b9b685ed9787636d962f4366caf34a9186e66/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L16017.
         inner_env.set_rp_augment_limit(256 * 1024);
 
-        if let Some(log_level) = log_level {
+        if let Some(log_level) = args.log_level {
             // Levels higher than [LogLevel::Notice] require libmdbx built with `MDBX_DEBUG` option.
             let is_log_level_available = if cfg!(debug_assertions) {
                 true
@@ -274,6 +301,10 @@ impl DatabaseEnv {
             } else {
                 return Err(DatabaseError::LogLevelUnavailable(log_level))
             }
+        }
+
+        if let Some(max_read_transaction_duration) = args.max_read_transaction_duration {
+            inner_env.set_max_read_transaction_duration(max_read_transaction_duration);
         }
 
         let env = DatabaseEnv {
@@ -332,6 +363,7 @@ mod tests {
         AccountChangeSet,
     };
     use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
+    use reth_libmdbx::Error;
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};
     use std::{path::Path, str::FromStr, sync::Arc};
     use tempfile::TempDir;
@@ -346,7 +378,8 @@ mod tests {
 
     /// Create database for testing with specified path
     fn create_test_db_with_path(kind: DatabaseEnvKind, path: &Path) -> DatabaseEnv {
-        let env = DatabaseEnv::open(path, kind, None).expect(ERROR_DB_CREATION);
+        let env =
+            DatabaseEnv::open(path, kind, DatabaseArguments::default()).expect(ERROR_DB_CREATION);
         env.create_tables().expect(ERROR_TABLE_CREATION);
         env
     }
@@ -693,7 +726,7 @@ mod tests {
         assert_eq!(
             cursor.insert(key_to_insert, B256::ZERO),
             Err(DatabaseWriteError {
-                code: -30799,
+                info: Error::KeyExist.into(),
                 operation: DatabaseWriteOperation::CursorInsert,
                 table_name: CanonicalHeaders::NAME,
                 key: key_to_insert.encode().into(),
@@ -837,7 +870,7 @@ mod tests {
         assert_eq!(
             cursor.append(key_to_append, B256::ZERO),
             Err(DatabaseWriteError {
-                code: -30418,
+                info: Error::KeyMismatch.into(),
                 operation: DatabaseWriteOperation::CursorAppend,
                 table_name: CanonicalHeaders::NAME,
                 key: key_to_append.encode().into(),
@@ -919,7 +952,7 @@ mod tests {
                 AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
             ),
             Err(DatabaseWriteError {
-                code: -30418,
+                info: Error::KeyMismatch.into(),
                 operation: DatabaseWriteOperation::CursorAppendDup,
                 table_name: AccountChangeSet::NAME,
                 key: transition_id.encode().into(),
@@ -932,7 +965,7 @@ mod tests {
                 AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
             ),
             Err(DatabaseWriteError {
-                code: -30418,
+                info: Error::KeyMismatch.into(),
                 operation: DatabaseWriteOperation::CursorAppend,
                 table_name: AccountChangeSet::NAME,
                 key: (transition_id - 1).encode().into(),
@@ -971,7 +1004,8 @@ mod tests {
             assert_eq!(result.expect(ERROR_RETURN_VALUE), 200);
         }
 
-        let env = DatabaseEnv::open(&path, DatabaseEnvKind::RO, None).expect(ERROR_DB_CREATION);
+        let env = DatabaseEnv::open(&path, DatabaseEnvKind::RO, Default::default())
+            .expect(ERROR_DB_CREATION);
 
         // GET
         let result =

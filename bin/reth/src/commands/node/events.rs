@@ -125,7 +125,7 @@ impl<DB> NodeState<DB> {
                             %target,
                             %stage_progress,
                             %stage_eta,
-                            message,
+                            "{message}",
                         )
                     } else {
                         info!(
@@ -134,7 +134,7 @@ impl<DB> NodeState<DB> {
                             checkpoint = %checkpoint.block_number,
                             %target,
                             %stage_progress,
-                            message,
+                            "{message}",
                         )
                     }
                 }
@@ -489,7 +489,7 @@ impl Display for Eta {
 
 #[cfg(test)]
 mod tests {
-    use crate::commands::node::events::Eta;
+    use super::*;
     use std::time::{Duration, Instant};
 
     #[test]

@@ -1,6 +1,6 @@
 use crate::{
     config::NetworkMode, discovery::DiscoveryEvent, manager::NetworkEvent, message::PeerRequest,
-    peers::PeersHandle, protocol::RlpxSubProtocol, FetchClient,
+    peers::PeersHandle, protocol::RlpxSubProtocol, swarm::NetworkConnectionState, FetchClient,
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -150,6 +150,25 @@ impl NetworkHandle {
         let (tx, rx) = oneshot::channel();
         self.send_message(NetworkHandleMessage::Shutdown(tx));
         rx.await
+    }
+
+    /// Set network connection state to Active.
+    ///
+    /// New outbound connections will be established if there's capacity.
+    pub fn set_network_active(&self) {
+        self.set_network_conn(NetworkConnectionState::Active);
+    }
+
+    /// Set network connection state to Hibernate.
+    ///
+    /// No new outbound connections will be established.
+    pub fn set_network_hibernate(&self) {
+        self.set_network_conn(NetworkConnectionState::Hibernate);
+    }
+
+    /// Set network connection state.
+    fn set_network_conn(&self, network_conn: NetworkConnectionState) {
+        self.send_message(NetworkHandleMessage::SetNetworkState(network_conn));
     }
 
     /// Whether tx gossip is disabled
@@ -432,6 +451,8 @@ pub(crate) enum NetworkHandleMessage {
     GetReputationById(PeerId, oneshot::Sender<Option<Reputation>>),
     /// Initiates a graceful shutdown of the network via a oneshot sender.
     Shutdown(oneshot::Sender<()>),
+    /// Sets the network state between hibernation and active.
+    SetNetworkState(NetworkConnectionState),
     /// Adds a new listener for `DiscoveryEvent`.
     DiscoveryListener(UnboundedSender<DiscoveryEvent>),
     /// Adds an additional `RlpxSubProtocol`.

@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Staged syncing primitives used in reth."
+description = "Database primitives used in reth."
 
 [lints]
 workspace = true
@@ -16,23 +16,13 @@ workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-codecs.workspace = true
-reth-libmdbx = { workspace = true, optional = true, features = ["return-borrowed"] }
+reth-libmdbx = { workspace = true, optional = true, features = ["return-borrowed", "read-tx-timeouts"] }
 reth-nippy-jar.workspace = true
 reth-tracing.workspace = true
 
 # codecs
 serde = { workspace = true, default-features = false }
-postcard = { version = "1.0.2", features = ["alloc"] }
-heapless = "0.7.16"
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
-futures.workspace = true
-tokio-stream.workspace = true
-rand.workspace = true
-secp256k1 = { workspace = true, default-features = false, features = [
-    "alloc",
-    "recovery",
-    "rand",
-], optional = true }
 modular-bitfield = "0.11.2"
 
 # metrics
@@ -45,17 +35,15 @@ page_size = "0.6.0"
 thiserror.workspace = true
 tempfile = { workspace = true, optional = true }
 parking_lot.workspace = true
-derive_more = "0.99"
+derive_more.workspace = true
 eyre.workspace = true
 paste = "1.0"
-rayon.workspace = true
-itertools.workspace = true
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
-once_cell = "1.19.0"
+once_cell.workspace = true
 
 [dev-dependencies]
 # reth libs with arbitrary
@@ -63,36 +51,27 @@ reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-codecs.workspace = true
 reth-interfaces.workspace = true
 
+rand.workspace = true
+serde_json.workspace = true
+
 tempfile.workspace = true
-test-fuzz = "4"
+test-fuzz = "5"
 
 pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion.workspace = true
 iai = "0.1.1"
-tokio = { workspace = true, features = ["full"] }
-
-# needed for test-fuzz to work properly, see https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
-secp256k1.workspace = true
-
-async-trait.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-derive.workspace = true
 
-serde_json.workspace = true
-
 paste = "1.0"
 
 assert_matches.workspace = true
 
-[build-dependencies]
-vergen = { version = "8", features = ["git", "git2"] }
-
 [features]
 default = ["mdbx"]
 test-utils = ["tempfile", "arbitrary"]
-bench-postcard = ["bench"]
 mdbx = ["reth-libmdbx"]
 bench = []
 arbitrary = [

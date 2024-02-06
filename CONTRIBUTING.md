@@ -98,11 +98,7 @@ likelihood of the PR getting merged.
 Please also make sure that the following commands pass if you have changed the code:
 
 ```sh
-cargo check --all
-cargo test --all --all-features
-cargo +nightly fmt -- --check
-cargo clippy --bin "reth" --workspace --features "ethereum" --lib --tests --benches --examples -- -D warnings
-cargo clippy --bin "op-reth" --workspace --features "optimism" --lib --tests --benches --examples -- -D warnings
+make pr
 ```
 
 If you are working in VSCode, we recommend you install the [rust-analyzer](https://rust-analyzer.github.io/) extension,
@@ -111,14 +107,6 @@ and use the following VSCode user settings:
 ```json
 "editor.formatOnSave": true,
 "rust-analyzer.rustfmt.extraArgs": ["+nightly"],
-"rust-analyzer.check.overrideCommand": [
-"cargo",
-"+nightly",
-"clippy",
-"--all",
-"--all-features",
-"--message-format=json"
-],
 "[rust]": {
 "editor.defaultFormatter": "rust-lang.rust-analyzer"
 }

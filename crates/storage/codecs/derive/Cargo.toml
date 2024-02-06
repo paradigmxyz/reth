@@ -33,7 +33,7 @@ serde = { workspace = true, default-features = false }
 parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
 
 [dev-dependencies]
-pretty_assertions = "1.3.0"
+similar-asserts.workspace = true
 
 [features]
 default = ["compact"]
