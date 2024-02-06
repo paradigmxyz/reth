@@ -19,7 +19,7 @@ use reth_primitives::{
     revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders,
-    TransactionKind::{self, Call, Create},
+    TransactionKind::{Call, Create},
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256, U128, U256, U64,
 };
 use reth_provider::{
@@ -34,8 +34,8 @@ use reth_rpc_types::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
-    Index, Log, Transaction, TransactionInfo, TransactionReceipt, TransactionRequest,
-    TypedTransactionRequest,
+    Index, Log, Transaction, TransactionInfo, TransactionKind as RpcTransactionKind,
+    TransactionReceipt, TransactionRequest, TypedTransactionRequest,
 };
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
@@ -613,8 +613,8 @@ where
             ..
         } = request;
 
-        // todo: remove this inlining
-        let mut transaction = match (
+        // todo: remove this inlining after https://github.com/alloy-rs/alloy/pull/183#issuecomment-1928161285
+        let transaction = match (
             gas_price,
             max_fee_per_gas,
             access_list.take(),
@@ -632,8 +632,8 @@ where
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
                     kind: match to {
-                        Some(to) => TransactionKind::Call(to),
-                        None => TransactionKind::Create,
+                        Some(to) => RpcTransactionKind::Call(to),
+                        None => RpcTransactionKind::Create,
                     },
                     chain_id: None,
                 }))
@@ -648,8 +648,8 @@ where
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
                     kind: match to {
-                        Some(to) => TransactionKind::Call(to),
-                        None => TransactionKind::Create,
+                        Some(to) => RpcTransactionKind::Call(to),
+                        None => RpcTransactionKind::Create,
                     },
                     chain_id: 0,
                     access_list,
@@ -669,8 +669,8 @@ where
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
                     kind: match to {
-                        Some(to) => TransactionKind::Call(to),
-                        None => TransactionKind::Create,
+                        Some(to) => RpcTransactionKind::Call(to),
+                        None => RpcTransactionKind::Create,
                     },
                     chain_id: 0,
                     access_list: access_list.unwrap_or_default(),
@@ -696,8 +696,8 @@ where
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
                     kind: match to {
-                        Some(to) => TransactionKind::Call(to),
-                        None => TransactionKind::Create,
+                        Some(to) => RpcTransactionKind::Call(to),
+                        None => RpcTransactionKind::Create,
                     },
                     access_list: access_list.unwrap_or_default(),
 
