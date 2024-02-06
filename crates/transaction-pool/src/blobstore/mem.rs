@@ -4,7 +4,7 @@ use reth_primitives::B256;
 use std::{collections::HashMap, sync::Arc};
 
 /// An in-memory blob store.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct InMemoryBlobStore {
     inner: Arc<InMemoryBlobStoreInner>,
 }
@@ -14,6 +14,12 @@ struct InMemoryBlobStoreInner {
     /// Storage for all blob data.
     store: RwLock<HashMap<B256, BlobTransactionSidecar>>,
     size_tracker: BlobStoreSize,
+}
+
+impl PartialEq for InMemoryBlobStoreInner {
+    fn eq(&self, other: &Self) -> bool {
+        self.store.read().eq(&other.store.read())
+    }
 }
 
 impl BlobStore for InMemoryBlobStore {

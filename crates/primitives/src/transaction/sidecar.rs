@@ -482,8 +482,9 @@ impl proptest::arbitrary::Arbitrary for BlobTransactionSidecar {
     type Strategy = BoxedStrategy<BlobTransactionSidecar>;
 }
 
+/// Generates a [`BlobTransactionSidecar`] structure containing blobs, commitments, and proofs.
 #[cfg(any(test, feature = "arbitrary"))]
-fn generate_blob_sidecar(blobs: Vec<Blob>) -> BlobTransactionSidecar {
+pub fn generate_blob_sidecar(blobs: Vec<Blob>) -> BlobTransactionSidecar {
     let kzg_settings = MAINNET_KZG_TRUSTED_SETUP.clone();
 
     let commitments: Vec<Bytes48> = blobs

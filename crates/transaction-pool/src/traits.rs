@@ -1140,7 +1140,7 @@ impl PoolSize {
 }
 
 /// Represents the current status of the pool.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
 pub struct BlockInfo {
     /// Hash for the currently tracked block.
     pub last_seen_block_hash: B256,
