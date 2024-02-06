@@ -512,7 +512,7 @@ mod tests {
         transaction::sidecar::generate_blob_sidecar,
         BlobTransactionSidecar,
     };
-    use std::{fs, fs::File, io::Read, path::PathBuf};
+    use std::{fs, path::PathBuf};
 
     #[test]
     fn test_blob_transaction_sidecar_generation() {
@@ -536,7 +536,6 @@ mod tests {
         let sidecar = generate_blob_sidecar(blobs.clone());
 
         // Assert commitment equality
-        // Random blob details: https://sepolia.blobscan.com/blob/0x01915bb277dc526cc966eab02e4636d655d8b5ffc81cdd51122c97b04ecd261a
         assert_eq!(
             sidecar.commitments,
             vec![
@@ -560,16 +559,14 @@ mod tests {
             let file_path = entry.path();
 
             // Ensure the entry is a file and not a directory
-            if file_path.is_file() {
-                // Read the contents of the JSON file into a string
-                let mut json_contents = String::new();
-                let mut json_file =
-                    File::open(file_path.as_path()).expect("Failed to open JSON file");
-                json_file.read_to_string(&mut json_contents).expect("Failed to read the file");
+            if file_path.is_file() && file_path.extension().unwrap_or_default() == "json" {
+                // Read the contents of the JSON file into a string.
+                let json_content =
+                    fs::read_to_string(file_path).expect("Failed to read the blob data file");
 
                 // Parse the JSON contents into a serde_json::Value
                 let json_value: serde_json::Value =
-                    serde_json::from_str(&json_contents).expect("Failed to deserialize JSON");
+                    serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
 
                 // Extract blob data from JSON and convert it to Blob
                 if let Some(data) = json_value.get("data") {
