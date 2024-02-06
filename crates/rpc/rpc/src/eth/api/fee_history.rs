@@ -324,6 +324,12 @@ pub struct FeeHistoryEntry {
     pub base_fee_per_gas: u64,
     /// Gas used ratio this block.
     pub gas_used_ratio: f64,
+    /// The base per blob gas for EIP-4844.
+    /// For pre EIP-4844 equals to zero.
+    pub base_fee_per_blob_gas: Option<u128>,
+    /// Blob gas used ratio for this block.
+    /// Calculated as the ratio pf gasUsed and gasLimit.
+    pub blob_gas_used_ratio: f64,
     /// Gas used by this block.
     pub gas_used: u64,
     /// Gas limit by this block.
@@ -342,6 +348,9 @@ impl FeeHistoryEntry {
         FeeHistoryEntry {
             base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default(),
             gas_used_ratio: block.gas_used as f64 / block.gas_limit as f64,
+            base_fee_per_blob_gas: block.blob_fee(),
+            blob_gas_used_ratio: block.blob_gas_used() as f64 /
+                reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
             gas_used: block.gas_used,
             header_hash: block.hash,
             gas_limit: block.gas_limit,

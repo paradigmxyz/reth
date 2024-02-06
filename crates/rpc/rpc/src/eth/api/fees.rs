@@ -109,6 +109,10 @@ where
         // Collect base fees, gas usage ratios and (optionally) reward percentile data
         let mut base_fee_per_gas: Vec<U256> = Vec::new();
         let mut gas_used_ratio: Vec<f64> = Vec::new();
+
+        let mut base_fee_per_blob_gas: Vec<U256> = Vec::new();
+        let mut blob_gas_used_ratio: Vec<f64> = Vec::new();
+
         let mut rewards: Vec<Vec<U256>> = Vec::new();
 
         // Check if the requested range is within the cache bounds
@@ -122,6 +126,9 @@ where
             for entry in &fee_entries {
                 base_fee_per_gas.push(U256::from(entry.base_fee_per_gas));
                 gas_used_ratio.push(entry.gas_used_ratio);
+                base_fee_per_blob_gas
+                    .push(U256::from(entry.base_fee_per_blob_gas.unwrap_or_default()));
+                blob_gas_used_ratio.push(entry.blob_gas_used_ratio);
 
                 if let Some(percentiles) = &reward_percentiles {
                     let mut block_rewards = Vec::with_capacity(percentiles.len());
@@ -155,6 +162,11 @@ where
             for header in &headers {
                 base_fee_per_gas.push(U256::from(header.base_fee_per_gas.unwrap_or_default()));
                 gas_used_ratio.push(header.gas_used as f64 / header.gas_limit as f64);
+                base_fee_per_blob_gas.push(U256::from(header.blob_fee().unwrap_or_default()));
+                blob_gas_used_ratio.push(
+                    header.blob_gas_used.unwrap_or_default() as f64 /
+                        reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
+                );
 
                 // Percentiles were specified, so we need to collect reward percentile ino
                 if let Some(percentiles) = &reward_percentiles {
@@ -199,6 +211,8 @@ where
         Ok(FeeHistory {
             base_fee_per_gas,
             gas_used_ratio,
+            base_fee_per_blob_gas,
+            blob_gas_used_ratio,
             oldest_block: U256::from(start_block),
             reward: reward_percentiles.map(|_| rewards),
         })
