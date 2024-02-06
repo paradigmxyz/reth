@@ -1581,8 +1581,7 @@ mod tests {
             signature::Signature, TransactionKind, TxEip1559, TxLegacy,
             PARALLEL_SENDER_RECOVERY_THRESHOLD,
         },
-        Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
-        TxHashOrNumber, B256, U256,
+        Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, B256, U256,
     };
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
