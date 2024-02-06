@@ -68,8 +68,11 @@ const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES_ON_FETCH_PENDING: usize =
 /// Average byte size of an encoded transaction. Estimated by the standard recommended max
 /// response size divided by the recommended max count of hashes in an [`GetPooledTransactions`]
 /// request.
-const TX_ENCODED_LENGTH_AVERAGE: usize = SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE /
-    SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_MEMPOOL_PACKET;
+const AVERAGE_BYTE_SIZE_TX_ENCODED_LENGTH: usize =
+    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE /
+        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_MEMPOOL_PACKET;
+
+const MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED_LENGTH: usize = 120;
 
 /// Default budget for finding an idle fallback peer for any hash pending fetch in
 /// [`TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash`], when said search is
@@ -236,26 +239,9 @@ impl TransactionFetcher {
         self.pack_hashes_eth66(hashes_to_request, hashes_from_announcement)
     }
 
-    /// Evaluates wether or not to include a hash in a [`GetPooledTransactions`] version eth68
-    /// request. It does so based on the size of the transaction and the accumulated size of the
-    /// corresponding [`PooledTransactions`] response.
-    ///
-    /// Returns `true` if the hash fits and the size has been accumulated.
-    fn fold_size_of_eth68_response(&self, acc_size_response: &mut usize, size: usize) -> bool {
-        let next_acc_size = *acc_size_response + size;
-
-        if next_acc_size <= SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE {
-            // only update accumulated size of tx response if tx will fit in without exceeding
-            // soft limit
-            *acc_size_response = next_acc_size;
-            return true
-        }
-
-        false
-    }
-
-    /// Packages hashes for [`GetPooledTxRequest`] up to limit as defined by protocol version 68.
-    /// Returns left over hashes.
+    /// Packages hashes for [`GetPooledTxRequest`] from an
+    /// [`Eth68`](reth_eth_wire::EthVersion::Eth68) announcement up to limit as defined by protocol
+    /// version 68. Returns left over hashes.
     ///
     /// Loops through hashes passed as parameter and checks if a hash fits in the expected
     /// response. If no, it's add to surplus hashes. If yes, it's add to hashes to request and
@@ -283,16 +269,33 @@ impl TransactionFetcher {
 
         let mut surplus_hashes = RequestTxHashes::with_capacity(hashes_from_announcement_len - 1);
 
-        for (hash, metadata) in hashes_from_announcement_iter {
+        'fold_size: loop {
+            let Some((hash, metadata)) = hashes_from_announcement_iter.next() else { break };
+
             let Some((_ty, size)) = metadata else {
                 unreachable!("this method is called upon reception of an eth68 announcement")
             };
 
-            match self.fold_size_of_eth68_response(&mut acc_size_response, size) {
-                true => hashes_to_request.push(hash),
-                false => surplus_hashes.push(hash),
+            let next_acc_size = acc_size_response + size;
+
+            if next_acc_size <= SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE {
+                // only update accumulated size of tx response if tx will fit in without exceeding
+                // soft limit
+                acc_size_response = next_acc_size;
+                hashes_to_request.push(hash)
+            } else {
+                surplus_hashes.push(hash)
+            }
+
+            let free_space =
+                SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE - acc_size_response;
+
+            if free_space < MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED_LENGTH {
+                break 'fold_size
             }
         }
+
+        surplus_hashes.extend(hashes_from_announcement_iter.map(|(hash, _metadata)| hash));
         surplus_hashes.shrink_to_fit();
 
         surplus_hashes
@@ -659,7 +662,7 @@ impl TransactionFetcher {
     ///
     /// The request hashes buffer is filled as if it's an eth68 request, i.e. smartly assemble
     /// the request based on expected response size. For any hash missing size metadata, it is
-    /// guessed at [`TX_ENCODED_LENGTH_AVERAGE`].
+    /// guessed at [`AVERAGE_BYTE_SIZE_TX_ENCODED_LENGTH`].
 
     /// Loops through hashes pending fetch and does:
     ///
@@ -680,7 +683,7 @@ impl TransactionFetcher {
             .hashes_unknown_to_pool
             .get(hash)
             .and_then(|entry| entry.tx_encoded_len())
-            .unwrap_or(TX_ENCODED_LENGTH_AVERAGE);
+            .unwrap_or(AVERAGE_BYTE_SIZE_TX_ENCODED_LENGTH);
 
         // if request full enough already, we're satisfied, send request for single tx
         if acc_size_response >= SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING {
@@ -708,7 +711,7 @@ impl TransactionFetcher {
                 .hashes_unknown_to_pool
                 .get(hash)
                 .and_then(|entry| entry.tx_encoded_len())
-                .unwrap_or(TX_ENCODED_LENGTH_AVERAGE);
+                .unwrap_or(AVERAGE_BYTE_SIZE_TX_ENCODED_LENGTH);
 
             acc_size_response += size;
 
