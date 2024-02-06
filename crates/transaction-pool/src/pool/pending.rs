@@ -1,13 +1,15 @@
 use crate::{
-    identifier::TransactionId,
-    pool::{best::BestTransactions, size::SizeTracker},
+    identifier::{SenderId, TransactionId},
+    pool::{
+        best::{BestTransactions, BestTransactionsWithBasefee},
+        size::SizeTracker,
+    },
     Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
-
-use crate::pool::best::BestTransactionsWithBasefee;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
+    ops::Bound::Unbounded,
     sync::Arc,
 };
 use tokio::sync::broadcast;
@@ -22,8 +24,7 @@ use tokio::sync::broadcast;
 ///
 /// Once an `independent` transaction was executed it *unlocks* the next nonce, if this transaction
 /// is also pending, then this will be moved to the `independent` queue.
-#[allow(missing_debug_implementations)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PendingPool<T: TransactionOrdering> {
     /// How to order transactions.
     ordering: T,
@@ -490,6 +491,15 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.by_id.contains_key(id)
     }
 
+    /// Get transactions by sender
+    pub(crate) fn get_txs_by_sender(&self, sender: SenderId) -> Vec<TransactionId> {
+        self.by_id
+            .range((sender.start_bound(), Unbounded))
+            .take_while(move |(other, _)| sender == other.sender)
+            .map(|(tx_id, _)| *tx_id)
+            .collect()
+    }
+
     /// Retrieves a transaction with the given ID from the pool, if it exists.
     fn get(&self, id: &TransactionId) -> Option<&PendingTransaction<T>> {
         self.by_id.get(id)
@@ -516,6 +526,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 }
 
 /// A transaction that is ready to be included in a block.
+#[derive(Debug)]
 pub(crate) struct PendingTransaction<T: TransactionOrdering> {
     /// Identifier that tags when transaction was submitted in the pool.
     pub(crate) submission_id: u64,

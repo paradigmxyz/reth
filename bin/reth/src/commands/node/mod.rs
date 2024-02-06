@@ -9,15 +9,8 @@ use reth_interfaces::consensus::Consensus;
 use reth_primitives::ChainSpec;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
-/// Re-export from `reth_node_core` for backwards compatibility.
-pub mod events {
-    pub use crate::core::events::*;
-}
-
-/// Re-export from `reth_node_core` for backwards compatibility.
-pub mod cl_events {
-    pub use crate::core::cl_events::*;
-}
+pub mod cl_events;
+pub mod events;
 
 use crate::{
     args::{
@@ -25,7 +18,7 @@ use crate::{
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
         RpcServerArgs, TxPoolArgs,
     },
-    builder::NodeConfig,
+    builder::{launch_from_config, NodeConfig},
     cli::{db_type::DatabaseBuilder, ext::RethCliExt},
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
@@ -84,6 +77,13 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
     pub instance: u16,
 
+    /// Sets all ports to unused, allowing the OS to choose random unused ports when sockets are
+    /// bound.
+    ///
+    /// Mutually exclusive with `--instance`.
+    #[arg(long, conflicts_with = "instance", global = true)]
+    pub with_unused_ports: bool,
+
     /// Overrides the KZG trusted setup by reading from the supplied file.
     #[arg(long, value_name = "PATH")]
     pub trusted_setup_file: Option<PathBuf>,
@@ -141,6 +141,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             metrics,
             trusted_setup_file,
             instance,
+            with_unused_ports,
             network,
             rpc,
             txpool,
@@ -159,6 +160,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             chain,
             metrics,
             instance,
+            with_unused_ports,
             trusted_setup_file,
             network,
             rpc,
@@ -183,6 +185,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             metrics,
             trusted_setup_file,
             instance,
+            with_unused_ports,
             network,
             rpc,
             txpool,
@@ -200,7 +203,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let database = DatabaseBuilder::Real(datadir);
 
         // set up node config
-        let node_config = NodeConfig {
+        let mut node_config = NodeConfig {
             database,
             config,
             chain,
@@ -219,10 +222,15 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             rollup,
         };
 
+        if with_unused_ports {
+            node_config = node_config.with_unused_ports();
+        }
+
         let executor = ctx.task_executor;
 
         // launch the node
-        let handle = node_config.launch::<Ext>(ext, executor).await?;
+        let handle = launch_from_config::<Ext>(node_config, ext, executor).await?;
+
         handle.wait_for_node_exit().await
     }
 
@@ -395,5 +403,38 @@ mod tests {
         assert_eq!(cmd.rpc.ws_port, 8550);
         // check network listening port number
         assert_eq!(cmd.network.port, 30305);
+    }
+
+    #[test]
+    fn parse_with_unused_ports() {
+        let cmd = NodeCommand::<()>::parse_from(["reth", "--with-unused-ports"]);
+        assert!(cmd.with_unused_ports);
+    }
+
+    #[test]
+    fn with_unused_ports_conflicts_with_instance() {
+        let err =
+            NodeCommand::<()>::try_parse_from(["reth", "--with-unused-ports", "--instance", "2"])
+                .unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn with_unused_ports_check_zero() {
+        let mut cmd = NodeCommand::<()>::parse_from(["reth"]);
+        cmd.rpc = cmd.rpc.with_unused_ports();
+        cmd.network = cmd.network.with_unused_ports();
+
+        // make sure the rpc ports are zero
+        assert_eq!(cmd.rpc.auth_port, 0);
+        assert_eq!(cmd.rpc.http_port, 0);
+        assert_eq!(cmd.rpc.ws_port, 0);
+
+        // make sure the network ports are zero
+        assert_eq!(cmd.network.port, 0);
+        assert_eq!(cmd.network.discovery.port, 0);
+
+        // make sure the ipc path is not the default
+        assert_ne!(cmd.rpc.ipcpath, String::from("/tmp/reth.ipc"));
     }
 }

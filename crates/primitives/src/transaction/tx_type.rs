@@ -28,7 +28,9 @@ pub const DEPOSIT_TX_TYPE_ID: u8 = 126;
 ///
 /// Other required changes when adding a new type can be seen on [PR#3953](https://github.com/paradigmxyz/reth/pull/3953/files).
 #[derive_arbitrary(compact)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize, Hash,
+)]
 pub enum TxType {
     /// Legacy transaction pre EIP-2929
     #[default]
@@ -45,6 +47,9 @@ pub enum TxType {
 }
 
 impl TxType {
+    /// The max type reserved by an EIP.
+    pub const MAX_RESERVED_EIP: TxType = Self::EIP4844;
+
     /// Check if the transaction type has an access list.
     pub const fn has_access_list(&self) -> bool {
         match self {
@@ -72,6 +77,29 @@ impl From<TxType> for u8 {
 impl From<TxType> for U8 {
     fn from(value: TxType) -> Self {
         U8::from(u8::from(value))
+    }
+}
+
+impl TryFrom<u8> for TxType {
+    type Error = &'static str;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        #[cfg(feature = "optimism")]
+        if value == TxType::DEPOSIT as u8 {
+            return Ok(TxType::DEPOSIT)
+        }
+
+        if value == TxType::Legacy as u8 {
+            return Ok(TxType::Legacy)
+        } else if value == TxType::EIP2930 as u8 {
+            return Ok(TxType::EIP2930)
+        } else if value == TxType::EIP1559 as u8 {
+            return Ok(TxType::EIP1559)
+        } else if value == TxType::EIP4844 as u8 {
+            return Ok(TxType::EIP4844)
+        }
+
+        Err("invalid tx type")
     }
 }
 

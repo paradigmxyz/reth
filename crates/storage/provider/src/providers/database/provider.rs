@@ -11,7 +11,6 @@ use crate::{
     PruneCheckpointWriter, StageCheckpointReader, StatsReader, StorageReader, TransactionVariant,
     TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
-use ahash::{AHashMap, AHashSet};
 use itertools::{izip, Itertools};
 use reth_db::{
     common::KeyValue,
@@ -31,25 +30,23 @@ use reth_interfaces::{
     provider::{ProviderResult, RootMismatch},
     RethResult,
 };
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     keccak256,
-    revm::{
-        config::revm_spec,
-        env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
-    },
+    revm::{config::revm_spec, env::fill_block_env},
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
     PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment,
     StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_trie::{prefix_set::PrefixSetMut, updates::TrieUpdates, HashedPostState, StateRoot};
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
 use std::{
     cmp::Ordering,
-    collections::{hash_map, BTreeMap, BTreeSet, HashMap},
+    collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
     ops::{Bound, Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
@@ -799,7 +796,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             // withdrawal can be missing
             let shanghai_is_active =
                 chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp);
-            let mut withdrawals = Some(Vec::new());
+            let mut withdrawals = Some(Withdrawals::default());
             if shanghai_is_active {
                 if let Some((block_number, _)) = block_withdrawals.as_ref() {
                     if *block_number == main_block_number {
@@ -1744,7 +1741,7 @@ impl<TX: DbTx> WithdrawalsProvider for DatabaseProvider<TX> {
         &self,
         id: BlockHashOrNumber,
         timestamp: u64,
-    ) -> ProviderResult<Option<Vec<Withdrawal>>> {
+    ) -> ProviderResult<Option<Withdrawals>> {
         if self.chain_spec.is_shanghai_active_at_timestamp(timestamp) {
             if let Some(number) = self.convert_hash_or_number(id)? {
                 // If we are past shanghai, then all blocks should have a withdrawal list, even if
@@ -1768,27 +1765,41 @@ impl<TX: DbTx> WithdrawalsProvider for DatabaseProvider<TX> {
 }
 
 impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
-    fn fill_env_at(
+    fn fill_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnv,
         block_env: &mut BlockEnv,
         at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
-        self.fill_env_with_header(cfg, block_env, &header)
+        self.fill_env_with_header(cfg, block_env, &header, evm_config)
     }
 
-    fn fill_env_with_header(
+    fn fill_env_with_header<EvmConfig>(
         &self,
         cfg: &mut CfgEnv,
         block_env: &mut BlockEnv,
         header: &Header,
-    ) -> ProviderResult<()> {
+        _evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        fill_cfg_and_block_env(cfg, block_env, &self.chain_spec, header, total_difficulty);
+        EvmConfig::fill_cfg_and_block_env(
+            cfg,
+            block_env,
+            &self.chain_spec,
+            header,
+            total_difficulty,
+        );
         Ok(())
     }
 
@@ -1827,17 +1838,33 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         Ok(())
     }
 
-    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockHashOrNumber) -> ProviderResult<()> {
+    fn fill_cfg_env_at<EvmConfig>(
+        &self,
+        cfg: &mut CfgEnv,
+        at: BlockHashOrNumber,
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
-        self.fill_cfg_env_with_header(cfg, &header)
+        self.fill_cfg_env_with_header(cfg, &header, evm_config)
     }
 
-    fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> ProviderResult<()> {
+    fn fill_cfg_env_with_header<EvmConfig>(
+        &self,
+        cfg: &mut CfgEnv,
+        header: &Header,
+        _evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
+        EvmConfig::fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
         Ok(())
     }
 }
@@ -2093,8 +2120,8 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
     ) -> ProviderResult<()> {
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSetMut::default();
-        let mut storage_prefix_set: AHashMap<B256, PrefixSetMut> = AHashMap::default();
-        let mut destroyed_accounts = AHashSet::default();
+        let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
+        let mut destroyed_accounts = HashSet::default();
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 
@@ -2283,8 +2310,8 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
 
             // Initialize prefix sets.
             let mut account_prefix_set = PrefixSetMut::default();
-            let mut storage_prefix_set: AHashMap<B256, PrefixSetMut> = AHashMap::default();
-            let mut destroyed_accounts = AHashSet::default();
+            let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
+            let mut destroyed_accounts = HashSet::default();
 
             // Unwind account hashes. Add changed accounts to account prefix set.
             let hashed_addresses = self.unwind_account_hashing(range.clone())?;

@@ -54,7 +54,8 @@ reth-snapshot = { workspace = true, features = ["clap"] }
 reth-trie.workspace = true
 reth-nippy-jar.workspace = true
 reth-node-api.workspace = true
-reth-node-builder.workspace = true
+reth-node-ethereum.workspace = true
+reth-node-optimism = { workspace = true, optional = true, features = ["optimism"] }
 reth-node-core.workspace = true
 
 # crypto
@@ -102,6 +103,7 @@ hyper = "0.14.25"
 # misc
 aquamarine.workspace = true
 eyre.workspace = true
+thiserror.workspace = true
 clap = { workspace = true, features = ["derive"] }
 tempfile.workspace = true
 backon = "0.4"
@@ -148,8 +150,7 @@ optimism = [
     "reth-payload-builder/optimism",
     "reth-optimism-payload-builder/optimism",
     "reth-ethereum-payload-builder/optimism",
-    "reth-node-api/optimism",
-    "reth-node-builder/optimism",
+    "dep:reth-node-optimism",
     "reth-node-core/optimism",
 ]
 

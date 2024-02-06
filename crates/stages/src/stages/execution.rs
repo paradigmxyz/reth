@@ -594,6 +594,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::models::AccountBeforeTx;
     use reth_interfaces::executor::BlockValidationError;
+    use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Address,
         Bytecode, ChainSpecBuilder, PruneMode, PruneModes, ReceiptsLogPruneConfig, SealedBlock,
@@ -603,10 +604,11 @@ mod tests {
     use reth_revm::EvmProcessorFactory;
     use std::{collections::BTreeMap, sync::Arc};
 
-    fn stage() -> ExecutionStage<EvmProcessorFactory> {
-        let executor_factory = EvmProcessorFactory::new(Arc::new(
-            ChainSpecBuilder::mainnet().berlin_activated().build(),
-        ));
+    fn stage() -> ExecutionStage<EvmProcessorFactory<EthEvmConfig>> {
+        let executor_factory = EvmProcessorFactory::new(
+            Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()),
+            EthEvmConfig::default(),
+        );
         ExecutionStage::new(
             executor_factory,
             ExecutionStageThresholds {
@@ -836,7 +838,7 @@ mod tests {
                 mode.receipts_log_filter = random_filter.clone();
             }
 
-            let mut execution_stage: ExecutionStage<EvmProcessorFactory> = stage();
+            let mut execution_stage: ExecutionStage<EvmProcessorFactory<EthEvmConfig>> = stage();
             execution_stage.prune_modes = mode.clone().unwrap_or_default();
 
             let output = execution_stage.execute(&provider, input).unwrap();

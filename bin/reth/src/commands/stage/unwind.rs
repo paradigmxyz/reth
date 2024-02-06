@@ -73,7 +73,7 @@ impl Command {
 
         let blocks_and_execution = provider
             .take_block_and_execution_range(&self.chain, range)
-            .map_err(|err| eyre::eyre!("Transaction error on unwind: {err:?}"))?;
+            .map_err(|err| eyre::eyre!("Transaction error on unwind: {err}"))?;
 
         provider.commit()?;
 

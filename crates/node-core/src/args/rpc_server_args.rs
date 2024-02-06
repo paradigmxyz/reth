@@ -19,7 +19,7 @@ use clap::{
 use futures::TryFutureExt;
 use rand::Rng;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_node_api::EngineTypes;
+use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, StateProviderFactory,
@@ -47,12 +47,15 @@ use tracing::{debug, info};
 
 /// Default max number of subscriptions per connection.
 pub(crate) const RPC_DEFAULT_MAX_SUBS_PER_CONN: u32 = 1024;
+
 /// Default max request size in MB.
 pub(crate) const RPC_DEFAULT_MAX_REQUEST_SIZE_MB: u32 = 15;
+
 /// Default max response size in MB.
 ///
 /// This is only relevant for very large trace responses.
-pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 150;
+pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 160;
+
 /// Default number of incoming connections.
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
 
@@ -216,9 +219,10 @@ impl RpcServerArgs {
         // ws port is scaled by a factor of instance * 2
         self.ws_port += instance * 2 - 2;
 
-        // also adjust the ipc path by appending the instance number to the path used for the
-        // endpoint
-        self.ipcpath = format!("{}-{}", self.ipcpath, instance);
+        // if multiple instances are being run, append the instance number to the ipc path
+        if instance > 1 {
+            self.ipcpath = format!("{}-{}", self.ipcpath, instance);
+        }
     }
 
     /// Set the http port to zero, to allow the OS to assign a random unused port when the rpc
@@ -269,7 +273,7 @@ impl RpcServerArgs {
     /// Returns the handles for the launched regular RPC server(s) (if any) and the server handle
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
-    pub async fn start_servers<Reth, Engine, Conf, EngineT: EngineTypes>(
+    pub async fn start_servers<Reth, Engine, Conf, EngineT>(
         &self,
         components: &Reth,
         engine_api: Engine,
@@ -277,8 +281,9 @@ impl RpcServerArgs {
         conf: &mut Conf,
     ) -> eyre::Result<RethRpcServerHandles>
     where
-        Reth: RethNodeComponents,
+        EngineT: EngineTypes + 'static,
         Engine: EngineApiServer<EngineT>,
+        Reth: RethNodeComponents,
         Conf: RethNodeCommandConfig,
     {
         let auth_config = self.auth_server_config(jwt_secret)?;
@@ -292,6 +297,7 @@ impl RpcServerArgs {
             .with_network(components.network())
             .with_events(components.events())
             .with_executor(components.task_executor())
+            .with_evm_config(components.evm_config())
             .build_with_auth_server(module_config, engine_api);
 
         let rpc_components = RethRpcComponents {
@@ -338,13 +344,14 @@ impl RpcServerArgs {
     }
 
     /// Convenience function for starting a rpc server with configs which extracted from cli args.
-    pub async fn start_rpc_server<Provider, Pool, Network, Tasks, Events>(
+    pub async fn start_rpc_server<Provider, Pool, Network, Tasks, Events, EvmConfig>(
         &self,
         provider: Provider,
         pool: Pool,
         network: Network,
         executor: Tasks,
         events: Events,
+        evm_config: EvmConfig,
     ) -> Result<RpcServerHandle, RpcError>
     where
         Provider: BlockReaderIdExt
@@ -361,6 +368,7 @@ impl RpcServerArgs {
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         Events: CanonStateSubscriptions + Clone + 'static,
+        EvmConfig: ConfigureEvmEnv + 'static,
     {
         reth_rpc_builder::launch(
             provider,
@@ -370,12 +378,14 @@ impl RpcServerArgs {
             self.rpc_server_config(),
             executor,
             events,
+            evm_config,
         )
         .await
     }
 
     /// Create Engine API server.
-    pub async fn start_auth_server<Provider, Pool, Network, Tasks, EngineT>(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn start_auth_server<Provider, Pool, Network, Tasks, EngineT, EvmConfig>(
         &self,
         provider: Provider,
         pool: Pool,
@@ -383,6 +393,7 @@ impl RpcServerArgs {
         executor: Tasks,
         engine_api: EngineApi<Provider, EngineT>,
         jwt_secret: JwtSecret,
+        evm_config: EvmConfig,
     ) -> Result<AuthServerHandle, RpcError>
     where
         Provider: BlockReaderIdExt
@@ -397,6 +408,7 @@ impl RpcServerArgs {
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         EngineT: EngineTypes + 'static,
+        EvmConfig: ConfigureEvmEnv + 'static,
     {
         let socket_address = SocketAddr::new(self.auth_addr, self.auth_port);
 
@@ -408,6 +420,7 @@ impl RpcServerArgs {
             engine_api,
             socket_address,
             jwt_secret,
+            evm_config,
         )
         .await
     }
@@ -594,7 +607,7 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
         val.parse::<RpcModuleSelection>().map_err(|err| {
             let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
-            let possible_values = RethRpcModule::all_variants().to_vec().join(",");
+            let possible_values = RethRpcModule::all_variant_names().to_vec().join(",");
             let msg = format!(
                 "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
             );
@@ -603,7 +616,7 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
     }
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
-        let values = RethRpcModule::all_variants().iter().map(PossibleValue::new);
+        let values = RethRpcModule::all_variant_names().iter().map(PossibleValue::new);
         Some(Box::new(values))
     }
 }

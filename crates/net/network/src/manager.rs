@@ -29,7 +29,7 @@ use crate::{
     protocol::IntoRlpxSubProtocol,
     session::SessionManager,
     state::NetworkState,
-    swarm::{NetworkConnectionState, Swarm, SwarmEvent},
+    swarm::{Swarm, SwarmEvent},
     transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
@@ -224,7 +224,7 @@ where
             Arc::clone(&num_active_peers),
         );
 
-        let swarm = Swarm::new(incoming, sessions, state, NetworkConnectionState::default());
+        let swarm = Swarm::new(incoming, sessions, state);
 
         let (to_manager_tx, from_handle_rx) = mpsc::unbounded_channel();
 
@@ -551,6 +551,14 @@ where
             NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
                 self.swarm.sessions_mut().disconnect(peer_id, reason);
             }
+            NetworkHandleMessage::SetNetworkState(net_state) => {
+                // Sets network connection state between Active and Hibernate.
+                // If hibernate stops the node to fill new outbound
+                // connections, this is beneficial for sync stages that do not require a network
+                // connection.
+                self.swarm.on_network_state_change(net_state);
+            }
+
             NetworkHandleMessage::Shutdown(tx) => {
                 // Set connection status to `Shutdown`. Stops node to accept
                 // new incoming connections as well as sending connection requests to newly

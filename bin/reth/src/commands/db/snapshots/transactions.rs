@@ -4,6 +4,7 @@ use super::{
 };
 use rand::{seq::SliceRandom, Rng};
 use reth_db::{snapshot::TransactionMask, DatabaseEnv};
+
 use reth_primitives::{
     snapshot::{Filters, InclusionFilter},
     SnapshotSegment, TransactionSignedNoHash,
@@ -12,7 +13,6 @@ use reth_provider::{
     providers::SnapshotProvider, BlockNumReader, ProviderError, ProviderFactory,
     TransactionsProvider, TransactionsProviderExt,
 };
-
 use std::{path::PathBuf, sync::Arc};
 
 impl Command {

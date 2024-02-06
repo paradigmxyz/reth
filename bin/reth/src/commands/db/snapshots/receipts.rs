@@ -12,7 +12,6 @@ use reth_provider::{
     providers::SnapshotProvider, BlockNumReader, ProviderError, ProviderFactory, ReceiptProvider,
     TransactionsProvider, TransactionsProviderExt,
 };
-
 use std::{path::PathBuf, sync::Arc};
 
 impl Command {

@@ -6,6 +6,7 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_node_core::dirs::{ChainPath, DataDirPath};
+use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::stage::StageCheckpoint;
 use reth_provider::{ChainSpecProvider, ProviderFactory};
 use reth_revm::EvmProcessorFactory;
@@ -130,8 +131,10 @@ async fn unwind_and_copy<DB: Database>(
 ) -> eyre::Result<()> {
     let provider = db_tool.provider_factory.provider_rw()?;
 
-    let mut exec_stage =
-        ExecutionStage::new_with_factory(EvmProcessorFactory::new(db_tool.chain.clone()));
+    let mut exec_stage = ExecutionStage::new_with_factory(EvmProcessorFactory::new(
+        db_tool.chain.clone(),
+        EthEvmConfig::default(),
+    ));
 
     exec_stage.unwind(
         &provider,
@@ -162,6 +165,7 @@ async fn dry_run<DB: Database>(
 
     let mut exec_stage = ExecutionStage::new_with_factory(EvmProcessorFactory::new(
         output_provider_factory.chain_spec().clone(),
+        EthEvmConfig::default(),
     ));
 
     let input =

@@ -7,6 +7,7 @@ use reth_primitives::{
 };
 
 /// A generator for transactions for testing purposes.
+#[derive(Debug)]
 pub struct TransactionGenerator<R> {
     /// The random number generator used for generating keys and selecting signers.
     pub rng: R,
@@ -47,7 +48,7 @@ impl<R: Rng> TransactionGenerator<R> {
     }
 
     /// Sets the default gas limit for all generated transactions
-    pub fn with_gas_limit(mut self, gas_limit: u64) -> Self {
+    pub const fn with_gas_limit(mut self, gas_limit: u64) -> Self {
         self.gas_limit = gas_limit;
         self
     }
@@ -59,7 +60,7 @@ impl<R: Rng> TransactionGenerator<R> {
     }
 
     /// Sets the base fee for the generated transactions
-    pub fn with_base_fee(mut self, base_fee: u64) -> Self {
+    pub const fn with_base_fee(mut self, base_fee: u64) -> Self {
         self.base_fee = base_fee as u128;
         self
     }
@@ -99,6 +100,7 @@ impl<R: Rng> TransactionGenerator<R> {
 }
 
 /// A Builder type to configure and create a transaction.
+#[derive(Debug)]
 pub struct TransactionBuilder {
     /// The signer used to sign the transaction.
     pub signer: B256,
@@ -168,19 +170,19 @@ impl TransactionBuilder {
     }
 
     /// Sets the signer for the transaction builder.
-    pub fn signer(mut self, signer: B256) -> Self {
+    pub const fn signer(mut self, signer: B256) -> Self {
         self.signer = signer;
         self
     }
 
     /// Sets the gas limit for the transaction builder.
-    pub fn gas_limit(mut self, gas_limit: u64) -> Self {
+    pub const fn gas_limit(mut self, gas_limit: u64) -> Self {
         self.gas_limit = gas_limit;
         self
     }
 
     /// Sets the nonce for the transaction builder.
-    pub fn nonce(mut self, nonce: u64) -> Self {
+    pub const fn nonce(mut self, nonce: u64) -> Self {
         self.nonce = nonce;
         self
     }
@@ -198,19 +200,19 @@ impl TransactionBuilder {
     }
 
     /// Sets the maximum fee per gas for the transaction builder.
-    pub fn max_fee_per_gas(mut self, max_fee_per_gas: u128) -> Self {
+    pub const fn max_fee_per_gas(mut self, max_fee_per_gas: u128) -> Self {
         self.max_fee_per_gas = max_fee_per_gas;
         self
     }
 
     /// Sets the maximum priority fee per gas for the transaction builder.
-    pub fn max_priority_fee_per_gas(mut self, max_priority_fee_per_gas: u128) -> Self {
+    pub const fn max_priority_fee_per_gas(mut self, max_priority_fee_per_gas: u128) -> Self {
         self.max_priority_fee_per_gas = max_priority_fee_per_gas;
         self
     }
 
     /// Sets the recipient or contract address for the transaction builder.
-    pub fn to(mut self, to: Address) -> Self {
+    pub const fn to(mut self, to: Address) -> Self {
         self.to = TransactionKind::Call(to);
         self
     }
@@ -234,7 +236,7 @@ impl TransactionBuilder {
     }
 
     /// Sets the chain ID for the transaction.
-    pub fn chain_id(mut self, chain_id: u64) -> Self {
+    pub const fn chain_id(mut self, chain_id: u64) -> Self {
         self.chain_id = chain_id;
         self
     }

@@ -92,7 +92,7 @@ macro_rules! impl_to_rpc_result {
                 match self {
                     Ok(t) => Ok(t),
                     Err(err) => {
-                        let msg = format!("{msg}: {err:?}");
+                        let msg = format!("{msg}: {err}");
                         Err($crate::result::internal_rpc_err(msg))
                     }
                 }

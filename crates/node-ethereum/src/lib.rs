@@ -1,4 +1,4 @@
-//! Standalone crate for Reth configuration and builder types.
+//! Standalone crate for ethereum-specific Reth configuration and builder types.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -12,5 +12,7 @@
 pub mod engine;
 pub use engine::EthEngineTypes;
 
-#[cfg(feature = "optimism")]
-pub use engine::OptimismEngineTypes;
+/// Exports commonly used concrete instances of the
+/// [ConfigureEvmEnv](reth_node_api::ConfigureEvmEnv) trait.
+pub mod evm;
+pub use evm::EthEvmConfig;

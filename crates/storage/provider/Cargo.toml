@@ -19,6 +19,7 @@ reth-db.workspace = true
 reth-trie.workspace = true
 reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
+reth-node-api.workspace = true
 
 revm.workspace = true
 
@@ -40,7 +41,6 @@ pin-project.workspace = true
 parking_lot.workspace = true
 dashmap = { version = "5.5", features = ["inline"] }
 strum.workspace = true
-ahash.workspace = true
 
 # test-utils
 alloy-rlp = { workspace = true, optional = true }

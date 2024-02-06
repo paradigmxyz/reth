@@ -13,12 +13,14 @@ use reth_interfaces::{
     provider::ProviderResult,
     RethError, RethResult,
 };
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
     BlockNumberOrTag, BlockWithSenders, ChainInfo, ChainSpec, Header, PruneCheckpoint,
     PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta,
-    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
+    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
+    U256,
 };
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
@@ -438,7 +440,7 @@ where
         &self,
         id: BlockHashOrNumber,
         timestamp: u64,
-    ) -> ProviderResult<Option<Vec<Withdrawal>>> {
+    ) -> ProviderResult<Option<Withdrawals>> {
         self.database.provider()?.withdrawals_by_block(id, timestamp)
     }
 
@@ -466,22 +468,30 @@ where
     DB: Database,
     Tree: Send + Sync,
 {
-    fn fill_env_at(
+    fn fill_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnv,
         block_env: &mut BlockEnv,
         at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
-        self.database.provider()?.fill_env_at(cfg, block_env, at)
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
+        self.database.provider()?.fill_env_at(cfg, block_env, at, evm_config)
     }
 
-    fn fill_env_with_header(
+    fn fill_env_with_header<EvmConfig>(
         &self,
         cfg: &mut CfgEnv,
         block_env: &mut BlockEnv,
         header: &Header,
-    ) -> ProviderResult<()> {
-        self.database.provider()?.fill_env_with_header(cfg, block_env, header)
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
+        self.database.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
     }
 
     fn fill_block_env_at(
@@ -500,12 +510,28 @@ where
         self.database.provider()?.fill_block_env_with_header(block_env, header)
     }
 
-    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockHashOrNumber) -> ProviderResult<()> {
-        self.database.provider()?.fill_cfg_env_at(cfg, at)
+    fn fill_cfg_env_at<EvmConfig>(
+        &self,
+        cfg: &mut CfgEnv,
+        at: BlockHashOrNumber,
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
+        self.database.provider()?.fill_cfg_env_at(cfg, at, evm_config)
     }
 
-    fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> ProviderResult<()> {
-        self.database.provider()?.fill_cfg_env_with_header(cfg, header)
+    fn fill_cfg_env_with_header<EvmConfig>(
+        &self,
+        cfg: &mut CfgEnv,
+        header: &Header,
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
+        self.database.provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
     }
 }
 

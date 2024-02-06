@@ -54,7 +54,6 @@ sucds = "~0.6"
 tempfile.workspace = true
 thiserror.workspace = true
 zstd = { version = "0.12", features = ["experimental"] }
-ahash.workspace = true
 
 # `test-utils` feature
 hash-db = { version = "~0.15", optional = true }
@@ -115,6 +114,10 @@ test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
 
 [[bench]]
 name = "recover_ecdsa_crit"
+harness = false
+
+[[bench]]
+name = "validate_blob_tx"
 harness = false
 
 [[bench]]

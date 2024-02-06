@@ -12,13 +12,15 @@ use reth_db::{
     RawValue,
 };
 use reth_interfaces::provider::ProviderResult;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::AccountProof,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode,
     ChainInfo, ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
-    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, MAINNET, U256,
+    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
+    MAINNET, U256,
 };
 use reth_trie::updates::TrieUpdates;
 use revm::primitives::{BlockEnv, CfgEnv};
@@ -324,21 +326,29 @@ impl StateProvider for NoopProvider {
 }
 
 impl EvmEnvProvider for NoopProvider {
-    fn fill_env_at(
+    fn fill_env_at<EvmConfig>(
         &self,
         _cfg: &mut CfgEnv,
         _block_env: &mut BlockEnv,
         _at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
+        _evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
         Ok(())
     }
 
-    fn fill_env_with_header(
+    fn fill_env_with_header<EvmConfig>(
         &self,
         _cfg: &mut CfgEnv,
         _block_env: &mut BlockEnv,
         _header: &Header,
-    ) -> ProviderResult<()> {
+        _evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
         Ok(())
     }
 
@@ -358,11 +368,27 @@ impl EvmEnvProvider for NoopProvider {
         Ok(())
     }
 
-    fn fill_cfg_env_at(&self, _cfg: &mut CfgEnv, _at: BlockHashOrNumber) -> ProviderResult<()> {
+    fn fill_cfg_env_at<EvmConfig>(
+        &self,
+        _cfg: &mut CfgEnv,
+        _at: BlockHashOrNumber,
+        _evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
         Ok(())
     }
 
-    fn fill_cfg_env_with_header(&self, _cfg: &mut CfgEnv, _header: &Header) -> ProviderResult<()> {
+    fn fill_cfg_env_with_header<EvmConfig>(
+        &self,
+        _cfg: &mut CfgEnv,
+        _header: &Header,
+        _evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
         Ok(())
     }
 }
@@ -411,14 +437,14 @@ impl StageCheckpointReader for NoopProvider {
 }
 
 impl WithdrawalsProvider for NoopProvider {
-    fn latest_withdrawal(&self) -> ProviderResult<Option<reth_primitives::Withdrawal>> {
+    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         Ok(None)
     }
     fn withdrawals_by_block(
         &self,
         _id: BlockHashOrNumber,
         _timestamp: u64,
-    ) -> ProviderResult<Option<Vec<reth_primitives::Withdrawal>>> {
+    ) -> ProviderResult<Option<Withdrawals>> {
         Ok(None)
     }
 }

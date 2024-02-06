@@ -20,7 +20,7 @@ async fn trace_many_blocks() {
     let mut stream = client.trace_block_buffered_unordered(15_000_000..=16_000_100, 20);
     let now = Instant::now();
     while let Some((err, block)) = stream.next_err().await {
-        eprintln!("Error tracing block {block:?}: {err:?}");
+        eprintln!("Error tracing block {block:?}: {err}");
     }
     println!("Traced all blocks in {:?}", now.elapsed());
 }

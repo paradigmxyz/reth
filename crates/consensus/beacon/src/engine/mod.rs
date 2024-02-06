@@ -335,7 +335,7 @@ where
     fn forkchoice_updated(
         &mut self,
         state: ForkchoiceState,
-        attrs: Option<EngineT::PayloadAttributes>,
+        mut attrs: Option<EngineT::PayloadAttributes>,
     ) -> RethResult<OnForkChoiceUpdated> {
         trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
         if state.head_block_hash.is_zero() {
@@ -376,39 +376,14 @@ where
             Ok(outcome) => {
                 match &outcome {
                     CanonicalOutcome::AlreadyCanonical { header } => {
-                        // On Optimism, the proposers are allowed to reorg their own chain at will.
-                        cfg_if::cfg_if! {
-                            if #[cfg(feature = "optimism")] {
-                                if self.blockchain.chain_spec().is_optimism() {
-                                    debug!(
-                                        target: "consensus::engine",
-                                        fcu_head_num=?header.number,
-                                        current_head_num=?self.blockchain.canonical_tip().number,
-                                        "[Optimism] Allowing beacon reorg to old head"
-                                    );
-                                    let _ = self.update_head(header.clone());
-                                    self.listeners.notify(
-                                        BeaconConsensusEngineEvent::CanonicalChainCommitted(
-                                            Box::new(header.clone()),
-                                            elapsed,
-                                        ),
-                                    );
-                                } else {
-                                    debug!(
-                                        target: "consensus::engine",
-                                        fcu_head_num=?header.number,
-                                        current_head_num=?self.blockchain.canonical_tip().number,
-                                        "Ignoring beacon update to old head"
-                                    );
-                                }
-                            } else {
-                                debug!(
-                                    target: "consensus::engine",
-                                    fcu_head_num=?header.number,
-                                    current_head_num=?self.blockchain.canonical_tip().number,
-                                    "Ignoring beacon update to old head"
-                                );
-                            }
+                        if self.on_head_already_canonical(header, &mut attrs) {
+                            let _ = self.update_head(header.clone());
+                            self.listeners.notify(
+                                BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                                    Box::new(header.clone()),
+                                    elapsed,
+                                ),
+                            );
                         }
                     }
                     CanonicalOutcome::Committed { head } => {
@@ -471,6 +446,42 @@ where
 
         trace!(target: "consensus::engine", ?status, ?state, "Returning forkchoice status");
         Ok(OnForkChoiceUpdated::valid(status))
+    }
+
+    /// Invoked when head hash references a `VALID` block that is already canonical.
+    ///
+    /// Returns `true` if the head needs to be updated.
+    fn on_head_already_canonical(
+        &mut self,
+        header: &SealedHeader,
+        attrs: &mut Option<EngineT::PayloadAttributes>,
+    ) -> bool {
+        // On Optimism, the proposers are allowed to reorg their own chain at will.
+        #[cfg(feature = "optimism")]
+        if self.blockchain.chain_spec().is_optimism() {
+            debug!(
+                target: "consensus::engine",
+                fcu_head_num=?header.number,
+                current_head_num=?self.blockchain.canonical_tip().number,
+                "[Optimism] Allowing beacon reorg to old head"
+            );
+            return true
+        }
+
+        // 2. Client software MAY skip an update of the forkchoice state and MUST NOT begin a
+        //    payload build process if `forkchoiceState.headBlockHash` references a `VALID` ancestor
+        //    of the head of canonical chain, i.e. the ancestor passed payload validation process
+        //    and deemed `VALID`. In the case of such an event, client software MUST return
+        //    `{payloadStatus: {status: VALID, latestValidHash: forkchoiceState.headBlockHash,
+        //    validationError: null}, payloadId: null}`
+        attrs.take();
+        debug!(
+            target: "consensus::engine",
+            fcu_head_num=?header.number,
+            current_head_num=?self.blockchain.canonical_tip().number,
+            "Ignoring beacon update to old head"
+        );
+        false
     }
 
     /// Invoked when we receive a new forkchoice update message.
