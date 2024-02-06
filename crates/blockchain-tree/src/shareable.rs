@@ -178,7 +178,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTreeViewer for ShareableBlockc
 
     fn pending_block(&self) -> Option<SealedBlock> {
         trace!(target: "blockchain_tree", "Returning first pending block");
-        self.tree.read().pending_block().cloned()
+        self.tree.read().pending_block()
     }
 
     fn pending_block_and_receipts(&self) -> Option<(SealedBlock, Vec<Receipt>)> {

@@ -1099,11 +1099,10 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         }
 
         let head = chain_notification.tip().header.clone();
-
+        let sealed_block = chain_notification.tip().block.clone();
         // send notification about new canonical chain.
         let _ = self.canon_state_notification_sender.send(chain_notification);
 
-        let sealed_block = chain_notification.tip().block.clone();
         self.pending_block.try_update(Some(sealed_block));
 
         debug!(
