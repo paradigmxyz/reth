@@ -1105,12 +1105,9 @@ mod tests {
         validate::ValidTransaction,
         BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
     };
-    use reth_primitives::kzg::Blob;
-    #[cfg(feature = "c-kzg")]
-    use reth_primitives::transaction::generate_blob_sidecar;
+    use reth_primitives::{kzg::Blob, transaction::generate_blob_sidecar};
     use std::{fs, path::PathBuf};
 
-    #[cfg(feature = "c-kzg")]
     #[test]
     fn test_discard_blobs_on_blob_tx_eviction() {
         // Define the maximum limit for blobs in the sub-pool.
