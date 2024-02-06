@@ -222,13 +222,7 @@ where
         hash: B256,
         index: usize,
     ) -> EthResult<Option<LocalizedTransactionTrace>> {
-        match self.trace_transaction(hash).await? {
-            None => Ok(None),
-            Some(traces) => {
-                let trace = traces.into_iter().nth(index);
-                Ok(trace)
-            }
-        }
+        Ok(self.trace_transaction(hash).await?.and_then(|traces| traces.into_iter().nth(index)))
     }
 
     /// Returns all transaction traces that match the given filter.
