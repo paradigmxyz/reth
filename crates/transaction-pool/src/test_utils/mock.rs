@@ -1285,6 +1285,67 @@ impl MockTransactionRatio {
     }
 }
 
+/// The range of each type of fee, for the different transaction types
+#[derive(Debug, Clone)]
+pub struct MockFeeRange {
+    /// The range of gas_price or legacy and access list transactions
+    pub gas_price: Uniform<u128>,
+    /// The range of priority fees for EIP-1559 and EIP-4844 transactions
+    pub priority_fee: Uniform<u128>,
+    /// The range of max fees for EIP-1559 and EIP-4844 transactions
+    pub max_fee: Uniform<u128>,
+    /// The range of max fees per blob gas for EIP-4844 transactions
+    pub max_fee_blob: Uniform<u128>,
+}
+
+impl MockFeeRange {
+    /// Creates a new [MockFeeRange] with the given ranges.
+    ///
+    /// Expects the bottom of the `priority_fee_range` to be greater than the top of the
+    /// `max_fee_range`.
+    pub fn new(
+        gas_price: Range<u128>,
+        priority_fee: Range<u128>,
+        max_fee: Range<u128>,
+        max_fee_blob: Range<u128>,
+    ) -> Self {
+        assert!(
+            max_fee.start <= priority_fee.end,
+            "max_fee_range should be strictly below the priority fee range"
+        );
+        Self {
+            gas_price: gas_price.into(),
+            priority_fee: priority_fee.into(),
+            max_fee: max_fee.into(),
+            max_fee_blob: max_fee_blob.into(),
+        }
+    }
+
+    /// Returns a sample of `gas_price` for legacy and access list transactions with the given
+    /// [Rng](rand::Rng).
+    pub fn sample_gas_price(&self, rng: &mut impl rand::Rng) -> u128 {
+        self.gas_price.sample(rng)
+    }
+
+    /// Returns a sample of `max_priority_fee_per_gas` for EIP-1559 and EIP-4844 transactions with
+    /// the given [Rng](rand::Rng).
+    pub fn sample_priority_fee(&self, rng: &mut impl rand::Rng) -> u128 {
+        self.priority_fee.sample(rng)
+    }
+
+    /// Returns a sample of `max_fee_per_gas` for EIP-1559 and EIP-4844 transactions with the given
+    /// [Rng](rand::Rng).
+    pub fn sample_max_fee(&self, rng: &mut impl rand::Rng) -> u128 {
+        self.max_fee.sample(rng)
+    }
+
+    /// Returns a sample of `max_fee_per_blob_gas` for EIP-4844 transactions with the given
+    /// [Rng](rand::Rng).
+    pub fn sample_max_fee_blob(&self, rng: &mut impl rand::Rng) -> u128 {
+        self.max_fee_blob.sample(rng)
+    }
+}
+
 /// A configured distribution that can generate transactions
 #[derive(Debug)]
 pub struct MockTransactionDistribution {
@@ -1292,37 +1353,25 @@ pub struct MockTransactionDistribution {
     transaction_ratio: WeightedIndex<u32>,
     /// generates the gas limit
     gas_limit_range: Uniform<u64>,
-    /// generates the priority fee, if applicable
-    priority_fee_range: Uniform<u128>,
-    /// generates the max fee, if applicable
-    max_fee_range: Uniform<u128>,
-    /// generates the max fee per blob gas, if applicable
-    max_fee_blob_range: Uniform<u128>,
+    /// generates the transaction's fake size
+    size_range: Uniform<usize>,
+    /// generates fees for the given transaction types
+    fee_ranges: MockFeeRange,
 }
 
 impl MockTransactionDistribution {
     /// Creates a new generator distribution.
-    ///
-    /// Expects the bottom of the `priority_fee_range` to be greater than the top of the
-    /// `max_fee_range`.
     pub fn new(
         transaction_ratio: MockTransactionRatio,
+        fee_ranges: MockFeeRange,
         gas_limit_range: Range<u64>,
-        priority_fee_range: Range<u128>,
-        max_fee_range: Range<u128>,
-        max_fee_blob_range: Range<u128>,
+        size_range: Range<usize>,
     ) -> Self {
-        assert!(
-            max_fee_range.start <= priority_fee_range.end,
-            "max_fee_range should be strictly below the priority fee range"
-        );
-
         Self {
             transaction_ratio: transaction_ratio.weighted_index(),
             gas_limit_range: gas_limit_range.into(),
-            priority_fee_range: priority_fee_range.into(),
-            max_fee_range: max_fee_range.into(),
-            max_fee_blob_range: max_fee_blob_range.into(),
+            fee_ranges,
+            size_range: size_range.into(),
         }
     }
 
@@ -1330,23 +1379,25 @@ impl MockTransactionDistribution {
     pub fn tx(&self, nonce: u64, rng: &mut impl rand::Rng) -> MockTransaction {
         let transaction_sample = self.transaction_ratio.sample(rng);
         let tx = if transaction_sample == 0 {
-            MockTransaction::legacy()
+            MockTransaction::legacy().with_gas_price(self.fee_ranges.sample_gas_price(rng))
         } else if transaction_sample == 1 {
-            MockTransaction::eip2930()
+            MockTransaction::eip2930().with_gas_price(self.fee_ranges.sample_gas_price(rng))
         } else if transaction_sample == 2 {
             MockTransaction::eip1559()
-                .with_priority_fee(self.priority_fee_range.sample(rng))
-                .with_max_fee(self.max_fee_range.sample(rng))
+                .with_priority_fee(self.fee_ranges.sample_priority_fee(rng))
+                .with_max_fee(self.fee_ranges.sample_max_fee(rng))
         } else if transaction_sample == 3 {
             MockTransaction::eip4844()
-                .with_priority_fee(self.priority_fee_range.sample(rng))
-                .with_max_fee(self.max_fee_range.sample(rng))
-                .with_blob_fee(self.max_fee_blob_range.sample(rng))
+                .with_priority_fee(self.fee_ranges.sample_priority_fee(rng))
+                .with_max_fee(self.fee_ranges.sample_max_fee(rng))
+                .with_blob_fee(self.fee_ranges.sample_max_fee_blob(rng))
         } else {
             unreachable!("unknown transaction type returned by the weighted index")
         };
 
-        tx.with_nonce(nonce).with_gas_limit(self.gas_limit_range.sample(rng))
+        let size = self.size_range.sample(rng);
+
+        tx.with_nonce(nonce).with_gas_limit(self.gas_limit_range.sample(rng)).with_size(size)
     }
 }
 

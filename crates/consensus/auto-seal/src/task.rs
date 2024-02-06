@@ -2,7 +2,7 @@ use crate::{mode::MiningMode, Storage};
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_node_api::{EngineTypes, EvmEnvConfig};
+use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_stages::PipelineEvent;
@@ -88,7 +88,7 @@ where
     Pool: TransactionPool + Unpin + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
     Engine: EngineTypes + 'static,
-    EvmConfig: EvmEnvConfig + Clone + Unpin + Send + Sync + 'static,
+    EvmConfig: ConfigureEvmEnv + Clone + Unpin + Send + Sync + 'static,
 {
     type Output = ();
 

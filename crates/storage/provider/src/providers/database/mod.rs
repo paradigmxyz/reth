@@ -11,7 +11,7 @@ use crate::{
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::{provider::ProviderResult, RethError, RethResult};
-use reth_node_api::EvmEnvConfig;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     snapshot::HighestSnapshots,
     stage::{StageCheckpoint, StageId},
@@ -446,7 +446,7 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         self.provider()?.fill_env_at(cfg, block_env, at, evm_config)
     }
@@ -459,7 +459,7 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         self.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
     }
@@ -487,7 +487,7 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         self.provider()?.fill_cfg_env_at(cfg, at, evm_config)
     }
@@ -499,7 +499,7 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         self.provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
     }

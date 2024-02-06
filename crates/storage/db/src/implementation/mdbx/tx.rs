@@ -208,13 +208,11 @@ impl<K: TransactionKind> MetricsHandler<K> {
             let open_duration = self.start.elapsed();
             if open_duration > LONG_TRANSACTION_DURATION {
                 self.backtrace_recorded.store(true, Ordering::Relaxed);
-
-                let backtrace = Backtrace::force_capture();
                 warn!(
                     target: "storage::db::mdbx",
                     ?open_duration,
                     %self.txn_id,
-                    "The database read transaction has been open for too long. Backtrace: {}", backtrace.to_string()
+                    "The database read transaction has been open for too long. Backtrace:\n{}", Backtrace::force_capture()
                 );
             }
         }

@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use crate::{
     blobstore::BlobStoreError,
     error::PoolResult,
@@ -228,6 +230,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// given base fee.
     ///
     /// Consumer: Block production
+    #[deprecated(note = "Use best_transactions_with_attributes instead.")]
     fn best_transactions_with_base_fee(
         &self,
         base_fee: u64,

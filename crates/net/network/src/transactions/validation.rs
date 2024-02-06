@@ -237,7 +237,7 @@ impl FilterAnnouncement for EthAnnouncementFilter {
                 network=%Self,
                 "empty eth68 announcement"
             );
-            return (FilterOutcome::ReportPeer, HashMap::new())
+            return (FilterOutcome::ReportPeer, ValidAnnouncementData::empty_eth68())
         }
 
         let mut should_report_peer = false;
@@ -284,7 +284,7 @@ impl FilterAnnouncement for EthAnnouncementFilter {
 
         (
             if should_report_peer { FilterOutcome::ReportPeer } else { FilterOutcome::Ok },
-            deduped_data,
+            ValidAnnouncementData::new_eth68(deduped_data),
         )
     }
 
@@ -306,7 +306,7 @@ impl FilterAnnouncement for EthAnnouncementFilter {
                 network=%Self,
                 "empty eth66 announcement"
             );
-            return (FilterOutcome::ReportPeer, HashMap::new())
+            return (FilterOutcome::ReportPeer, ValidAnnouncementData::empty_eth66())
         }
 
         // 2. checks if announcement is spam packed with duplicate hashes
@@ -324,7 +324,7 @@ impl FilterAnnouncement for EthAnnouncementFilter {
             } else {
                 FilterOutcome::Ok
             },
-            deduped_data,
+            ValidAnnouncementData::new_eth66(deduped_data),
         )
     }
 }
@@ -380,7 +380,7 @@ mod test {
         let mut expected_data = HashMap::new();
         expected_data.insert(hashes[1], Some((types[1], sizes[1])));
 
-        assert_eq!(expected_data, data,)
+        assert_eq!(expected_data, data.into_data())
     }
 
     #[test]
@@ -416,7 +416,7 @@ mod test {
         let mut expected_data = HashMap::new();
         expected_data.insert(hashes[2], Some((types[2], sizes[2])));
 
-        assert_eq!(expected_data, data,)
+        assert_eq!(expected_data, data.into_data())
     }
 
     #[test]
@@ -456,7 +456,7 @@ mod test {
         expected_data.insert(hashes[3], Some((types[3], sizes[3])));
         expected_data.insert(hashes[0], Some((types[0], sizes[0])));
 
-        assert_eq!(expected_data, data,)
+        assert_eq!(expected_data, data.into_data())
     }
 
     #[test]
@@ -500,7 +500,7 @@ mod test {
         expected_data.insert(hashes[1], None);
         expected_data.insert(hashes[0], None);
 
-        assert_eq!(expected_data, data)
+        assert_eq!(expected_data, data.into_data())
     }
 
     #[test]
