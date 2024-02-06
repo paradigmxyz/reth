@@ -1,6 +1,6 @@
 use crate::{
     Address, Bytes, GotExpected, Header, SealedHeader, TransactionSigned,
-    TransactionSignedEcRecovered, Withdrawal, Withdrawals, B256,
+    TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
@@ -119,7 +119,7 @@ impl Block {
             // take into account capacity
             self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
-            self.withdrawals.as_ref().map(|w| w.size() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Withdrawals>>())
+            self.withdrawals.as_ref().map_or(std::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 }
 
@@ -316,7 +316,7 @@ impl SealedBlock {
             // take into account capacity
             self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
-            self.withdrawals.as_ref().map(|w| w.size() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Withdrawals>>())
+            self.withdrawals.as_ref().map_or(std::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 
     /// Calculates the total gas used by blob transactions in the sealed block.
@@ -515,8 +515,7 @@ impl BlockBody {
             self.ommers.capacity() * std::mem::size_of::<Header>() +
             self.withdrawals
                 .as_ref()
-                .map(|w| w.size() + w.capacity() * std::mem::size_of::<Withdrawal>())
-                .unwrap_or(std::mem::size_of::<Option<Withdrawals>>())
+                .map_or(std::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 }
 
