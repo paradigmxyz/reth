@@ -70,7 +70,7 @@ impl SnapshotSegment {
     }
 
     /// Returns the default file name for the provided segment and range.
-    pub fn filename(&self, block_range: &RangeInclusive<BlockNumber>) -> String {
+    pub fn filename(&self, block_range: &SegmentRange) -> String {
         // ATTENTION: if changing the name format, be sure to reflect those changes in
         // [`Self::parse_filename`].
         format!("snapshot_{}_{}_{}", self.as_ref(), block_range.start(), block_range.end())
@@ -81,7 +81,7 @@ impl SnapshotSegment {
         &self,
         filters: Filters,
         compression: Compression,
-        block_range: &RangeInclusive<BlockNumber>,
+        block_range: &SegmentRange,
     ) -> String {
         let prefix = self.filename(block_range);
 
@@ -134,9 +134,9 @@ impl SnapshotSegment {
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
 pub struct SegmentHeader {
     /// Block range of the snapshot segment
-    block_range: RangeInclusive<BlockNumber>,
+    block_range: SegmentRange,
     /// Transaction range of the snapshot segment
-    tx_range: Option<RangeInclusive<TxNumber>>,
+    tx_range: Option<SegmentRange>,
     /// Segment type
     segment: SnapshotSegment,
 }
@@ -148,7 +148,7 @@ impl SegmentHeader {
         tx_range: Option<RangeInclusive<TxNumber>>,
         segment: SnapshotSegment,
     ) -> Self {
-        Self { block_range, tx_range, segment }
+        Self { block_range: block_range.into(), tx_range: tx_range.map(Into::into), segment }
     }
 
     /// Returns the snapshot segment kind.
@@ -158,22 +158,22 @@ impl SegmentHeader {
 
     /// Returns the block range.
     pub fn block_range(&self) -> RangeInclusive<BlockNumber> {
-        self.block_range.clone()
+        self.block_range.start()..=self.block_range.end()
     }
 
     /// Returns the transaction range.
     pub fn tx_range(&self) -> Option<RangeInclusive<TxNumber>> {
-        self.tx_range.clone()
+        self.tx_range.as_ref().map(|range| range.start()..=range.end())
     }
 
     /// Returns the first block number of the segment.
     pub fn block_start(&self) -> BlockNumber {
-        *self.block_range.start()
+        self.block_range.start()
     }
 
     /// Returns the last block number of the segment.
     pub fn block_end(&self) -> BlockNumber {
-        *self.block_range.end()
+        self.block_range.end()
     }
 
     /// Returns the first transaction number of the segment.  
@@ -182,7 +182,7 @@ impl SegmentHeader {
     ///
     /// This method panics if `self.tx_range` is `None`.
     pub fn tx_start(&self) -> TxNumber {
-        *self.tx_range.as_ref().expect("should exist").start()
+        self.tx_range.as_ref().expect("should exist").start()
     }
 
     /// Returns the last transaction number of the segment.   
@@ -192,7 +192,7 @@ impl SegmentHeader {
     /// This method panics if `self.tx_range` is `None`.
     #[track_caller]
     pub fn tx_end(&self) -> TxNumber {
-        *self.tx_range.as_ref().expect("should exist").end()
+        self.tx_range.as_ref().expect("should exist").end()
     }
 
     /// Number of transactions.  
@@ -213,7 +213,7 @@ impl SegmentHeader {
 
     /// Increments block end range depending on segment
     pub fn increment_block(&mut self) {
-        self.block_range = *self.block_range.start()..=*self.block_range.end() + 1;
+        self.block_range.end += 1;
     }
 
     /// Increments tx end range depending on segment
@@ -222,9 +222,9 @@ impl SegmentHeader {
             SnapshotSegment::Headers => (),
             SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
                 if let Some(tx_range) = &mut self.tx_range {
-                    *tx_range = *tx_range.start()..=*tx_range.end() + 1;
+                    tx_range.end += 1;
                 } else {
-                    self.tx_range = Some(0..=0);
+                    self.tx_range = Some(SegmentRange::new(0, 0));
                 }
             }
         }
@@ -234,31 +234,37 @@ impl SegmentHeader {
     pub fn prune(&mut self, num: u64) {
         match self.segment {
             SnapshotSegment::Headers => {
-                self.block_range =
-                    *self.block_range.start()..=self.block_range.end().saturating_sub(num)
+                self.block_range.end.saturating_sub(num);
             }
             SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
-                self.tx_range = self.tx_range.as_ref().and_then(|tx_range| {
-                    if num > *tx_range.end() {
-                        return None
+                if let Some(range) = &mut self.tx_range {
+                    if num > range.end {
+                        self.tx_range = None;
+                    } else {
+                        range.end.saturating_sub(num);
                     }
-                    Some(*tx_range.start()..=tx_range.end().saturating_sub(num))
-                });
+                };
             }
         };
     }
 
     /// Sets a new block_range.
-    pub fn set_block_range(&mut self, block_range: RangeInclusive<BlockNumber>) {
-        self.block_range = block_range;
+    pub fn set_block_range(&mut self, block_start: BlockNumber, block_end: BlockNumber) {
+        self.block_range.start = block_start;
+        self.block_range.end = block_end;
     }
 
     /// Sets a new tx_range.
-    pub fn set_tx_range(&mut self, tx_range: RangeInclusive<TxNumber>) {
-        self.tx_range = Some(tx_range);
+    pub fn set_tx_range(&mut self, tx_start: TxNumber, tx_end: TxNumber) {
+        if let Some(tx_range) = &mut self.tx_range {
+            tx_range.start = tx_start;
+            tx_range.end = tx_end;
+        } else {
+            self.tx_range = Some(SegmentRange::new(tx_start, tx_end))
+        }
     }
 
-    /// Returns the row offset which depends on whether the segment is block or transaction based.
+    /// Returns the start number depending on whether the segment is block or transaction based.
     pub fn start(&self) -> u64 {
         match self.segment {
             SnapshotSegment::Headers => self.block_start(),
@@ -274,6 +280,35 @@ pub struct SegmentConfig {
     pub filters: Filters,
     /// Compression used on the segment
     pub compression: Compression,
+}
+
+/// Helper type to handle segment transaction and block INCLUSIVE ranges.
+///
+/// They can be modified on a hot loop, which makes the `std::ops::RangeInclusive` a poor fit.
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
+struct SegmentRange {
+    start: u64,
+    end: u64,
+}
+
+impl SegmentRange {
+    fn new(start: u64, end: u64) -> Self {
+        Self { start, end }
+    }
+
+    fn start(&self) -> u64 {
+        self.start
+    }
+
+    fn end(&self) -> u64 {
+        self.end
+    }
+}
+
+impl From<RangeInclusive<u64>> for SegmentRange {
+    fn from(value: RangeInclusive<u64>) -> Self {
+        SegmentRange { start: *value.start(), end: *value.end() }
+    }
 }
 
 #[cfg(test)]
