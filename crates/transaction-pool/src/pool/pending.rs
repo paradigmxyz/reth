@@ -388,7 +388,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let mut unique_senders = self.highest_nonces.len();
 
         // keep track of transactions to remove and how many have been removed so far
+        let original_length = self.len();
         let mut removed = Vec::new();
+        let mut total_removed = 0;
+
+        // track total `size` of transactions to remove
+        let original_size = self.size();
+        let mut total_size = 0;
 
         loop {
             // check how many unique senders were removed last iteration
@@ -401,15 +407,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
             // we can re-use the temp array
             removed.clear();
 
-            // return early if the pool is under limits
-            if !limit.is_exceeded(self.len(), self.size()) || non_local_senders == 0 {
-                return
-            }
-
             // loop through the highest nonces set, removing transactions until we reach the limit
             for tx in self.highest_nonces.iter() {
                 // return early if the pool is under limits
-                if !limit.is_exceeded(self.len(), self.size()) || non_local_senders == 0 {
+                if !limit.is_exceeded(original_length - total_removed, original_size - total_size) ||
+                    non_local_senders == 0
+                {
                     // need to remove remaining transactions before exiting
                     for id in &removed {
                         if let Some(tx) = self.remove_transaction(id) {
@@ -425,6 +428,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
                     continue
                 }
 
+                total_size += tx.transaction.size();
+                total_removed += 1;
                 removed.push(*tx.transaction.id());
             }
 
@@ -433,6 +438,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 if let Some(tx) = self.remove_transaction(id) {
                     end_removed.push(tx);
                 }
+            }
+
+            // return if either the pool is under limits or there are no more _eligible_
+            // transactions to remove
+            if !limit.is_exceeded(self.len(), self.size()) || non_local_senders == 0 {
+                return
             }
         }
     }
@@ -454,7 +465,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let mut removed = Vec::new();
         self.remove_to_limit(&limit, false, &mut removed);
 
-        if self.size() <= limit.max_size && self.len() <= limit.max_txs {
+        if !limit.is_exceeded(self.len(), self.size()) {
             return removed
         }
 
