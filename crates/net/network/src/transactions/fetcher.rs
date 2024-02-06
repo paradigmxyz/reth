@@ -320,7 +320,9 @@ impl TransactionFetcher {
     ) -> RequestTxHashes {
         let (mut request_hashes, _version) = hashes_from_announcement.into_request_hashes();
         if request_hashes.len() <= GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES {
-            request_hashes
+            *hashes_to_request = request_hashes;
+
+            RequestTxHashes::default()
         } else {
             let surplus_hashes =
                 request_hashes.split_off(GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES - 1);

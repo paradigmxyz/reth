@@ -629,7 +629,7 @@ impl HandleAnnouncement for ValidAnnouncementData {
 }
 
 /// Hashes to request from a peer.
-#[derive(Debug, Deref, DerefMut, IntoIterator, Constructor)]
+#[derive(Debug, Default, Deref, DerefMut, IntoIterator, Constructor)]
 pub struct RequestTxHashes {
     #[deref]
     #[deref_mut]
