@@ -555,27 +555,26 @@ mod tests {
         for entry in
             fs::read_dir("./src/transaction/blob_data/").expect("Failed to read blob_data folder")
         {
-            if let Ok(entry) = entry {
-                let file_path = entry.path();
+            let entry = entry.expect("Failed to read directory entry");
+            let file_path = entry.path();
 
-                // Ensure the entry is a file and not a directory
-                if file_path.is_file() {
-                    // Read the contents of the JSON file into a string
-                    let mut json_contents = String::new();
-                    let mut json_file =
-                        File::open(file_path.as_path()).expect("Failed to open JSON file");
-                    json_file.read_to_string(&mut json_contents).expect("Failed to read the file");
+            // Ensure the entry is a file and not a directory
+            if file_path.is_file() {
+                // Read the contents of the JSON file into a string
+                let mut json_contents = String::new();
+                let mut json_file =
+                    File::open(file_path.as_path()).expect("Failed to open JSON file");
+                json_file.read_to_string(&mut json_contents).expect("Failed to read the file");
 
-                    // Parse the JSON contents into a serde_json::Value
-                    let json_value: serde_json::Value =
-                        serde_json::from_str(&json_contents).expect("Failed to deserialize JSON");
+                // Parse the JSON contents into a serde_json::Value
+                let json_value: serde_json::Value =
+                    serde_json::from_str(&json_contents).expect("Failed to deserialize JSON");
 
-                    // Extract blob data from JSON and convert it to Blob
-                    if let Some(data) = json_value.get("data") {
-                        if let Some(data_str) = data.as_str() {
-                            if let Ok(blob) = Blob::from_hex(data_str) {
-                                blobs.push(blob);
-                            }
+                // Extract blob data from JSON and convert it to Blob
+                if let Some(data) = json_value.get("data") {
+                    if let Some(data_str) = data.as_str() {
+                        if let Ok(blob) = Blob::from_hex(data_str) {
+                            blobs.push(blob);
                         }
                     }
                 }
