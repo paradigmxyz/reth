@@ -36,7 +36,7 @@ impl Command {
 
         let mut rng = rand::thread_rng();
 
-        let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
+        let tx_range = provider.transaction_range_by_block_range(block_range.std_range())?;
 
         let mut row_indexes = tx_range.clone().collect::<Vec<_>>();
 

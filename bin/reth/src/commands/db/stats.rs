@@ -150,7 +150,7 @@ impl Command {
 
         for (segment, ranges) in snapshots.into_iter().sorted_by_key(|(segment, _)| *segment) {
             for (block_range, tx_range) in ranges {
-                let fixed_block_range = find_fixed_range(*block_range.start());
+                let fixed_block_range = find_fixed_range(block_range.start());
                 let jar_provider = snapshot_provider
                     .get_segment_provider(segment, || Some(fixed_block_range.clone()), None)?
                     .expect("something went wrong");

@@ -12,14 +12,14 @@ use reth_nippy_jar::{NippyJar, NippyJarCursor};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::{
     snapshot::{
-        Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentConfig, SegmentHeader,
+        Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentConfig,
+        SegmentHeader, SegmentRangeInclusive,
     },
     BlockNumber, ChainSpec, SnapshotSegment,
 };
 use reth_provider::{BlockNumReader, ProviderFactory};
 use reth_snapshot::{segments as snap_segments, segments::Segment};
 use std::{
-    ops::RangeInclusive,
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
@@ -164,13 +164,13 @@ impl Command {
     }
 
     /// Generates successive inclusive block ranges up to the tip starting at `self.from`.
-    fn block_ranges(&self, tip: BlockNumber) -> Vec<RangeInclusive<BlockNumber>> {
+    fn block_ranges(&self, tip: BlockNumber) -> Vec<SegmentRangeInclusive> {
         let mut from = self.from;
         let mut ranges = Vec::new();
 
         while from <= tip {
             let end_range = std::cmp::min(from + self.block_interval - 1, tip);
-            ranges.push(from..=end_range);
+            ranges.push(SegmentRangeInclusive::new(from, end_range));
             from = end_range + 1;
         }
 
@@ -202,7 +202,7 @@ impl Command {
                             &provider,
                             dir.as_path(),
                             config,
-                            block_range.clone(),
+                            block_range.std_range(),
                         )?;
                     }
 

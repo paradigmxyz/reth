@@ -21,7 +21,7 @@ use reth_db::{
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::{find_fixed_range, HighestSnapshots, SegmentHeader},
+    snapshot::{find_fixed_range, HighestSnapshots, SegmentHeader, SegmentRangeInclusive},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo, Header,
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
@@ -36,7 +36,7 @@ use std::{
 
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a snapshot range.
-type SegmentRanges = HashMap<SnapshotSegment, BTreeMap<TxNumber, RangeInclusive<BlockNumber>>>;
+type SegmentRanges = HashMap<SnapshotSegment, BTreeMap<TxNumber, SegmentRangeInclusive>>;
 
 /// [`SnapshotProvider`] manages all existing [`SnapshotJarProvider`].
 #[derive(Debug, Default)]
@@ -115,7 +115,7 @@ impl SnapshotProvider {
     pub fn get_segment_provider(
         &self,
         segment: SnapshotSegment,
-        fn_range: impl Fn() -> Option<RangeInclusive<BlockNumber>>,
+        fn_range: impl Fn() -> Option<SegmentRangeInclusive>,
         path: Option<&Path>,
     ) -> ProviderResult<Option<SnapshotJarProvider<'_>>> {
         // If we have a path, then get the block range from its name.
@@ -159,9 +159,9 @@ impl SnapshotProvider {
     pub fn delete_jar(
         &self,
         segment: SnapshotSegment,
-        fixed_block_range: RangeInclusive<BlockNumber>,
+        fixed_block_range: SegmentRangeInclusive,
     ) -> ProviderResult<()> {
-        let key = (*fixed_block_range.end(), segment);
+        let key = (fixed_block_range.end(), segment);
         let jar = if let Some((_, jar)) = self.map.remove(&key) {
             jar.jar
         } else {
@@ -185,9 +185,9 @@ impl SnapshotProvider {
     fn get_or_create_jar_provider(
         &self,
         segment: SnapshotSegment,
-        fixed_block_range: &RangeInclusive<u64>,
+        fixed_block_range: &SegmentRangeInclusive,
     ) -> ProviderResult<SnapshotJarProvider<'_>> {
-        let key = (*fixed_block_range.end(), segment);
+        let key = (fixed_block_range.end(), segment);
         if let Some(jar) = self.map.get(&key) {
             Ok(jar.into())
         } else {
@@ -211,7 +211,7 @@ impl SnapshotProvider {
         &self,
         segment: SnapshotSegment,
         block: u64,
-    ) -> Option<RangeInclusive<BlockNumber>> {
+    ) -> Option<SegmentRangeInclusive> {
         self.snapshots_max_block
             .read()
             .get(&segment)
@@ -225,7 +225,7 @@ impl SnapshotProvider {
         &self,
         segment: SnapshotSegment,
         tx: u64,
-    ) -> Option<RangeInclusive<BlockNumber>> {
+    ) -> Option<SegmentRangeInclusive> {
         let snapshots = self.snapshots_tx_index.read();
         let segment_snapshots = snapshots.get(&segment)?;
 
@@ -240,7 +240,7 @@ impl SnapshotProvider {
             }
             let tx_start = snapshots_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
             if tx_start <= tx {
-                return Some(find_fixed_range(*block_range.end()))
+                return Some(find_fixed_range(block_range.end()))
             }
         }
         None
@@ -273,7 +273,7 @@ impl SnapshotProvider {
                 // Updates the tx index by first removing all entries which have a higher
                 // block_start than our current static file.
                 if let Some(tx_range) = jar.user_header().tx_range() {
-                    let tx_end = *tx_range.end();
+                    let tx_end = tx_range.end();
 
                     // Current block range has the same block start as `fixed_range``, but block end
                     // might be different if we are still filling this static file.
@@ -308,10 +308,10 @@ impl SnapshotProvider {
                 }
 
                 // Update the cached provider.
-                self.map.insert((*fixed_range.end(), segment), LoadedJar::new(jar)?);
+                self.map.insert((fixed_range.end(), segment), LoadedJar::new(jar)?);
 
                 // Delete any cached provider that no longer has an associated jar.
-                self.map.retain(|(end, seg), _| !(*seg == segment && *end > *fixed_range.end()));
+                self.map.retain(|(end, seg), _| !(*seg == segment && *end > fixed_range.end()));
             }
             None => {
                 tx_index.remove(&segment);
@@ -332,13 +332,13 @@ impl SnapshotProvider {
         for (segment, ranges) in iter_snapshots(&self.path)? {
             // Update last block for each segment
             if let Some((block_range, _)) = ranges.last() {
-                max_block.insert(segment, *block_range.end());
+                max_block.insert(segment, block_range.end());
             }
 
             // Update tx -> block_range index
             for (block_range, tx_range) in ranges {
                 if let Some(tx_range) = tx_range {
-                    let tx_end = *tx_range.end();
+                    let tx_end = tx_range.end();
 
                     match tx_index.entry(segment) {
                         Entry::Occupied(mut index) => {
@@ -386,12 +386,14 @@ impl SnapshotProvider {
     ) -> ProviderResult<Option<T>> {
         if let Some(highest_block) = self.get_highest_snapshot_block(segment) {
             let mut range = find_fixed_range(highest_block);
-            while *range.end() > 0 {
+            while range.end() > 0 {
                 if let Some(res) = func(self.get_or_create_jar_provider(segment, &range)?)? {
                     return Ok(Some(res))
                 }
-                range = range.start().saturating_sub(BLOCKS_PER_SNAPSHOT)..=
-                    range.end().saturating_sub(BLOCKS_PER_SNAPSHOT);
+                range = SegmentRangeInclusive::new(
+                    range.start().saturating_sub(BLOCKS_PER_SNAPSHOT),
+                    range.end().saturating_sub(BLOCKS_PER_SNAPSHOT),
+                );
             }
         }
 

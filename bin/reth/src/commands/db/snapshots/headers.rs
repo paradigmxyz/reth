@@ -32,7 +32,7 @@ impl Command {
             Filters::WithoutFilters
         };
 
-        let mut row_indexes = block_range.clone().collect::<Vec<_>>();
+        let mut row_indexes = block_range.std_range().collect::<Vec<_>>();
         let mut rng = rand::thread_rng();
 
         let path: PathBuf = SnapshotSegment::Headers

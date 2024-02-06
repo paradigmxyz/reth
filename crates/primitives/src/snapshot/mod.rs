@@ -7,7 +7,7 @@ mod segment;
 use alloy_primitives::BlockNumber;
 pub use compression::Compression;
 pub use filters::{Filters, InclusionFilter, PerfectHashingFunction};
-pub use segment::{SegmentConfig, SegmentHeader, SnapshotSegment};
+pub use segment::{SegmentConfig, SegmentHeader, SegmentRangeInclusive, SnapshotSegment};
 use std::ops::RangeInclusive;
 
 /// Default snapshot block count.
@@ -49,7 +49,7 @@ impl HighestSnapshots {
 
 /// Each snapshot has a fixed number of blocks. This gives out the range where the requested block
 /// is positioned. Used for segment filename.
-pub fn find_fixed_range(block: BlockNumber) -> RangeInclusive<BlockNumber> {
+pub fn find_fixed_range(block: BlockNumber) -> SegmentRangeInclusive {
     let start = (block / BLOCKS_PER_SNAPSHOT) * BLOCKS_PER_SNAPSHOT;
-    start..=start + BLOCKS_PER_SNAPSHOT - 1
+    SegmentRangeInclusive::new(start, start + BLOCKS_PER_SNAPSHOT - 1)
 }
