@@ -6,7 +6,7 @@ use reth_primitives::{
     address, b256, hex, Address, Block, Bytes, ChainSpec, Hardfork, TransactionKind, B256, U256,
 };
 use revm::{
-    primitives::{BedrockSpec, Bytecode, HashMap, RegolithSpec},
+    primitives::{Bytecode, HashMap, SpecId},
     DatabaseCommit, L1BlockInfo,
 };
 use std::sync::Arc;
@@ -86,7 +86,12 @@ pub fn parse_l1_info_tx(data: &[u8]) -> Result<L1BlockInfo, BlockExecutionError>
         ),
     )?;
 
-    Ok(L1BlockInfo { l1_base_fee, l1_fee_overhead, l1_fee_scalar })
+    let mut l1block = L1BlockInfo::default();
+    l1block.l1_base_fee = l1_base_fee;
+    l1block.l1_fee_overhead = Some(l1_fee_overhead);
+    l1block.l1_base_fee_scalar = l1_fee_scalar;
+
+    Ok(l1block)
 }
 
 /// An extension trait for [L1BlockInfo] that allows us to calculate the L1 cost of a transaction
@@ -133,17 +138,18 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Ok(U256::ZERO)
         }
 
-        if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
-            Ok(self.calculate_tx_l1_cost::<RegolithSpec>(input))
+        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
+            SpecId::REGOLITH
         } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
-            Ok(self.calculate_tx_l1_cost::<BedrockSpec>(input))
+            SpecId::BEDROCK
         } else {
-            Err(reth_executor::BlockExecutionError::OptimismBlockExecution(
+            return Err(reth_executor::BlockExecutionError::OptimismBlockExecution(
                 reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
                     message: "Optimism hardforks are not active".to_string(),
                 },
             ))
-        }
+        };
+        Ok(self.calculate_tx_l1_cost(input, spec_id))
     }
 
     fn l1_data_gas(
@@ -152,17 +158,18 @@ impl RethL1BlockInfo for L1BlockInfo {
         timestamp: u64,
         input: &Bytes,
     ) -> Result<U256, BlockExecutionError> {
-        if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
-            Ok(self.data_gas::<RegolithSpec>(input))
+        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
+            SpecId::REGOLITH
         } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
-            Ok(self.data_gas::<BedrockSpec>(input))
+            SpecId::BEDROCK
         } else {
-            Err(reth_executor::BlockExecutionError::OptimismBlockExecution(
+            return Err(reth_executor::BlockExecutionError::OptimismBlockExecution(
                 reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
                     message: "Optimism hardforks are not active".to_string(),
                 },
             ))
-        }
+        };
+        Ok(self.data_gas(input, spec_id))
     }
 }
 
@@ -226,7 +233,7 @@ mod test_l1_fee {
 
         let l1_info: L1BlockInfo = super::extract_l1_info(&mock_block).unwrap();
         assert_eq!(l1_info.l1_base_fee, U256::from(652_114));
-        assert_eq!(l1_info.l1_fee_overhead, U256::from(2100));
-        assert_eq!(l1_info.l1_fee_scalar, U256::from(1_000_000));
+        assert_eq!(l1_info.l1_fee_overhead, Some(U256::from(2100)));
+        assert_eq!(l1_info.l1_base_fee_scalar, U256::from(1_000_000));
     }
 }

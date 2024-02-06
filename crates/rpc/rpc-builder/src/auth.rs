@@ -248,7 +248,7 @@ impl AuthServerConfigBuilder {
                     .max_connections(500)
                     // bump the default request size slightly, there aren't any methods exposed with
                     // dynamic request params that can exceed this
-                    .max_request_body_size(25 * 1024 * 1024)
+                    .max_request_body_size(5 * 1024 * 1024)
                     .set_id_provider(EthSubscriptionIdProvider::default())
             }),
         }
