@@ -1129,7 +1129,7 @@ where
                 )
             })?;
         }
-        info!(target: "consensus::cl","====================================on_block_commit========================================");
+        info!(target: "consensus::cl","==================================on_block_commit over======================================");
         Ok(())
     }
 
@@ -1910,6 +1910,7 @@ where
         let mut msg_out = vec![];
         seal.encode(&mut msg_out);
         let message_bytes = reth_primitives::Bytes::copy_from_slice(msg_out.as_slice());
+        info!(target: "consensus::cl", "Sending block seal to {:?}: {}", recipient, seal);
 
         //create header
         let header = ClayerConsensusMessageHeader {
