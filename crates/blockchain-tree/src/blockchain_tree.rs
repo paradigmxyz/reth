@@ -32,6 +32,7 @@ use std::{
     collections::{BTreeMap, HashSet},
     sync::Arc,
 };
+use tokio::sync::watch::{Receiver, Sender};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -74,6 +75,33 @@ pub struct BlockchainTree<DB: Database, EF: ExecutorFactory> {
     /// Metrics for sync stages.
     sync_metrics_tx: Option<MetricEventsSender>,
     prune_modes: Option<PruneModes>,
+    /// The pending block.
+    pending_block: PendingBlock,
+}
+
+#[derive(Debug)]
+struct PendingBlock {
+    tx: Sender<Option<SealedBlock>>,
+    rx: Receiver<Option<SealedBlock>>,
+}
+impl PendingBlock {
+    fn new() -> Self {
+        let (tx, rx) = tokio::sync::watch::channel(None);
+        Self { tx, rx }
+    }
+
+    // Method to conditionally update the PendingBlock
+    fn try_update(&self, block: Option<SealedBlock>) {
+        // Only send the update if the new block is different from the current one
+        if self.rx.borrow().as_ref() != block.as_ref() {
+            self.tx.send(block).unwrap()
+        }
+    }
+
+    // Method to read the current PendingBlock
+    fn read(&self) -> Option<SealedBlock> {
+        (*self.rx.borrow()).clone()
+    }
 }
 
 impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
@@ -117,6 +145,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             metrics: Default::default(),
             sync_metrics_tx: None,
             prune_modes,
+            pending_block: PendingBlock::new(),
         })
     }
 
@@ -226,9 +255,8 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     }
 
     /// Returns the block that's considered the `Pending` block, if it exists.
-    pub fn pending_block(&self) -> Option<&SealedBlock> {
-        let b = self.block_indices().pending_block_num_hash()?;
-        self.block_by_hash(b.hash)
+    pub fn pending_block(&self) -> Option<SealedBlock> {
+        self.pending_block.read()
     }
 
     /// Return items needed to execute on the pending state.
@@ -308,6 +336,10 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         if let Some(canonical_parent_number) =
             self.block_indices().canonical_number(block.parent_hash)
         {
+            if canonical_parent_number == parent.number {
+                let pending_block: SealedBlock = block.block.clone();
+                self.pending_block.try_update(Some(pending_block));
+            }
             // we found the parent block in canonical chain
             if canonical_parent_number != parent.number {
                 return Err(ConsensusError::ParentBlockNumberMismatch {
@@ -1070,6 +1102,9 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
         // send notification about new canonical chain.
         let _ = self.canon_state_notification_sender.send(chain_notification);
+
+        let sealed_block = chain_notification.tip().block.clone();
+        self.pending_block.try_update(Some(sealed_block));
 
         debug!(
             target: "blockchain_tree",
