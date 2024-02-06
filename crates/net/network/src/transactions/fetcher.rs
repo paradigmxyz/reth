@@ -499,6 +499,7 @@ impl TransactionFetcher {
                         if size != prev_size {
                             debug!(target: "net::tx",
                                 peer_id=format!("{peer_id:#}"),
+                                hash=%hash,
                                 size=size,
                                 previously_seen_size=previously_seen_size,
                                 client_version=%client_version,
