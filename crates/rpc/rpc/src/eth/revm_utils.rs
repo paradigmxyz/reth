@@ -131,7 +131,7 @@ where
 {
     let mut evm = revm::Evm::builder().with_db(db).with_env_with_handler_cfg(env).build();
     let res = evm.transact()?;
-    let (_, env) = evm.into_db_and_env_with_spec_id();
+    let (_, env) = evm.into_db_and_env_with_handler_cfg();
     Ok((res, env))
 }
 
@@ -153,7 +153,7 @@ where
         .append_handler_register(inspector_handle_register)
         .build();
     let res = evm.transact()?;
-    let (_, env) = evm.into_db_and_env_with_spec_id();
+    let (_, env) = evm.into_db_and_env_with_handler_cfg();
     Ok((res, env))
 }
 
@@ -178,7 +178,7 @@ where
         .append_handler_register(inspector_handle_register)
         .build();
     let res = evm.transact()?;
-    let (db, env) = evm.into_db_and_env_with_spec_id();
+    let (db, env) = evm.into_db_and_env_with_handler_cfg();
     Ok((res, env, db))
 }
 

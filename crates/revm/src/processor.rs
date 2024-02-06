@@ -56,7 +56,7 @@ pub struct EVMProcessor<'a, EvmConfig> {
     /// The configured chain-spec
     pub(crate) chain_spec: Arc<ChainSpec>,
     /// revm instance that contains database and env environment.
-    pub(crate) evm: Option<Evm<'a, InspectorStack, StateDBBox<'a, ProviderError>>>,
+    pub(crate) evm: Evm<'a, InspectorStack, StateDBBox<'a, ProviderError>>,
     /// The collection of receipts.
     /// Outer vector stores receipts for each block sequentially.
     /// The inner vector stores receipts ordered by transaction number.
@@ -105,7 +105,7 @@ where
             .build();
         EVMProcessor {
             chain_spec,
-            evm: Some(evm),
+            evm,
             receipts: Receipts::new(),
             first_block: None,
             tip: None,
@@ -142,7 +142,7 @@ where
             .build();
         EVMProcessor {
             chain_spec,
-            evm: Some(evm),
+            evm,
             receipts: Receipts::new(),
             first_block: None,
             tip: None,
@@ -155,7 +155,7 @@ where
 
     /// Configures the executor with the given inspectors.
     pub fn set_stack(&mut self, stack: InspectorStack) {
-        self.evm.as_mut().unwrap().context.external = stack;
+        self.evm.context.external = stack;
     }
 
     /// Configure the executor with the given block.
@@ -165,7 +165,7 @@ where
 
     /// Returns a reference to the database
     pub fn db_mut(&mut self) -> &mut StateDBBox<'a, ProviderError> {
-        &mut self.evm.as_mut().unwrap().context.evm.db
+        &mut self.evm.context.evm.db
     }
 
     /// Initializes the config and block env.
@@ -176,17 +176,17 @@ where
 
         self.db_mut().set_state_clear_flag(state_clear_flag);
 
-        let mut evm = self.evm.take().unwrap();
-        let mut cfg = CfgEnvWithHandlerCfg::new(evm.context.evm.env.cfg.clone(), evm.spec_id());
+        let mut cfg: CfgEnvWithHandlerCfg =
+            CfgEnvWithHandlerCfg::new(self.evm.context.evm.env.cfg.clone(), self.evm.spec_id());
         EvmConfig::fill_cfg_and_block_env(
             &mut cfg,
-            &mut evm.context.evm.env.block,
+            &mut self.evm.context.evm.env.block,
             &self.chain_spec,
             header,
             total_difficulty,
         );
-        evm.context.evm.env.cfg = cfg.cfg_env;
-        self.evm = Some(evm.modify_spec_id(cfg.handler_cfg.spec_id));
+        self.evm.context.evm.env.cfg = cfg.cfg_env;
+        self.evm.handler.modify_spec_id(cfg.handler_cfg.spec_id);
     }
 
     /// Applies the pre-block call to the EIP-4788 beacon block root contract.
@@ -202,7 +202,7 @@ where
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,
-            self.evm.as_mut().unwrap(),
+            &mut self.evm,
         )?;
         Ok(())
     }
@@ -257,14 +257,14 @@ where
     ) -> Result<ResultAndState, BlockExecutionError> {
         // Fill revm structure.
         #[cfg(not(feature = "optimism"))]
-        fill_tx_env(&mut self.evm.as_mut().unwrap().context.evm.env.tx, transaction, sender);
+        fill_tx_env(&mut self.evm.context.evm.env.tx, transaction, sender);
 
         #[cfg(feature = "optimism")]
         {
             let mut envelope_buf = Vec::with_capacity(transaction.length_without_header());
             transaction.encode_enveloped(&mut envelope_buf);
             fill_op_tx_env(
-                &mut self.evm.as_mut().unwrap().context.evm.env.tx,
+                &mut self.evm.context.evm.env.tx,
                 transaction,
                 sender,
                 envelope_buf.into(),
@@ -272,29 +272,23 @@ where
         }
 
         let hash = transaction.hash();
-        let should_inspect = self
-            .evm
-            .as_ref()
-            .unwrap()
-            .context
-            .external
-            .should_inspect(self.evm.as_ref().unwrap().context.evm.env.as_ref(), hash);
+        let should_inspect =
+            self.evm.context.external.should_inspect(self.evm.context.evm.env.as_ref(), hash);
         let out = if should_inspect {
-            // execution with inspector.
-            let evm = self.evm.take().unwrap();
-            let mut evm = evm.modify().append_handler_register(inspector_handle_register).build();
-            let output = evm.transact();
+            // push inspector handle register.
+            self.evm.handler.append_handle_register_plain(inspector_handle_register);
+            let output = self.evm.transact();
             tracing::trace!(
                 target: "evm",
-                ?hash, ?output, ?transaction, env = ?self.evm.as_mut().unwrap().context.evm.env,
+                ?hash, ?output, ?transaction, env = ?self.evm.context.evm.env,
                 "Executed transaction"
             );
-
-            self.evm = Some(evm.modify().reset_handler().build());
+            // pop last handle register
+            self.evm.handler.pop_handle_register();
             output
         } else {
             // main execution.
-            self.evm.as_mut().unwrap().transact()
+            self.evm.transact()
         };
         out.map_err(move |e| BlockValidationError::EVM { hash, error: e.into() }.into())
     }
@@ -513,7 +507,7 @@ where
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
         let receipts = std::mem::take(&mut self.receipts);
         BundleStateWithReceipts::new(
-            self.evm.as_mut().unwrap().context.evm.db.take_bundle(),
+            self.evm.context.evm.db.take_bundle(),
             receipts,
             self.first_block.unwrap_or_default(),
         )
@@ -524,7 +518,7 @@ where
     }
 
     fn size_hint(&self) -> Option<usize> {
-        Some(self.evm.as_ref().unwrap().context.evm.db.bundle_size_hint())
+        Some(self.evm.context.evm.db.bundle_size_hint())
     }
 }
 
@@ -810,7 +804,7 @@ mod tests {
         executor.init_env(&header, U256::ZERO);
 
         // get the env
-        let previous_env = executor.evm.as_ref().unwrap().context.evm.env.clone();
+        let previous_env = executor.evm.context.evm.env.clone();
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
@@ -831,7 +825,7 @@ mod tests {
             );
 
         // ensure that the env has not changed
-        assert_eq!(executor.evm.unwrap().context.evm.env, previous_env);
+        assert_eq!(executor.evm.context.evm.env, previous_env);
     }
 
     #[test]
@@ -978,7 +972,7 @@ mod tests {
 
         // there is no system contract call so there should be NO STORAGE CHANGES
         // this means we'll check the transition state
-        let state = executor.evm.unwrap().context.evm.db;
+        let state = executor.evm.context.evm.db;
         let transition_state = state
             .transition_state
             .clone()
@@ -1032,10 +1026,7 @@ mod tests {
         executor.init_env(&header, U256::ZERO);
 
         // ensure that the env is configured with a base fee
-        assert_eq!(
-            executor.evm.as_ref().unwrap().context.evm.env.block.basefee,
-            U256::from(u64::MAX)
-        );
+        assert_eq!(executor.evm.context.evm.env.block.basefee, U256::from(u64::MAX));
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
