@@ -163,7 +163,7 @@ impl SegmentHeader {
 
     /// Returns the transaction range.
     pub fn tx_range(&self) -> Option<SegmentRangeInclusive> {
-        self.tx_range.clone()
+        self.tx_range
     }
 
     /// Returns the first block number of the segment.

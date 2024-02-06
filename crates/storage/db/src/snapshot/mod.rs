@@ -3,7 +3,6 @@
 mod generation;
 use std::{
     collections::{hash_map::Entry, HashMap},
-    ops::RangeInclusive,
     path::Path,
 };
 
@@ -17,7 +16,7 @@ pub use mask::*;
 use reth_nippy_jar::{NippyJar, NippyJarError};
 use reth_primitives::{
     snapshot::{SegmentHeader, SegmentRangeInclusive},
-    BlockNumber, SnapshotSegment, TxNumber,
+    SnapshotSegment,
 };
 
 mod masks;
