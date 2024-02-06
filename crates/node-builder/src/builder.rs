@@ -40,37 +40,39 @@ type RethFullProviderType<DB, Evm> =
 /// components of a node.
 ///
 /// [builder]: https://doc.rust-lang.org/1.0.0/style/ownership/builders.html
-pub struct NodeBuilder<DB, State> {
+pub struct NodeBuilder<DB, Evm, State> {
     /// All settings for how the node should be configured.
     config: NodeConfig,
     /// State of the node builder process.
     state: State,
     /// The configured database for the node.
     database: DB,
+    /// The stateful evm configuration of the node.
+    evm: Evm
 }
 
-impl<DB, State> NodeBuilder<DB, State> {
+impl<DB, Evm, State> NodeBuilder<DB, Evm, State> {
     /// Returns a reference to the node builder's config.
     pub fn config(&self) -> &NodeConfig {
         &self.config
     }
 }
 
-impl NodeBuilder<(), InitState> {
+impl NodeBuilder<(), (),  InitState> {
     /// Create a new [`NodeBuilder`].
     pub fn new(config: NodeConfig) -> Self {
-        Self { config, database: (), state: InitState::default() }
+        Self { config, database: (), state: InitState::default(), evm: () }
     }
 }
 
-impl<DB> NodeBuilder<DB, InitState> {
+impl<DB, Evm> NodeBuilder<DB, Evm, InitState> {
     /// Configures the additional external context, e.g. additional context captured via CLI args.
-    pub fn with_database<D>(self, database: D) -> NodeBuilder<D, InitState> {
-        NodeBuilder { config: self.config, state: self.state, database }
+    pub fn with_database<D>(self, database: D) -> NodeBuilder<D, Evm, InitState> {
+        NodeBuilder { config: self.config, state: self.state, database, evm: self.evm }
     }
 }
 
-impl<DB> NodeBuilder<DB, InitState>
+impl<DB, Evm> NodeBuilder<DB, Evm, InitState>
 where
     DB: Database + Clone + 'static,
 {

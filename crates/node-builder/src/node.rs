@@ -3,19 +3,20 @@ use reth_node_api::{evm::EvmConfig, primitives::NodePrimitives, EngineTypes};
 use reth_node_core::cli::components::FullProvider;
 use std::marker::PhantomData;
 
-/// The type that configures the entire node.
+/// The type that configures stateless node types, the node's primitive types.
 pub trait NodeTypes: Send + Sync + 'static {
     /// The node's primitive types.
     type Primitives: NodePrimitives;
     /// The node's engine types.
     type Engine: EngineTypes;
-    /// The node's evm configuration.
-    type Evm: EvmConfig;
 }
 
-/// A helper type that also provides access to the builtin provider type of the node.
-// TODO naming
+/// A helper type that is downstream of the node types and adds stateful components to the node.
 pub trait FullNodeTypes: NodeTypes + 'static {
+    /// The node's evm configuration.
+    ///
+    /// TODO: This might depend on the node's database and provider types.
+    type Evm: EvmConfig;
     /// Underlying database type.
     type DB: Database + Clone + 'static;
     /// The provider type used to interact with the node.
@@ -44,7 +45,6 @@ where
 {
     type Primitives = Types::Primitives;
     type Engine = Types::Engine;
-    type Evm = Types::Evm;
 }
 
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
@@ -53,6 +53,7 @@ where
     Provider: FullProvider<DB>,
     DB: Database + Clone + 'static,
 {
+    type Evm = Types::Evm;
     type DB = DB;
     type Provider = Provider;
 }
