@@ -36,7 +36,7 @@ use reth_interfaces::{
     RethResult,
 };
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkHandle, NetworkManager};
-use reth_node_api::EvmEnvConfig;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     kzg::KzgSettings,
@@ -424,7 +424,7 @@ impl NodeConfig {
     ) -> eyre::Result<BlockchainTree<DB, EvmProcessorFactory<EvmConfig>>>
     where
         DB: Database + Unpin + Clone + 'static,
-        EvmConfig: EvmEnvConfig + Clone + 'static,
+        EvmConfig: ConfigureEvmEnv + Clone + 'static,
     {
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
@@ -536,7 +536,7 @@ impl NodeConfig {
     where
         DB: Database + Unpin + Clone + 'static,
         Client: HeadersClient + BodiesClient + Clone + 'static,
-        EvmConfig: EvmEnvConfig + Clone + 'static,
+        EvmConfig: ConfigureEvmEnv + Clone + 'static,
     {
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
@@ -774,7 +774,7 @@ impl NodeConfig {
         DB: Database + Clone + 'static,
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,
-        EvmConfig: EvmEnvConfig + Clone + 'static,
+        EvmConfig: ConfigureEvmEnv + Clone + 'static,
     {
         let mut builder = Pipeline::builder();
 

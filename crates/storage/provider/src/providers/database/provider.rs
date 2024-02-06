@@ -11,7 +11,6 @@ use crate::{
     PruneCheckpointWriter, StageCheckpointReader, StorageReader, TransactionVariant,
     TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
-use ahash::{AHashMap, AHashSet};
 use itertools::{izip, Itertools};
 use reth_db::{
     common::KeyValue,
@@ -31,7 +30,7 @@ use reth_interfaces::{
     provider::{ProviderResult, RootMismatch},
     RethError, RethResult,
 };
-use reth_node_api::EvmEnvConfig;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     keccak256,
     revm::{config::revm_spec, env::fill_block_env},
@@ -46,7 +45,7 @@ use reth_primitives::{
 use reth_trie::{prefix_set::PrefixSetMut, updates::TrieUpdates, HashedPostState, StateRoot};
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
 use std::{
-    collections::{hash_map, BTreeMap, BTreeSet, HashMap},
+    collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
     ops::{Bound, Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
@@ -1735,7 +1734,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
@@ -1750,7 +1749,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         let total_difficulty = self
             .header_td_by_number(header.number)?
@@ -1807,7 +1806,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
@@ -1821,7 +1820,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         let total_difficulty = self
             .header_td_by_number(header.number)?
@@ -2082,8 +2081,8 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
     ) -> ProviderResult<()> {
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSetMut::default();
-        let mut storage_prefix_set: AHashMap<B256, PrefixSetMut> = AHashMap::default();
-        let mut destroyed_accounts = AHashSet::default();
+        let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
+        let mut destroyed_accounts = HashSet::default();
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 
@@ -2272,8 +2271,8 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
 
             // Initialize prefix sets.
             let mut account_prefix_set = PrefixSetMut::default();
-            let mut storage_prefix_set: AHashMap<B256, PrefixSetMut> = AHashMap::default();
-            let mut destroyed_accounts = AHashSet::default();
+            let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
+            let mut destroyed_accounts = HashSet::default();
 
             // Unwind account hashes. Add changed accounts to account prefix set.
             let hashed_addresses = self.unwind_account_hashing(range.clone())?;
