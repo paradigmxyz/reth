@@ -217,7 +217,7 @@ where
             break
         }
 
-        tx.try_fill_tx_env(&mut evm.context.evm.env.tx)?;
+        tx.try_fill_tx_env(evm.tx_mut())?;
         evm.transact_commit()?;
         index += 1;
     }

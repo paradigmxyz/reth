@@ -4,7 +4,7 @@ use reth_primitives::{
     constants::SYSTEM_ADDRESS, revm::env::fill_tx_env_with_beacon_root_contract_call, Address,
     ChainSpec, Header, Withdrawal, B256, U256,
 };
-use revm::{Database, DatabaseCommit, Evm};
+use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
 use std::collections::HashMap;
 
 /// Collect all balance changes at the end of the block.
@@ -87,7 +87,7 @@ where
     }
 
     // get previous env
-    let previous_env = evm.context.evm.env.clone();
+    let previous_env = Box::new(evm.env().clone());
 
     // modify env for pre block call
     fill_tx_env_with_beacon_root_contract_call(&mut evm.context.evm.env, parent_beacon_block_root);
@@ -105,7 +105,7 @@ where
     };
 
     state.remove(&SYSTEM_ADDRESS);
-    state.remove(&evm.context.evm.env.block.coinbase);
+    state.remove(&evm.block().coinbase);
 
     evm.context.evm.db.commit(state);
 

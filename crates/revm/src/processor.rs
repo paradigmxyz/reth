@@ -17,6 +17,7 @@ use reth_provider::{
 use revm::{
     db::{states::bundle_state::BundleRetention, EmptyDBTyped, StateDBBox},
     inspector_handle_register,
+    interpreter::Host,
     primitives::{CfgEnvWithHandlerCfg, ResultAndState},
     Evm, State, StateBuilder,
 };
@@ -177,15 +178,15 @@ where
         self.db_mut().set_state_clear_flag(state_clear_flag);
 
         let mut cfg: CfgEnvWithHandlerCfg =
-            CfgEnvWithHandlerCfg::new(self.evm.context.evm.env.cfg.clone(), self.evm.spec_id());
+            CfgEnvWithHandlerCfg::new(self.evm.cfg().clone(), self.evm.spec_id());
         EvmConfig::fill_cfg_and_block_env(
             &mut cfg,
-            &mut self.evm.context.evm.env.block,
+            self.evm.block_mut(),
             &self.chain_spec,
             header,
             total_difficulty,
         );
-        self.evm.context.evm.env.cfg = cfg.cfg_env;
+        *self.evm.cfg_mut() = cfg.cfg_env;
         self.evm.handler.modify_spec_id(cfg.handler_cfg.spec_id);
     }
 
@@ -257,26 +258,20 @@ where
     ) -> Result<ResultAndState, BlockExecutionError> {
         // Fill revm structure.
         #[cfg(not(feature = "optimism"))]
-        fill_tx_env(&mut self.evm.context.evm.env.tx, transaction, sender);
+        fill_tx_env(self.evm.tx_mut(), transaction, sender);
 
         #[cfg(feature = "optimism")]
         {
             let mut envelope_buf = Vec::with_capacity(transaction.length_without_header());
             transaction.encode_enveloped(&mut envelope_buf);
-            fill_op_tx_env(
-                &mut self.evm.context.evm.env.tx,
-                transaction,
-                sender,
-                envelope_buf.into(),
-            );
+            fill_op_tx_env(&mut self.evm.tx_mut(), transaction, sender, envelope_buf.into());
         }
 
         let hash = transaction.hash();
-        let should_inspect =
-            self.evm.context.external.should_inspect(self.evm.context.evm.env.as_ref(), hash);
+        let should_inspect = self.evm.context.external.should_inspect(self.evm.env(), hash);
         let out = if should_inspect {
             // push inspector handle register.
-            self.evm.handler.append_handle_register_plain(inspector_handle_register);
+            self.evm.handler.append_handler_register_plain(inspector_handle_register);
             let output = self.evm.transact();
             tracing::trace!(
                 target: "evm",
@@ -1026,7 +1021,7 @@ mod tests {
         executor.init_env(&header, U256::ZERO);
 
         // ensure that the env is configured with a base fee
-        assert_eq!(executor.evm.context.evm.env.block.basefee, U256::from(u64::MAX));
+        assert_eq!(executor.evm.block().basefee, U256::from(u64::MAX));
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor

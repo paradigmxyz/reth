@@ -131,13 +131,10 @@ impl PendingBlockEnv {
             }
 
             // Configure the environment for the block.
-            let env = Box::new(Env {
-                cfg: cfg.cfg_env.clone(),
-                block: block_env.clone(),
-                tx: tx_env_with_recovered(&tx),
-            });
+            let env =
+                Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx_env_with_recovered(&tx));
 
-            let mut evm = revm::Evm::builder().modify_env(|e| *e = env).with_db(&mut db).build();
+            let mut evm = revm::Evm::builder().with_env(env).with_db(&mut db).build();
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,

@@ -91,7 +91,7 @@ where
                     let tx_hash = tx.hash;
                     let tx = tx_env_with_recovered(&tx);
                     let env = EnvWithHandlerCfg::new(
-                        Box::new(Env { cfg: cfg.cfg_env.clone(), block: block_env.clone(), tx }),
+                        Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
                         cfg.handler_cfg.spec_id,
                     );
                     let (result, state_changes) = this
@@ -238,11 +238,7 @@ where
                 )?;
 
                 let env = EnvWithHandlerCfg::new(
-                    Box::new(Env {
-                        cfg: cfg.cfg_env.clone(),
-                        block: block_env,
-                        tx: tx_env_with_recovered(&tx),
-                    }),
+                    Env::boxed(cfg.cfg_env.clone(), block_env, tx_env_with_recovered(&tx)),
                     cfg.handler_cfg.spec_id,
                 );
                 this.trace_transaction(
@@ -438,11 +434,7 @@ where
                     for tx in transactions {
                         let tx = tx_env_with_recovered(&tx);
                         let env = EnvWithHandlerCfg::new(
-                            Box::new(Env {
-                                cfg: cfg.cfg_env.clone(),
-                                block: block_env.clone(),
-                                tx,
-                            }),
+                            Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
                             cfg.handler_cfg.spec_id,
                         );
                         let (res, _) = transact(&mut db, env)?;
