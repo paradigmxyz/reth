@@ -587,6 +587,7 @@ where
 
             return
         };
+        let client_version = peer.client_version.clone();
 
         // 1. filter out known hashes
         //
@@ -664,6 +665,7 @@ where
             &mut valid_announcement_data,
             &peer_id,
             |peer_id| self.peers.contains_key(&peer_id),
+            &client_version,
         );
 
         if valid_announcement_data.is_empty() {
@@ -673,8 +675,10 @@ where
 
         debug!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
+            hashes_len=valid_announcement_data.iter().count(),
             hashes=?valid_announcement_data.keys().collect::<Vec<_>>(),
             msg_version=%valid_announcement_data.msg_version(),
+            client_version=%client_version,
             "received previously unseen and pending hashes in announcement from peer"
         );
 
@@ -689,6 +693,7 @@ where
                 peer_id=format!("{peer_id:#}"),
                 hashes=?*hashes,
                 msg_version=%msg_version,
+                client_version=%client_version,
                 "buffering hashes announced by busy peer"
             );
 
@@ -711,6 +716,7 @@ where
                 peer_id=format!("{peer_id:#}"),
                 surplus_hashes=?*surplus_hashes,
                 msg_version=%msg_version,
+                client_version=%client_version,
                 "some hashes in announcement from peer didn't fit in `GetPooledTransactions` request, buffering surplus hashes"
             );
 
@@ -721,6 +727,7 @@ where
             peer_id=format!("{peer_id:#}"),
             hashes=?*hashes_to_request,
             msg_version=%msg_version,
+            client_version=%client_version,
             "sending hashes in `GetPooledTransactions` request to peer's session"
         );
 
@@ -740,6 +747,7 @@ where
                 peer_id=format!("{peer_id:#}"),
                 failed_to_request_hashes=?*failed_to_request_hashes,
                 conn_eth_version=%conn_eth_version,
+                client_version=%client_version,
                 "sending `GetPooledTransactions` request to peer's session failed, buffering hashes"
             );
             self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
@@ -748,7 +756,7 @@ where
 
         if num_already_seen > 0 {
             self.metrics.messages_with_already_seen_hashes.increment(1);
-            trace!(target: "net::tx", num_hashes=%num_already_seen, ?peer_id, client=?peer.client_version, "Peer sent already seen hashes");
+            trace!(target: "net::tx", num_hashes=%num_already_seen, ?peer_id, client=?client_version, "Peer sent already seen hashes");
             self.report_already_seen(peer_id);
         }
     }
