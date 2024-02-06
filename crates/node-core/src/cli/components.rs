@@ -3,7 +3,7 @@
 use reth_db::database::Database;
 use reth_network::{NetworkEvents, NetworkProtocols};
 use reth_network_api::{NetworkInfo, Peers};
-use reth_node_api::EvmEnvConfig;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::ChainSpec;
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
@@ -61,7 +61,7 @@ pub trait RethNodeComponents: Clone + Send + Sync + 'static {
     /// The type that is used to spawn tasks.
     type Tasks: TaskSpawner + Clone + Unpin + 'static;
     /// The type that defines how to configure the EVM before execution.
-    type EvmConfig: EvmEnvConfig + 'static;
+    type EvmConfig: ConfigureEvmEnv + 'static;
 
     /// Returns the instance of the provider
     fn provider(&self) -> Self::Provider;
@@ -171,7 +171,7 @@ where
     Pool: TransactionPool + Clone + Unpin + 'static,
     Network: NetworkInfo + Peers + NetworkProtocols + NetworkEvents + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: EvmEnvConfig + 'static,
+    EvmConfig: ConfigureEvmEnv + 'static,
 {
     type DB = DB;
     type Provider = Provider;

@@ -36,8 +36,9 @@ use crate::{
 };
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    EthVersion, GetPooledTransactions, NewPooledTransactionHashes, NewPooledTransactionHashes66,
-    NewPooledTransactionHashes68, PooledTransactions, Transactions,
+    EthVersion, GetPooledTransactions, HandleAnnouncement, NewPooledTransactionHashes,
+    NewPooledTransactionHashes66, NewPooledTransactionHashes68, PooledTransactions, Transactions,
+    ValidTxHashes,
 };
 use reth_interfaces::{
     p2p::error::{RequestError, RequestResult},
@@ -590,9 +591,6 @@ where
 
         // 2. filter out invalid entries
         //
-        // first get the message version, because this will destruct the message
-        let msg_version = msg.version();
-        //
         // validates messages with respect to the given network, e.g. allowed tx types
         //
         let mut hashes = match msg {
@@ -604,7 +602,7 @@ where
                 if let FilterOutcome::ReportPeer = outcome {
                     self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
                 }
-                valid_data.into_iter().map(|(hash, metadata)| {
+                let hashes = valid_data.into_iter().map(|(hash, metadata)| {
                     // cache eth68 metadata
                     if let Some((_ty, size)) = metadata {
                         // check if this peer is announcing a different size for an already seen 
@@ -624,7 +622,9 @@ where
                         self.transaction_fetcher.eth68_meta.insert(hash, size);
                     }
                     hash
-                }).collect::<Vec<_>>()
+                }).collect::<Vec<_>>();
+
+                ValidTxHashes::new_eth68(hashes)
             }
             NewPooledTransactionHashes::Eth66(eth66_msg) => {
                 // validate eth66 announcement data
@@ -635,7 +635,9 @@ where
                     self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
                 }
 
-                valid_data.into_keys().collect::<Vec<_>>()
+                let valid_hashes = valid_data.into_data().into_keys().collect::<Vec<_>>();
+
+                ValidTxHashes::new_eth66(valid_hashes)
             }
         };
 
@@ -646,9 +648,11 @@ where
         // for any seen hashes add the peer as fallback. unseen hashes are loaded into the tx
         // fetcher, hence they should be valid at this point.
         //
-        self.transaction_fetcher.filter_unseen_hashes(&mut hashes, peer_id, |peer_id| {
-            self.peers.contains_key(&peer_id)
-        });
+        self.transaction_fetcher.filter_unseen_and_pending_hashes(
+            &mut hashes,
+            peer_id,
+            |peer_id| self.peers.contains_key(&peer_id),
+        );
 
         if hashes.is_empty() {
             // nothing to request
@@ -657,9 +661,10 @@ where
 
         debug!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            hashes=?hashes,
-            msg_version=%msg_version,
-            "received previously unseen hashes in announcement from peer"
+            hashes_len=hashes.len(),
+            hashes=?*hashes,
+            msg_version=%hashes.msg_version(),
+            "received previously unseen and pending hashes in announcement from peer"
         );
 
         // only send request for hashes to idle peer, otherwise buffer hashes storing peer as
@@ -667,8 +672,8 @@ where
         if !self.transaction_fetcher.is_idle(peer_id) {
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                hashes=?hashes,
-                msg_version=%msg_version,
+                hashes=?*hashes,
+                msg_version=%hashes.msg_version(),
                 "buffering hashes announced by busy peer"
             );
 
@@ -682,8 +687,8 @@ where
         if !surplus_hashes.is_empty() {
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                surplus_hashes=?surplus_hashes,
-                msg_version=%msg_version,
+                surplus_hashes=?*surplus_hashes,
+                msg_version=%surplus_hashes.msg_version(),
                 "some hashes in announcement from peer didn't fit in `GetPooledTransactions` request, buffering surplus hashes"
             );
 
@@ -692,8 +697,8 @@ where
 
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            hashes=?hashes,
-            msg_version=%msg_version,
+            hashes=?*hashes,
+            msg_version=%hashes.msg_version(),
             "sending hashes in `GetPooledTransactions` request to peer's session"
         );
 
@@ -709,8 +714,8 @@ where
         {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                failed_to_request_hashes=?failed_to_request_hashes,
-                msg_version=%msg_version,
+                failed_to_request_hashes=?*failed_to_request_hashes,
+                msg_version=%failed_to_request_hashes.msg_version(),
                 "sending `GetPooledTransactions` request to peer's session failed, buffering hashes"
             );
             self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
@@ -755,26 +760,28 @@ where
                 self.transaction_fetcher.fill_eth66_request_for_peer(&mut hashes, peer_id);
             }
 
-            let msg_version = || eth68_size.map(|_| EthVersion::Eth68).unwrap_or(EthVersion::Eth66);
+            let msg_version = peer.version;
 
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 hashes=?hashes,
-                msg_version=%msg_version(),
+                msg_version=%msg_version,
                 "requesting buffered hashes from idle peer"
             );
 
             // request the buffered missing transactions
             let metrics = &self.metrics;
             if let Some(failed_to_request_hashes) =
-                self.transaction_fetcher.request_transactions_from_peer(hashes, peer, || {
-                    metrics.egress_peer_channel_full.increment(1)
-                })
+                self.transaction_fetcher.request_transactions_from_peer(
+                    ValidTxHashes::new(hashes, msg_version),
+                    peer,
+                    || metrics.egress_peer_channel_full.increment(1),
+                )
             {
                 debug!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
                     failed_to_request_hashes=?failed_to_request_hashes,
-                    msg_version=%msg_version(),
+                    msg_version=%msg_version,
                     "failed sending request to peer's session, buffering hashes"
                 );
 

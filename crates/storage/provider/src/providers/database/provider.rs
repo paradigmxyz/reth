@@ -30,7 +30,7 @@ use reth_interfaces::{
     provider::{ProviderResult, RootMismatch},
     RethError, RethResult,
 };
-use reth_node_api::EvmEnvConfig;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     keccak256,
     revm::{config::revm_spec, env::fill_block_env},
@@ -1734,7 +1734,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
@@ -1749,7 +1749,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         let total_difficulty = self
             .header_td_by_number(header.number)?
@@ -1806,7 +1806,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
@@ -1820,7 +1820,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         let total_difficulty = self
             .header_td_by_number(header.number)?
