@@ -1120,8 +1120,6 @@ mod tests {
 
         // Set the block info for the pool, including a pending blob fee.
         test_pool
-            .pool
-            .write()
             .set_block_info(BlockInfo { pending_blob_fee: Some(10_000_000), ..Default::default() });
 
         // Read the contents of the JSON file into a string.
