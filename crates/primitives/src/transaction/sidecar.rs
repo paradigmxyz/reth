@@ -388,9 +388,9 @@ impl Decodable for BlobTransactionSidecar {
 // Wrapper for c-kzg rlp
 #[repr(C)]
 struct BlobTransactionSidecarRlp {
-    blobs: Vec<[u8; c_kzg::BYTES_PER_BLOB]>,
-    commitments: Vec<[u8; 48]>,
-    proofs: Vec<[u8; 48]>,
+    blobs: Vec<[u8; BYTES_PER_BLOB]>,
+    commitments: Vec<[u8; BYTES_PER_COMMITMENT]>,
+    proofs: Vec<[u8; BYTES_PER_PROOF]>,
 }
 
 const _: [(); std::mem::size_of::<BlobTransactionSidecar>()] =
@@ -438,7 +438,7 @@ impl<'a> arbitrary::Arbitrary<'a> for BlobTransactionSidecar {
             .map(|_| {
                 arr = arbitrary::Arbitrary::arbitrary(u).unwrap();
 
-                // Ensure that each blob is cacnonical by ensuring each field element contained in
+                // Ensure that each blob is canonical by ensuring each field element contained in
                 // the blob is < BLS_MODULUS
                 for i in 0..(FIELD_ELEMENTS_PER_BLOB as usize) {
                     arr[i * BYTES_PER_FIELD_ELEMENT] = 0;
@@ -463,7 +463,7 @@ impl proptest::arbitrary::Arbitrary for BlobTransactionSidecar {
                     .map(|mut blob| {
                         let mut arr = [0u8; BYTES_PER_BLOB];
 
-                        // Ensure that each blob is cacnonical by ensuring each field element
+                        // Ensure that each blob is canonical by ensuring each field element
                         // contained in the blob is < BLS_MODULUS
                         for i in 0..(FIELD_ELEMENTS_PER_BLOB as usize) {
                             blob[i * BYTES_PER_FIELD_ELEMENT] = 0;
