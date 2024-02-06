@@ -79,7 +79,7 @@ pub struct NetworkConfig<C> {
     pub optimism_network_config: OptimismNetworkConfig,
 }
 
-/// Optimmism Network Config
+/// Optimism Network Config
 #[cfg(feature = "optimism")]
 #[derive(Debug, Clone, Default)]
 pub struct OptimismNetworkConfig {
