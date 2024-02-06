@@ -78,7 +78,7 @@ pub struct TxPool<T: TransactionOrdering> {
 
 impl<T: TransactionOrdering> TxPool<T> {
     /// Create a new graph pool instance.
-    pub(crate) fn new(ordering: T, config: PoolConfig) -> Self {
+    pub fn new(ordering: T, config: PoolConfig) -> Self {
         Self {
             sender_info: Default::default(),
             pending_pool: PendingPool::new(ordering),
@@ -116,7 +116,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Returns stats about the size of pool.
-    pub(crate) fn size(&self) -> PoolSize {
+    pub fn size(&self) -> PoolSize {
         PoolSize {
             pending: self.pending_pool.len(),
             pending_size: self.pending_pool.size(),
@@ -131,7 +131,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Returns the currently tracked block values
-    pub(crate) const fn block_info(&self) -> BlockInfo {
+    pub const fn block_info(&self) -> BlockInfo {
         BlockInfo {
             last_seen_block_hash: self.all_transactions.last_seen_block_hash,
             last_seen_block_number: self.all_transactions.last_seen_block_number,
@@ -271,7 +271,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Sets the current block info for the pool.
     ///
     /// This will also apply updates to the pool based on the new base fee
-    pub(crate) fn set_block_info(&mut self, info: BlockInfo) {
+    pub fn set_block_info(&mut self, info: BlockInfo) {
         let BlockInfo {
             last_seen_block_hash,
             last_seen_block_number,
@@ -355,6 +355,12 @@ impl<T: TransactionOrdering> TxPool<T> {
             SubPool::BaseFee => self.basefee_pool.contains(id),
             SubPool::Blob => self.blob_pool.contains(id),
         }
+    }
+
+    /// Returns `true` if the pool is over its configured limits.
+    #[inline]
+    pub(crate) fn is_exceeded(&self) -> bool {
+        self.config.is_exceeded(self.size())
     }
 
     /// Returns the transaction for the given hash.

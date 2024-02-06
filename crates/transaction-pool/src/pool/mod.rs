@@ -739,6 +739,11 @@ where
         self.get_pool_data().is_empty()
     }
 
+    /// Returns whether or not the pool is over its configured size and transaction count limits.
+    pub(crate) fn is_exceeded(&self) -> bool {
+        self.pool.read().is_exceeded()
+    }
+
     /// Enforces the size limits of pool and returns the discarded transactions if violated.
     ///
     /// If some of the transactions are blob transactions, they are also removed from the blob
