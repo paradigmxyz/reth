@@ -531,7 +531,7 @@ impl TransactionFetcher {
                 return false
             }
           
-            // vacant entry  
+            // vacant entry
             #[cfg(not(debug_assertions))]
             {
                 previously_unseen_hashes_count += 1;
