@@ -1113,13 +1113,13 @@ mod tests {
         // Define the maximum limit for blobs in the sub-pool.
         let blob_limit = SubPoolLimit::new(1000, usize::MAX);
 
-        // Create a test pool builder with default configuration and the specified blob limit.
-        let pool_builder =
-            TestPoolBuilder::default().with_config(PoolConfig { blob_limit, ..Default::default() });
+        // Create a test pool with default configuration and the specified blob limit.
+        let test_pool = &TestPoolBuilder::default()
+            .with_config(PoolConfig { blob_limit, ..Default::default() })
+            .pool;
 
         // Set the block info for the pool, including a pending blob fee.
-        pool_builder
-            .pool
+        test_pool
             .pool
             .write()
             .set_block_info(BlockInfo { pending_blob_fee: Some(10_000_000), ..Default::default() });
@@ -1158,8 +1158,7 @@ mod tests {
             }
 
             // Add the transaction to the pool with external origin and valid outcome.
-            pool_builder
-                .pool
+            test_pool
                 .add_transaction(
                     TransactionOrigin::External,
                     TransactionValidationOutcome::Valid {
@@ -1175,13 +1174,13 @@ mod tests {
                 .unwrap();
 
             // Evict the worst transactions from the pool.
-            pool_builder.pool.discard_worst();
+            test_pool.discard_worst();
         }
 
         // Assert that the size of the pool's blob component is equal to the maximum blob limit.
-        assert_eq!(pool_builder.pool.size().blob, blob_limit.max_txs);
+        assert_eq!(test_pool.size().blob, blob_limit.max_txs);
 
         // Assert that the pool's blob store matches the expected blob store.
-        assert_eq!(*pool_builder.pool.blob_store(), blob_store);
+        assert_eq!(*test_pool.blob_store(), blob_store);
     }
 }

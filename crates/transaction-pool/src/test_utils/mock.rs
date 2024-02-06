@@ -318,21 +318,12 @@ impl MockTransaction {
 
     /// Returns a new EIP4844 transaction with a provided sidecar
     pub fn eip4844_with_sidecar(sidecar: BlobTransactionSidecar) -> Self {
-        MockTransaction::Eip4844 {
-            hash: B256::random(),
-            sender: Address::random(),
-            nonce: 0,
-            max_fee_per_gas: MIN_PROTOCOL_BASE_FEE as u128,
-            max_priority_fee_per_gas: MIN_PROTOCOL_BASE_FEE as u128,
-            max_fee_per_blob_gas: DATA_GAS_PER_BLOB as u128,
-            gas_limit: 0,
-            to: TransactionKind::Call(Address::random()),
-            value: Default::default(),
-            input: Bytes::new(),
-            accesslist: Default::default(),
-            sidecar,
-            size: Default::default(),
+        let mut transaction = Self::eip4844();
+        if let MockTransaction::Eip4844 { sidecar: ref mut existing_sidecar, .. } = &mut transaction
+        {
+            *existing_sidecar = sidecar;
         }
+        transaction
     }
 
     /// Returns a new EIP2930 transaction with random address and hash and empty values
