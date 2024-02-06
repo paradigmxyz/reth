@@ -12,7 +12,7 @@ use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
 use schnellru::{ByLength, Unlimited};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     num::NonZeroUsize,
     pin::Pin,
     task::{Context, Poll},
@@ -834,8 +834,23 @@ impl Stream for TransactionFetcher {
                         true
                     });
 
-                    self.remove_hashes_from_transaction_fetcher(fetched);
+                    if transactions.0.is_empty() {
+                        // todo: report peer for sending empty response
+                    }
 
+                    let transactions_len = transactions.0.len();
+                    let unique_fetched = transactions.0.into_iter().collect::<HashSet<_>>();
+                    if unique_fetched.len() != transactions_len {
+                        // todo: report peer for sending duplicates
+                    }
+
+                    for tx in unique_fetched {
+                        if !requested_hashes.remove(&tx.hash()) {
+                            // todo: report peer for sending hash that weren't requested
+                        }
+                    }
+
+                    self.remove_from_unknown_hashes(fetched);
                     // buffer left over hashes
                     self.buffer_hashes_for_retry(requested_hashes, &peer_id);
 
