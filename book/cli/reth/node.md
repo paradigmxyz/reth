@@ -41,6 +41,11 @@ Options:
           
           [default: 1]
 
+      --with-unused-ports
+          Sets all ports to unused, allowing the OS to choose random unused ports when sockets are bound.
+          
+          Mutually exclusive with `--instance`.
+
       --trusted-setup-file <PATH>
           Overrides the KZG trusted setup by reading from the supplied file
 
@@ -205,7 +210,7 @@ RPC:
       --rpc-max-response-size <RPC_MAX_RESPONSE_SIZE>
           Set the maximum RPC response payload size for both HTTP and WS in megabytes
           
-          [default: 150]
+          [default: 160]
           [aliases: --rpc.returndata.limit]
 
       --rpc-max-subscriptions-per-connection <RPC_MAX_SUBSCRIPTIONS_PER_CONNECTION>
@@ -332,6 +337,9 @@ TxPool:
       --txpool.locals <LOCALS>
           Flag to allow certain addresses as local
 
+      --txpool.no-local-transactions-propagation
+          Flag to toggle local transaction propagation
+
 Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder
@@ -441,7 +449,7 @@ Logging:
       --log.stdout.filter <FILTER>
           The filter to use for logs written to stdout
           
-          [default: info]
+          [default: ]
 
       --log.file.format <FORMAT>
           The format to use for logs written to the log file

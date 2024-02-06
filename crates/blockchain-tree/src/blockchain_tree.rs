@@ -1258,6 +1258,7 @@ mod tests {
         BlockWriter, BundleStateWithReceipts, ProviderFactory,
     };
     use reth_revm::EvmProcessorFactory;
+    use reth_trie::StateRoot;
     use std::{
         collections::{HashMap, HashSet},
         sync::Arc,
@@ -1574,6 +1575,97 @@ mod tests {
             tree.make_canonical(&canonical_block_3.hash).unwrap(),
             CanonicalOutcome::Committed { head: canonical_block_3.header.clone() }
         );
+    }
+
+    #[test]
+    fn cached_trie_updates() {
+        let data = BlockChainTestData::default_from_number(11);
+        let (block1, exec1) = data.blocks[0].clone();
+        let (block2, exec2) = data.blocks[1].clone();
+        let (block3, exec3) = data.blocks[2].clone();
+        let (block4, exec4) = data.blocks[3].clone();
+        let (block5, exec5) = data.blocks[4].clone();
+        let genesis = data.genesis;
+
+        // test pops execution results from vector, so order is from last to first.
+        let externals = setup_externals(vec![exec5.clone(), exec4.clone(), exec3, exec2, exec1]);
+
+        // last finalized block would be number 9.
+        setup_genesis(&externals.provider_factory, genesis);
+
+        // make tree
+        let config = BlockchainTreeConfig::new(1, 2, 3, 2);
+        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
+        // genesis block 10 is already canonical
+        tree.make_canonical(&B256::ZERO).unwrap();
+
+        // make genesis block 10 as finalized
+        tree.finalize_block(10);
+
+        assert_eq!(
+            tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+        let block1_chain_id = tree.state.block_indices.get_blocks_chain_id(&block1.hash).unwrap();
+        let block1_chain = tree.state.chains.get(&block1_chain_id).unwrap();
+        assert!(block1_chain.trie_updates().is_some());
+
+        assert_eq!(
+            tree.insert_block(block2.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+        let block2_chain_id = tree.state.block_indices.get_blocks_chain_id(&block2.hash).unwrap();
+        let block2_chain = tree.state.chains.get(&block2_chain_id).unwrap();
+        assert!(block2_chain.trie_updates().is_some());
+
+        assert_eq!(
+            tree.make_canonical(&block2.hash).unwrap(),
+            CanonicalOutcome::Committed { head: block2.header.clone() }
+        );
+
+        assert_eq!(
+            tree.insert_block(block3.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+        let block3_chain_id = tree.state.block_indices.get_blocks_chain_id(&block3.hash).unwrap();
+        let block3_chain = tree.state.chains.get(&block3_chain_id).unwrap();
+        assert!(block3_chain.trie_updates().is_some());
+
+        assert_eq!(
+            tree.make_canonical(&block3.hash).unwrap(),
+            CanonicalOutcome::Committed { head: block3.header.clone() }
+        );
+
+        assert_eq!(
+            tree.insert_block(block4.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+        let block4_chain_id = tree.state.block_indices.get_blocks_chain_id(&block4.hash).unwrap();
+        let block4_chain = tree.state.chains.get(&block4_chain_id).unwrap();
+        assert!(block4_chain.trie_updates().is_some());
+
+        assert_eq!(
+            tree.insert_block(block5.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+
+        let block5_chain_id = tree.state.block_indices.get_blocks_chain_id(&block5.hash).unwrap();
+        let block5_chain = tree.state.chains.get(&block5_chain_id).unwrap();
+        assert!(block5_chain.trie_updates().is_some());
+
+        assert_eq!(
+            tree.make_canonical(&block5.hash).unwrap(),
+            CanonicalOutcome::Committed { head: block5.header.clone() }
+        );
+
+        let provider = tree.externals.provider_factory.provider().unwrap();
+        let (acc_prefix_set, storage_prefix_set) = exec5.hash_state_slow().construct_prefix_sets();
+        let state_root = StateRoot::from_tx(provider.tx_ref())
+            .with_changed_account_prefixes(acc_prefix_set)
+            .with_changed_storage_prefixes(storage_prefix_set)
+            .root()
+            .unwrap();
+        assert_eq!(state_root, block5.state_root);
     }
 
     #[test]

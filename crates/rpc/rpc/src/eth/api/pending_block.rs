@@ -16,7 +16,7 @@ use reth_revm::{
     database::StateProviderDatabase,
     state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
 };
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{db::states::bundle_state::BundleRetention, Database, DatabaseCommit, State};
 use std::time::Instant;
 
@@ -62,7 +62,10 @@ impl PendingBlockEnv {
 
         let mut executed_txs = Vec::new();
         let mut senders = Vec::new();
-        let mut best_txs = pool.best_transactions_with_base_fee(base_fee);
+        let mut best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
+            base_fee,
+            block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
+        ));
 
         let (withdrawals, withdrawals_root) = match origin {
             PendingBlockEnvOrigin::ActualPending(ref block) => {

@@ -69,16 +69,30 @@ impl BlockChainTestData {
     /// Create test data with two blocks that are connected, specifying their block numbers.
     pub fn default_from_number(first: BlockNumber) -> Self {
         let one = block1(first);
-        let two = block2(first + 1, one.0.hash, &one.1);
-        Self { genesis: genesis(), blocks: vec![one, two] }
+        let mut extended_state = one.1.clone();
+        let two = block2(first + 1, one.0.hash, &extended_state);
+        extended_state.extend(two.1.clone());
+        let three = block3(first + 2, two.0.hash, &extended_state);
+        extended_state.extend(three.1.clone());
+        let four = block4(first + 3, three.0.hash, &extended_state);
+        extended_state.extend(four.1.clone());
+        let five = block5(first + 4, four.0.hash, &extended_state);
+        Self { genesis: genesis(), blocks: vec![one, two, three, four, five] }
     }
 }
 
 impl Default for BlockChainTestData {
     fn default() -> Self {
         let one = block1(1);
-        let two = block2(2, one.0.hash, &one.1);
-        Self { genesis: genesis(), blocks: vec![one, two] }
+        let mut extended_state = one.1.clone();
+        let two = block2(2, one.0.hash, &extended_state);
+        extended_state.extend(two.1.clone());
+        let three = block3(3, two.0.hash, &extended_state);
+        extended_state.extend(three.1.clone());
+        let four = block4(4, three.0.hash, &extended_state);
+        extended_state.extend(four.1.clone());
+        let five = block5(5, four.0.hash, &extended_state);
+        Self { genesis: genesis(), blocks: vec![one, two, three, four, five] }
     }
 }
 
@@ -104,6 +118,7 @@ fn bundle_state_root(state: &BundleStateWithReceipts) -> B256 {
                         account
                             .storage
                             .iter()
+                            .filter(|(_, value)| !value.present_value.is_zero())
                             .map(|(slot, value)| ((*slot).into(), value.present_value)),
                     ),
                 ),
@@ -210,6 +225,240 @@ fn block2(
         state_root,
         b256!("90101a13dd059fa5cca99ed93d1dc23657f63626c5b8f993a2ccbdf7446b64f8")
     );
+
+    let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
+    block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    let mut header = block.header.clone().unseal();
+    header.number = number;
+    header.state_root = state_root;
+    // parent_hash points to block1 hash
+    header.parent_hash = parent_hash;
+    block.header = header.seal_slow();
+
+    (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, bundle)
+}
+
+/// Block three that points to block 2
+fn block3(
+    number: BlockNumber,
+    parent_hash: B256,
+    prev_state: &BundleStateWithReceipts,
+) -> (SealedBlockWithSenders, BundleStateWithReceipts) {
+    let address_range = 1..=20;
+    let slot_range = 1..=100;
+
+    let mut bundle_state_builder = BundleState::builder(number..=number);
+    for idx in address_range {
+        let address = Address::with_last_byte(idx);
+        bundle_state_builder = bundle_state_builder
+            .state_present_account_info(
+                address,
+                AccountInfo { nonce: 1, balance: U256::from(idx), ..Default::default() },
+            )
+            .state_storage(
+                address,
+                HashMap::from_iter(
+                    slot_range
+                        .clone()
+                        .map(|slot| (U256::from(slot), (U256::ZERO, U256::from(slot)))),
+                ),
+            );
+    }
+    let bundle = BundleStateWithReceipts::new(
+        bundle_state_builder.build(),
+        Receipts::from_vec(vec![vec![Some(Receipt {
+            tx_type: TxType::EIP1559,
+            success: true,
+            cumulative_gas_used: 400,
+            logs: vec![Log {
+                address: Address::new([0x61; 20]),
+                topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                data: Bytes::default(),
+            }],
+            #[cfg(feature = "optimism")]
+            deposit_nonce: None,
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: None,
+        })]]),
+        number,
+    );
+
+    let mut extended = prev_state.clone();
+    extended.extend(bundle.clone());
+    let state_root = bundle_state_root(&extended);
+
+    let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
+    block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    let mut header = block.header.clone().unseal();
+    header.number = number;
+    header.state_root = state_root;
+    // parent_hash points to block1 hash
+    header.parent_hash = parent_hash;
+    block.header = header.seal_slow();
+
+    (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, bundle)
+}
+
+/// Block four that points to block 3
+fn block4(
+    number: BlockNumber,
+    parent_hash: B256,
+    prev_state: &BundleStateWithReceipts,
+) -> (SealedBlockWithSenders, BundleStateWithReceipts) {
+    let address_range = 1..=20;
+    let slot_range = 1..=100;
+
+    let mut bundle_state_builder = BundleState::builder(number..=number);
+    for idx in address_range {
+        let address = Address::with_last_byte(idx);
+        // increase balance for every even account and destroy every odd
+        bundle_state_builder = if idx % 2 == 0 {
+            bundle_state_builder
+                .state_present_account_info(
+                    address,
+                    AccountInfo { nonce: 1, balance: U256::from(idx * 2), ..Default::default() },
+                )
+                .state_storage(
+                    address,
+                    HashMap::from_iter(
+                        slot_range.clone().map(|slot| {
+                            (U256::from(slot), (U256::from(slot), U256::from(slot * 2)))
+                        }),
+                    ),
+                )
+        } else {
+            bundle_state_builder.state_address(address).state_storage(
+                address,
+                HashMap::from_iter(
+                    slot_range
+                        .clone()
+                        .map(|slot| (U256::from(slot), (U256::from(slot), U256::ZERO))),
+                ),
+            )
+        };
+        // record previous account info
+        bundle_state_builder = bundle_state_builder
+            .revert_account_info(
+                number,
+                address,
+                Some(Some(AccountInfo {
+                    nonce: 1,
+                    balance: U256::from(idx),
+                    ..Default::default()
+                })),
+            )
+            .revert_storage(
+                number,
+                address,
+                Vec::from_iter(slot_range.clone().map(|slot| (U256::from(slot), U256::from(slot)))),
+            );
+    }
+    let bundle = BundleStateWithReceipts::new(
+        bundle_state_builder.build(),
+        Receipts::from_vec(vec![vec![Some(Receipt {
+            tx_type: TxType::EIP1559,
+            success: true,
+            cumulative_gas_used: 400,
+            logs: vec![Log {
+                address: Address::new([0x61; 20]),
+                topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                data: Bytes::default(),
+            }],
+            #[cfg(feature = "optimism")]
+            deposit_nonce: None,
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: None,
+        })]]),
+        number,
+    );
+
+    let mut extended = prev_state.clone();
+    extended.extend(bundle.clone());
+    let state_root = bundle_state_root(&extended);
+
+    let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
+    block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    let mut header = block.header.clone().unseal();
+    header.number = number;
+    header.state_root = state_root;
+    // parent_hash points to block1 hash
+    header.parent_hash = parent_hash;
+    block.header = header.seal_slow();
+
+    (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, bundle)
+}
+
+/// Block five that points to block 4
+fn block5(
+    number: BlockNumber,
+    parent_hash: B256,
+    prev_state: &BundleStateWithReceipts,
+) -> (SealedBlockWithSenders, BundleStateWithReceipts) {
+    let address_range = 1..=20;
+    let slot_range = 1..=100;
+
+    let mut bundle_state_builder = BundleState::builder(number..=number);
+    for idx in address_range {
+        let address = Address::with_last_byte(idx);
+        // update every even account and recreate every odd only with half of slots
+        bundle_state_builder = bundle_state_builder
+            .state_present_account_info(
+                address,
+                AccountInfo { nonce: 1, balance: U256::from(idx * 2), ..Default::default() },
+            )
+            .state_storage(
+                address,
+                HashMap::from_iter(
+                    slot_range
+                        .clone()
+                        .take(50)
+                        .map(|slot| (U256::from(slot), (U256::from(slot), U256::from(slot * 4)))),
+                ),
+            );
+        bundle_state_builder = if idx % 2 == 0 {
+            bundle_state_builder
+                .revert_account_info(
+                    number,
+                    address,
+                    Some(Some(AccountInfo {
+                        nonce: 1,
+                        balance: U256::from(idx * 2),
+                        ..Default::default()
+                    })),
+                )
+                .revert_storage(
+                    number,
+                    address,
+                    Vec::from_iter(
+                        slot_range.clone().map(|slot| (U256::from(slot), U256::from(slot * 2))),
+                    ),
+                )
+        } else {
+            bundle_state_builder.revert_address(number, address)
+        };
+    }
+    let bundle = BundleStateWithReceipts::new(
+        bundle_state_builder.build(),
+        Receipts::from_vec(vec![vec![Some(Receipt {
+            tx_type: TxType::EIP1559,
+            success: true,
+            cumulative_gas_used: 400,
+            logs: vec![Log {
+                address: Address::new([0x61; 20]),
+                topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                data: Bytes::default(),
+            }],
+            #[cfg(feature = "optimism")]
+            deposit_nonce: None,
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: None,
+        })]]),
+        number,
+    );
+
+    let mut extended = prev_state.clone();
+    extended.extend(bundle.clone());
+    let state_root = bundle_state_root(&extended);
 
     let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
     block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));

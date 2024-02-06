@@ -20,12 +20,7 @@ pub struct LogArgs {
     pub log_stdout_format: LogFormat,
 
     /// The filter to use for logs written to stdout.
-    #[arg(
-        long = "log.stdout.filter",
-        value_name = "FILTER",
-        global = true,
-        default_value = "info"
-    )]
+    #[arg(long = "log.stdout.filter", value_name = "FILTER", global = true, default_value = "")]
     pub log_stdout_filter: String,
 
     /// The format to use for logs written to the log file.
@@ -81,8 +76,8 @@ impl LogArgs {
     fn layer(&self, format: LogFormat, filter: String, use_color: bool) -> LayerInfo {
         LayerInfo::new(
             format,
+            self.verbosity.directive().to_string(),
             filter,
-            self.verbosity.directive(),
             if use_color { Some(self.color.to_string()) } else { None },
         )
     }

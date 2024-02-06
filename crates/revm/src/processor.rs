@@ -5,11 +5,11 @@ use crate::{
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
 };
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
-use reth_node_api::EvmEnvConfig;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     Address, Block, BlockNumber, BlockWithSenders, Bloom, ChainSpec, GotExpected, Hardfork, Header,
     PruneMode, PruneModes, PruneSegmentError, Receipt, ReceiptWithBloom, Receipts,
-    TransactionSigned, B256, MINIMUM_PRUNING_DISTANCE, U256,
+    TransactionSigned, Withdrawals, B256, MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_provider::{
     BlockExecutor, BlockExecutorStats, ProviderError, PrunableBlockExecutor, StateProvider,
@@ -85,7 +85,7 @@ pub struct EVMProcessor<'a, EvmConfig> {
 
 impl<'a, EvmConfig> EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: EvmEnvConfig,
+    EvmConfig: ConfigureEvmEnv,
 {
     /// Return chain spec.
     pub fn chain_spec(&self) -> &Arc<ChainSpec> {
@@ -213,7 +213,7 @@ where
             block.timestamp,
             total_difficulty,
             &block.ommers,
-            block.withdrawals.as_ref(),
+            block.withdrawals.as_ref().map(Withdrawals::as_ref),
         );
 
         // Irregular state change at Ethereum DAO hardfork
@@ -390,7 +390,7 @@ where
 #[cfg(not(feature = "optimism"))]
 impl<'a, EvmConfig> BlockExecutor for EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: EvmEnvConfig,
+    EvmConfig: ConfigureEvmEnv,
 {
     fn execute(
         &mut self,
@@ -505,7 +505,7 @@ where
 
 impl<'a, EvmConfig> PrunableBlockExecutor for EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: EvmEnvConfig,
+    EvmConfig: ConfigureEvmEnv,
 {
     fn set_tip(&mut self, tip: BlockNumber) {
         self.tip = Some(tip);

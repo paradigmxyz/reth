@@ -58,10 +58,12 @@ members = [
     "examples/additional-rpc-namespace-in-cli/",
     "examples/beacon-api-sse/",
     "examples/cli-extension-event-hooks/",
+    "examples/custom-node/",
+    "examples/custom-payload-builder/",
     "examples/manual-p2p/",
     "examples/rpc-db/",
     "examples/trace-transaction-cli/",
-    "examples/custom-payload-builder/",
+    "examples/polygon-p2p/",
     "testing/ef-tests/",
 ]
 default-members = ["bin/reth"]
@@ -79,7 +81,7 @@ rust.unused_must_use = "deny"
 rust.rust_2018_idioms = "deny"
 
 [workspace.package]
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
@@ -173,7 +175,7 @@ revm = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", feat
 revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", features = [
     "std",
 ], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev="e900523"}
 
 # eth
 alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
@@ -214,7 +216,7 @@ serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }
 rand = "0.8.5"
 schnellru = "0.2"
-strum = "0.25"
+strum = "0.26"
 rayon = "1.7"
 itertools = "0.12"
 parking_lot = "0.12"
@@ -222,7 +224,6 @@ metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::me
 hex-literal = "0.4"
 once_cell = "1.17"
 syn = "2.0"
-ahash = "0.8.6"
 nybbles = "0.1"
 
 # proc-macros

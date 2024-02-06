@@ -18,7 +18,7 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_node_api::EvmEnvConfig;
+//! use reth_node_api::ConfigureEvmEnv;
 //! use reth_provider::{
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -47,7 +47,7 @@
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
-//!     EvmConfig: EvmEnvConfig + 'static,
+//!     EvmConfig: ConfigureEvmEnv + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -78,7 +78,7 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_node_api::{EngineTypes, EvmEnvConfig};
+//! use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 //! use reth_provider::{
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -113,8 +113,8 @@
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
 //!     EngineApi: EngineApiServer<EngineT>,
-//!     EngineT: EngineTypes,
-//!     EvmConfig: EvmEnvConfig + 'static,
+//!     EngineT: EngineTypes + 'static,
+//!     EvmConfig: ConfigureEvmEnv + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -167,14 +167,17 @@ use jsonrpsee::{
     server::{IdProvider, Server, ServerHandle},
     Methods, RpcModule,
 };
-use reth_node_api::{EngineTypes, EvmEnvConfig};
-use reth_node_ethereum::EthEvmConfig;
+use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use serde::{Deserialize, Serialize, Serializer};
-use strum::{AsRefStr, EnumIter, EnumVariantNames, IntoStaticStr, ParseError, VariantNames};
+use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
 use tower::layer::util::{Identity, Stack};
 use tower_http::cors::CorsLayer;
 use tracing::{instrument, trace};
 
+use crate::{
+    auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics,
+    RpcModuleSelection::Selection,
+};
 use constants::*;
 use error::{RpcError, ServerKind};
 use reth_ipc::server::IpcServer;
@@ -198,11 +201,6 @@ use reth_rpc::{
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
-
-use crate::{
-    auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics,
-    RpcModuleSelection::Selection,
-};
 // re-export for convenience
 pub use crate::eth::{EthConfig, EthHandlers};
 
@@ -250,7 +248,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: EvmEnvConfig + 'static,
+    EvmConfig: ConfigureEvmEnv + 'static,
 {
     let module_config = module_config.into();
     let server_config = server_config.into();
@@ -418,7 +416,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
         evm_config: E,
     ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, E>
     where
-        E: EvmEnvConfig + 'static,
+        E: ConfigureEvmEnv + 'static,
     {
         let Self { provider, pool, executor, network, events, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
@@ -441,14 +439,14 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: EvmEnvConfig + 'static,
+    EvmConfig: ConfigureEvmEnv + 'static,
 {
     /// Configures all [RpcModule]s specific to the given [TransportRpcModuleConfig] which can be
     /// used to start the transport server(s).
     ///
     /// This behaves exactly as [RpcModuleBuilder::build] for the [TransportRpcModules], but also
     /// configures the auth (engine api) server, which exposes a subset of the `eth_` namespace.
-    pub fn build_with_auth_server<EngineApi, EngineT: EngineTypes>(
+    pub fn build_with_auth_server<EngineApi, EngineT>(
         self,
         module_config: TransportRpcModuleConfig,
         engine: EngineApi,
@@ -458,6 +456,7 @@ where
         RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig>,
     )
     where
+        EngineT: EngineTypes + 'static,
         EngineApi: EngineApiServer<EngineT>,
     {
         let mut modules = TransportRpcModules::default();
@@ -494,20 +493,24 @@ where
     ///
     /// ```no_run
     /// use reth_network_api::noop::NoopNetwork;
+    /// use reth_node_api::ConfigureEvmEnv;
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
     /// use reth_rpc_builder::RpcModuleBuilder;
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::noop::NoopTransactionPool;
     ///
-    /// let mut registry = RpcModuleBuilder::default()
-    ///     .with_provider(NoopProvider::default())
-    ///     .with_pool(NoopTransactionPool::default())
-    ///     .with_network(NoopNetwork::default())
-    ///     .with_executor(TokioTaskExecutor::default())
-    ///     .with_events(TestCanonStateSubscriptions::default())
-    ///     .into_registry(Default::default());
+    /// fn init<Evm: ConfigureEvmEnv + 'static>(evm: Evm) {
+    ///     let mut registry = RpcModuleBuilder::default()
+    ///         .with_provider(NoopProvider::default())
+    ///         .with_pool(NoopTransactionPool::default())
+    ///         .with_network(NoopNetwork::default())
+    ///         .with_executor(TokioTaskExecutor::default())
+    ///         .with_events(TestCanonStateSubscriptions::default())
+    ///         .with_evm_config(evm)
+    ///         .into_registry(Default::default());
     ///
-    /// let eth_api = registry.eth_api();
+    ///     let eth_api = registry.eth_api();
+    /// }
     /// ```
     pub fn into_registry(
         self,
@@ -549,9 +552,9 @@ where
     }
 }
 
-impl Default for RpcModuleBuilder<(), (), (), (), (), EthEvmConfig> {
+impl Default for RpcModuleBuilder<(), (), (), (), (), ()> {
     fn default() -> Self {
-        RpcModuleBuilder::new((), (), (), (), (), EthEvmConfig::default())
+        RpcModuleBuilder::new((), (), (), (), (), ())
     }
 }
 
@@ -625,9 +628,9 @@ impl RpcModuleSelection {
     pub const STANDARD_MODULES: [RethRpcModule; 3] =
         [RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3];
 
-    /// Returns a selection of [RethRpcModule] with all [RethRpcModule::VARIANTS].
+    /// Returns a selection of [RethRpcModule] with all [RethRpcModule::all_variants].
     pub fn all_modules() -> Vec<RethRpcModule> {
-        RpcModuleSelection::try_from_selection(RethRpcModule::VARIANTS.iter().copied())
+        RpcModuleSelection::try_from_selection(RethRpcModule::all_variants().iter().copied())
             .expect("valid selection")
             .into_selection()
     }
@@ -732,7 +735,7 @@ impl RpcModuleSelection {
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         Events: CanonStateSubscriptions + Clone + 'static,
-        EvmConfig: EvmEnvConfig + 'static,
+        EvmConfig: ConfigureEvmEnv + 'static,
     {
         let mut registry =
             RethModuleRegistry::new(provider, pool, network, executor, events, config, evm_config);
@@ -820,7 +823,8 @@ impl fmt::Display for RpcModuleSelection {
     Hash,
     AsRefStr,
     IntoStaticStr,
-    EnumVariantNames,
+    VariantNames,
+    VariantArray,
     EnumIter,
     Deserialize,
 )]
@@ -857,9 +861,14 @@ pub enum RethRpcModule {
 // === impl RethRpcModule ===
 
 impl RethRpcModule {
+    /// Returns all variant names of the enum
+    pub const fn all_variant_names() -> &'static [&'static str] {
+        <Self as VariantNames>::VARIANTS
+    }
+
     /// Returns all variants of the enum
-    pub const fn all_variants() -> &'static [&'static str] {
-        Self::VARIANTS
+    pub const fn all_variants() -> &'static [Self] {
+        <Self as VariantArray>::VARIANTS
     }
 
     /// Returns all variants of the enum
@@ -1048,7 +1057,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: EvmEnvConfig + 'static,
+    EvmConfig: ConfigureEvmEnv + 'static,
 {
     /// Register Eth Namespace
     ///
@@ -1101,7 +1110,7 @@ where
     /// Note: This does _not_ register the `engine_` in this registry.
     pub fn create_auth_module<EngineApi, EngineT>(&mut self, engine_api: EngineApi) -> AuthRpcModule
     where
-        EngineT: EngineTypes,
+        EngineT: EngineTypes + 'static,
         EngineApi: EngineApiServer<EngineT>,
     {
         let eth_handlers = self.eth_handlers();

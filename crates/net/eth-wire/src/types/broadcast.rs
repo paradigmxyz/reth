@@ -4,6 +4,7 @@ use crate::{EthMessage, EthVersion};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
+use derive_more::{Deref, DerefMut, IntoIterator};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Block, Bytes, TransactionSigned, TxHash, B256, U128};
 
@@ -447,13 +448,23 @@ pub trait HandleAnnouncement {
     /// The announcement contains no entries.
     fn is_empty(&self) -> bool;
 
+    /// Returns the number of entries.
+    fn len(&self) -> usize;
+
     /// Retain only entries for which the hash in the entry, satisfies a given predicate.
     fn retain_by_hash(&mut self, f: impl FnMut(TxHash) -> bool);
+
+    /// Returns the announcement version, either [`EthVersion::Eth66`] or [`EthVersion::Eth68`].
+    fn msg_version(&self) -> EthVersion;
 }
 
 impl HandleAnnouncement for NewPooledTransactionHashes {
     fn is_empty(&self) -> bool {
         self.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
     }
 
     fn retain_by_hash(&mut self, f: impl FnMut(TxHash) -> bool) {
@@ -462,11 +473,19 @@ impl HandleAnnouncement for NewPooledTransactionHashes {
             NewPooledTransactionHashes::Eth68(msg) => msg.retain_by_hash(f),
         }
     }
+
+    fn msg_version(&self) -> EthVersion {
+        self.version()
+    }
 }
 
 impl HandleAnnouncement for NewPooledTransactionHashes68 {
     fn is_empty(&self) -> bool {
         self.hashes.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.hashes.len()
     }
 
     fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
@@ -483,11 +502,19 @@ impl HandleAnnouncement for NewPooledTransactionHashes68 {
             self.sizes.remove(index);
         }
     }
+
+    fn msg_version(&self) -> EthVersion {
+        EthVersion::Eth68
+    }
 }
 
 impl HandleAnnouncement for NewPooledTransactionHashes66 {
     fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
     }
 
     fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
@@ -502,34 +529,139 @@ impl HandleAnnouncement for NewPooledTransactionHashes66 {
             self.0.remove(index);
         }
     }
+
+    fn msg_version(&self) -> EthVersion {
+        EthVersion::Eth66
+    }
 }
 
 /// Announcement data that has been validated according to the configured network. For an eth68
 /// announcement, values of the map are `Some((u8, usize))` - the tx metadata. For an eth66
 /// announcement, values of the map are `None`.
-pub type ValidAnnouncementData = HashMap<TxHash, Option<(u8, usize)>>;
+#[derive(Debug, IntoIterator)]
+pub struct ValidAnnouncementData {
+    #[into_iterator]
+    data: HashMap<TxHash, Option<(u8, usize)>>,
+    version: EthVersion,
+}
+
+impl ValidAnnouncementData {
+    /// Returns a new [`ValidAnnouncementData`] wrapper around validated [`EthVersion::Eth68`]
+    /// announcement data.
+    pub fn new_eth68(data: HashMap<TxHash, Option<(u8, usize)>>) -> Self {
+        Self { data, version: EthVersion::Eth68 }
+    }
+
+    /// Returns a new [`ValidAnnouncementData`] wrapper around validated [`EthVersion::Eth68`]
+    /// announcement data.
+    pub fn new_eth66(data: HashMap<TxHash, Option<(u8, usize)>>) -> Self {
+        Self { data, version: EthVersion::Eth66 }
+    }
+
+    /// Returns a new [`ValidAnnouncementData`] with empty data for an [`EthVersion::Eth68`]
+    /// announcement.
+    pub fn empty_eth68() -> Self {
+        Self { data: HashMap::new(), version: EthVersion::Eth68 }
+    }
+
+    /// Returns a new [`ValidAnnouncementData`] with empty data for an [`EthVersion::Eth66`]
+    /// announcement.
+    pub fn empty_eth66() -> Self {
+        Self { data: HashMap::new(), version: EthVersion::Eth66 }
+    }
+
+    /// Destructs returning the validated data.
+    pub fn into_data(self) -> HashMap<TxHash, Option<(u8, usize)>> {
+        self.data
+    }
+}
 
 impl HandleAnnouncement for ValidAnnouncementData {
     fn is_empty(&self) -> bool {
-        self.is_empty()
+        self.data.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.data.len()
     }
 
     fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
-        self.retain(|&hash, _| f(hash))
+        self.data.retain(|&hash, _| f(hash))
+    }
+
+    fn msg_version(&self) -> EthVersion {
+        self.version
     }
 }
 
 /// Hashes extracted from valid announcement data. For an eth68 announcement, this means the eth68
 /// metadata should have been cached already.
-pub type ValidTxHashes = Vec<TxHash>;
+#[derive(Debug, Deref, DerefMut, IntoIterator)]
+pub struct ValidTxHashes {
+    #[deref]
+    #[deref_mut]
+    #[into_iterator]
+    hashes: Vec<TxHash>,
+    version: EthVersion,
+}
+
+impl ValidTxHashes {
+    /// Returns a new [`ValidTxHashes`] wrapper around validated hashes. Takes a list of validated
+    /// hashes as parameter along with the eth version.
+    pub fn new(hashes: Vec<TxHash>, version: EthVersion) -> Self {
+        Self { hashes, version }
+    }
+
+    /// Returns a new [`ValidTxHashes`] wrapper around validated hashes from valid
+    /// [`EthVersion::Eth68`] announcement data. Takes a list of validated hashes as parameter.
+    pub fn new_eth68(hashes: Vec<TxHash>) -> Self {
+        Self::new(hashes, EthVersion::Eth68)
+    }
+
+    /// Returns a new [`ValidTxHashes`] wrapper around validated hashes from valid
+    /// [`EthVersion::Eth66`] announcement data. Takes a list of validated hashes as parameter.
+    pub fn new_eth66(hashes: Vec<TxHash>) -> Self {
+        Self::new(hashes, EthVersion::Eth66)
+    }
+
+    /// Returns a new [`ValidTxHashes`] with empty hashes.
+    pub fn empty(version: EthVersion) -> Self {
+        Self { hashes: vec![], version }
+    }
+
+    /// Returns a new [`ValidTxHashes`] with empty hashes for an [`EthVersion::Eth68`]
+    /// announcement.
+    pub fn empty_eth68() -> Self {
+        Self::empty(EthVersion::Eth68)
+    }
+
+    /// Returns a new [`ValidTxHashes`] with empty hashes for an [`EthVersion::Eth66`]
+    /// announcement.
+    pub fn empty_eth66() -> Self {
+        Self::empty(EthVersion::Eth66)
+    }
+
+    /// Destructs returning the validated hashes.
+    pub fn into_hashes(self) -> Vec<TxHash> {
+        self.hashes
+    }
+}
 
 impl HandleAnnouncement for ValidTxHashes {
     fn is_empty(&self) -> bool {
-        self.is_empty()
+        self.hashes.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.hashes.len()
     }
 
     fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
-        self.retain(|&hash| f(hash))
+        self.hashes.retain(|&hash| f(hash))
+    }
+
+    fn msg_version(&self) -> EthVersion {
+        self.version
     }
 }
 
