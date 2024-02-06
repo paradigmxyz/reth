@@ -1,12 +1,10 @@
 //! Mock types.
 
-#![allow(dead_code, unused_macros)]
-
 use crate::{
     identifier::{SenderIdentifiers, TransactionId},
     pool::txpool::TxPool,
     traits::TransactionOrigin,
-    PoolTransaction, Priority, TransactionOrdering, ValidPoolTransaction,
+    CoinbaseTipOrdering, PoolTransaction, ValidPoolTransaction,
 };
 use paste::paste;
 use rand::{
@@ -45,6 +43,7 @@ pub fn mock_tx_pool() -> MockTxPool {
     MockTxPool::new(Default::default(), Default::default())
 }
 
+#[cfg(feature = "optimism")]
 macro_rules! op_set_value {
     ($this:ident, sender, $value:ident) => {
         $this.from = $value;
@@ -61,6 +60,7 @@ macro_rules! op_set_value {
     ($this:ident, $other:ident, $field:ident) => {};
 }
 
+#[cfg(feature = "optimism")]
 macro_rules! op_get_value {
     ($this:ident, sender) => {
         $this.from
@@ -1211,24 +1211,8 @@ impl MockTransactionFactory {
     }
 }
 
-/// Used to define a specific ordering for transactions, providing a priority value
-/// based on the effective tip per gas and base fee of the given [MockTransaction].
-#[derive(Clone, Default, Debug)]
-#[non_exhaustive]
-pub struct MockOrdering;
-
-impl TransactionOrdering for MockOrdering {
-    type PriorityValue = U256;
-    type Transaction = MockTransaction;
-
-    fn priority(
-        &self,
-        transaction: &Self::Transaction,
-        base_fee: u64,
-    ) -> Priority<Self::PriorityValue> {
-        transaction.effective_tip_per_gas(base_fee).map(U256::from).into()
-    }
-}
+/// MockOrdering is just a CoinbaseTipOrdering with MockTransaction
+pub type MockOrdering = CoinbaseTipOrdering<MockTransaction>;
 
 /// A ratio of each of the configured transaction types. The percentages sum up to 100, this is
 /// enforced in [MockTransactionRatio::new] by an assert.
@@ -1388,6 +1372,22 @@ impl MockTransactionDistribution {
 
         tx.with_nonce(nonce).with_gas_limit(self.gas_limit_range.sample(rng)).with_size(size)
     }
+
+    /// Generates a new transaction set for the given sender.
+    ///
+    /// The nonce range defines which nonces to set, and how many transactions to generate.
+    pub fn tx_set(
+        &self,
+        sender: Address,
+        nonce_range: Range<u64>,
+        rng: &mut impl rand::Rng,
+    ) -> MockTransactionSet {
+        let mut txs = Vec::new();
+        for nonce in nonce_range {
+            txs.push(self.tx(nonce, rng).with_sender(sender));
+        }
+        MockTransactionSet::new(txs)
+    }
 }
 
 /// A set of [MockTransaction]s that can be modified at once
@@ -1464,7 +1464,9 @@ impl IntoIterator for MockTransactionSet {
 
 #[test]
 fn test_mock_priority() {
-    let o = MockOrdering;
+    use crate::TransactionOrdering;
+
+    let o = MockOrdering::default();
     let lo = MockTransaction::eip1559().with_gas_limit(100_000);
     let hi = lo.next().inc_price();
     assert!(o.priority(&hi, 0) > o.priority(&lo, 0));
