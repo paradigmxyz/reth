@@ -1,11 +1,14 @@
 //! Traits for the builder
 
-use crate::{components::NodeComponents, BuilderContext};
+use crate::{
+    components::NodeComponents,
+    node::{FullNodeTypes, NodeTypes},
+    BuilderContext,
+};
 use reth_network::NetworkHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
-use crate::node::{FullNodeTypes, NodeTypes};
 
 /// Encapsulates all types and components of the node.
 pub trait FullNodeComponents: FullNodeTypes + 'static {

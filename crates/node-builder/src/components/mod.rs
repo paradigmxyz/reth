@@ -7,6 +7,7 @@
 //!
 //! Components depend on a fully type configured node: [FullNodeTypes].
 
+use crate::node::FullNodeTypes;
 pub use builder::*;
 pub use network::*;
 pub use payload::*;
@@ -14,7 +15,6 @@ pub use pool::*;
 use reth_network::NetworkHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 pub use traits::*;
-use crate::node::FullNodeTypes;
 
 mod builder;
 mod network;

@@ -1,9 +1,8 @@
 //! Payload service component for the node builder.
 
-use crate::BuilderContext;
+use crate::{node::FullNodeTypes, BuilderContext};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_transaction_pool::TransactionPool;
-use crate::node::FullNodeTypes;
 
 /// A type that knows how to spawn the payload service.
 pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool> {

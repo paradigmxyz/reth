@@ -1,9 +1,8 @@
 //! Network component for the node builder.
 
-use crate::BuilderContext;
+use crate::{node::FullNodeTypes, BuilderContext};
 use reth_network::NetworkHandle;
 use reth_transaction_pool::TransactionPool;
-use crate::node::FullNodeTypes;
 
 /// A type that knows how to build the network implementation.
 pub trait NetworkBuilder<Node: FullNodeTypes, Pool: TransactionPool> {

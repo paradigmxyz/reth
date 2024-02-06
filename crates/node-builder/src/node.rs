@@ -1,9 +1,7 @@
-use std::marker::PhantomData;
 use reth_db::database::Database;
-use reth_node_api::EngineTypes;
-use reth_node_api::evm::EvmConfig;
-use reth_node_api::primitives::NodePrimitives;
+use reth_node_api::{evm::EvmConfig, primitives::NodePrimitives, EngineTypes};
 use reth_node_core::cli::components::FullProvider;
+use std::marker::PhantomData;
 
 /// The type that configures the entire node.
 pub trait NodeTypes: Send + Sync + 'static {
@@ -23,7 +21,6 @@ pub trait FullNodeTypes: NodeTypes + 'static {
     /// The provider type used to interact with the node.
     type Provider: FullProvider<Self::DB>;
 }
-
 
 /// An adapter type that adds the builtin provider type to the user configured node types.
 #[derive(Debug)]

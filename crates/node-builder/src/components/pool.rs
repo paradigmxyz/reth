@@ -1,7 +1,6 @@
 //! Pool component for the node builder.
-use crate::BuilderContext;
+use crate::{node::FullNodeTypes, BuilderContext};
 use reth_transaction_pool::TransactionPool;
-use crate::node::FullNodeTypes;
 
 /// A type that knows how to build the transaction pool.
 pub trait PoolBuilder<Node: FullNodeTypes> {

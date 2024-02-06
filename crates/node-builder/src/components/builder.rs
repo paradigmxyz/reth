@@ -4,10 +4,10 @@ use crate::{
     components::{
         NetworkBuilder, NodeComponents, NodeComponentsBuilder, PayloadServiceBuilder, PoolBuilder,
     },
+    node::FullNodeTypes,
     BuilderContext,
 };
 use std::marker::PhantomData;
-use crate::node::FullNodeTypes;
 
 /// A generic, customizable [`NodeComponentsBuilder`].
 ///

@@ -1,6 +1,6 @@
 //! Builder support for rpc components.
 
-use std::fmt;
+use crate::{components::FullNodeComponents, BuilderContext};
 use reth_network::NetworkHandle;
 use reth_node_core::{
     node_config::NodeConfig,
@@ -10,7 +10,7 @@ use reth_node_core::{
     },
 };
 use reth_tasks::TaskExecutor;
-use crate::{BuilderContext, components::FullNodeComponents};
+use std::fmt;
 
 /// Contains the handles to the spawned RPC servers.
 ///
@@ -155,7 +155,7 @@ pub struct RpcContext<'a, Node: FullNodeComponents> {
         NetworkHandle,
         TaskExecutor,
         Node::Provider,
-        Node::Evm
+        Node::Evm,
     >,
     /// Holds installed modules per transport type.
     ///

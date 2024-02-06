@@ -3,7 +3,7 @@
 use crate::{
     components::{FullNodeComponents, FullNodeComponentsAdapter, NodeComponentsBuilder},
     hooks::NodeHooks,
-    node::{FullNode, FullNodeTypesAdapter},
+    node::{FullNode, FullNodeTypes, FullNodeTypesAdapter, NodeTypes},
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
     NodeHandle,
 };
@@ -27,7 +27,6 @@ use reth_revm::EvmProcessorFactory;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::PoolConfig;
 use std::{marker::PhantomData, sync::Arc};
-use crate::node::{FullNodeTypes, NodeTypes};
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -102,8 +101,9 @@ where
         >,
     >
     where
-        Components:
-            NodeComponentsBuilder<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>>,
+        Components: NodeComponentsBuilder<
+            FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+        >,
     {
         NodeBuilder {
             config: self.config,
@@ -133,7 +133,9 @@ impl<DB, Types, Components>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     Types: NodeTypes,
-    Components: NodeComponentsBuilder<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>>,
+    Components: NodeComponentsBuilder<
+        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+    >,
 {
     /// Apply a function to the components builder.
     pub fn map_components(self, f: impl FnOnce(Components) -> Components) -> Self {
@@ -167,7 +169,9 @@ where
         >,
     >
     where
-        C: NodeComponentsBuilder<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>>,
+        C: NodeComponentsBuilder<
+            FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+        >,
     {
         NodeBuilder {
             config: self.config,
@@ -202,7 +206,7 @@ where
         F: FnOnce(
                 FullNode<
                     FullNodeComponentsAdapter<
-                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
                         Components::Pool,
                     >,
                 >,
@@ -356,7 +360,7 @@ pub struct InitState;
 pub struct TypesState<Types, DB>
 where
     DB: Database + Clone + 'static,
-    Types: NodeTypes
+    Types: NodeTypes,
 {
     adapter: FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
 }
