@@ -80,11 +80,11 @@ pub use validation::*;
 
 /// Cache limit of transactions to keep track of for a single peer, that the peer's pool and local
 /// pool have in common.
-const CAPACITY_CACHE_TRANSACTION_HASHES_SEEN_BY_PEER_AND_IN_POOL: usize = 7 * 1024;
+const CAPACITY_CACHE_TRANSACTION_HASHES_SEEN_BY_PEER_AND_IN_POOL: usize = 10 * 1024;
 
 /// Cache limit of transactions to keep track of for a single peer, that are in the peer's pool
 /// but maybe not in the local pool yet.
-const CAPACITY_CACHE_TRANSACTION_HASHES_SENT_BY_PEER_AND_MAYBE_IN_POOL: usize = 3 * 1024;
+const CAPACITY_CACHE_TRANSACTION_HASHES_SENT_BY_PEER_AND_MAYBE_IN_POOL: usize = 10 * 1024;
 
 /// Soft limit for NewPooledTransactions
 const SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_MEMPOOL_PACKET: usize = 4096;
