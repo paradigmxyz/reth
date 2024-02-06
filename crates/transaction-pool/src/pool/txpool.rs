@@ -1345,7 +1345,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 }
             }
         } else if new_blob_tx.cost() > on_chain_balance {
-            println!("new_blob_tx: {:?} would go into overdraft, cumulative_cost: {}, bal: {on_chain_balance}", new_blob_tx, new_blob_tx.cost());
             // the transaction would go into overdraft
             return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
         }
