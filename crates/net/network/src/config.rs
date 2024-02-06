@@ -14,7 +14,7 @@ use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_primitives::{
     mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET,
 };
-use reth_provider::{test_utils::NoopProvider, BlockReader, HeaderProvider};
+use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
@@ -412,8 +412,12 @@ impl NetworkConfigBuilder {
         self
     }
 
-    pub fn build_with_noop_provider(self) -> NetworkConfig<NoopProvider> {
-        self.build(NoopProvider::default())
+    /// Convenience function for creating a [NetworkConfig] with a noop provider that does nothing.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn build_with_noop_provider(
+        self,
+    ) -> NetworkConfig<reth_provider::test_utils::NoopProvider> {
+        self.build(reth_provider::test_utils::NoopProvider::default())
     }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]
