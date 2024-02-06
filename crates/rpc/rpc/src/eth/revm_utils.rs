@@ -179,7 +179,6 @@ where
         .build();
     let res = evm.transact()?;
     let (db, env) = evm.into_db_and_env_with_spec_id();
-    // TODO(revm)
     Ok((res, env, db))
 }
 

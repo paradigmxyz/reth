@@ -64,7 +64,7 @@ impl Case for BlockchainTestCase {
         }
 
         // Iterate through test cases, filtering by the network type to exclude specific forks.
-        for (_, case) in self.tests.iter().filter(|(_, case)| {
+        for case in self.tests.values().filter(|case| {
             !matches!(
                 case.network,
                 ForkSpec::ByzantiumToConstantinopleAt5 |

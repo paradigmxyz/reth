@@ -165,9 +165,6 @@ where
 
     /// Returns a reference to the database
     pub fn db_mut(&mut self) -> &mut StateDBBox<'a, ProviderError> {
-        // Option will be removed from EVM in the future.
-        // as it is always some.
-        // https://github.com/bluealloy/revm/issues/697
         &mut self.evm.as_mut().unwrap().context.evm.db
     }
 

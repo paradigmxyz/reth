@@ -31,7 +31,7 @@ use reth_revm::state_change::{
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId},
+    primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg},
     Database, DatabaseCommit, Evm, State,
 };
 use std::{
@@ -630,8 +630,6 @@ impl Drop for Cancelled {
 /// Static config for how to build a payload.
 #[derive(Clone, Debug)]
 pub struct PayloadConfig<Attributes> {
-    /// Specification id for the block.
-    pub spec_id: SpecId,
     /// Pre-configured block environment.
     pub initialized_block_env: BlockEnv,
     /// Configuration for the environment.
@@ -665,11 +663,10 @@ where
         chain_spec: Arc<ChainSpec>,
     ) -> Self {
         // configure evm env based on parent block
-        let (spec_id, initialized_cfg, initialized_block_env) =
+        let (initialized_cfg, initialized_block_env) =
             attributes.cfg_and_block_env(&chain_spec, &parent_block);
 
         Self {
-            spec_id,
             initialized_block_env,
             initialized_cfg,
             parent_block,
