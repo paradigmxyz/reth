@@ -622,16 +622,6 @@ where
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block with
-    /// the given base fee.
-    pub(crate) fn best_transactions_with_base_fee(
-        &self,
-        base_fee: u64,
-    ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
-    {
-        self.get_pool_data().best_transactions_with_base_fee(base_fee)
-    }
-
-    /// Returns an iterator that yields transactions that are ready to be included in the block with
     /// the given base fee and optional blob fee attributes.
     pub(crate) fn best_transactions_with_attributes(
         &self,

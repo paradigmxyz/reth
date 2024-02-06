@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use crate::{
     blobstore::BlobStoreError,
     error::PoolResult,
@@ -228,6 +230,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// given base fee.
     ///
     /// Consumer: Block production
+    #[deprecated(note = "Use best_transactions_with_attributes instead.")]
     fn best_transactions_with_base_fee(
         &self,
         base_fee: u64,
@@ -368,11 +371,21 @@ pub trait TransactionPoolExt: TransactionPool {
     /// Sets the current block info for the pool.
     fn set_block_info(&self, info: BlockInfo);
 
-    /// Event listener for when the pool needs to be updated
+    /// Event listener for when the pool needs to be updated.
     ///
-    /// Implementers need to update the pool accordingly.
-    /// For example the base fee of the pending block is determined after a block is mined which
+    /// Implementers need to update the pool accordingly:
+    ///
+    /// ## Fee changes
+    ///
+    /// The [CanonicalStateUpdate] includes the base and blob fee of the pending block, which
     /// affects the dynamic fee requirement of pending transactions in the pool.
+    ///
+    /// ## EIP-4844 Blob transactions
+    ///
+    /// Mined blob transactions need to be removed from the pool, but from the pool only. The blob
+    /// sidecar must not be removed from the blob store. Only after a blob transaction is
+    /// finalized, its sidecar is removed from the blob store. This ensures that in case of a reorg,
+    /// the sidecar is still available.
     fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>);
 
     /// Updates the accounts in the pool

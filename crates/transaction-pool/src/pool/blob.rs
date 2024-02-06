@@ -1,3 +1,4 @@
+use super::txpool::PendingFees;
 use crate::{
     identifier::TransactionId, pool::size::SizeTracker, traits::BestTransactionsAttributes,
     PoolTransaction, SubPoolLimit, ValidPoolTransaction,
@@ -7,8 +8,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
-
-use super::txpool::PendingFees;
 
 /// A set of validated blob transactions in the pool that are __not pending__.
 ///

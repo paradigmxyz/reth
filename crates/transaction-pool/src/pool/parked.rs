@@ -221,6 +221,7 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
     /// Returns all transactions that satisfy the given basefee.
     ///
     /// Note: this does _not_ remove the transactions
+    #[allow(dead_code)]
     pub(crate) fn satisfy_base_fee_transactions(
         &self,
         basefee: u64,
