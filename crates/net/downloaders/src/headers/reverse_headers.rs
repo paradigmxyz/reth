@@ -1382,14 +1382,14 @@ mod tests {
         let mut heap = BinaryHeap::new();
         let hi = 1u64;
         heap.push(OrderedHeadersResponse {
-            headers: vec![].into(),
+            headers: Headers::default(),
             request: HeadersRequest { start: hi.into(), limit: 0, direction: Default::default() },
             peer_id: Default::default(),
         });
 
         let lo = 0u64;
         heap.push(OrderedHeadersResponse {
-            headers: vec![].into(),
+            headers: Headers::default(),
             request: HeadersRequest { start: lo.into(), limit: 0, direction: Default::default() },
             peer_id: Default::default(),
         });

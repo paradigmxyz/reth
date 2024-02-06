@@ -552,7 +552,7 @@ mod tests {
         }
 
         fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> ProviderResult<Headers> {
-            Ok(vec![].into())
+            Ok(Headers::default())
         }
 
         fn sealed_header(
@@ -804,7 +804,7 @@ mod tests {
 
         let body = BlockBody {
             transactions: vec![transaction],
-            ommers: vec![].into(),
+            ommers: Headers::default(),
             withdrawals: Some(Withdrawals::default()),
         };
 
