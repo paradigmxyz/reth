@@ -52,7 +52,7 @@ impl BlobStore for DiskFileBlobStore {
 
     fn insert_all(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
         if txs.is_empty() {
-            return Ok(());
+            return Ok(())
         }
         self.inner.insert_many(txs)
     }
@@ -64,10 +64,7 @@ impl BlobStore for DiskFileBlobStore {
     }
 
     fn delete_all(&self, txs: Vec<B256>) -> Result<(), BlobStoreError> {
-        let mut files_to_delete = self.inner.files_to_delete.write();
-        for tx in txs {
-            files_to_delete.insert(tx);
-        }
+        self.inner.files_to_delete.write().extend(txs)
         Ok(())
     }
 
@@ -122,7 +119,7 @@ struct DiskFileBlobStoreInner {
     blob_cache: Mutex<LruMap<TxHash, BlobTransactionSidecar, ByLength>>,
     size_tracker: BlobStoreSize,
     file_lock: RwLock<()>,
-    files_to_delete: Arc<RwLock<HashSet<B256>>>,
+    files_to_delete: RwLock<HashSet<B256>>,
 }
 
 impl DiskFileBlobStoreInner {
