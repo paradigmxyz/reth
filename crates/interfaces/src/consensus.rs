@@ -1,6 +1,6 @@
 use reth_primitives::{
-    BlockHash, BlockNumber, GotExpected, GotExpectedBoxed, Header, InvalidTransactionError,
-    SealedBlock, SealedHeader, SealedHeaderError, B256, U256,
+    BlockHash, BlockNumber, GotExpected, GotExpectedBoxed, Header, HeaderValidationError,
+    InvalidTransactionError, SealedBlock, SealedHeader, B256, U256,
 };
 use std::fmt::Debug;
 
@@ -230,7 +230,7 @@ pub enum ConsensusError {
     #[error(transparent)]
     InvalidTransaction(#[from] InvalidTransactionError),
 
-    /// Error type transparently wrapping SealedHeaderError.
+    /// Error type transparently wrapping HeaderValidationError.
     #[error(transparent)]
-    SealedHeaderError(#[from] SealedHeaderError),
+    HeaderValidationError(#[from] HeaderValidationError),
 }

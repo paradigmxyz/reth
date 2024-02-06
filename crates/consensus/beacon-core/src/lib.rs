@@ -43,7 +43,7 @@ impl Consensus for BeaconConsensus {
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
-        header.validate_regarding_parent(parent, &self.chain_spec).map_err(ConsensusError::from)?;
+        header.validate_against_parent(parent, &self.chain_spec).map_err(ConsensusError::from)?;
         Ok(())
     }
 
