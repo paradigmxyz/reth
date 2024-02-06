@@ -227,7 +227,10 @@ impl TransactionFetcher {
         idle_peer
     }
 
-    /// Packages hashes for [`GetPooledTxRequest`] up to limit. Returns left over hashes.
+    /// Packages hashes for a [`GetPooledTxRequest`] up to limit. Returns left over hashes. Takes
+    /// a [`RequestTxHashes`] buffer as parameter for filling with hashes to request.
+    ///
+    /// Returns left over hashes.
     pub(super) fn pack_hashes(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
@@ -239,9 +242,12 @@ impl TransactionFetcher {
         self.pack_hashes_eth66(hashes_to_request, hashes_from_announcement)
     }
 
-    /// Packages hashes for [`GetPooledTxRequest`] from an
+    /// Packages hashes for a [`GetPooledTxRequest`] from an
     /// [`Eth68`](reth_eth_wire::EthVersion::Eth68) announcement up to limit as defined by protocol
-    /// version 68. Returns left over hashes.
+    /// version 68. Takes a [`RequestTxHashes`] buffer as parameter for filling with hashes to
+    /// request.
+    ///
+    /// Returns left over hashes.
     ///
     /// Loops through hashes passed as parameter and checks if a hash fits in the expected
     /// response. If no, it's add to surplus hashes. If yes, it's add to hashes to request and
@@ -301,7 +307,10 @@ impl TransactionFetcher {
         surplus_hashes
     }
 
-    /// Packages hashes for [`GetPooledTxRequest`] up to limit as defined by protocol version 66.
+    /// Packages hashes for a [`GetPooledTxRequest`] from an
+    /// [`Eth66`](reth_eth_wire::EthVersion::Eth66) announcement up to limit as defined by
+    /// protocol version 66. Takes a [`RequestTxHashes`] buffer as parameter for filling with hashes
+    /// to request.
     ///
     /// Returns left over hashes.
     pub(super) fn pack_hashes_eth66(
