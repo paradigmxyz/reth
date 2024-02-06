@@ -173,13 +173,12 @@ impl<DB> NodeState<DB> {
                     number=block.number,
                     hash=?block.hash,
                     num_connected_peers = self.num_connected_peers(),
-                    "Block added to canonical chain\ttxs={:} mgas={:.3} gas_pct={:.2}% base_fee_gwei={:.2} elapsed={:.2}s",
-                    block.body.len(),
-                    block.header.header.gas_used as f64 / 1.0E6,
-                    block.header.header.gas_used as f64 * 100.0 / block.header.header.gas_limit as f64,
-                    block.header.header.base_fee_per_gas.unwrap_or(0) as f64 / 1e9,
-                    elapsed.as_secs_f64()
-                    //TODO blob base fee and excess blob gas
+                    txs=block.body.len(),
+                    mgas=format!("{:.3}", block.header.header.gas_used as f64 / 1.0E6),
+                    gas_used=format!("{:.3}", block.header.header.gas_used as f64 * 100.0 / block.header.header.gas_limit as f64),
+                    base_fee_gwei=format!("{:2}", block.header.header.base_fee_per_gas.unwrap_or(0) as f64 / 1e9),
+                    elapsed_ms=elapsed.as_millis(),
+                    "Block added to canonical chain"
                 );
             }
             BeaconConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {

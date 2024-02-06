@@ -1282,7 +1282,7 @@ where
             InsertPayloadOk::Inserted(BlockStatus::Valid(attachment)) => {
                 latest_valid_hash = Some(block_hash);
                 let event = if attachment.is_canonical() {
-                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block)
+                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed)
                 } else {
                     BeaconConsensusEngineEvent::ForkBlockAdded(block)
                 };
