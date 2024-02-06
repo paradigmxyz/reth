@@ -6429,6 +6429,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-node-builder"
+version = "0.1.0-alpha.17"
+dependencies = [
+ "async-trait",
+ "eyre",
+ "reth-blockchain-tree",
+ "reth-db",
+ "reth-network",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-provider",
+ "reth-revm",
+ "reth-rpc-types",
+ "reth-tasks",
+ "reth-tracing",
+ "reth-transaction-pool",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "reth-node-core"
 version = "0.1.0-alpha.17"
 dependencies = [
