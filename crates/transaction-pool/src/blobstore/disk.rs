@@ -5,7 +5,7 @@ use alloy_rlp::{Decodable, Encodable};
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::{BlobTransactionSidecar, TxHash, B256};
 use schnellru::{ByLength, LruMap};
-use std::{collections::HashSet, fmt, fs, io, mem::take, path::PathBuf, sync::Arc};
+use std::{collections::HashSet, fmt, fs, io, path::PathBuf, sync::Arc};
 use tracing::{debug, trace};
 
 /// How many [BlobTransactionSidecar] to cache in memory.
