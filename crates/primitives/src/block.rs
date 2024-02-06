@@ -351,14 +351,7 @@ impl SealedBlock {
 
     /// Returns a vector of transactions RLP encoded with [TransactionSigned::encode_enveloped].
     pub fn raw_transactions(&self) -> Vec<Bytes> {
-        self.body
-            .iter()
-            .map(|tx| {
-                let mut encoded = Vec::new();
-                tx.encode_enveloped(&mut encoded);
-                encoded.into()
-            })
-            .collect()
+        self.body.iter().map(|tx| tx.envelope_encoded()).collect()
     }
 }
 
