@@ -193,9 +193,9 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
     TransactionRequest {
         from: Some(from),
         to,
-        gas_price: gas_price.map(U128::from),
-        max_fee_per_gas: max_fee_per_gas.map(U128::from),
-        max_priority_fee_per_gas: max_priority_fee_per_gas.map(U128::from),
+        gas_price: gas_price.map(U256::from),
+        max_fee_per_gas: max_fee_per_gas.map(U256::from),
+        max_priority_fee_per_gas: max_priority_fee_per_gas.map(U256::from),
         gas: Some(U256::from(gas)),
         value: Some(value.into()),
         input: TransactionInput::new(input),
