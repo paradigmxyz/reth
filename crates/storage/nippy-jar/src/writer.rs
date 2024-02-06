@@ -283,11 +283,11 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
                     self.offsets.push(self.data_file.stream_position()?);
                 }
 
-                self.write_column(value.as_ref())?;
+                let written = self.write_column(value.as_ref())?;
 
                 // Last offset represents the size of the data file if no more data is to be
                 // appended. Otherwise, represents the offset of the next data item.
-                self.offsets.push(self.data_file.stream_position()?);
+                self.offsets.push(self.offsets.last().expect("qed") + written as u64);
             }
             None => {
                 return Err(NippyJarError::UnexpectedMissingValue(
@@ -302,15 +302,17 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
     }
 
     /// Writes column to data file. If it's the last column of the row, call `finalize_row()`
-    fn write_column(&mut self, value: &[u8]) -> Result<(), NippyJarError> {
+    fn write_column(&mut self, value: &[u8]) -> Result<usize, NippyJarError> {
         self.uncompressed_row_size += value.len();
-        if let Some(compression) = &self.jar.compressor {
+        let len = if let Some(compression) = &self.jar.compressor {
             let before = self.tmp_buf.len();
             let len = compression.compress_to(value, &mut self.tmp_buf)?;
             self.data_file.write_all(&self.tmp_buf[before..before + len])?;
+            len
         } else {
             self.data_file.write_all(value)?;
-        }
+            value.len()
+        };
 
         self.column += 1;
 
@@ -318,7 +320,7 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
             self.finalize_row();
         }
 
-        Ok(())
+        Ok(len)
     }
 
     /// Prunes rows from data and offsets file and updates its configuration on disk
