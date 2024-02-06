@@ -7,12 +7,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-/// Exports optimism-specific types that implement traits in [reth_node_api].
-#[cfg(feature = "optimism")]
-pub mod optimism;
-#[cfg(feature = "optimism")]
-pub use optimism::{OptimismEngineTypes, OptimismEvmConfig};
-
 /// Node event hooks.
 pub mod hooks;
 
