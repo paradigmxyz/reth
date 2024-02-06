@@ -14,7 +14,6 @@ use reth_transaction_pool::{
 async fn only_blobs_eviction() {
     // This test checks that blob transactions can be inserted into the pool, and at each step the
     // blob pool can be truncated to the correct size
-    // TODO: try this with other transaction ratios
 
     // set the pool limits to something small
     let pool_config = PoolConfig {
