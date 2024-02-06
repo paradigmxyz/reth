@@ -1422,7 +1422,11 @@ impl MockTransactionDistribution {
             };
 
             // finally generate the transaction set
-            NonConflictingSetOutcome::Mixed(modified_distribution.tx_set(sender, nonce_range, rng))
+            NonConflictingSetOutcome::BlobsOnly(modified_distribution.tx_set(
+                sender,
+                nonce_range,
+                rng,
+            ))
         } else {
             let MockTransactionRatio { legacy_pct, access_list_pct, dynamic_fee_pct, .. } =
                 modified_distribution.transaction_ratio;
@@ -1448,11 +1452,7 @@ impl MockTransactionDistribution {
             modified_distribution.transaction_ratio = new_ratio;
 
             // finally generate the transaction set
-            NonConflictingSetOutcome::BlobsOnly(modified_distribution.tx_set(
-                sender,
-                nonce_range,
-                rng,
-            ))
+            NonConflictingSetOutcome::Mixed(modified_distribution.tx_set(sender, nonce_range, rng))
         }
     }
 }
