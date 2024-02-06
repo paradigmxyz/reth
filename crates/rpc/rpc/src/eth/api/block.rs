@@ -8,7 +8,7 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
-use reth_node_api::EvmEnvConfig;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{BlockId, TransactionMeta};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{Index, RichBlock, TransactionReceipt};
@@ -22,7 +22,7 @@ where
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: EvmEnvConfig + 'static,
+    EvmConfig: ConfigureEvmEnv + 'static,
 {
     /// Returns the uncle headers of the given block
     ///

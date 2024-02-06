@@ -19,7 +19,7 @@ use clap::{
 use futures::TryFutureExt;
 use rand::Rng;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_node_api::{EngineTypes, EvmEnvConfig};
+use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, StateProviderFactory,
@@ -368,7 +368,7 @@ impl RpcServerArgs {
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         Events: CanonStateSubscriptions + Clone + 'static,
-        EvmConfig: EvmEnvConfig + 'static,
+        EvmConfig: ConfigureEvmEnv + 'static,
     {
         reth_rpc_builder::launch(
             provider,
@@ -408,7 +408,7 @@ impl RpcServerArgs {
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         EngineT: EngineTypes + 'static,
-        EvmConfig: EvmEnvConfig + 'static,
+        EvmConfig: ConfigureEvmEnv + 'static,
     {
         let socket_address = SocketAddr::new(self.auth_addr, self.auth_port);
 
