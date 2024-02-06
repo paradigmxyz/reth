@@ -25,7 +25,9 @@ use reth_rpc_types::{
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
-    primitives::{BlockEnv, CfgEnv, Env, ExecutionResult, Halt, TransactTo},
+    primitives::{
+        BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason, TransactTo,
+    },
     DatabaseCommit,
 };
 use tracing::trace;
@@ -124,7 +126,8 @@ where
                 let transactions = block.into_transactions_ecrecovered().take(num_txs);
                 for tx in transactions {
                     let tx = tx_env_with_recovered(&tx);
-                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                    let env =
+                        EnvWithHandlerCfg::new_with_cfg_env(cfg.clone(), block_env.clone(), tx);
                     let (res, _) = transact(&mut db, env)?;
                     db.commit(res.state);
                 }
@@ -173,7 +176,7 @@ where
     /// This will execute the [CallRequest] and find the best gas limit via binary search
     pub fn estimate_gas_with<S>(
         &self,
-        mut cfg: CfgEnv,
+        mut cfg: CfgEnvWithHandlerCfg,
         block: BlockEnv,
         request: CallRequest,
         state: S,
@@ -328,7 +331,7 @@ where
                 }
                 ExecutionResult::Halt { reason, .. } => {
                     match reason {
-                        Halt::OutOfGas(_) | Halt::InvalidFEOpcode => {
+                        HaltReason::OutOfGas(_) | HaltReason::InvalidFEOpcode => {
                             // either out of gas or invalid opcode can be thrown dynamically if
                             // gasLeft is too low, so we treat this as `out of gas`, we know this
                             // call succeeds with a higher gaslimit. common usage of invalid opcode in openzeppelin <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/94697be8a3f0dfcd95dfb13ffbd39b5973f5c65d/contracts/metatx/ERC2771Forwarder.sol#L360-L367>
@@ -401,13 +404,13 @@ where
         // can consume the list since we're not using the request anymore
         let initial = request.access_list.take().unwrap_or_default();
 
-        let precompiles = get_precompiles(env.cfg.spec_id);
+        let precompiles = get_precompiles(env.handler_cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
         let (result, env) = inspect(&mut db, env, &mut inspector)?;
 
         match result.result {
             ExecutionResult::Halt { reason, .. } => Err(match reason {
-                Halt::NonceOverflow => RpcInvalidTransactionError::NonceMaxValue,
+                HaltReason::NonceOverflow => RpcInvalidTransactionError::NonceMaxValue,
                 halt => RpcInvalidTransactionError::EvmHalt(halt),
             }),
             ExecutionResult::Revert { output, .. } => {
@@ -418,9 +421,16 @@ where
 
         let access_list = inspector.into_access_list();
 
+        let cfg_with_spec_id = CfgEnvWithHandlerCfg::new(env.cfg.clone(), env.handler_cfg.spec_id);
         // calculate the gas used using the access list
         request.access_list = Some(access_list.clone());
-        let gas_used = self.estimate_gas_with(env.cfg, env.block, request, db.db.state(), None)?;
+        let gas_used = self.estimate_gas_with(
+            cfg_with_spec_id,
+            env.block.clone(),
+            request,
+            db.db.state(),
+            None,
+        )?;
 
         Ok(AccessListWithGasUsed { access_list, gas_used })
     }
@@ -431,7 +441,7 @@ where
 #[inline]
 fn map_out_of_gas_err<S>(
     env_gas_limit: U256,
-    mut env: Env,
+    mut env: EnvWithHandlerCfg,
     mut db: &mut CacheDB<StateProviderDatabase<S>>,
 ) -> EthApiError
 where

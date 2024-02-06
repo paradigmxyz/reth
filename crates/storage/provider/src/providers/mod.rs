@@ -22,7 +22,7 @@ use reth_primitives::{
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
 };
-use revm::primitives::{BlockEnv, CfgEnv};
+use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     collections::{BTreeMap, HashSet},
     ops::{RangeBounds, RangeInclusive},
@@ -460,7 +460,7 @@ where
 {
     fn fill_env_at<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
         at: BlockHashOrNumber,
         evm_config: EvmConfig,
@@ -473,7 +473,7 @@ where
 
     fn fill_env_with_header<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
         header: &Header,
         evm_config: EvmConfig,
@@ -502,7 +502,7 @@ where
 
     fn fill_cfg_env_at<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         at: BlockHashOrNumber,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
@@ -514,7 +514,7 @@ where
 
     fn fill_cfg_env_with_header<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         header: &Header,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>

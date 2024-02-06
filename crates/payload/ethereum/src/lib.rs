@@ -25,7 +25,7 @@ mod builder {
         },
         eip4844::calculate_excess_blob_gas,
         proofs,
-        revm::{compat::into_reth_log, env::tx_env_with_recovered},
+        revm::env::tx_env_with_recovered,
         Block, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH, U256,
     };
     use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
@@ -33,7 +33,7 @@ mod builder {
     use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
     use revm::{
         db::states::bundle_state::BundleRetention,
-        primitives::{EVMError, Env, InvalidTransaction, ResultAndState},
+        primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
         DatabaseCommit, State,
     };
     use tracing::{debug, trace, warn};
@@ -262,14 +262,14 @@ mod builder {
             }
 
             // Configure the environment for the block.
-            let env = Env {
-                cfg: initialized_cfg.clone(),
-                block: initialized_block_env.clone(),
-                tx: tx_env_with_recovered(&tx),
-            };
-
-            let mut evm = revm::EVM::with_env(env);
-            evm.database(&mut db);
+            let mut evm = revm::Evm::builder()
+                .with_db(&mut db)
+                .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
+                    initialized_cfg.clone(),
+                    initialized_block_env.clone(),
+                    tx_env_with_recovered(&tx),
+                ))
+                .build();
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,
@@ -295,7 +295,8 @@ mod builder {
                     }
                 }
             };
-
+            // drop evm so db is released.
+            drop(evm);
             // commit changes
             db.commit(state);
 
@@ -320,7 +321,7 @@ mod builder {
                 tx_type: tx.tx_type(),
                 success: result.is_success(),
                 cumulative_gas_used,
-                logs: result.logs().into_iter().map(into_reth_log).collect(),
+                logs: result.logs().into_iter().map(Into::into).collect(),
             }));
 
             // update add to total fees

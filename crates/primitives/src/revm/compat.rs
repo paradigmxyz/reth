@@ -3,20 +3,15 @@ use crate::{
     Account, Address, Log as RethLog, TransactionKind, KECCAK_EMPTY, U256,
 };
 use revm::{
-    interpreter::gas::initial_tx_gas,
+    interpreter::gas::validate_initial_tx_gas,
     primitives::{MergeSpec, ShanghaiSpec},
 };
 
 /// Check equality between Revm and Reth `Log`s.
-pub fn is_log_equal(revm_log: &Log, reth_log: &crate::Log) -> bool {
+pub fn is_log_equal(revm_log: &Log, reth_log: &RethLog) -> bool {
     revm_log.address == reth_log.address &&
-        revm_log.data == reth_log.data &&
-        revm_log.topics == reth_log.topics
-}
-
-/// Converts a Revm `Log` into a Reth `Log`.
-pub fn into_reth_log(log: Log) -> RethLog {
-    RethLog { address: log.address, topics: log.topics, data: log.data }
+        revm_log.data.data == reth_log.data &&
+        revm_log.topics() == reth_log.topics
 }
 
 /// Converts a Revm [`AccountInfo`] into a Reth [`Account`].
@@ -54,8 +49,8 @@ pub fn calculate_intrinsic_gas_after_merge(
     is_shanghai: bool,
 ) -> u64 {
     if is_shanghai {
-        initial_tx_gas::<ShanghaiSpec>(input, kind.is_create(), access_list)
+        validate_initial_tx_gas::<ShanghaiSpec>(input, kind.is_create(), access_list)
     } else {
-        initial_tx_gas::<MergeSpec>(input, kind.is_create(), access_list)
+        validate_initial_tx_gas::<MergeSpec>(input, kind.is_create(), access_list)
     }
 }
