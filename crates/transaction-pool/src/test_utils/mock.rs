@@ -84,15 +84,9 @@ macro_rules! set_value {
     ($this:ident => $field:ident) => {
         let new_value = $field;
         match $this {
-            MockTransaction::Legacy { ref mut $field, .. } => {
-                *$field = new_value;
-            }
-            MockTransaction::Eip1559 { ref mut $field, .. } => {
-                *$field = new_value;
-            }
-            MockTransaction::Eip4844 { ref mut $field, .. } => {
-                *$field = new_value;
-            }
+            MockTransaction::Legacy { ref mut $field, .. } |
+            MockTransaction::Eip1559 { ref mut $field, .. } |
+            MockTransaction::Eip4844 { ref mut $field, .. } |
             MockTransaction::Eip2930 { ref mut $field, .. } => {
                 *$field = new_value;
             }
@@ -109,9 +103,9 @@ macro_rules! set_value {
 macro_rules! get_value {
     ($this:tt => $field:ident) => {
         match $this {
-            MockTransaction::Legacy { $field, .. } => $field.clone(),
-            MockTransaction::Eip1559 { $field, .. } => $field.clone(),
-            MockTransaction::Eip4844 { $field, .. } => $field.clone(),
+            MockTransaction::Legacy { $field, .. } |
+            MockTransaction::Eip1559 { $field, .. } |
+            MockTransaction::Eip4844 { $field, .. } |
             MockTransaction::Eip2930 { $field, .. } => $field.clone(),
             #[cfg(feature = "optimism")]
             #[allow(unused_variables)]
@@ -1377,22 +1371,17 @@ impl MockTransactionDistribution {
 
     /// Generates a new transaction
     pub fn tx(&self, nonce: u64, rng: &mut impl rand::Rng) -> MockTransaction {
-        let transaction_sample = self.transaction_ratio.sample(rng);
-        let tx = if transaction_sample == 0 {
-            MockTransaction::legacy().with_gas_price(self.fee_ranges.sample_gas_price(rng))
-        } else if transaction_sample == 1 {
-            MockTransaction::eip2930().with_gas_price(self.fee_ranges.sample_gas_price(rng))
-        } else if transaction_sample == 2 {
-            MockTransaction::eip1559()
+        let tx = match self.transaction_ratio.sample(rng) {
+            0 => MockTransaction::legacy().with_gas_price(self.fee_ranges.sample_gas_price(rng)),
+            1 => MockTransaction::eip2930().with_gas_price(self.fee_ranges.sample_gas_price(rng)),
+            2 => MockTransaction::eip1559()
+                .with_priority_fee(self.fee_ranges.sample_priority_fee(rng))
+                .with_max_fee(self.fee_ranges.sample_max_fee(rng)),
+            3 => MockTransaction::eip4844()
                 .with_priority_fee(self.fee_ranges.sample_priority_fee(rng))
                 .with_max_fee(self.fee_ranges.sample_max_fee(rng))
-        } else if transaction_sample == 3 {
-            MockTransaction::eip4844()
-                .with_priority_fee(self.fee_ranges.sample_priority_fee(rng))
-                .with_max_fee(self.fee_ranges.sample_max_fee(rng))
-                .with_blob_fee(self.fee_ranges.sample_max_fee_blob(rng))
-        } else {
-            unreachable!("unknown transaction type returned by the weighted index")
+                .with_blob_fee(self.fee_ranges.sample_max_fee_blob(rng)),
+            _ => unreachable!("unknown transaction type returned by the weighted index"),
         };
 
         let size = self.size_range.sample(rng);
