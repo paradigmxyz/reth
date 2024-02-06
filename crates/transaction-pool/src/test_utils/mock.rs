@@ -1,12 +1,10 @@
 //! Mock types.
 
-#![allow(dead_code, unused_macros)]
-
 use crate::{
     identifier::{SenderIdentifiers, TransactionId},
     pool::txpool::TxPool,
     traits::TransactionOrigin,
-    PoolTransaction, Priority, TransactionOrdering, ValidPoolTransaction,
+    CoinbaseTipOrdering, PoolTransaction, ValidPoolTransaction,
 };
 use paste::paste;
 use rand::{
@@ -45,6 +43,7 @@ pub fn mock_tx_pool() -> MockTxPool {
     MockTxPool::new(Default::default(), Default::default())
 }
 
+#[cfg(feature = "optimism")]
 macro_rules! op_set_value {
     ($this:ident, sender, $value:ident) => {
         $this.from = $value;
@@ -61,6 +60,7 @@ macro_rules! op_set_value {
     ($this:ident, $other:ident, $field:ident) => {};
 }
 
+#[cfg(feature = "optimism")]
 macro_rules! op_get_value {
     ($this:ident, sender) => {
         $this.from
@@ -1211,24 +1211,8 @@ impl MockTransactionFactory {
     }
 }
 
-/// Used to define a specific ordering for transactions, providing a priority value
-/// based on the effective tip per gas and base fee of the given [MockTransaction].
-#[derive(Clone, Default, Debug)]
-#[non_exhaustive]
-pub struct MockOrdering;
-
-impl TransactionOrdering for MockOrdering {
-    type PriorityValue = U256;
-    type Transaction = MockTransaction;
-
-    fn priority(
-        &self,
-        transaction: &Self::Transaction,
-        base_fee: u64,
-    ) -> Priority<Self::PriorityValue> {
-        transaction.effective_tip_per_gas(base_fee).map(U256::from).into()
-    }
-}
+/// MockOrdering is just a CoinbaseTipOrdering with MockTransaction
+pub type MockOrdering = CoinbaseTipOrdering<MockTransaction>;
 
 /// A ratio of each of the configured transaction types. The percentages sum up to 100, this is
 /// enforced in [MockTransactionRatio::new] by an assert.
@@ -1341,10 +1325,10 @@ impl MockFeeRange {
 }
 
 /// A configured distribution that can generate transactions
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MockTransactionDistribution {
     /// ratio of each transaction type to generate
-    transaction_ratio: WeightedIndex<u32>,
+    transaction_ratio: MockTransactionRatio,
     /// generates the gas limit
     gas_limit_range: Uniform<u64>,
     /// generates the transaction's fake size
@@ -1362,7 +1346,7 @@ impl MockTransactionDistribution {
         size_range: Range<usize>,
     ) -> Self {
         Self {
-            transaction_ratio: transaction_ratio.weighted_index(),
+            transaction_ratio,
             gas_limit_range: gas_limit_range.into(),
             fee_ranges,
             size_range: size_range.into(),
@@ -1371,7 +1355,8 @@ impl MockTransactionDistribution {
 
     /// Generates a new transaction
     pub fn tx(&self, nonce: u64, rng: &mut impl rand::Rng) -> MockTransaction {
-        let tx = match self.transaction_ratio.sample(rng) {
+        let transaction_sample = self.transaction_ratio.weighted_index().sample(rng);
+        let tx = match transaction_sample {
             0 => MockTransaction::legacy().with_gas_price(self.fee_ranges.sample_gas_price(rng)),
             1 => MockTransaction::eip2930().with_gas_price(self.fee_ranges.sample_gas_price(rng)),
             2 => MockTransaction::eip1559()
@@ -1387,6 +1372,126 @@ impl MockTransactionDistribution {
         let size = self.size_range.sample(rng);
 
         tx.with_nonce(nonce).with_gas_limit(self.gas_limit_range.sample(rng)).with_size(size)
+    }
+
+    /// Generates a new transaction set for the given sender.
+    ///
+    /// The nonce range defines which nonces to set, and how many transactions to generate.
+    pub fn tx_set(
+        &self,
+        sender: Address,
+        nonce_range: Range<u64>,
+        rng: &mut impl rand::Rng,
+    ) -> MockTransactionSet {
+        let mut txs = Vec::new();
+        for nonce in nonce_range {
+            txs.push(self.tx(nonce, rng).with_sender(sender));
+        }
+        MockTransactionSet::new(txs)
+    }
+
+    /// Generates a transaction set that ensures that blob txs are not mixed with other transaction
+    /// types.
+    ///
+    /// This is done by taking the existing distribution, and using the first transaction to
+    /// determine whether or not the sender should generate entirely blob transactions.
+    pub fn tx_set_non_conflicting_types(
+        &self,
+        sender: Address,
+        nonce_range: Range<u64>,
+        rng: &mut impl rand::Rng,
+    ) -> NonConflictingSetOutcome {
+        // This will create a modified distribution that will only generate blob transactions
+        // for the given sender, if the blob transaction is the first transaction in the set.
+        //
+        // Otherwise, it will modify the transaction distribution to only generate legacy, eip2930,
+        // and eip1559 transactions.
+        //
+        // The new distribution should still have the same relative amount of transaction types.
+        let mut modified_distribution = self.clone();
+        let first_tx = self.tx(nonce_range.start, rng);
+
+        // now we can check and modify the distribution, preserving potentially uneven ratios
+        // between transaction types
+        if first_tx.is_eip4844() {
+            modified_distribution.transaction_ratio = MockTransactionRatio {
+                legacy_pct: 0,
+                access_list_pct: 0,
+                dynamic_fee_pct: 0,
+                blob_pct: 100,
+            };
+
+            // finally generate the transaction set
+            NonConflictingSetOutcome::BlobsOnly(modified_distribution.tx_set(
+                sender,
+                nonce_range,
+                rng,
+            ))
+        } else {
+            let MockTransactionRatio { legacy_pct, access_list_pct, dynamic_fee_pct, .. } =
+                modified_distribution.transaction_ratio;
+
+            // Calculate the total weight of non-blob transactions
+            let total_non_blob_weight: u32 = legacy_pct + access_list_pct + dynamic_fee_pct;
+
+            // Calculate new weights, preserving the ratio between non-blob transaction types
+            let new_weights: Vec<u32> = [legacy_pct, access_list_pct, dynamic_fee_pct]
+                .into_iter()
+                .map(|weight| weight * 100 / total_non_blob_weight)
+                .collect();
+
+            let new_ratio = MockTransactionRatio {
+                legacy_pct: new_weights[0],
+                access_list_pct: new_weights[1],
+                dynamic_fee_pct: new_weights[2],
+                blob_pct: 0,
+            };
+
+            // Set the new transaction ratio excluding blob transactions and preserving the relative
+            // ratios
+            modified_distribution.transaction_ratio = new_ratio;
+
+            // finally generate the transaction set
+            NonConflictingSetOutcome::Mixed(modified_distribution.tx_set(sender, nonce_range, rng))
+        }
+    }
+}
+
+/// Indicates whether or not the non-conflicting transaction set generated includes only blobs, or
+/// a mix of transaction types.
+#[derive(Debug, Clone)]
+pub enum NonConflictingSetOutcome {
+    /// The transaction set includes only blob transactions
+    BlobsOnly(MockTransactionSet),
+    /// The transaction set includes a mix of transaction types
+    Mixed(MockTransactionSet),
+}
+
+impl NonConflictingSetOutcome {
+    /// Returns the inner [MockTransactionSet]
+    pub fn into_inner(self) -> MockTransactionSet {
+        match self {
+            NonConflictingSetOutcome::BlobsOnly(set) | NonConflictingSetOutcome::Mixed(set) => set,
+        }
+    }
+
+    /// Introduces artificial nonce gaps into the transaction set, at random, with a range of gap
+    /// sizes.
+    ///
+    /// If this is a [NonConflictingSetOutcome::BlobsOnly], then nonce gaps will not be introduced.
+    /// Otherwise, the nonce gaps will be introduced to the mixed transaction set.
+    ///
+    /// See [MockTransactionSet::with_nonce_gaps] for more information on the generation process.
+    pub fn with_nonce_gaps(
+        &mut self,
+        gap_pct: u32,
+        gap_range: Range<u64>,
+        rng: &mut impl rand::Rng,
+    ) {
+        match self {
+            NonConflictingSetOutcome::BlobsOnly(_) => {}
+            NonConflictingSetOutcome::Mixed(set) => set.with_nonce_gaps(gap_pct, gap_range, rng),
+        }
     }
 }
 
@@ -1432,6 +1537,39 @@ impl MockTransactionSet {
         Self::dependent(sender, 0, tx_count, tx_type)
     }
 
+    /// Introduces artificial nonce gaps into the transaction set, at random, with a range of gap
+    /// sizes.
+    ///
+    /// This assumes that the `gap_pct` is between 0 and 100, and the `gap_range` has a lower bound
+    /// of at least one. This is enforced with assertions.
+    ///
+    /// The `gap_pct` is the percent chance that the next transaction in the set will introduce a
+    /// nonce gap.
+    ///
+    /// Let an example transaction set be `[(tx1, 1), (tx2, 2)]`, where the first element of the
+    /// tuple is a transaction, and the second element is the nonce. If the `gap_pct` is 50, and
+    /// the `gap_range` is `1..=1`, then the resulting transaction set could would be either
+    /// `[(tx1, 1), (tx2, 2)]` or `[(tx1, 1), (tx2, 3)]`, with a 50% chance of either.
+    pub fn with_nonce_gaps(
+        &mut self,
+        gap_pct: u32,
+        gap_range: Range<u64>,
+        rng: &mut impl rand::Rng,
+    ) {
+        assert!(gap_pct <= 100, "gap_pct must be between 0 and 100");
+        assert!(gap_range.start >= 1, "gap_range must have a lower bound of at least one");
+
+        let mut prev_nonce = 0;
+        for tx in self.transactions.iter_mut() {
+            if rng.gen_bool(gap_pct as f64 / 100.0) {
+                prev_nonce += gap_range.start;
+            } else {
+                prev_nonce += 1;
+            }
+            tx.set_nonce(prev_nonce);
+        }
+    }
+
     /// Add transactions to the [MockTransactionSet]
     pub fn extend<T: IntoIterator<Item = MockTransaction>>(&mut self, txs: T) {
         self.transactions.extend(txs);
@@ -1464,7 +1602,9 @@ impl IntoIterator for MockTransactionSet {
 
 #[test]
 fn test_mock_priority() {
-    let o = MockOrdering;
+    use crate::TransactionOrdering;
+
+    let o = MockOrdering::default();
     let lo = MockTransaction::eip1559().with_gas_limit(100_000);
     let hi = lo.next().inc_price();
     assert!(o.priority(&hi, 0) > o.priority(&lo, 0));
