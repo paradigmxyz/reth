@@ -211,9 +211,9 @@ impl TransactionFetcher {
                 break idle_peer.copied()
             }
 
-            if let Some(bud) = budget {
-                budget = Some(bud.saturating_sub(1));
-                if budget == Some(0) {
+            if let Some(ref mut bud) = budget {
+                *bud = bud.saturating_sub(1);
+                if *bud == 0 {
                     return None
                 }
             }
