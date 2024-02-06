@@ -64,13 +64,15 @@ impl BlobStore for DiskFileBlobStore {
     }
 
     fn delete_all(&self, txs: Vec<B256>) -> Result<(), BlobStoreError> {
-        self.inner.files_to_delete.write().extend(txs)
+        self.inner.files_to_delete.write().extend(txs);
         Ok(())
     }
 
     fn cleanup(&self) -> Result<(), BlobStoreError> {
-        let mut files_to_delete = self.inner.files_to_delete.write();
-        let txs_to_delete = std::mem::take(&mut *files_to_delete);
+        let txs_to_delete = {
+            let mut files_to_delete = self.inner.files_to_delete.write();
+            std::mem::take(&mut *files_to_delete)
+        };
         for tx in txs_to_delete {
             let file_path = self.inner.blob_disk_file(tx);
             if let Err(e) = std::fs::remove_file(&file_path) {
