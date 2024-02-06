@@ -512,20 +512,19 @@ mod tests {
         transaction::sidecar::generate_blob_sidecar,
         BlobTransactionSidecar,
     };
-    use std::{fs, fs::File, io::Read};
+    use std::{fs, fs::File, io::Read, path::PathBuf};
 
     #[test]
     fn test_blob_transaction_sidecar_generation() {
-        // Open the JSON file containing blob data
-        let mut json_file = File::open("./src/transaction/blob_data/blob1.json").unwrap();
-
-        // Read the contents of the JSON file into a string
-        let mut json_contents = String::new();
-        json_file.read_to_string(&mut json_contents).expect("Failed to read the file");
+        // Read the contents of the JSON file into a string.
+        let json_content = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/transaction/blob_data/blob1.json"),
+        )
+        .expect("Failed to read the blob data file");
 
         // Parse the JSON contents into a serde_json::Value
         let json_value: serde_json::Value =
-            serde_json::from_str(&json_contents).expect("Failed to deserialize JSON");
+            serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
 
         // Extract blob data from JSON and convert it to Blob
         let blobs: Vec<Blob> = vec![Blob::from_hex(
@@ -552,8 +551,10 @@ mod tests {
         let mut blobs: Vec<Blob> = Vec::new();
 
         // Iterate over each file in the folder
-        for entry in
-            fs::read_dir("./src/transaction/blob_data/").expect("Failed to read blob_data folder")
+        for entry in fs::read_dir(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/transaction/blob_data/"),
+        )
+        .expect("Failed to read blob_data folder")
         {
             let entry = entry.expect("Failed to read directory entry");
             let file_path = entry.path();
@@ -590,16 +591,15 @@ mod tests {
 
     #[test]
     fn test_blob_transaction_sidecar_rlp_encode() {
-        // Open the JSON file containing blob data
-        let mut json_file = File::open("./src/transaction/blob_data/blob1.json").unwrap();
-
-        // Read the contents of the JSON file into a string
-        let mut json_contents = String::new();
-        json_file.read_to_string(&mut json_contents).expect("Failed to read the file");
+        // Read the contents of the JSON file into a string.
+        let json_content = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/transaction/blob_data/blob1.json"),
+        )
+        .expect("Failed to read the blob data file");
 
         // Parse the JSON contents into a serde_json::Value
         let json_value: serde_json::Value =
-            serde_json::from_str(&json_contents).expect("Failed to deserialize JSON");
+            serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
 
         // Extract blob data from JSON and convert it to Blob
         let blobs: Vec<Blob> = vec![Blob::from_hex(
@@ -622,16 +622,15 @@ mod tests {
 
     #[test]
     fn test_blob_transaction_sidecar_rlp_decode() {
-        // Open the JSON file containing blob data
-        let mut json_file = File::open("./src/transaction/blob_data/blob1.json").unwrap();
-
-        // Read the contents of the JSON file into a string
-        let mut json_contents = String::new();
-        json_file.read_to_string(&mut json_contents).expect("Failed to read the file");
+        // Read the contents of the JSON file into a string.
+        let json_content = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/transaction/blob_data/blob1.json"),
+        )
+        .expect("Failed to read the blob data file");
 
         // Parse the JSON contents into a serde_json::Value
         let json_value: serde_json::Value =
-            serde_json::from_str(&json_contents).expect("Failed to deserialize JSON");
+            serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
 
         // Extract blob data from JSON and convert it to Blob
         let blobs: Vec<Blob> = vec![Blob::from_hex(
