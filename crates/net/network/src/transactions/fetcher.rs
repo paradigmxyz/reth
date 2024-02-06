@@ -530,7 +530,7 @@ impl TransactionFetcher {
 
                 return false
             }
-
+          
             // vacant entry  
             #[cfg(not(debug_assertions))]
             {
@@ -579,8 +579,6 @@ impl TransactionFetcher {
         #[cfg(debug_assertions)]
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            previously_unseen_hashes_len=previously_unseen_hashes.len(),
-            previously_unseen_hashes=?previously_unseen_hashes,
             msg_version=%msg_version,
             client_version=%client_version,
             "received previously unseen hashes in announcement from peer"
