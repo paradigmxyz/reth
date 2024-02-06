@@ -1492,7 +1492,7 @@ mod tests {
                     }
                     .seal_slow(),
                     body: body.clone().into_iter().map(|tx| tx.into_signed()).collect(),
-                    ommers: Vec::new().into(),
+                    ommers: Headers::default(),
                     withdrawals: Some(Withdrawals::default()),
                 },
                 body.iter().map(|tx| tx.signer()).collect(),

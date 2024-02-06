@@ -220,7 +220,7 @@ mod test_l1_fee {
         let mock_block = Block {
             header: Header::default(),
             body: vec![l1_info_tx],
-            ommers: Vec::default().into(),
+            ommers: Headers::default(),
             withdrawals: None,
         };
 
