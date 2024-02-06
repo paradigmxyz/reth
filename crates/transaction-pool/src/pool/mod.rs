@@ -1148,7 +1148,10 @@ mod tests {
         // Loop to add transactions to the pool and test blob eviction.
         for n in 0..blob_limit.max_txs + 10 {
             // Create a mock transaction with the generated blob sidecar.
-            let tx = MockTransaction::eip4844_with_sidecar(sidecar.clone());
+            let mut tx = MockTransaction::eip4844_with_sidecar(sidecar.clone());
+
+            // Set non zero size
+            tx.set_size(1844674407370951);
 
             // Insert the sidecar into the blob store if the current index is within the blob limit.
             if n < blob_limit.max_txs {
@@ -1177,6 +1180,9 @@ mod tests {
 
         // Assert that the size of the pool's blob component is equal to the maximum blob limit.
         assert_eq!(test_pool.size().blob, blob_limit.max_txs);
+
+        // Assert that the size of the pool's blob_size component matches the expected value.
+        assert_eq!(test_pool.size().blob_size, 1844674407370951000);
 
         // Assert that the pool's blob store matches the expected blob store.
         assert_eq!(*test_pool.blob_store(), blob_store);
