@@ -559,21 +559,23 @@ mod tests {
             let file_path = entry.path();
 
             // Ensure the entry is a file and not a directory
-            if file_path.is_file() && file_path.extension().unwrap_or_default() == "json" {
-                // Read the contents of the JSON file into a string.
-                let json_content =
-                    fs::read_to_string(file_path).expect("Failed to read the blob data file");
+            if !file_path.is_file() || file_path.extension().unwrap_or_default() != "json" {
+                continue;
+            }
 
-                // Parse the JSON contents into a serde_json::Value
-                let json_value: serde_json::Value =
-                    serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
+            // Read the contents of the JSON file into a string.
+            let json_content =
+                fs::read_to_string(file_path).expect("Failed to read the blob data file");
 
-                // Extract blob data from JSON and convert it to Blob
-                if let Some(data) = json_value.get("data") {
-                    if let Some(data_str) = data.as_str() {
-                        if let Ok(blob) = Blob::from_hex(data_str) {
-                            blobs.push(blob);
-                        }
+            // Parse the JSON contents into a serde_json::Value
+            let json_value: serde_json::Value =
+                serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
+
+            // Extract blob data from JSON and convert it to Blob
+            if let Some(data) = json_value.get("data") {
+                if let Some(data_str) = data.as_str() {
+                    if let Ok(blob) = Blob::from_hex(data_str) {
+                        blobs.push(blob);
                     }
                 }
             }
