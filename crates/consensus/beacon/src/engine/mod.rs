@@ -474,7 +474,10 @@ where
         //    and deemed `VALID`. In the case of such an event, client software MUST return
         //    `{payloadStatus: {status: VALID, latestValidHash: forkchoiceState.headBlockHash,
         //    validationError: null}, payloadId: null}`
-        attrs.take();
+        if self.blockchain.canonical_tip() != header.num_hash() {
+            attrs.take();
+        }
+
         debug!(
             target: "consensus::engine",
             fcu_head_num=?header.number,
