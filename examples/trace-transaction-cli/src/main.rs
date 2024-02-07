@@ -73,7 +73,7 @@ impl RethNodeCommandConfig for RethCliTxpoolExt {
             // Waiting for new transactions
             while let Some(event) = pending_transactions.next().await {
                 let tx = event.transaction;
-                println!("Transaction received: {:?}", tx);
+                println!("Transaction received: {tx:?}");
 
                 if let Some(tx_recipient_address) = tx.to() {
                     if recipients.is_empty() || recipients.contains(&tx_recipient_address) {
@@ -83,11 +83,8 @@ impl RethNodeCommandConfig for RethCliTxpoolExt {
                         let tracerequest =
                             TraceCallRequest::new(callrequest).with_trace_type(TraceType::Trace);
                         if let Ok(trace_result) = traceapi.trace_call(tracerequest).await {
-                            println!(
-                                "trace result for transaction : {:?} is {:?}",
-                                tx.hash(),
-                                trace_result
-                            );
+                            let hash = tx.hash();
+                            println!("trace result for transaction {hash}: {trace_result:?}");
                         }
                     }
                 }

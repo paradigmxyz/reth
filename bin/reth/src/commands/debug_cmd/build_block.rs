@@ -18,10 +18,16 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
-use reth_db::{init_db, DatabaseEnv};
+use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_interfaces::{consensus::Consensus, RethResult};
 use reth_node_api::PayloadBuilderAttributes;
+#[cfg(not(feature = "optimism"))]
+use reth_node_ethereum::EthEvmConfig;
+#[cfg(feature = "optimism")]
+use reth_node_optimism::OptimismEvmConfig;
 use reth_payload_builder::database::CachedReads;
+#[cfg(not(feature = "optimism"))]
+use reth_payload_builder::EthPayloadBuilderAttributes;
 #[cfg(feature = "optimism")]
 use reth_payload_builder::OptimismPayloadBuilderAttributes;
 use reth_primitives::{
@@ -46,9 +52,6 @@ use reth_transaction_pool::{
 };
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 use tracing::*;
-
-#[cfg(not(feature = "optimism"))]
-use reth_payload_builder::EthPayloadBuilderAttributes;
 
 /// `reth debug build-block` command
 /// This debug routine requires that the node is positioned at the block before the target.
@@ -150,16 +153,23 @@ impl Command {
         fs::create_dir_all(&db_path)?;
 
         // initialize the database
-        let db = Arc::new(init_db(db_path, self.db.log_level)?);
+        let db =
+            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         let provider_factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
 
         let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
+
+        #[cfg(feature = "optimism")]
+        let evm_config = OptimismEvmConfig::default();
+
+        #[cfg(not(feature = "optimism"))]
+        let evm_config = EthEvmConfig::default();
 
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
             provider_factory.clone(),
             Arc::clone(&consensus),
-            EvmProcessorFactory::new(self.chain.clone()),
+            EvmProcessorFactory::new(self.chain.clone(), evm_config),
         );
         let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
         let blockchain_tree = ShareableBlockchainTree::new(tree);
@@ -297,7 +307,7 @@ impl Command {
                 let block_with_senders =
                     SealedBlockWithSenders::new(block.clone(), senders).unwrap();
 
-                let executor_factory = EvmProcessorFactory::new(self.chain.clone());
+                let executor_factory = EvmProcessorFactory::new(self.chain.clone(), evm_config);
                 let mut executor = executor_factory.with_state(blockchain_db.latest()?);
                 executor
                     .execute_and_verify_receipt(&block_with_senders.clone().unseal(), U256::MAX)?;
@@ -306,8 +316,8 @@ impl Command {
 
                 let hashed_state = state.hash_state_slow();
                 let (state_root, trie_updates) = state
-                    .state_root_calculator(provider_factory.provider()?.tx_ref(), &hashed_state)
-                    .root_with_updates()?;
+                    .hash_state_slow()
+                    .state_root_with_updates(provider_factory.provider()?.tx_ref())?;
 
                 if state_root != block_with_senders.state_root {
                     eyre::bail!(

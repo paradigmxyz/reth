@@ -13,7 +13,13 @@ use std::{
 /// Trait that will transform the data to be saved in the DB in a (ideally) compressed format
 pub trait Compress: Send + Sync + Sized + Debug {
     /// Compressed type.
-    type Compressed: bytes::BufMut + AsMut<[u8]> + Default + AsRef<[u8]> + Send + Sync;
+    type Compressed: bytes::BufMut
+        + AsRef<[u8]>
+        + AsMut<[u8]>
+        + Into<Vec<u8>>
+        + Default
+        + Send
+        + Sync;
 
     /// If the type cannot be compressed, return its inner reference as `Some(self.as_ref())`
     fn uncompressable_ref(&self) -> Option<&[u8]> {

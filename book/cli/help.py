@@ -254,8 +254,10 @@ def preprocess_help(s: str):
     """Preprocesses the help output of a command."""
     # Remove the user-specific paths.
     s = re.sub(r"default: /.*/reth", "default: <CACHE_DIR>", s)
-    # Remove the commit SHA.
-    s = re.sub(r"-[0-9A-Fa-f]{6,10}/", "-<SHA>/", s)
+    # Remove the commit SHA and target architecture triple
+    s = re.sub(r"default: reth/.*-[0-9A-Fa-f]{6,10}/\w+-\w*-\w+", "default: reth/<VERSION>-<SHA>/<ARCH>", s)
+    # Remove the OS
+    s = re.sub(r"default: reth/.*/\w+", "default: reth/<VERSION>/<OS>", s)
 
     return s
 

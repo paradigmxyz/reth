@@ -147,9 +147,11 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![warn(clippy::missing_const_for_fn)]
 
 use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;
+use reth_eth_wire::HandleAnnouncement;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
@@ -237,15 +239,11 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
-    ) -> PoolResult<Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)>> {
-        let outcomes = futures_util::future::join_all(
-            transactions.into_iter().map(|tx| self.validate(origin, tx)),
-        )
-        .await
-        .into_iter()
-        .collect();
-
-        Ok(outcomes)
+    ) -> Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)> {
+        futures_util::future::join_all(transactions.into_iter().map(|tx| self.validate(origin, tx)))
+            .await
+            .into_iter()
+            .collect()
     }
 
     /// Validates the given transaction
@@ -269,6 +267,11 @@ where
     /// Whether the pool is empty
     pub fn is_empty(&self) -> bool {
         self.pool.is_empty()
+    }
+
+    /// Returns whether or not the pool is over its configured size and transaction count limits.
+    pub fn is_exceeded(&self) -> bool {
+        self.pool.is_exceeded()
     }
 }
 
@@ -354,15 +357,13 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
-    ) -> PoolResult<Vec<PoolResult<TxHash>>> {
+    ) -> Vec<PoolResult<TxHash>> {
         if transactions.is_empty() {
-            return Ok(Vec::new())
+            return Vec::new()
         }
-        let validated = self.validate_all(origin, transactions).await?;
+        let validated = self.validate_all(origin, transactions).await;
 
-        let transactions =
-            self.pool.add_transactions(origin, validated.into_iter().map(|(_, tx)| tx));
-        Ok(transactions)
+        self.pool.add_transactions(origin, validated.into_iter().map(|(_, tx)| tx))
     }
 
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
@@ -425,7 +426,7 @@ where
         &self,
         base_fee: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
-        self.pool.best_transactions_with_base_fee(base_fee)
+        self.pool.best_transactions_with_attributes(BestTransactionsAttributes::base_fee(base_fee))
     }
 
     fn best_transactions_with_attributes(
@@ -454,8 +455,11 @@ where
         self.pool.remove_transactions(hashes)
     }
 
-    fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {
-        self.pool.retain_unknown(hashes)
+    fn retain_unknown<A>(&self, announcement: &mut A)
+    where
+        A: HandleAnnouncement,
+    {
+        self.pool.retain_unknown(announcement)
     }
 
     fn get(&self, tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {

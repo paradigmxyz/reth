@@ -8,18 +8,20 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{basefee::calculate_next_block_base_fee, BlockNumberOrTag, U256};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::FeeHistory;
 use reth_transaction_pool::TransactionPool;
 use tracing::debug;
 
-impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Pool: TransactionPool + Clone + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
+    EvmConfig: ConfigureEvmEnv + 'static,
 {
     /// Returns a suggestion for a gas price for legacy transactions.
     ///
@@ -199,6 +201,8 @@ where
             gas_used_ratio,
             oldest_block: U256::from(start_block),
             reward: reward_percentiles.map(|_| rewards),
+            base_fee_per_blob_gas: Default::default(),
+            blob_gas_used_ratio: Default::default(),
         })
     }
 

@@ -15,8 +15,9 @@ use crate::eth::{
 use async_trait::async_trait;
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
-    revm_primitives::{BlockEnv, CfgEnv},
+    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, B256, U256, U64,
 };
 
@@ -26,6 +27,7 @@ use reth_provider::{
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
+use revm_primitives::{CfgEnv, SpecId};
 use std::{
     fmt::Debug,
     future::Future,
@@ -82,12 +84,12 @@ pub trait EthApiSpec: EthTransactions + Send + Sync {
 /// are implemented separately in submodules. The rpc handler implementation can then delegate to
 /// the main impls. This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone
 /// or in other network handlers (for example ipc).
-pub struct EthApi<Provider, Pool, Network> {
+pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
-    inner: Arc<EthApiInner<Provider, Pool, Network>>,
+    inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
 }
 
-impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Provider: BlockReaderIdExt + ChainSpecProvider,
 {
@@ -102,6 +104,7 @@ where
         gas_cap: impl Into<GasCap>,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
+        evm_config: EvmConfig,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -113,6 +116,7 @@ where
             Box::<TokioTaskExecutor>::default(),
             blocking_task_pool,
             fee_history_cache,
+            evm_config,
         )
     }
 
@@ -128,6 +132,7 @@ where
         task_spawner: Box<dyn TaskSpawner>,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
+        evm_config: EvmConfig,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -150,8 +155,9 @@ where
             pending_block: Default::default(),
             blocking_task_pool,
             fee_history_cache,
+            evm_config,
             #[cfg(feature = "optimism")]
-            http_client: reqwest::Client::new(),
+            http_client: reqwest::Client::builder().use_rustls_tls().build().unwrap(),
         };
 
         Self { inner: Arc::new(inner) }
@@ -215,7 +221,7 @@ where
 
 // === State access helpers ===
 
-impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
@@ -252,14 +258,15 @@ where
     }
 }
 
-impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
+    EvmConfig: ConfigureEvmEnv + Clone + 'static,
 {
-    /// Configures the [CfgEnv] and [BlockEnv] for the pending block
+    /// Configures the [CfgEnvWithHandlerCfg] and [BlockEnv] for the pending block
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     pub(crate) fn pending_block_env_and_cfg(&self) -> EthResult<PendingBlockEnv> {
@@ -283,17 +290,22 @@ where
             PendingBlockEnvOrigin::DerivedFromLatest(latest)
         };
 
-        let mut cfg = CfgEnv::default();
+        let mut cfg = CfgEnvWithHandlerCfg::new(CfgEnv::default(), SpecId::LATEST);
 
         #[cfg(feature = "optimism")]
         {
-            cfg.optimism = self.provider().chain_spec().is_optimism();
+            cfg.handler_cfg.is_optimism = self.provider().chain_spec().is_optimism();
         }
 
         let mut block_env = BlockEnv::default();
         // Note: for the PENDING block we assume it is past the known merge block and thus this will
         // not fail when looking up the total difficulty value for the blockenv.
-        self.provider().fill_env_with_header(&mut cfg, &mut block_env, origin.header())?;
+        self.provider().fill_env_with_header(
+            &mut cfg,
+            &mut block_env,
+            origin.header(),
+            self.inner.evm_config.clone(),
+        )?;
 
         Ok(PendingBlockEnv { cfg, block_env, origin })
     }
@@ -347,25 +359,28 @@ where
     }
 }
 
-impl<Provider, Pool, Events> std::fmt::Debug for EthApi<Provider, Pool, Events> {
+impl<Provider, Pool, Events, EvmConfig> std::fmt::Debug
+    for EthApi<Provider, Pool, Events, EvmConfig>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthApi").finish_non_exhaustive()
     }
 }
 
-impl<Provider, Pool, Events> Clone for EthApi<Provider, Pool, Events> {
+impl<Provider, Pool, Events, EvmConfig> Clone for EthApi<Provider, Pool, Events, EvmConfig> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
 }
 
 #[async_trait]
-impl<Provider, Pool, Network> EthApiSpec for EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthApiSpec for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Pool: TransactionPool + Clone + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + 'static,
+    EvmConfig: ConfigureEvmEnv + 'static,
 {
     /// Returns the current ethereum protocol version.
     ///
@@ -443,7 +458,7 @@ impl From<GasCap> for u64 {
 }
 
 /// Container type `EthApi`
-struct EthApiInner<Provider, Pool, Network> {
+struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     /// The transaction pool.
     pool: Pool,
     /// The provider that can interact with the chain.
@@ -468,6 +483,8 @@ struct EthApiInner<Provider, Pool, Network> {
     blocking_task_pool: BlockingTaskPool,
     /// Cache for block fees history
     fee_history_cache: FeeHistoryCache,
+    /// The type that defines how to configure the EVM
+    evm_config: EvmConfig,
     /// An http client for communicating with sequencers.
     #[cfg(feature = "optimism")]
     http_client: reqwest::Client,

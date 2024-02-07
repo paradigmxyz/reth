@@ -639,7 +639,7 @@ impl Discv4Service {
     /// [`DiscoveryUpdate::Added`] event for the given bootnodes. So boot nodes don't appear in the
     /// update stream, which is usually desirable, since bootnodes should not be connected to.
     ///
-    /// If adding the configured boodnodes should result in a [`DiscoveryUpdate::Added`], see
+    /// If adding the configured bootnodes should result in a [`DiscoveryUpdate::Added`], see
     /// [`Self::add_all_nodes`].
     ///
     /// **Note:** This is a noop if there are no bootnodes.
@@ -1057,7 +1057,7 @@ impl Discv4Service {
         } else if needs_bond {
             self.try_ping(record, PingReason::EstablishBond);
         } else if is_proven {
-            // if node has been proven, this means we've recieved a pong and verified its endpoint
+            // if node has been proven, this means we've received a pong and verified its endpoint
             // proof. We've also sent a pong above to verify our endpoint proof, so we can now
             // send our find_nodes request if PingReason::Lookup
             if let Some((_, ctx)) = self.pending_lookup.remove(&record.id) {
@@ -1193,7 +1193,7 @@ impl Discv4Service {
     /// Handler for an incoming `FindNode` message
     fn on_find_node(&mut self, msg: FindNode, remote_addr: SocketAddr, node_id: PeerId) {
         if self.is_expired(msg.expire) {
-            // ping's expiration timestamp is in the past
+            // expiration timestamp is in the past
             return
         }
         if node_id == *self.local_peer_id() {
@@ -2018,9 +2018,9 @@ struct NodeEntry {
     last_enr_seq: Option<u64>,
     /// ForkId if retrieved via ENR requests.
     fork_id: Option<ForkId>,
-    /// Counter for failed findNode requests
+    /// Counter for failed findNode requests.
     find_node_failures: usize,
-    /// whether the endpoint of the peer is proven
+    /// Whether the endpoint of the peer is proven.
     has_endpoint_proof: bool,
 }
 
@@ -2087,7 +2087,7 @@ enum PingReason {
     /// Initial ping to a previously unknown peer that didn't fit into the table. But we still want
     /// to establish a bond.
     EstablishBond,
-    /// Re-ping a peer..
+    /// Re-ping a peer.
     RePing,
     /// Part of a lookup to ensure endpoint is proven.
     Lookup(NodeRecord, LookupContext),

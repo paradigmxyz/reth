@@ -30,7 +30,7 @@ where
     }
 
     /// Return the withdrawals for the payload or attributes.
-    pub fn withdrawals(&self) -> Option<&Vec<reth_rpc_types::engine::payload::Withdrawal>> {
+    pub fn withdrawals(&self) -> Option<&Vec<reth_rpc_types::withdrawal::Withdrawal>> {
         match self {
             Self::ExecutionPayload { payload, .. } => payload.withdrawals(),
             Self::PayloadAttributes(attributes) => attributes.withdrawals(),

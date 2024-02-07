@@ -1,12 +1,12 @@
 use crate::{
     eth::transaction::typed::{
-        BlobTransactionSidecar, EIP1559TransactionRequest, EIP2930TransactionRequest,
-        EIP4844TransactionRequest, LegacyTransactionRequest, TransactionKind,
-        TypedTransactionRequest,
+        EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
+        LegacyTransactionRequest, TransactionKind, TypedTransactionRequest,
     },
     AccessList,
 };
 use alloy_primitives::{Address, Bytes, B256, U128, U256, U64, U8};
+use alloy_rpc_types::BlobTransactionSidecar;
 use serde::{Deserialize, Serialize};
 
 /// Represents _all_ transaction requests received from RPC

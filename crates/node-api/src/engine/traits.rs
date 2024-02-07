@@ -1,12 +1,36 @@
 use crate::{validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion};
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge,
-    revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId},
-    Address, ChainSpec, Header, B256, U256,
+    revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
+    Address, ChainSpec, Header, SealedBlock, Withdrawals, B256, U256,
 };
-use reth_rpc_types::engine::{
-    OptimismPayloadAttributes, PayloadAttributes as EthPayloadAttributes, PayloadId, Withdrawal,
+use reth_rpc_types::{
+    engine::{
+        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, OptimismPayloadAttributes,
+        PayloadAttributes as EthPayloadAttributes, PayloadId,
+    },
+    withdrawal::Withdrawal,
+    ExecutionPayloadV1,
 };
+
+/// Represents a built payload type that contains a built [SealedBlock] and can be converted into
+/// engine API execution payloads.
+pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
+    /// Returns the built block (sealed)
+    fn block(&self) -> &SealedBlock;
+
+    /// Returns the fees collected for the built block
+    fn fees(&self) -> U256;
+
+    /// Converts the type into the response expected by `engine_getPayloadV1`
+    fn into_v1_payload(self) -> ExecutionPayloadV1;
+
+    /// Converts the type into the response expected by `engine_getPayloadV2`
+    fn into_v2_payload(self) -> ExecutionPayloadEnvelopeV2;
+
+    /// Converts the type into the response expected by `engine_getPayloadV2`
+    fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3;
+}
 
 /// This can be implemented by types that describe a currently running payload job.
 ///
@@ -48,10 +72,10 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     fn prev_randao(&self) -> B256;
 
     /// Returns the withdrawals for the running payload job.
-    fn withdrawals(&self) -> &Vec<reth_primitives::Withdrawal>;
+    fn withdrawals(&self) -> &Withdrawals;
 
-    /// Returns the configured [CfgEnv] and [BlockEnv] for the targeted payload (that has the
-    /// `parent` as its parent).
+    /// Returns the configured [CfgEnvWithHandlerCfg] and [BlockEnv] for the targeted payload (that
+    /// has the `parent` as its parent).
     ///
     /// The `chain_spec` is used to determine the correct chain id and hardfork for the payload
     /// based on its timestamp.
@@ -59,19 +83,18 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     /// Block related settings are derived from the `parent` block and the configured attributes.
     ///
     /// NOTE: This is only intended for beacon consensus (after merge).
-    fn cfg_and_block_env(&self, chain_spec: &ChainSpec, parent: &Header) -> (CfgEnv, BlockEnv) {
-        // TODO: should be different once revm has configurable cfgenv
+    fn cfg_and_block_env(
+        &self,
+        chain_spec: &ChainSpec,
+        parent: &Header,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        // TODO: should be different once revm has configurable CfgEnvWithHandlerCfg
         // configure evm env based on parent block
         let mut cfg = CfgEnv::default();
         cfg.chain_id = chain_spec.chain().id();
 
-        #[cfg(feature = "optimism")]
-        {
-            cfg.optimism = chain_spec.is_optimism();
-        }
-
         // ensure we're not missing any timestamp based hardforks
-        cfg.spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp());
+        let spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp());
 
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value
@@ -79,7 +102,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
             .next_block_excess_blob_gas()
             .map_or_else(
                 || {
-                    if cfg.spec_id == SpecId::CANCUN {
+                    if spec_id == SpecId::CANCUN {
                         // default excess blob gas is zero
                         Some(0)
                     } else {
@@ -107,7 +130,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
             blob_excess_gas_and_price,
         };
 
-        (cfg, block_env)
+        (CfgEnvWithHandlerCfg::new(cfg, spec_id), block_env)
     }
 }
 
@@ -154,7 +177,7 @@ impl PayloadAttributes for EthPayloadAttributes {
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
     ) -> Result<(), AttributesValidationError> {
-        validate_version_specific_fields(chain_spec, version, &self.into())
+        validate_version_specific_fields(chain_spec, version, self.into())
     }
 }
 
@@ -176,7 +199,7 @@ impl PayloadAttributes for OptimismPayloadAttributes {
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
     ) -> Result<(), AttributesValidationError> {
-        validate_version_specific_fields(chain_spec, version, &self.into())?;
+        validate_version_specific_fields(chain_spec, version, self.into())?;
 
         if self.gas_limit.is_none() && chain_spec.is_optimism() {
             return Err(AttributesValidationError::InvalidParams(

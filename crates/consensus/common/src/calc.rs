@@ -28,7 +28,7 @@ pub fn base_block_reward(
         chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, block_difficulty)
     {
         None
-    } else if chain_spec.fork(Hardfork::Petersburg).active_at_block(block_number) {
+    } else if chain_spec.fork(Hardfork::Constantinople).active_at_block(block_number) {
         Some(ETH_TO_WEI * 2)
     } else if chain_spec.fork(Hardfork::Byzantium).active_at_block(block_number) {
         Some(ETH_TO_WEI * 3)

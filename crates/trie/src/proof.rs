@@ -206,8 +206,11 @@ mod tests {
 
         // Hash accounts and insert them into hashing table.
         let genesis = chain_spec.genesis();
-        let alloc_accounts =
-            genesis.alloc.clone().into_iter().map(|(addr, account)| (addr, Some(account.into())));
+        let alloc_accounts = genesis
+            .alloc
+            .clone()
+            .into_iter()
+            .map(|(addr, account)| (addr, Some(Account::from_genesis_account(account))));
         provider.insert_account_for_hashing(alloc_accounts).unwrap();
 
         let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {
@@ -282,7 +285,7 @@ mod tests {
         for (target, expected_proof) in data {
             let target = Address::from_str(target).unwrap();
             let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &[]).unwrap();
-            pretty_assertions::assert_eq!(
+            similar_asserts::assert_eq!(
                 account_proof.proof,
                 expected_proof,
                 "proof for {target:?} does not match"
@@ -330,7 +333,7 @@ mod tests {
 
         let provider = factory.provider().unwrap();
         let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &[]).unwrap();
-        pretty_assertions::assert_eq!(account_proof.proof, expected_account_proof);
+        similar_asserts::assert_eq!(account_proof.proof, expected_account_proof);
     }
 
     #[test]
@@ -352,7 +355,7 @@ mod tests {
 
         let provider = factory.provider().unwrap();
         let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &[]).unwrap();
-        pretty_assertions::assert_eq!(account_proof.proof, expected_account_proof);
+        similar_asserts::assert_eq!(account_proof.proof, expected_account_proof);
     }
 
     #[test]
@@ -437,6 +440,6 @@ mod tests {
 
         let provider = factory.provider().unwrap();
         let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &slots).unwrap();
-        pretty_assertions::assert_eq!(account_proof, expected);
+        similar_asserts::assert_eq!(account_proof, expected);
     }
 }

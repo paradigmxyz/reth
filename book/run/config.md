@@ -131,22 +131,21 @@ The execution stage executes historical transactions. This stage is generally ve
 
 Each executed transaction also generates a number of changesets, and mutates the current state of accounts and storage.
 
-For this reason, there are two ways to control how much work to perform before the results are written to disk.
+For this reason, there are several ways to control how much work to perform before the results are written to disk.
 
 ```toml
 [stages.execution]
-# The maximum amount of blocks to execute before writing the results to disk.
+# The maximum number of blocks to process before the execution stage commits.
 max_blocks = 500000
-# The maximum amount of account and storage changes to collect before writing
-# the results to disk.
+# The maximum number of state changes to keep in memory before the execution stage commits.
 max_changes = 5000000
+# The maximum cumulative amount of gas to process before the execution stage commits.
+max_cumulative_gas = 1500000000000 # 30_000_000 * 50_000_000
+# The maximum time spent on blocks processing before the execution stage commits.
+max_duration = '10m'
 ```
 
-Either one of `max_blocks` or `max_changes` must be specified, and both can also be specified at the same time:
-
-- If only `max_blocks` is specified, reth will execute (up to) that amount of blocks before writing to disk.
-- If only `max_changes` is specified, reth will execute as many blocks as possible until the target amount of state transitions have occurred before writing to disk.
-- If both are specified, then the first threshold to be hit will determine when the results are written to disk.
+For all thresholds specified, the first to be hit will determine when the results are written to disk.
 
 Lower values correspond to more frequent disk writes, but also lower memory consumption. A lower value also negatively impacts sync speed, since reth keeps a cache around for the entire duration of blocks executed in the same range.
 

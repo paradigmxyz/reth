@@ -89,6 +89,7 @@ where
 
         let skip = skip as u64;
 
+
         for _ in 0..limit {
             if let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
                 match direction {
@@ -129,6 +130,7 @@ where
                 }
 
                 if headers.len() >= MAX_HEADERS_SERVE {
+
                     break
                 }
             } else {
@@ -158,6 +160,7 @@ where
     ) {
         self.metrics.received_bodies_requests.increment(1);
         let mut bodies = Vec::new();
+
         for hash in request.0 {
             if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
                 let body = BlockBody {
@@ -175,9 +178,11 @@ where
                         // If encode_max fails,stop the loop
                         break;
                     }
+
                 }
 
-                if bodies.len() >= MAX_BODIES_SERVE {
+                total_bytes += APPROX_BODY_SIZE;
+                if total_bytes > SOFT_RESPONSE_LIMIT {
                     break
                 }
             } else {
@@ -195,6 +200,7 @@ where
         response: oneshot::Sender<RequestResult<Receipts>>,
     ) {
         let mut receipts = Vec::new();
+
 
         for hash in request.0 {
             if let Some(receipts_by_block) =
@@ -215,9 +221,11 @@ where
                         // If encode_max fails,stop the loop
                         break;
                     }
+
                 }
 
-                if receipts.len() >= MAX_RECEIPTS_SERVE {
+                total_bytes += APPROX_RECEIPT_SIZE;
+                if total_bytes > SOFT_RESPONSE_LIMIT {
                     break
                 }
             } else {

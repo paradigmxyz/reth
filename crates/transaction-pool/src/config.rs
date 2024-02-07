@@ -1,4 +1,4 @@
-use crate::TransactionOrigin;
+use crate::{PoolSize, TransactionOrigin};
 use reth_primitives::{Address, EIP4844_TX_TYPE_ID};
 use std::collections::HashSet;
 /// Guarantees max transactions for one sender, compatible with geth/erigon
@@ -38,6 +38,17 @@ pub struct PoolConfig {
     pub local_transactions_config: LocalTransactionConfig,
 }
 
+impl PoolConfig {
+    /// Returns whether or not the size and amount constraints in any sub-pools are exceeded.
+    #[inline]
+    pub const fn is_exceeded(&self, pool_size: PoolSize) -> bool {
+        self.blob_limit.is_exceeded(pool_size.blob, pool_size.blob_size) ||
+            self.pending_limit.is_exceeded(pool_size.pending, pool_size.pending_size) ||
+            self.basefee_limit.is_exceeded(pool_size.basefee, pool_size.basefee_size) ||
+            self.queued_limit.is_exceeded(pool_size.queued, pool_size.queued_size)
+    }
+}
+
 impl Default for PoolConfig {
     fn default() -> Self {
         Self {
@@ -53,7 +64,7 @@ impl Default for PoolConfig {
 }
 
 /// Size limits for a sub-pool.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SubPoolLimit {
     /// Maximum amount of transaction in the pool.
     pub max_txs: usize,
@@ -62,9 +73,14 @@ pub struct SubPoolLimit {
 }
 
 impl SubPoolLimit {
+    /// Creates a new instance with the given limits.
+    pub const fn new(max_txs: usize, max_size: usize) -> Self {
+        Self { max_txs, max_size }
+    }
+
     /// Returns whether the size or amount constraint is violated.
     #[inline]
-    pub fn is_exceeded(&self, txs: usize, size: usize) -> bool {
+    pub const fn is_exceeded(&self, txs: usize, size: usize) -> bool {
         self.max_txs < txs || self.max_size < size
     }
 }
@@ -91,7 +107,7 @@ pub struct PriceBumpConfig {
 impl PriceBumpConfig {
     /// Returns the price bump required to replace the given transaction type.
     #[inline]
-    pub(crate) fn price_bump(&self, tx_type: u8) -> u128 {
+    pub(crate) const fn price_bump(&self, tx_type: u8) -> u128 {
         if tx_type == EIP4844_TX_TYPE_ID {
             return self.replace_blob_tx_price_bump
         }
@@ -110,7 +126,7 @@ impl Default for PriceBumpConfig {
 
 /// Configuration options for the locally received transactions:
 /// [TransactionOrigin::Local](crate::TransactionOrigin)
-#[derive(Debug, Clone, Eq, PartialEq, Default)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LocalTransactionConfig {
     /// Apply no exemptions to the locally received transactions.
     ///
@@ -121,12 +137,24 @@ pub struct LocalTransactionConfig {
     pub no_exemptions: bool,
     /// Addresses that will be considered as local . Above exemptions apply
     pub local_addresses: HashSet<Address>,
+    /// Flag indicating whether local transactions should be propagated.
+    pub propagate_local_transactions: bool,
+}
+
+impl Default for LocalTransactionConfig {
+    fn default() -> Self {
+        Self {
+            no_exemptions: false,
+            local_addresses: HashSet::default(),
+            propagate_local_transactions: true,
+        }
+    }
 }
 
 impl LocalTransactionConfig {
     /// Returns whether local transactions are not exempt from the configured limits.
     #[inline]
-    pub fn no_local_exemptions(&self) -> bool {
+    pub const fn no_local_exemptions(&self) -> bool {
         self.no_exemptions
     }
 
@@ -145,5 +173,56 @@ impl LocalTransactionConfig {
             return false
         }
         origin.is_local() || self.contains_local_address(sender)
+    }
+
+    /// Sets toggle to propagate transactions received locally by this client (e.g
+    /// transactions from eth_sendTransaction to this nodes' RPC server)
+    ///
+    /// If set to false, only transactions received by network peers (via
+    /// p2p) will be marked as propagated in the local transaction pool and returned on a
+    /// GetPooledTransactions p2p request
+    pub const fn set_propagate_local_transactions(mut self, propagate_local_txs: bool) -> Self {
+        self.propagate_local_transactions = propagate_local_txs;
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pool_size_sanity() {
+        let pool_size = PoolSize {
+            pending: 0,
+            pending_size: 0,
+            basefee: 0,
+            basefee_size: 0,
+            queued: 0,
+            queued_size: 0,
+            blob: 0,
+            blob_size: 0,
+            ..Default::default()
+        };
+
+        // the current size is zero so this should not exceed any limits
+        let config = PoolConfig::default();
+        assert!(!config.is_exceeded(pool_size));
+
+        // set them to be above the limits
+        let pool_size = PoolSize {
+            pending: config.pending_limit.max_txs + 1,
+            pending_size: config.pending_limit.max_size + 1,
+            basefee: config.basefee_limit.max_txs + 1,
+            basefee_size: config.basefee_limit.max_size + 1,
+            queued: config.queued_limit.max_txs + 1,
+            queued_size: config.queued_limit.max_size + 1,
+            blob: config.blob_limit.max_txs + 1,
+            blob_size: config.blob_limit.max_size + 1,
+            ..Default::default()
+        };
+
+        // now this should be above the limits
+        assert!(config.is_exceeded(pool_size));
     }
 }

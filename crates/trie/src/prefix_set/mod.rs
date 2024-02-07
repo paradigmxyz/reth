@@ -12,7 +12,7 @@ pub use loader::{LoadedPrefixSets, PrefixSetLoader};
 /// Internally, this implementation uses a `Vec` and aims to act like a `BTreeSet` in being both
 /// sorted and deduplicated. It does this by keeping a `sorted` flag. The `sorted` flag represents
 /// whether or not the `Vec` is definitely sorted. When a new element is added, it is set to
-/// `false.`. The `Vec` is sorted and deduplicated when `sorted` is `false` and:
+/// `false.`. The `Vec` is sorted and deduplicated when `sorted` is `true` and:
 ///  * An element is being checked for inclusion (`contains`), or
 ///  * The set is being converted into an immutable `PrefixSet` (`freeze`)
 ///

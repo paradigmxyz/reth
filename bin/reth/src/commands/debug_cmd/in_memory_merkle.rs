@@ -13,10 +13,11 @@ use crate::{
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_config::Config;
-use reth_db::{init_db, DatabaseEnv};
+use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_interfaces::executor::BlockValidationError;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
+use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
 use reth_provider::{
     AccountExtReader, BlockWriter, ExecutorFactory, HashingWriter, HeaderProvider,
@@ -24,7 +25,7 @@ use reth_provider::{
     StorageReader,
 };
 use reth_tasks::TaskExecutor;
-use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, updates::TrieKey, StateRoot};
+use reth_trie::{updates::TrieKey, StateRoot};
 use std::{
     net::{SocketAddr, SocketAddrV4},
     path::PathBuf,
@@ -112,7 +113,8 @@ impl Command {
         fs::create_dir_all(&db_path)?;
 
         // initialize the database
-        let db = Arc::new(init_db(db_path, self.db.log_level)?);
+        let db =
+            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         let factory = ProviderFactory::new(&db, self.chain.clone());
         let provider = factory.provider()?;
 
@@ -161,7 +163,8 @@ impl Command {
             )
             .await?;
 
-        let executor_factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
+        let executor_factory =
+            reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
         let mut executor =
             executor_factory.with_state(LatestStateProviderRef::new(provider.tx_ref()));
 
@@ -178,15 +181,8 @@ impl Command {
         let block_state = executor.take_output_state();
 
         // Unpacked `BundleState::state_root_slow` function
-        let hashed_post_state = block_state.hash_state_slow().sorted();
-        let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
-        let tx = provider.tx_ref();
-        let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &hashed_post_state);
-        let (in_memory_state_root, in_memory_updates) = StateRoot::from_tx(tx)
-            .with_hashed_cursor_factory(hashed_cursor_factory)
-            .with_changed_account_prefixes(account_prefix_set)
-            .with_changed_storage_prefixes(storage_prefix_set)
-            .root_with_updates()?;
+        let (in_memory_state_root, in_memory_updates) =
+            block_state.hash_state_slow().state_root_with_updates(provider.tx_ref())?;
 
         if in_memory_state_root == block.state_root {
             info!(target: "reth::cli", state_root = ?in_memory_state_root, "Computed in-memory state root matches");
@@ -232,7 +228,7 @@ impl Command {
         while in_mem_updates_iter.peek().is_some() || incremental_updates_iter.peek().is_some() {
             match (in_mem_updates_iter.next(), incremental_updates_iter.next()) {
                 (Some(in_mem), Some(incr)) => {
-                    pretty_assertions::assert_eq!(in_mem.0, incr.0, "Nibbles don't match");
+                    similar_asserts::assert_eq!(in_mem.0, incr.0, "Nibbles don't match");
                     if in_mem.1 != incr.1 &&
                         matches!(in_mem.0, TrieKey::AccountNode(ref nibbles) if nibbles.0.len() > self.skip_node_depth.unwrap_or_default())
                     {
@@ -252,7 +248,7 @@ impl Command {
             }
         }
 
-        pretty_assertions::assert_eq!(
+        similar_asserts::assert_eq!(
             incremental_mismatched,
             in_mem_mismatched,
             "Mismatched trie updates"

@@ -7,7 +7,7 @@ use reth_interfaces::test_utils::generators::{
 };
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    proofs, Block, SealedBlock, TransactionSigned, B256, U256,
+    proofs, Block, SealedBlock, TransactionSigned, Withdrawals, B256, U256,
 };
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
@@ -47,10 +47,9 @@ fn payload_body_roundtrip() {
                 .collect::<Result<Vec<_>, _>>(),
         );
         let withdraw = payload_body.withdrawals.map(|withdrawals| {
-            withdrawals
-                .into_iter()
-                .map(convert_standalone_withdraw_to_withdrawal)
-                .collect::<Vec<_>>()
+            Withdrawals::new(
+                withdrawals.into_iter().map(convert_standalone_withdraw_to_withdrawal).collect(),
+            )
         });
         assert_eq!(block.withdrawals, withdraw);
     }

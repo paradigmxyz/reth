@@ -22,6 +22,7 @@
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
 //! # use tokio::sync::watch;
+//! # use reth_node_ethereum::EthEvmConfig;
 //! # use reth_provider::ProviderFactory;
 //! # use reth_provider::HeaderSyncMode;
 //! # use reth_provider::test_utils::create_test_provider_factory;
@@ -39,7 +40,7 @@
 //! #    provider_factory.clone()
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(B256::default());
-//! # let executor_factory = EvmProcessorFactory::new(chain_spec.clone());
+//! # let executor_factory = EvmProcessorFactory::new(chain_spec.clone(), EthEvmConfig::default());
 //! // Create a pipeline that can fully sync
 //! # let pipeline =
 //! Pipeline::builder()

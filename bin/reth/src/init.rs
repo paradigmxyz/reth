@@ -164,8 +164,11 @@ pub fn insert_genesis_hashes<DB: Database>(
     genesis: &reth_primitives::Genesis,
 ) -> ProviderResult<()> {
     // insert and hash accounts to hashing table
-    let alloc_accounts =
-        genesis.alloc.clone().into_iter().map(|(addr, account)| (addr, Some(account.into())));
+    let alloc_accounts = genesis
+        .alloc
+        .clone()
+        .into_iter()
+        .map(|(addr, account)| (addr, Some(Account::from_genesis_account(account))));
     provider.insert_account_for_hashing(alloc_accounts)?;
 
     let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {

@@ -17,10 +17,12 @@ use reth_primitives::ChainSpec;
 use reth_tracing::FileWorkerGuard;
 use std::sync::Arc;
 
-pub mod components;
-pub mod config;
-pub mod db_type;
-pub mod ext;
+/// Re-export of the `reth_node_core` types specifically in the `cli` module.
+///
+/// This is re-exported because the types in `reth_node_core::cli` originally existed in
+/// `reth::cli` but were moved to the `reth_node_core` crate. This re-export avoids a breaking
+/// change.
+pub use crate::core::cli::*;
 
 /// The main reth cli interface.
 ///

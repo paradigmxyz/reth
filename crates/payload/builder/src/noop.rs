@@ -15,7 +15,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 #[derive(Debug)]
 pub struct NoopPayloadBuilderService<Engine: EngineTypes> {
     /// Receiver half of the command channel.
-    command_rx: UnboundedReceiverStream<PayloadServiceCommand<Engine::PayloadBuilderAttributes>>,
+    command_rx: UnboundedReceiverStream<PayloadServiceCommand<Engine>>,
 }
 
 impl<Engine> NoopPayloadBuilderService<Engine>
@@ -25,8 +25,10 @@ where
     /// Creates a new [NoopPayloadBuilderService].
     pub fn new() -> (Self, PayloadBuilderHandle<Engine>) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
-        let handle = PayloadBuilderHandle::new(service_tx);
-        (Self { command_rx: UnboundedReceiverStream::new(command_rx) }, handle)
+        (
+            Self { command_rx: UnboundedReceiverStream::new(command_rx) },
+            PayloadBuilderHandle::new(service_tx),
+        )
     }
 }
 

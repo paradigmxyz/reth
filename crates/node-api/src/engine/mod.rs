@@ -1,135 +1,11 @@
 //! This contains the [EngineTypes] trait and implementations for ethereum mainnet types.
-//!
-//! The [EngineTypes] trait can be implemented to configure the engine to work with custom types,
-//! as long as those types implement certain traits.
-//!
-//! Custom payload attributes can be supported by implementing two main traits:
-//!
-//! [PayloadAttributes] can be implemented for payload attributes types that are used as
-//! arguments to the `engine_forkchoiceUpdated` method. This type should be used to define and
-//! _spawn_ payload jobs.
-//!
-//! [PayloadBuilderAttributes] can be implemented for payload attributes types that _describe_
-//! running payload jobs.
-//!
-//! Once traits are implemented and custom types are defined, the [EngineTypes] trait can be
-//! implemented:
-//! ```no_run
-//! # use reth_rpc_types::engine::{PayloadAttributes as EthPayloadAttributes, PayloadId, Withdrawal};
-//! # use reth_primitives::{B256, ChainSpec, Address};
-//! # use reth_node_api::{EngineTypes, EngineApiMessageVersion, validate_version_specific_fields, AttributesValidationError, PayloadAttributes, PayloadBuilderAttributes};
-//! # use reth_payload_builder::EthPayloadBuilderAttributes;
-//! # use serde::{Deserialize, Serialize};
-//! # use thiserror::Error;
-//! # use std::convert::Infallible;
-//!
-//! /// A custom payload attributes type.
-//! #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-//! pub struct CustomPayloadAttributes {
-//!     /// An inner payload type
-//!     #[serde(flatten)]
-//!     pub inner: EthPayloadAttributes,
-//!     /// A custom field
-//!     pub custom: u64,
-//! }
-//!
-//! /// Custom error type used in payload attributes validation
-//! #[derive(Debug, Error)]
-//! pub enum CustomError {
-//!    #[error("Custom field is not zero")]
-//!    CustomFieldIsNotZero,
-//! }
-//!
-//! impl PayloadAttributes for CustomPayloadAttributes {
-//!     fn timestamp(&self) -> u64 {
-//!         self.inner.timestamp()
-//!     }
-//!
-//!     fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
-//!         self.inner.withdrawals()
-//!     }
-//!
-//!     fn parent_beacon_block_root(&self) -> Option<B256> {
-//!         self.inner.parent_beacon_block_root()
-//!     }
-//!
-//!     fn ensure_well_formed_attributes(
-//!         &self,
-//!         chain_spec: &ChainSpec,
-//!         version: EngineApiMessageVersion,
-//!     ) -> Result<(), AttributesValidationError> {
-//!         validate_version_specific_fields(chain_spec, version, &self.into())?;
-//!
-//!         // custom validation logic - ensure that the custom field is not zero
-//!         if self.custom == 0 {
-//!             return Err(AttributesValidationError::invalid_params(
-//!                 CustomError::CustomFieldIsNotZero,
-//!             ))
-//!         }
-//!
-//!         Ok(())
-//!     }
-//! }
-//!
-//! /// Newtype around the payload builder attributes type
-//! #[derive(Clone, Debug, PartialEq, Eq)]
-//! pub struct CustomPayloadBuilderAttributes(EthPayloadBuilderAttributes);
-//!
-//! impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
-//!     type RpcPayloadAttributes = CustomPayloadAttributes;
-//!     type Error = Infallible;
-//!
-//!     fn try_new(parent: B256, attributes: CustomPayloadAttributes) -> Result<Self, Infallible> {
-//!         Ok(Self(EthPayloadBuilderAttributes::new(parent, attributes.inner)))
-//!     }
-//!
-//!     fn parent(&self) -> B256 {
-//!         self.0.parent
-//!     }
-//!
-//!     fn payload_id(&self) -> PayloadId {
-//!         self.0.id
-//!     }
-//!
-//!     fn timestamp(&self) -> u64 {
-//!         self.0.timestamp
-//!     }
-//!
-//!     fn parent_beacon_block_root(&self) -> Option<B256> {
-//!         self.0.parent_beacon_block_root
-//!     }
-//!
-//!     fn suggested_fee_recipient(&self) -> Address {
-//!         self.0.suggested_fee_recipient
-//!     }
-//!
-//!     fn prev_randao(&self) -> B256 {
-//!         self.0.prev_randao
-//!     }
-//!
-//!     fn withdrawals(&self) -> &Vec<reth_primitives::Withdrawal> {
-//!         &self.0.withdrawals
-//!     }
-//! }
-//!
-//! /// Custom engine types - uses a custom payload attributes RPC type, but uses the default
-//! /// payload builder attributes type.
-//! #[derive(Clone, Debug, Default)]
-//! #[non_exhaustive]
-//! pub struct CustomEngineTypes;
-//!
-//! impl EngineTypes for CustomEngineTypes {
-//!    type PayloadAttributes = CustomPayloadAttributes;
-//!    type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
-//! }
-//! ```
 
 use reth_primitives::{ChainSpec, Hardfork};
 
 /// Contains traits to abstract over payload attributes types and default implementations of the
 /// [PayloadAttributes] trait for ethereum mainnet and optimism types.
 pub mod traits;
-pub use traits::{PayloadAttributes, PayloadBuilderAttributes};
+pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
 
 /// Contains error types used in the traits defined in this crate.
 pub mod error;
@@ -140,7 +16,7 @@ pub mod payload;
 pub use payload::PayloadOrAttributes;
 
 /// The types that are used by the engine.
-pub trait EngineTypes: Send + Sync {
+pub trait EngineTypes: serde::de::DeserializeOwned + Send + Sync {
     /// The RPC payload attributes type the CL node emits via the engine API.
     type PayloadAttributes: PayloadAttributes + Unpin;
 
@@ -149,7 +25,16 @@ pub trait EngineTypes: Send + Sync {
         + Clone
         + Unpin;
 
-    // TODO: payload type
+    /// The built payload type.
+    type BuiltPayload: BuiltPayload + Clone + Unpin;
+
+    /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
+    /// and the message version.
+    fn validate_version_specific_fields(
+        chain_spec: &ChainSpec,
+        version: EngineApiMessageVersion,
+        payload_or_attrs: PayloadOrAttributes<'_, Self::PayloadAttributes>,
+    ) -> Result<(), AttributesValidationError>;
 }
 
 /// Validates the timestamp depending on the version called:
@@ -283,12 +168,12 @@ pub fn validate_parent_beacon_block_root_presence(
     Ok(())
 }
 
-/// Validates the presence or exclusion of fork-specific fields based on the payload attributes
-/// and the message version.
+/// Validates the presence or exclusion of fork-specific fields based on the ethereum payload
+/// attributes and the message version.
 pub fn validate_version_specific_fields<Type>(
     chain_spec: &ChainSpec,
     version: EngineApiMessageVersion,
-    payload_or_attrs: &PayloadOrAttributes<'_, Type>,
+    payload_or_attrs: PayloadOrAttributes<'_, Type>,
 ) -> Result<(), AttributesValidationError>
 where
     Type: PayloadAttributes,
