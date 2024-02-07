@@ -3,15 +3,12 @@
 use crate::commands::node::cl_events::ConsensusLayerHealthEvent;
 use futures::Stream;
 use num_format::{Buffer, Locale};
-use reth_beacon_consensus::BeaconConsensusEngineEvent;
+use reth_beacon_consensus::{BeaconConsensusEngineEvent, ForkchoiceStatus};
 use reth_db::{database::Database, database_metrics::DatabaseMetadata};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
-use reth_primitives::{
-    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    BlockNumber,
-};
+use reth_primitives::{stage::{EntitiesCheckpoint, StageCheckpoint, StageId}, BlockNumber, constants};
 use reth_prune::PrunerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
 use std::{
@@ -23,6 +20,7 @@ use std::{
 };
 use tokio::time::Interval;
 use tracing::{info, warn};
+use crate::primitives::B256;
 
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
@@ -41,11 +39,18 @@ struct NodeState<DB> {
     latest_block: Option<BlockNumber>,
     /// The time of the latest block seen by the pipeline
     latest_block_time: Option<u64>,
+    /// Hash of the head block last set by fork choice update
+    head_block_hash: B256,
+    /// Hash of the safe block last set by fork choice update
+    safe_block_hash: B256,
+    /// Hash of finalized block last set by fork choice update
+    finalized_block_hash: B256,
+
 }
 
 impl<DB> NodeState<DB> {
     fn new(db: DB, network: Option<NetworkHandle>, latest_block: Option<BlockNumber>) -> Self {
-        Self { db, network, current_stage: None, latest_block, latest_block_time: None }
+        Self { db, network, current_stage: None, latest_block, latest_block_time: None, head_block_hash: B256::ZERO, safe_block_hash: B256::ZERO, finalized_block_hash: B256::ZERO }
     }
 
     fn num_connected_peers(&self) -> usize {
@@ -158,13 +163,18 @@ impl<DB> NodeState<DB> {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
                 let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
                     state;
-                info!(
-                    ?head_block_hash,
-                    ?safe_block_hash,
-                    ?finalized_block_hash,
-                    ?status,
-                    "Forkchoice updated"
-                );
+                if status != ForkchoiceStatus::Valid || (self.safe_block_hash != safe_block_hash && self.finalized_block_hash != finalized_block_hash) {
+                    info!(
+                        ?head_block_hash,
+                        ?safe_block_hash,
+                        ?finalized_block_hash,
+                        ?status,
+                        "Forkchoice updated"
+                    );
+                }
+                self.head_block_hash = head_block_hash;
+                self.safe_block_hash = safe_block_hash;
+                self.finalized_block_hash = finalized_block_hash;
             }
             BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed) => {
                 let mut gas_fmt_buf = Buffer::default();
@@ -172,12 +182,14 @@ impl<DB> NodeState<DB> {
                 info!(
                     number=block.number,
                     hash=?block.hash,
-                    num_connected_peers = self.num_connected_peers(),
+                    peers=self.num_connected_peers(),
                     txs=block.body.len(),
-                    mgas=format!("{:.3}", block.header.header.gas_used as f64 / 1.0E6),
-                    gas_used=format!("{:.3}", block.header.header.gas_used as f64 * 100.0 / block.header.header.gas_limit as f64),
-                    base_fee_gwei=format!("{:2}", block.header.header.base_fee_per_gas.unwrap_or(0) as f64 / 1e9),
-                    elapsed_ms=elapsed.as_millis(),
+                    mgas=%format!("{:.3}", block.header.header.gas_used as f64 / constants::MGAS_TO_GAS as f64),
+                    full=%format!("{:.1}%", block.header.header.gas_used as f64 * 100.0 / block.header.header.gas_limit as f64),
+                    base_fee=%format!("{:.2}gwei", block.header.header.base_fee_per_gas.unwrap_or(0) as f64 / constants::GWEI_TO_WEI as f64),
+                    blobs=block.header.blob_gas_used.unwrap_or(0) / constants::BLOB_SIZE_BYTES,
+                    excess_blobs=block.header.excess_blob_gas.unwrap_or(0) / constants::BLOB_SIZE_BYTES,
+                    ?elapsed,
                     "Block added to canonical chain"
                 );
             }
@@ -305,7 +317,7 @@ pub async fn handle_events<E, DB>(
     events: E,
     db: DB,
 ) where
-    E: Stream<Item = NodeEvent> + Unpin,
+    E: Stream<Item=NodeEvent> + Unpin,
     DB: DatabaseMetadata + Database + 'static,
 {
     let state = NodeState::new(db, network, latest_block_number);
@@ -329,9 +341,9 @@ struct EventHandler<E, DB> {
 }
 
 impl<E, DB> Future for EventHandler<E, DB>
-where
-    E: Stream<Item = NodeEvent> + Unpin,
-    DB: DatabaseMetadata + Database + 'static,
+    where
+        E: Stream<Item=NodeEvent> + Unpin,
+        DB: DatabaseMetadata + Database + 'static,
 {
     type Output = ();
 
@@ -437,7 +449,7 @@ struct Eta {
 impl Eta {
     /// Update the ETA given the checkpoint, if possible.
     fn update(&mut self, checkpoint: StageCheckpoint) {
-        let Some(current) = checkpoint.entities() else { return };
+        let Some(current) = checkpoint.entities() else { return; };
 
         if let Some(last_checkpoint_time) = &self.last_checkpoint_time {
             let processed_since_last = current.processed - self.last_checkpoint.processed;
@@ -447,7 +459,7 @@ impl Eta {
             self.eta = Duration::try_from_secs_f64(
                 ((current.total - current.processed) as f64) / per_second,
             )
-            .ok();
+                .ok();
         }
 
         self.last_checkpoint = current;
@@ -478,7 +490,7 @@ impl Display for Eta {
                     f,
                     "{}",
                     humantime::format_duration(Duration::from_secs(remaining.as_secs()))
-                )
+                );
             }
         }
 
@@ -502,7 +514,7 @@ mod tests {
             )),
             ..Default::default()
         }
-        .to_string();
+            .to_string();
 
         assert_eq!(eta, "13m 37s");
     }
