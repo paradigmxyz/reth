@@ -73,10 +73,10 @@ mod builder {
                 ..
             } = config;
 
-            debug!(target: "payload_builder", parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building empty payload");
+            debug!(target: "payload_builder", parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building empty payload");
 
-            let state = client.state_by_block_hash(parent_block.hash).map_err(|err| {
-                warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to get state for empty payload");
+            let state = client.state_by_block_hash(parent_block.hash()).map_err(|err| {
+                warn!(target: "payload_builder", parent_hash=%parent_block.hash(), ?err,  "failed to get state for empty payload");
                 err
             })?;
             let mut db = State::builder()
@@ -98,13 +98,13 @@ mod builder {
                 &initialized_block_env,
                 &attributes,
             ).map_err(|err| {
-                warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to apply beacon root contract call for empty payload");
+                warn!(target: "payload_builder", parent_hash=%parent_block.hash(), ?err,  "failed to apply beacon root contract call for empty payload");
                 err
             })?;
 
             let WithdrawalsOutcome { withdrawals_root, withdrawals } =
                 commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals.clone()).map_err(|err| {
-                    warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to commit withdrawals for empty payload");
+                    warn!(target: "payload_builder", parent_hash=%parent_block.hash(), ?err,  "failed to commit withdrawals for empty payload");
                     err
                 })?;
 
@@ -116,7 +116,7 @@ mod builder {
             let bundle_state =
                 BundleStateWithReceipts::new(db.take_bundle(), Receipts::new(), block_number);
             let state_root = state.state_root(&bundle_state).map_err(|err| {
-                warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to calculate state root for empty payload");
+                warn!(target: "payload_builder", parent_hash=%parent_block.hash(), ?err,  "failed to calculate state root for empty payload");
                 err
             })?;
 
@@ -140,7 +140,7 @@ mod builder {
             }
 
             let header = Header {
-                parent_hash: parent_block.hash,
+                parent_hash: parent_block.hash(),
                 ommers_hash: EMPTY_OMMER_ROOT_HASH,
                 beneficiary: initialized_block_env.coinbase,
                 state_root,
@@ -184,7 +184,7 @@ mod builder {
     {
         let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
-        let state_provider = client.state_by_block_hash(config.parent_block.hash)?;
+        let state_provider = client.state_by_block_hash(config.parent_block.hash())?;
         let state = StateProviderDatabase::new(&state_provider);
         let mut db = State::builder()
             .with_database_ref(cached_reads.as_db(&state))
@@ -200,7 +200,7 @@ mod builder {
             ..
         } = config;
 
-        debug!(target: "payload_builder", id=%attributes.id, parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building new payload");
+        debug!(target: "payload_builder", id=%attributes.id, parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
         let mut cumulative_gas_used = 0;
         let mut sum_blob_gas_used = 0;
         let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
@@ -387,7 +387,7 @@ mod builder {
         }
 
         let header = Header {
-            parent_hash: parent_block.hash,
+            parent_hash: parent_block.hash(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: initialized_block_env.coinbase,
             state_root,

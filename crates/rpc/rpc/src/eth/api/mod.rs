@@ -18,7 +18,8 @@ use reth_network_api::NetworkInfo;
 use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, B256, U256, U64,
+    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, SealedHeader, B256,
+    U256, U64,
 };
 
 use reth_provider::{
@@ -270,22 +271,29 @@ where
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     pub(crate) fn pending_block_env_and_cfg(&self) -> EthResult<PendingBlockEnv> {
-        let origin = if let Some(pending) = self.provider().pending_block_with_senders()? {
+        let origin: PendingBlockEnvOrigin = if let Some(pending) =
+            self.provider().pending_block_with_senders()?
+        {
             PendingBlockEnvOrigin::ActualPending(pending)
         } else {
             // no pending block from the CL yet, so we use the latest block and modify the env
             // values that we can
-            let mut latest =
+            let latest =
                 self.provider().latest_header()?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
+            let (mut latest_header, _block_hash) = latest.split();
             // child block
-            latest.number += 1;
+            latest_header.number += 1;
             // assumed child block is in the next slot
-            latest.timestamp += 12;
+            latest_header.timestamp += 12;
             // base fee of the child block
             let chain_spec = self.provider().chain_spec();
-            latest.base_fee_per_gas =
-                latest.next_block_base_fee(chain_spec.base_fee_params(latest.timestamp));
+
+            latest_header.base_fee_per_gas = latest_header
+                .next_block_base_fee(chain_spec.base_fee_params(latest_header.timestamp));
+
+            let block_hash = latest_header.hash_slow();
+            let latest = SealedHeader::new(latest_header, block_hash);
 
             PendingBlockEnvOrigin::DerivedFromLatest(latest)
         };
@@ -326,7 +334,7 @@ where
             if let Some(pending_block) = lock.as_ref() {
                 // this is guaranteed to be the `latest` header
                 if pending.block_env.number.to::<u64>() == pending_block.block.number &&
-                    pending.origin.header().hash == pending_block.block.parent_hash &&
+                    pending.origin.header().hash() == pending_block.block.parent_hash &&
                     now <= pending_block.expires_at
                 {
                     return Ok(Some(pending_block.block.clone()))

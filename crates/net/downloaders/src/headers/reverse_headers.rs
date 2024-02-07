@@ -294,7 +294,7 @@ where
             // detached head error.
             if let Err(error) = self.consensus.validate_header_against_parent(last_header, head) {
                 // Replace the last header with a detached variant
-                error!(target: "downloaders::headers", ?error, number = last_header.number, hash = ?last_header.hash, "Header cannot be attached to known canonical chain");
+                error!(target: "downloaders::headers", ?error, number = last_header.number, hash = ?last_header.hash(), "Header cannot be attached to known canonical chain");
                 return Err(HeadersDownloaderError::DetachedHead {
                     local_head: Box::new(head.clone()),
                     header: Box::new(last_header.clone()),

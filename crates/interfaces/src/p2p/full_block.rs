@@ -150,7 +150,7 @@ where
             BodyResponse::PendingValidation(resp) => {
                 // ensure the block is valid, else retry
                 if let Err(err) = ensure_valid_body_response(&header, resp.data()) {
-                    debug!(target: "downloaders", ?err,  hash=?header.hash, "Received wrong body");
+                    debug!(target: "downloaders", ?err,  hash=?header.hash(), "Received wrong body");
                     self.client.report_bad_message(resp.peer_id());
                     self.header = Some(header);
                     self.request.body = Some(self.client.get_block_body(self.hash));
@@ -164,7 +164,7 @@ where
     fn on_block_response(&mut self, resp: WithPeerId<BlockBody>) {
         if let Some(ref header) = self.header {
             if let Err(err) = ensure_valid_body_response(header, resp.data()) {
-                debug!(target: "downloaders", ?err,  hash=?header.hash, "Received wrong body");
+                debug!(target: "downloaders", ?err,  hash=?header.hash(), "Received wrong body");
                 self.client.report_bad_message(resp.peer_id());
                 return
             }
@@ -193,7 +193,7 @@ where
                                 maybe_header.map(|h| h.map(|h| h.seal_slow())).split();
                             if let Some(header) = maybe_header {
                                 if header.hash() != this.hash {
-                                    debug!(target: "downloaders", expected=?this.hash, received=?header.hash, "Received wrong header");
+                                    debug!(target: "downloaders", expected=?this.hash, received=?header.hash(), "Received wrong header");
                                     // received a different header than requested
                                     this.client.report_bad_message(peer)
                                 } else {
@@ -438,7 +438,7 @@ where
                     BodyResponse::PendingValidation(resp) => {
                         // ensure the block is valid, else retry
                         if let Err(err) = ensure_valid_body_response(header, resp.data()) {
-                            debug!(target: "downloaders", ?err,  hash=?header.hash, "Received wrong body in range response");
+                            debug!(target: "downloaders", ?err,  hash=?header.hash(), "Received wrong body in range response");
                             self.client.report_bad_message(resp.peer_id());
 
                             // get body that doesn't match, put back into vecdeque, and just retry
@@ -733,6 +733,8 @@ enum RangeResponseResult {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Range;
+
     use super::*;
     use crate::test_utils::TestFullBlockClient;
     use futures::StreamExt;
@@ -762,18 +764,30 @@ mod tests {
         assert_eq!(*received, SealedBlock::new(header, body));
     }
 
+    /// Inserts headers and returns the last header and block body.
+    fn insert_headers_into_client(
+        client: &TestFullBlockClient,
+        range: Range<usize>,
+    ) -> (SealedHeader, BlockBody) {
+        let mut sealed_header = SealedHeader::default();
+        let body = BlockBody::default();
+        for _ in range {
+            let (mut header, hash) = sealed_header.split();
+            // update to the next header
+            header.parent_hash = hash;
+            header.number += 1;
+
+            sealed_header = header.seal_slow();
+            client.insert(sealed_header.clone(), body.clone());
+        }
+
+        (sealed_header, body)
+    }
+
     #[tokio::test]
     async fn download_full_block_range() {
         let client = TestFullBlockClient::default();
-        let mut header = SealedHeader::default();
-        let body = BlockBody::default();
-        client.insert(header.clone(), body.clone());
-        for _ in 0..10 {
-            header.parent_hash = header.hash_slow();
-            header.number += 1;
-            header = header.header.seal_slow();
-            client.insert(header.clone(), body.clone());
-        }
+        let (header, body) = insert_headers_into_client(&client, 0..50);
         let client = FullBlockClient::test_client(client);
 
         let received = client.get_full_block_range(header.hash(), 1).await;
@@ -791,15 +805,7 @@ mod tests {
     #[tokio::test]
     async fn download_full_block_range_stream() {
         let client = TestFullBlockClient::default();
-        let mut header = SealedHeader::default();
-        let body = BlockBody::default();
-        client.insert(header.clone(), body.clone());
-        for _ in 0..10 {
-            header.parent_hash = header.hash_slow();
-            header.number += 1;
-            header = header.header.seal_slow();
-            client.insert(header.clone(), body.clone());
-        }
+        let (header, body) = insert_headers_into_client(&client, 0..50);
         let client = FullBlockClient::test_client(client);
 
         let future = client.get_full_block_range(header.hash(), 1);
@@ -837,15 +843,7 @@ mod tests {
     async fn download_full_block_range_over_soft_limit() {
         // default soft limit is 20, so we will request 50 blocks
         let client = TestFullBlockClient::default();
-        let mut header = SealedHeader::default();
-        let body = BlockBody::default();
-        client.insert(header.clone(), body.clone());
-        for _ in 0..50 {
-            header.parent_hash = header.hash_slow();
-            header.number += 1;
-            header = header.header.seal_slow();
-            client.insert(header.clone(), body.clone());
-        }
+        let (header, body) = insert_headers_into_client(&client, 0..50);
         let client = FullBlockClient::test_client(client);
 
         let received = client.get_full_block_range(header.hash(), 1).await;

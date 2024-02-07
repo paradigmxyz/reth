@@ -343,7 +343,7 @@ impl FeeHistoryEntry {
             base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default(),
             gas_used_ratio: block.gas_used as f64 / block.gas_limit as f64,
             gas_used: block.gas_used,
-            header_hash: block.hash,
+            header_hash: block.hash(),
             gas_limit: block.gas_limit,
             rewards: Vec::new(),
         }
