@@ -206,6 +206,9 @@ where
                 last_header.base_fee_per_gas.unwrap_or_default(),
                 self.provider().chain_spec().base_fee_params(last_header.timestamp),
             )));
+
+            base_fee_per_blob_gas
+                .push(U256::from(last_header.next_block_blob_fee().unwrap_or_default()));
         };
 
         Ok(FeeHistory {
