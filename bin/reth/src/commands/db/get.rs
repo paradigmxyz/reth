@@ -3,8 +3,8 @@ use clap::Parser;
 use reth_db::{
     database::Database,
     snapshot::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask, ReceiptMask, TransactionMask},
-    table::{Decompress, DupSort, Encode, Table},
-    tables, HeaderTD, RawKey, RawTable, Receipts, TableViewer, Tables, Transactions,
+    table::{Decompress, DupSort, Table},
+    tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
 };
 use reth_primitives::{BlockHash, Header, SnapshotSegment};
 use tracing::error;
