@@ -123,13 +123,15 @@ fn block_provider_example<T: BlockReader>(provider: T, number: u64) -> eyre::Res
     let sealed_block = block.clone().seal_slow();
 
     // Can also query the block by hash directly
-    let block_by_hash =
-        provider.block_by_hash(sealed_block.hash())?.ok_or(eyre::eyre!("block by hash not found"))?;
+    let block_by_hash = provider
+        .block_by_hash(sealed_block.hash())?
+        .ok_or(eyre::eyre!("block by hash not found"))?;
     assert_eq!(block, block_by_hash);
 
     // Or by relying in the internal conversion
-    let block_by_hash2 =
-        provider.block(sealed_block.hash().into())?.ok_or(eyre::eyre!("block by hash not found"))?;
+    let block_by_hash2 = provider
+        .block(sealed_block.hash().into())?
+        .ok_or(eyre::eyre!("block by hash not found"))?;
     assert_eq!(block, block_by_hash2);
 
     // Or you can also specify the datasource. For this provider this always return `None`, but
