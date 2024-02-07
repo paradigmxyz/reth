@@ -94,13 +94,21 @@ impl<'a, DB: Database> DbTool<'a, DB> {
                 None
             };
 
-            let mut walk =
-                if filter.reverse { cursor.walk_back(None)? } else { cursor.walk(None)? };
-            Ok(walk
-                .skip(filter.skip)
-                .filter_map(map_filter)
-                .take(filter.len)
-                .collect::<Vec<(_, _)>>())
+            if filter.reverse {
+                Ok(cursor
+                    .walk_back(None)?
+                    .skip(filter.skip)
+                    .filter_map(map_filter)
+                    .take(filter.len)
+                    .collect::<Vec<(_, _)>>())
+            } else {
+                Ok(cursor
+                    .walk(None)?
+                    .skip(filter.skip)
+                    .filter_map(map_filter)
+                    .take(filter.len)
+                    .collect::<Vec<(_, _)>>())
+            }
         })?;
 
         Ok((data.map_err(|e: DatabaseError| eyre::eyre!(e))?, hits))
