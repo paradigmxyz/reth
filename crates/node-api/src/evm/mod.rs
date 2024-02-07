@@ -7,26 +7,10 @@ pub trait EvmConfig: ConfigureEvmEnv + Clone + Send + Sync + 'static {}
 /// Trait for configuring the EVM.
 pub trait EvmConfig : ConfigureEvmEnv {
 
-    // TODO add functions for configuring the EVM::builder
+    /// A hook that allows to modify the EVM before execution.
+    fn evm(&self, db: ()) -> Evm<>;
 
-    /// Returns the EVM handler for the given spec id.
-    ///
-    ///
-    /// TODO this function needs a bunch of generics to satisfy the EvmHandler struct
-    ///
-    /// We could also add more functions to make creating EvmHandler easier; e.g: `LoadPrecompilesHandle`
-    ///
-    /// See also `EvmHandler::mainnet`
-    ///
-    /// ```
-    ///
-    ///  let mut evm = revm::Evm::builder().with_db(db)
-    ///  // TODO how do I set the handler to then evm?
-    /// .with_env_with_handler_cfg(env).build();
-    ///
-    /// ```
-    ///
-    fn evm_handler(&self, spec_id: SpecId) -> EvmHandler;
+    fn evm_with_inspector<I>(&self, db: (), inspector: I) -> Evm<>;
 
 }
 
