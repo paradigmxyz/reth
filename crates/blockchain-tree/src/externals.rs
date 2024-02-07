@@ -76,7 +76,7 @@ impl<DB: Database, EF> TreeExternals<DB, EF> {
             )?));
         }
 
-        let hashes = hashes.into_iter().take(num_hashes).collect();
+        let hashes = hashes.into_iter().rev().take(num_hashes).collect();
         Ok(hashes)
     }
 }
