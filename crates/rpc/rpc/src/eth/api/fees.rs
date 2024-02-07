@@ -215,8 +215,6 @@ where
             blob_gas_used_ratio,
             oldest_block: U256::from(start_block),
             reward: reward_percentiles.map(|_| rewards),
-            base_fee_per_blob_gas: Default::default(),
-            blob_gas_used_ratio: Default::default(),
         })
     }
 
