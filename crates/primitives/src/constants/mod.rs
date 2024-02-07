@@ -8,6 +8,8 @@ use std::time::Duration;
 
 /// [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#parameters) constants.
 pub mod eip4844;
+/// P2P constants.
+pub mod p2p;
 
 /// The client version: `reth/v{major}.{minor}.{patch}`
 pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"));

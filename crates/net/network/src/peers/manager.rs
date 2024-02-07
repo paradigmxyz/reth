@@ -2,8 +2,7 @@ use crate::{
     error::{BackoffKind, SessionError},
     peers::{
         reputation::{is_banned_reputation, DEFAULT_REPUTATION},
-        ReputationChangeWeights, DEFAULT_MAX_CONCURRENT_DIALS, DEFAULT_MAX_PEERS_INBOUND,
-        DEFAULT_MAX_PEERS_OUTBOUND,
+        ReputationChangeWeights,
     },
     session::{Direction, PendingSessionHandshakeError},
     swarm::NetworkConnectionState,
@@ -12,7 +11,10 @@ use futures::StreamExt;
 use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
 use reth_net_common::ban_list::BanList;
 use reth_network_api::{PeerKind, ReputationChangeKind};
-use reth_primitives::{ForkId, NodeRecord, PeerId};
+use reth_primitives::{
+    ForkId, NodeRecord, PeerId, DEFAULT_COUNT_MAX_CONCURRENT_DIALS, DEFAULT_COUNT_MAX_PEERS_INBOUND,
+    DEFAULT_COUNT_MAX_PEERS_OUTBOUND,
+};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     fmt::Display,
@@ -877,9 +879,9 @@ impl Default for ConnectionInfo {
         ConnectionInfo {
             num_outbound: 0,
             num_inbound: 0,
-            max_outbound: DEFAULT_MAX_PEERS_OUTBOUND,
-            max_inbound: DEFAULT_MAX_PEERS_INBOUND,
-            max_concurrent_outbound_dials: DEFAULT_MAX_CONCURRENT_DIALS,
+            max_outbound: DEFAULT_COUNT_MAX_PEERS_OUTBOUND,
+            max_inbound: DEFAULT_COUNT_MAX_PEERS_INBOUND,
+            max_concurrent_outbound_dials: DEFAULT_COUNT_MAX_CONCURRENT_DIALS,
         }
     }
 }
