@@ -259,7 +259,7 @@ impl Command {
             Arc::clone(&best_block),
             Bytes::default(),
             OptimismPayloadBuilderAttributes::try_new(
-                best_block.hash,
+                best_block.hash(),
                 OptimismPayloadAttributes {
                     payload_attributes: payload_attrs,
                     transactions: None,
