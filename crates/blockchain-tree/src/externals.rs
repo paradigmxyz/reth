@@ -55,23 +55,21 @@ impl<DB: Database, EF> TreeExternals<DB, EF> {
             .take(num_hashes)
             .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?;
 
-        if hashes.len() < num_hashes {
-            let snapshot_provider = self.provider_factory.snapshot_provider();
-            let total_headers = snapshot_provider.count_entries::<tables::Headers>()? as u64;
-            if total_headers > 0 {
-                let range = total_headers
-                    .saturating_sub(1)
-                    .saturating_sub((num_hashes - hashes.len()) as u64)..
-                    total_headers;
+        let snapshot_provider = self.provider_factory.snapshot_provider();
+        let total_headers = snapshot_provider.count_entries::<tables::Headers>()? as u64;
+        if total_headers > 0 {
+            let range =
+                total_headers.saturating_sub(1).saturating_sub(num_hashes as u64)..total_headers;
 
-                hashes.extend(range.clone().zip(snapshot_provider.fetch_range_with_predicate(
-                    SnapshotSegment::Headers,
-                    range,
-                    |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(number.into()),
-                    |_| true,
-                )?));
-            }
+            hashes.extend(range.clone().zip(snapshot_provider.fetch_range_with_predicate(
+                SnapshotSegment::Headers,
+                range,
+                |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(number.into()),
+                |_| true,
+            )?));
         }
+
+        debug_assert!(hashes.len() <= num_hashes, "too many hashes fetched");
 
         Ok(hashes)
     }
