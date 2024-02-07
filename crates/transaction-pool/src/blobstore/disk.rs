@@ -58,20 +58,20 @@ impl BlobStore for DiskFileBlobStore {
     }
 
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError> {
-        let mut files_to_delete = self.inner.files_to_delete.write();
-        files_to_delete.insert(tx);
+        let mut txs_to_delete = self.inner.txs_to_delete.write();
+        txs_to_delete.insert(tx);
         Ok(())
     }
 
     fn delete_all(&self, txs: Vec<B256>) -> Result<(), BlobStoreError> {
-        self.inner.files_to_delete.write().extend(txs);
+        let mut txs_to_delete = self.inner.txs_to_delete.write();
         Ok(())
     }
 
     fn cleanup(&self) -> Result<(), BlobStoreError> {
         let txs_to_delete = {
-            let mut files_to_delete = self.inner.files_to_delete.write();
-            std::mem::take(&mut *files_to_delete)
+            let mut txs_to_delete = self.inner.txs_to_delete.write();
+            std::mem::take(&mut *txs_to_delete)
         };
         for tx in txs_to_delete {
             let file_path = self.inner.blob_disk_file(tx);
@@ -121,7 +121,7 @@ struct DiskFileBlobStoreInner {
     blob_cache: Mutex<LruMap<TxHash, BlobTransactionSidecar, ByLength>>,
     size_tracker: BlobStoreSize,
     file_lock: RwLock<()>,
-    files_to_delete: RwLock<HashSet<B256>>,
+    txs_to_delete: RwLock<HashSet<B256>>,
 }
 
 impl DiskFileBlobStoreInner {
@@ -132,7 +132,7 @@ impl DiskFileBlobStoreInner {
             blob_cache: Mutex::new(LruMap::new(ByLength::new(max_length))),
             size_tracker: Default::default(),
             file_lock: Default::default(),
-            files_to_delete: Default::default(),
+            txs_to_delete: Default::default(),
         }
     }
 
