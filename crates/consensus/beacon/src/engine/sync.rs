@@ -566,7 +566,6 @@ mod tests {
         });
     }
 
-    /// Inserts headers and returns the last header and block body.
     fn insert_headers_into_client(
         client: &TestFullBlockClient,
         genesis_header: SealedHeader,
