@@ -406,7 +406,7 @@ mod tests {
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
     use reth_tasks::TokioTaskExecutor;
-    use std::{collections::VecDeque, future::poll_fn, sync::Arc};
+    use std::{collections::VecDeque, future::poll_fn, ops::Range, sync::Arc};
     use tokio::sync::watch;
 
     struct TestPipelineBuilder {
@@ -520,7 +520,7 @@ mod tests {
         }
     }
 
-    fn insert_headers_into_client(client: &mut TestFullBlockClient, range: Range<usize>) {
+    fn insert_headers_into_client(client: &TestFullBlockClient, range: Range<usize>) {
         let mut sealed_header = SealedHeader::default();
         let body = BlockBody::default();
         for _ in range {
@@ -545,7 +545,7 @@ mod tests {
         );
 
         let client = TestFullBlockClient::default();
-        insert_headers_into_client(0..10);
+        insert_headers_into_client(&client, 0..10);
         // force the pipeline to be "done" after 5 blocks
         let pipeline = TestPipelineBuilder::new()
             .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
@@ -559,7 +559,7 @@ mod tests {
             .build(pipeline, chain_spec);
 
         let tip = client.highest_block().expect("there should be blocks here");
-        sync_controller.set_pipeline_sync_target(tip.hash);
+        sync_controller.set_pipeline_sync_target(tip.hash());
 
         let sync_future = poll_fn(|cx| sync_controller.poll(cx));
         let next_event = poll!(sync_future);
@@ -567,7 +567,7 @@ mod tests {
         // can assert that the first event here is PipelineStarted because we set the sync target,
         // and we should get Ready because the pipeline should be spawned immediately
         assert_matches!(next_event, Poll::Ready(EngineSyncEvent::PipelineStarted(Some(target))) => {
-            assert_eq!(target, tip.hash);
+            assert_eq!(target, tip.hash());
         });
 
         // the next event should be the pipeline finishing in a good state

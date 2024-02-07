@@ -764,7 +764,11 @@ mod tests {
         assert_eq!(*received, SealedBlock::new(header, body));
     }
 
-    fn insert_headers_into_client(client: &mut TestFullBlockClient, range: Range<usize>) {
+    /// Inserts headers and returns the last header and block body.
+    fn insert_headers_into_client(
+        client: &TestFullBlockClient,
+        range: Range<usize>,
+    ) -> (SealedHeader, BlockBody) {
         let mut sealed_header = SealedHeader::default();
         let body = BlockBody::default();
         for _ in range {
@@ -776,12 +780,14 @@ mod tests {
             sealed_header = SealedHeader::new(header, hash);
             client.insert(sealed_header.clone(), body.clone());
         }
+
+        (sealed_header, body)
     }
 
     #[tokio::test]
     async fn download_full_block_range() {
         let client = TestFullBlockClient::default();
-        insert_headers_into_client(&mut client, 0..10);
+        let (header, body) = insert_headers_into_client(&client, 0..50);
         let client = FullBlockClient::test_client(client);
 
         let received = client.get_full_block_range(header.hash(), 1).await;
@@ -799,7 +805,7 @@ mod tests {
     #[tokio::test]
     async fn download_full_block_range_stream() {
         let client = TestFullBlockClient::default();
-        insert_headers_into_client(&mut client, 0..10);
+        let (header, body) = insert_headers_into_client(&client, 0..50);
         let client = FullBlockClient::test_client(client);
 
         let future = client.get_full_block_range(header.hash(), 1);
@@ -837,7 +843,7 @@ mod tests {
     async fn download_full_block_range_over_soft_limit() {
         // default soft limit is 20, so we will request 50 blocks
         let client = TestFullBlockClient::default();
-        insert_headers_into_client(&mut client, 0..50);
+        let (header, body) = insert_headers_into_client(&client, 0..50);
         let client = FullBlockClient::test_client(client);
 
         let received = client.get_full_block_range(header.hash(), 1).await;
