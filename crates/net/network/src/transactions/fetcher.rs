@@ -1,6 +1,7 @@
 use crate::{
     cache::{LruCache, LruMap},
     message::PeerRequest,
+    peers::{DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND},
 };
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
@@ -38,7 +39,8 @@ const MARGINAL_FALLBACK_PEERS_PER_TX: u8 = 1;
 const MAX_REQUEST_RETRIES_PER_TX_HASH: u8 = 2;
 
 /// Default maximum concurrent [`GetPooledTxRequest`]s.
-pub(super) const DEFAULT_MAX_CONCURRENT_TX_REQUESTS: u32 = 10000;
+pub(super) const DEFAULT_MAX_CONCURRENT_TX_REQUESTS: u32 =
+    DEFAULT_MAX_COUNT_PEERS_INBOUND + DEFAULT_MAX_COUNT_PEERS_OUTBOUND;
 
 /// Maximum concurrent [`GetPooledTxRequest`]s to allow per peer.
 pub(super) const MAX_CONCURRENT_TX_REQUESTS_PER_PEER: u8 = 1;
