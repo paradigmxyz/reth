@@ -574,7 +574,7 @@ mod tests {
             header.parent_hash = hash;
             header.number += 1;
             header.timestamp += 1;
-            sealed_header = SealedHeader::new(header, hash);
+            sealed_header = header.seal_slow();
             client.insert(sealed_header.clone(), body.clone());
         }
     }
