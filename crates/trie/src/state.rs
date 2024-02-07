@@ -145,29 +145,25 @@ impl HashedPostState {
     /// The prefix sets contain the hashed account and storage keys that have been changed in the
     /// post state.
     pub fn construct_prefix_sets(&self) -> (PrefixSet, HashMap<B256, PrefixSet>) {
-        // Initialize prefix sets.
-        let mut account_prefix_set = PrefixSetMut::default();
-        let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
-
         // Populate account prefix set.
+        let mut account_prefix_set = PrefixSetMut::with_capacity(self.accounts.len());
         for hashed_address in self.accounts.keys() {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
         }
 
         // Populate storage prefix sets.
+        let mut storage_prefix_sets = HashMap::with_capacity(self.storages.len());
         for (hashed_address, hashed_storage) in self.storages.iter() {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
 
-            let storage_prefix_set_entry = storage_prefix_set.entry(*hashed_address).or_default();
+            let mut prefix_set = PrefixSetMut::with_capacity(hashed_storage.storage.len());
             for hashed_slot in hashed_storage.storage.keys() {
-                storage_prefix_set_entry.insert(Nibbles::unpack(hashed_slot));
+                prefix_set.insert(Nibbles::unpack(hashed_slot));
             }
+            storage_prefix_sets.insert(*hashed_address, prefix_set.freeze());
         }
 
-        (
-            account_prefix_set.freeze(),
-            storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
-        )
+        (account_prefix_set.freeze(), storage_prefix_sets)
     }
 
     /// Calculate the state root for this [HashedPostState].
