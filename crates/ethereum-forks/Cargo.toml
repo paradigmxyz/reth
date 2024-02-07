@@ -21,7 +21,7 @@ alloy-rlp = { workspace = true, features = ["arrayvec", "derive"] }
 crc = "3"
 
 # misc
-serde = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive"], optional = true }
 thiserror.workspace = true
 
 # arbitrary utils
@@ -36,5 +36,7 @@ proptest.workspace = true
 proptest-derive.workspace = true
 
 [features]
+default = ["serde"]
+serde = ["dep:serde"]
 arbitrary = ["dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 optimism = []
