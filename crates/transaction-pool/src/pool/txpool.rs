@@ -15,7 +15,7 @@ use crate::{
         AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
     traits::{BestTransactionsAttributes, BlockInfo, PoolSize},
-    PoolConfig, PoolResult, PoolTransaction, PriceBumpConfig, TransactionOrdering,
+    PoolConfig, PoolResult, PoolTransaction, PriceBumpConfig, SubPoolLimit, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
@@ -751,60 +751,77 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) fn discard_worst(&mut self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
 
-        // Helper macro that discards the worst transactions for the pools
-        macro_rules! discard_worst {
-            ($this:ident, $removed:ident,  [$($limit:ident => $pool:ident),*]  ) => {
-                $ (
-                while $this
-                        .config
-                        .$limit
-                        .is_exceeded($this.$pool.len(), $this.$pool.size())
-                    {
-                        trace!(
-                            "discarding transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
-                            stringify!($pool),
-                            $this.config.$limit,
-                            $this.$pool.size(),
-                            $this.$pool.len(),
-                        );
+        // Function that discards the worst transactions for the pools
+        let mut discard = |limit: &SubPoolLimit,
+                           pool_name: &str,
+                           pool_size: usize,
+                           pool_len: usize,
+                           truncate: Fn(
+            SubPoolLimit,
+        )
+            -> Vec<Arc<ValidPoolTransaction<T::Transaction>>>| {
+            while limit.is_exceeded(pool_len, pool_size) {
+                trace!(
+                    "discarding transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
+                    pool_name,
+                    limit,
+                    pool_size,
+                    pool_len,
+                );
 
-                        // 1. first remove the worst transaction from the subpool
-                        let removed_from_subpool = $this.$pool.truncate_pool($this.config.$limit.clone());
+                // 1. first remove the worst transaction from the subpool
+                let removed_from_subpool = truncate(limit.clone());
 
-                        trace!(
-                            "removed {} transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
-                            removed_from_subpool.len(),
-                            stringify!($pool),
-                            $this.config.$limit,
-                            $this.$pool.size(),
-                            $this.$pool.len()
-                        );
+                trace!(
+                    "removed {} transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
+                    removed_from_subpool.len(),
+                    pool_name,
+                    limit,
+                    pool_size,
+                    pool_len,
+                );
 
-                        // 2. remove all transactions from the total set
-                        for tx in removed_from_subpool {
-                            $this.all_transactions.remove_transaction(tx.id());
+                // 2. remove all transactions from the total set
+                for tx in removed_from_subpool {
+                    let id = tx.id();
+                    self.all_transactions.remove_transaction(id);
 
-                            let id = *tx.id();
+                    // keep track of removed transaction
+                    removed.push(tx);
 
-                            // keep track of removed transaction
-                            removed.push(tx);
+                    // 3. remove all its descendants from the entire pool
+                    self.remove_descendants(id, &mut removed);
+                }
+            }
+        };
 
-                            // 3. remove all its descendants from the entire pool
-                            $this.remove_descendants(&id, &mut $removed);
-                        }
-                    }
-
-                )*
-            };
-        }
-
-        discard_worst!(
-            self, removed, [
-                pending_limit  => pending_pool,
-                basefee_limit  => basefee_pool,
-                blob_limit => blob_pool,
-                queued_limit  => queued_pool
-            ]
+        discard(
+            &self.config.pending_limit,
+            "pending",
+            self.pending_pool.size(),
+            self.pending_pool.len(),
+            |limit| self.pending_pool.truncate_pool(limit),
+        );
+        discard(
+            &self.config.basefee_limit,
+            "basefee",
+            self.basefee_pool.size(),
+            self.basefee_pool.len(),
+            |limit| self.basefee_pool.truncate_pool(limit),
+        );
+        discard(
+            &self.config.blob_limit,
+            "blob",
+            self.blob_pool.size(),
+            self.blob_pool.len(),
+            |limit| self.blob_pool.truncate_pool(limit),
+        );
+        discard(
+            &self.config.queued_limit,
+            "queued",
+            self.queued_pool.size(),
+            self.queued_pool.len(),
+            |limit| self.queued_pool.truncate_pool(limit),
         );
 
         removed
