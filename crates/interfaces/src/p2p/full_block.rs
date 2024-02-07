@@ -438,7 +438,7 @@ where
                     BodyResponse::PendingValidation(resp) => {
                         // ensure the block is valid, else retry
                         if let Err(err) = ensure_valid_body_response(header, resp.data()) {
-                            debug!(target: "downloaders", ?err,  hash=?header.hash, "Received wrong body in range response");
+                            debug!(target: "downloaders", ?err,  hash=?header.hash(), "Received wrong body in range response");
                             self.client.report_bad_message(resp.peer_id());
 
                             // get body that doesn't match, put back into vecdeque, and just retry
