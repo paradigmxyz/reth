@@ -12,12 +12,8 @@ use crate::{
 };
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
-use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
-use reth_beacon_consensus::{
-    hooks::{EngineHooks, PruneHook, SnapshotHook},
-    BeaconConsensus, BeaconConsensusEngine, BeaconConsensusEngineError,
-    MIN_BLOCKS_FOR_PIPELINE_RUN,
-};
+use reth_auto_seal_consensus::{AutoSealConsensus, MiningMode};
+use reth_beacon_consensus::BeaconConsensus;
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree,
 };
@@ -53,7 +49,6 @@ use reth_provider::{
     ProviderFactory, StageCheckpointReader,
 };
 use reth_revm::EvmProcessorFactory;
-use reth_rpc_engine_api::EngineApi;
 use reth_snapshot::Snapshotter;
 use reth_stages::{
     prelude::*,
