@@ -4,9 +4,9 @@ use crate::eth::error::{EthApiError, EthResult};
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs,
-    revm::{compat::into_reth_log, env::tx_env_with_recovered},
+    revm::env::tx_env_with_recovered,
     revm_primitives::{
-        BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
+        BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
     },
     Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     Receipts, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
@@ -18,13 +18,14 @@ use reth_revm::{
 };
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{db::states::bundle_state::BundleRetention, Database, DatabaseCommit, State};
+use revm_primitives::EnvWithHandlerCfg;
 use std::time::Instant;
 
-/// Configured [BlockEnv] and [CfgEnv] for a pending block
+/// Configured [BlockEnv] and [CfgEnvWithHandlerCfg] for a pending block
 #[derive(Debug, Clone)]
 pub(crate) struct PendingBlockEnv {
-    /// Configured [CfgEnv] for the pending block.
-    pub(crate) cfg: CfgEnv,
+    /// Configured [CfgEnvWithHandlerCfg] for the pending block.
+    pub(crate) cfg: CfgEnvWithHandlerCfg,
     /// Configured [BlockEnv] for the pending block.
     pub(crate) block_env: BlockEnv,
     /// Origin block for the config
@@ -131,10 +132,9 @@ impl PendingBlockEnv {
 
             // Configure the environment for the block.
             let env =
-                Env { cfg: cfg.clone(), block: block_env.clone(), tx: tx_env_with_recovered(&tx) };
+                Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx_env_with_recovered(&tx));
 
-            let mut evm = revm::EVM::with_env(env);
-            evm.database(&mut db);
+            let mut evm = revm::Evm::builder().with_env(env).with_db(&mut db).build();
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,
@@ -157,7 +157,8 @@ impl PendingBlockEnv {
                     }
                 }
             };
-
+            // drop evm to release db reference.
+            drop(evm);
             // commit changes
             db.commit(state);
 
@@ -182,7 +183,7 @@ impl PendingBlockEnv {
                 tx_type: tx.tx_type(),
                 success: result.is_success(),
                 cumulative_gas_used,
-                logs: result.logs().into_iter().map(into_reth_log).collect(),
+                logs: result.logs().into_iter().map(Into::into).collect(),
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
                 #[cfg(feature = "optimism")]
@@ -233,7 +234,7 @@ impl PendingBlockEnv {
 
         // check if cancun is activated to set eip4844 header fields correctly
         let blob_gas_used =
-            if cfg.spec_id >= SpecId::CANCUN { Some(sum_blob_gas_used) } else { None };
+            if cfg.handler_cfg.spec_id >= SpecId::CANCUN { Some(sum_blob_gas_used) } else { None };
 
         let header = Header {
             parent_hash,
@@ -266,8 +267,8 @@ impl PendingBlockEnv {
 
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
-/// This constructs a new [EVM](revm::EVM) with the given DB, and environment ([CfgEnv] and
-/// [BlockEnv]) to execute the pre block contract call.
+/// This constructs a new [Evm](revm::Evm) with the given DB, and environment [CfgEnvWithHandlerCfg]
+/// and [BlockEnv]) to execute the pre block contract call.
 ///
 /// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
 /// change.
@@ -275,23 +276,22 @@ fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit>(
     db: &mut DB,
     chain_spec: &ChainSpec,
     block_number: u64,
-    initialized_cfg: &CfgEnv,
+    initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
     parent_beacon_block_root: Option<B256>,
 ) -> EthResult<()>
 where
     DB::Error: std::fmt::Display,
 {
-    // Configure the environment for the block.
-    let env = Env {
-        cfg: initialized_cfg.clone(),
-        block: initialized_block_env.clone(),
-        ..Default::default()
-    };
-
     // apply pre-block EIP-4788 contract call
-    let mut evm_pre_block = revm::EVM::with_env(env);
-    evm_pre_block.database(db);
+    let mut evm_pre_block = revm::Evm::builder()
+        .with_db(db)
+        .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
+            initialized_cfg.clone(),
+            initialized_block_env.clone(),
+            Default::default(),
+        ))
+        .build();
 
     // initialize a block from the env, because the pre block call needs the block itself
     apply_beacon_root_contract_call(

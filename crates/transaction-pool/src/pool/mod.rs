@@ -498,8 +498,10 @@ where
             return added
         }
 
-        let mut listener = self.event_listener.write();
-        discarded.iter().for_each(|tx| listener.discarded(tx));
+        {
+            let mut listener = self.event_listener.write();
+            discarded.iter().for_each(|tx| listener.discarded(tx));
+        }
 
         // It may happen that a newly added transaction is immediately discarded, so we need to
         // adjust the result here
@@ -735,6 +737,11 @@ where
     /// Whether the pool is empty
     pub(crate) fn is_empty(&self) -> bool {
         self.get_pool_data().is_empty()
+    }
+
+    /// Returns whether or not the pool is over its configured size and transaction count limits.
+    pub(crate) fn is_exceeded(&self) -> bool {
+        self.pool.read().is_exceeded()
     }
 
     /// Enforces the size limits of pool and returns the discarded transactions if violated.

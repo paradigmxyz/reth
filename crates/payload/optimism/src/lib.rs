@@ -22,7 +22,7 @@ mod builder {
     use reth_primitives::{
         constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
         proofs,
-        revm::{compat::into_reth_log, env::tx_env_with_recovered},
+        revm::env::tx_env_with_recovered,
         Block, Hardfork, Header, IntoRecoveredTransaction, Receipt, Receipts,
         EMPTY_OMMER_ROOT_HASH, U256,
     };
@@ -31,7 +31,7 @@ mod builder {
     use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
     use revm::{
         db::states::bundle_state::BundleRetention,
-        primitives::{EVMError, Env, InvalidTransaction, ResultAndState},
+        primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
         DatabaseCommit, State,
     };
     use tracing::{debug, trace, warn};
@@ -209,11 +209,6 @@ mod builder {
         Client: StateProviderFactory,
         Pool: TransactionPool,
     {
-        debug_assert!(
-            args.config.initialized_cfg.optimism,
-            "optimism payload builder called on non-optimism chain"
-        );
-
         let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
         let state_provider = client.state_by_block_hash(config.parent_block.hash)?;
@@ -299,15 +294,14 @@ mod builder {
                     ))
                 })?;
 
-            // Configure the environment for the block.
-            let env = Env {
-                cfg: initialized_cfg.clone(),
-                block: initialized_block_env.clone(),
-                tx: tx_env_with_recovered(&sequencer_tx),
-            };
-
-            let mut evm = revm::EVM::with_env(env);
-            evm.database(&mut db);
+            let mut evm = revm::Evm::builder()
+                .with_db(&mut db)
+                .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
+                    initialized_cfg.clone(),
+                    initialized_block_env.clone(),
+                    tx_env_with_recovered(&sequencer_tx),
+                ))
+                .build();
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,
@@ -325,6 +319,8 @@ mod builder {
                 }
             };
 
+            // to realease the db reference drop evm.
+            drop(evm);
             // commit changes
             db.commit(state);
 
@@ -338,7 +334,7 @@ mod builder {
                 tx_type: sequencer_tx.tx_type(),
                 success: result.is_success(),
                 cumulative_gas_used,
-                logs: result.logs().into_iter().map(into_reth_log).collect(),
+                logs: result.logs().into_iter().map(Into::into).collect(),
                 deposit_nonce: depositor.map(|account| account.nonce),
                 // The deposit receipt version was introduced in Canyon to indicate an update to how
                 // receipt hashes should be computed when set. The state transition process
@@ -375,14 +371,15 @@ mod builder {
                 let tx = pool_tx.to_recovered_transaction();
 
                 // Configure the environment for the block.
-                let env = Env {
-                    cfg: initialized_cfg.clone(),
-                    block: initialized_block_env.clone(),
-                    tx: tx_env_with_recovered(&tx),
-                };
 
-                let mut evm = revm::EVM::with_env(env);
-                evm.database(&mut db);
+                let mut evm = revm::Evm::builder()
+                    .with_db(&mut db)
+                    .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
+                        initialized_cfg.clone(),
+                        initialized_block_env.clone(),
+                        tx_env_with_recovered(&tx),
+                    ))
+                    .build();
 
                 let ResultAndState { result, state } = match evm.transact() {
                     Ok(res) => res,
@@ -408,7 +405,8 @@ mod builder {
                         }
                     }
                 };
-
+                // to realease the db reference drop evm.
+                drop(evm);
                 // commit changes
                 db.commit(state);
 
@@ -423,7 +421,7 @@ mod builder {
                     tx_type: tx.tx_type(),
                     success: result.is_success(),
                     cumulative_gas_used,
-                    logs: result.logs().into_iter().map(into_reth_log).collect(),
+                    logs: result.logs().into_iter().map(Into::into).collect(),
                     deposit_nonce: None,
                     deposit_receipt_version: None,
                 }));

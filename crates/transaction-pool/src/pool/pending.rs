@@ -410,8 +410,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             // loop through the highest nonces set, removing transactions until we reach the limit
             for tx in self.highest_nonces.iter() {
                 // return early if the pool is under limits
-                if original_size - total_size <= limit.max_size &&
-                    original_length - total_removed <= limit.max_txs ||
+                if !limit.is_exceeded(original_length - total_removed, original_size - total_size) ||
                     non_local_senders == 0
                 {
                     // need to remove remaining transactions before exiting
@@ -440,6 +439,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
                     end_removed.push(tx);
                 }
             }
+
+            // return if either the pool is under limits or there are no more _eligible_
+            // transactions to remove
+            if !limit.is_exceeded(self.len(), self.size()) || non_local_senders == 0 {
+                return
+            }
         }
     }
 
@@ -460,7 +465,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let mut removed = Vec::new();
         self.remove_to_limit(&limit, false, &mut removed);
 
-        if self.size() <= limit.max_size && self.len() <= limit.max_txs {
+        if !limit.is_exceeded(self.len(), self.size()) {
             return removed
         }
 

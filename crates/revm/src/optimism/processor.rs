@@ -3,10 +3,7 @@ use reth_interfaces::executor::{
     BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
 };
 use reth_node_api::ConfigureEvmEnv;
-use reth_primitives::{
-    revm::compat::into_reth_log, revm_primitives::ResultAndState, BlockWithSenders, Hardfork,
-    Receipt, U256,
-};
+use reth_primitives::{revm_primitives::ResultAndState, BlockWithSenders, Hardfork, Receipt, U256};
 use reth_provider::{BlockExecutor, BlockExecutorStats, BundleStateWithReceipts};
 use revm::DatabaseCommit;
 use std::time::Instant;
@@ -137,7 +134,7 @@ where
                 success: result.is_success(),
                 cumulative_gas_used,
                 // convert to reth log
-                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
+                logs: result.into_logs().into_iter().map(Into::into).collect(),
                 #[cfg(feature = "optimism")]
                 deposit_nonce: depositor.map(|account| account.nonce),
                 // The deposit receipt version was introduced in Canyon to indicate an update to how
@@ -157,7 +154,7 @@ where
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
         let receipts = std::mem::take(&mut self.receipts);
         BundleStateWithReceipts::new(
-            self.evm.db().unwrap().take_bundle(),
+            self.evm.context.evm.db.take_bundle(),
             receipts,
             self.first_block.unwrap_or_default(),
         )
@@ -168,6 +165,6 @@ where
     }
 
     fn size_hint(&self) -> Option<usize> {
-        self.evm.db.as_ref().map(|db| db.bundle_size_hint())
+        Some(self.evm.context.evm.db.bundle_size_hint())
     }
 }
