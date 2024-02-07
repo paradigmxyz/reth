@@ -334,7 +334,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             .state
             .buffered_blocks
             .lowest_ancestor(&block_hash)
-            .ok_or_else(|| BlockchainTreeError::BlockBufferingFailed { block_hash })?;
+            .ok_or(BlockchainTreeError::BlockBufferingFailed { block_hash })?;
 
         Ok(BlockStatus::Disconnected { missing_ancestor: lowest_ancestor.parent_num_hash() })
     }
