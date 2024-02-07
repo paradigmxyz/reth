@@ -14,7 +14,7 @@ use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind,
     PoolTransactionError,
 };
-use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError};
+use revm::primitives::{EVMError, ExecutionResult, HaltReason, OutOfGasError};
 use std::time::Duration;
 
 /// Result alias
@@ -110,6 +110,9 @@ pub enum EthApiError {
     #[error(transparent)]
     #[cfg(feature = "optimism")]
     Optimism(#[from] OptimismEthApiError),
+    /// Evm generic purpose error.
+    #[error("Revm error: {0}")]
+    EvmCustom(String),
 }
 
 /// Eth Optimism Api Error
@@ -150,7 +153,8 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::ExcessBlobGasNotSet |
             EthApiError::InvalidBlockData(_) |
             EthApiError::Internal(_) |
-            EthApiError::TransactionNotFound => internal_rpc_err(error.to_string()),
+            EthApiError::TransactionNotFound |
+            EthApiError::EvmCustom(_) => internal_rpc_err(error.to_string()),
             EthApiError::UnknownBlockNumber | EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
@@ -234,6 +238,7 @@ where
                 EthApiError::ExcessBlobGasNotSet
             }
             EVMError::Database(err) => err.into(),
+            EVMError::Custom(err) => EthApiError::EvmCustom(err),
         }
     }
 }
@@ -320,7 +325,7 @@ pub enum RpcInvalidTransactionError {
     Revert(RevertError),
     /// Unspecific EVM halt error.
     #[error("EVM error {0:?}")]
-    EvmHalt(Halt),
+    EvmHalt(HaltReason),
     /// Invalid chain id set for the transaction.
     #[error("invalid chain ID")]
     InvalidChainId,
@@ -385,10 +390,10 @@ impl RpcInvalidTransactionError {
     /// Converts the halt error
     ///
     /// Takes the configured gas limit of the transaction which is attached to the error
-    pub(crate) fn halt(reason: Halt, gas_limit: u64) -> Self {
+    pub(crate) fn halt(reason: HaltReason, gas_limit: u64) -> Self {
         match reason {
-            Halt::OutOfGas(err) => RpcInvalidTransactionError::out_of_gas(err, gas_limit),
-            Halt::NonceOverflow => RpcInvalidTransactionError::NonceMaxValue,
+            HaltReason::OutOfGas(err) => RpcInvalidTransactionError::out_of_gas(err, gas_limit),
+            HaltReason::NonceOverflow => RpcInvalidTransactionError::NonceMaxValue,
             err => RpcInvalidTransactionError::EvmHalt(err),
         }
     }
@@ -397,7 +402,7 @@ impl RpcInvalidTransactionError {
     pub(crate) fn out_of_gas(reason: OutOfGasError, gas_limit: u64) -> Self {
         let gas_limit = U256::from(gas_limit);
         match reason {
-            OutOfGasError::BasicOutOfGas => RpcInvalidTransactionError::BasicOutOfGas(gas_limit),
+            OutOfGasError::Basic => RpcInvalidTransactionError::BasicOutOfGas(gas_limit),
             OutOfGasError::Memory => RpcInvalidTransactionError::MemoryOutOfGas(gas_limit),
             OutOfGasError::Precompile => RpcInvalidTransactionError::PrecompileOutOfGas(gas_limit),
             OutOfGasError::InvalidOperand => {
@@ -449,7 +454,7 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::NonceOverflowInTransaction => {
                 RpcInvalidTransactionError::NonceMaxValue
             }
-            InvalidTransaction::CreateInitcodeSizeLimit => {
+            InvalidTransaction::CreateInitCodeSizeLimit => {
                 RpcInvalidTransactionError::MaxInitCodeSizeExceeded
             }
             InvalidTransaction::NonceTooHigh { .. } => RpcInvalidTransactionError::NonceTooHigh,

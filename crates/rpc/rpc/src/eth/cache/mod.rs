@@ -11,7 +11,7 @@ use reth_provider::{
     BlockReader, CanonStateNotification, EvmEnvProvider, StateProviderFactory, TransactionVariant,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
-use revm::primitives::{BlockEnv, CfgEnv};
+use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 use schnellru::{ByLength, Limiter};
 use std::{
     future::Future,
@@ -44,7 +44,7 @@ type BlockWithSendersResponseSender = oneshot::Sender<ProviderResult<Option<Bloc
 type ReceiptsResponseSender = oneshot::Sender<ProviderResult<Option<Arc<Vec<Receipt>>>>>;
 
 /// The type that can send the response to a requested env
-type EnvResponseSender = oneshot::Sender<ProviderResult<(CfgEnv, BlockEnv)>>;
+type EnvResponseSender = oneshot::Sender<ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>>;
 
 type BlockLruCache<L> = MultiConsumerLruCache<
     B256,
@@ -56,7 +56,8 @@ type BlockLruCache<L> = MultiConsumerLruCache<
 type ReceiptsLruCache<L> =
     MultiConsumerLruCache<B256, Arc<Vec<Receipt>>, L, ReceiptsResponseSender>;
 
-type EnvLruCache<L> = MultiConsumerLruCache<B256, (CfgEnv, BlockEnv), L, EnvResponseSender>;
+type EnvLruCache<L> =
+    MultiConsumerLruCache<B256, (CfgEnvWithHandlerCfg, BlockEnv), L, EnvResponseSender>;
 
 /// Provides async access to cached eth data
 ///
@@ -252,7 +253,10 @@ impl EthStateCache {
     ///
     /// Returns an error if the corresponding header (required for populating the envs) was not
     /// found.
-    pub async fn get_evm_env(&self, block_hash: B256) -> ProviderResult<(CfgEnv, BlockEnv)> {
+    pub async fn get_evm_env(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetEnv { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
@@ -285,7 +289,7 @@ pub(crate) struct EthStateCacheService<
 > where
     LimitBlocks: Limiter<B256, BlockWithSenders>,
     LimitReceipts: Limiter<B256, Arc<Vec<Receipt>>>,
-    LimitEnvs: Limiter<B256, (CfgEnv, BlockEnv)>,
+    LimitEnvs: Limiter<B256, (CfgEnvWithHandlerCfg, BlockEnv)>,
 {
     /// The type used to lookup data from disk
     provider: Provider,
@@ -476,7 +480,10 @@ where
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
-                                    let mut cfg = CfgEnv::default();
+                                    let mut cfg = CfgEnvWithHandlerCfg::new(
+                                        CfgEnv::default(),
+                                        SpecId::LATEST,
+                                    );
                                     let mut block_env = BlockEnv::default();
                                     let res = provider
                                         .fill_env_at(
@@ -551,7 +558,7 @@ enum CacheAction {
     GetReceipts { block_hash: B256, response_tx: ReceiptsResponseSender },
     BlockWithSendersResult { block_hash: B256, res: ProviderResult<Option<BlockWithSenders>> },
     ReceiptsResult { block_hash: B256, res: ProviderResult<Option<Arc<Vec<Receipt>>>> },
-    EnvResult { block_hash: B256, res: Box<ProviderResult<(CfgEnv, BlockEnv)>> },
+    EnvResult { block_hash: B256, res: Box<ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>> },
     CacheNewCanonicalChain { blocks: Vec<SealedBlockWithSenders>, receipts: Vec<BlockReceipts> },
 }
 

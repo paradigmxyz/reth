@@ -1,5 +1,5 @@
 use reth_primitives::{revm::env::fill_block_env, Address, ChainSpec, Header, Transaction, U256};
-use revm_primitives::{BlockEnv, CfgEnv, SpecId, TxEnv};
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId, TxEnv};
 
 /// This represents the set of methods used to configure the EVM before execution.
 pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
@@ -11,9 +11,9 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     where
         T: AsRef<Transaction>;
 
-    /// Fill [CfgEnv] fields according to the chain spec and given header
+    /// Fill [CfgEnvWithHandlerCfg] fields according to the chain spec and given header
     fn fill_cfg_env(
-        cfg_env: &mut CfgEnv,
+        cfg_env: &mut CfgEnvWithHandlerCfg,
         chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
@@ -22,14 +22,14 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     /// Convenience function to call both [fill_cfg_env](ConfigureEvmEnv::fill_cfg_env) and
     /// [fill_block_env].
     fn fill_cfg_and_block_env(
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
         chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     ) {
         Self::fill_cfg_env(cfg, chain_spec, header, total_difficulty);
-        let after_merge = cfg.spec_id >= SpecId::MERGE;
+        let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
         fill_block_env(block_env, chain_spec, header, after_merge);
     }
 }
