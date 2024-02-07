@@ -212,12 +212,12 @@ where
             None => return Err(EthApiError::TransactionNotFound),
             Some(res) => res,
         };
-        let (cfg, block_env, _) = self.inner.eth_api.evm_env_at(block.hash.into()).await?;
+        let (cfg, block_env, _) = self.inner.eth_api.evm_env_at(block.hash().into()).await?;
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
         let state_at: BlockId = block.parent_hash.into();
-        let block_hash = block.hash;
+        let block_hash = block.hash();
         let block_txs = block.into_transactions_ecrecovered();
 
         let this = self.clone();
@@ -413,7 +413,7 @@ where
         // but if all transactions are to be replayed, we can use the state at the block itself
         let num_txs = transaction_index.index().unwrap_or(block.body.len());
         if num_txs == block.body.len() {
-            at = block.hash;
+            at = block.hash();
             replay_block_txs = false;
         }
 

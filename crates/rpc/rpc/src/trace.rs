@@ -353,7 +353,7 @@ where
             maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
         if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
-            if let Some(header_td) = self.provider().header_td(&block.header.hash)? {
+            if let Some(header_td) = self.provider().header_td(&block.header.hash())? {
                 if let Some(base_block_reward) = base_block_reward(
                     self.provider().chain_spec().as_ref(),
                     block.header.number,
@@ -549,7 +549,7 @@ struct TraceApiInner<Provider, Eth> {
 /// beneficiary.
 fn reward_trace(header: &SealedHeader, reward: RewardAction) -> LocalizedTransactionTrace {
     LocalizedTransactionTrace {
-        block_hash: Some(header.hash),
+        block_hash: Some(header.hash()),
         block_number: Some(header.number),
         transaction_hash: None,
         transaction_position: None,

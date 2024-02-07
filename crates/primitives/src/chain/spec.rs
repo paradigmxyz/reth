@@ -700,7 +700,7 @@ impl ChainSpec {
 
     /// Get the sealed header for the genesis block.
     pub fn sealed_genesis_header(&self) -> SealedHeader {
-        SealedHeader { header: self.genesis_header(), hash: self.genesis_hash() }
+        SealedHeader::new(self.genesis_header(), self.genesis_hash())
     }
 
     /// Get the initial base fee of the genesis block.

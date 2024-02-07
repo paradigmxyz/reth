@@ -147,9 +147,9 @@ where
                             );
 
                             let state = ForkchoiceState {
-                                head_block_hash: new_header.hash,
-                                finalized_block_hash: new_header.hash,
-                                safe_block_hash: new_header.hash,
+                                head_block_hash: new_header.hash(),
+                                finalized_block_hash: new_header.hash(),
+                                safe_block_hash: new_header.hash(),
                             };
                             drop(storage);
 
