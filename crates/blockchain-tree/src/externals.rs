@@ -46,6 +46,7 @@ impl<DB: Database, EF> TreeExternals<DB, EF> {
         &self,
         num_hashes: usize,
     ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+        // Fetch the latest canonical hashes from the database
         let mut hashes = self
             .provider_factory
             .provider()?
@@ -55,6 +56,12 @@ impl<DB: Database, EF> TreeExternals<DB, EF> {
             .take(num_hashes)
             .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?;
 
+        // Fetch the same number of latest canonical hashes from the snapshots and merge them with
+        // the database hashes. It is needed due to the fact that we're writing directly to
+        // snapshots in pipeline sync, but to the database in live sync, which means that the latest
+        // canonical hashes in the snapshot might be more recent than in the database, and vice
+        // versa, or even some ranges of the latest `num_hashes` blocks may be in database, and some
+        // ranges in snapshots.
         let snapshot_provider = self.provider_factory.snapshot_provider();
         let total_headers = snapshot_provider.count_entries::<tables::Headers>()? as u64;
         if total_headers > 0 {
