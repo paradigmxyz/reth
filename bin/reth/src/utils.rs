@@ -58,13 +58,11 @@ impl<'a, DB: Database> DbTool<'a, DB> {
                 if let Ok((k, v)) = row {
                     let (key, value) = (k.into_key(), v.into_value());
 
-                    if key.len() + value.len() < filter.min_row_size {
-                        return None
-                    }
-                    if key.len() < filter.min_key_size {
-                        return None
-                    }
-                    if value.len() < filter.min_value_size {
+                    let (key_len, value_len) = (key.len(), value.len());
+                    if key_len + value_len < filter.min_row_size ||
+                        key_len < filter.min_key_size ||
+                        value_len < filter.min_value_size
+                    {
                         return None
                     }
 
@@ -96,21 +94,13 @@ impl<'a, DB: Database> DbTool<'a, DB> {
                 None
             };
 
-            if filter.reverse {
-                Ok(cursor
-                    .walk_back(None)?
-                    .skip(filter.skip)
-                    .filter_map(map_filter)
-                    .take(filter.len)
-                    .collect::<Vec<(_, _)>>())
-            } else {
-                Ok(cursor
-                    .walk(None)?
-                    .skip(filter.skip)
-                    .filter_map(map_filter)
-                    .take(filter.len)
-                    .collect::<Vec<(_, _)>>())
-            }
+            let mut walk =
+                if filter.reverse { cursor.walk_back(None)? } else { cursor.walk(None)? };
+            Ok(walk
+                .skip(filter.skip)
+                .filter_map(map_filter)
+                .take(filter.len)
+                .collect::<Vec<(_, _)>>())
         })?;
 
         Ok((data.map_err(|e: DatabaseError| eyre::eyre!(e))?, hits))
