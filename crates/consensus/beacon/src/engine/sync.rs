@@ -520,6 +520,20 @@ mod tests {
         }
     }
 
+    fn insert_headers_into_client(client: &mut TestFullBlockClient, range: Range<usize>) {
+        let mut sealed_header = SealedHeader::default();
+        let body = BlockBody::default();
+        for _ in range {
+            let (mut header, hash) = sealed_header.split();
+            // update to the next header
+            header.parent_hash = hash;
+            header.number += 1;
+
+            sealed_header = SealedHeader::new(header, hash);
+            client.insert(sealed_header.clone(), body.clone());
+        }
+    }
+
     #[tokio::test]
     async fn pipeline_started_after_setting_target() {
         let chain_spec = Arc::new(
@@ -531,16 +545,7 @@ mod tests {
         );
 
         let client = TestFullBlockClient::default();
-        let mut header = SealedHeader::default();
-        let body = BlockBody::default();
-        client.insert(header.clone(), body.clone());
-        for _ in 0..10 {
-            header.parent_hash = header.hash_slow();
-            header.number += 1;
-            header = header.header.seal_slow();
-            client.insert(header.clone(), body.clone());
-        }
-
+        insert_headers_into_client(0..10);
         // force the pipeline to be "done" after 5 blocks
         let pipeline = TestPipelineBuilder::new()
             .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
@@ -597,7 +602,7 @@ mod tests {
             header.parent_hash = header.hash_slow();
             header.number += 1;
             header.timestamp += 1;
-            header = header.header.seal_slow();
+            header = header.header().seal_slow();
             client.insert(header.clone(), body.clone());
         }
 
