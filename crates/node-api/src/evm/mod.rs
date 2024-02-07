@@ -4,6 +4,32 @@ use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId, TxEnv};
 /// EVM configuration trait.
 pub trait EvmConfig: ConfigureEvmEnv + Clone + Send + Sync + 'static {}
 
+/// Trait for configuring the EVM.
+pub trait EvmConfig : ConfigureEvmEnv {
+
+    // TODO add functions for configuring the EVM::builder
+
+    /// Returns the EVM handler for the given spec id.
+    ///
+    ///
+    /// TODO this function needs a bunch of generics to satisfy the EvmHandler struct
+    ///
+    /// We could also add more functions to make creating EvmHandler easier; e.g: `LoadPrecompilesHandle`
+    ///
+    /// See also `EvmHandler::mainnet`
+    ///
+    /// ```
+    ///
+    ///  let mut evm = revm::Evm::builder().with_db(db)
+    ///  // TODO how do I set the handler to then evm?
+    /// .with_env_with_handler_cfg(env).build();
+    ///
+    /// ```
+    ///
+    fn evm_handler(&self, spec_id: SpecId) -> EvmHandler;
+
+}
+
 /// This represents the set of methods used to configure the EVM before execution.
 pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     /// The type of the transaction metadata.
