@@ -109,13 +109,13 @@ mod tests {
         let mut cache = InvalidHeaderCache::new(10);
         let header = Header::default().seal_slow();
         cache.insert(header.clone());
-        assert_eq!(cache.headers.get(&header.hash).unwrap().hit_count, 0);
+        assert_eq!(cache.headers.get(&header.hash()).unwrap().hit_count, 0);
 
         for hit in 1..INVALID_HEADER_HIT_EVICTION_THRESHOLD {
-            assert!(cache.get(&header.hash).is_some());
-            assert_eq!(cache.headers.get(&header.hash).unwrap().hit_count, hit);
+            assert!(cache.get(&header.hash()).is_some());
+            assert_eq!(cache.headers.get(&header.hash()).unwrap().hit_count, hit);
         }
 
-        assert!(cache.get(&header.hash).is_none());
+        assert!(cache.get(&header.hash()).is_none());
     }
 }

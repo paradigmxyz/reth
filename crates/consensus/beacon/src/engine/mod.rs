@@ -2137,7 +2137,7 @@ mod tests {
                 .build();
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
-            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
             env.db
                 .update(|tx| {
@@ -2152,15 +2152,15 @@ mod tests {
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
             let forkchoice = ForkchoiceState {
-                head_block_hash: block1.hash,
-                finalized_block_hash: block1.hash,
+                head_block_hash: block1.hash(),
+                finalized_block_hash: block1.hash(),
                 ..Default::default()
             };
 
             let result = env.send_forkchoice_updated(forkchoice).await.unwrap();
             let expected_result = ForkchoiceUpdated::new(PayloadStatus::new(
                 PayloadStatusEnum::Valid,
-                Some(block1.hash),
+                Some(block1.hash()),
             ));
             assert_eq!(result, expected_result);
             assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));
@@ -2187,15 +2187,15 @@ mod tests {
                 .build();
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
-            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
-            let next_head = random_block(&mut rng, 2, Some(block1.hash), None, Some(0));
+            let next_head = random_block(&mut rng, 2, Some(block1.hash()), None, Some(0));
             let next_forkchoice_state = ForkchoiceState {
-                head_block_hash: next_head.hash,
-                finalized_block_hash: block1.hash,
+                head_block_hash: next_head.hash(),
+                finalized_block_hash: block1.hash(),
                 ..Default::default()
             };
 
@@ -2211,7 +2211,7 @@ mod tests {
 
             let result = env.send_forkchoice_retry_on_syncing(next_forkchoice_state).await.unwrap();
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Valid)
-                .with_latest_valid_hash(next_head.hash);
+                .with_latest_valid_hash(next_head.hash());
             assert_eq!(result, expected_result);
 
             assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));
@@ -2237,7 +2237,7 @@ mod tests {
                 .build();
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
-            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
 
             let engine = spawn_consensus_engine(consensus_engine);
@@ -2245,7 +2245,7 @@ mod tests {
             let res = env
                 .send_forkchoice_updated(ForkchoiceState {
                     head_block_hash: rng.gen(),
-                    finalized_block_hash: block1.hash,
+                    finalized_block_hash: block1.hash(),
                     ..Default::default()
                 })
                 .await;
@@ -2274,16 +2274,16 @@ mod tests {
                 .build();
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
-            let mut block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
-            block1.header.difficulty = U256::from(1);
+            let mut block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
+            block1.header.set_difficulty(U256::from(1));
 
             // a second pre-merge block
-            let mut block2 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
-            block2.header.difficulty = U256::from(1);
+            let mut block2 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
+            block2.header.set_difficulty(U256::from(1));
 
             // a transition block
-            let mut block3 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
-            block3.header.difficulty = U256::from(1);
+            let mut block3 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
+            block3.header.set_difficulty(U256::from(1));
 
             insert_blocks(
                 env.db.as_ref(),
@@ -2295,8 +2295,8 @@ mod tests {
 
             let res = env
                 .send_forkchoice_updated(ForkchoiceState {
-                    head_block_hash: block1.hash,
-                    finalized_block_hash: block1.hash,
+                    head_block_hash: block1.hash(),
+                    finalized_block_hash: block1.hash(),
                     ..Default::default()
                 })
                 .await;
@@ -2327,7 +2327,7 @@ mod tests {
                 .build();
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
-            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
 
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
 
@@ -2335,13 +2335,13 @@ mod tests {
 
             let res = env
                 .send_forkchoice_updated(ForkchoiceState {
-                    head_block_hash: block1.hash,
-                    finalized_block_hash: block1.hash,
+                    head_block_hash: block1.hash(),
+                    finalized_block_hash: block1.hash(),
                     ..Default::default()
                 })
                 .await;
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
-                validation_error: BlockValidationError::BlockPreMerge { hash: block1.hash }
+                validation_error: BlockValidationError::BlockPreMerge { hash: block1.hash() }
                     .to_string(),
             })
             .with_latest_valid_hash(B256::ZERO);
@@ -2422,8 +2422,8 @@ mod tests {
                 .build();
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
-            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
-            let block2 = random_block(&mut rng, 2, Some(block1.hash), None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
+            let block2 = random_block(&mut rng, 2, Some(block1.hash()), None, Some(0));
             insert_blocks(
                 env.db.as_ref(),
                 chain_spec.clone(),
@@ -2435,13 +2435,13 @@ mod tests {
             // Send forkchoice
             let res = env
                 .send_forkchoice_updated(ForkchoiceState {
-                    head_block_hash: block1.hash,
-                    finalized_block_hash: block1.hash,
+                    head_block_hash: block1.hash(),
+                    finalized_block_hash: block1.hash(),
                     ..Default::default()
                 })
                 .await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
-                .with_latest_valid_hash(block1.hash);
+                .with_latest_valid_hash(block1.hash());
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
@@ -2451,7 +2451,7 @@ mod tests {
                 .unwrap();
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
-                .with_latest_valid_hash(block2.hash);
+                .with_latest_valid_hash(block2.hash());
             assert_eq!(result, expected_result);
             assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));
         }
@@ -2498,13 +2498,13 @@ mod tests {
             // Send forkchoice
             let res = env
                 .send_forkchoice_updated(ForkchoiceState {
-                    head_block_hash: block1.hash,
-                    finalized_block_hash: block1.hash,
+                    head_block_hash: block1.hash(),
+                    finalized_block_hash: block1.hash(),
                     ..Default::default()
                 })
                 .await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
-                .with_latest_valid_hash(block1.hash);
+                .with_latest_valid_hash(block1.hash());
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
             assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));
         }
@@ -2536,13 +2536,13 @@ mod tests {
             // Send forkchoice
             let res = env
                 .send_forkchoice_updated(ForkchoiceState {
-                    head_block_hash: genesis.hash,
-                    finalized_block_hash: genesis.hash,
+                    head_block_hash: genesis.hash(),
+                    finalized_block_hash: genesis.hash(),
                     ..Default::default()
                 })
                 .await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
-                .with_latest_valid_hash(genesis.hash);
+                .with_latest_valid_hash(genesis.hash());
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
@@ -2559,15 +2559,17 @@ mod tests {
         async fn payload_pre_merge() {
             let data = BlockChainTestData::default();
             let mut block1 = data.blocks[0].0.block.clone();
-            block1.header.difficulty = MAINNET.fork(Hardfork::Paris).ttd().unwrap() - U256::from(1);
+            block1
+                .header
+                .set_difficulty(MAINNET.fork(Hardfork::Paris).ttd().unwrap() - U256::from(1));
             block1 = block1.unseal().seal_slow();
             let (block2, exec_result2) = data.blocks[1].clone();
-            let mut block2 = block2.block;
+            let mut block2 = block2.unseal().block;
             block2.withdrawals = None;
-            block2.header.parent_hash = block1.hash;
+            block2.header.parent_hash = block1.hash();
             block2.header.base_fee_per_gas = Some(100);
             block2.header.difficulty = U256::ZERO;
-            block2 = block2.unseal().seal_slow();
+            let block2 = block2.clone().seal_slow();
 
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
@@ -2596,14 +2598,14 @@ mod tests {
             // Send forkchoice
             let res = env
                 .send_forkchoice_updated(ForkchoiceState {
-                    head_block_hash: block1.hash,
-                    finalized_block_hash: block1.hash,
+                    head_block_hash: block1.hash(),
+                    finalized_block_hash: block1.hash(),
                     ..Default::default()
                 })
                 .await;
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: BlockValidationError::BlockPreMerge { hash: block1.hash }
+                validation_error: BlockValidationError::BlockPreMerge { hash: block1.hash() }
                     .to_string(),
             })
             .with_latest_valid_hash(B256::ZERO);
@@ -2616,7 +2618,7 @@ mod tests {
                 .unwrap();
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: BlockValidationError::BlockPreMerge { hash: block2.hash }
+                validation_error: BlockValidationError::BlockPreMerge { hash: block2.hash() }
                     .to_string(),
             })
             .with_latest_valid_hash(B256::ZERO);

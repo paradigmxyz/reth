@@ -397,8 +397,8 @@ mod tests {
     use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
     use reth_interfaces::{p2p::either::EitherDownloader, test_utils::TestFullBlockClient};
     use reth_primitives::{
-        constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpec,
-        ChainSpecBuilder, Header, SealedHeader, MAINNET,
+        stage::StageCheckpoint, BlockBody, ChainSpec,
+        ChainSpecBuilder, SealedHeader, MAINNET,
     };
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
@@ -520,20 +520,6 @@ mod tests {
         }
     }
 
-    fn insert_headers_into_client(client: &TestFullBlockClient, range: Range<usize>) {
-        let mut sealed_header = SealedHeader::default();
-        let body = BlockBody::default();
-        for _ in range {
-            let (mut header, hash) = sealed_header.split();
-            // update to the next header
-            header.parent_hash = hash;
-            header.number += 1;
-
-            sealed_header = SealedHeader::new(header, hash);
-            client.insert(sealed_header.clone(), body.clone());
-        }
-    }
-
     #[tokio::test]
     async fn pipeline_started_after_setting_target() {
         let chain_spec = Arc::new(
@@ -580,6 +566,20 @@ mod tests {
         });
     }
 
+    fn insert_headers_into_client(client: &TestFullBlockClient, range: Range<usize>) {
+        let mut sealed_header = SealedHeader::default();
+        let body = BlockBody::default();
+        for _ in range {
+            let (mut header, hash) = sealed_header.split();
+            // update to the next header
+            header.parent_hash = hash;
+            header.number += 1;
+            header.timestamp += 1;
+            sealed_header = SealedHeader::new(header, hash);
+            client.insert(sealed_header.clone(), body.clone());
+        }
+    }
+
     #[tokio::test]
     async fn controller_sends_range_request() {
         let chain_spec = Arc::new(
@@ -591,20 +591,7 @@ mod tests {
         );
 
         let client = TestFullBlockClient::default();
-        let mut header = Header {
-            base_fee_per_gas: Some(7),
-            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
-            ..Default::default()
-        }
-        .seal_slow();
-        let body = BlockBody::default();
-        for _ in 0..10 {
-            header.parent_hash = header.hash_slow();
-            header.number += 1;
-            header.timestamp += 1;
-            header = header.header().seal_slow();
-            client.insert(header.clone(), body.clone());
-        }
+        insert_headers_into_client(&client, 0..10);
 
         // set up a pipeline
         let pipeline = TestPipelineBuilder::new().build(chain_spec.clone());
@@ -616,14 +603,14 @@ mod tests {
         let tip = client.highest_block().expect("there should be blocks here");
 
         // call the download range method
-        sync_controller.download_block_range(tip.hash, tip.number);
+        sync_controller.download_block_range(tip.hash(), tip.number);
 
         // ensure we have one in flight range request
         assert_eq!(sync_controller.inflight_block_range_requests.len(), 1);
 
         // ensure the range request is made correctly
         let first_req = sync_controller.inflight_block_range_requests.first().unwrap();
-        assert_eq!(first_req.start_hash(), tip.hash);
+        assert_eq!(first_req.start_hash(), tip.hash());
         assert_eq!(first_req.count(), tip.number);
 
         // ensure they are in ascending order

@@ -685,20 +685,46 @@ impl SealedHeader {
         &self.header
     }
 
-    /// Return header/block hash.
+    /// Returns header/block hash.
     #[inline]
     pub fn hash(&self) -> BlockHash {
         self.hash
     }
 
-    #[cfg(test)]
+    /// Updates the block header.
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn set_header(&mut self, header: Header) {
         self.header = header
     }
 
-    #[cfg(test)]
+    /// Updates the block hash.
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn set_hash(&mut self, hash: BlockHash) {
         self.hash = hash
+    }
+
+    /// Updates the parent block hash.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_parent_hash(&mut self, hash: BlockHash) {
+        self.header.parent_hash = hash
+    }
+
+    /// Updates the block number.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_block_number(&mut self, number: BlockNumber) {
+        self.header.number = number;
+    }
+
+    /// Updates the block state root.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_state_root(&mut self, state_root: B256) {
+        self.header.state_root = state_root;
+    }
+
+    /// Updates the block difficulty.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_difficulty(&mut self, difficulty: U256) {
+        self.header.difficulty = difficulty;
     }
 
     /// Checks the gas limit for consistency between parent and self headers.

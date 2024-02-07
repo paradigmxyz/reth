@@ -1288,8 +1288,8 @@ mod tests {
     fn setup_genesis<DB: Database>(factory: &ProviderFactory<DB>, mut genesis: SealedBlock) {
         // insert genesis to db.
 
-        genesis.header.header.number = 10;
-        genesis.header.header.state_root = EMPTY_ROOT_HASH;
+        genesis.header.set_block_number(10);
+        genesis.header.set_state_root(EMPTY_ROOT_HASH);
         let provider = factory.provider_rw().unwrap();
 
         provider
@@ -1506,14 +1506,14 @@ mod tests {
         let fork_block = mock_block(1, Some(chain_spec.genesis_hash()), Vec::from([mock_tx(0)]), 1);
 
         let canonical_block_1 =
-            mock_block(2, Some(fork_block.hash), Vec::from([mock_tx(1), mock_tx(2)]), 3);
-        let canonical_block_2 = mock_block(3, Some(canonical_block_1.hash), Vec::new(), 3);
+            mock_block(2, Some(fork_block.hash()), Vec::from([mock_tx(1), mock_tx(2)]), 3);
+        let canonical_block_2 = mock_block(3, Some(canonical_block_1.hash()), Vec::new(), 3);
         let canonical_block_3 =
-            mock_block(4, Some(canonical_block_2.hash), Vec::from([mock_tx(3)]), 4);
+            mock_block(4, Some(canonical_block_2.hash()), Vec::from([mock_tx(3)]), 4);
 
-        let sidechain_block_1 = mock_block(2, Some(fork_block.hash), Vec::from([mock_tx(1)]), 2);
+        let sidechain_block_1 = mock_block(2, Some(fork_block.hash()), Vec::from([mock_tx(1)]), 2);
         let sidechain_block_2 =
-            mock_block(3, Some(sidechain_block_1.hash), Vec::from([mock_tx(2)]), 3);
+            mock_block(3, Some(sidechain_block_1.hash()), Vec::from([mock_tx(2)]), 3);
 
         let mut tree = BlockchainTree::new(
             TreeExternals::new(provider_factory.clone(), consensus, executor_factory.clone()),
@@ -1525,7 +1525,7 @@ mod tests {
         tree.insert_block(fork_block.clone(), BlockValidationKind::Exhaustive).unwrap();
 
         assert_eq!(
-            tree.make_canonical(&fork_block.hash).unwrap(),
+            tree.make_canonical(&fork_block.hash()).unwrap(),
             CanonicalOutcome::Committed { head: fork_block.header.clone() }
         );
 
@@ -1535,7 +1535,7 @@ mod tests {
         );
 
         assert_eq!(
-            tree.make_canonical(&canonical_block_1.hash).unwrap(),
+            tree.make_canonical(&canonical_block_1.hash()).unwrap(),
             CanonicalOutcome::Committed { head: canonical_block_1.header.clone() }
         );
 
@@ -1550,12 +1550,12 @@ mod tests {
         );
 
         assert_eq!(
-            tree.make_canonical(&sidechain_block_1.hash).unwrap(),
+            tree.make_canonical(&sidechain_block_1.hash()).unwrap(),
             CanonicalOutcome::Committed { head: sidechain_block_1.header.clone() }
         );
 
         assert_eq!(
-            tree.make_canonical(&canonical_block_1.hash).unwrap(),
+            tree.make_canonical(&canonical_block_1.hash()).unwrap(),
             CanonicalOutcome::Committed { head: canonical_block_1.header.clone() }
         );
 
@@ -1565,7 +1565,7 @@ mod tests {
         );
 
         assert_eq!(
-            tree.make_canonical(&sidechain_block_2.hash).unwrap(),
+            tree.make_canonical(&sidechain_block_2.hash()).unwrap(),
             CanonicalOutcome::Committed { head: sidechain_block_2.header.clone() }
         );
 
@@ -1575,7 +1575,7 @@ mod tests {
         );
 
         assert_eq!(
-            tree.make_canonical(&canonical_block_3.hash).unwrap(),
+            tree.make_canonical(&canonical_block_3.hash()).unwrap(),
             CanonicalOutcome::Committed { head: canonical_block_3.header.clone() }
         );
     }
@@ -1609,7 +1609,7 @@ mod tests {
             tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
         );
-        let block1_chain_id = tree.state.block_indices.get_blocks_chain_id(&block1.hash).unwrap();
+        let block1_chain_id = tree.state.block_indices.get_blocks_chain_id(&block1.hash()).unwrap();
         let block1_chain = tree.state.chains.get(&block1_chain_id).unwrap();
         assert!(block1_chain.trie_updates().is_some());
 
@@ -1617,12 +1617,12 @@ mod tests {
             tree.insert_block(block2.clone(), BlockValidationKind::Exhaustive).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
         );
-        let block2_chain_id = tree.state.block_indices.get_blocks_chain_id(&block2.hash).unwrap();
+        let block2_chain_id = tree.state.block_indices.get_blocks_chain_id(&block2.hash()).unwrap();
         let block2_chain = tree.state.chains.get(&block2_chain_id).unwrap();
         assert!(block2_chain.trie_updates().is_some());
 
         assert_eq!(
-            tree.make_canonical(&block2.hash).unwrap(),
+            tree.make_canonical(&block2.hash()).unwrap(),
             CanonicalOutcome::Committed { head: block2.header.clone() }
         );
 
@@ -1630,12 +1630,12 @@ mod tests {
             tree.insert_block(block3.clone(), BlockValidationKind::Exhaustive).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
         );
-        let block3_chain_id = tree.state.block_indices.get_blocks_chain_id(&block3.hash).unwrap();
+        let block3_chain_id = tree.state.block_indices.get_blocks_chain_id(&block3.hash()).unwrap();
         let block3_chain = tree.state.chains.get(&block3_chain_id).unwrap();
         assert!(block3_chain.trie_updates().is_some());
 
         assert_eq!(
-            tree.make_canonical(&block3.hash).unwrap(),
+            tree.make_canonical(&block3.hash()).unwrap(),
             CanonicalOutcome::Committed { head: block3.header.clone() }
         );
 
@@ -1643,7 +1643,7 @@ mod tests {
             tree.insert_block(block4.clone(), BlockValidationKind::Exhaustive).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
         );
-        let block4_chain_id = tree.state.block_indices.get_blocks_chain_id(&block4.hash).unwrap();
+        let block4_chain_id = tree.state.block_indices.get_blocks_chain_id(&block4.hash()).unwrap();
         let block4_chain = tree.state.chains.get(&block4_chain_id).unwrap();
         assert!(block4_chain.trie_updates().is_some());
 
@@ -1652,12 +1652,12 @@ mod tests {
             InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
         );
 
-        let block5_chain_id = tree.state.block_indices.get_blocks_chain_id(&block5.hash).unwrap();
+        let block5_chain_id = tree.state.block_indices.get_blocks_chain_id(&block5.hash()).unwrap();
         let block5_chain = tree.state.chains.get(&block5_chain_id).unwrap();
         assert!(block5_chain.trie_updates().is_some());
 
         assert_eq!(
-            tree.make_canonical(&block5.hash).unwrap(),
+            tree.make_canonical(&block5.hash()).unwrap(),
             CanonicalOutcome::Committed { head: block5.header.clone() }
         );
 
@@ -1715,13 +1715,19 @@ mod tests {
         // |
         TreeTester::default()
             .with_chain_num(1)
-            .with_block_to_chain(HashMap::from([(block1.hash, 0.into()), (block2.hash, 0.into())]))
-            .with_fork_to_child(HashMap::from([(block1.parent_hash, HashSet::from([block1.hash]))]))
+            .with_block_to_chain(HashMap::from([
+                (block1.hash(), 0.into()),
+                (block2.hash(), 0.into()),
+            ]))
+            .with_fork_to_child(HashMap::from([(
+                block1.parent_hash,
+                HashSet::from([block1.hash()]),
+            )]))
             .assert(&tree);
 
         let mut block2a = block2.clone();
         let block2a_hash = B256::new([0x34; 32]);
-        block2a.hash = block2a_hash;
+        block2a.set_hash(block2a_hash);
 
         assert_eq!(
             tree.insert_block(block2a.clone(), BlockValidationKind::Exhaustive).unwrap(),
@@ -1742,13 +1748,13 @@ mod tests {
         TreeTester::default()
             .with_chain_num(2)
             .with_block_to_chain(HashMap::from([
-                (block1.hash, 0.into()),
-                (block2.hash, 0.into()),
-                (block2a.hash, 1.into()),
+                (block1.hash(), 0.into()),
+                (block2.hash(), 0.into()),
+                (block2a.hash(), 1.into()),
             ]))
             .with_fork_to_child(HashMap::from([
-                (block1.parent_hash, HashSet::from([block1.hash])),
-                (block2a.parent_hash, HashSet::from([block2a.hash])),
+                (block1.parent_hash, HashSet::from([block1.hash()])),
+                (block2a.parent_hash, HashSet::from([block2a.hash()])),
             ]))
             .assert(&tree);
         // chain 0 has two blocks so receipts and reverts len is 2
@@ -1833,9 +1839,15 @@ mod tests {
         // |
         TreeTester::default()
             .with_chain_num(1)
-            .with_block_to_chain(HashMap::from([(block1.hash, 0.into()), (block2.hash, 0.into())]))
-            .with_fork_to_child(HashMap::from([(block1.parent_hash, HashSet::from([block1.hash]))]))
-            .with_pending_blocks((block1.number, HashSet::from([block1.hash])))
+            .with_block_to_chain(HashMap::from([
+                (block1.hash(), 0.into()),
+                (block2.hash(), 0.into()),
+            ]))
+            .with_fork_to_child(HashMap::from([(
+                block1.parent_hash,
+                HashSet::from([block1.hash()]),
+            )]))
+            .with_pending_blocks((block1.number, HashSet::from([block1.hash()])))
             .assert(&tree);
 
         // already inserted block will `InsertPayloadOk::AlreadySeen(_)`
@@ -1879,10 +1891,10 @@ mod tests {
 
         let mut block1a = block1.clone();
         let block1a_hash = B256::new([0x33; 32]);
-        block1a.hash = block1a_hash;
+        block1a.set_hash(block1a_hash);
         let mut block2a = block2.clone();
         let block2a_hash = B256::new([0x34; 32]);
-        block2a.hash = block2a_hash;
+        block2a.set_hash(block2a_hash);
 
         // reinsert two blocks that point to canonical chain
         assert_eq!(
@@ -1945,10 +1957,13 @@ mod tests {
         // |
         TreeTester::default()
             .with_chain_num(2)
-            .with_block_to_chain(HashMap::from([(block1a_hash, 1.into()), (block2.hash, 3.into())]))
+            .with_block_to_chain(HashMap::from([
+                (block1a_hash, 1.into()),
+                (block2.hash(), 3.into()),
+            ]))
             .with_fork_to_child(HashMap::from([
                 (block1.parent_hash, HashSet::from([block1a_hash])),
-                (block1.hash(), HashSet::from([block2.hash])),
+                (block1.hash(), HashSet::from([block2.hash()])),
             ]))
             .with_pending_blocks((block2.number + 1, HashSet::new()))
             .assert(&tree);
@@ -1966,13 +1981,13 @@ mod tests {
         TreeTester::default()
             .with_chain_num(2)
             .with_block_to_chain(HashMap::from([
-                (block1.hash, 4.into()),
+                (block1.hash(), 4.into()),
                 (block2a_hash, 4.into()),
-                (block2.hash, 3.into()),
+                (block2.hash(), 3.into()),
             ]))
             .with_fork_to_child(HashMap::from([
-                (block1.parent_hash, HashSet::from([block1.hash])),
-                (block1.hash(), HashSet::from([block2.hash])),
+                (block1.parent_hash, HashSet::from([block1.hash()])),
+                (block1.hash(), HashSet::from([block2.hash()])),
             ]))
             .with_pending_blocks((block1a.number + 1, HashSet::new()))
             .assert(&tree);
@@ -1984,11 +1999,11 @@ mod tests {
                 && *new.blocks() == BTreeMap::from([(block1a.number,block1a.clone())]));
 
         // check that b2 and b1 are not canonical
-        assert!(!tree.is_block_hash_canonical(&block2.hash).unwrap());
-        assert!(!tree.is_block_hash_canonical(&block1.hash).unwrap());
+        assert!(!tree.is_block_hash_canonical(&block2.hash()).unwrap());
+        assert!(!tree.is_block_hash_canonical(&block1.hash()).unwrap());
 
         // ensure that b1a is canonical
-        assert!(tree.is_block_hash_canonical(&block1a.hash).unwrap());
+        assert!(tree.is_block_hash_canonical(&block1a.hash()).unwrap());
 
         // make b2 canonical
         tree.make_canonical(&block2.hash()).unwrap();
@@ -2021,7 +2036,7 @@ mod tests {
                 && *new.blocks() == BTreeMap::from([(block1.number,block1.clone()),(block2.number,block2.clone())]));
 
         // check that b2 is now canonical
-        assert!(tree.is_block_hash_canonical(&block2.hash).unwrap());
+        assert!(tree.is_block_hash_canonical(&block2.hash()).unwrap());
 
         // finalize b1 that would make b1a removed from tree
         tree.finalize_block(11);
@@ -2054,16 +2069,19 @@ mod tests {
         // |
         TreeTester::default()
             .with_chain_num(2)
-            .with_block_to_chain(HashMap::from([(block2a_hash, 4.into()), (block2.hash, 6.into())]))
+            .with_block_to_chain(HashMap::from([
+                (block2a_hash, 4.into()),
+                (block2.hash(), 6.into()),
+            ]))
             .with_fork_to_child(HashMap::from([(
                 block1.hash(),
-                HashSet::from([block2a_hash, block2.hash]),
+                HashSet::from([block2a_hash, block2.hash()]),
             )]))
-            .with_pending_blocks((block2.number, HashSet::from([block2.hash, block2a.hash])))
+            .with_pending_blocks((block2.number, HashSet::from([block2.hash(), block2a.hash()])))
             .assert(&tree);
 
         // commit b2a
-        tree.make_canonical(&block2.hash).unwrap();
+        tree.make_canonical(&block2.hash()).unwrap();
 
         // Trie state:
         // b2   b2a (side chain)
@@ -2087,8 +2105,8 @@ mod tests {
 
         // insert unconnected block2b
         let mut block2b = block2a.clone();
-        block2b.hash = B256::new([0x99; 32]);
-        block2b.parent_hash = B256::new([0x88; 32]);
+        block2b.set_hash(B256::new([0x99; 32]));
+        block2b.set_parent_hash(B256::new([0x88; 32]));
 
         assert_eq!(
             tree.insert_block(block2b.clone(), BlockValidationKind::Exhaustive).unwrap(),
