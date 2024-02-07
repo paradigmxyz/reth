@@ -397,7 +397,8 @@ mod tests {
     use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
     use reth_interfaces::{p2p::either::EitherDownloader, test_utils::TestFullBlockClient};
     use reth_primitives::{
-        stage::StageCheckpoint, BlockBody, ChainSpec, ChainSpecBuilder, SealedHeader, MAINNET,
+        constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpec,
+        ChainSpecBuilder, Header, SealedHeader, MAINNET,
     };
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
@@ -530,7 +531,7 @@ mod tests {
         );
 
         let client = TestFullBlockClient::default();
-        insert_headers_into_client(&client, 0..10);
+        insert_headers_into_client(&client, SealedHeader::default(), 0..10);
         // force the pipeline to be "done" after 5 blocks
         let pipeline = TestPipelineBuilder::new()
             .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
@@ -565,8 +566,13 @@ mod tests {
         });
     }
 
-    fn insert_headers_into_client(client: &TestFullBlockClient, range: Range<usize>) {
-        let mut sealed_header = SealedHeader::default();
+    /// Inserts headers and returns the last header and block body.
+    fn insert_headers_into_client(
+        client: &TestFullBlockClient,
+        genesis_header: SealedHeader,
+        range: Range<usize>,
+    ) {
+        let mut sealed_header = genesis_header;
         let body = BlockBody::default();
         for _ in range {
             let (mut header, hash) = sealed_header.split();
@@ -590,7 +596,13 @@ mod tests {
         );
 
         let client = TestFullBlockClient::default();
-        insert_headers_into_client(&client, 0..10);
+        let mut header = Header {
+            base_fee_per_gas: Some(7),
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            ..Default::default()
+        }
+        .seal_slow();
+        insert_headers_into_client(&client, header, 0..10);
 
         // set up a pipeline
         let pipeline = TestPipelineBuilder::new().build(chain_spec.clone());
