@@ -673,9 +673,9 @@ pub struct SealedHeader {
 }
 
 impl SealedHeader {
-    /// Creates the sealed header with corresponding block hash.
+    /// Creates the sealed header with the corresponding block hash.
     #[inline]
-    pub fn new(header: Header, hash: BlockHash) -> Self {
+    pub const fn new(header: Header, hash: BlockHash) -> Self {
         Self { header, hash }
     }
 
@@ -689,6 +689,16 @@ impl SealedHeader {
     #[inline]
     pub fn hash(&self) -> BlockHash {
         self.hash
+    }
+
+    #[cfg(test)]
+    pub fn set_header(&mut self, header: Header) {
+        self.header = header
+    }
+
+    #[cfg(test)]
+    pub fn set_hash(&mut self, hash: BlockHash) {
+        self.hash = hash
     }
 
     /// Checks the gas limit for consistency between parent and self headers.
