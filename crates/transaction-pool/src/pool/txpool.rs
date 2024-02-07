@@ -12,7 +12,7 @@ use crate::{
         pending::PendingPool,
         state::{SubPool, TxState},
         update::{Destination, PoolUpdate},
-        AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
+        AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome, SubPoolExt,
     },
     traits::{BestTransactionsAttributes, BlockInfo, PoolSize},
     PoolConfig, PoolResult, PoolTransaction, PriceBumpConfig, SubPoolLimit, TransactionOrdering,
@@ -749,81 +749,61 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// This returns all transactions that were removed from the entire pool.
     pub(crate) fn discard_worst(&mut self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let mut removed: Vec<Arc<ValidPoolTransaction<T::Transaction>>> = Vec::new();
+
+        // discard(&self.config.pending_limit, "pending", self.pending_pool);
+        // discard(&self.config.basefee_limit, "basefee", self.basefee_pool);
+        removed.extend(self.discard(self.config.blob_limit.clone(), "blob", &mut self.blob_pool));
+        // discard(&self.config.queued_limit, "queued", self.queued_pool);
+
+        removed
+    }
+
+    // Function that discards the worst transactions for the pools
+    fn discard<P>(
+        &mut self,
+        limit: SubPoolLimit,
+        pool_name: &str,
+        pool: &mut P,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>>
+    where
+        P: SubPoolExt<T::Transaction>,
+    {
         let mut removed = Vec::new();
+        let (pool_size, pool_len) = (pool.size(), pool.len());
+        while limit.is_exceeded(pool_len, pool_size) {
+            trace!(
+                "discarding transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
+                pool_name,
+                limit,
+                pool_size,
+                pool_len,
+            );
 
-        // Function that discards the worst transactions for the pools
-        let mut discard = |limit: &SubPoolLimit,
-                           pool_name: &str,
-                           pool_size: usize,
-                           pool_len: usize,
-                           truncate: Fn(
-            SubPoolLimit,
-        )
-            -> Vec<Arc<ValidPoolTransaction<T::Transaction>>>| {
-            while limit.is_exceeded(pool_len, pool_size) {
-                trace!(
-                    "discarding transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
-                    pool_name,
-                    limit,
-                    pool_size,
-                    pool_len,
-                );
+            // 1. first remove the worst transaction from the subpool
+            let removed_from_subpool = pool.truncate_pool(limit.clone());
 
-                // 1. first remove the worst transaction from the subpool
-                let removed_from_subpool = truncate(limit.clone());
+            trace!(
+                "removed {} transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
+                removed_from_subpool.len(),
+                pool_name,
+                limit,
+                pool_size,
+                pool_len,
+            );
 
-                trace!(
-                    "removed {} transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
-                    removed_from_subpool.len(),
-                    pool_name,
-                    limit,
-                    pool_size,
-                    pool_len,
-                );
+            // 2. remove all transactions from the total set
+            for tx in removed_from_subpool {
+                self.all_transactions.remove_transaction(tx.id());
 
-                // 2. remove all transactions from the total set
-                for tx in removed_from_subpool {
-                    let id = tx.id();
-                    self.all_transactions.remove_transaction(id);
+                let id = *tx.id();
+                // keep track of removed transaction
+                removed.push(tx);
 
-                    // keep track of removed transaction
-                    removed.push(tx);
-
-                    // 3. remove all its descendants from the entire pool
-                    self.remove_descendants(id, &mut removed);
-                }
+                // 3. remove all its descendants from the entire pool
+                self.remove_descendants(&id, &mut removed);
             }
-        };
-
-        discard(
-            &self.config.pending_limit,
-            "pending",
-            self.pending_pool.size(),
-            self.pending_pool.len(),
-            |limit| self.pending_pool.truncate_pool(limit),
-        );
-        discard(
-            &self.config.basefee_limit,
-            "basefee",
-            self.basefee_pool.size(),
-            self.basefee_pool.len(),
-            |limit| self.basefee_pool.truncate_pool(limit),
-        );
-        discard(
-            &self.config.blob_limit,
-            "blob",
-            self.blob_pool.size(),
-            self.blob_pool.len(),
-            |limit| self.blob_pool.truncate_pool(limit),
-        );
-        discard(
-            &self.config.queued_limit,
-            "queued",
-            self.queued_pool.size(),
-            self.queued_pool.len(),
-            |limit| self.queued_pool.truncate_pool(limit),
-        );
-
+        }
         removed
     }
 

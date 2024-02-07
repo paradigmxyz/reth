@@ -1,6 +1,8 @@
 use super::txpool::PendingFees;
 use crate::{
-    identifier::TransactionId, pool::size::SizeTracker, traits::BestTransactionsAttributes,
+    identifier::TransactionId,
+    pool::{size::SizeTracker, SubPoolExt},
+    traits::BestTransactionsAttributes,
     PoolTransaction, SubPoolLimit, ValidPoolTransaction,
 };
 use std::{
@@ -88,16 +90,6 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         Vec::new()
     }
 
-    /// The reported size of all transactions in this pool.
-    pub(crate) fn size(&self) -> usize {
-        self.size_of.into()
-    }
-
-    /// Number of transactions in the entire pool
-    pub(crate) fn len(&self) -> usize {
-        self.by_id.len()
-    }
-
     /// Returns whether the pool is empty
     #[cfg(test)]
     #[allow(dead_code)]
@@ -176,27 +168,6 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         removed
     }
 
-    /// Removes transactions until the pool satisfies its [SubPoolLimit].
-    ///
-    /// This is done by removing transactions according to their ordering in the pool, defined by
-    /// the [BlobOrd] struct.
-    ///
-    /// Removed transactions are returned in the order they were removed.
-    pub(crate) fn truncate_pool(
-        &mut self,
-        limit: SubPoolLimit,
-    ) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        let mut removed = Vec::new();
-
-        while limit.is_exceeded(self.len(), self.size()) {
-            let tx = self.all.last().expect("pool is not empty");
-            let id = *tx.transaction.id();
-            removed.push(self.remove_transaction(&id).expect("transaction exists"));
-        }
-
-        removed
-    }
-
     /// Returns `true` if the transaction with the given id is already included in this pool.
     pub(crate) fn contains(&self, id: &TransactionId) -> bool {
         self.by_id.contains_key(id)
@@ -211,6 +182,36 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn assert_invariants(&self) {
         assert_eq!(self.by_id.len(), self.all.len(), "by_id.len() != all.len()");
+    }
+}
+
+impl<T: PoolTransaction> SubPoolExt<T> for BlobTransactions<T> {
+    /// The reported size of all transactions in this pool.
+    fn size(&self) -> usize {
+        self.size_of.into()
+    }
+
+    /// Number of transactions in the entire pool
+    fn len(&self) -> usize {
+        self.by_id.len()
+    }
+
+    /// Removes transactions until the pool satisfies its [SubPoolLimit].
+    ///
+    /// This is done by removing transactions according to their ordering in the pool, defined by
+    /// the [BlobOrd] struct.
+    ///
+    /// Removed transactions are returned in the order they were removed.
+    fn truncate_pool(&mut self, limit: SubPoolLimit) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        let mut removed = Vec::new();
+
+        while limit.is_exceeded(self.len(), self.size()) {
+            let tx = self.all.last().expect("pool is not empty");
+            let id = *tx.transaction.id();
+            removed.push(self.remove_transaction(&id).expect("transaction exists"));
+        }
+
+        removed
     }
 }
 

@@ -78,7 +78,8 @@ use crate::{
         PoolTransaction, PropagatedTransactions, TransactionOrigin,
     },
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
-    CanonicalStateUpdate, ChangedAccount, PoolConfig, TransactionOrdering, TransactionValidator,
+    CanonicalStateUpdate, ChangedAccount, PoolConfig, SubPoolLimit, TransactionOrdering,
+    TransactionValidator,
 };
 use best::BestTransactions;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
@@ -1095,4 +1096,12 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
         let iter = self.promoted.iter();
         FullPendingTransactionIter { kind, iter }
     }
+}
+
+/// SubPoolExt is a trait that represents a pool of transactions that have been validated and
+/// have basic states
+pub trait SubPoolExt<T: PoolTransaction> {
+    fn len(&self) -> usize;
+    fn size(&self) -> usize;
+    fn truncate_pool(&mut self, limit: SubPoolLimit) -> Vec<Arc<ValidPoolTransaction<T>>>;
 }
