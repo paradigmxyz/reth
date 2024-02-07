@@ -326,13 +326,15 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         // insert block inside unconnected block buffer. Delaying its execution.
         self.state.buffered_blocks.insert_block(block.clone());
 
+        let block_hash = block.hash();
         // find the lowest ancestor of the block in the buffer to return as the missing parent
         // this shouldn't return None because that only happens if the block was evicted, which
         // shouldn't happen right after insertion
-        let lowest_ancestor =
-            self.state.buffered_blocks.lowest_ancestor(&block.hash).ok_or_else(|| {
-                BlockchainTreeError::BlockBufferingFailed { block_hash: block.hash }
-            })?;
+        let lowest_ancestor = self
+            .state
+            .buffered_blocks
+            .lowest_ancestor(&block_hash)
+            .ok_or_else(|| BlockchainTreeError::BlockBufferingFailed { block_hash })?;
 
         Ok(BlockStatus::Disconnected { missing_ancestor: lowest_ancestor.parent_num_hash() })
     }
@@ -368,7 +370,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             .active_at_ttd(parent_td, U256::ZERO)
         {
             return Err(BlockExecutionError::Validation(BlockValidationError::BlockPreMerge {
-                hash: block.hash,
+                hash: block.hash(),
             })
             .into())
         }
@@ -643,18 +645,19 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         {
             error!(
                 ?block,
-                "Failed to validate total difficulty for block {}: {e}", block.header.hash
+                "Failed to validate total difficulty for block {}: {e}",
+                block.header.hash()
             );
             return Err(e)
         }
 
         if let Err(e) = self.externals.consensus.validate_header(block) {
-            error!(?block, "Failed to validate header {}: {e}", block.header.hash);
+            error!(?block, "Failed to validate header {}: {e}", block.header.hash());
             return Err(e)
         }
 
         if let Err(e) = self.externals.consensus.validate_block(block) {
-            error!(?block, "Failed to validate block {}: {e}", block.header.hash);
+            error!(?block, "Failed to validate block {}: {e}", block.header.hash());
             return Err(e)
         }
 
@@ -806,7 +809,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         let mut all_chain_blocks = Vec::new();
         for (_, chain) in self.state.chains.iter() {
             for (&number, blocks) in chain.blocks().iter() {
-                all_chain_blocks.push(BlockNumHash { number, hash: blocks.hash })
+                all_chain_blocks.push(BlockNumHash { number, hash: blocks.hash() })
             }
         }
         for block in all_chain_blocks.into_iter() {
@@ -1103,7 +1106,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
         // Compute state root or retrieve cached trie updates before opening write transaction.
         let block_hash_numbers =
-            blocks.iter().map(|(number, b)| (number, b.hash)).collect::<Vec<_>>();
+            blocks.iter().map(|(number, b)| (number, b.hash())).collect::<Vec<_>>();
         let trie_updates = match chain_trie_updates {
             Some(updates) => {
                 debug!(target: "blockchain_tree", blocks = ?block_hash_numbers, "Using cached trie updates");
@@ -1128,7 +1131,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                         RootMismatch {
                             root: GotExpected { got: state_root, expected: tip.state_root },
                             block_number: tip.number,
-                            block_hash: tip.hash,
+                            block_hash: tip.hash(),
                         },
                     ))))
                 }

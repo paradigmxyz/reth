@@ -222,7 +222,7 @@ impl Chain {
     pub fn append_chain(&mut self, other: Chain) -> RethResult<()> {
         let chain_tip = self.tip();
         let other_fork_block = other.fork_block();
-        if chain_tip.hash != other_fork_block.hash {
+        if chain_tip.hash() != other_fork_block.hash {
             return Err(BlockExecutionError::AppendChainDoesntConnect {
                 chain_tip: Box::new(chain_tip.num_hash()),
                 other_chain_fork: Box::new(other_fork_block),

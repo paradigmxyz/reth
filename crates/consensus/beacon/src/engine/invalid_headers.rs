@@ -66,8 +66,8 @@ impl InvalidHeaderCache {
 
     /// Inserts an invalid ancestor into the map.
     pub(crate) fn insert(&mut self, invalid_ancestor: SealedHeader) {
-        if self.get(&invalid_ancestor.hash).is_none() {
-            let hash = invalid_ancestor.hash;
+        if self.get(&invalid_ancestor.hash()).is_none() {
+            let hash = invalid_ancestor.hash();
             let header = invalid_ancestor.unseal();
             warn!(target: "consensus::engine", ?hash, ?header, "Bad block with hash");
             self.insert_entry(hash, Arc::new(header));

@@ -70,7 +70,7 @@ impl BlockBuffer {
 
     /// Insert a correct block inside the buffer.
     pub fn insert_block(&mut self, block: SealedBlockWithSenders) {
-        let hash = block.hash;
+        let hash = block.hash();
 
         self.parent_to_child.entry(block.parent_hash).or_default().insert(hash);
         self.earliest_blocks.entry(block.number).or_default().insert(hash);

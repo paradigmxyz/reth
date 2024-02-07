@@ -13,10 +13,7 @@ use alloy_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_S
 use bytes::{Buf, BufMut, BytesMut};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
-use std::{
-    mem,
-    ops::{Deref, DerefMut},
-};
+use std::{mem, ops::Deref};
 
 /// Errors that can occur during header sanity checks.
 #[derive(Debug, PartialEq)]
@@ -670,12 +667,30 @@ pub enum HeaderValidationError {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SealedHeader {
     /// Locked Header fields.
-    pub header: Header,
+    header: Header,
     /// Locked Header hash.
-    pub hash: BlockHash,
+    hash: BlockHash,
 }
 
 impl SealedHeader {
+    /// Creates the sealed header with corresponding block hash.
+    #[inline]
+    pub fn new(header: Header, hash: BlockHash) -> Self {
+        Self { header, hash }
+    }
+
+    /// Returns the sealed Header fields.
+    #[inline]
+    pub fn header(&self) -> &Header {
+        &self.header
+    }
+
+    /// Return header/block hash.
+    #[inline]
+    pub fn hash(&self) -> BlockHash {
+        self.hash
+    }
+
     /// Checks the gas limit for consistency between parent and self headers.
     ///
     /// The maximum allowable difference between self and parent gas limits is determined by the
@@ -864,11 +879,6 @@ impl SealedHeader {
         (self.header, self.hash)
     }
 
-    /// Return header/block hash.
-    pub fn hash(&self) -> BlockHash {
-        self.hash
-    }
-
     /// Return the number hash tuple.
     pub fn num_hash(&self) -> BlockNumHash {
         BlockNumHash::new(self.number, self.hash)
@@ -942,12 +952,6 @@ impl Deref for SealedHeader {
 
     fn deref(&self) -> &Self::Target {
         &self.header
-    }
-}
-
-impl DerefMut for SealedHeader {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.header
     }
 }
 

@@ -77,7 +77,7 @@ where
         if let Some((block, receipts)) = block_and_receipts {
             let block_number = block.number;
             let base_fee = block.base_fee_per_gas;
-            let block_hash = block.hash;
+            let block_hash = block.hash();
             let excess_blob_gas = block.excess_blob_gas;
 
             #[cfg(feature = "optimism")]
@@ -193,7 +193,7 @@ where
             Some(block) => block,
             None => return Ok(None),
         };
-        let block_hash = block.hash;
+        let block_hash = block.hash();
         let total_difficulty = self
             .provider()
             .header_td_by_number(block.number)?

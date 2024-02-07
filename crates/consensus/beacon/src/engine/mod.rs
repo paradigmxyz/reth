@@ -906,7 +906,7 @@ where
     fn update_head(&self, head: SealedHeader) -> RethResult<()> {
         let mut head_block = Head {
             number: head.number,
-            hash: head.hash,
+            hash: head.hash(),
             difficulty: head.difficulty,
             timestamp: head.timestamp,
             // NOTE: this will be set later
@@ -1091,14 +1091,14 @@ where
         let block_hash = block.hash();
         let block_num_hash = block.num_hash();
 
-        let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block.hash);
-        if lowest_buffered_ancestor == block.hash {
+        let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block.hash());
+        if lowest_buffered_ancestor == block.hash() {
             lowest_buffered_ancestor = block.parent_hash;
         }
 
         // now check the block itself
         if let Some(status) =
-            self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, block.hash)
+            self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, block.hash())
         {
             return Ok(status)
         }
@@ -1270,7 +1270,7 @@ where
     ) -> Result<PayloadStatus, InsertBlockError> {
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
-        let block_hash = block.hash;
+        let block_hash = block.hash();
         let status = self
             .blockchain
             .insert_block_without_senders(block.clone(), BlockValidationKind::Exhaustive)?;
@@ -1295,7 +1295,7 @@ where
             InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
                 // check if the block's parent is already marked as invalid
                 if let Some(status) =
-                    self.check_invalid_ancestor_with_head(block.parent_hash, block.hash)
+                    self.check_invalid_ancestor_with_head(block.parent_hash, block.hash())
                 {
                     return Ok(status)
                 }
@@ -1321,7 +1321,7 @@ where
         let (block, error) = err.split();
 
         if error.is_invalid_block() {
-            warn!(target: "consensus::engine", invalid_hash=?block.hash, invalid_number=?block.number, ?error, "Invalid block error on new payload");
+            warn!(target: "consensus::engine", invalid_hash=?block.hash(), invalid_number=?block.number, ?error, "Invalid block error on new payload");
 
             // all of these occurred if the payload is invalid
             let parent_hash = block.parent_hash;
@@ -1381,9 +1381,9 @@ where
     /// stop because there's nothing to do here and the engine needs to wait for another FCU.
     fn on_downloaded_block(&mut self, block: SealedBlock) {
         let downloaded_num_hash = block.num_hash();
-        trace!(target: "consensus::engine", hash=?block.hash, number=%block.number, "Downloaded full block");
+        trace!(target: "consensus::engine", hash=?block.hash(), number=%block.number, "Downloaded full block");
         // check if the block's parent is already marked as invalid
-        if self.check_invalid_ancestor_with_head(block.parent_hash, block.hash).is_some() {
+        if self.check_invalid_ancestor_with_head(block.parent_hash, block.hash()).is_some() {
             // can skip this invalid block
             return
         }
@@ -1414,7 +1414,7 @@ where
                 warn!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
                 if err.kind().is_invalid_block() {
                     let (block, err) = err.split();
-                    warn!(target: "consensus::engine", invalid_number=?block.number, invalid_hash=?block.hash, ?err, "Marking block as invalid");
+                    warn!(target: "consensus::engine", invalid_number=?block.number, invalid_hash=?block.hash(), ?err, "Marking block as invalid");
 
                     self.invalid_headers.insert(block.header);
                 }
@@ -1498,7 +1498,7 @@ where
                     }
 
                     let new_head = outcome.into_header();
-                    debug!(target: "consensus::engine", hash=?new_head.hash, number=new_head.number, "Canonicalized new head");
+                    debug!(target: "consensus::engine", hash=?new_head.hash(), number=new_head.number, "Canonicalized new head");
 
                     // we can update the FCU blocks
                     let _ = self.update_canon_chain(new_head, &target);
@@ -1586,7 +1586,7 @@ where
                 }
 
                 if let ControlFlow::Unwind { bad_block, .. } = ctrl {
-                    warn!(target: "consensus::engine", invalid_hash=?bad_block.hash, invalid_number=?bad_block.number, "Bad block detected in unwind");
+                    warn!(target: "consensus::engine", invalid_hash=?bad_block.hash(), invalid_number=?bad_block.number, "Bad block detected in unwind");
 
                     // update the `invalid_headers` cache with the new invalid headers
                     self.invalid_headers.insert(*bad_block);

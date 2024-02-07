@@ -164,15 +164,15 @@ impl<DB> NodeState<DB> {
                 );
             }
             BeaconConsensusEngineEvent::CanonicalBlockAdded(block) => {
-                info!(number=block.number, hash=?block.hash, "Block added to canonical chain");
+                info!(number=block.number, hash=?block.hash(), "Block added to canonical chain");
             }
             BeaconConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
                 self.latest_block = Some(head.number);
 
-                info!(number=head.number, hash=?head.hash, ?elapsed, "Canonical chain committed");
+                info!(number=head.number, hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
             BeaconConsensusEngineEvent::ForkBlockAdded(block) => {
-                info!(number=block.number, hash=?block.hash, "Block added to fork chain");
+                info!(number=block.number, hash=?block.hash(), "Block added to fork chain");
             }
         }
     }

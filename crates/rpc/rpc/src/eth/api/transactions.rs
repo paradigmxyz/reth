@@ -773,7 +773,7 @@ where
         };
         let (tx, tx_info) = transaction.split();
 
-        let (cfg, block_env, _) = self.evm_env_at(block.hash.into()).await?;
+        let (cfg, block_env, _) = self.evm_env_at(block.hash().into()).await?;
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
@@ -848,7 +848,7 @@ where
             // we need to get the state of the parent block because we're replaying this block on
             // top of its parent block's state
             let state_at = block.parent_hash;
-            let block_hash = block.hash;
+            let block_hash = block.hash();
 
             let block_number = block_env.number.saturating_to::<u64>();
             let base_fee = block_env.basefee.saturating_to::<u64>();
@@ -1087,7 +1087,7 @@ where
         index: Index,
     ) -> EthResult<Option<Transaction>> {
         if let Some(block) = self.block_with_senders(block_id.into()).await? {
-            let block_hash = block.hash;
+            let block_hash = block.hash();
             let block_number = block.number;
             let base_fee_per_gas = block.base_fee_per_gas;
             if let Some(tx) = block.into_transactions_ecrecovered().nth(index.into()) {

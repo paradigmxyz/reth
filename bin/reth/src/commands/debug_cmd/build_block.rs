@@ -274,7 +274,7 @@ impl Command {
         let payload_config = PayloadConfig::new(
             Arc::clone(&best_block),
             Bytes::default(),
-            EthPayloadBuilderAttributes::try_new(best_block.hash, payload_attrs)?,
+            EthPayloadBuilderAttributes::try_new(best_block.hash(), payload_attrs)?,
             self.chain.clone(),
         );
 
