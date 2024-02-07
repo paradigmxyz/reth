@@ -214,14 +214,48 @@ impl EthMessage {
 }
 
 /// `EncodableExt` is an extension trait for types that are encodable, providing methods
-/// to encode data with size constraints. It is designed to work with collections of encodable
-/// items.
+/// to encode data with size constraints. It is primarily designed for collections of encodable
+/// items or individual encodable items that can be serialized into a byte sequence.
+///
+/// Implementors should ensure that encoding respects the specified size limits, either by
+/// returning an error when the limit is exceeded (`encode_max`) or by producing a truncated
+/// encoding that fits within the limit (`encode_truncate`).
 pub trait EncodableExt {
     /// Encodes the data, ensuring that the encoded message does not exceed the specified size
-    /// limit. If the encoded size exceeds the limit, an error is returned.
+    /// limit. If the encoded size exceeds the limit, an error is returned, indicating the failure
+    /// to comply with the size constraint.
+    ///
+    /// This method is suitable for scenarios where it's critical to avoid exceeding a size limit,
+    /// such as in network communications where payload sizes are restricted.
+    ///
+    /// # Arguments
+    ///
+    /// * `size` - The maximum allowed size of the data.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<u8>)` - A vector containing the encoded data if it is within the size limit.
+    /// * `Err(alloy_rlp::Error)` - An error if the encoded data exceeds the size limit.
     fn encode_max(&self, size: usize) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error>;
-    // Encodes the data, truncating the encoded message if it exceeds the specified size limit.
-    /// The resulting data will fit within the limit, but may be incomplete if truncation occurs.
+
+    /// Encodes the data, truncating the encoded message if it exceeds the specified size limit.
+    /// The resulting data will fit within the limit but may be incomplete if truncation occurs.
+    ///
+    /// When using this method with collections or "vec-like" structures, implementors should take
+    /// care to ensure the truncated encoding remains valid and interpretable, albeit potentially
+    /// incomplete. For example, truncating a list of items might result in the list containing
+    /// fewer items than intended, but each item in the list should remain individually intact
+    /// and decodable.
+    ///
+    /// # Arguments
+    ///
+    /// * `limit` - The maximum allowed size of the encoded data.
+    ///
+    /// # Returns
+    ///
+    /// A vector containing the encoded data, truncated to fit within the size limit if necessary.
+    /// Users of this method should be aware that the truncated data may not represent the complete
+    /// original dataset.
     fn encode_truncate(&self, limit: usize) -> Vec<u8>;
 }
 
