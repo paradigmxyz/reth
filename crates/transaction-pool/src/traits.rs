@@ -584,7 +584,7 @@ impl<'a> CanonicalStateUpdate<'a> {
     }
 
     /// Returns the hash of the tip block.
-    pub fn hash(&self) -> B256 {
+    pub const fn hash(&self) -> B256 {
         self.new_tip.hash()
     }
 
