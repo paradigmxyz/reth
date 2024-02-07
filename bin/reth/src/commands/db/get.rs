@@ -2,18 +2,20 @@ use crate::utils::DbTool;
 use clap::Parser;
 use reth_db::{
     database::Database,
-    table::{DupSort, Table},
-    RawKey, RawTable, TableViewer, Tables,
+    snapshot::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask, ReceiptMask, TransactionMask},
+    table::{Decompress, DupSort, Encode, Table},
+    tables, HeaderTD, RawKey, RawTable, Receipts, TableViewer, Tables, Transactions,
 };
+use reth_primitives::{BlockHash, Header, SnapshotSegment};
 use tracing::error;
+
+use super::SourceSubcommand;
 
 /// The arguments for the `reth db get` command
 #[derive(Parser, Debug)]
 pub struct Command {
-    /// The table name
-    ///
-    /// NOTE: The dupsort tables are not supported now.
-    pub table: Tables,
+    #[clap(subcommand)]
+    subcommand: SourceSubcommand,
 
     /// The key to get content for
     #[arg(value_parser = maybe_json_value_parser)]
@@ -31,21 +33,93 @@ pub struct Command {
 impl Command {
     /// Execute `db get` command
     pub fn execute<DB: Database>(self, tool: &DbTool<DB>) -> eyre::Result<()> {
-        self.table.view(&GetValueViewer { tool, args: &self })?;
+        match self.subcommand {
+            SourceSubcommand::Mdbx { table } => {
+                table.view(&GetValueViewer { tool, args: &self })?
+            }
+            SourceSubcommand::Snapshot { segment } => {
+                let (key, mask): (u64, _) = match segment {
+                    SnapshotSegment::Headers => (
+                        self.table_key::<tables::Headers>()?,
+                        <HeaderMask<Header, BlockHash>>::MASK,
+                    ),
+                    SnapshotSegment::Transactions => (
+                        self.table_key::<tables::Transactions>()?,
+                        <TransactionMask<<Transactions as Table>::Value>>::MASK,
+                    ),
+                    SnapshotSegment::Receipts => (
+                        self.table_key::<tables::Receipts>()?,
+                        <ReceiptMask<<Receipts as Table>::Value>>::MASK,
+                    ),
+                };
+
+                let content = tool.provider_factory.snapshot_provider().find_snapshot(
+                    segment,
+                    |provider| {
+                        let mut cursor = provider.cursor()?;
+                        cursor.get(key.into(), mask).map(|result| {
+                            result.map(|vec| {
+                                vec.iter().map(|slice| slice.to_vec()).collect::<Vec<_>>()
+                            })
+                        })
+                    },
+                )?;
+
+                match content {
+                    Some(content) => {
+                        if self.raw {
+                            println!("{:?}", content);
+                        } else {
+                            match segment {
+                                SnapshotSegment::Headers => {
+                                    let header = Header::decompress(content[0].as_slice())?;
+                                    let block_hash = BlockHash::decompress(content[1].as_slice())?;
+                                    println!(
+                                        "{}\n{}",
+                                        serde_json::to_string_pretty(&header)?,
+                                        serde_json::to_string_pretty(&block_hash)?
+                                    );
+                                }
+                                SnapshotSegment::Transactions => {
+                                    let transaction = <<Transactions as Table>::Value>::decompress(
+                                        content[0].as_slice(),
+                                    )?;
+                                    println!("{}", serde_json::to_string_pretty(&transaction)?);
+                                }
+                                SnapshotSegment::Receipts => {
+                                    let receipt = <<Receipts as Table>::Value>::decompress(
+                                        content[0].as_slice(),
+                                    )?;
+                                    println!("{}", serde_json::to_string_pretty(&receipt)?);
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        error!(target: "reth::cli", "No content for the given table key.");
+                    }
+                };
+            }
+        }
 
         Ok(())
     }
 
     /// Get an instance of key for given table
     pub fn table_key<T: Table>(&self) -> Result<T::Key, eyre::Error> {
-        assert_eq!(T::NAME, self.table.name());
+        if let SourceSubcommand::Mdbx { table } = self.subcommand {
+            assert_eq!(T::NAME, table.name());
+        }
 
         serde_json::from_str::<T::Key>(&self.key).map_err(|e| eyre::eyre!(e))
     }
 
     /// Get an instance of subkey for given dupsort table
     fn table_subkey<T: DupSort>(&self) -> Result<T::SubKey, eyre::Error> {
-        assert_eq!(T::NAME, self.table.name());
+        if let SourceSubcommand::Mdbx { table } = self.subcommand {
+            assert_eq!(T::NAME, table.name());
+        }
+
         serde_json::from_str::<T::SubKey>(&self.subkey.clone().unwrap_or_default())
             .map_err(|e| eyre::eyre!(e))
     }
