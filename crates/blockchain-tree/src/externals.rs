@@ -76,8 +76,7 @@ impl<DB: Database, EF> TreeExternals<DB, EF> {
             )?));
         }
 
-        debug_assert!(hashes.len() <= num_hashes, "too many hashes fetched");
-
+        let hashes = hashes.into_iter().take(num_hashes).collect();
         Ok(hashes)
     }
 }
