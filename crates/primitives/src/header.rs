@@ -687,7 +687,7 @@ impl SealedHeader {
 
     /// Returns header/block hash.
     #[inline]
-    pub fn hash(&self) -> BlockHash {
+    pub const fn hash(&self) -> BlockHash {
         self.hash
     }
 
