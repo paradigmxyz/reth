@@ -76,6 +76,8 @@ impl<DB: Database, EF> TreeExternals<DB, EF> {
             )?));
         }
 
+        // We may have fetched more than `num_hashes` hashes, so we need to truncate the result to
+        // the requested number.
         let hashes = hashes.into_iter().rev().take(num_hashes).collect();
         Ok(hashes)
     }
