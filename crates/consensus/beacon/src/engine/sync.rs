@@ -595,7 +595,7 @@ mod tests {
         );
 
         let client = TestFullBlockClient::default();
-        let mut header = Header {
+        let header = Header {
             base_fee_per_gas: Some(7),
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             ..Default::default()
