@@ -560,33 +560,32 @@ where
                                 this.evm_env_cache.insert(block_hash, data);
                             }
                         }
-                        CacheAction::CacheUpdateNewCanonicalChain { blocks, receipts, is_new } => {
-                            if is_new {
-                                for block in blocks {
-                                    this.on_new_block(block.hash(), Ok(Some(block.unseal())));
-                                }
+                        CacheAction::CacheNewCanonicalChain { blocks, receipts } => {
+                            for block in blocks {
+                                this.on_new_block(block.hash(), Ok(Some(block.unseal())));
+                            }
 
-                                for block_receipts in receipts {
-                                    this.on_new_receipts(
-                                        block_receipts.block_hash,
-                                        Ok(Some(Arc::new(
-                                            block_receipts.receipts.into_iter().flatten().collect(),
-                                        ))),
-                                    );
-                                }
-                            } else {
-                                for block in blocks {
-                                    this.on_reorg_block(block.hash(), Ok(Some(block.unseal())));
-                                }
+                            for block_receipts in receipts {
+                                this.on_new_receipts(
+                                    block_receipts.block_hash,
+                                    Ok(Some(Arc::new(
+                                        block_receipts.receipts.into_iter().flatten().collect(),
+                                    ))),
+                                );
+                            }
+                        }
+                        CacheAction::UncacheOldCanonicalChain { blocks, receipts } => {
+                            for block in blocks {
+                                this.on_reorg_block(block.hash(), Ok(Some(block.unseal())));
+                            }
 
-                                for block_receipts in receipts {
-                                    this.on_reorg_receipts(
-                                        block_receipts.block_hash,
-                                        Ok(Some(Arc::new(
-                                            block_receipts.receipts.into_iter().flatten().collect(),
-                                        ))),
-                                    );
-                                }
+                            for block_receipts in receipts {
+                                this.on_reorg_receipts(
+                                    block_receipts.block_hash,
+                                    Ok(Some(Arc::new(
+                                        block_receipts.receipts.into_iter().flatten().collect(),
+                                    ))),
+                                );
                             }
                         }
                     };
@@ -599,39 +598,15 @@ where
 
 /// All message variants sent through the channel
 enum CacheAction {
-    GetBlockWithSenders {
-        block_hash: B256,
-        response_tx: BlockWithSendersResponseSender,
-    },
-    GetBlockTransactions {
-        block_hash: B256,
-        response_tx: BlockTransactionsResponseSender,
-    },
-    GetEnv {
-        block_hash: B256,
-        response_tx: EnvResponseSender,
-    },
-    GetReceipts {
-        block_hash: B256,
-        response_tx: ReceiptsResponseSender,
-    },
-    BlockWithSendersResult {
-        block_hash: B256,
-        res: ProviderResult<Option<BlockWithSenders>>,
-    },
-    ReceiptsResult {
-        block_hash: B256,
-        res: ProviderResult<Option<Arc<Vec<Receipt>>>>,
-    },
-    EnvResult {
-        block_hash: B256,
-        res: Box<ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>>,
-    },
-    CacheUpdateNewCanonicalChain {
-        blocks: Vec<SealedBlockWithSenders>,
-        receipts: Vec<BlockReceipts>,
-        is_new: bool,
-    },
+    GetBlockWithSenders { block_hash: B256, response_tx: BlockWithSendersResponseSender },
+    GetBlockTransactions { block_hash: B256, response_tx: BlockTransactionsResponseSender },
+    GetEnv { block_hash: B256, response_tx: EnvResponseSender },
+    GetReceipts { block_hash: B256, response_tx: ReceiptsResponseSender },
+    BlockWithSendersResult { block_hash: B256, res: ProviderResult<Option<BlockWithSenders>> },
+    ReceiptsResult { block_hash: B256, res: ProviderResult<Option<Arc<Vec<Receipt>>>> },
+    EnvResult { block_hash: B256, res: Box<ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>> },
+    CacheNewCanonicalChain { blocks: Vec<SealedBlockWithSenders>, receipts: Vec<BlockReceipts> },
+    UncacheOldCanonicalChain { blocks: Vec<SealedBlockWithSenders>, receipts: Vec<BlockReceipts> },
 }
 
 struct BlockReceipts {
@@ -646,6 +621,23 @@ where
     St: Stream<Item = CanonStateNotification> + Unpin + 'static,
 {
     while let Some(event) = events.next().await {
+        if let Some(reverted) = event.reverted() {
+            let (blocks, receipts): (Vec<_>, Vec<_>) = reverted
+                .blocks_and_receipts()
+                .map(|(block, receipts)| {
+                    let block_receipts = BlockReceipts {
+                        block_hash: block.block.hash(),
+                        receipts: receipts.clone(),
+                    };
+                    (block.clone(), block_receipts)
+                })
+                .unzip();
+
+            let _ = eth_state_cache
+                .to_service
+                .send(CacheAction::UncacheOldCanonicalChain { blocks, receipts });
+        }
+
         if let Some(committed) = event.committed() {
             let (blocks, receipts): (Vec<_>, Vec<_>) = committed
                 .blocks_and_receipts()
@@ -658,51 +650,9 @@ where
                 })
                 .unzip();
 
-            let _ = eth_state_cache.to_service.send(CacheAction::CacheUpdateNewCanonicalChain {
-                blocks,
-                receipts,
-                is_new: true,
-            });
-        } else {
-            if let Some(reverted) = event.reverted() {
-                let (blocks, receipts): (Vec<_>, Vec<_>) = reverted
-                    .blocks_and_receipts()
-                    .map(|(block, receipts)| {
-                        let block_receipts = BlockReceipts {
-                            block_hash: block.block.hash(),
-                            receipts: receipts.clone(),
-                        };
-                        (block.clone(), block_receipts)
-                    })
-                    .unzip();
-
-                let _ =
-                    eth_state_cache.to_service.send(CacheAction::CacheUpdateNewCanonicalChain {
-                        blocks,
-                        receipts,
-                        is_new: false,
-                    });
-            }
-
-            if let Some(committed) = event.committed() {
-                let (blocks, receipts): (Vec<_>, Vec<_>) = committed
-                    .blocks_and_receipts()
-                    .map(|(block, receipts)| {
-                        let block_receipts = BlockReceipts {
-                            block_hash: block.block.hash(),
-                            receipts: receipts.clone(),
-                        };
-                        (block.clone(), block_receipts)
-                    })
-                    .unzip();
-
-                let _ =
-                    eth_state_cache.to_service.send(CacheAction::CacheUpdateNewCanonicalChain {
-                        blocks,
-                        receipts,
-                        is_new: true,
-                    });
-            }
+            let _ = eth_state_cache
+                .to_service
+                .send(CacheAction::CacheNewCanonicalChain { blocks, receipts });
         }
     }
 }
