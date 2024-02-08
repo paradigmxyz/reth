@@ -1,6 +1,6 @@
 //! Support for handling events emitted by node components.
 
-use crate::commands::node::cl_events::ConsensusLayerHealthEvent;
+use crate::{commands::node::cl_events::ConsensusLayerHealthEvent, primitives::B256};
 use futures::Stream;
 use num_format::{Buffer, Locale};
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, ForkchoiceStatus};
@@ -8,7 +8,11 @@ use reth_db::{database::Database, database_metrics::DatabaseMetadata};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
-use reth_primitives::{stage::{EntitiesCheckpoint, StageCheckpoint, StageId}, BlockNumber, constants};
+use reth_primitives::{
+    constants,
+    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
+    BlockNumber,
+};
 use reth_prune::PrunerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
 use std::{
@@ -20,7 +24,6 @@ use std::{
 };
 use tokio::time::Interval;
 use tracing::{info, warn};
-use crate::primitives::B256;
 
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
@@ -45,12 +48,20 @@ struct NodeState<DB> {
     safe_block_hash: Option<B256>,
     /// Hash of finalized block last set by fork choice update
     finalized_block_hash: Option<B256>,
-
 }
 
 impl<DB> NodeState<DB> {
     fn new(db: DB, network: Option<NetworkHandle>, latest_block: Option<BlockNumber>) -> Self {
-        Self { db, network, current_stage: None, latest_block, latest_block_time: None, head_block_hash: None, safe_block_hash: None, finalized_block_hash: None }
+        Self {
+            db,
+            network,
+            current_stage: None,
+            latest_block,
+            latest_block_time: None,
+            head_block_hash: None,
+            safe_block_hash: None,
+            finalized_block_hash: None,
+        }
     }
 
     fn num_connected_peers(&self) -> usize {
@@ -163,7 +174,10 @@ impl<DB> NodeState<DB> {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
                 let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
                     state;
-                if status != ForkchoiceStatus::Valid || (self.safe_block_hash != Some(safe_block_hash) && self.finalized_block_hash != Some(finalized_block_hash)) {
+                if status != ForkchoiceStatus::Valid ||
+                    (self.safe_block_hash != Some(safe_block_hash) &&
+                        self.finalized_block_hash != Some(finalized_block_hash))
+                {
                     info!(
                         ?head_block_hash,
                         ?safe_block_hash,
@@ -317,7 +331,7 @@ pub async fn handle_events<E, DB>(
     events: E,
     db: DB,
 ) where
-    E: Stream<Item=NodeEvent> + Unpin,
+    E: Stream<Item = NodeEvent> + Unpin,
     DB: DatabaseMetadata + Database + 'static,
 {
     let state = NodeState::new(db, network, latest_block_number);
@@ -341,9 +355,9 @@ struct EventHandler<E, DB> {
 }
 
 impl<E, DB> Future for EventHandler<E, DB>
-    where
-        E: Stream<Item=NodeEvent> + Unpin,
-        DB: DatabaseMetadata + Database + 'static,
+where
+    E: Stream<Item = NodeEvent> + Unpin,
+    DB: DatabaseMetadata + Database + 'static,
 {
     type Output = ();
 
@@ -449,7 +463,9 @@ struct Eta {
 impl Eta {
     /// Update the ETA given the checkpoint, if possible.
     fn update(&mut self, checkpoint: StageCheckpoint) {
-        let Some(current) = checkpoint.entities() else { return; };
+        let Some(current) = checkpoint.entities() else {
+            return;
+        };
 
         if let Some(last_checkpoint_time) = &self.last_checkpoint_time {
             let processed_since_last = current.processed - self.last_checkpoint.processed;
@@ -459,7 +475,7 @@ impl Eta {
             self.eta = Duration::try_from_secs_f64(
                 ((current.total - current.processed) as f64) / per_second,
             )
-                .ok();
+            .ok();
         }
 
         self.last_checkpoint = current;
@@ -514,7 +530,7 @@ mod tests {
             )),
             ..Default::default()
         }
-            .to_string();
+        .to_string();
 
         assert_eq!(eta, "13m 37s");
     }
