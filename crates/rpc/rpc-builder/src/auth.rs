@@ -61,7 +61,7 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     EngineT: EngineTypes + 'static,
     EngineApi: EngineApiServer<EngineT>,
-    EvmConfig: EvmEnvConfig + 'static,
+    EvmConfig: ConfigureEvmEnv + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
 {
     // spawn a new cache task
