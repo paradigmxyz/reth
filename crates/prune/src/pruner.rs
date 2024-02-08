@@ -65,7 +65,7 @@ impl<DB: Database> Pruner<DB> {
         }
     }
 
-    /// Listen for events on the prune.
+    /// Listen for events on the pruner.
     pub fn events(&mut self) -> UnboundedReceiverStream<PrunerEvent> {
         self.listeners.new_listener()
     }

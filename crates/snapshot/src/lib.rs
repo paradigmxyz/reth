@@ -7,7 +7,9 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+mod event;
 pub mod segments;
 mod snapshotter;
 
+pub use event::SnapshotterEvent;
 pub use snapshotter::{SnapshotTargets, Snapshotter, SnapshotterResult, SnapshotterWithResult};

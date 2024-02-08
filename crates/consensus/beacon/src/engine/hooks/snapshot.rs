@@ -76,7 +76,7 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
     ) -> RethResult<Option<EngineHookEvent>> {
         Ok(match &mut self.state {
             SnapshotterState::Idle(snapshotter) => {
-                let Some(snapshotter) = snapshotter.take() else {
+                let Some(mut snapshotter) = snapshotter.take() else {
                     trace!(target: "consensus::engine::hooks::snapshot", "Snapshotter is already running but the state is idle");
                     return Ok(None)
                 };
