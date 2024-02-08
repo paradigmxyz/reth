@@ -198,8 +198,8 @@ impl<DB> NodeState<DB> {
                     mgas=%format!("{:.3}", block.header.gas_used as f64 / constants::MGAS_TO_GAS as f64),
                     full=%format!("{:.1}%", block.header.gas_used as f64 * 100.0 / block.header.gas_limit as f64),
                     base_fee=%format!("{:.2}gwei", block.header.base_fee_per_gas.unwrap_or(0) as f64 / constants::GWEI_TO_WEI as f64),
-                    blobs=block.header.blob_gas_used.unwrap_or(0) / constants::EIP4844_GAS_PER_BLOB,
-                    excess_blobs=block.header.excess_blob_gas.unwrap_or(0) / constants::EIP4844_GAS_PER_BLOB,
+                    blobs=block.header.blob_gas_used.unwrap_or(0) / constants::eip4844::DATA_GAS_PER_BLOB,
+                    excess_blobs=block.header.excess_blob_gas.unwrap_or(0) / constants::eip4844::DATA_GAS_PER_BLOB,
                     ?elapsed,
                     "Block added to canonical chain"
                 );

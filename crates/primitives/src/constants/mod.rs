@@ -61,9 +61,6 @@ pub const EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 8;
 /// Elasticity multiplier as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
 pub const EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u64 = 2;
 
-/// Size of blobs in bytes as defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844)
-pub const EIP4844_GAS_PER_BLOB: u64 = 2u64.pow(17);
-
 /// Minimum gas limit allowed for transactions.
 pub const MINIMUM_GAS_LIMIT: u64 = 5000;
 
