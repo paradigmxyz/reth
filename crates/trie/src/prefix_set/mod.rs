@@ -48,6 +48,11 @@ where
 }
 
 impl PrefixSetMut {
+    /// Create [PrefixSetMut] with pre-allocated capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self { keys: Vec::with_capacity(capacity), ..Default::default() }
+    }
+
     /// Returns `true` if any of the keys in the set has the given prefix or
     /// if the given prefix is a prefix of any key in the set.
     pub fn contains(&mut self, prefix: &[u8]) -> bool {

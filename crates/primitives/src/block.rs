@@ -232,7 +232,7 @@ impl SealedBlock {
 
     /// Header hash.
     #[inline]
-    pub fn hash(&self) -> B256 {
+    pub const fn hash(&self) -> B256 {
         self.header.hash()
     }
 

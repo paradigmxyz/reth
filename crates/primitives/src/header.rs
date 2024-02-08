@@ -13,10 +13,7 @@ use alloy_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_S
 use bytes::{Buf, BufMut, BytesMut};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
-use std::{
-    mem,
-    ops::{Deref, DerefMut},
-};
+use std::{mem, ops::Deref};
 
 /// Errors that can occur during header sanity checks.
 #[derive(Debug, PartialEq)]
@@ -670,12 +667,66 @@ pub enum HeaderValidationError {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SealedHeader {
     /// Locked Header fields.
-    pub header: Header,
+    header: Header,
     /// Locked Header hash.
-    pub hash: BlockHash,
+    hash: BlockHash,
 }
 
 impl SealedHeader {
+    /// Creates the sealed header with the corresponding block hash.
+    #[inline]
+    pub const fn new(header: Header, hash: BlockHash) -> Self {
+        Self { header, hash }
+    }
+
+    /// Returns the sealed Header fields.
+    #[inline]
+    pub fn header(&self) -> &Header {
+        &self.header
+    }
+
+    /// Returns header/block hash.
+    #[inline]
+    pub const fn hash(&self) -> BlockHash {
+        self.hash
+    }
+
+    /// Updates the block header.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_header(&mut self, header: Header) {
+        self.header = header
+    }
+
+    /// Updates the block hash.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_hash(&mut self, hash: BlockHash) {
+        self.hash = hash
+    }
+
+    /// Updates the parent block hash.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_parent_hash(&mut self, hash: BlockHash) {
+        self.header.parent_hash = hash
+    }
+
+    /// Updates the block number.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_block_number(&mut self, number: BlockNumber) {
+        self.header.number = number;
+    }
+
+    /// Updates the block state root.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_state_root(&mut self, state_root: B256) {
+        self.header.state_root = state_root;
+    }
+
+    /// Updates the block difficulty.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_difficulty(&mut self, difficulty: U256) {
+        self.header.difficulty = difficulty;
+    }
+
     /// Checks the gas limit for consistency between parent and self headers.
     ///
     /// The maximum allowable difference between self and parent gas limits is determined by the
@@ -864,11 +915,6 @@ impl SealedHeader {
         (self.header, self.hash)
     }
 
-    /// Return header/block hash.
-    pub fn hash(&self) -> BlockHash {
-        self.hash
-    }
-
     /// Return the number hash tuple.
     pub fn num_hash(&self) -> BlockNumHash {
         BlockNumHash::new(self.number, self.hash)
@@ -942,12 +988,6 @@ impl Deref for SealedHeader {
 
     fn deref(&self) -> &Self::Target {
         &self.header
-    }
-}
-
-impl DerefMut for SealedHeader {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.header
     }
 }
 

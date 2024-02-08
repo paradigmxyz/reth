@@ -334,7 +334,7 @@ impl PendingBlockEnvOrigin {
     pub(crate) fn state_block_id(&self) -> BlockId {
         match self {
             PendingBlockEnvOrigin::ActualPending(_) => BlockNumberOrTag::Pending.into(),
-            PendingBlockEnvOrigin::DerivedFromLatest(header) => BlockId::Hash(header.hash.into()),
+            PendingBlockEnvOrigin::DerivedFromLatest(header) => BlockId::Hash(header.hash().into()),
         }
     }
 
@@ -342,7 +342,7 @@ impl PendingBlockEnvOrigin {
     fn build_target_hash(&self) -> B256 {
         match self {
             PendingBlockEnvOrigin::ActualPending(block) => block.parent_hash,
-            PendingBlockEnvOrigin::DerivedFromLatest(header) => header.hash,
+            PendingBlockEnvOrigin::DerivedFromLatest(header) => header.hash(),
         }
     }
 
