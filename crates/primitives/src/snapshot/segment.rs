@@ -308,6 +308,12 @@ impl SegmentRangeInclusive {
     }
 }
 
+impl std::fmt::Display for SegmentRangeInclusive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}..={}", self.start, self.end)
+    }
+}
+
 impl From<RangeInclusive<u64>> for SegmentRangeInclusive {
     fn from(value: RangeInclusive<u64>) -> Self {
         SegmentRangeInclusive { start: *value.start(), end: *value.end() }
