@@ -172,7 +172,7 @@ where
                 if let Some(percentiles) = &reward_percentiles {
                     let (transactions, receipts) = self
                         .cache()
-                        .get_transactions_and_receipts(header.hash)
+                        .get_transactions_and_receipts(header.hash())
                         .await?
                         .ok_or(EthApiError::InvalidBlockRange)?;
                     rewards.push(

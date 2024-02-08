@@ -112,7 +112,7 @@ where
         // but if all transactions are to be replayed, we can use the state at the block itself
         let num_txs = transaction_index.index().unwrap_or(block.body.len());
         if num_txs == block.body.len() {
-            at = block.hash;
+            at = block.hash();
             replay_block_txs = false;
         }
 

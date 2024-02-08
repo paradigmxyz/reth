@@ -215,7 +215,7 @@ where
                 }
             }
 
-            self.pre_cached = Some(PrecachedState { block: committed.tip().hash, cached });
+            self.pre_cached = Some(PrecachedState { block: committed.tip().hash(), cached });
         }
     }
 }

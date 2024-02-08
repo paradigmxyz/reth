@@ -530,7 +530,7 @@ where
                         }
                         CacheAction::CacheNewCanonicalChain { blocks, receipts } => {
                             for block in blocks {
-                                this.on_new_block(block.hash, Ok(Some(block.unseal())));
+                                this.on_new_block(block.hash(), Ok(Some(block.unseal())));
                             }
 
                             for block_receipts in receipts {
@@ -578,8 +578,10 @@ where
             let (blocks, receipts): (Vec<_>, Vec<_>) = committed
                 .blocks_and_receipts()
                 .map(|(block, receipts)| {
-                    let block_receipts =
-                        BlockReceipts { block_hash: block.block.hash, receipts: receipts.clone() };
+                    let block_receipts = BlockReceipts {
+                        block_hash: block.block.hash(),
+                        receipts: receipts.clone(),
+                    };
                     (block.clone(), block_receipts)
                 })
                 .unzip();

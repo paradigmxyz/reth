@@ -352,7 +352,7 @@ impl FeeHistoryEntry {
             blob_gas_used_ratio: block.blob_gas_used() as f64 /
                 reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
             gas_used: block.gas_used,
-            header_hash: block.hash,
+            header_hash: block.hash(),
             gas_limit: block.gas_limit,
             rewards: Vec::new(),
         }
