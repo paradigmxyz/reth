@@ -1455,7 +1455,7 @@ mod tests {
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use secp256k1::SecretKey;
     use std::{future::poll_fn, hash};
-    use tests::fetcher::TxUnknownToPool;
+    use tests::fetcher::TxFetchMetadata;
 
     async fn new_tx_manager() -> TransactionsManager<impl TransactionPool> {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -1871,10 +1871,10 @@ mod tests {
         backups.insert(peer_id_1);
         tx_fetcher
             .hashes_unknown_to_pool
-            .insert(seen_hashes[1], TxUnknownToPool::new(retries, backups.clone(), None));
+            .insert(seen_hashes[1], TxFetchMetadata::new(retries, backups.clone(), None));
         tx_fetcher
             .hashes_unknown_to_pool
-            .insert(seen_hashes[0], TxUnknownToPool::new(retries, backups, None));
+            .insert(seen_hashes[0], TxFetchMetadata::new(retries, backups, None));
         tx_fetcher.hashes_pending_fetch.insert(seen_hashes[1]);
         tx_fetcher.hashes_pending_fetch.insert(seen_hashes[0]);
 

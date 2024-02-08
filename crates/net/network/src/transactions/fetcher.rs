@@ -58,21 +58,23 @@ const DEFAULT_MAX_HASHES_PENDING_FETCH: usize = MAX_CAPACITY_CACHE_FOR_HASHES_PE
 pub(super) const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES: usize = 256;
 
 /// Soft limit for a [`PooledTransactions`] response if request is filled from hashes pending
-/// fetch.
+/// fetch. Default is half of [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE`] which defaults to 256 KiB, so 128 KiB.
 const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING: usize =
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE / 2;
 
 /// Soft limit for the number of hashes in a [`GetPooledTransactions`] request is filled from
-/// hashes pending fetch.
+/// hashes pending fetch. Default is half of the [`GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES`] 
+/// which by spec is 256 hashes, so 128 hashes.
 const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES_ON_FETCH_PENDING: usize =
     GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES / 2;
 
-/// Average byte size of an encoded transaction. Estimated by the standard recommended max
-/// response size divided by the recommended max count of hashes in an [`GetPooledTransactions`]
-/// request.
+/// Average byte size of an encoded transaction. Default is 
+/// [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE`], which defaults to 128 KiB, 
+/// divided by [`GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES`], which defaults to 256 hashes, so 
+/// 521 bytes.
 const AVERAGE_BYTE_SIZE_TX_ENCODED_LENGTH: usize =
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE /
-        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_MEMPOOL_PACKET;
+    GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES;
 
 const MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED_LENGTH: usize = 120;
 
@@ -88,7 +90,7 @@ const BUDGET_FIND_IDLE_FALLBACK_PEER: usize =
 /// new requests on announced hashes.
 #[derive(Debug)]
 #[pin_project]
-pub(super) struct TransactionFetcher<T = TxUnknownToPool> {
+pub(super) struct TransactionFetcher<T = TxFetchMetadata> {
     /// All peers with an `inflight_requests`.
     pub(super) active_peers: LruMap<PeerId, u8, ByLength>,
     /// All currently active requests for pooled transactions.
@@ -104,17 +106,21 @@ pub(super) struct TransactionFetcher<T = TxUnknownToPool> {
     tx_fetcher_info: TransactionFetcherInfo,
 }
 
+/// Metadata of a transaction hash that is yet to be fetched.
 #[derive(Debug)]
-pub(super) struct TxUnknownToPool {
+pub(super) struct TxFetchMetadata {
+    /// The number of times a request attempt has been made for the hash.
     retries: u8,
+    /// Peers that have announced the hash, but to which a request attempt has not yet been made.
     fallback_peers: LruCache<PeerId>,
+    /// Size metadata of the transaction if it has been seen in an eth68 announcement.
     // todo: store all seen sizes as a `(size, peer_id)` tuple to catch peers that respond with
     // another size tx than they announced. alt enter in request (won't catch peers announcing
     // wrong size for requests assembled from hashes pending fetch if stored in request fut)
     tx_encoded_length: Option<usize>,
 }
 
-impl TxUnknownToPool {
+impl TxFetchMetadata {
     pub fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId> {
         &mut self.fallback_peers
     }
@@ -179,7 +185,7 @@ impl TransactionFetcher {
         hash: TxHash,
         is_session_active: impl Fn(&PeerId) -> bool,
     ) -> Option<&PeerId> {
-        let TxUnknownToPool { fallback_peers, .. } = self.hashes_unknown_to_pool.peek(&hash)?;
+        let TxFetchMetadata { fallback_peers, .. } = self.hashes_unknown_to_pool.peek(&hash)?;
 
         for peer_id in fallback_peers.iter() {
             if self.is_idle(peer_id) && is_session_active(peer_id) {
@@ -335,8 +341,7 @@ impl TransactionFetcher {
         }
     }
 
-    /// Tries to buffer hashes for retry. Hashes that have been re-requested
-    /// [`MAX_REQUEST_RETRIES_PER_TX_HASH`], are dropped.
+    /// Tries to buffer hashes for retry.
     pub(super) fn buffer_hashes_for_retry(
         &mut self,
         mut hashes: RequestTxHashes,
@@ -358,7 +363,8 @@ impl TransactionFetcher {
 
     /// Buffers hashes. Note: Only peers that haven't yet tried to request the hashes should be
     /// passed as `fallback_peer` parameter! For re-buffering hashes on failed request, use
-    /// [`TransactionFetcher::buffer_hashes_for_retry`].
+    /// [`TransactionFetcher::buffer_hashes_for_retry`]. Hashes that have been re-requested
+    /// [`MAX_REQUEST_RETRIES_PER_TX_HASH`], are dropped.
     pub(super) fn buffer_hashes(&mut self, hashes: RequestTxHashes, fallback_peer: Option<PeerId>) {
         let mut max_retried_and_evicted_hashes = vec![];
 
@@ -370,7 +376,7 @@ impl TransactionFetcher {
 `@self`: {self:?}",
             );
 
-            let Some(TxUnknownToPool { retries, fallback_peers, .. }) =
+            let Some(TxFetchMetadata { retries, fallback_peers, .. }) =
                 self.hashes_unknown_to_pool.get(&hash)
             else {
                 return
@@ -495,7 +501,7 @@ impl TransactionFetcher {
         // filter out inflight hashes, and register the peer as fallback for all inflight hashes
         new_announced_hashes.retain(|hash, metadata| {
             // occupied entry
-            if let Some(TxUnknownToPool{ref mut fallback_peers, tx_encoded_length: ref mut previously_seen_size, ..}) = self.hashes_unknown_to_pool.peek_mut(hash) {
+            if let Some(TxFetchMetadata{ref mut fallback_peers, tx_encoded_length: ref mut previously_seen_size, ..}) = self.hashes_unknown_to_pool.peek_mut(hash) {
                 // update size metadata if available
                 if let Some((_ty, size)) = metadata {
                     if let Some(prev_size) = previously_seen_size {
@@ -557,7 +563,7 @@ impl TransactionFetcher {
             let limit = NonZeroUsize::new(MAX_ALTERNATIVE_PEERS_PER_TX.into()).expect("MAX_ALTERNATIVE_PEERS_PER_TX should be non-zero");
 
             if self.hashes_unknown_to_pool.get_or_insert(*hash, ||
-                TxUnknownToPool{retries: 0, fallback_peers: LruCache::new(limit), tx_encoded_length: None}
+                TxFetchMetadata{retries: 0, fallback_peers: LruCache::new(limit), tx_encoded_length: None}
             ).is_none() {
 
                 debug!(target: "net::tx",
