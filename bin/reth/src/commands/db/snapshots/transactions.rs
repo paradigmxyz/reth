@@ -25,8 +25,7 @@ impl Command {
     ) -> eyre::Result<()> {
         let provider = provider_factory.provider()?;
         let tip = provider.last_block_number()?;
-        let block_range =
-            self.block_ranges(tip).first().expect("has been generated before").clone();
+        let block_range = *self.block_ranges(tip).first().expect("has been generated before");
 
         let filters = if let Some(phf) = self.with_filters.then_some(phf).flatten() {
             Filters::WithFilters(inclusion_filter, phf)
@@ -36,7 +35,7 @@ impl Command {
 
         let mut rng = rand::thread_rng();
 
-        let tx_range = provider.transaction_range_by_block_range(block_range.std_range())?;
+        let tx_range = provider.transaction_range_by_block_range(block_range.into())?;
 
         let mut row_indexes = tx_range.clone().collect::<Vec<_>>();
 

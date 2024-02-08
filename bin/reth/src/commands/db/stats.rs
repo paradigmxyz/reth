@@ -152,7 +152,7 @@ impl Command {
             for (block_range, tx_range) in ranges {
                 let fixed_block_range = find_fixed_range(block_range.start());
                 let jar_provider = snapshot_provider
-                    .get_segment_provider(segment, || Some(fixed_block_range.clone()), None)?
+                    .get_segment_provider(segment, || Some(fixed_block_range), None)?
                     .expect("something went wrong");
 
                 let columns = jar_provider.columns();
