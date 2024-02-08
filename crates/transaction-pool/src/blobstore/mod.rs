@@ -4,7 +4,10 @@ pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore
 pub use mem::InMemoryBlobStore;
 pub use noop::NoopBlobStore;
 use reth_primitives::{BlobTransactionSidecar, B256};
-use std::{fmt, sync::atomic::AtomicUsize};
+use std::{
+    fmt,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
 
 pub mod disk;
@@ -85,32 +88,39 @@ pub(crate) struct BlobStoreSize {
 impl BlobStoreSize {
     #[inline]
     pub(crate) fn add_size(&self, add: usize) {
-        self.data_size.fetch_add(add, std::sync::atomic::Ordering::Relaxed);
+        self.data_size.fetch_add(add, Ordering::Relaxed);
     }
 
     #[inline]
     pub(crate) fn sub_size(&self, sub: usize) {
-        self.data_size.fetch_sub(sub, std::sync::atomic::Ordering::Relaxed);
+        self.data_size.fetch_sub(sub, Ordering::Relaxed);
     }
 
     #[inline]
     pub(crate) fn update_len(&self, len: usize) {
-        self.num_blobs.store(len, std::sync::atomic::Ordering::Relaxed);
+        self.num_blobs.store(len, Ordering::Relaxed);
     }
 
     #[inline]
     pub(crate) fn inc_len(&self, add: usize) {
-        self.num_blobs.fetch_add(add, std::sync::atomic::Ordering::Relaxed);
+        self.num_blobs.fetch_add(add, Ordering::Relaxed);
     }
 
     #[inline]
     pub(crate) fn data_size(&self) -> usize {
-        self.data_size.load(std::sync::atomic::Ordering::Relaxed)
+        self.data_size.load(Ordering::Relaxed)
     }
 
     #[inline]
     pub(crate) fn blobs_len(&self) -> usize {
-        self.num_blobs.load(std::sync::atomic::Ordering::Relaxed)
+        self.num_blobs.load(Ordering::Relaxed)
+    }
+}
+
+impl PartialEq for BlobStoreSize {
+    fn eq(&self, other: &Self) -> bool {
+        self.data_size.load(Ordering::Relaxed) == other.data_size.load(Ordering::Relaxed) &&
+            self.num_blobs.load(Ordering::Relaxed) == other.num_blobs.load(Ordering::Relaxed)
     }
 }
 

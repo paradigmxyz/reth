@@ -6970,6 +6970,7 @@ dependencies = [
  "revm",
  "schnellru",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
