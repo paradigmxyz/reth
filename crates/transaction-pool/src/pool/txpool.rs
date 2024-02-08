@@ -759,7 +759,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         // Helper macro that discards the worst transactions for the pools
         macro_rules! discard_worst {
-            ($this:ident, $removed:ident,  [$($limit:ident => $pool:ident),*]  ) => {
+            ($this:ident, $removed:ident, [$($limit:ident => $pool:ident),* $(,)*]) => {
                 $ (
                 while $this
                         .config
@@ -806,10 +806,10 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         discard_worst!(
             self, removed, [
-                pending_limit  => pending_pool,
-                basefee_limit  => basefee_pool,
-                blob_limit => blob_pool,
-                queued_limit  => queued_pool
+                pending_limit => pending_pool,
+                basefee_limit => basefee_pool,
+                blob_limit    => blob_pool,
+                queued_limit  => queued_pool,
             ]
         );
 
