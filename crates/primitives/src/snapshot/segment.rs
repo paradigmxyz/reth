@@ -306,16 +306,23 @@ impl SegmentRangeInclusive {
     pub fn end(&self) -> u64 {
         self.end
     }
-
-    /// Returns a [`RangeInclusive`] representation
-    pub fn std_range(&self) -> RangeInclusive<u64> {
-        self.start..=self.end
-    }
 }
 
 impl From<RangeInclusive<u64>> for SegmentRangeInclusive {
     fn from(value: RangeInclusive<u64>) -> Self {
         SegmentRangeInclusive { start: *value.start(), end: *value.end() }
+    }
+}
+
+impl From<&SegmentRangeInclusive> for RangeInclusive<u64> {
+    fn from(value: &SegmentRangeInclusive) -> Self {
+        value.start()..=value.end()
+    }
+}
+
+impl From<SegmentRangeInclusive> for RangeInclusive<u64> {
+    fn from(value: SegmentRangeInclusive) -> Self {
+        (&value).into()
     }
 }
 

@@ -202,7 +202,7 @@ impl Command {
                             &provider,
                             dir.as_path(),
                             config,
-                            block_range.std_range(),
+                            block_range.into(),
                         )?;
                     }
 

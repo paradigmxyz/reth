@@ -11,7 +11,7 @@ use reth_primitives::{
 use reth_provider::{
     providers::SnapshotProvider, BlockNumReader, HeaderProvider, ProviderError, ProviderFactory,
 };
-use std::{path::PathBuf, sync::Arc};
+use std::{ops::RangeInclusive, path::PathBuf, sync::Arc};
 
 impl Command {
     pub(crate) fn bench_headers_snapshot(
@@ -23,8 +23,7 @@ impl Command {
     ) -> eyre::Result<()> {
         let provider = provider_factory.provider()?;
         let tip = provider.last_block_number()?;
-        let block_range =
-            self.block_ranges(tip).first().expect("has been generated before").clone();
+        let block_range = *self.block_ranges(tip).first().expect("has been generated before");
 
         let filters = if let Some(phf) = self.with_filters.then_some(phf).flatten() {
             Filters::WithFilters(inclusion_filter, phf)
@@ -32,7 +31,8 @@ impl Command {
             Filters::WithoutFilters
         };
 
-        let mut row_indexes = block_range.std_range().collect::<Vec<_>>();
+        let range: RangeInclusive<u64> = (&block_range).into();
+        let mut row_indexes = range.collect::<Vec<_>>();
         let mut rng = rand::thread_rng();
 
         let path: PathBuf = SnapshotSegment::Headers
