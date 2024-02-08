@@ -9,7 +9,11 @@ use reth_primitives::{
     BlockHash, BlockNumber, Header, Receipt, SnapshotSegment, TransactionSignedNoHash, TxNumber,
     U256,
 };
-use std::{ops::Deref, path::PathBuf, sync::Arc};
+use std::{
+    ops::Deref,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 /// Mutable reference to a dashmap element of [`SnapshotProviderRW`].
 pub type SnapshotProviderRWRefMut<'a> = RefMut<'a, SnapshotSegment, SnapshotProviderRW<'static>>;
@@ -338,7 +342,7 @@ impl<'a> Deref for SnapshotProviderRW<'a> {
 
 fn create_jar(
     segment: SnapshotSegment,
-    path: &PathBuf,
+    path: &Path,
     block_range: SegmentRangeInclusive,
     tx_range: Option<SegmentRangeInclusive>,
 ) -> NippyJar<SegmentHeader> {
