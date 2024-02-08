@@ -1322,20 +1322,21 @@ where
                 fee_history_cache,
                 self.evm_config.clone(),
             );
-            let filter = EthFilter::new(
-                self.provider.clone(),
-                self.pool.clone(),
-                cache.clone(),
-                self.config.eth.filter_config(),
-                executor.clone(),
-            );
-
             let pubsub = EthPubSub::with_spawner(
                 self.provider.clone(),
                 self.pool.clone(),
                 self.events.clone(),
                 self.network.clone(),
-                executor,
+                executor.clone(),
+            );
+
+            let filter = EthFilter::new::<Events, Network>(
+                self.provider.clone(),
+                self.pool.clone(),
+                cache.clone(),
+                self.config.eth.filter_config(),
+                executor.clone(),
+                self.events.clone(),
             );
 
             let eth = EthHandlers { api, cache, filter, pubsub, blocking_task_pool };

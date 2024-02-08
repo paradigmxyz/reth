@@ -14,8 +14,8 @@ use jsonrpsee::{
 use reth_network_api::{NetworkInfo, Peers};
 use reth_node_api::{EngineTypes, EvmEnvConfig};
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
-    StateProviderFactory,
+    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
+    ReceiptProviderIdExt, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -35,7 +35,7 @@ use std::{
 
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
-pub async fn launch<Provider, Pool, Network, Tasks, EngineApi, EngineT, EvmConfig>(
+pub async fn launch<Provider, Pool, Network, Tasks, EngineApi, EngineT, EvmConfig, Events>(
     provider: Provider,
     pool: Pool,
     network: Network,
@@ -44,6 +44,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, EngineApi, EngineT, EvmConfi
     socket_addr: SocketAddr,
     secret: JwtSecret,
     evm_config: EvmConfig,
+    events: Events,
 ) -> Result<AuthServerHandle, RpcError>
 where
     Provider: BlockReaderIdExt
@@ -61,6 +62,7 @@ where
     EngineT: EngineTypes + 'static,
     EngineApi: EngineApiServer<EngineT>,
     EvmConfig: EvmEnvConfig + 'static,
+    Events: CanonStateSubscriptions + Clone + 'static,
 {
     // spawn a new cache task
     let eth_cache = EthStateCache::spawn_with(
@@ -77,7 +79,7 @@ where
     let eth_api = EthApi::with_spawner(
         provider.clone(),
         pool.clone(),
-        network,
+        network.clone(),
         eth_cache.clone(),
         gas_oracle,
         EthConfig::default().rpc_gas_cap,
@@ -89,9 +91,23 @@ where
     let config = EthFilterConfig::default()
         .max_logs_per_response(DEFAULT_MAX_LOGS_PER_RESPONSE)
         .max_blocks_per_filter(DEFAULT_MAX_BLOCKS_PER_FILTER);
-    let eth_filter =
-        EthFilter::new(provider, pool, eth_cache.clone(), config, Box::new(executor.clone()));
-    launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
+
+    let eth_filter = EthFilter::new::<Events, Network>(
+        provider.clone(),
+        pool.clone(),
+        eth_cache.clone(),
+        config,
+        Box::new(executor.clone()),
+        events.clone(),
+    );
+    launch_with_eth_api::<Provider, Pool, Network, EngineApi, EngineT, EvmConfig>(
+        eth_api,
+        eth_filter,
+        engine_api,
+        socket_addr,
+        secret,
+    )
+    .await
 }
 
 /// Configure and launch a _standalone_ auth server with existing EthApi implementation.
