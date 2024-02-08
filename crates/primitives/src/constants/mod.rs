@@ -61,6 +61,9 @@ pub const EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 8;
 /// Elasticity multiplier as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
 pub const EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u64 = 2;
 
+/// Size of blobs in bytes as defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844)
+pub const EIP4844_GAS_PER_BLOB: u64 = 2u64.pow(17);
+
 /// Minimum gas limit allowed for transactions.
 pub const MINIMUM_GAS_LIMIT: u64 = 5000;
 
@@ -120,9 +123,6 @@ pub const ETH_TO_WEI: u128 = FINNEY_TO_WEI * 1000;
 
 /// Multiplier for converting mgas to gas.
 pub const MGAS_TO_GAS: u64 = 1_000_000u64;
-
-/// Multiplier for blob size
-pub const BLOB_SIZE_BYTES: u64 = 128 * 1024;
 
 /// The Ethereum mainnet genesis hash.
 pub const MAINNET_GENESIS_HASH: B256 =

@@ -40,17 +40,17 @@ struct NodeState<DB> {
     /// The time of the latest block seen by the pipeline
     latest_block_time: Option<u64>,
     /// Hash of the head block last set by fork choice update
-    head_block_hash: B256,
+    head_block_hash: Option<B256>,
     /// Hash of the safe block last set by fork choice update
-    safe_block_hash: B256,
+    safe_block_hash: Option<B256>,
     /// Hash of finalized block last set by fork choice update
-    finalized_block_hash: B256,
+    finalized_block_hash: Option<B256>,
 
 }
 
 impl<DB> NodeState<DB> {
     fn new(db: DB, network: Option<NetworkHandle>, latest_block: Option<BlockNumber>) -> Self {
-        Self { db, network, current_stage: None, latest_block, latest_block_time: None, head_block_hash: B256::ZERO, safe_block_hash: B256::ZERO, finalized_block_hash: B256::ZERO }
+        Self { db, network, current_stage: None, latest_block, latest_block_time: None, head_block_hash: None, safe_block_hash: None, finalized_block_hash: None }
     }
 
     fn num_connected_peers(&self) -> usize {
@@ -163,7 +163,7 @@ impl<DB> NodeState<DB> {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
                 let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
                     state;
-                if status != ForkchoiceStatus::Valid || (self.safe_block_hash != safe_block_hash && self.finalized_block_hash != finalized_block_hash) {
+                if status != ForkchoiceStatus::Valid || (self.safe_block_hash != Some(safe_block_hash) && self.finalized_block_hash != Some(finalized_block_hash)) {
                     info!(
                         ?head_block_hash,
                         ?safe_block_hash,
@@ -172,9 +172,9 @@ impl<DB> NodeState<DB> {
                         "Forkchoice updated"
                     );
                 }
-                self.head_block_hash = head_block_hash;
-                self.safe_block_hash = safe_block_hash;
-                self.finalized_block_hash = finalized_block_hash;
+                self.head_block_hash = Some(head_block_hash);
+                self.safe_block_hash = Some(safe_block_hash);
+                self.finalized_block_hash = Some(finalized_block_hash);
             }
             BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed) => {
                 let mut gas_fmt_buf = Buffer::default();
@@ -187,8 +187,8 @@ impl<DB> NodeState<DB> {
                     mgas=%format!("{:.3}", block.header.header.gas_used as f64 / constants::MGAS_TO_GAS as f64),
                     full=%format!("{:.1}%", block.header.header.gas_used as f64 * 100.0 / block.header.header.gas_limit as f64),
                     base_fee=%format!("{:.2}gwei", block.header.header.base_fee_per_gas.unwrap_or(0) as f64 / constants::GWEI_TO_WEI as f64),
-                    blobs=block.header.blob_gas_used.unwrap_or(0) / constants::BLOB_SIZE_BYTES,
-                    excess_blobs=block.header.excess_blob_gas.unwrap_or(0) / constants::BLOB_SIZE_BYTES,
+                    blobs=block.header.blob_gas_used.unwrap_or(0) / constants::EIP4844_GAS_PER_BLOB,
+                    excess_blobs=block.header.excess_blob_gas.unwrap_or(0) / constants::EIP4844_GAS_PER_BLOB,
                     ?elapsed,
                     "Block added to canonical chain"
                 );
