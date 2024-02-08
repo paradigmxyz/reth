@@ -194,7 +194,7 @@ impl Command {
             if let Some(segment_snapshots) = snapshots.get(&snapshot_segment) {
                 for (block_range, _) in segment_snapshots {
                     snapshot_provider
-                        .delete_jar(snapshot_segment, find_fixed_range(*block_range.start()))?;
+                        .delete_jar(snapshot_segment, find_fixed_range(block_range.start()))?;
                 }
             }
         }

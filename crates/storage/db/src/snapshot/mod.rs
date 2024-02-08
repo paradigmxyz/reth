@@ -3,7 +3,6 @@
 mod generation;
 use std::{
     collections::{hash_map::Entry, HashMap},
-    ops::RangeInclusive,
     path::Path,
 };
 
@@ -15,13 +14,16 @@ pub use cursor::SnapshotCursor;
 mod mask;
 pub use mask::*;
 use reth_nippy_jar::{NippyJar, NippyJarError};
-use reth_primitives::{snapshot::SegmentHeader, BlockNumber, SnapshotSegment, TxNumber};
+use reth_primitives::{
+    snapshot::{SegmentHeader, SegmentRangeInclusive},
+    SnapshotSegment,
+};
 
 mod masks;
 
 /// Alias type for a map of [`SnapshotSegment`] and sorted lists of existing snapshot ranges.
 type SortedSnapshots =
-    HashMap<SnapshotSegment, Vec<(RangeInclusive<BlockNumber>, Option<RangeInclusive<TxNumber>>)>>;
+    HashMap<SnapshotSegment, Vec<(SegmentRangeInclusive, Option<SegmentRangeInclusive>)>>;
 
 /// Given the snapshots directory path, it returns a list over the existing snapshots organized by
 /// [`SnapshotSegment`]. Each segment has a sorted list of block ranges and transaction ranges as
@@ -62,7 +64,7 @@ pub fn iter_snapshots(path: impl AsRef<Path>) -> Result<SortedSnapshots, NippyJa
 
     for (_, range_list) in static_files.iter_mut() {
         // Sort by block end range.
-        range_list.sort_by(|a, b| a.0.end().cmp(b.0.end()));
+        range_list.sort_by(|a, b| a.0.end().cmp(&b.0.end()));
     }
 
     Ok(static_files)

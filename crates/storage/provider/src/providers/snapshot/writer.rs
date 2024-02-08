@@ -5,7 +5,7 @@ use reth_db::codecs::CompactU256;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
-    snapshot::{find_fixed_range, SegmentHeader},
+    snapshot::{find_fixed_range, SegmentHeader, SegmentRangeInclusive},
     BlockHash, BlockNumber, Header, Receipt, SnapshotSegment, TransactionSignedNoHash, TxNumber,
     U256,
 };
@@ -41,20 +41,25 @@ impl<'a> SnapshotProviderRW<'a> {
     ) -> ProviderResult<(NippyJarWriter<'a, SegmentHeader>, PathBuf)> {
         let block_range = find_fixed_range(block);
         let (jar, path) =
-            match reader.get_segment_provider_from_block(segment, *block_range.start(), None) {
+            match reader.get_segment_provider_from_block(segment, block_range.start(), None) {
                 Ok(provider) => {
                     (NippyJar::load(provider.data_path())?, provider.data_path().into())
                 }
                 Err(ProviderError::MissingSnapshotBlock(_, _)) => {
                     // TODO(joshie): if its a receipt segment, we can find out the actual range.
-                    let tx_range = reader.get_highest_snapshot_tx(segment).map(|tx| tx..=tx);
+                    let tx_range = reader
+                        .get_highest_snapshot_tx(segment)
+                        .map(|tx| SegmentRangeInclusive::new(tx, tx));
                     let path = reader.directory().join(segment.filename(&block_range));
                     (
                         NippyJar::new(
                             segment.columns(),
                             &path,
                             SegmentHeader::new(
-                                *block_range.start()..=*block_range.start(),
+                                SegmentRangeInclusive::new(
+                                    block_range.start(),
+                                    block_range.start(),
+                                ),
                                 tx_range,
                                 segment,
                             ),
@@ -112,7 +117,7 @@ impl<'a> SnapshotProviderRW<'a> {
             "This function should only be called by append_header when dealing with SnapshotSegment::Headers.");
 
         let last_block = self.writer.user_header().block_end();
-        let writer_range_end = *find_fixed_range(last_block).end();
+        let writer_range_end = find_fixed_range(last_block).end();
 
         // We have finished the previous snapshot and must freeze it
         if last_block + 1 > writer_range_end {
@@ -124,9 +129,12 @@ impl<'a> SnapshotProviderRW<'a> {
             self.writer = writer;
             self.data_path = data_path;
 
-            let block_start = *find_fixed_range(last_block + 1).start();
-            *self.writer.user_header_mut() =
-                SegmentHeader::new(block_start..=block_start, None, segment)
+            let block_start = find_fixed_range(last_block + 1).start();
+            *self.writer.user_header_mut() = SegmentHeader::new(
+                SegmentRangeInclusive::new(block_start, block_start),
+                None,
+                segment,
+            )
         } else {
             self.writer.user_header_mut().increment_block()
         }
@@ -192,7 +200,7 @@ impl<'a> SnapshotProviderRW<'a> {
         // Only Transactions and Receipts
         if let Some(last_block) = last_block {
             let header = self.writer.user_header_mut();
-            header.set_block_range(header.block_start()..=last_block);
+            header.set_block_range(header.block_start(), last_block);
         }
 
         // Commits new changes to disk.
@@ -222,7 +230,7 @@ impl<'a> SnapshotProviderRW<'a> {
         debug_assert!(self.writer.user_header().segment() == segment);
 
         if self.writer.user_header().tx_range().is_none() {
-            self.writer.user_header_mut().set_tx_range(tx_num..=tx_num);
+            self.writer.user_header_mut().set_tx_range(tx_num, tx_num);
         } else {
             self.writer.user_header_mut().increment_tx();
         }
@@ -330,7 +338,7 @@ impl<'a> SnapshotProviderRW<'a> {
     #[cfg(any(test, feature = "test-utils"))]
     /// Helper function to override block range for testing.
     pub fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
-        self.writer.user_header_mut().set_block_range(block_range)
+        self.writer.user_header_mut().set_block_range(*block_range.start(), *block_range.end())
     }
 }
 
