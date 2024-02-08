@@ -24,7 +24,7 @@ RUN cargo chef cook --profile $BUILD_PROFILE --recipe-path recipe.json
 
 # Build application
 COPY . .
-RUN cargo build --profile $BUILD_PROFILE --locked --bin reth
+RUN cargo build --profile $BUILD_PROFILE --no-default-features --locked --bin reth
 
 # ARG is not resolved in COPY so we have to hack around it by copying the
 # binary to a temporary location
