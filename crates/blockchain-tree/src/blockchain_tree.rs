@@ -94,12 +94,8 @@ impl PendingBlock {
         Self { tx, rx }
     }
 
-    // Method to conditionally update the PendingBlock
     fn try_update(&self, block: Option<SealedBlock>) -> Result<(), PendingBlockError> {
-        let current = self.rx.borrow();
-        if current.as_ref() != block.as_ref() {
-            self.tx.send(block)?;
-        }
+        self.tx.send(block)?;
         Ok(())
     }
 
