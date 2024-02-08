@@ -61,6 +61,9 @@ pub enum Hardfork {
     Canyon,
     /// Cancun.
     Cancun,
+    /// Ecotone
+    #[cfg(feature = "optimism")]
+    Ecotone,
 }
 
 impl Hardfork {
@@ -97,6 +100,8 @@ impl Hardfork {
             Hardfork::Regolith => None,
             #[cfg(feature = "optimism")]
             Hardfork::Canyon => None,
+            #[cfg(feature = "optimism")]
+            Hardfork::Ecotone => None,
         }
     }
 
@@ -157,6 +162,8 @@ impl Hardfork {
             Hardfork::Regolith => None,
             #[cfg(feature = "optimism")]
             Hardfork::Canyon => None,
+            #[cfg(feature = "optimism")]
+            Hardfork::Ecotone => None,
         }
     }
 }
@@ -189,6 +196,8 @@ impl FromStr for Hardfork {
             "regolith" => Hardfork::Regolith,
             #[cfg(feature = "optimism")]
             "canyon" => Hardfork::Canyon,
+            #[cfg(feature = "optimism")]
+            "ecotone" => Hardfork::Ecotone,
             _ => return Err(format!("Unknown hardfork: {s}")),
         })
     }
@@ -254,8 +263,9 @@ mod tests {
     #[test]
     #[cfg(feature = "optimism")]
     fn check_op_hardfork_from_str() {
-        let hardfork_str = ["beDrOck", "rEgOlITH", "cAnYoN"];
-        let expected_hardforks = [Hardfork::Bedrock, Hardfork::Regolith, Hardfork::Canyon];
+        let hardfork_str = ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe"];
+        let expected_hardforks =
+            [Hardfork::Bedrock, Hardfork::Regolith, Hardfork::Canyon, Hardfork::Ecotone];
 
         let hardforks: Vec<Hardfork> =
             hardfork_str.iter().map(|h| Hardfork::from_str(h).unwrap()).collect();
@@ -290,7 +300,8 @@ mod tests {
         let pos_hardforks = [Hardfork::Paris, Hardfork::Shanghai, Hardfork::Cancun];
 
         #[cfg(feature = "optimism")]
-        let op_hardforks = [Hardfork::Bedrock, Hardfork::Regolith, Hardfork::Canyon];
+        let op_hardforks =
+            [Hardfork::Bedrock, Hardfork::Regolith, Hardfork::Canyon, Hardfork::Ecotone];
 
         for hardfork in pow_hardforks.iter() {
             assert_eq!(hardfork.consensus_type(), ConsensusType::ProofOfWork);
