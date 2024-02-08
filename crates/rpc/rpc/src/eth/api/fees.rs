@@ -8,7 +8,7 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
-use reth_node_api::EvmEnvConfig;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{basefee::calculate_next_block_base_fee, BlockNumberOrTag, U256};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::FeeHistory;
@@ -21,7 +21,7 @@ where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: EvmEnvConfig + 'static,
+    EvmConfig: ConfigureEvmEnv + 'static,
 {
     /// Returns a suggestion for a gas price for legacy transactions.
     ///
@@ -160,7 +160,7 @@ where
                 if let Some(percentiles) = &reward_percentiles {
                     let (transactions, receipts) = self
                         .cache()
-                        .get_transactions_and_receipts(header.hash)
+                        .get_transactions_and_receipts(header.hash())
                         .await?
                         .ok_or(EthApiError::InvalidBlockRange)?;
                     rewards.push(
@@ -201,6 +201,8 @@ where
             gas_used_ratio,
             oldest_block: U256::from(start_block),
             reward: reward_percentiles.map(|_| rewards),
+            base_fee_per_blob_gas: Default::default(),
+            blob_gas_used_ratio: Default::default(),
         })
     }
 

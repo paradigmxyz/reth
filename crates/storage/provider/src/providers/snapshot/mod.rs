@@ -77,7 +77,7 @@ mod tests {
         let tx = provider_rw.tx_mut();
         let mut td = U256::ZERO;
         for header in headers.clone() {
-            td += header.header.difficulty;
+            td += header.header().difficulty;
             let hash = header.hash();
 
             tx.put::<CanonicalHeaders>(header.number, hash).unwrap();

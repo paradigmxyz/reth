@@ -20,6 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2024-02-03
       - uses: taiki-e/install-action@cargo-udeps
       - name: Check for unused dependencies
         run: cargo udeps --lib --features "jemalloc,${{ matrix.network }}"

@@ -107,7 +107,7 @@ pub async fn get_single_body<Client>(
 where
     Client: BodiesClient,
 {
-    let (peer_id, response) = client.get_block_body(header.hash).await?.split();
+    let (peer_id, response) = client.get_block_body(header.hash()).await?.split();
 
     if response.is_none() {
         client.report_bad_message(peer_id);

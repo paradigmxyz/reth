@@ -4,7 +4,6 @@ use crate::{
     updates::TrieUpdates,
     StateRoot, StateRootError,
 };
-use ahash::{AHashMap, AHashSet};
 use reth_db::{
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},
@@ -18,7 +17,7 @@ use reth_primitives::{
 };
 use revm::db::BundleAccount;
 use std::{
-    collections::{hash_map, HashMap},
+    collections::{hash_map, HashMap, HashSet},
     ops::RangeInclusive,
 };
 
@@ -26,9 +25,9 @@ use std::{
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct HashedPostState {
     /// Mapping of hashed address to account info, `None` if destroyed.
-    pub accounts: AHashMap<B256, Option<Account>>,
+    pub accounts: HashMap<B256, Option<Account>>,
     /// Mapping of hashed address to hashed storage.
-    pub storages: AHashMap<B256, HashedStorage>,
+    pub storages: HashMap<B256, HashedStorage>,
 }
 
 impl HashedPostState {
@@ -77,7 +76,7 @@ impl HashedPostState {
         }
 
         // Iterate over storage changesets and record value before first occurring storage change.
-        let mut storages = AHashMap::<Address, HashMap<B256, U256>>::default();
+        let mut storages = HashMap::<Address, HashMap<B256, U256>>::default();
         let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSet>()?;
         for entry in storage_changesets_cursor.walk_range(BlockNumberAddress::range(range))? {
             let (BlockNumberAddress((_, address)), storage) = entry?;
@@ -99,6 +98,24 @@ impl HashedPostState {
         }
 
         Ok(this)
+    }
+
+    /// Set account entries on hashed state.
+    pub fn with_accounts(
+        mut self,
+        accounts: impl IntoIterator<Item = (B256, Option<Account>)>,
+    ) -> Self {
+        self.accounts = HashMap::from_iter(accounts);
+        self
+    }
+
+    /// Set storage entries on hashed state.
+    pub fn with_storages(
+        mut self,
+        storages: impl IntoIterator<Item = (B256, HashedStorage)>,
+    ) -> Self {
+        self.storages = HashMap::from_iter(storages);
+        self
     }
 
     /// Extend this hashed post state with contents of another.
@@ -123,7 +140,7 @@ impl HashedPostState {
     /// Converts hashed post state into [HashedPostStateSorted].
     pub fn into_sorted(self) -> HashedPostStateSorted {
         let mut accounts = Vec::new();
-        let mut destroyed_accounts = AHashSet::default();
+        let mut destroyed_accounts = HashSet::default();
         for (hashed_address, info) in self.accounts {
             if let Some(info) = info {
                 accounts.push((hashed_address, info));
@@ -145,30 +162,26 @@ impl HashedPostState {
     /// Construct [PrefixSet] from hashed post state.
     /// The prefix sets contain the hashed account and storage keys that have been changed in the
     /// post state.
-    pub fn construct_prefix_sets(&self) -> (PrefixSet, AHashMap<B256, PrefixSet>) {
-        // Initialize prefix sets.
-        let mut account_prefix_set = PrefixSetMut::default();
-        let mut storage_prefix_set: AHashMap<B256, PrefixSetMut> = AHashMap::default();
-
+    pub fn construct_prefix_sets(&self) -> (PrefixSet, HashMap<B256, PrefixSet>) {
         // Populate account prefix set.
-        for (hashed_address, _) in &self.accounts {
+        let mut account_prefix_set = PrefixSetMut::with_capacity(self.accounts.len());
+        for hashed_address in self.accounts.keys() {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
         }
 
         // Populate storage prefix sets.
+        let mut storage_prefix_sets = HashMap::with_capacity(self.storages.len());
         for (hashed_address, hashed_storage) in self.storages.iter() {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
 
-            let storage_prefix_set_entry = storage_prefix_set.entry(*hashed_address).or_default();
-            for (hashed_slot, _) in &hashed_storage.storage {
-                storage_prefix_set_entry.insert(Nibbles::unpack(hashed_slot));
+            let mut prefix_set = PrefixSetMut::with_capacity(hashed_storage.storage.len());
+            for hashed_slot in hashed_storage.storage.keys() {
+                prefix_set.insert(Nibbles::unpack(hashed_slot));
             }
+            storage_prefix_sets.insert(*hashed_address, prefix_set.freeze());
         }
 
-        (
-            account_prefix_set.freeze(),
-            storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
-        )
+        (account_prefix_set.freeze(), storage_prefix_sets)
     }
 
     /// Calculate the state root for this [HashedPostState].
@@ -232,33 +245,36 @@ pub struct HashedStorage {
     /// Flag indicating whether the storage was wiped or not.
     pub wiped: bool,
     /// Mapping of hashed storage slot to storage value.
-    pub storage: AHashMap<B256, U256>,
+    pub storage: HashMap<B256, U256>,
 }
 
 impl HashedStorage {
     /// Create new instance of [HashedStorage].
     pub fn new(wiped: bool) -> Self {
-        Self { wiped, storage: AHashMap::default() }
+        Self { wiped, storage: HashMap::default() }
     }
 
     /// Create new hashed storage from iterator.
     pub fn from_iter(wiped: bool, iter: impl IntoIterator<Item = (B256, U256)>) -> Self {
-        Self { wiped, storage: AHashMap::from_iter(iter) }
+        Self { wiped, storage: HashMap::from_iter(iter) }
     }
 
     /// Extend hashed storage with contents of other.
     /// The entries in second hashed storage take precedence.
     pub fn extend(&mut self, other: Self) {
+        if other.wiped {
+            self.wiped = true;
+            self.storage.clear();
+        }
         for (hashed_slot, value) in other.storage {
             self.storage.insert(hashed_slot, value);
         }
-        self.wiped |= other.wiped;
     }
 
     /// Converts hashed storage into [HashedStorageSorted].
     pub fn into_sorted(self) -> HashedStorageSorted {
         let mut non_zero_valued_slots = Vec::new();
-        let mut zero_valued_slots = AHashSet::default();
+        let mut zero_valued_slots = HashSet::default();
         for (hashed_slot, value) in self.storage {
             if value == U256::ZERO {
                 zero_valued_slots.insert(hashed_slot);
@@ -278,14 +294,14 @@ pub struct HashedPostStateSorted {
     /// Sorted collection of hashed addresses and their account info.
     pub(crate) accounts: Vec<(B256, Account)>,
     /// Set of destroyed account keys.
-    pub(crate) destroyed_accounts: AHashSet<B256>,
+    pub(crate) destroyed_accounts: HashSet<B256>,
     /// Map of hashed addresses to hashed storage.
-    pub(crate) storages: AHashMap<B256, HashedStorageSorted>,
+    pub(crate) storages: HashMap<B256, HashedStorageSorted>,
 }
 
 impl HashedPostStateSorted {
     /// Returns all destroyed accounts.
-    pub fn destroyed_accounts(&self) -> AHashSet<B256> {
+    pub fn destroyed_accounts(&self) -> HashSet<B256> {
         self.destroyed_accounts.clone()
     }
 
@@ -307,7 +323,86 @@ pub struct HashedStorageSorted {
     /// Sorted hashed storage slots with non-zero value.
     pub(crate) non_zero_valued_slots: Vec<(B256, U256)>,
     /// Slots that have been zero valued.
-    pub(crate) zero_valued_slots: AHashSet<B256>,
+    pub(crate) zero_valued_slots: HashSet<B256>,
     /// Flag indicating hether the storage was wiped or not.
     pub(crate) wiped: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hashed_state_wiped_extension() {
+        let hashed_address = B256::default();
+        let hashed_slot = B256::with_last_byte(64);
+        let hashed_slot2 = B256::with_last_byte(65);
+
+        // Initialize post state storage
+        let original_slot_value = U256::from(123);
+        let mut hashed_state = HashedPostState::default().with_storages([(
+            hashed_address,
+            HashedStorage::from_iter(
+                false,
+                [(hashed_slot, original_slot_value), (hashed_slot2, original_slot_value)],
+            ),
+        )]);
+
+        // Update single slot value
+        let updated_slot_value = U256::from(321);
+        let extension = HashedPostState::default().with_storages([(
+            hashed_address,
+            HashedStorage::from_iter(false, [(hashed_slot, updated_slot_value)]),
+        )]);
+        hashed_state.extend(extension);
+
+        let account_storage = hashed_state.storages.get(&hashed_address);
+        assert_eq!(
+            account_storage.and_then(|st| st.storage.get(&hashed_slot)),
+            Some(&updated_slot_value)
+        );
+        assert_eq!(
+            account_storage.and_then(|st| st.storage.get(&hashed_slot2)),
+            Some(&original_slot_value)
+        );
+        assert_eq!(account_storage.map(|st| st.wiped), Some(false));
+
+        // Wipe account storage
+        let wiped_extension =
+            HashedPostState::default().with_storages([(hashed_address, HashedStorage::new(true))]);
+        hashed_state.extend(wiped_extension);
+
+        let account_storage = hashed_state.storages.get(&hashed_address);
+        assert_eq!(account_storage.map(|st| st.storage.is_empty()), Some(true));
+        assert_eq!(account_storage.map(|st| st.wiped), Some(true));
+
+        // Reinitialize single slot value
+        hashed_state.extend(HashedPostState::default().with_storages([(
+            hashed_address,
+            HashedStorage::from_iter(false, [(hashed_slot, original_slot_value)]),
+        )]));
+        let account_storage = hashed_state.storages.get(&hashed_address);
+        assert_eq!(
+            account_storage.and_then(|st| st.storage.get(&hashed_slot)),
+            Some(&original_slot_value)
+        );
+        assert_eq!(account_storage.and_then(|st| st.storage.get(&hashed_slot2)), None);
+        assert_eq!(account_storage.map(|st| st.wiped), Some(true));
+
+        // Reinitialize single slot value
+        hashed_state.extend(HashedPostState::default().with_storages([(
+            hashed_address,
+            HashedStorage::from_iter(false, [(hashed_slot2, updated_slot_value)]),
+        )]));
+        let account_storage = hashed_state.storages.get(&hashed_address);
+        assert_eq!(
+            account_storage.and_then(|st| st.storage.get(&hashed_slot)),
+            Some(&original_slot_value)
+        );
+        assert_eq!(
+            account_storage.and_then(|st| st.storage.get(&hashed_slot2)),
+            Some(&updated_slot_value)
+        );
+        assert_eq!(account_storage.map(|st| st.wiped), Some(true));
+    }
 }

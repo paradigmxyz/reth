@@ -78,7 +78,7 @@ pub struct TxPool<T: TransactionOrdering> {
 
 impl<T: TransactionOrdering> TxPool<T> {
     /// Create a new graph pool instance.
-    pub(crate) fn new(ordering: T, config: PoolConfig) -> Self {
+    pub fn new(ordering: T, config: PoolConfig) -> Self {
         Self {
             sender_info: Default::default(),
             pending_pool: PendingPool::new(ordering),
@@ -116,7 +116,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Returns stats about the size of pool.
-    pub(crate) fn size(&self) -> PoolSize {
+    pub fn size(&self) -> PoolSize {
         PoolSize {
             pending: self.pending_pool.len(),
             pending_size: self.pending_pool.size(),
@@ -131,7 +131,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Returns the currently tracked block values
-    pub(crate) const fn block_info(&self) -> BlockInfo {
+    pub const fn block_info(&self) -> BlockInfo {
         BlockInfo {
             last_seen_block_hash: self.all_transactions.last_seen_block_hash,
             last_seen_block_number: self.all_transactions.last_seen_block_number,
@@ -271,7 +271,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Sets the current block info for the pool.
     ///
     /// This will also apply updates to the pool based on the new base fee
-    pub(crate) fn set_block_info(&mut self, info: BlockInfo) {
+    pub fn set_block_info(&mut self, info: BlockInfo) {
         let BlockInfo {
             last_seen_block_hash,
             last_seen_block_number,
@@ -290,34 +290,6 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Returns an iterator that yields transactions that are ready to be included in the block.
     pub(crate) fn best_transactions(&self) -> BestTransactions<T> {
         self.pending_pool.best()
-    }
-
-    /// Returns an iterator that yields transactions that are ready to be included in the block with
-    /// the given base fee.
-    pub(crate) fn best_transactions_with_base_fee(
-        &self,
-        basefee: u64,
-    ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
-    {
-        match basefee.cmp(&self.all_transactions.pending_fees.base_fee) {
-            Ordering::Equal => {
-                // fee unchanged, nothing to shift
-                Box::new(self.best_transactions())
-            }
-            Ordering::Greater => {
-                // base fee increased, we only need to enforces this on the pending pool
-                Box::new(self.pending_pool.best_with_basefee(basefee))
-            }
-            Ordering::Less => {
-                // base fee decreased, we need to move transactions from the basefee pool to the
-                // pending pool
-                let unlocked = self.basefee_pool.satisfy_base_fee_transactions(basefee);
-                Box::new(
-                    self.pending_pool
-                        .best_with_unlocked(unlocked, self.all_transactions.pending_fees.base_fee),
-                )
-            }
-        }
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block with
@@ -383,6 +355,12 @@ impl<T: TransactionOrdering> TxPool<T> {
             SubPool::BaseFee => self.basefee_pool.contains(id),
             SubPool::Blob => self.blob_pool.contains(id),
         }
+    }
+
+    /// Returns `true` if the pool is over its configured limits.
+    #[inline]
+    pub(crate) fn is_exceeded(&self) -> bool {
+        self.config.is_exceeded(self.size())
     }
 
     /// Returns the transaction for the given hash.
@@ -781,7 +759,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         // Helper macro that discards the worst transactions for the pools
         macro_rules! discard_worst {
-            ($this:ident, $removed:ident,  [$($limit:ident => $pool:ident),*]  ) => {
+            ($this:ident, $removed:ident, [$($limit:ident => $pool:ident),* $(,)*]) => {
                 $ (
                 while $this
                         .config
@@ -828,10 +806,10 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         discard_worst!(
             self, removed, [
-                pending_limit  => pending_pool,
-                basefee_limit  => basefee_pool,
-                blob_limit => blob_pool,
-                queued_limit  => queued_pool
+                pending_limit => pending_pool,
+                basefee_limit => basefee_pool,
+                blob_limit    => blob_pool,
+                queued_limit  => queued_pool,
             ]
         );
 

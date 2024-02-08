@@ -12,7 +12,7 @@
 pub mod engine;
 pub use engine::EthEngineTypes;
 
-/// Exports commonly used concrete instances of the [EvmEnvConfig](reth_node_api::EvmEnvConfig)
-/// trait.
+/// Exports commonly used concrete instances of the
+/// [ConfigureEvmEnv](reth_node_api::ConfigureEvmEnv) trait.
 pub mod evm;
 pub use evm::EthEvmConfig;
