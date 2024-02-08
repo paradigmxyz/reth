@@ -6,6 +6,15 @@ use crate::{
     provider::ProviderError,
 };
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
+use tokio::sync::watch::error::SendError;
+
+#[derive(Debug, thiserror::Error)]
+/// Pending block errors
+pub enum PendingBlockError {
+    #[error(transparent)]
+    /// Error originating from the update of the pending block
+    Update(#[from] SendError<Option<SealedBlock>>),
+}
 
 /// Various error cases that can occur when a block violates tree assumptions.
 #[derive(Debug, Clone, Copy, thiserror::Error, Eq, PartialEq)]
@@ -212,6 +221,9 @@ pub enum InsertBlockErrorKind {
     /// BlockchainTree error.
     #[error(transparent)]
     BlockchainTree(BlockchainTreeError),
+    #[error(transparent)]
+    /// Pending block errors
+    PendingBlock(#[from] PendingBlockError),
 }
 
 impl InsertBlockErrorKind {
@@ -273,6 +285,7 @@ impl InsertBlockErrorKind {
                 CanonicalError::Validation(_) => true,
             },
             InsertBlockErrorKind::BlockchainTree(_) => false,
+            InsertBlockErrorKind::PendingBlock(_) => false,
         }
     }
 

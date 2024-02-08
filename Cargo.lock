@@ -5952,6 +5952,7 @@ dependencies = [
  "reth-revm",
  "reth-stages",
  "reth-trie",
+ "thiserror",
  "tokio",
  "tracing",
 ]

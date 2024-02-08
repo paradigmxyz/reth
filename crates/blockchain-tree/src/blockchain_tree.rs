@@ -9,7 +9,10 @@ use crate::{
 use reth_db::{database::Database, DatabaseError};
 use reth_interfaces::{
     blockchain_tree::{
-        error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
+        error::{
+            BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind,
+            PendingBlockError,
+        },
         BlockAttachment, BlockStatus, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
     },
     consensus::{Consensus, ConsensusError},
@@ -32,7 +35,7 @@ use std::{
     collections::{BTreeMap, HashSet},
     sync::Arc,
 };
-use tokio::sync::watch::{Receiver, Sender};
+use tokio::sync::watch::{self};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -81,9 +84,10 @@ pub struct BlockchainTree<DB: Database, EF: ExecutorFactory> {
 
 #[derive(Debug)]
 struct PendingBlock {
-    tx: Sender<Option<SealedBlock>>,
-    rx: Receiver<Option<SealedBlock>>,
+    tx: watch::Sender<Option<SealedBlock>>,
+    rx: watch::Receiver<Option<SealedBlock>>,
 }
+
 impl PendingBlock {
     fn new() -> Self {
         let (tx, rx) = tokio::sync::watch::channel(None);
@@ -91,11 +95,12 @@ impl PendingBlock {
     }
 
     // Method to conditionally update the PendingBlock
-    fn try_update(&self, block: Option<SealedBlock>) {
-        // Only send the update if the new block is different from the current one
-        if self.rx.borrow().as_ref() != block.as_ref() {
-            self.tx.send(block).unwrap()
+    fn try_update(&self, block: Option<SealedBlock>) -> Result<(), PendingBlockError> {
+        let current = self.rx.borrow();
+        if current.as_ref() != block.as_ref() {
+            self.tx.send(block)?;
         }
+        Ok(())
     }
 
     // Method to read the current PendingBlock
@@ -338,7 +343,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         {
             if canonical_parent_number == parent.number {
                 let pending_block: SealedBlock = block.block.clone();
-                self.pending_block.try_update(Some(pending_block));
+                self.pending_block.try_update(Some(pending_block))?;
             }
             // we found the parent block in canonical chain
             if canonical_parent_number != parent.number {
@@ -1099,11 +1104,14 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         }
 
         let head = chain_notification.tip().header.clone();
-        let sealed_block = chain_notification.tip().block.clone();
         // send notification about new canonical chain.
         let _ = self.canon_state_notification_sender.send(chain_notification);
 
-        self.pending_block.try_update(Some(sealed_block));
+        let sealed_block = self.blockchain_tree_pending_block();
+
+        if let Err(err) = self.pending_block.try_update(sealed_block.cloned()) {
+            error!(target: "blockchain_tree", "Failed to update pending block: {:?}", err);
+        }
 
         debug!(
             target: "blockchain_tree",
@@ -1112,6 +1120,12 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         );
 
         Ok(CanonicalOutcome::Committed { head })
+    }
+
+    /// Helper function to retrieve the pending block from the blockchain tree.
+    fn blockchain_tree_pending_block(&self) -> Option<&SealedBlock> {
+        let b = self.block_indices().pending_block_num_hash()?;
+        self.block_by_hash(b.hash)
     }
 
     /// Subscribe to new blocks events.
