@@ -22,7 +22,7 @@ use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
     state::StateOverride,
     trace::{filter::TraceFilter, parity::*, tracerequest::TraceCallRequest},
-    BlockError, BlockOverrides, CallRequest, Index,
+    BlockOverrides, CallRequest, Index,
 };
 use revm::{
     db::{CacheDB, DatabaseCommit},
@@ -253,15 +253,17 @@ where
         }
 
         // fetch all blocks in that range
-        let blocks = self.provider().block_range(start..=end)?;
+        let blocks = self.provider().block_range_with_senders(start..=end)?;
 
         // find relevant blocks to trace
         let mut target_blocks = Vec::new();
-        for block in blocks {
+        for block_with_senders in blocks {
             let mut transaction_indices = HashSet::new();
             let mut highest_matching_index = 0;
-            for (tx_idx, tx) in block.body.iter().enumerate() {
-                let from = tx.recover_signer().ok_or(BlockError::InvalidSignature)?;
+
+            let block_number = block_with_senders.number;
+            for (tx_idx, tx) in block_with_senders.into_transactions_ecrecovered().enumerate() {
+                let from = tx.signer();
                 let to = tx.to();
                 if matcher.matches(from, to) {
                     let idx = tx_idx as u64;
@@ -270,7 +272,7 @@ where
                 }
             }
             if !transaction_indices.is_empty() {
-                target_blocks.push((block.number, transaction_indices, highest_matching_index));
+                target_blocks.push((block_number, transaction_indices, highest_matching_index));
             }
         }
 

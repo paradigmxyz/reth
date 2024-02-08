@@ -667,6 +667,14 @@ impl BlockReader for SnapshotProvider {
         // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn block_range_with_senders(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockWithSenders>> {
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 impl WithdrawalsProvider for SnapshotProvider {
