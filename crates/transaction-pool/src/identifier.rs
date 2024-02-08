@@ -91,7 +91,7 @@ impl TransactionId {
     /// Returns the `TransactionId` this transaction depends on.
     ///
     /// This returns `transaction_nonce - 1` if `transaction_nonce` is higher than the
-    /// `on_chain_none`
+    /// `on_chain_nonce`
     pub fn ancestor(
         transaction_nonce: u64,
         on_chain_nonce: u64,
@@ -114,7 +114,7 @@ impl TransactionId {
         TransactionId::new(self.sender, self.nonce + 1)
     }
 
-    /// Returns the nonce the follows directly after this.
+    /// Returns the nonce that follows immediately after this one.
     #[inline]
     pub(crate) const fn next_nonce(&self) -> u64 {
         self.nonce + 1
