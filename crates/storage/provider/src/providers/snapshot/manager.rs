@@ -291,7 +291,7 @@ impl SnapshotProvider {
                         .and_modify(|index| {
                             index
                                 .retain(|_, block_range| block_range.start() < fixed_range.start());
-                            index.insert(tx_end, current_block_range.clone());
+                            index.insert(tx_end, current_block_range);
                         })
                         .or_insert_with(|| BTreeMap::from([(tx_end, current_block_range)]));
                 } else if let Some(1) = tx_index.get(&segment).map(|index| index.len()) {
