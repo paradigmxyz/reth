@@ -2360,7 +2360,15 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Head { number: 4061227, timestamp: 1699981200, ..Default::default() },
-                    ForkId { hash: ForkHash([0x7f, 0x4a, 0x72, 0x1f]), next: 0 },
+                    ForkId { hash: ForkHash([0x7f, 0x4a, 0x72, 0x1f]), next: 1707238800 },
+                ),
+                (
+                    Head { number: 4061228, timestamp: 1707238799, ..Default::default() },
+                    ForkId { hash: ForkHash([0x7f, 0x4a, 0x72, 0x1f]), next: 1707238800 },
+                ),
+                (
+                    Head { number: 4061229, timestamp: 1707238800, ..Default::default() },
+                    ForkId { hash: ForkHash([0x18, 0x59, 0x2a, 0x41]), next: 0 },
                 ),
             ],
         );
@@ -2390,7 +2398,15 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Head { number: 4, timestamp: 1699981200, ..Default::default() },
-                    ForkId { hash: ForkHash([0xb3, 0x29, 0x13, 0xde]), next: 0 },
+                    ForkId { hash: ForkHash([0xb3, 0x29, 0x13, 0xde]), next: 1707238800 },
+                ),
+                (
+                    Head { number: 5, timestamp: 1707238799, ..Default::default() },
+                    ForkId { hash: ForkHash([0xb3, 0x29, 0x13, 0xde]), next: 1707238800 },
+                ),
+                (
+                    Head { number: 6, timestamp: 1707238800, ..Default::default() },
+                    ForkId { hash: ForkHash([0x21, 0x11, 0x52, 0x97]), next: 0 },
                 ),
             ],
         );
