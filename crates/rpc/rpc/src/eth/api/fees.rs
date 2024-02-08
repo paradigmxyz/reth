@@ -152,6 +152,9 @@ where
                 last_entry.base_fee_per_gas,
                 self.provider().chain_spec().base_fee_params(last_entry_timestamp),
             )));
+
+            base_fee_per_blob_gas
+                .push(U256::from(last_entry.next_block_blob_fee().unwrap_or_default()));
         } else {
             // read the requested header range
             let headers = self.provider().sealed_headers_range(start_block..=end_block)?;
