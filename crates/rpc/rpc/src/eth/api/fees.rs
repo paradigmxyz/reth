@@ -170,7 +170,7 @@ where
                 base_fee_per_blob_gas.push(U256::from(header.blob_fee().unwrap_or_default()));
                 blob_gas_used_ratio.push(
                     header.blob_gas_used.unwrap_or_default() as f64 /
-                        reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
+                        alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
                 );
 
                 // Percentiles were specified, so we need to collect reward percentile ino
