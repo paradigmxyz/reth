@@ -225,8 +225,8 @@ impl TransactionFetcher {
 
     /// Packages hashes for a [`GetPooledTxRequest`] from an
     /// [`Eth66`](reth_eth_wire::EthVersion::Eth66) announcement up to limit as defined by
-    /// protocol version 66. Takes a [`RequestTxHashes`] buffer as parameter for filling with hashes
-    /// to request.
+    /// protocol version 66. Takes a [`RequestTxHashes`] buffer as parameter for filling with
+    /// hashes to request.
     ///
     /// Returns left over hashes.
     pub(super) fn pack_hashes_eth66(
@@ -272,7 +272,7 @@ impl TransactionFetcher {
     /// Buffers hashes. Note: Only peers that haven't yet tried to request the hashes should be
     /// passed as `fallback_peer` parameter! For re-buffering hashes on failed request, use
     /// [`TransactionFetcher::buffer_hashes_for_retry`]. Hashes that have been re-requested
-    /// [`DEFAULT_MAX_RETRIES_PER_TX_HASH`], are dropped.
+    /// [`DEFAULT_MAX_RETRIES`], are dropped.
     pub(super) fn buffer_hashes(&mut self, hashes: RequestTxHashes, fallback_peer: Option<PeerId>) {
         let mut max_retried_and_evicted_hashes = vec![];
 
@@ -599,13 +599,13 @@ impl TransactionFetcher {
         None
     }
 
-    /// Tries to fill request with hashes pending fetch so that the expected tx response is full
-    /// enough. A mutable reference to a list of hashes to request is passed as parameter. A
-    /// budget is passed as parameter, this ensures that the node stops searching for more hashes
-    /// after the budget is depleted. Under bad network conditions, the cache of hashes pending
-    /// fetch may become very full for a while. As the node recovers, the hashes pending fetch
-    /// cache should get smaller. The budget should aim to be big enough to loop through all
-    /// buffered hashes in good network conditions.
+    /// Tries to fill request with hashes pending fetch so that the expected [`PooledTransactions`]
+    /// response is full enough. A mutable reference to a list of hashes to request is passed as
+    /// parameter. A budget is passed as parameter, this ensures that the node stops searching
+    /// for more hashes after the budget is depleted. Under bad network conditions, the cache of
+    /// hashes pending fetch may become very full for a while. As the node recovers, the hashes
+    /// pending fetch cache should get smaller. The budget should aim to be big enough to loop
+    /// through all buffered hashes in good network conditions.
     ///
     /// The request hashes buffer is filled as if it's an eth68 request, i.e. smartly assemble
     /// the request based on expected response size. For any hash missing size metadata, it is
@@ -875,7 +875,7 @@ pub(super) enum FetchEvent {
     },
 }
 
-/// An inflight request for `PooledTransactions` from a peer
+/// An inflight request for [`PooledTransactions`] from a peer
 pub(super) struct GetPooledTxRequest {
     peer_id: PeerId,
     /// Transaction hashes that were requested, for cleanup purposes

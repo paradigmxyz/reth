@@ -63,11 +63,11 @@ pub(super) const DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS: usize =
 
 /* ==================== RETRIES ==================== */
 
-/// Default maximum request retires per [`TxHash`](reth_primitives:TxHash). Note, this is reset
-/// should the [`TxHash`] re-appear in an announcement after it has been evicted from the hashes
-/// pending fetch cache, i.e. the counter is restarted. If this happens, it is likely a very popular
-/// transaction, that should and can indeed be fetched hence this behaviour is favourable. Default
-/// is 2 retries.
+/// Default maximum request retires per [`TxHash`](reth_primitives::TxHash). Note, this is reset
+/// should the [`TxHash`](reth_primitives::TxHash) re-appear in an announcement after it has been
+/// evicted from the hashes pending fetch cache, i.e. the counter is restarted. If this happens, it
+/// is likely a very popular transaction, that should and can indeed be fetched hence this
+/// behaviour is favourable. Default is 2 retries.
 pub(super) const DEFAULT_MAX_RETRIES: u8 = 2;
 
 /// Default number of alternative peers to keep track of for each transaction pending fetch. At
@@ -91,7 +91,8 @@ const DEFAULT_MARGINAL_COUNT_FALLBACK_PEERS: u8 = 1;
 pub(super) const DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS: u32 =
     DEFAULT_MAX_COUNT_PEERS_INBOUND + DEFAULT_MAX_COUNT_PEERS_OUTBOUND;
 
-/// Default maximum number of concurrent [`GetPooledTxRequest`]s to allow per peer. This number
+/// Default maximum number of concurrent
+/// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions)s to allow per peer. This number
 /// reflects concurrent requests for different hashes. Default is 1 request.
 pub(super) const DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER: u8 = 1;
 
