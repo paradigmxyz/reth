@@ -1501,7 +1501,9 @@ where
                     debug!(target: "consensus::engine", hash=?new_head.hash(), number=new_head.number, "Canonicalized new head");
 
                     // we can update the FCU blocks
-                    let _ = self.update_canon_chain(new_head, &target);
+                    if let Err(err) = self.update_canon_chain(new_head, &target) {
+                        debug!(target: "consensus::engine", ?err, ?target, "Failed to update the canonical chain tracker");
+                    }
 
                     // we're no longer syncing
                     self.sync_state_updater.update_sync_state(SyncState::Idle);
