@@ -6913,9 +6913,11 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-stages",
+ "reth-tokio-util",
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tracing",
 ]
 
