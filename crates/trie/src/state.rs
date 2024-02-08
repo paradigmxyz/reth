@@ -63,14 +63,12 @@ impl HashedPostState {
         tx: &TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, DatabaseError> {
-        let mut this = Self::default();
-
         // Iterate over account changesets and record value before first occurring account change.
+        let mut accounts = HashMap::<Address, Option<Account>>::default();
         let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSet>()?;
         for entry in account_changesets_cursor.walk_range(range.clone())? {
             let (_, AccountBeforeTx { address, info }) = entry?;
-            let hashed_address = keccak256(address); // TODO: cache hashes?
-            if let hash_map::Entry::Vacant(entry) = this.accounts.entry(hashed_address) {
+            if let hash_map::Entry::Vacant(entry) = accounts.entry(address) {
                 entry.insert(info);
             }
         }
@@ -86,18 +84,24 @@ impl HashedPostState {
             }
         }
 
-        for (address, storage) in storages {
-            // The `wiped` flag indicates only whether previous storage entries should be looked
-            // up in db or not. For reverts it's a noop since all wiped changes had been written as
-            // storage reverts.
-            let hashed_storage = HashedStorage::from_iter(
-                false,
-                storage.into_iter().map(|(slot, value)| (keccak256(slot), value)),
-            );
-            this.storages.insert(keccak256(address), hashed_storage);
-        }
+        let hashed_accounts = HashMap::from_iter(
+            accounts.into_iter().map(|(address, info)| (keccak256(address), info)),
+        );
 
-        Ok(this)
+        let hashed_storages = HashMap::from_iter(storages.into_iter().map(|(address, storage)| {
+            (
+                keccak256(address),
+                HashedStorage::from_iter(
+                    // The `wiped` flag indicates only whether previous storage entries
+                    // should be looked up in db or not. For reverts it's a noop since all
+                    // wiped changes had been written as storage reverts.
+                    false,
+                    storage.into_iter().map(|(slot, value)| (keccak256(slot), value)),
+                ),
+            )
+        }));
+
+        Ok(Self { accounts: hashed_accounts, storages: hashed_storages })
     }
 
     /// Set account entries on hashed state.
