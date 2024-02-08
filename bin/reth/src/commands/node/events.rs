@@ -2,7 +2,6 @@
 
 use crate::{commands::node::cl_events::ConsensusLayerHealthEvent, primitives::B256};
 use futures::Stream;
-use num_format::{Buffer, Locale};
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, ForkchoiceStatus};
 use reth_db::{database::Database, database_metrics::DatabaseMetadata};
 use reth_interfaces::consensus::ForkchoiceState;
@@ -191,8 +190,6 @@ impl<DB> NodeState<DB> {
                 self.finalized_block_hash = Some(finalized_block_hash);
             }
             BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed) => {
-                let mut gas_fmt_buf = Buffer::default();
-                gas_fmt_buf.write_formatted(&block.header.gas_used, &Locale::en);
                 info!(
                     number=block.number,
                     hash=?block.hash(),
