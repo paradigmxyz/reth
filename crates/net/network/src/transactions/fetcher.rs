@@ -30,7 +30,7 @@ use super::{
 /// new requests on announced hashes.
 #[derive(Debug)]
 #[pin_project]
-pub(super) struct TransactionFetcher<T = TxFetchMetadata> {
+pub(super) struct TransactionFetcher {
     /// All peers with an `inflight_requests`.
     pub(super) active_peers: LruMap<PeerId, u8, ByLength>,
     /// All currently active requests for pooled transactions.
@@ -39,7 +39,7 @@ pub(super) struct TransactionFetcher<T = TxFetchMetadata> {
     /// Hashes that are awaiting an idle peer so they can be fetched.
     pub(super) hashes_pending_fetch: LruCache<TxHash>,
     /// Tracks all hashes in the transaction fetcher.
-    pub(super) hashes_unknown_to_pool: LruMap<TxHash, T, Unlimited>,
+    pub(super) hashes_unknown_to_pool: LruMap<TxHash, TxFetchMetadata, Unlimited>,
     /// Filter for valid eth68 announcements.
     pub(super) filter_valid_hashes: AnnouncementFilter,
     /// Info on capacity of the transaction fetcher.
