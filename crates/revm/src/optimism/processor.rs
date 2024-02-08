@@ -3,7 +3,9 @@ use reth_interfaces::executor::{
     BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
 };
 use reth_node_api::ConfigureEvmEnv;
-use reth_primitives::{revm_primitives::ResultAndState, BlockWithSenders, Hardfork, Receipt, U256};
+use reth_primitives::{
+    revm_primitives::ResultAndState, BlockWithSenders, Hardfork, Receipt, TxType, U256,
+};
 use reth_provider::{BlockExecutor, BlockExecutorStats, BundleStateWithReceipts};
 use revm::DatabaseCommit;
 use std::time::Instant;
@@ -93,6 +95,13 @@ where
                     block_available_gas,
                 }
                 .into())
+            }
+
+            // An optimism block should never contain blob transactions.
+            if matches!(transaction.tx_type(), TxType::EIP4844) {
+                return Err(BlockExecutionError::OptimismBlockExecution(
+                    OptimismBlockExecutionError::BlobTransactionRejected,
+                ))
             }
 
             // Cache the depositor account prior to the state transition for the deposit nonce.

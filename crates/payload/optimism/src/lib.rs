@@ -23,7 +23,7 @@ mod builder {
         constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
         proofs,
         revm::env::tx_env_with_recovered,
-        Block, Hardfork, Header, IntoRecoveredTransaction, Receipt, Receipts,
+        Block, Hardfork, Header, IntoRecoveredTransaction, Receipt, Receipts, TxType,
         EMPTY_OMMER_ROOT_HASH, U256,
     };
     use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
@@ -267,6 +267,13 @@ mod builder {
             // Check if the job was cancelled, if so we can exit early.
             if cancel.is_cancelled() {
                 return Ok(BuildOutcome::Cancelled)
+            }
+
+            // A sequencer's block should never contain blob transactions.
+            if matches!(sequencer_tx.tx_type(), TxType::EIP4844) {
+                return Err(PayloadBuilderError::other(
+                    OptimismPayloadBuilderError::BlobTransactionRejected,
+                ))
             }
 
             // Convert the transaction to a [TransactionSignedEcRecovered]. This is
