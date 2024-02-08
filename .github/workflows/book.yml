@@ -58,8 +58,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
-        with:
-          toolchain: nightly-2024-02-03
       - name: Install mdbook
         run: |
           mkdir mdbook
