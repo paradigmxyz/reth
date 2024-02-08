@@ -9,7 +9,7 @@
 //! hand, space remains, hashes that the peer has previously announced are taken out of buffered
 //! hashes to fill the request up. The [`GetPooledTransactions`] request is then sent to the
 //! peer's session, this marks the peer as active with respect to
-//! `fetcher::MAX_CONCURRENT_TX_REQUESTS_PER_PEER`.
+//! `MAX_CONCURRENT_TX_REQUESTS_PER_PEER`.
 //!
 //! When a peer buffers hashes in the `TransactionsManager::on_new_pooled_transaction_hashes`
 //! pipeline, it is stored as fallback peer for those hashes. When [`TransactionsManager`] is
@@ -69,43 +69,20 @@ use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
 
+mod constants;
 mod fetcher;
 mod validation;
 
-use fetcher::{
-    FetchEvent, TransactionFetcher, DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS,
-    SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST,
-};
+use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
+use fetcher::{FetchEvent, TransactionFetcher};
 pub use validation::*;
 
-/// Default limit for number transactions to keep track of for a single peer, for transactions
-/// that the peer's pool and local pool have in common.
-const DEFAULT_CAPACITY_CACHE_TRANSACTION_HASHES_SEEN_BY_PEER_AND_IN_POOL: usize = 10 * 1024;
-
-/// Default limit for the number of transactions to keep track of for a single peer, for
-/// transactions that are in the peer's pool but maybe not in the local pool yet.
-const DEFAULT_CAPACITY_CACHE_TRANSACTION_HASHES_SENT_BY_PEER_AND_MAYBE_IN_POOL: usize = 10 * 1024;
-
-/// Soft limit for the number of hashes in a [`NewPooledTransactionHashes`] broadcast message.
-/// Spec'd at 4096 hashes.
-///
-/// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>
-const SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE: usize = 4096;
-
-/// Default soft limit for the byte size of a [`Transactions`] broadcast message. Default is 128
-/// KiB.
-const DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE: usize = 128 * 1024;
-
-/// Soft limit for the byte size of a [`PooledTransactions`] response. This defaults to less than
-/// the standard maximum response size of 2 MiB (see specs). Default is 128 KiB.
-///
-/// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
-const DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE: usize = 128 * 1024;
-
-/// Default maximum pending pool imports to tolerate.
-const DEFAULT_MAX_PENDING_POOL_IMPORTS: usize =
-    SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST *
-        DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS as usize;
+use self::constants::{
+    DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER_AND_IN_POOL,
+    DEFAULT_CAPACITY_CACHE_SENT_BY_PEER_AND_MAYBE_IN_POOL, DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+    DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+    DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE,
+};
 
 /// The future for inserting a function into the pool
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = Vec<PoolResult<TxHash>>> + Send + 'static>>;
@@ -284,7 +261,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
             metrics: Default::default(),
-            pool_imports_info: PoolImportsInfo::new(DEFAULT_MAX_PENDING_POOL_IMPORTS),
+            pool_imports_info: PoolImportsInfo::new(DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS),
         }
     }
 }
@@ -1344,16 +1321,10 @@ impl Default for TransactionsSeenByPeer {
     fn default() -> Self {
         Self {
             transactions_received_as_hash: LruCache::new(
-                NonZeroUsize::new(
-                    DEFAULT_CAPACITY_CACHE_TRANSACTION_HASHES_SENT_BY_PEER_AND_MAYBE_IN_POOL,
-                )
-                .unwrap(),
+                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_SENT_BY_PEER_AND_MAYBE_IN_POOL).unwrap(),
             ),
             transactions_received_in_full_or_sent: LruCache::new(
-                NonZeroUsize::new(
-                    DEFAULT_CAPACITY_CACHE_TRANSACTION_HASHES_SEEN_BY_PEER_AND_IN_POOL,
-                )
-                .unwrap(),
+                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER_AND_IN_POOL).unwrap(),
             ),
         }
     }
@@ -1453,10 +1424,11 @@ impl PoolImportsInfo {
 
 #[cfg(test)]
 mod tests {
+    use constants::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
+
     use super::*;
     use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
     use alloy_rlp::Decodable;
-    use fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS_PER_TX;
     use futures::FutureExt;
     use reth_interfaces::sync::{NetworkSyncUpdater, SyncState};
     use reth_network_api::NetworkInfo;
@@ -1490,7 +1462,7 @@ mod tests {
     }
 
     pub(super) fn default_cache<T: hash::Hash + Eq>() -> LruCache<T> {
-        let limit = NonZeroUsize::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS_PER_TX.into()).unwrap();
+        let limit = NonZeroUsize::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS.into()).unwrap();
         LruCache::new(limit)
     }
 

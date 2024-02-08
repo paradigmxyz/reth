@@ -1,7 +1,6 @@
 use crate::{
     cache::{LruCache, LruMap},
     message::PeerRequest,
-    peers::{DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND},
 };
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
@@ -21,98 +20,9 @@ use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError}
 use tracing::{debug, trace};
 
 use super::{
-    AnnouncementFilter, Peer, PooledTransactions, TransactionsManagerMetrics,
+    constants::*, AnnouncementFilter, Peer, PooledTransactions, TransactionsManagerMetrics,
     DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
-
-/// Default number of alternative peers to keep track of for each transaction pending fetch. At
-/// most [`DEFAULT_MAX_RETRIES_PER_TX_HASH`], which defaults to 2 peers, can ever be
-/// needed per peer. Default is the sum of [`DEFAULT_MAX_RETRIES_PER_TX_HASH`] and
-/// [`DEFAULT_MARGINAL_COUNT_FALLBACK_PEERS_PER_TX`], which defaults to 1 peer, so 3 peers.
-pub(super) const DEFAULT_MAX_COUNT_FALLBACK_PEERS_PER_TX: u8 =
-    DEFAULT_MAX_RETRIES_PER_TX_HASH + DEFAULT_MARGINAL_COUNT_FALLBACK_PEERS_PER_TX;
-
-/// Default marginal on fallback peers. This is the case, since a transaction is only requested
-/// once from each individual peer. Default is 1 peer.
-const DEFAULT_MARGINAL_COUNT_FALLBACK_PEERS_PER_TX: u8 = 1;
-
-/// Default maximum request retires per [`TxHash`]. Note, this is reset should the [`TxHash`]
-/// re-appear in an announcement after it has been evicted from the hashes pending fetch cache,
-/// i.e. the counter is restarted. If this happens, it is likely a very popular transaction, that
-/// should and can indeed be fetched hence this behaviour is favourable. Default is 2 retries.
-const DEFAULT_MAX_RETRIES_PER_TX_HASH: u8 = 2;
-
-/// Default maximum concurrent [`GetPooledTxRequest`]s. Default is the product of
-/// [`DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS_PER_PEER`], which defaults to 1 request, and the
-/// sum of [`DEFAULT_MAX_COUNT_PEERS_INBOUND`] and [`DEFAULT_MAX_COUNT_PEERS_OUTBOUND`], which
-/// default to 30 and 100 peers respectively, so 130 requests.
-pub(super) const DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS: u32 =
-    DEFAULT_MAX_COUNT_PEERS_INBOUND + DEFAULT_MAX_COUNT_PEERS_OUTBOUND;
-
-/// Default maximum number of concurrent [`GetPooledTxRequest`]s to allow per peer. This number
-/// reflects concurrent requests for different hashes. Default is 1 request.
-pub(super) const DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS_PER_PEER: u8 = 1;
-
-/// Recommended soft limit for the number of hashes in a [`GetPooledTransactions`] message. Spec'd
-/// at 256 hashes (8 KiB).
-///
-/// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09>
-pub(super) const SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST: usize = 256;
-
-/// Default limit for number of transactions waiting for an idle peer to be fetched from. Default
-/// is 100 times the [`SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST`], which defaults
-/// to 256 hashes, so 25 600 hashes.
-pub(super) const DEFAULT_MAX_CAPACITY_CACHE_HASHES_PENDING_FETCH: usize =
-    100 * SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST;
-
-/// Average byte size of an encoded transaction. Default is
-/// [`DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], which defaults to 128 KiB,
-/// divided by [`SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST`], which defaults to
-/// 256 hashes, so 521 bytes.
-const AVERAGE_BYTE_SIZE_TX_ENCODED: usize =
-    DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE /
-        SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST;
-
-/// Median observed size in bytes of a small encoded legacy transaction. Default is 120 bytes.
-const MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED: usize = 120;
-
-/// Default budget for finding an idle fallback peer for any hash pending fetch, when said search
-/// is budget constrained. Default is a sixth of [`DEFAULT_MAX_COUNT_HASHES_PENDING_FETCH`], which
-/// defaults to 12 800 hashes (the breadth of the search), divided by
-/// [`DEFAULT_MAX_COUNT_FALLBACK_PEERS_PER_TX`], which defaults to 3 peers (the depth of the
-/// search), so 4 266 hashes.
-const DEFAULT_BUDGET_FIND_IDLE_FALLBACK_PEER: usize = 1 / 6 *
-    DEFAULT_MAX_COUNT_HASHES_PENDING_FETCH *
-    DEFAULT_MAX_CAPACITY_CACHE_HASHES_PENDING_FETCH /
-    DEFAULT_MAX_COUNT_FALLBACK_PEERS_PER_TX as usize;
-
-/// Default maximum number of hashes pending fetch to tolerate at any time. Default is half of
-/// [`DEFAULT_MAX_CAPACITY_CACHE_HASHES_PENDING_FETCH`], which defaults to 25 600 hashes, so
-/// 12 800 hashes.
-const DEFAULT_MAX_COUNT_HASHES_PENDING_FETCH: usize =
-    1 / 2 * DEFAULT_MAX_CAPACITY_CACHE_HASHES_PENDING_FETCH;
-
-/* ==================== Bounds on fetch pending hashes ==================== */
-
-/// Default max inflight request when fetching pending hashes. Default is half of
-/// [`DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS`], which defaults to 130 requests, so 65 requests.
-const DEFAULT_MAX_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES: usize =
-    1 / 2 * DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS as usize;
-
-/// Default soft limit for the number of hashes in a [`GetPooledTransactions`] request, when it is
-/// filled from hashes pending fetch. Default is half of the
-/// [`SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST`] which by spec is 256 hashes, so
-/// 128 hashes.
-const DEFAULT_SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_ON_FETCH_PENDING: usize =
-    1 / 2 * SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST;
-
-/// Default soft limit for a [`PooledTransactions`] response when it's used as expected response in
-/// calibrating the filling of a [`GetPooledTransactions`] request, when the request is filled
-/// from hashes pending fetch. Default is half of
-/// [`DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], which defaults to 256 KiB, so
-/// 128 KiB.
-const DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING: usize =
-    1 / 2 * DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE;
 
 /// The type responsible for fetching missing transactions from peers.
 ///
@@ -136,38 +46,6 @@ pub(super) struct TransactionFetcher<T = TxFetchMetadata> {
     tx_fetcher_info: TransactionFetcherInfo,
 }
 
-/// Metadata of a transaction hash that is yet to be fetched.
-#[derive(Debug)]
-pub(super) struct TxFetchMetadata {
-    /// The number of times a request attempt has been made for the hash.
-    retries: u8,
-    /// Peers that have announced the hash, but to which a request attempt has not yet been made.
-    fallback_peers: LruCache<PeerId>,
-    /// Size metadata of the transaction if it has been seen in an eth68 announcement.
-    // todo: store all seen sizes as a `(size, peer_id)` tuple to catch peers that respond with
-    // another size tx than they announced. alt enter in request (won't catch peers announcing
-    // wrong size for requests assembled from hashes pending fetch if stored in request fut)
-    tx_encoded_length: Option<usize>,
-}
-
-impl TxFetchMetadata {
-    pub fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId> {
-        &mut self.fallback_peers
-    }
-
-    pub fn tx_encoded_len(&self) -> Option<usize> {
-        self.tx_encoded_length
-    }
-
-    #[cfg(test)]
-    pub fn new(
-        retries: u8,
-        fallback_peers: LruCache<PeerId>,
-        tx_encoded_length: Option<usize>,
-    ) -> Self {
-        Self { retries, fallback_peers, tx_encoded_length }
-    }
-}
 // === impl TransactionFetcher ===
 
 impl TransactionFetcher {
@@ -187,7 +65,7 @@ impl TransactionFetcher {
     fn decrement_inflight_request_count_for(&mut self, peer_id: &PeerId) {
         let remove = || -> bool {
             if let Some(inflight_count) = self.active_peers.get(peer_id) {
-                if *inflight_count <= DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS_PER_PEER {
+                if *inflight_count <= DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
                     return true
                 }
                 *inflight_count -= 1;
@@ -203,7 +81,7 @@ impl TransactionFetcher {
     /// Returns `true` if peer is idle with respect to `self.inflight_requests`.
     pub(super) fn is_idle(&self, peer_id: &PeerId) -> bool {
         let Some(inflight_count) = self.active_peers.peek(peer_id) else { return true };
-        if *inflight_count < DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS_PER_PEER {
+        if *inflight_count < DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
             return true
         }
         false
@@ -416,7 +294,7 @@ impl TransactionFetcher {
                 // peer has not yet requested hash
                 fallback_peers.insert(peer_id);
             } else {
-                if *retries >= DEFAULT_MAX_RETRIES_PER_TX_HASH {
+                if *retries >= DEFAULT_MAX_RETRIES {
                     debug!(target: "net::tx",
                         hash=%hash,
                         retries=retries,
@@ -462,17 +340,15 @@ impl TransactionFetcher {
         let Some(peer) = peers.get(&peer_id) else { return };
         let conn_eth_version = peer.version;
 
-        // fill the request with other buffered hashes that have been announced by the peer.
-        // look up the given number of lru hashes that are pending fetch, in the hashes seen
-        // by this peer, before giving up and sending a request with the single tx popped
-        // above.
-        let budget_lru_hashes_pending_fetch =
-            1 / 2 * DEFAULT_MAX_CAPACITY_CACHE_HASHES_PENDING_FETCH;
+        // fill the request with more hashes pending fetch that have been announced by the peer.
+        // the search for more hashes is done with respect to the given budget, which determines
+        // how many hashes to loop through before giving up and sending a request with the single
+        // hash that was taken out of the cache above.
 
         self.fill_request_from_hashes_pending_fetch(
             &mut hashes_to_request,
             peer.seen_transactions.maybe_pending_transaction_hashes(),
-            budget_lru_hashes_pending_fetch,
+            self.search_breadth_budget_find_intersection_pending_hashes_and_hashes_seen_by_peer(),
         );
 
         // free unused memory
@@ -591,7 +467,7 @@ impl TransactionFetcher {
             );
 
             // todo: allow `MAX_ALTERNATIVE_PEERS_PER_TX` to be zero
-            let limit = NonZeroUsize::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS_PER_TX.into()).expect("MAX_ALTERNATIVE_PEERS_PER_TX should be non-zero");
+            let limit = NonZeroUsize::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS.into()).expect("MAX_ALTERNATIVE_PEERS_PER_TX should be non-zero");
 
             if self.hashes_unknown_to_pool.get_or_insert(*hash, ||
                 TxFetchMetadata{retries: 0, fallback_peers: LruCache::new(limit), tx_encoded_length: None}
@@ -665,12 +541,12 @@ impl TransactionFetcher {
             return Some(new_announced_hashes)
         };
 
-        if *inflight_count >= DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS_PER_PEER {
+        if *inflight_count >= DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 new_announced_hashes=?*new_announced_hashes,
                 conn_eth_version=%conn_eth_version,
-                MAX_CONCURRENT_TX_REQUESTS_PER_PEER=DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS_PER_PEER,
+                MAX_CONCURRENT_TX_REQUESTS_PER_PEER=DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
                 "limit for concurrent `GetPooledTransactions` requests per peer reached"
             );
             return Some(new_announced_hashes)
@@ -746,7 +622,7 @@ impl TransactionFetcher {
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         seen_hashes: &LruCache<TxHash>,
-        mut budget: usize, // only check `budget` lru pending hashes
+        mut budget: Option<usize>, // only check `budget` lru pending hashes
     ) {
         let Some(hash) = hashes_to_request.first() else { return };
 
@@ -758,7 +634,7 @@ impl TransactionFetcher {
 
         // if request full enough already, we're satisfied, send request for single tx
         if acc_size_response >=
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING_HASHES
         {
             return
         }
@@ -766,11 +642,6 @@ impl TransactionFetcher {
         // try to fill request by checking if any other hashes pending fetch (in lru order) are
         // also seen by peer
         for hash in self.hashes_pending_fetch.iter() {
-            budget = budget.saturating_sub(1);
-            if budget == 0 {
-                break
-            }
-
             // 1. Check if a hash pending fetch is seen by peer.
             if !seen_hashes.contains(hash) {
                 continue;
@@ -792,11 +663,18 @@ impl TransactionFetcher {
             // if expected response is full enough or the number of hashes in the request is
             // enough, we're satisfied
             if acc_size_response >=
-                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING ||
+                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING_HASHES ||
                 hashes_to_request.len() >
-                    DEFAULT_SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_ON_FETCH_PENDING
+                    DEFAULT_SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST_ON_FETCH_PENDING_HASHES
             {
                 break
+            }
+
+            if let Some(ref mut bud) = budget {
+                *bud = bud.saturating_sub(1);
+                if *bud == 0 {
+                    return
+                }
             }
         }
 
@@ -806,38 +684,61 @@ impl TransactionFetcher {
         }
     }
 
-    /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes.
+    /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes. Returns  
+    /// `false` if [`TransactionFetcher`] is operating close to full capacity, or if too many
+    /// hashes are pending fetch.
     pub(super) fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
         let info = &self.tx_fetcher_info;
 
-        self.inflight_requests.len() < info.max_inflight_transaction_requests ||
-            self.hashes_pending_fetch.len() > info.max_hashes_pending_fetch
+        self.inflight_requests.len() <= info.max_inflight_transaction_requests ||
+            self.hashes_pending_fetch.len() >= info.max_hashes_pending_fetch
     }
 
+    /// Returns the limit to enforce when looking for any pending hash with an idle fallback peer.
+    ///
     /// Returns `Some(limit)` if [`TransactionFetcher`] is operating close to full capacity.
-    /// Returns `None`, unlimited, if [`TransactionFetcher`] is not that busy.
+    /// Returns `None`, unlimited, if [`TransactionFetcher`] is not that busy or too many hashes
+    /// are pending.
     pub(super) fn search_breadth_budget_find_idle_fallback_peer(&self) -> Option<usize> {
-        let info = &self.tx_fetcher_info;
-
-        let inflight_requests = self.inflight_requests.len();
-        let hashes_pending_fetch = self.hashes_pending_fetch.len();
-
-        if inflight_requests <= info.max_inflight_transaction_requests ||
-            hashes_pending_fetch >= info.max_hashes_pending_fetch
-        {
+        if self.has_capacity_for_fetching_pending_hashes() {
             // unlimited search breadth
             None
         } else {
             // limited breadth of search for idle peer
             trace!(target: "net::tx",
-                inflight_requests=inflight_requests,
-                max_inflight_transaction_requests=info.max_inflight_transaction_requests,
-                hashes_pending_fetch=hashes_pending_fetch,
-                max_hashes_pending_fetch=info.max_hashes_pending_fetch,
-                "search breadth limited in search for idle fallback peer for hashes pending fetch"
+                inflight_requests=self.inflight_requests.len(),
+                max_inflight_transaction_requests=self.tx_fetcher_info.max_inflight_transaction_requests,
+                hashes_pending_fetch=self.hashes_pending_fetch.len(),
+                max_hashes_pending_fetch=self.tx_fetcher_info.max_hashes_pending_fetch,
+                "search breadth limited in search for idle fallback peer for some hash pending fetch"
             );
 
             Some(DEFAULT_BUDGET_FIND_IDLE_FALLBACK_PEER)
+        }
+    }
+
+    /// Returns the limit to enforce when looking for any pending hash with an idle fallback peer.
+    ///
+    /// Returns `Some(limit)` if [`TransactionFetcher`] is operating close to full capacity.
+    /// Returns `None`, unlimited, if [`TransactionFetcher`] is not that busy or too many hashes
+    /// are pending.
+    pub(super) fn search_breadth_budget_find_intersection_pending_hashes_and_hashes_seen_by_peer(
+        &self,
+    ) -> Option<usize> {
+        if self.has_capacity_for_fetching_pending_hashes() {
+            // unlimited search breadth
+            None
+        } else {
+            // limited breadth of search for idle peer
+            trace!(target: "net::tx",
+                inflight_requests=self.inflight_requests.len(),
+                max_inflight_transaction_requests=self.tx_fetcher_info.max_inflight_transaction_requests,
+                hashes_pending_fetch=self.hashes_pending_fetch.len(),
+                max_hashes_pending_fetch=self.tx_fetcher_info.max_hashes_pending_fetch,
+                "search breadth limited in search for idle fallback peer for some hash pending fetch"
+            );
+
+            Some(DEFAULT_BUDGET_FIND_INTERSECTION_ANNOUNCED_BY_PEER_AND_PENDING_FETCH)
         }
     }
 }
@@ -909,16 +810,49 @@ impl Stream for TransactionFetcher {
 impl Default for TransactionFetcher {
     fn default() -> Self {
         Self {
-            active_peers: LruMap::new(DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS),
+            active_peers: LruMap::new(DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS),
             inflight_requests: Default::default(),
             hashes_pending_fetch: LruCache::new(
-                NonZeroUsize::new(DEFAULT_MAX_CAPACITY_CACHE_HASHES_PENDING_FETCH)
+                NonZeroUsize::new(DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH)
                     .expect("buffered cache limit should be non-zero"),
             ),
             hashes_unknown_to_pool: LruMap::new_unlimited(),
             filter_valid_hashes: Default::default(),
             tx_fetcher_info: TransactionFetcherInfo::default(),
         }
+    }
+}
+
+/// Metadata of a transaction hash that is yet to be fetched.
+#[derive(Debug)]
+pub(super) struct TxFetchMetadata {
+    /// The number of times a request attempt has been made for the hash.
+    retries: u8,
+    /// Peers that have announced the hash, but to which a request attempt has not yet been made.
+    fallback_peers: LruCache<PeerId>,
+    /// Size metadata of the transaction if it has been seen in an eth68 announcement.
+    // todo: store all seen sizes as a `(size, peer_id)` tuple to catch peers that respond with
+    // another size tx than they announced. alt enter in request (won't catch peers announcing
+    // wrong size for requests assembled from hashes pending fetch if stored in request fut)
+    tx_encoded_length: Option<usize>,
+}
+
+impl TxFetchMetadata {
+    pub fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId> {
+        &mut self.fallback_peers
+    }
+
+    pub fn tx_encoded_len(&self) -> Option<usize> {
+        self.tx_encoded_length
+    }
+
+    #[cfg(test)]
+    pub fn new(
+        retries: u8,
+        fallback_peers: LruCache<PeerId>,
+        tx_encoded_length: Option<usize>,
+    ) -> Self {
+        Self { retries, fallback_peers, tx_encoded_length }
     }
 }
 
@@ -1013,7 +947,7 @@ impl Default for TransactionFetcherInfo {
     fn default() -> Self {
         Self::new(
             DEFAULT_MAX_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES,
-            DEFAULT_MAX_COUNT_HASHES_PENDING_FETCH,
+            DEFAULT_MAX_COUNT_PENDING_FETCH,
         )
     }
 }
