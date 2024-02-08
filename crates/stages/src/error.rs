@@ -37,9 +37,9 @@ pub enum StageError {
          downloaded header #{header_number} ({header_hash}) is detached from \
          local head #{head_number} ({head_hash}): {error}",
         header_number = header.number,
-        header_hash = header.hash,
+        header_hash = header.hash(),
         head_number = local_head.number,
-        head_hash = local_head.hash,
+        head_hash = local_head.hash(),
     )]
     DetachedHead {
         /// The local head we attempted to attach to.

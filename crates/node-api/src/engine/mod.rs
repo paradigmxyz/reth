@@ -66,7 +66,7 @@ pub fn validate_payload_timestamp(
         // a validation **MUST** be added:
         //
         // 1. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
-        //    payload or payloadAttributes greater or equal to the Cancun activation timestamp.
+        //    payload or payloadAttributes is greater or equal to the Cancun activation timestamp.
         return Err(AttributesValidationError::UnsupportedFork)
     }
 
@@ -74,8 +74,21 @@ pub fn validate_payload_timestamp(
         // From the Engine API spec:
         // <https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/cancun.md#specification-2>
         //
+        // For `engine_getPayloadV3`:
+        //
         // 1. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
         //    the built payload does not fall within the time frame of the Cancun fork.
+        //
+        // For `engine_forkchoiceUpdatedV3`:
+        //
+        // 2. Client software **MUST** return `-38005: Unsupported fork` error if the
+        //    `payloadAttributes` is set and the `payloadAttributes.timestamp` does not fall within
+        //    the time frame of the Cancun fork.
+        //
+        // For `engine_newPayloadV3`:
+        //
+        // 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
+        //    the payload does not fall within the time frame of the Cancun fork.
         return Err(AttributesValidationError::UnsupportedFork)
     }
     Ok(())
@@ -114,17 +127,18 @@ pub fn validate_withdrawals_presence(
     Ok(())
 }
 
-/// Validate the presence of the `parentBeaconBlockRoot` field according to the payload
-/// timestamp.
+/// Validate the presence of the `parentBeaconBlockRoot` field according to the given timestamp.
+/// This method is meant to be used with either a `payloadAttributes` field or a full payload, with
+/// the `engine_forkchoiceUpdated` and `engine_newPayload` methods respectively.
 ///
-/// After Cancun, `parentBeaconBlockRoot` field must be [Some].
-/// Before Cancun, `parentBeaconBlockRoot` field must be [None].
+/// After Cancun, the `parentBeaconBlockRoot` field must be [Some].
+/// Before Cancun, the `parentBeaconBlockRoot` field must be [None].
 ///
-/// If the engine API message version is V1 or V2, and the payload attribute's timestamp is
-/// post-Cancun, then this will return [AttributesValidationError::UnsupportedFork].
+/// If the engine API message version is V1 or V2, and the timestamp is post-Cancun, then this will
+/// return [AttributesValidationError::UnsupportedFork].
 ///
-/// If the payload attribute's timestamp is before the Cancun fork and the engine API message
-/// version is V3, then this will return [AttributesValidationError::UnsupportedFork].
+/// If the timestamp is before the Cancun fork and the engine API message version is V3, then this
+/// will return [AttributesValidationError::UnsupportedFork].
 ///
 /// If the engine API message version is V3, but the `parentBeaconBlockRoot` is [None], then
 /// this will return [AttributesValidationError::NoParentBeaconBlockRootPostCancun].
@@ -135,9 +149,16 @@ pub fn validate_withdrawals_presence(
 ///    matches the expected one and return `-32602: Invalid params` error if this check fails. Any
 ///    field having `null` value **MUST** be considered as not provided.
 ///
+/// For `engine_forkchoiceUpdatedV3`:
+///
 /// 2. Client software **MUST** return `-38005: Unsupported fork` error if the `payloadAttributes`
 ///    is set and the `payloadAttributes.timestamp` does not fall within the time frame of the
 ///    Cancun fork.
+///
+/// For `engine_newPayloadV3`:
+///
+/// 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of the
+///    payload does not fall within the time frame of the Cancun fork.
 pub fn validate_parent_beacon_block_root_presence(
     chain_spec: &ChainSpec,
     version: EngineApiMessageVersion,
@@ -160,9 +181,16 @@ pub fn validate_parent_beacon_block_root_presence(
         }
     };
 
+    // For `engine_forkchoiceUpdatedV3`:
+    //
     // 2. Client software **MUST** return `-38005: Unsupported fork` error if the
     //    `payloadAttributes` is set and the `payloadAttributes.timestamp` does not fall within the
     //    time frame of the Cancun fork.
+    //
+    // For `engine_newPayloadV3`:
+    //
+    // 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of the
+    //    payload does not fall within the time frame of the Cancun fork.
     validate_payload_timestamp(chain_spec, version, timestamp)?;
 
     Ok(())

@@ -160,7 +160,7 @@ where
                 if let Some(percentiles) = &reward_percentiles {
                     let (transactions, receipts) = self
                         .cache()
-                        .get_transactions_and_receipts(header.hash)
+                        .get_transactions_and_receipts(header.hash())
                         .await?
                         .ok_or(EthApiError::InvalidBlockRange)?;
                     rewards.push(
@@ -201,6 +201,8 @@ where
             gas_used_ratio,
             oldest_block: U256::from(start_block),
             reward: reward_percentiles.map(|_| rewards),
+            base_fee_per_blob_gas: Default::default(),
+            blob_gas_used_ratio: Default::default(),
         })
     }
 

@@ -212,20 +212,20 @@ pub fn insert_genesis_header<DB: Database>(
     snapshot_provider: Arc<SnapshotProvider>,
     chain: Arc<ChainSpec>,
 ) -> ProviderResult<()> {
-    let header = chain.sealed_genesis_header();
+    let (header, block_hash) = chain.sealed_genesis_header().split();
 
     match snapshot_provider.block_hash(0) {
         Ok(None) | Err(ProviderError::MissingSnapshotBlock(SnapshotSegment::Headers, 0)) => {
-            let (difficulty, hash) = (header.difficulty, header.hash);
+            let (difficulty, hash) = (header.difficulty, block_hash);
             let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
-            writer.append_header(header.header, difficulty, hash)?;
+            writer.append_header(header, difficulty, hash)?;
             writer.commit()?;
         }
         Ok(Some(_)) => {}
         Err(e) => return Err(e),
     }
 
-    tx.put::<tables::HeaderNumbers>(header.hash, 0)?;
+    tx.put::<tables::HeaderNumbers>(block_hash, 0)?;
     tx.put::<tables::BlockBodyIndices>(0, Default::default())?;
 
     Ok(())

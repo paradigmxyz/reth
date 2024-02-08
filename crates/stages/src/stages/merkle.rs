@@ -502,7 +502,7 @@ mod tests {
             let SealedBlock { header, body, ommers, withdrawals } = random_block(
                 &mut rng,
                 stage_progress,
-                preblocks.last().map(|b| b.hash),
+                preblocks.last().map(|b| b.hash()),
                 Some(0),
                 None,
             );
@@ -559,7 +559,7 @@ mod tests {
 
             let snapshot_provider = self.db.factory.snapshot_provider();
             let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers).unwrap();
-            let mut last_header = last_block.header.header;
+            let mut last_header = last_block.header().clone();
             last_header.state_root = root;
 
             let hash = last_header.hash_slow();

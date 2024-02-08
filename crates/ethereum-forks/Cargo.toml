@@ -14,16 +14,15 @@ workspace = true
 [dependencies]
 # ethereum
 alloy-chains.workspace = true
-alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
-alloy-rlp = { workspace = true, features = ["arrayvec"] }
+alloy-primitives = { workspace = true, features = ["serde", "rand", "rlp"] }
+alloy-rlp = { workspace = true, features = ["arrayvec", "derive"] }
 
 # used for forkid
 crc = "3"
 
 # misc
-serde.workspace = true
+serde = { workspace = true, features = ["derive"], optional = true }
 thiserror.workspace = true
-
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -36,7 +35,8 @@ arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-derive.workspace = true
 
-
 [features]
+default = ["serde"]
+serde = ["dep:serde"]
 arbitrary = ["dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 optimism = []
