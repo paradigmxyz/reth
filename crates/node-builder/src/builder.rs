@@ -89,6 +89,8 @@ where
     DB: Database + Clone + 'static,
 {
     /// Configures the types of the node.
+    ///
+    // TODO this can be made independent of Database
     pub fn with_types<T>(self, types: T) -> NodeBuilder<DB, TypesState<T, DB>>
     where
         T: NodeTypes,
