@@ -9,46 +9,61 @@ use reth_db::{
 use reth_primitives::{BlockHash, Header, SnapshotSegment};
 use tracing::error;
 
-use super::SourceSubcommand;
-
 /// The arguments for the `reth db get` command
 #[derive(Parser, Debug)]
 pub struct Command {
     #[clap(subcommand)]
-    subcommand: SourceSubcommand,
+    subcommand: Subcommand,
+}
 
-    /// The key to get content for
-    #[arg(value_parser = maybe_json_value_parser)]
-    pub key: String,
+#[derive(clap::Subcommand, Debug)]
+enum Subcommand {
+    Mdbx {
+        table: tables::Tables,
 
-    /// The subkey to get content for
-    #[arg(value_parser = maybe_json_value_parser)]
-    pub subkey: Option<String>,
+        /// The key to get content for
+        #[arg(value_parser = maybe_json_value_parser)]
+        key: String,
 
-    /// Output bytes instead of human-readable decoded value
-    #[clap(long)]
-    pub raw: bool,
+        /// The subkey to get content for
+        #[arg(value_parser = maybe_json_value_parser)]
+        subkey: Option<String>,
+
+        /// Output bytes instead of human-readable decoded value
+        #[clap(long)]
+        raw: bool,
+    },
+    Snapshot {
+        segment: SnapshotSegment,
+
+        /// The key to get content for
+        #[arg(value_parser = maybe_json_value_parser)]
+        key: String,
+
+        /// Output bytes instead of human-readable decoded value
+        #[clap(long)]
+        raw: bool,
+    },
 }
 
 impl Command {
     /// Execute `db get` command
     pub fn execute<DB: Database>(self, tool: &DbTool<DB>) -> eyre::Result<()> {
         match self.subcommand {
-            SourceSubcommand::Mdbx { table } => {
-                table.view(&GetValueViewer { tool, args: &self })?
+            Subcommand::Mdbx { table, key, subkey, raw } => {
+                table.view(&GetValueViewer { tool, key, subkey, raw })?
             }
-            SourceSubcommand::Snapshot { segment } => {
+            Subcommand::Snapshot { segment, key, raw } => {
                 let (key, mask): (u64, _) = match segment {
-                    SnapshotSegment::Headers => (
-                        self.table_key::<tables::Headers>()?,
-                        <HeaderMask<Header, BlockHash>>::MASK,
-                    ),
+                    SnapshotSegment::Headers => {
+                        (table_key::<tables::Headers>(&key)?, <HeaderMask<Header, BlockHash>>::MASK)
+                    }
                     SnapshotSegment::Transactions => (
-                        self.table_key::<tables::Transactions>()?,
+                        table_key::<tables::Transactions>(&key)?,
                         <TransactionMask<<Transactions as Table>::Value>>::MASK,
                     ),
                     SnapshotSegment::Receipts => (
-                        self.table_key::<tables::Receipts>()?,
+                        table_key::<tables::Receipts>(&key)?,
                         <ReceiptMask<<Receipts as Table>::Value>>::MASK,
                     ),
                 };
@@ -67,7 +82,7 @@ impl Command {
 
                 match content {
                     Some(content) => {
-                        if self.raw {
+                        if raw {
                             println!("{:?}", content);
                         } else {
                             match segment {
@@ -104,39 +119,33 @@ impl Command {
 
         Ok(())
     }
+}
 
-    /// Get an instance of key for given table
-    pub fn table_key<T: Table>(&self) -> Result<T::Key, eyre::Error> {
-        if let SourceSubcommand::Mdbx { table } = self.subcommand {
-            assert_eq!(T::NAME, table.name());
-        }
+/// Get an instance of key for given table
+fn table_key<T: Table>(key: &str) -> Result<T::Key, eyre::Error> {
+    serde_json::from_str::<T::Key>(key).map_err(|e| eyre::eyre!(e))
+}
 
-        serde_json::from_str::<T::Key>(&self.key).map_err(|e| eyre::eyre!(e))
-    }
-
-    /// Get an instance of subkey for given dupsort table
-    fn table_subkey<T: DupSort>(&self) -> Result<T::SubKey, eyre::Error> {
-        if let SourceSubcommand::Mdbx { table } = self.subcommand {
-            assert_eq!(T::NAME, table.name());
-        }
-
-        serde_json::from_str::<T::SubKey>(&self.subkey.clone().unwrap_or_default())
-            .map_err(|e| eyre::eyre!(e))
-    }
+/// Get an instance of subkey for given dupsort table
+fn table_subkey<T: DupSort>(subkey: &Option<String>) -> Result<T::SubKey, eyre::Error> {
+    serde_json::from_str::<T::SubKey>(&subkey.clone().unwrap_or_default())
+        .map_err(|e| eyre::eyre!(e))
 }
 
 struct GetValueViewer<'a, DB: Database> {
     tool: &'a DbTool<DB>,
-    args: &'a Command,
+    key: String,
+    subkey: Option<String>,
+    raw: bool,
 }
 
 impl<DB: Database> TableViewer<()> for GetValueViewer<'_, DB> {
     type Error = eyre::Report;
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
-        let key = self.args.table_key::<T>()?;
+        let key = table_key::<T>(&self.key)?;
 
-        let content = if self.args.raw {
+        let content = if self.raw {
             self.tool
                 .get::<RawTable<T>>(RawKey::from(key))?
                 .map(|content| format!("{:?}", content.raw_value()))
@@ -158,10 +167,10 @@ impl<DB: Database> TableViewer<()> for GetValueViewer<'_, DB> {
 
     fn view_dupsort<T: DupSort>(&self) -> Result<(), Self::Error> {
         // get a key for given table
-        let key = self.args.table_key::<T>()?;
+        let key = table_key::<T>(&self.key)?;
 
         // process dupsort table
-        let subkey = self.args.table_subkey::<T>()?;
+        let subkey = table_subkey::<T>(&self.subkey)?;
 
         match self.tool.get_dup::<T>(key, subkey)? {
             Some(content) => {

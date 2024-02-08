@@ -1,31 +1,29 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use reth_db::{
     database::Database,
     snapshot::iter_snapshots,
     table::Table,
     transaction::{DbTx, DbTxMut},
-    TableViewer,
+    TableViewer, Tables,
 };
-use reth_primitives::snapshot::find_fixed_range;
+use reth_primitives::{snapshot::find_fixed_range, SnapshotSegment};
 use reth_provider::ProviderFactory;
-
-use super::SourceSubcommand;
 
 /// The arguments for the `reth db clear` command
 #[derive(Parser, Debug)]
 pub struct Command {
     #[clap(subcommand)]
-    subcommand: SourceSubcommand,
+    subcommand: Subcommands,
 }
 
 impl Command {
     /// Execute `db clear` command
     pub fn execute<DB: Database>(self, provider_factory: ProviderFactory<DB>) -> eyre::Result<()> {
         match self.subcommand {
-            SourceSubcommand::Mdbx { table } => {
+            Subcommands::Mdbx { table } => {
                 table.view(&ClearViewer { db: provider_factory.db_ref() })?
             }
-            SourceSubcommand::Snapshot { segment } => {
+            Subcommands::Snapshot { segment } => {
                 let snapshot_provider = provider_factory.snapshot_provider();
                 let snapshots = iter_snapshots(snapshot_provider.directory())?;
 
@@ -40,6 +38,12 @@ impl Command {
 
         Ok(())
     }
+}
+
+#[derive(Subcommand, Debug)]
+enum Subcommands {
+    Mdbx { table: Tables },
+    Snapshot { segment: SnapshotSegment },
 }
 
 struct ClearViewer<'a, DB: Database> {

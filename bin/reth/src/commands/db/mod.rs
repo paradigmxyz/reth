@@ -203,12 +203,6 @@ impl Command {
     }
 }
 
-#[derive(Subcommand, Debug)]
-enum SourceSubcommand {
-    Mdbx { table: Tables },
-    Snapshot { segment: SnapshotSegment },
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
