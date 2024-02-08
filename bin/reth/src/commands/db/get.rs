@@ -213,17 +213,12 @@ mod tests {
 
     #[test]
     fn parse_numeric_key_args() {
-        let args = CommandParser::<Command>::parse_from(["reth", "Headers", "123"]).args;
-        assert_eq!(args.table_key::<Headers>().unwrap(), 123);
-
-        let args = CommandParser::<Command>::parse_from([
-            "reth",
-            "HashedAccount",
-            "0x0ac361fe774b78f8fc4e86c1916930d150865c3fc2e21dca2e58833557608bac",
-        ])
-        .args;
+        assert_eq!(table_key::<Headers>("123").unwrap(), 123);
         assert_eq!(
-            args.table_key::<HashedAccount>().unwrap(),
+            table_key::<HashedAccount>(
+                "\"0x0ac361fe774b78f8fc4e86c1916930d150865c3fc2e21dca2e58833557608bac\""
+            )
+            .unwrap(),
             B256::from_str("0x0ac361fe774b78f8fc4e86c1916930d150865c3fc2e21dca2e58833557608bac")
                 .unwrap()
         );
@@ -231,16 +226,13 @@ mod tests {
 
     #[test]
     fn parse_string_key_args() {
-        let args =
-            CommandParser::<Command>::parse_from(["reth", "SyncStage", "MerkleExecution"]).args;
-        assert_eq!(args.table_key::<SyncStage>().unwrap(), "MerkleExecution");
+        assert_eq!(table_key::<SyncStage>("\"MerkleExecution\"").unwrap(), "MerkleExecution");
     }
 
     #[test]
     fn parse_json_key_args() {
-        let args = CommandParser::<Command>::parse_from(["reth", "StorageHistory", r#"{ "address": "0x01957911244e546ce519fbac6f798958fafadb41", "sharded_key": { "key": "0x0000000000000000000000000000000000000000000000000000000000000003", "highest_block_number": 18446744073709551615 } }"#]).args;
         assert_eq!(
-            args.table_key::<StorageHistory>().unwrap(),
+            table_key::<StorageHistory>(r#"{ "address": "0x01957911244e546ce519fbac6f798958fafadb41", "sharded_key": { "key": "0x0000000000000000000000000000000000000000000000000000000000000003", "highest_block_number": 18446744073709551615 } }"#).unwrap(),
             StorageShardedKey::new(
                 Address::from_str("0x01957911244e546ce519fbac6f798958fafadb41").unwrap(),
                 B256::from_str(
@@ -254,9 +246,8 @@ mod tests {
 
     #[test]
     fn parse_json_key_for_account_history() {
-        let args = CommandParser::<Command>::parse_from(["reth", "AccountHistory", r#"{ "key": "0x4448e1273fd5a8bfdb9ed111e96889c960eee145", "highest_block_number": 18446744073709551615 }"#]).args;
         assert_eq!(
-            args.table_key::<AccountHistory>().unwrap(),
+            table_key::<AccountHistory>(r#"{ "key": "0x4448e1273fd5a8bfdb9ed111e96889c960eee145", "highest_block_number": 18446744073709551615 }"#).unwrap(),
             ShardedKey::new(
                 Address::from_str("0x4448e1273fd5a8bfdb9ed111e96889c960eee145").unwrap(),
                 18446744073709551615
