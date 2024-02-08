@@ -333,7 +333,6 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         let pipeline_events = pipeline.events();
 
         let initial_target = self.config.initial_pipeline_target(genesis_hash);
-        let mut hooks = EngineHooks::new();
 
         let prune_config = prune_config.unwrap_or_default();
         let mut pruner = PrunerBuilder::new(prune_config.clone())

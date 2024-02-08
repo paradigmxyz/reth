@@ -12,6 +12,7 @@ use reth_snapshot::{Snapshotter, SnapshotterWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
+use tracing::trace;
 
 /// Manages snapshotting under the control of the engine.
 ///
@@ -75,7 +76,10 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
     ) -> RethResult<Option<EngineHookEvent>> {
         Ok(match &mut self.state {
             SnapshotterState::Idle(snapshotter) => {
-                let Some(snapshotter) = snapshotter.take() else { return Ok(None) };
+                let Some(snapshotter) = snapshotter.take() else {
+                    trace!(target: "consensus::engine::hooks::snapshot", "Snapshotter is already running but the state is idle");
+                    return Ok(None)
+                };
 
                 let targets = snapshotter.get_snapshot_targets(finalized_block_number)?;
 
@@ -112,7 +116,10 @@ impl<DB: Database + 'static> EngineHook for SnapshotHook<DB> {
         cx: &mut Context<'_>,
         ctx: EngineContext,
     ) -> Poll<RethResult<EngineHookEvent>> {
-        let Some(finalized_block_number) = ctx.finalized_block_number else { return Poll::Pending };
+        let Some(finalized_block_number) = ctx.finalized_block_number else {
+            trace!(target: "consensus::engine::hooks::snapshot", ?ctx, "Finalized block number is not available");
+            return Poll::Pending
+        };
 
         // Try to spawn a snapshotter
         match self.try_spawn_snapshotter(finalized_block_number)? {
