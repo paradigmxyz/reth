@@ -13,9 +13,8 @@ use reth_db::{
     mdbx::DatabaseArguments,
     open_db, open_db_read_only,
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
-    Tables,
 };
-use reth_primitives::{ChainSpec, SnapshotSegment};
+use reth_primitives::ChainSpec;
 use reth_provider::ProviderFactory;
 use std::{
     io::{self, Write},
