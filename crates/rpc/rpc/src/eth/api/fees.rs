@@ -146,6 +146,8 @@ where
                 .map(|h| h.timestamp)
                 .unwrap_or_default();
 
+            // Als need to include the `base_fee_per_gas` and `base_fee_per_blob_gas` for the next
+            // block
             base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
                 last_entry.gas_used,
                 last_entry.gas_limit,
@@ -210,6 +212,7 @@ where
                 self.provider().chain_spec().base_fee_params(last_header.timestamp),
             )));
 
+            // Same goes for the `base_fee_per_blob_gas`
             base_fee_per_blob_gas
                 .push(U256::from(last_header.next_block_blob_fee().unwrap_or_default()));
         };
