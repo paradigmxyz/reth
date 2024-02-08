@@ -33,7 +33,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             15537394,
             U256::from(58_750_003_716_598_352_816_469u128),
         )),
-        fork_timestamps: ForkTimestamps::default().shanghai(1681338455),
+        fork_timestamps: ForkTimestamps::default().shanghai(1681338455).cancun(1710338135),
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
             (Hardfork::Homestead, ForkCondition::Block(1150000)),
@@ -57,6 +57,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1681338455)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(1710338135)),
         ]),
         // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
         deposit_contract: Some(DepositContract::new(
@@ -82,7 +83,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         // <https://goerli.etherscan.io/block/7382818>
         paris_block_and_final_difficulty: Some((7382818, U256::from(10_790_000))),
-        fork_timestamps: ForkTimestamps::default().shanghai(1678832736),
+        fork_timestamps: ForkTimestamps::default().shanghai(1678832736).cancun(1705473120),
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
             (Hardfork::Homestead, ForkCondition::Block(0)),
@@ -126,7 +127,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         // <https://sepolia.etherscan.io/block/1450409>
         paris_block_and_final_difficulty: Some((1450409, U256::from(17_000_018_015_853_232u128))),
-        fork_timestamps: ForkTimestamps::default().shanghai(1677557088),
+        fork_timestamps: ForkTimestamps::default().shanghai(1677557088).cancun(1706655072),
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
             (Hardfork::Homestead, ForkCondition::Block(0)),
@@ -173,7 +174,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(1))),
-        fork_timestamps: ForkTimestamps::default().shanghai(1696000704),
+        fork_timestamps: ForkTimestamps::default().shanghai(1696000704).cancun(1707305664),
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
             (Hardfork::Homestead, ForkCondition::Block(0)),
@@ -1208,6 +1209,12 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Remove the given fork from the spec.
+    pub fn without_fork(mut self, fork: Hardfork) -> Self {
+        self.hardforks.remove(&fork);
+        self
+    }
+
     /// Enable the Paris hardfork at the given TTD.
     ///
     /// Does not set the merge netsplit block.
@@ -1722,6 +1729,7 @@ Merge hard forks:
 
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
+- Cancun                           @1710338135
 "
         );
     }
@@ -1775,8 +1783,8 @@ Post-merge hard forks (timestamp based):
             assert!(spec.fork_timestamps.shanghai.is_some());
         }
 
-        // currently there is only 1 timestamp fork known for mainnet: shanghai
-        ensure_timestamp_fork_conditions(&MAINNET, 1);
+        // currently there are 2 timestamp forks known for mainnet: shanghai, cancun
+        ensure_timestamp_fork_conditions(&MAINNET, 2);
 
         // currently there are 2 timestamp forks known for sepolia: shanghai, cancun
         ensure_timestamp_fork_conditions(&SEPOLIA, 2);
@@ -1998,7 +2006,11 @@ Post-merge hard forks (timestamp based):
                     Hardfork::GrayGlacier,
                     ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1681338455 },
                 ),
-                (Hardfork::Shanghai, ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 }),
+                (
+                    Hardfork::Shanghai,
+                    ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 1710338135 },
+                ),
+                (Hardfork::Cancun, ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 }),
             ],
         );
     }
@@ -2175,12 +2187,17 @@ Post-merge hard forks (timestamp based):
                 // First Shanghai block
                 (
                     Head { number: 20000000, timestamp: 1681338455, ..Default::default() },
-                    ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 },
+                    ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 1710338135 },
                 ),
-                // Future Shanghai block
+                // First Cancun block
                 (
-                    Head { number: 20000000, timestamp: 2000000000, ..Default::default() },
-                    ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 },
+                    Head { number: 20000001, timestamp: 1710338135, ..Default::default() },
+                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+                ),
+                // Future Cancun block
+                (
+                    Head { number: 20000002, timestamp: 2000000000, ..Default::default() },
+                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
                 ),
             ],
         );
@@ -2417,11 +2434,9 @@ Post-merge hard forks (timestamp based):
     /// This is based off of the test vectors here: https://github.com/ethereum/go-ethereum/blob/5c8cc10d1e05c23ff1108022f4150749e73c0ca1/core/forkid/forkid_test.go#L155-L188
     #[test]
     fn timestamped_forks() {
-        let mainnet_with_shanghai = ChainSpecBuilder::mainnet()
-            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(1668000000))
-            .build();
+        let mainnet_with_timestamps = ChainSpecBuilder::mainnet().build();
         test_fork_ids(
-            &mainnet_with_shanghai,
+            &mainnet_with_timestamps,
             &[
                 (
                     Head { number: 0, timestamp: 0, ..Default::default() },
@@ -2521,20 +2536,28 @@ Post-merge hard forks (timestamp based):
                 ), // Last Arrow Glacier block
                 (
                     Head { number: 15050000, timestamp: 0, ..Default::default() },
-                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1668000000 },
+                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1681338455 },
                 ), // First Gray Glacier block
                 (
                     Head { number: 19999999, timestamp: 1667999999, ..Default::default() },
-                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1668000000 },
+                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1681338455 },
                 ), // Last Gray Glacier block
                 (
-                    Head { number: 20000000, timestamp: 1668000000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x71, 0x14, 0x76, 0x44]), next: 0 },
-                ), // First Shanghai block
+                    Head { number: 20000000, timestamp: 1681338455, ..Default::default() },
+                    ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 1710338135 },
+                ), // Last Shanghai block
                 (
-                    Head { number: 20000000, timestamp: 2668000000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x71, 0x14, 0x76, 0x44]), next: 0 },
-                ), // Future Shanghai block
+                    Head { number: 20000001, timestamp: 1710338134, ..Default::default() },
+                    ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 1710338135 },
+                ), // First Cancun block
+                (
+                    Head { number: 20000002, timestamp: 1710338135, ..Default::default() },
+                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+                ), // Future Cancun block
+                (
+                    Head { number: 20000003, timestamp: 2000000000, ..Default::default() },
+                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+                ),
             ],
         );
     }
@@ -2635,6 +2658,7 @@ Post-merge hard forks (timestamp based):
             "arrowGlacierBlock": 0,
             "grayGlacierBlock": 0,
             "shanghaiTime": 0,
+            "cancunTime": 1,
             "terminalTotalDifficulty": 0,
             "terminalTotalDifficultyPassed": true,
             "ethash": {}
@@ -2728,6 +2752,12 @@ Post-merge hard forks (timestamp based):
         assert_eq!(
             chainspec.hardforks.get(&Hardfork::Shanghai).unwrap(),
             &ForkCondition::Timestamp(0)
+        );
+
+        // including time based hardforks
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::Cancun).unwrap(),
+            &ForkCondition::Timestamp(1)
         );
 
         // alloc key -> expected rlp mapping
