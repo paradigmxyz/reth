@@ -252,7 +252,11 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis_hash: Some(b256!(
             "c1fc15cd51159b1f1e5cbc4b82e85c1447ddfa33c52cf1d98d14fba0d6354be1"
         )),
-        fork_timestamps: ForkTimestamps::default().shanghai(1699981200).canyon(1699981200),
+        fork_timestamps: ForkTimestamps::default()
+            .shanghai(1699981200)
+            .canyon(1699981200)
+            .cancun(1707238800)
+            .ecotone(1707238800),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
@@ -276,6 +280,8 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
             (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(1707238800)),
+            (Hardfork::Ecotone, ForkCondition::Timestamp(1707238800)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
@@ -300,7 +306,11 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis_hash: Some(b256!(
             "a3ab140f15ea7f7443a4702da64c10314eb04d488e72974e02e2d728096b4f76"
         )),
-        fork_timestamps: ForkTimestamps::default().shanghai(1699981200).canyon(1699981200),
+        fork_timestamps: ForkTimestamps::default()
+            .shanghai(1699981200)
+            .canyon(1699981200)
+            .cancun(1707238800)
+            .ecotone(1707238800),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
@@ -324,6 +334,8 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Regolith, ForkCondition::Timestamp(1683219600)),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
             (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(1707238800)),
+            (Hardfork::Ecotone, ForkCondition::Timestamp(1707238800)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
@@ -348,7 +360,11 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis_hash: Some(b256!(
             "0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4"
         )),
-        fork_timestamps: ForkTimestamps::default().shanghai(1699981200).canyon(1699981200),
+        fork_timestamps: ForkTimestamps::default()
+            .shanghai(1699981200)
+            .canyon(1699981200)
+            .cancun(1708534800)
+            .ecotone(1708534800),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
@@ -372,6 +388,8 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
             (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(1708534800)),
+            (Hardfork::Ecotone, ForkCondition::Timestamp(1708534800)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
@@ -688,7 +706,7 @@ impl ChainSpec {
 
     /// Get the sealed header for the genesis block.
     pub fn sealed_genesis_header(&self) -> SealedHeader {
-        SealedHeader { header: self.genesis_header(), hash: self.genesis_hash() }
+        SealedHeader::new(self.genesis_header(), self.genesis_hash())
     }
 
     /// Get the initial base fee of the genesis block.
@@ -1041,6 +1059,9 @@ pub struct ForkTimestamps {
     /// The timestamp of the Canyon fork
     #[cfg(feature = "optimism")]
     pub canyon: Option<u64>,
+    /// The timestamp of the Ecotone fork
+    #[cfg(feature = "optimism")]
+    pub ecotone: Option<u64>,
 }
 
 impl ForkTimestamps {
@@ -1060,6 +1081,9 @@ impl ForkTimestamps {
             }
             if let Some(canyon) = forks.get(&Hardfork::Canyon).and_then(|f| f.as_timestamp()) {
                 timestamps = timestamps.canyon(canyon);
+            }
+            if let Some(ecotone) = forks.get(&Hardfork::Ecotone).and_then(|f| f.as_timestamp()) {
+                timestamps = timestamps.ecotone(ecotone);
             }
         }
         timestamps
@@ -1088,6 +1112,13 @@ impl ForkTimestamps {
     #[cfg(feature = "optimism")]
     pub fn canyon(mut self, canyon: u64) -> Self {
         self.canyon = Some(canyon);
+        self
+    }
+
+    /// Sets the given ecotone timestamp
+    #[cfg(feature = "optimism")]
+    pub fn ecotone(mut self, ecotone: u64) -> Self {
+        self.ecotone = Some(ecotone);
         self
     }
 }
@@ -1291,6 +1322,15 @@ impl ChainSpecBuilder {
         // Canyon also activates changes from L1's Shanghai hardfork
         self.hardforks.insert(Hardfork::Shanghai, ForkCondition::Timestamp(0));
         self.hardforks.insert(Hardfork::Canyon, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Ecotone at genesis
+    #[cfg(feature = "optimism")]
+    pub fn ecotone_activated(mut self) -> Self {
+        self = self.canyon_activated();
+        self.hardforks.insert(Hardfork::Cancun, ForkCondition::Timestamp(0));
+        self.hardforks.insert(Hardfork::Ecotone, ForkCondition::Timestamp(0));
         self
     }
 
@@ -2308,7 +2348,15 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Head { number: 4061227, timestamp: 1699981200, ..Default::default() },
-                    ForkId { hash: ForkHash([0x7f, 0x4a, 0x72, 0x1f]), next: 0 },
+                    ForkId { hash: ForkHash([0x7f, 0x4a, 0x72, 0x1f]), next: 1707238800 },
+                ),
+                (
+                    Head { number: 4061228, timestamp: 1707238799, ..Default::default() },
+                    ForkId { hash: ForkHash([0x7f, 0x4a, 0x72, 0x1f]), next: 1707238800 },
+                ),
+                (
+                    Head { number: 4061229, timestamp: 1707238800, ..Default::default() },
+                    ForkId { hash: ForkHash([0x18, 0x59, 0x2a, 0x41]), next: 0 },
                 ),
             ],
         );
@@ -2338,7 +2386,15 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Head { number: 4, timestamp: 1699981200, ..Default::default() },
-                    ForkId { hash: ForkHash([0xb3, 0x29, 0x13, 0xde]), next: 0 },
+                    ForkId { hash: ForkHash([0xb3, 0x29, 0x13, 0xde]), next: 1707238800 },
+                ),
+                (
+                    Head { number: 5, timestamp: 1707238799, ..Default::default() },
+                    ForkId { hash: ForkHash([0xb3, 0x29, 0x13, 0xde]), next: 1707238800 },
+                ),
+                (
+                    Head { number: 6, timestamp: 1707238800, ..Default::default() },
+                    ForkId { hash: ForkHash([0x21, 0x11, 0x52, 0x97]), next: 0 },
                 ),
             ],
         );
@@ -2975,7 +3031,6 @@ Post-merge hard forks (timestamp based):
         assert_eq!(header.parent_beacon_block_root, Some(B256::ZERO));
         assert_eq!(header.blob_gas_used, Some(0));
         assert_eq!(header.excess_blob_gas, Some(0));
-        println!("header: {:?}", header);
 
         // check the genesis hash
         let genesis_hash = header.hash_slow();

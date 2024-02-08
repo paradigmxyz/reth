@@ -1,4 +1,5 @@
 use alloy_primitives::{BlockNumber, B256, U256};
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -8,9 +9,8 @@ use std::fmt;
 ///
 /// Note: This is a slimmed down version of Header, primarily for communicating the highest block
 /// with the P2P network and the RPC.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
-)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Head {
     /// The number of the head block.
     pub number: BlockNumber,

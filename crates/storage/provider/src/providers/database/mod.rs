@@ -19,7 +19,7 @@ use reth_primitives::{
     SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
     Withdrawal, Withdrawals, B256, U256,
 };
-use revm::primitives::{BlockEnv, CfgEnv};
+use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
@@ -445,7 +445,7 @@ impl<DB: Database> StageCheckpointReader for ProviderFactory<DB> {
 impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
     fn fill_env_at<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
         at: BlockHashOrNumber,
         evm_config: EvmConfig,
@@ -458,7 +458,7 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
 
     fn fill_env_with_header<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
         header: &Header,
         evm_config: EvmConfig,
@@ -487,7 +487,7 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
 
     fn fill_cfg_env_at<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         at: BlockHashOrNumber,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
@@ -499,7 +499,7 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
 
     fn fill_cfg_env_with_header<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         header: &Header,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
@@ -706,7 +706,7 @@ mod tests {
         // Checkpoint and no gap
         let mut snapshot_writer =
             provider.snapshot_provider().latest_writer(SnapshotSegment::Headers).unwrap();
-        snapshot_writer.append_header(head.header.clone(), U256::ZERO, head.hash()).unwrap();
+        snapshot_writer.append_header(head.header().clone(), U256::ZERO, head.hash()).unwrap();
         snapshot_writer.commit().unwrap();
         drop(snapshot_writer);
 

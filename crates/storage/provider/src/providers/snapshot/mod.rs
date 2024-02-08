@@ -63,8 +63,11 @@ mod tests {
         // Ranges
         let row_count = 100u64;
         let range = 0..=(row_count - 1);
-        let segment_header =
-            SegmentHeader::new(range.clone(), Some(range.clone()), SnapshotSegment::Headers);
+        let segment_header = SegmentHeader::new(
+            range.clone().into(),
+            Some(range.clone().into()),
+            SnapshotSegment::Headers,
+        );
 
         // Data sources
         let factory = create_test_provider_factory();
@@ -84,7 +87,7 @@ mod tests {
         let tx = provider_rw.tx_mut();
         let mut td = U256::ZERO;
         for header in headers.clone() {
-            td += header.header.difficulty;
+            td += header.header().difficulty;
             let hash = header.hash();
 
             tx.put::<CanonicalHeaders>(header.number, hash).unwrap();

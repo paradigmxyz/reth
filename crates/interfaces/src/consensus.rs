@@ -1,5 +1,5 @@
 use reth_primitives::{
-    constants::MINIMUM_GAS_LIMIT, BlockHash, BlockNumber, GotExpected, GotExpectedBoxed, Header,
+    BlockHash, BlockNumber, GotExpected, GotExpectedBoxed, Header, HeaderValidationError,
     InvalidTransactionError, SealedBlock, SealedHeader, B256, U256,
 };
 use std::fmt::Debug;
@@ -130,19 +130,6 @@ pub enum ConsensusError {
         block_number: BlockNumber,
     },
 
-    /// Error when the parent hash does not match the expected parent hash.
-    #[error("mismatched parent hash: {0}")]
-    ParentHashMismatch(GotExpectedBoxed<B256>),
-
-    /// Error when the block timestamp is in the past compared to the parent timestamp.
-    #[error("block timestamp {timestamp} is in the past compared to the parent timestamp {parent_timestamp}")]
-    TimestampIsInPast {
-        /// The parent block's timestamp.
-        parent_timestamp: u64,
-        /// The block's timestamp.
-        timestamp: u64,
-    },
-
     /// Error when the block timestamp is in the future compared to our clock time.
     #[error("block timestamp {timestamp} is in the future compared to our clock time {present_timestamp}")]
     TimestampIsInFuture {
@@ -152,40 +139,9 @@ pub enum ConsensusError {
         present_timestamp: u64,
     },
 
-    /// Error when the child gas limit exceeds the maximum allowed increase.
-    #[error("child gas_limit {child_gas_limit} max increase is {parent_gas_limit}/1024")]
-    GasLimitInvalidIncrease {
-        /// The parent gas limit.
-        parent_gas_limit: u64,
-        /// The child gas limit.
-        child_gas_limit: u64,
-    },
-
-    /// Error when the child gas limit exceeds the maximum allowed decrease.
-    #[error("child gas_limit {child_gas_limit} max decrease is {parent_gas_limit}/1024")]
-    GasLimitInvalidDecrease {
-        /// The parent gas limit.
-        parent_gas_limit: u64,
-        /// The child gas limit.
-        child_gas_limit: u64,
-    },
-
-    /// Error indicating that the child gas limit is below the minimum allowed limit.
-    ///
-    /// This error occurs when the child gas limit is less than the specified minimum gas limit.
-    #[error("child gas limit {child_gas_limit} is below the minimum allowed limit ({MINIMUM_GAS_LIMIT})")]
-    GasLimitInvalidMinimum {
-        /// The child gas limit.
-        child_gas_limit: u64,
-    },
-
     /// Error when the base fee is missing.
     #[error("base fee missing")]
     BaseFeeMissing,
-
-    /// Error when the block's base fee is different from the expected base fee.
-    #[error("block base fee mismatch: {0}")]
-    BaseFeeDiff(GotExpected<u64>),
 
     /// Error when there is a transaction signer recovery error.
     #[error("transaction signer recovery error")]
@@ -270,22 +226,11 @@ pub enum ConsensusError {
     #[error("blob gas used mismatch: {0}")]
     BlobGasUsedDiff(GotExpected<u64>),
 
-    /// Error when there is an invalid excess blob gas.
-    #[error(
-        "invalid excess blob gas: {diff}; \
-         parent excess blob gas: {parent_excess_blob_gas}, \
-         parent blob gas used: {parent_blob_gas_used}"
-    )]
-    ExcessBlobGasDiff {
-        /// The excess blob gas diff.
-        diff: GotExpected<u64>,
-        /// The parent excess blob gas.
-        parent_excess_blob_gas: u64,
-        /// The parent blob gas used.
-        parent_blob_gas_used: u64,
-    },
-
     /// Error for a transaction that violates consensus.
     #[error(transparent)]
     InvalidTransaction(#[from] InvalidTransactionError),
+
+    /// Error type transparently wrapping HeaderValidationError.
+    #[error(transparent)]
+    HeaderValidationError(#[from] HeaderValidationError),
 }

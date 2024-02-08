@@ -65,14 +65,14 @@ pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     let tx_range = match segment {
         SnapshotSegment::Headers => None,
         SnapshotSegment::Receipts | SnapshotSegment::Transactions => {
-            Some(provider.transaction_range_by_block_range(block_range.clone())?)
+            Some(provider.transaction_range_by_block_range(block_range.clone())?.into())
         }
     };
 
     let mut nippy_jar = NippyJar::new(
         COLUMNS,
         &directory.as_ref().join(segment.filename(&find_fixed_range(*block_range.end())).as_str()),
-        SegmentHeader::new(block_range, tx_range, segment),
+        SegmentHeader::new(block_range.into(), tx_range, segment),
     );
 
     nippy_jar = match segment_config.compression {

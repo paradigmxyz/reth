@@ -150,6 +150,8 @@ impl EngineHooksController {
             );
 
             return Poll::Ready(Ok(result))
+        } else {
+            debug!(target: "consensus::engine::hooks", hook = hook.name(), "Next hook is not ready");
         }
 
         Poll::Pending

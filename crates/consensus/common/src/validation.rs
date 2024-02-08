@@ -2,12 +2,7 @@
 
 use reth_interfaces::{consensus::ConsensusError, RethResult};
 use reth_primitives::{
-    constants::{
-        self,
-        eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
-        MINIMUM_GAS_LIMIT,
-    },
-    eip4844::calculate_excess_blob_gas,
+    constants::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
     BlockNumber, ChainSpec, GotExpected, Hardfork, Header, InvalidTransactionError, SealedBlock,
     SealedHeader, Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844,
     TxLegacy,
@@ -254,122 +249,6 @@ pub fn validate_block_standalone(
     Ok(())
 }
 
-/// Checks the gas limit for consistency between parent and child headers.
-///
-/// The maximum allowable difference between child and parent gas limits is determined by the
-/// parent's gas limit divided by the elasticity multiplier (1024).
-///
-/// This check is skipped if the Optimism flag is enabled in the chain spec, as gas limits on
-/// Optimism can adjust instantly.
-#[inline(always)]
-fn check_gas_limit(
-    parent: &SealedHeader,
-    child: &SealedHeader,
-    chain_spec: &ChainSpec,
-) -> Result<(), ConsensusError> {
-    // Determine the parent gas limit, considering elasticity multiplier on the London fork.
-    let mut parent_gas_limit = parent.gas_limit;
-    if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
-        parent_gas_limit =
-            parent.gas_limit * chain_spec.base_fee_params(child.timestamp).elasticity_multiplier;
-    }
-
-    // Check for an increase in gas limit beyond the allowed threshold.
-    if child.gas_limit > parent_gas_limit {
-        if child.gas_limit - parent_gas_limit >= parent_gas_limit / 1024 {
-            return Err(ConsensusError::GasLimitInvalidIncrease {
-                parent_gas_limit,
-                child_gas_limit: child.gas_limit,
-            })
-        }
-    }
-    // Check for a decrease in gas limit beyond the allowed threshold.
-    else if parent_gas_limit - child.gas_limit >= parent_gas_limit / 1024 {
-        return Err(ConsensusError::GasLimitInvalidDecrease {
-            parent_gas_limit,
-            child_gas_limit: child.gas_limit,
-        })
-    }
-    // Check if the child gas limit is below the minimum required limit.
-    else if child.gas_limit < MINIMUM_GAS_LIMIT {
-        return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit })
-    }
-
-    Ok(())
-}
-
-/// Validate block in regards to parent
-pub fn validate_header_regarding_parent(
-    parent: &SealedHeader,
-    child: &SealedHeader,
-    chain_spec: &ChainSpec,
-) -> Result<(), ConsensusError> {
-    // Parent number is consistent.
-    if parent.number + 1 != child.number {
-        return Err(ConsensusError::ParentBlockNumberMismatch {
-            parent_block_number: parent.number,
-            block_number: child.number,
-        })
-    }
-
-    if parent.hash != child.parent_hash {
-        return Err(ConsensusError::ParentHashMismatch(
-            GotExpected { got: child.parent_hash, expected: parent.hash }.into(),
-        ))
-    }
-
-    // timestamp in past check
-    if child.header.is_timestamp_in_past(parent.timestamp) {
-        return Err(ConsensusError::TimestampIsInPast {
-            parent_timestamp: parent.timestamp,
-            timestamp: child.timestamp,
-        })
-    }
-
-    // TODO Check difficulty increment between parent and child
-    // Ace age did increment it by some formula that we need to follow.
-
-    cfg_if::cfg_if! {
-        if #[cfg(feature = "optimism")] {
-            // On Optimism, the gas limit can adjust instantly, so we skip this check
-            // if the optimism feature is enabled in the chain spec.
-            if !chain_spec.is_optimism() {
-                check_gas_limit(parent, child, chain_spec)?;
-            }
-        } else {
-            check_gas_limit(parent, child, chain_spec)?;
-        }
-    }
-
-    // EIP-1559 check base fee
-    if chain_spec.fork(Hardfork::London).active_at_block(child.number) {
-        let base_fee = child.base_fee_per_gas.ok_or(ConsensusError::BaseFeeMissing)?;
-
-        let expected_base_fee =
-            if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
-                constants::EIP1559_INITIAL_BASE_FEE
-            } else {
-                // This BaseFeeMissing will not happen as previous blocks are checked to have them.
-                parent
-                    .next_block_base_fee(chain_spec.base_fee_params(child.timestamp))
-                    .ok_or(ConsensusError::BaseFeeMissing)?
-            };
-        if expected_base_fee != base_fee {
-            return Err(ConsensusError::BaseFeeDiff(GotExpected {
-                expected: expected_base_fee,
-                got: base_fee,
-            }))
-        }
-    }
-
-    // ensure that the blob gas fields for this block
-    if chain_spec.fork(Hardfork::Cancun).active_at_timestamp(child.timestamp) {
-        validate_4844_header_with_parent(parent, child)?;
-    }
-
-    Ok(())
-}
-
 /// Validate block in regards to chain (parent)
 ///
 /// Checks:
@@ -395,41 +274,6 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider + WithdrawalsProvider
 
     // Return parent header.
     Ok(parent.seal(block.parent_hash))
-}
-
-/// Validates that the EIP-4844 header fields are correct with respect to the parent block. This
-/// ensures that the `blob_gas_used` and `excess_blob_gas` fields exist in the child header, and
-/// that the `excess_blob_gas` field matches the expected `excess_blob_gas` calculated from the
-/// parent header fields.
-pub fn validate_4844_header_with_parent(
-    parent: &SealedHeader,
-    child: &SealedHeader,
-) -> Result<(), ConsensusError> {
-    // From [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension):
-    //
-    // > For the first post-fork block, both parent.blob_gas_used and parent.excess_blob_gas
-    // > are evaluated as 0.
-    //
-    // This means in the first post-fork block, calculate_excess_blob_gas will return 0.
-    let parent_blob_gas_used = parent.blob_gas_used.unwrap_or(0);
-    let parent_excess_blob_gas = parent.excess_blob_gas.unwrap_or(0);
-
-    if child.blob_gas_used.is_none() {
-        return Err(ConsensusError::BlobGasUsedMissing)
-    }
-    let excess_blob_gas = child.excess_blob_gas.ok_or(ConsensusError::ExcessBlobGasMissing)?;
-
-    let expected_excess_blob_gas =
-        calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
-    if expected_excess_blob_gas != excess_blob_gas {
-        return Err(ConsensusError::ExcessBlobGasDiff {
-            diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
-            parent_excess_blob_gas,
-            parent_blob_gas_used,
-        })
-    }
-
-    Ok(())
 }
 
 /// Validates that the EIP-4844 header fields exist and conform to the spec. This ensures that:
@@ -823,105 +667,6 @@ mod tests {
                 got: 1,
                 expected: expected_blob_gas_used
             }))
-        );
-    }
-
-    #[test]
-    fn test_valid_gas_limit_increase() {
-        let parent = SealedHeader {
-            header: Header { gas_limit: 1024 * 10, ..Default::default() },
-            ..Default::default()
-        };
-        let child = SealedHeader {
-            header: Header { gas_limit: parent.header.gas_limit + 5, ..Default::default() },
-            ..Default::default()
-        };
-        let chain_spec = ChainSpec::default();
-
-        assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
-    }
-
-    #[test]
-    fn test_gas_limit_below_minimum() {
-        let parent = SealedHeader {
-            header: Header { gas_limit: MINIMUM_GAS_LIMIT, ..Default::default() },
-            ..Default::default()
-        };
-        let child = SealedHeader {
-            header: Header { gas_limit: MINIMUM_GAS_LIMIT - 1, ..Default::default() },
-            ..Default::default()
-        };
-        let chain_spec = ChainSpec::default();
-
-        assert_eq!(
-            check_gas_limit(&parent, &child, &chain_spec),
-            Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit })
-        );
-    }
-
-    #[test]
-    fn test_invalid_gas_limit_increase_exceeding_limit() {
-        let gas_limit = 1024 * 10;
-        let parent = SealedHeader {
-            header: Header { gas_limit, ..Default::default() },
-            ..Default::default()
-        };
-        let child = SealedHeader {
-            header: Header {
-                gas_limit: parent.header.gas_limit + parent.header.gas_limit / 1024 + 1,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let chain_spec = ChainSpec::default();
-
-        assert_eq!(
-            check_gas_limit(&parent, &child, &chain_spec),
-            Err(ConsensusError::GasLimitInvalidIncrease {
-                parent_gas_limit: parent.header.gas_limit,
-                child_gas_limit: child.header.gas_limit,
-            })
-        );
-    }
-
-    #[test]
-    fn test_valid_gas_limit_decrease_within_limit() {
-        let gas_limit = 1024 * 10;
-        let parent = SealedHeader {
-            header: Header { gas_limit, ..Default::default() },
-            ..Default::default()
-        };
-        let child = SealedHeader {
-            header: Header { gas_limit: parent.header.gas_limit - 5, ..Default::default() },
-            ..Default::default()
-        };
-        let chain_spec = ChainSpec::default();
-
-        assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
-    }
-
-    #[test]
-    fn test_invalid_gas_limit_decrease_exceeding_limit() {
-        let gas_limit = 1024 * 10;
-        let parent = SealedHeader {
-            header: Header { gas_limit, ..Default::default() },
-            ..Default::default()
-        };
-        let child = SealedHeader {
-            header: Header {
-                gas_limit: parent.header.gas_limit - parent.header.gas_limit / 1024 - 1,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let chain_spec = ChainSpec::default();
-
-        assert_eq!(
-            check_gas_limit(&parent, &child, &chain_spec),
-            Err(ConsensusError::GasLimitInvalidDecrease {
-                parent_gas_limit: parent.header.gas_limit,
-                child_gas_limit: child.header.gas_limit,
-            })
         );
     }
 }

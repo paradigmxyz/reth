@@ -6,14 +6,13 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::{Buf, BufMut, BytesMut};
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::strategy::Strategy;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact, CompactZstd};
 use std::{
     cmp::Ordering,
     ops::{Deref, DerefMut},
 };
-
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::strategy::Strategy;
 
 /// Receipt containing result of transaction execution.
 #[main_codec(no_arbitrary, zstd)]

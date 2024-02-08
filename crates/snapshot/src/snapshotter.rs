@@ -1,6 +1,6 @@
 //! Support for snapshotting.
 
-use crate::{segments, segments::Segment};
+use crate::{segments, segments::Segment, SnapshotterEvent};
 use rayon::prelude::*;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
@@ -9,7 +9,9 @@ use reth_provider::{
     providers::{SnapshotProvider, SnapshotWriter},
     ProviderFactory,
 };
+use reth_tokio_util::EventListeners;
 use std::{ops::RangeInclusive, sync::Arc, time::Instant};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, trace};
 
 /// Result of [Snapshotter::run] execution.
@@ -29,6 +31,7 @@ pub struct Snapshotter<DB> {
     /// needed in [Snapshotter] to prevent snapshotting the prunable data.
     /// See [Snapshotter::get_snapshot_targets].
     prune_modes: PruneModes,
+    listeners: EventListeners<SnapshotterEvent>,
 }
 
 /// Snapshot targets, per data part, measured in [`BlockNumber`].
@@ -71,7 +74,12 @@ impl<DB: Database> Snapshotter<DB> {
         snapshot_provider: Arc<SnapshotProvider>,
         prune_modes: PruneModes,
     ) -> Self {
-        Self { provider_factory, snapshot_provider, prune_modes }
+        Self { provider_factory, snapshot_provider, prune_modes, listeners: Default::default() }
+    }
+
+    /// Listen for events on the snapshotter.
+    pub fn events(&mut self) -> UnboundedReceiverStream<SnapshotterEvent> {
+        self.listeners.new_listener()
     }
 
     /// Run the snapshotter.
@@ -82,7 +90,7 @@ impl<DB: Database> Snapshotter<DB> {
     ///
     /// NOTE: it doesn't delete the data from database, and the actual deleting (aka pruning) logic
     /// lives in the `prune` crate.
-    pub fn run(&self, targets: SnapshotTargets) -> SnapshotterResult {
+    pub fn run(&mut self, targets: SnapshotTargets) -> SnapshotterResult {
         debug_assert!(targets
             .is_contiguous_to_highest_snapshots(self.snapshot_provider.get_highest_snapshots()));
 
@@ -123,6 +131,8 @@ impl<DB: Database> Snapshotter<DB> {
 
         let elapsed = start.elapsed(); // TODO(alexey): track in metrics
         debug!(target: "snapshot", ?targets, ?elapsed, "Snapshotter finished");
+
+        self.listeners.notify(SnapshotterEvent::Finished { targets: targets.clone(), elapsed });
 
         Ok(targets)
     }
@@ -224,7 +234,7 @@ mod tests {
         let provider_factory = db.factory;
         let snapshot_provider = provider_factory.snapshot_provider();
 
-        let snapshotter =
+        let mut snapshotter =
             Snapshotter::new(provider_factory, snapshot_provider.clone(), PruneModes::default());
 
         let targets = snapshotter.get_snapshot_targets(1).expect("get snapshot targets");

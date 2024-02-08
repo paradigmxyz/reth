@@ -245,7 +245,7 @@ where
                     for header in headers {
                         let header_number = header.number;
 
-                        self.hash_collector.insert(header.hash, header_number);
+                        self.hash_collector.insert(header.hash(), header_number);
                         self.header_collector.insert(header_number, header);
 
                         // Headers are downloaded in reverse, so if we reach here, we know we have

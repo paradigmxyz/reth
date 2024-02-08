@@ -12,6 +12,7 @@ use reth_primitives::{
     BlockNumber,
 };
 use reth_prune::PrunerEvent;
+use reth_snapshot::SnapshotterEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
 use std::{
     fmt::{Display, Formatter},
@@ -164,15 +165,15 @@ impl<DB> NodeState<DB> {
                 );
             }
             BeaconConsensusEngineEvent::CanonicalBlockAdded(block) => {
-                info!(number=block.number, hash=?block.hash, "Block added to canonical chain");
+                info!(number=block.number, hash=?block.hash(), "Block added to canonical chain");
             }
             BeaconConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
                 self.latest_block = Some(head.number);
 
-                info!(number=head.number, hash=?head.hash, ?elapsed, "Canonical chain committed");
+                info!(number=head.number, hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
             BeaconConsensusEngineEvent::ForkBlockAdded(block) => {
-                info!(number=block.number, hash=?block.hash, "Block added to fork chain");
+                info!(number=block.number, hash=?block.hash(), "Block added to fork chain");
             }
         }
     }
@@ -202,6 +203,14 @@ impl<DB> NodeState<DB> {
         match event {
             PrunerEvent::Finished { tip_block_number, elapsed, stats } => {
                 info!(tip_block_number, ?elapsed, ?stats, "Pruner finished");
+            }
+        }
+    }
+
+    fn handle_snapshotter_event(&self, event: SnapshotterEvent) {
+        match event {
+            SnapshotterEvent::Finished { targets, elapsed } => {
+                info!(?targets, ?elapsed, "Snapshotter finished");
             }
         }
     }
@@ -249,6 +258,8 @@ pub enum NodeEvent {
     ConsensusLayerHealth(ConsensusLayerHealthEvent),
     /// A pruner event
     Pruner(PrunerEvent),
+    /// A snapshotter event
+    Snapshotter(SnapshotterEvent),
 }
 
 impl From<NetworkEvent> for NodeEvent {
@@ -278,6 +289,12 @@ impl From<ConsensusLayerHealthEvent> for NodeEvent {
 impl From<PrunerEvent> for NodeEvent {
     fn from(event: PrunerEvent) -> Self {
         NodeEvent::Pruner(event)
+    }
+}
+
+impl From<SnapshotterEvent> for NodeEvent {
+    fn from(event: SnapshotterEvent) -> Self {
+        NodeEvent::Snapshotter(event)
     }
 }
 
@@ -390,6 +407,9 @@ where
                 }
                 NodeEvent::Pruner(event) => {
                     this.state.handle_pruner_event(event);
+                }
+                NodeEvent::Snapshotter(event) => {
+                    this.state.handle_snapshotter_event(event);
                 }
             }
         }

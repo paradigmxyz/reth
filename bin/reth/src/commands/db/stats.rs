@@ -150,9 +150,9 @@ impl Command {
 
         for (segment, ranges) in snapshots.into_iter().sorted_by_key(|(segment, _)| *segment) {
             for (block_range, tx_range) in ranges {
-                let fixed_block_range = find_fixed_range(*block_range.start());
+                let fixed_block_range = find_fixed_range(block_range.start());
                 let jar_provider = snapshot_provider
-                    .get_segment_provider(segment, || Some(fixed_block_range.clone()), None)?
+                    .get_segment_provider(segment, || Some(fixed_block_range), None)?
                     .expect("something went wrong");
 
                 let columns = jar_provider.columns();
@@ -176,9 +176,9 @@ impl Command {
 
                 let mut row = Row::new();
                 row.add_cell(Cell::new(segment))
-                    .add_cell(Cell::new(format!("{block_range:?}")))
+                    .add_cell(Cell::new(format!("{block_range}")))
                     .add_cell(Cell::new(
-                        tx_range.map_or("N/A".to_string(), |tx_range| format!("{tx_range:?}")),
+                        tx_range.map_or("N/A".to_string(), |tx_range| format!("{tx_range}")),
                     ))
                     .add_cell(Cell::new(format!("{columns} x {rows}")));
                 if !only_total_size {

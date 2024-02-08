@@ -263,11 +263,12 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
 
         let mut hooks = EngineHooks::new();
 
-        let snapshotter = Snapshotter::new(
+        let mut snapshotter = Snapshotter::new(
             provider_factory.clone(),
             provider_factory.snapshot_provider(),
             prune_config.clone().unwrap_or_default().segments,
         );
+        let snapshotter_events = snapshotter.events();
         hooks.add(SnapshotHook::new(snapshotter.clone(), Box::new(executor.clone())));
         info!(target: "reth::cli", "Snapshotter initialized");
 
@@ -333,7 +334,6 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         let pipeline_events = pipeline.events();
 
         let initial_target = self.config.initial_pipeline_target(genesis_hash);
-        let mut hooks = EngineHooks::new();
 
         let prune_config = prune_config.unwrap_or_default();
         let mut pruner = PrunerBuilder::new(prune_config.clone())
@@ -375,7 +375,8 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             } else {
                 Either::Right(stream::empty())
             },
-            pruner_events.map(Into::into)
+            pruner_events.map(Into::into),
+            snapshotter_events.map(Into::into),
         );
         executor.spawn_critical(
             "events task",

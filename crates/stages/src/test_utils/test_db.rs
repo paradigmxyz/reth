@@ -139,14 +139,14 @@ impl TestStageDB {
         td: U256,
     ) -> ProviderResult<()> {
         if let Some(writer) = writer {
-            writer.append_header(header.header.clone(), td, header.hash)?;
+            writer.append_header(header.header().clone(), td, header.hash())?;
         } else {
-            tx.put::<tables::CanonicalHeaders>(header.number, header.hash)?;
+            tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
             tx.put::<tables::HeaderTD>(header.number, td.into())?;
-            tx.put::<tables::Headers>(header.number, header.header.clone())?;
+            tx.put::<tables::Headers>(header.number, header.header().clone())?;
         }
 
-        tx.put::<tables::HeaderNumbers>(header.hash, header.number)?;
+        tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
         Ok(())
     }
 
