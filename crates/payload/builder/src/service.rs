@@ -77,7 +77,7 @@ where
 /// A communication channel to the [PayloadBuilderService].
 ///
 /// This is the API used to create new payloads and to get the current state of existing ones.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PayloadBuilderHandle<Engine: EngineTypes> {
     /// Sender half of the message channel to the [PayloadBuilderService].
     to_service: mpsc::UnboundedSender<PayloadServiceCommand<Engine>>,
@@ -158,6 +158,14 @@ where
         attr: Engine::PayloadBuilderAttributes,
     ) -> Result<PayloadId, PayloadBuilderError> {
         self.send_new_payload(attr).await?
+    }
+}
+
+impl<Engine: EngineTypes> Clone for PayloadBuilderHandle<Engine> {
+    fn clone(&self) -> Self {
+        Self {
+            to_service: self.to_service.clone(),
+        }
     }
 }
 

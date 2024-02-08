@@ -39,46 +39,65 @@ type RethFullProviderType<DB, Evm> =
 /// [`NodeBuilder`] provides a [builder-like interface][builder] for composing
 /// components of a node.
 ///
+/// Configuring a node starts out with a [`NodeConfig`] and then proceeds to configure the core
+/// static types of the node: [NodeTypes], these include the node's primitive types and the node's
+/// engine types.
+///
+/// Next all stateful components of the node are configured, these include the
+/// [EvmConfig](reth_node_api::evm::EvmConfig), the database [Database] and finally all the
+/// components of the node that are downstream of those types, these include:
+///
+///  - The transaction pool: [PoolBuilder](crate::components::PoolBuilder)
+///  - The network: [NetworkBuilder](crate::components::NetworkBuilder)
+///  - The payload builder: [PayloadBuilder](crate::components::PayloadServiceBuilder)
+///
+/// Finally, the node is ready to launch [NodeBuilder::launch]
+///
 /// [builder]: https://doc.rust-lang.org/1.0.0/style/ownership/builders.html
-pub struct NodeBuilder<DB, Evm, State> {
+pub struct NodeBuilder<DB, State> {
     /// All settings for how the node should be configured.
     config: NodeConfig,
     /// State of the node builder process.
     state: State,
     /// The configured database for the node.
     database: DB,
-    /// The stateful evm configuration of the node.
-    evm: Evm
 }
 
-impl<DB, Evm, State> NodeBuilder<DB, Evm, State> {
+impl<DB, State> NodeBuilder<DB, State> {
     /// Returns a reference to the node builder's config.
     pub fn config(&self) -> &NodeConfig {
         &self.config
     }
 }
 
-impl NodeBuilder<(), (),  InitState> {
+impl NodeBuilder<(), InitState> {
     /// Create a new [`NodeBuilder`].
     pub fn new(config: NodeConfig) -> Self {
-        Self { config, database: (), state: InitState::default(), evm: () }
+        Self { config, database: (), state: InitState::default() }
     }
 }
 
-impl<DB, Evm> NodeBuilder<DB, Evm, InitState> {
+impl<DB> NodeBuilder<DB, InitState> {
     /// Configures the additional external context, e.g. additional context captured via CLI args.
-    pub fn with_database<D>(self, database: D) -> NodeBuilder<D, Evm, InitState> {
-        NodeBuilder { config: self.config, state: self.state, database, evm: self.evm }
+    pub fn with_database<D>(self, database: D) -> NodeBuilder<D, InitState> {
+        NodeBuilder { config: self.config, state: self.state, database }
     }
 }
 
-impl<DB, Evm> NodeBuilder<DB, Evm, InitState>
+impl<DB> NodeBuilder<DB, InitState>
 where
     DB: Database + Clone + 'static,
 {
     /// Configures the types of the node.
-    pub fn with_types<T>(self) -> NodeBuilder<DB, TypesState<T, DB>> {
-        NodeBuilder { config: self.config, state: Default::default(), database: self.database }
+    pub fn with_types<T>(self, types: T) -> NodeBuilder<DB, TypesState<T, DB>>
+    where
+        T: NodeTypes,
+    {
+        NodeBuilder {
+            config: self.config,
+            state: TypesState { types, adapter: FullNodeTypesAdapter::default() },
+            database: self.database,
+        }
     }
 }
 
@@ -364,16 +383,8 @@ where
     DB: Database + Clone + 'static,
     Types: NodeTypes,
 {
+    types: Types,
     adapter: FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-}
-
-impl<Types, DB> Default for TypesState<Types, DB>
-where
-    DB: Database + Clone + 'static,
-{
-    fn default() -> Self {
-        Self { adapter: Default::default() }
-    }
 }
 
 /// The state of the node builder process after the node's components have been configured.

@@ -9,14 +9,12 @@ pub trait NodeTypes: Send + Sync + 'static {
     type Primitives: NodePrimitives;
     /// The node's engine types.
     type Engine: EngineTypes;
+    /// The node's evm configuration.
+    type Evm: EvmConfig;
 }
 
 /// A helper type that is downstream of the node types and adds stateful components to the node.
 pub trait FullNodeTypes: NodeTypes + 'static {
-    /// The node's evm configuration.
-    ///
-    /// TODO: This might depend on the node's database and provider types.
-    type Evm: EvmConfig;
     /// Underlying database type.
     type DB: Database + Clone + 'static;
     /// The provider type used to interact with the node.
@@ -45,6 +43,7 @@ where
 {
     type Primitives = Types::Primitives;
     type Engine = Types::Engine;
+    type Evm = Types::Evm;
 }
 
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
@@ -53,7 +52,6 @@ where
     Provider: FullProvider<DB>,
     DB: Database + Clone + 'static,
 {
-    type Evm = Types::Evm;
     type DB = DB;
     type Provider = Provider;
 }
