@@ -79,12 +79,11 @@ where
             let base_fee = block.base_fee_per_gas;
             let block_hash = block.hash();
             let excess_blob_gas = block.excess_blob_gas;
+            let block = block.unseal();
 
             #[cfg(feature = "optimism")]
             let (block_timestamp, l1_block_info) = {
-                let body = reth_revm::optimism::parse_l1_info_tx(
-                    &block.body.first().ok_or(EthApiError::InternalEthError)?.input()[4..],
-                );
+                let body = reth_revm::optimism::extract_l1_info(&block);
                 (block.timestamp, body.ok())
             };
 
