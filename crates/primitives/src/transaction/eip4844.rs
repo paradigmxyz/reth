@@ -1,8 +1,6 @@
 use super::access_list::AccessList;
-use crate::{
-    constants::eip4844::DATA_GAS_PER_BLOB, keccak256, Bytes, ChainId, Signature, TransactionKind,
-    TxType, TxValue, B256,
-};
+use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, TxValue, B256};
+use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};

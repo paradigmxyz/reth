@@ -12,6 +12,7 @@ pub use builder::*;
 
 #[cfg(not(feature = "optimism"))]
 mod builder {
+    use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
     use reth_basic_payload_builder::{
         commit_withdrawals, is_better_payload, pre_block_beacon_root_contract_call, BuildArguments,
         BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
@@ -20,9 +21,7 @@ mod builder {
         error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
     };
     use reth_primitives::{
-        constants::{
-            eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
-        },
+        constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
         eip4844::calculate_excess_blob_gas,
         proofs,
         revm::env::tx_env_with_recovered,

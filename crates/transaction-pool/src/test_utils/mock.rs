@@ -6,18 +6,19 @@ use crate::{
     traits::TransactionOrigin,
     CoinbaseTipOrdering, PoolTransaction, ValidPoolTransaction,
 };
+use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
 use paste::paste;
 use rand::{
     distributions::{Uniform, WeightedIndex},
     prelude::Distribution,
 };
 use reth_primitives::{
-    constants::{eip4844::DATA_GAS_PER_BLOB, MIN_PROTOCOL_BASE_FEE},
-    AccessList, Address, BlobTransactionSidecar, Bytes, FromRecoveredPooledTransaction,
-    FromRecoveredTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
-    Signature, Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered,
-    TxEip1559, TxEip2930, TxEip4844, TxHash, TxLegacy, TxType, B256, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
+    constants::MIN_PROTOCOL_BASE_FEE, AccessList, Address, BlobTransactionSidecar, Bytes,
+    FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction,
+    PooledTransactionsElementEcRecovered, Signature, Transaction, TransactionKind,
+    TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxHash,
+    TxLegacy, TxType, B256, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
+    LEGACY_TX_TYPE_ID, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 

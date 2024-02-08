@@ -26,6 +26,7 @@ reth-interfaces.workspace = true
 reth-tasks.workspace = true
 revm.workspace = true
 alloy-rlp.workspace = true
+alloy-eips.workspace = true
 reth-revm = { workspace = true, optional = true }
 
 # async/futures

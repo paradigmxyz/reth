@@ -3,9 +3,10 @@
 
 #[cfg(any(test, feature = "arbitrary"))]
 use crate::{
-    constants::eip4844::{FIELD_ELEMENTS_PER_BLOB, MAINNET_KZG_TRUSTED_SETUP},
+    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP,
     kzg::{KzgCommitment, KzgProof, BYTES_PER_FIELD_ELEMENT},
 };
+
 use crate::{
     keccak256,
     kzg::{
@@ -13,6 +14,7 @@ use crate::{
     },
     Signature, Transaction, TransactionSigned, TxEip4844, TxHash, EIP4844_TX_TYPE_ID,
 };
+use alloy_eips::eip4844::FIELD_ELEMENTS_PER_BLOB;
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use bytes::BufMut;
 #[cfg(any(test, feature = "arbitrary"))]

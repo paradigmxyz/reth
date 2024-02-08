@@ -171,9 +171,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-eips"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/alloy#974d488bab5e21e9f17452a39a4bfa56677367b2"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "thiserror",
+]
+
+[[package]]
 name = "alloy-genesis"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#48f1c0fbf6e22f09c1b3f297955f5acea0b0f99d"
+source = "git+https://github.com/alloy-rs/alloy#974d488bab5e21e9f17452a39a4bfa56677367b2"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
@@ -195,7 +205,7 @@ dependencies = [
 [[package]]
 name = "alloy-node-bindings"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#48f1c0fbf6e22f09c1b3f297955f5acea0b0f99d"
+source = "git+https://github.com/alloy-rs/alloy#974d488bab5e21e9f17452a39a4bfa56677367b2"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -256,7 +266,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-engine-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#48f1c0fbf6e22f09c1b3f297955f5acea0b0f99d"
+source = "git+https://github.com/alloy-rs/alloy#974d488bab5e21e9f17452a39a4bfa56677367b2"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -271,7 +281,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-trace-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#48f1c0fbf6e22f09c1b3f297955f5acea0b0f99d"
+source = "git+https://github.com/alloy-rs/alloy#974d488bab5e21e9f17452a39a4bfa56677367b2"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
@@ -282,7 +292,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#48f1c0fbf6e22f09c1b3f297955f5acea0b0f99d"
+source = "git+https://github.com/alloy-rs/alloy#974d488bab5e21e9f17452a39a4bfa56677367b2"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -5958,6 +5968,7 @@ name = "reth-consensus-common"
 version = "0.1.0-alpha.17"
 dependencies = [
  "alloy-chains",
+ "alloy-eips",
  "assert_matches",
  "cfg-if",
  "mockall",
@@ -6164,6 +6175,7 @@ dependencies = [
 name = "reth-ethereum-payload-builder"
 version = "0.1.0-alpha.17"
 dependencies = [
+ "alloy-eips",
  "reth-basic-payload-builder",
  "reth-payload-builder",
  "reth-primitives",
@@ -6541,6 +6553,7 @@ name = "reth-primitives"
 version = "0.1.0-alpha.17"
 dependencies = [
  "alloy-chains",
+ "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
@@ -6662,6 +6675,7 @@ name = "reth-rpc"
 version = "0.1.0-alpha.17"
 dependencies = [
  "alloy-dyn-abi",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-sol-types",
@@ -6944,6 +6958,7 @@ dependencies = [
 name = "reth-transaction-pool"
 version = "0.1.0-alpha.17"
 dependencies = [
+ "alloy-eips",
  "alloy-rlp",
  "aquamarine",
  "assert_matches",

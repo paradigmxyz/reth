@@ -24,6 +24,7 @@ alloy-chains = { workspace = true, features = ["serde", "rlp"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie = { workspace = true, features = ["serde"] }
+alloy-eips.workspace = true
 ethers-core = { workspace = true, default-features = false, optional = true }
 nybbles = { version = "0.1.2", features = ["serde", "rlp"] }
 alloy-genesis.workspace = true
@@ -37,7 +38,12 @@ c-kzg = { workspace = true, features = ["serde"], optional = true }
 tracing.workspace = true
 
 # misc
-smallvec = { version = "1.11", features = ["arbitrary", "serde", "union", "const_new"] }
+smallvec = { version = "1.11", features = [
+    "arbitrary",
+    "serde",
+    "union",
+    "const_new",
+] }
 bytes.workspace = true
 byteorder = "1"
 clap = { workspace = true, features = ["derive"], optional = true }
@@ -86,7 +92,11 @@ plain_hasher = "0.2"
 # necessary so we don't hit a "undeclared 'std'":
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
 criterion.workspace = true
-pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
+pprof = { workspace = true, features = [
+    "flamegraph",
+    "frame-pointer",
+    "criterion",
+] }
 secp256k1.workspace = true
 
 [features]

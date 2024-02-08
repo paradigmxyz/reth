@@ -1,8 +1,8 @@
 //! Collection of methods for block validation.
 
+use alloy_eips::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK};
 use reth_interfaces::{consensus::ConsensusError, RethResult};
 use reth_primitives::{
-    constants::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
     BlockNumber, ChainSpec, GotExpected, Hardfork, Header, InvalidTransactionError, SealedBlock,
     SealedHeader, Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844,
     TxLegacy,
@@ -314,15 +314,16 @@ pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), Cons
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
     use mockall::mock;
     use reth_interfaces::{
         provider::ProviderResult,
         test_utils::generators::{self, Rng},
     };
     use reth_primitives::{
-        constants::eip4844::DATA_GAS_PER_BLOB, hex_literal::hex, proofs, Account, Address,
-        BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, Header, Signature,
-        TransactionKind, TransactionSigned, Withdrawal, Withdrawals, MAINNET, U256,
+        hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber, Bytes,
+        ChainSpecBuilder, Header, Signature, TransactionKind, TransactionSigned, Withdrawal,
+        Withdrawals, MAINNET, U256,
     };
     use std::ops::RangeBounds;
 

@@ -1,8 +1,9 @@
 //! Support for building a pending block via local txpool.
 
 use crate::eth::error::{EthApiError, EthResult};
+use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
 use reth_primitives::{
-    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
+    constants::BEACON_NONCE,
     proofs,
     revm::env::tx_env_with_recovered,
     revm_primitives::{

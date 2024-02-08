@@ -34,6 +34,7 @@ alloy-rlp.workspace = true
 alloy-dyn-abi = { workspace = true, features = ["eip712"] }
 alloy-primitives.workspace = true
 alloy-sol-types.workspace = true
+alloy-eips.workspace = true
 revm = { workspace = true, features = [
     "optional_block_gas_limit",
     "optional_eip3607",
@@ -49,7 +50,9 @@ hyper = "0.14.24"
 jsonwebtoken = "8"
 
 ## required for optimism sequencer delegation
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"], optional = true }
+reqwest = { version = "0.11", default-features = false, features = [
+    "rustls-tls",
+], optional = true }
 
 # async
 async-trait.workspace = true
@@ -66,7 +69,11 @@ metrics.workspace = true
 
 # misc
 bytes.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true

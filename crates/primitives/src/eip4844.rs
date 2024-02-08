@@ -1,7 +1,8 @@
 //! Helpers for working with EIP-4844 blob fee.
 
 #[cfg(feature = "c-kzg")]
-use crate::{constants::eip4844::VERSIONED_HASH_VERSION_KZG, B256};
+use crate::B256;
+use alloy_eips::eip4844::VERSIONED_HASH_VERSION_KZG;
 #[cfg(feature = "c-kzg")]
 use sha2::{Digest, Sha256};
 

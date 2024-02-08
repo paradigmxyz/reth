@@ -8,11 +8,9 @@ use crate::{
     EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig, PoolTransaction,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
+use alloy_eips::eip4844::MAX_BLOBS_PER_BLOCK;
 use reth_primitives::{
-    constants::{
-        eip4844::{MAINNET_KZG_TRUSTED_SETUP, MAX_BLOBS_PER_BLOCK},
-        ETHEREUM_BLOCK_GAS_LIMIT,
-    },
+    constants::{eip4844::MAINNET_KZG_TRUSTED_SETUP, ETHEREUM_BLOCK_GAS_LIMIT},
     kzg::KzgSettings,
     revm::compat::calculate_intrinsic_gas_after_merge,
     ChainSpec, GotExpected, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID,
