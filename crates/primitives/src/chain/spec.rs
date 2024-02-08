@@ -700,7 +700,7 @@ impl ChainSpec {
 
     /// Get the sealed header for the genesis block.
     pub fn sealed_genesis_header(&self) -> SealedHeader {
-        SealedHeader { header: self.genesis_header(), hash: self.genesis_hash() }
+        SealedHeader::new(self.genesis_header(), self.genesis_hash())
     }
 
     /// Get the initial base fee of the genesis block.
@@ -2987,7 +2987,6 @@ Post-merge hard forks (timestamp based):
         assert_eq!(header.parent_beacon_block_root, Some(B256::ZERO));
         assert_eq!(header.blob_gas_used, Some(0));
         assert_eq!(header.excess_blob_gas, Some(0));
-        println!("header: {:?}", header);
 
         // check the genesis hash
         let genesis_hash = header.hash_slow();

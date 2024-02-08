@@ -1,6 +1,4 @@
 #![allow(missing_docs)]
-use std::sync::Arc;
-
 use alloy_primitives::hex;
 use c_kzg::{KzgCommitment, KzgSettings};
 use criterion::{
@@ -16,6 +14,7 @@ use reth_primitives::{
     BlobTransactionSidecar, TxEip4844,
 };
 use revm_primitives::MAX_BLOB_NUMBER_PER_BLOCK;
+use std::sync::Arc;
 
 // constant seed to use for the rng
 const SEED: [u8; 32] = hex!("1337133713371337133713371337133713371337133713371337133713371337");

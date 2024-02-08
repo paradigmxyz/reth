@@ -503,7 +503,7 @@ impl<T: PoolTransaction> Clone for NewTransactionEvent<T> {
 }
 
 /// This type represents a new blob sidecar that has been stored in the transaction pool's
-/// blobstore; it includes the TransasctionHash of the blob transaction along with the assoc.
+/// blobstore; it includes the TransactionHash of the blob transaction along with the assoc.
 /// sidecar (blobs, commitments, proofs)
 #[derive(Debug, Clone)]
 pub struct NewBlobSidecar {
@@ -584,8 +584,8 @@ impl<'a> CanonicalStateUpdate<'a> {
     }
 
     /// Returns the hash of the tip block.
-    pub fn hash(&self) -> B256 {
-        self.new_tip.hash
+    pub const fn hash(&self) -> B256 {
+        self.new_tip.hash()
     }
 
     /// Timestamp of the latest chain update

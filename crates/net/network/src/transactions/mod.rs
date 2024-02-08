@@ -659,7 +659,7 @@ where
             return
         }
 
-        debug!(target: "net::tx",
+        trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
             hashes_len=hashes.len(),
             hashes=?*hashes,

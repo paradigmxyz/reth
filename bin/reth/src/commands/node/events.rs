@@ -192,15 +192,15 @@ impl<DB> NodeState<DB> {
             }
             BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed) => {
                 let mut gas_fmt_buf = Buffer::default();
-                gas_fmt_buf.write_formatted(&block.header.header.gas_used, &Locale::en);
+                gas_fmt_buf.write_formatted(&block.header.gas_used, &Locale::en);
                 info!(
                     number=block.number,
-                    hash=?block.hash,
+                    hash=?block.hash(),
                     peers=self.num_connected_peers(),
                     txs=block.body.len(),
-                    mgas=%format!("{:.3}", block.header.header.gas_used as f64 / constants::MGAS_TO_GAS as f64),
-                    full=%format!("{:.1}%", block.header.header.gas_used as f64 * 100.0 / block.header.header.gas_limit as f64),
-                    base_fee=%format!("{:.2}gwei", block.header.header.base_fee_per_gas.unwrap_or(0) as f64 / constants::GWEI_TO_WEI as f64),
+                    mgas=%format!("{:.3}", block.header.gas_used as f64 / constants::MGAS_TO_GAS as f64),
+                    full=%format!("{:.1}%", block.header.gas_used as f64 * 100.0 / block.header.gas_limit as f64),
+                    base_fee=%format!("{:.2}gwei", block.header.base_fee_per_gas.unwrap_or(0) as f64 / constants::GWEI_TO_WEI as f64),
                     blobs=block.header.blob_gas_used.unwrap_or(0) / constants::EIP4844_GAS_PER_BLOB,
                     excess_blobs=block.header.excess_blob_gas.unwrap_or(0) / constants::EIP4844_GAS_PER_BLOB,
                     ?elapsed,
@@ -211,10 +211,10 @@ impl<DB> NodeState<DB> {
                 self.latest_block = Some(head.number);
                 self.latest_block_time = Some(head.timestamp);
 
-                info!(number=head.number, hash=?head.hash, ?elapsed, "Canonical chain committed");
+                info!(number=head.number, hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
             BeaconConsensusEngineEvent::ForkBlockAdded(block) => {
-                info!(number=block.number, hash=?block.hash, "Block added to fork chain");
+                info!(number=block.number, hash=?block.hash(), "Block added to fork chain");
             }
         }
     }

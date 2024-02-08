@@ -17,7 +17,7 @@ use crate::{
     TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
 use reth_eth_wire::HandleAnnouncement;
-use reth_primitives::{Address, BlobTransactionSidecar, TxHash};
+use reth_primitives::{Address, BlobTransactionSidecar, TxHash, U256};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -263,8 +263,10 @@ impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
             )
         }
 
+        // we return `balance: U256::MAX` to simulate a valid transaction which will never go into
+        // overdraft
         TransactionValidationOutcome::Valid {
-            balance: Default::default(),
+            balance: U256::MAX,
             state_nonce: 0,
             transaction: ValidTransaction::Valid(transaction),
             propagate: match origin {
