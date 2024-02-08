@@ -51,21 +51,8 @@ impl<'a> SnapshotProviderRW<'a> {
                         .get_highest_snapshot_tx(segment)
                         .map(|tx| SegmentRangeInclusive::new(tx, tx));
                     let path = reader.directory().join(segment.filename(&block_range));
-                    (
-                        NippyJar::new(
-                            segment.columns(),
-                            &path,
-                            SegmentHeader::new(
-                                SegmentRangeInclusive::new(
-                                    block_range.start(),
-                                    block_range.start(),
-                                ),
-                                tx_range,
-                                segment,
-                            ),
-                        ),
-                        path,
-                    )
+
+                    (create_jar(segment, &path, block_range, tx_range), path)
                 }
                 Err(err) => return Err(err),
             };
@@ -347,4 +334,29 @@ impl<'a> Deref for SnapshotProviderRW<'a> {
     fn deref(&self) -> &Self::Target {
         &self.reader
     }
+}
+
+fn create_jar(
+    segment: SnapshotSegment,
+    path: &PathBuf,
+    block_range: SegmentRangeInclusive,
+    tx_range: Option<SegmentRangeInclusive>,
+) -> NippyJar<SegmentHeader> {
+    let mut jar = NippyJar::new(
+        segment.columns(),
+        path,
+        SegmentHeader::new(
+            SegmentRangeInclusive::new(block_range.start(), block_range.start()),
+            tx_range,
+            segment,
+        ),
+    );
+
+    // Transaction and Receipt already have the compression scheme used natively in its encoding.
+    // (zstd-dictionary)
+    if matches!(segment, SnapshotSegment::Headers) {
+        jar = jar.with_lz4();
+    }
+
+    jar
 }
