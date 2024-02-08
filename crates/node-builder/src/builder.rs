@@ -23,11 +23,12 @@ use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     ChainSpec,
 };
-use reth_provider::{providers::BlockchainProvider, ChainSpecProvider};
+use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFactory};
 use reth_revm::EvmProcessorFactory;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::PoolConfig;
 use std::{marker::PhantomData, sync::Arc};
+use std::path::PathBuf;
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -70,6 +71,7 @@ impl<DB, State> NodeBuilder<DB, State> {
     pub fn config(&self) -> &NodeConfig {
         &self.config
     }
+
 }
 
 impl NodeBuilder<(), InitState> {
@@ -304,6 +306,18 @@ where
             >,
         >,
     > {
+        let Self { config, state, database, consensus_kind } = self;
+        // TODO move data dir to NodeConfig
+
+        // TODO
+        // raise_fd_limit
+        // install prometheus
+        // load config
+
+
+        let mut provider_factory =
+            ProviderFactory::new(database.clone(), Arc::clone(&config.chain));
+
         // 0. blockchain provider setup
         // 1. create the `BuilderContext`
         // 2. build the components
