@@ -61,6 +61,11 @@ impl<Provider, Pool, Events, Network> EthPubSub<Provider, Pool, Events, Network>
         let inner = EthPubSubInner { provider, pool, chain_events, network };
         Self { inner: Arc::new(inner), subscription_task_spawner }
     }
+
+    /// Method to get chain events for canonical state subscription
+    pub fn get_chain_events(&self) -> &Events {
+        &self.inner.chain_events
+    }
 }
 
 #[async_trait::async_trait]
@@ -134,7 +139,7 @@ where
                                 ),
                             ))
                         });
-                        return pipe_from_stream(accepted_sink, stream).await
+                        return pipe_from_stream(accepted_sink, stream).await;
                     }
                     Params::Bool(false) | Params::None => {
                         // only hashes requested
@@ -164,7 +169,7 @@ where
             // send the current status immediately
             let msg = SubscriptionMessage::from_json(&current_sub_res)?;
             if accepted_sink.send(msg).await.is_err() {
-                return Ok(())
+                return Ok(());
             }
 
             while (canon_state.next().await).is_some() {
@@ -178,7 +183,7 @@ where
                     let sync_status = pubsub.sync_status(current_syncing).await;
                     let msg = SubscriptionMessage::from_json(&sync_status)?;
                     if accepted_sink.send(msg).await.is_err() {
-                        break
+                        break;
                     }
                 }
             }
