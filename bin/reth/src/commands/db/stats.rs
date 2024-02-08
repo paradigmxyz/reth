@@ -176,9 +176,9 @@ impl Command {
 
                 let mut row = Row::new();
                 row.add_cell(Cell::new(segment))
-                    .add_cell(Cell::new(format!("{block_range:?}")))
+                    .add_cell(Cell::new(format!("{block_range}")))
                     .add_cell(Cell::new(
-                        tx_range.map_or("N/A".to_string(), |tx_range| format!("{tx_range:?}")),
+                        tx_range.map_or("N/A".to_string(), |tx_range| format!("{tx_range}")),
                     ))
                     .add_cell(Cell::new(format!("{columns} x {rows}")));
                 if !only_total_size {
