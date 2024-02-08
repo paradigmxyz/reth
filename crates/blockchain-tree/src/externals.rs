@@ -46,6 +46,7 @@ impl<DB: Database, EF> TreeExternals<DB, EF> {
         &self,
         num_hashes: usize,
     ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+        // Fetch the latest canonical hashes from the database
         let mut hashes = self
             .provider_factory
             .provider()?
@@ -55,24 +56,29 @@ impl<DB: Database, EF> TreeExternals<DB, EF> {
             .take(num_hashes)
             .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?;
 
-        if hashes.len() < num_hashes {
-            let snapshot_provider = self.provider_factory.snapshot_provider();
-            let total_headers = snapshot_provider.count_entries::<tables::Headers>()? as u64;
-            if total_headers > 0 {
-                let range = total_headers
-                    .saturating_sub(1)
-                    .saturating_sub((num_hashes - hashes.len()) as u64)..
-                    total_headers;
+        // Fetch the same number of latest canonical hashes from the snapshots and merge them with
+        // the database hashes. It is needed due to the fact that we're writing directly to
+        // snapshots in pipeline sync, but to the database in live sync, which means that the latest
+        // canonical hashes in the snapshot might be more recent than in the database, and vice
+        // versa, or even some ranges of the latest `num_hashes` blocks may be in database, and some
+        // ranges in snapshots.
+        let snapshot_provider = self.provider_factory.snapshot_provider();
+        let total_headers = snapshot_provider.count_entries::<tables::Headers>()? as u64;
+        if total_headers > 0 {
+            let range =
+                total_headers.saturating_sub(1).saturating_sub(num_hashes as u64)..total_headers;
 
-                hashes.extend(range.clone().zip(snapshot_provider.fetch_range_with_predicate(
-                    SnapshotSegment::Headers,
-                    range,
-                    |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(number.into()),
-                    |_| true,
-                )?));
-            }
+            hashes.extend(range.clone().zip(snapshot_provider.fetch_range_with_predicate(
+                SnapshotSegment::Headers,
+                range,
+                |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(number.into()),
+                |_| true,
+            )?));
         }
 
+        // We may have fetched more than `num_hashes` hashes, so we need to truncate the result to
+        // the requested number.
+        let hashes = hashes.into_iter().rev().take(num_hashes).collect();
         Ok(hashes)
     }
 }
