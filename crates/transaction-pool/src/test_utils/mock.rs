@@ -310,6 +310,16 @@ impl MockTransaction {
         }
     }
 
+    /// Returns a new EIP4844 transaction with a provided sidecar
+    pub fn eip4844_with_sidecar(sidecar: BlobTransactionSidecar) -> Self {
+        let mut transaction = Self::eip4844();
+        if let MockTransaction::Eip4844 { sidecar: ref mut existing_sidecar, .. } = &mut transaction
+        {
+            *existing_sidecar = sidecar;
+        }
+        transaction
+    }
+
     /// Returns a new EIP2930 transaction with random address and hash and empty values
     pub fn eip2930() -> Self {
         MockTransaction::Eip2930 {
