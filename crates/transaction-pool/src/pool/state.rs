@@ -2,7 +2,7 @@ bitflags::bitflags! {
     /// Marker to represents the current state of a transaction in the pool and from which the corresponding sub-pool is derived, depending on what bits are set.
     ///
     /// This mirrors [erigon's ephemeral state field](https://github.com/ledgerwatch/erigon/wiki/Transaction-Pool-Design#ordering-function).
-     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
     pub(crate) struct TxState: u8 {
         /// Set to `1` if all ancestor transactions are pending.
         const NO_PARKED_ANCESTORS = 0b10000000;

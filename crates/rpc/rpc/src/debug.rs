@@ -14,10 +14,8 @@ use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
-    revm::env::tx_env_with_recovered,
-    revm_primitives::{db::DatabaseCommit, BlockEnv, CfgEnv},
-    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, Withdrawals,
-    B256,
+    revm::env::tx_env_with_recovered, Address, Block, BlockId, BlockNumberOrTag, Bytes,
+    TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,
@@ -31,7 +29,10 @@ use reth_rpc_types::{
     },
     BlockError, Bundle, CallRequest, RichBlock, StateContext,
 };
-use revm::{db::CacheDB, primitives::Env};
+use revm::{
+    db::CacheDB,
+    primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
+};
 use revm_inspectors::tracing::{
     js::{JsInspector, TransactionContext},
     FourByteInspector, TracingInspector, TracingInspectorConfig,
@@ -73,7 +74,7 @@ where
         &self,
         at: BlockId,
         transactions: Vec<TransactionSignedEcRecovered>,
-        cfg: CfgEnv,
+        cfg: CfgEnvWithHandlerCfg,
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
     ) -> EthResult<Vec<TraceResult>> {
@@ -89,7 +90,10 @@ where
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
                     let tx = tx_env_with_recovered(&tx);
-                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                    let env = EnvWithHandlerCfg::new(
+                        Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
+                        cfg.handler_cfg.spec_id,
+                    );
                     let (result, state_changes) = this
                         .trace_transaction(
                             opts.clone(),
@@ -208,12 +212,12 @@ where
             None => return Err(EthApiError::TransactionNotFound),
             Some(res) => res,
         };
-        let (cfg, block_env, _) = self.inner.eth_api.evm_env_at(block.hash.into()).await?;
+        let (cfg, block_env, _) = self.inner.eth_api.evm_env_at(block.hash().into()).await?;
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
         let state_at: BlockId = block.parent_hash.into();
-        let block_hash = block.hash;
+        let block_hash = block.hash();
         let block_txs = block.into_transactions_ecrecovered();
 
         let this = self.clone();
@@ -233,7 +237,10 @@ where
                     tx.hash,
                 )?;
 
-                let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
+                let env = EnvWithHandlerCfg::new(
+                    Env::boxed(cfg.cfg_env.clone(), block_env, tx_env_with_recovered(&tx)),
+                    cfg.handler_cfg.spec_id,
+                );
                 this.trace_transaction(
                     opts,
                     env,
@@ -406,7 +413,7 @@ where
         // but if all transactions are to be replayed, we can use the state at the block itself
         let num_txs = transaction_index.index().unwrap_or(block.body.len());
         if num_txs == block.body.len() {
-            at = block.hash;
+            at = block.hash();
             replay_block_txs = false;
         }
 
@@ -426,7 +433,10 @@ where
                     // Execute all transactions until index
                     for tx in transactions {
                         let tx = tx_env_with_recovered(&tx);
-                        let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                        let env = EnvWithHandlerCfg::new(
+                            Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
+                            cfg.handler_cfg.spec_id,
+                        );
                         let (res, _) = transact(&mut db, env)?;
                         db.commit(res.state);
                     }
@@ -483,7 +493,7 @@ where
     fn trace_transaction(
         &self,
         opts: GethDebugTracingOptions,
-        env: Env,
+        env: EnvWithHandlerCfg,
         db: &mut SubState<StateProviderBox>,
         transaction_context: Option<TransactionContext>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {

@@ -3,10 +3,9 @@ use alloy_chains::{Chain, NamedChain};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{hex, ChainSpec, ForkId, Genesis, Hardfork, Head, B256, MAINNET, U256};
-use std::fmt::{Debug, Display};
-
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use std::fmt::{Debug, Display};
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same
 /// network and are following the same fork.

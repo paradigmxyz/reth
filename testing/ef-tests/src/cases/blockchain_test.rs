@@ -128,7 +128,11 @@ impl Case for BlockchainTestCase {
                     // Insert state hashes into the provider based on the expected state root.
                     let last_block = last_block.unwrap_or_default();
                     provider
-                        .insert_hashes(0..=last_block.number, last_block.hash, *expected_state_root)
+                        .insert_hashes(
+                            0..=last_block.number,
+                            last_block.hash(),
+                            *expected_state_root,
+                        )
                         .map_err(|err| Error::RethError(err.into()))?;
                 }
                 _ => return Err(Error::MissingPostState),

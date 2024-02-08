@@ -23,7 +23,7 @@ impl StorageEntry {
 
 impl From<(B256, U256)> for StorageEntry {
     fn from((key, value): (B256, U256)) -> Self {
-        StorageEntry { key, value }
+        Self { key, value }
     }
 }
 

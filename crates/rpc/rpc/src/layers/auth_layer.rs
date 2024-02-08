@@ -69,7 +69,7 @@ where
 
 /// This type is the actual implementation of the middleware. It follows the [`Service`]
 /// specification to correctly proxy Http requests to its inner service after headers validation.
-#[allow(missing_debug_implementations)]
+#[derive(Debug)]
 pub struct AuthService<S, V> {
     /// Performs auth validation logics
     validator: V,
