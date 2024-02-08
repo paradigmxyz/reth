@@ -86,7 +86,7 @@ impl<'a> SnapshotProviderRW<'a> {
         let user_header = self.writer.user_header();
         let mut max_block = Some(user_header.block_end());
 
-        if matches!(self.writer.user_header().segment(), SnapshotSegment::Headers) {
+        if self.writer.user_header().segment().is_headers() {
             // This can be a scenario where we pruned all blocks from the static file, including the
             // genesis block.
             if user_header.block_end() == 0 && self.writer.rows() == 0 {
@@ -104,7 +104,7 @@ impl<'a> SnapshotProviderRW<'a> {
     pub fn increment_block(&mut self, segment: SnapshotSegment) -> ProviderResult<BlockNumber> {
         debug_assert!(
             (self.writer.rows() as u64 + self.writer.user_header().block_end()) != 0
-            || !matches!(segment, SnapshotSegment::Headers),
+            || !segment.is_headers(),
             "This function should only be called by append_header when dealing with SnapshotSegment::Headers.");
 
         let last_block = self.writer.user_header().block_end();
@@ -358,7 +358,7 @@ fn create_jar(
 
     // Transaction and Receipt already have the compression scheme used natively in its encoding.
     // (zstd-dictionary)
-    if matches!(segment, SnapshotSegment::Headers) {
+    if segment.is_headers() {
         jar = jar.with_lz4();
     }
 
