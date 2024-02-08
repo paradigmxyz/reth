@@ -99,7 +99,7 @@ pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, BlockExecuti
 
 /// Parses the calldata of the [L1BlockInfo] transaction post-Ecotone hardfork.
 pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, BlockExecutionError> {
-    // The setL1BlockValuesEcotone tx calldata must be exactly 260 bytes long, considering that
+    // The setL1BlockValuesEcotone tx calldata must be exactly 160 bytes long, considering that
     // we already removed the first 4 bytes (the function selector). Detailed breakdown:
     //   8 bytes for the block sequence number
     // + 4 bytes for the blob base fee scalar
@@ -118,10 +118,10 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, BlockExecuti
         ))
     }
 
-    let l1_base_fee = U256::try_from_be_slice(&data[32..64]).ok_or(
+    let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[8..12]).ok_or(
         reth_executor::BlockExecutionError::OptimismBlockExecution(
             reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
-                message: "could not convert l1 blob base fee".to_string(),
+                message: "could not convert l1 blob base fee scalar".to_string(),
             },
         ),
     )?;
@@ -132,17 +132,17 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, BlockExecuti
             },
         ),
     )?;
-    let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or(
+    let l1_base_fee = U256::try_from_be_slice(&data[32..64]).ok_or(
         reth_executor::BlockExecutionError::OptimismBlockExecution(
             reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
                 message: "could not convert l1 blob base fee".to_string(),
             },
         ),
     )?;
-    let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[8..12]).ok_or(
+    let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or(
         reth_executor::BlockExecutionError::OptimismBlockExecution(
             reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
-                message: "could not convert l1 blob base fee scalar".to_string(),
+                message: "could not convert l1 blob base fee".to_string(),
             },
         ),
     )?;
