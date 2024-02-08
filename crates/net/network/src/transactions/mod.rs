@@ -100,7 +100,7 @@ const DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE: usize = 128 *
 /// the standard maximum response size of 2 MiB (see specs). Default is 128 KiB.
 ///
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
-const DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE: usize = 128 * 1024;
+const DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE: usize = 128 * 1024;
 
 /// Default maximum pending pool imports to tolerate.
 const DEFAULT_MAX_PENDING_POOL_IMPORTS: usize =
@@ -327,7 +327,7 @@ where
             let transactions = self.pool.get_pooled_transaction_elements(
                 request.0,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
-                    DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE,
+                    DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
                 ),
             );
 
@@ -1070,7 +1070,7 @@ where
 
             if this.has_capacity_for_fetching_pending_hashes() {
                 // try drain buffered transactions.
-                this.transaction_fetcher.request_hashes_pending_fetch(
+                this.transaction_fetcher.on_fetch_pending_hashes(
                     &this.peers,
                     &this.metrics,
                     this.transaction_fetcher.search_breadth_budget_find_idle_fallback_peer(),
@@ -1892,7 +1892,7 @@ mod tests {
         assert!(tx_fetcher.is_idle(&peer_id_1));
 
         // sends request for buffered hashes to peer_1
-        tx_fetcher.request_hashes_pending_fetch(&tx_manager.peers, &tx_manager.metrics, Some(1));
+        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, &tx_manager.metrics, Some(1));
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 

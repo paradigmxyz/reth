@@ -22,19 +22,19 @@ use tracing::{debug, trace};
 
 use super::{
     AnnouncementFilter, Peer, PooledTransactions, TransactionsManagerMetrics,
-    DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE,
+    DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 
 /// Default number of alternative peers to keep track of for each transaction pending fetch. At
 /// most [`DEFAULT_MAX_RETRIES_PER_TX_HASH`], which defaults to 2 peers, can ever be
 /// needed per peer. Default is the sum of [`DEFAULT_MAX_RETRIES_PER_TX_HASH`] and
-/// [`DEFAULT_MARGINAL_FALLBACK_PEERS_PER_TX`], which defaults to 1 peer, so 3 peers.
+/// [`DEFAULT_MARGINAL_COUNT_FALLBACK_PEERS_PER_TX`], which defaults to 1 peer, so 3 peers.
 pub(super) const DEFAULT_MAX_COUNT_FALLBACK_PEERS_PER_TX: u8 =
-    DEFAULT_MAX_RETRIES_PER_TX_HASH + DEFAULT_MARGINAL_FALLBACK_PEERS_PER_TX;
+    DEFAULT_MAX_RETRIES_PER_TX_HASH + DEFAULT_MARGINAL_COUNT_FALLBACK_PEERS_PER_TX;
 
 /// Default marginal on fallback peers. This is the case, since a transaction is only requested
 /// once from each individual peer. Default is 1 peer.
-const DEFAULT_MARGINAL_FALLBACK_PEERS_PER_TX: u8 = 1;
+const DEFAULT_MARGINAL_COUNT_FALLBACK_PEERS_PER_TX: u8 = 1;
 
 /// Default maximum request retires per [`TxHash`]. Note, this is reset should the [`TxHash`]
 /// re-appear in an announcement after it has been evicted from the hashes pending fetch cache,
@@ -42,27 +42,16 @@ const DEFAULT_MARGINAL_FALLBACK_PEERS_PER_TX: u8 = 1;
 /// should and can indeed be fetched hence this behaviour is favourable. Default is 2 retries.
 const DEFAULT_MAX_RETRIES_PER_TX_HASH: u8 = 2;
 
-/// Default maximum concurrent [`GetPooledTxRequest`]s. Default is the sum of
-/// [`DEFAULT_MAX_COUNT_PEERS_INBOUND`], which defaults to 30 peers, and
-/// [`DEFAULT_MAX_COUNT_PEERS_OUTBOUND`], which defaults to 100 peers, so 130 peers.
+/// Default maximum concurrent [`GetPooledTxRequest`]s. Default is the product of
+/// [`DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS_PER_PEER`], which defaults to 1 request, and the
+/// sum of [`DEFAULT_MAX_COUNT_PEERS_INBOUND`] and [`DEFAULT_MAX_COUNT_PEERS_OUTBOUND`], which
+/// default to 30 and 100 peers respectively, so 130 requests.
 pub(super) const DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS: u32 =
     DEFAULT_MAX_COUNT_PEERS_INBOUND + DEFAULT_MAX_COUNT_PEERS_OUTBOUND;
 
 /// Default maximum number of concurrent [`GetPooledTxRequest`]s to allow per peer. This number
-/// reflects concurrent requests for different hashes. Default is 1.
+/// reflects concurrent requests for different hashes. Default is 1 request.
 pub(super) const DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS_PER_PEER: u8 = 1;
-
-/// Default limit for number of transactions waiting for an idle peer to be fetched from. Default
-/// is 100 times the [`SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST`], which defaults
-/// to 256 hashes, so 25 600 hashes.
-pub(super) const DEFAULT_MAX_CAPACITY_CACHE_HASHES_PENDING_FETCH: usize =
-    100 * SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST;
-
-/// Default maximum number of hashes pending fetch to tolerate at any time. Default is half of
-/// [`DEFAULT_MAX_CAPACITY_CACHE_HASHES_PENDING_FETCH`], which defaults to 25 600 hashes, so
-/// 12 800 hashes.
-const DEFAULT_MAX_HASHES_PENDING_FETCH: usize =
-    1 / 2 * DEFAULT_MAX_CAPACITY_CACHE_HASHES_PENDING_FETCH;
 
 /// Recommended soft limit for the number of hashes in a [`GetPooledTransactions`] message. Spec'd
 /// at 256 hashes (8 KiB).
@@ -70,39 +59,60 @@ const DEFAULT_MAX_HASHES_PENDING_FETCH: usize =
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09>
 pub(super) const SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST: usize = 256;
 
-/// Default soft limit for the number of hashes in a [`GetPooledTransactions`] request, when it is
-/// filled from hashes pending fetch. Default is half of the
-/// [`SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST`] which by spec is 256 hashes, so
-/// 128 hashes.
-const DEFAULT_SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_ON_FETCH_PENDING: usize =
-    SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST;
-
-/// Default soft limit for a [`PooledTransactions`] response when it's used as expected response in
-/// calibrating the filling of a [`GetPooledTransactions`] request, when the request is filled
-/// from hashes pending fetch. Default is half of
-/// [`DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE`], which defaults to 256
-/// KiB, so 128 KiB.
-const DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING: usize =
-    1 / 2 * DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE;
+/// Default limit for number of transactions waiting for an idle peer to be fetched from. Default
+/// is 100 times the [`SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST`], which defaults
+/// to 256 hashes, so 25 600 hashes.
+pub(super) const DEFAULT_MAX_CAPACITY_CACHE_HASHES_PENDING_FETCH: usize =
+    100 * SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST;
 
 /// Average byte size of an encoded transaction. Default is
-/// [`DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE`], which defaults to 128
-/// KiB, divided by [`SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST`], which defaults to
+/// [`DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], which defaults to 128 KiB,
+/// divided by [`SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST`], which defaults to
 /// 256 hashes, so 521 bytes.
 const AVERAGE_BYTE_SIZE_TX_ENCODED: usize =
-    DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE /
+    DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE /
         SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST;
 
 /// Median observed size in bytes of a small encoded legacy transaction. Default is 120 bytes.
 const MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED: usize = 120;
 
 /// Default budget for finding an idle fallback peer for any hash pending fetch, when said search
-/// is budget constrained. Default is a sixth of [`DEFAULT_MAX_HASHES_PENDING_FETCH`], which
+/// is budget constrained. Default is a sixth of [`DEFAULT_MAX_COUNT_HASHES_PENDING_FETCH`], which
 /// defaults to 12 800 hashes (the breadth of the search), divided by
 /// [`DEFAULT_MAX_COUNT_FALLBACK_PEERS_PER_TX`], which defaults to 3 peers (the depth of the
 /// search), so 4 266 hashes.
-const DEFAULT_BUDGET_FIND_IDLE_FALLBACK_PEER: usize =
-    1 / 6 * DEFAULT_MAX_HASHES_PENDING_FETCH / DEFAULT_MAX_COUNT_FALLBACK_PEERS_PER_TX as usize;
+const DEFAULT_BUDGET_FIND_IDLE_FALLBACK_PEER: usize = 1 / 6 *
+    DEFAULT_MAX_COUNT_HASHES_PENDING_FETCH *
+    DEFAULT_MAX_CAPACITY_CACHE_HASHES_PENDING_FETCH /
+    DEFAULT_MAX_COUNT_FALLBACK_PEERS_PER_TX as usize;
+
+/// Default maximum number of hashes pending fetch to tolerate at any time. Default is half of
+/// [`DEFAULT_MAX_CAPACITY_CACHE_HASHES_PENDING_FETCH`], which defaults to 25 600 hashes, so
+/// 12 800 hashes.
+const DEFAULT_MAX_COUNT_HASHES_PENDING_FETCH: usize =
+    1 / 2 * DEFAULT_MAX_CAPACITY_CACHE_HASHES_PENDING_FETCH;
+
+/* ==================== Bounds on fetch pending hashes ==================== */
+
+/// Default max inflight request when fetching pending hashes. Default is half of
+/// [`DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS`], which defaults to 130 requests, so 65 requests.
+const DEFAULT_MAX_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES: usize =
+    1 / 2 * DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS as usize;
+
+/// Default soft limit for the number of hashes in a [`GetPooledTransactions`] request, when it is
+/// filled from hashes pending fetch. Default is half of the
+/// [`SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST`] which by spec is 256 hashes, so
+/// 128 hashes.
+const DEFAULT_SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_ON_FETCH_PENDING: usize =
+    1 / 2 * SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST;
+
+/// Default soft limit for a [`PooledTransactions`] response when it's used as expected response in
+/// calibrating the filling of a [`GetPooledTransactions`] request, when the request is filled
+/// from hashes pending fetch. Default is half of
+/// [`DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], which defaults to 256 KiB, so
+/// 128 KiB.
+const DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING: usize =
+    1 / 2 * DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE;
 
 /// The type responsible for fetching missing transactions from peers.
 ///
@@ -294,7 +304,7 @@ impl TransactionFetcher {
             hashes_to_request.push(hash);
 
             // tx is really big, pack request with single tx
-            if size >= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE {
+            if size >= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE {
                 return hashes_from_announcement_iter.collect::<RequestTxHashes>()
             } else {
                 acc_size_response = size;
@@ -312,7 +322,7 @@ impl TransactionFetcher {
 
             let next_acc_size = acc_size_response + size;
 
-            if next_acc_size <= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE {
+            if next_acc_size <= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE {
                 // only update accumulated size of tx response if tx will fit in without exceeding
                 // soft limit
                 acc_size_response = next_acc_size;
@@ -321,8 +331,8 @@ impl TransactionFetcher {
                 surplus_hashes.push(hash)
             }
 
-            let free_space = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE -
-                acc_size_response;
+            let free_space =
+                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE - acc_size_response;
 
             if free_space < MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED {
                 break 'fold_size
@@ -431,7 +441,7 @@ impl TransactionFetcher {
     ///
     /// Finds the first buffered hash with a fallback peer that is idle, if any. Fills the rest of
     /// the request by checking the transactions seen by the peer against the buffer.
-    pub(super) fn request_hashes_pending_fetch(
+    pub(super) fn on_fetch_pending_hashes(
         &mut self,
         peers: &HashMap<PeerId, Peer>,
         metrics: &TransactionsManagerMetrics,
@@ -456,7 +466,8 @@ impl TransactionFetcher {
         // look up the given number of lru hashes that are pending fetch, in the hashes seen
         // by this peer, before giving up and sending a request with the single tx popped
         // above.
-        let budget_lru_hashes_pending_fetch = DEFAULT_MAX_CAPACITY_CACHE_HASHES_PENDING_FETCH / 2;
+        let budget_lru_hashes_pending_fetch =
+            1 / 2 * DEFAULT_MAX_CAPACITY_CACHE_HASHES_PENDING_FETCH;
 
         self.fill_request_from_hashes_pending_fetch(
             &mut hashes_to_request,
@@ -778,8 +789,8 @@ impl TransactionFetcher {
             acc_size_response += size;
 
             // 4. Check if acc size or hashes count is at limit, if so stop looping.
-            // if request full enough or the number of hashes in the request is enough, we're
-            // satisfied
+            // if expected response is full enough or the number of hashes in the request is
+            // enough, we're satisfied
             if acc_size_response >=
                 DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING ||
                 hashes_to_request.len() >
@@ -809,12 +820,10 @@ impl TransactionFetcher {
         let info = &self.tx_fetcher_info;
 
         let inflight_requests = self.inflight_requests.len();
-        let soft_limit_inflight_requests = info.max_inflight_transaction_requests / 2;
         let hashes_pending_fetch = self.hashes_pending_fetch.len();
-        let limit_hashes_pending_fetch = info.max_hashes_pending_fetch;
 
-        if inflight_requests < soft_limit_inflight_requests ||
-            hashes_pending_fetch > info.max_hashes_pending_fetch
+        if inflight_requests <= info.max_inflight_transaction_requests ||
+            hashes_pending_fetch >= info.max_hashes_pending_fetch
         {
             // unlimited search breadth
             None
@@ -822,9 +831,9 @@ impl TransactionFetcher {
             // limited breadth of search for idle peer
             trace!(target: "net::tx",
                 inflight_requests=inflight_requests,
-                soft_limit_inflight_requests=soft_limit_inflight_requests,
+                max_inflight_transaction_requests=info.max_inflight_transaction_requests,
                 hashes_pending_fetch=hashes_pending_fetch,
-                limit_hashes_pending_fetch=limit_hashes_pending_fetch,
+                max_hashes_pending_fetch=info.max_hashes_pending_fetch,
                 "search breadth limited in search for idle fallback peer for hashes pending fetch"
             );
 
@@ -908,10 +917,7 @@ impl Default for TransactionFetcher {
             ),
             hashes_unknown_to_pool: LruMap::new_unlimited(),
             filter_valid_hashes: Default::default(),
-            tx_fetcher_info: TransactionFetcherInfo::new(
-                DEFAULT_MAX_COUNT_CONCURRENT_TX_REQUESTS as usize,
-                DEFAULT_MAX_HASHES_PENDING_FETCH,
-            ),
+            tx_fetcher_info: TransactionFetcherInfo::default(),
         }
     }
 }
@@ -1003,6 +1009,15 @@ impl TransactionFetcherInfo {
     }
 }
 
+impl Default for TransactionFetcherInfo {
+    fn default() -> Self {
+        Self::new(
+            DEFAULT_MAX_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES,
+            DEFAULT_MAX_COUNT_HASHES_PENDING_FETCH,
+        )
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::collections::HashSet;
@@ -1025,9 +1040,9 @@ mod test {
             B256::from_slice(&[5; 32]),
         ];
         let eth68_hashes_sizes = [
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE - 2,
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_MESSAGE, /* this one will
-                                                                                * not fit */
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE - 2,
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE, /* this one will
+                                                                        * not fit */
             2,
             9, // this one won't
             2,
