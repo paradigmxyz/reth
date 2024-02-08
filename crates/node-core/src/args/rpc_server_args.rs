@@ -409,7 +409,7 @@ impl RpcServerArgs {
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         EngineT: EngineTypes + 'static,
-        EvmConfig: EvmEnvConfig + 'static,
+        EvmConfig: ConfigureEvmEnv + 'static,
         Events: CanonStateSubscriptions + Clone + 'static,
     {
         let socket_address = SocketAddr::new(self.auth_addr, self.auth_port);
