@@ -12,6 +12,7 @@ use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
+use reth_interfaces::consensus::Consensus;
 use reth_node_core::{
     cli::config::RethTransactionPoolConfig,
     dirs::{ChainPath, DataDirPath},
@@ -30,7 +31,6 @@ use std::{marker::PhantomData, sync::Arc};
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
-// TODO: this will eventually depend on node primitive types and evm
 type RethFullProviderType<DB, Evm> =
     BlockchainProvider<DB, ShareableBlockchainTree<DB, EvmProcessorFactory<Evm>>>;
 
@@ -61,6 +61,8 @@ pub struct NodeBuilder<DB, State> {
     state: State,
     /// The configured database for the node.
     database: DB,
+    /// What consensus type to use
+    consensus_kind: NodeConsensus,
 }
 
 impl<DB, State> NodeBuilder<DB, State> {
@@ -73,14 +75,24 @@ impl<DB, State> NodeBuilder<DB, State> {
 impl NodeBuilder<(), InitState> {
     /// Create a new [`NodeBuilder`].
     pub fn new(config: NodeConfig) -> Self {
-        Self { config, database: (), state: InitState::default() }
+        Self {
+            config,
+            database: (),
+            state: InitState::default(),
+            consensus_kind: Default::default(),
+        }
     }
 }
 
 impl<DB> NodeBuilder<DB, InitState> {
     /// Configures the additional external context, e.g. additional context captured via CLI args.
     pub fn with_database<D>(self, database: D) -> NodeBuilder<D, InitState> {
-        NodeBuilder { config: self.config, state: self.state, database }
+        NodeBuilder {
+            config: self.config,
+            state: self.state,
+            database,
+            consensus_kind: Default::default(),
+        }
     }
 }
 
@@ -89,7 +101,6 @@ where
     DB: Database + Clone + 'static,
 {
     /// Configures the types of the node.
-    ///
     // TODO this can be made independent of Database
     pub fn with_types<T>(self, types: T) -> NodeBuilder<DB, TypesState<T, DB>>
     where
@@ -99,6 +110,7 @@ where
             config: self.config,
             state: TypesState { types, adapter: FullNodeTypesAdapter::default() },
             database: self.database,
+            consensus_kind: self.consensus_kind,
         }
     }
 }
@@ -131,6 +143,7 @@ where
         NodeBuilder {
             config: self.config,
             database: self.database,
+            consensus_kind: self.consensus_kind,
             state: ComponentsState {
                 _maker: Default::default(),
                 components_builder,
@@ -165,6 +178,7 @@ where
         Self {
             config: self.config,
             database: self.database,
+            consensus_kind: self.consensus_kind,
             state: ComponentsState {
                 _maker: Default::default(),
                 components_builder: f(self.state.components_builder),
@@ -199,6 +213,7 @@ where
         NodeBuilder {
             config: self.config,
             database: self.database,
+            consensus_kind: self.consensus_kind,
             state: ComponentsState {
                 _maker: Default::default(),
                 components_builder,
@@ -402,4 +417,17 @@ pub struct ComponentsState<Types, Components, FullNode: FullNodeComponents> {
     /// Additional NodeHooks that are called at specific points in the node's launch lifecycle.
     hooks: NodeHooks<FullNode>,
     rpc: RpcHooks<FullNode>,
+}
+
+/// What consensus type to use
+// TODO eventually this depend on the node's primitive types
+#[derive(Clone, Default)]
+pub enum NodeConsensus {
+    /// Beacon consensus
+    #[default]
+    Beacon,
+    /// Autoseal consensus
+    Autoseal,
+    /// Custom consensus implementation
+    Other(Arc<dyn Consensus>),
 }

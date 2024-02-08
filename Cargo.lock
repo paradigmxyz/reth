@@ -6402,6 +6402,7 @@ dependencies = [
  "eyre",
  "reth-blockchain-tree",
  "reth-db",
+ "reth-interfaces",
  "reth-network",
  "reth-node-api",
  "reth-node-core",

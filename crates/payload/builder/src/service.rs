@@ -163,9 +163,7 @@ where
 
 impl<Engine: EngineTypes> Clone for PayloadBuilderHandle<Engine> {
     fn clone(&self) -> Self {
-        Self {
-            to_service: self.to_service.clone(),
-        }
+        Self { to_service: self.to_service.clone() }
     }
 }
 

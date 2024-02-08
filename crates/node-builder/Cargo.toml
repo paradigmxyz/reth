@@ -24,6 +24,7 @@ reth-payload-builder.workspace = true
 reth-transaction-pool.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
+reth-interfaces.workspace = true
 
 # misc
 eyre.workspace = true
