@@ -134,4 +134,4 @@ This allows importing existing Grafana dashboards, without running reth in Docke
 docker compose -f etc/docker-compose.yml up -d --no-deps grafana
 ```
 
-After login with `admin:admin` credentials, this should list Prometheus under [`grafana datasources`](http://localhost:3000/connections/datasources). Replace its `Prometheus server URL` with `http://host.docker.internal:9090`.
+After login with `admin:admin` credentials, this should list Prometheus under [`Grafana datasources`](http://localhost:3000/connections/datasources). Replace its `Prometheus server URL` with `http://host.docker.internal:9090`.
