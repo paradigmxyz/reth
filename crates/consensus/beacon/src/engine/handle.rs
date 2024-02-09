@@ -16,7 +16,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// A _shareable_ beacon consensus frontend type. Used to interact with the spawned beacon consensus
 /// engine task.
 ///
-/// See also [`BeaconConsensusEngine`](crate::engine::BeaconConsensusEngine).
+/// See also `BeaconConsensusEngine`
 #[derive(Debug)]
 pub struct BeaconConsensusEngineHandle<Engine>
 where
