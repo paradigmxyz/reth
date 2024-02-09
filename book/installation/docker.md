@@ -125,3 +125,11 @@ docker exec -it reth bash
 **If Reth is running with Docker Compose, replace `reth` with `reth-reth-1` in the above command**
 
 Refer to the [CLI docs](../cli/cli.md) to interact with Reth once inside the Reth container.
+
+## Run only grafana in docker
+
+```bash
+docker compose -f etc/docker-compose.yml up -d --no-deps grafana
+```
+
+This should list Prometheus under [`grafana datasources`](http://localhost:3000/connections/datasources). Replace its `Prometheus server URL` with `http://host.docker.internal:9090`.

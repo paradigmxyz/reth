@@ -11,4 +11,4 @@ The files in this directory may undergo a lot of changes while reth is unstable,
 
 ### Docker Compose
 
-To run Reth, Grafana and Prometheus with Docker Compose, refer to the [docker docs](/book/installation/docker.md#using-docker-compose)
+To run Reth, Grafana or Prometheus with Docker Compose, refer to the [docker docs](/book/installation/docker.md#using-docker-compose)
