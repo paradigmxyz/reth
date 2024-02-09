@@ -1769,25 +1769,15 @@ Post-merge hard forks (timestamp based):
     // Tests that all predefined timestamps are correctly set up in the chainspecs
     #[test]
     fn test_predefined_chain_spec_fork_timestamps() {
-        fn ensure_timestamp_fork_conditions(spec: &ChainSpec, known_timestamp_based_forks: usize) {
-            // This is a sanity test that ensures we always set all currently known fork timestamps,
-            // this will fail if a new timestamp based fork condition has added to the hardforks but
-            // no corresponding entry in the ForkTimestamp types, See also
-            // [ForkTimestamps::from_hardforks]
+        let predefined = [&MAINNET, &SEPOLIA, &HOLESKY, &GOERLI];
 
-            let num_timestamp_based_forks =
-                spec.hardforks.values().copied().filter(ForkCondition::is_timestamp).count();
-            assert_eq!(num_timestamp_based_forks, known_timestamp_based_forks);
+        for spec in predefined.iter() {
+            let expected_timestamp_forks = &spec.fork_timestamps;
+            let got_timestamp_forks = ForkTimestamps::from_hardforks(&spec.hardforks);
 
-            // ensures all timestamp forks are set
-            assert!(spec.fork_timestamps.shanghai.is_some());
+            // make sure they're the same
+            assert_eq!(expected_timestamp_forks, &got_timestamp_forks);
         }
-
-        // currently there are 2 timestamp forks known for mainnet: shanghai, cancun
-        ensure_timestamp_fork_conditions(&MAINNET, 2);
-
-        // currently there are 2 timestamp forks known for sepolia: shanghai, cancun
-        ensure_timestamp_fork_conditions(&SEPOLIA, 2);
     }
 
     // Tests that we skip any fork blocks in block #0 (the genesis ruleset)
