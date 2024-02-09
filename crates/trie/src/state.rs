@@ -163,7 +163,7 @@ impl HashedPostState {
         HashedPostStateSorted { accounts, destroyed_accounts, storages }
     }
 
-    /// Construct [PrefixSet] from hashed post state.
+    /// Construct [TriePrefixSets] from hashed post state.
     /// The prefix sets contain the hashed account and storage keys that have been changed in the
     /// post state.
     pub fn construct_prefix_sets(&self) -> TriePrefixSets {
