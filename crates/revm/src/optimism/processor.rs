@@ -1,4 +1,4 @@
-use crate::processor::{verify_receipt, EVMProcessor};
+use crate::processor::{verify_receipt_optimism, EVMProcessor};
 use reth_interfaces::executor::{
     BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
 };
@@ -38,7 +38,7 @@ where
         // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
         if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
             let time = Instant::now();
-            if let Err(error) = verify_receipt(
+            if let Err(error) = verify_receipt_optimism(
                 block.header.receipts_root,
                 block.header.logs_bloom,
                 receipts.iter(),
