@@ -151,6 +151,7 @@ where
     }
 }
 
+/// An iterator over existing intermediate storage branch nodes and updated leaf nodes.
 #[derive(Debug)]
 pub struct StorageNodeIter<C, H> {
     /// Underlying walker over intermediate nodes.
