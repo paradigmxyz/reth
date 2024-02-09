@@ -45,7 +45,7 @@ pub struct TxPoolArgs {
     #[arg(long = "blobpool.pricebump", default_value_t = REPLACE_BLOB_PRICE_BUMP)]
     pub blob_transaction_price_bump: u128,
 
-    /// Maximum size a single transaction can have
+    /// Max size in bytes of a single transaction allowed to enter the pool
     #[arg(long = "txpool.max_tx_input_bytes", default_value_t = DEFAULT_MAX_TX_INPUT_BYTES)]
     pub max_tx_input_bytes: usize,
 
