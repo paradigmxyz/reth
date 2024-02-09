@@ -1662,12 +1662,9 @@ mod tests {
         );
 
         let provider = tree.externals.provider_factory.provider().unwrap();
-        let (acc_prefix_set, storage_prefix_set) = exec5.hash_state_slow().construct_prefix_sets();
-        let state_root = StateRoot::from_tx(provider.tx_ref())
-            .with_changed_account_prefixes(acc_prefix_set)
-            .with_changed_storage_prefixes(storage_prefix_set)
-            .root()
-            .unwrap();
+        let prefix_sets = exec5.hash_state_slow().construct_prefix_sets();
+        let state_root =
+            StateRoot::from_tx(provider.tx_ref()).with_prefix_sets(prefix_sets).root().unwrap();
         assert_eq!(state_root, block5.state_root);
     }
 
