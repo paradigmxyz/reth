@@ -9,7 +9,7 @@ use jsonrpsee::{
 use reth_interfaces::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes, U256};
 use reth_revm::tracing::js::JsInspectorError;
-use reth_rpc_types::{error::EthRpcErrorCode, BlockError, CallInputError};
+use reth_rpc_types::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind,
     PoolTransactionError,
@@ -105,7 +105,7 @@ pub enum EthApiError {
     InternalJsTracerError(String),
     #[error(transparent)]
     /// Call Input error when both `data` and `input` fields are set and not equal.
-    CallInputError(#[from] CallInputError),
+    TransactionInputError(#[from] TransactionInputError),
     /// Optimism related error
     #[error(transparent)]
     #[cfg(feature = "optimism")]
@@ -170,7 +170,7 @@ impl From<EthApiError> for ErrorObject<'static> {
             }
             err @ EthApiError::InternalBlockingTaskError => internal_rpc_err(err.to_string()),
             err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
-            err @ EthApiError::CallInputError(_) => invalid_params_rpc_err(err.to_string()),
+            err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
             #[cfg(feature = "optimism")]
             EthApiError::Optimism(err) => match err {
                 OptimismEthApiError::HyperError(err) => internal_rpc_err(err.to_string()),

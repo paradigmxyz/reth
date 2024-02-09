@@ -175,7 +175,7 @@ revm = { git = "https://github.com/bluealloy/revm", branch = "main", features = 
 revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "main", features = [
     "std",
 ], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", branch = "main" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", branch = "onbjerg/rm-callrequest" }
 
 # eth
 alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
@@ -184,11 +184,11 @@ alloy-dyn-abi = "0.6"
 alloy-sol-types = "0.6"
 alloy-rlp = "0.3"
 alloy-trie = "0.2"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy" }
-alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy" }
-alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
