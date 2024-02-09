@@ -4,7 +4,7 @@ use crate::{
     blobstore::BlobStore,
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     traits::TransactionOrigin,
-    validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE, MAX_TX_INPUT_BYTES},
+    validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE},
     EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig, PoolTransaction,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
@@ -28,6 +28,8 @@ use tokio::sync::Mutex;
 
 #[cfg(feature = "optimism")]
 use reth_revm::optimism::RethL1BlockInfo;
+
+use super::constants::DEFAULT_MAX_TX_INPUT_BYTES;
 
 /// Validator for Ethereum transactions.
 #[derive(Debug, Clone)]
@@ -118,6 +120,8 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     kzg_settings: Arc<KzgSettings>,
     /// How to handle [TransactionOrigin::Local](TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
+    /// Maximum size a single transaction can have
+    max_tx_input_bytes: usize,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
 }
@@ -192,11 +196,11 @@ where
         };
 
         // Reject transactions over defined size to prevent DOS attacks
-        if transaction.size() > MAX_TX_INPUT_BYTES {
+        if transaction.size() > self.max_tx_input_bytes {
             let size = transaction.size();
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::OversizedData(size, MAX_TX_INPUT_BYTES),
+                InvalidPoolTransactionError::OversizedData(size, self.max_tx_input_bytes),
             )
         }
 
@@ -627,6 +631,8 @@ impl EthTransactionValidatorBuilder {
             blob_store: Box::new(blob_store),
             kzg_settings,
             local_transactions_config,
+            max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES, /* TODO: Best way to bring poolconfig
+                                                             * to the scope? */
             _marker: Default::default(),
         };
 
