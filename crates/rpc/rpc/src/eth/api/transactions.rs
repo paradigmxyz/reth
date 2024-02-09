@@ -581,7 +581,7 @@ where
                     gas_price: Some(gas_price),
                     max_fee_per_gas: Some(max_fee_per_gas),
                     value: request.value,
-                    input: request.input.clone().into(),
+                    input: request.input.clone(),
                     nonce: request.nonce,
                     chain_id: Some(chain_id),
                     access_list: request.access_list.clone(),
