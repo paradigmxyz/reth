@@ -21,6 +21,8 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, info, trace, warn};
 
+type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
+
 /// A communication channel to the [PayloadBuilderService] that can retrieve payloads.
 #[derive(Debug, Clone)]
 pub struct PayloadStore<Engine: EngineTypes> {
@@ -396,9 +398,6 @@ where
         }
     }
 }
-
-// TODO: make generic over built payload type
-type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
 
 /// Message type for the [PayloadBuilderService].
 pub enum PayloadServiceCommand<Engine: EngineTypes> {
