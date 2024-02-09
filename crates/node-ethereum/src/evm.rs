@@ -1,9 +1,10 @@
-use reth_node_api::{evm::EvmConfig, ConfigureEvmEnv};
+use reth_node_api::{ConfigureEvmEnv, EvmConfig};
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_tx_env},
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     Address, ChainSpec, Head, Header, Transaction, U256,
 };
+use revm::{Database, Evm};
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone, Copy, Default)]
@@ -46,6 +47,22 @@ impl ConfigureEvmEnv for EthEvmConfig {
 
 // TODO
 impl EvmConfig for EthEvmConfig {}
+
+impl EvmConfig for EthEvmConfig {
+    fn evm<DB, EXT>(&self, db: DB) -> Evm<'_, EXT, DB>
+    where
+        DB: Database,
+    {
+        todo!()
+    }
+
+    fn evm_with_inspector<I, DB, EXT>(&self, db: DB, inspector: I) -> Evm<'_, EXT, DB>
+    where
+        DB: Database,
+    {
+        todo!()
+    }
+}
 
 #[cfg(test)]
 mod tests {
