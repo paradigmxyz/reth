@@ -170,7 +170,7 @@ pub trait RethL1BlockInfo {
         &self,
         chain_spec: &ChainSpec,
         timestamp: u64,
-        input: &Bytes,
+        input: &[u8],
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError>;
 
@@ -184,7 +184,7 @@ pub trait RethL1BlockInfo {
         &self,
         chain_spec: &ChainSpec,
         timestamp: u64,
-        input: &Bytes,
+        input: &[u8],
     ) -> Result<U256, BlockExecutionError>;
 }
 
@@ -193,7 +193,7 @@ impl RethL1BlockInfo for L1BlockInfo {
         &self,
         chain_spec: &ChainSpec,
         timestamp: u64,
-        input: &Bytes,
+        input: &[u8],
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError> {
         if is_deposit {
@@ -218,7 +218,7 @@ impl RethL1BlockInfo for L1BlockInfo {
         &self,
         chain_spec: &ChainSpec,
         timestamp: u64,
-        input: &Bytes,
+        input: &[u8],
     ) -> Result<U256, BlockExecutionError> {
         let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
             SpecId::REGOLITH
