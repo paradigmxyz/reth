@@ -20,8 +20,11 @@ use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError}
 use tracing::{debug, trace};
 
 use super::{
-    constants::*, AnnouncementFilter, Peer, PooledTransactions, TransactionsManagerMetrics,
-    DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+    constants::{
+        tx_fetcher::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+        SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST,
+    },
+    AnnouncementFilter, Peer, PooledTransactions, TransactionsManagerMetrics,
 };
 
 /// The type responsible for fetching missing transactions from peers.

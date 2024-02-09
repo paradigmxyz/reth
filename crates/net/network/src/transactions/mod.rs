@@ -78,9 +78,7 @@ use fetcher::{FetchEvent, TransactionFetcher};
 pub use validation::*;
 
 use self::constants::{
-    DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER_AND_IN_POOL,
-    DEFAULT_CAPACITY_CACHE_SENT_BY_PEER_AND_MAYBE_IN_POOL, DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
-    DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+    tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE,
 };
 
@@ -1424,7 +1422,7 @@ impl PoolImportsInfo {
 
 #[cfg(test)]
 mod tests {
-    use constants::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
+    use constants::tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
 
     use super::*;
     use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
