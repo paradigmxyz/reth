@@ -1,7 +1,5 @@
 //! MEV bundle type bindings
 
-#![allow(missing_docs)]
-
 use crate::{BlockId, BlockNumberOrTag, Log};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256, U64};
 use serde::{
@@ -148,60 +146,77 @@ pub struct PrivacyHint {
 }
 
 impl PrivacyHint {
+    /// Sets the flag indicating inclusion of calldata and returns the modified PrivacyHint
+    /// instance.
     pub fn with_calldata(mut self) -> Self {
         self.calldata = true;
         self
     }
 
+    /// Sets the flag indicating inclusion of contract address and returns the modified PrivacyHint
+    /// instance.
     pub fn with_contract_address(mut self) -> Self {
         self.contract_address = true;
         self
     }
 
+    /// Sets the flag indicating inclusion of logs and returns the modified PrivacyHint instance.
     pub fn with_logs(mut self) -> Self {
         self.logs = true;
         self
     }
 
+    /// Sets the flag indicating inclusion of function selector and returns the modified PrivacyHint
+    /// instance.
     pub fn with_function_selector(mut self) -> Self {
         self.function_selector = true;
         self
     }
 
+    /// Sets the flag indicating inclusion of hash and returns the modified PrivacyHint instance.
     pub fn with_hash(mut self) -> Self {
         self.hash = true;
         self
     }
 
+    /// Sets the flag indicating inclusion of transaction hash and returns the modified PrivacyHint
+    /// instance.
     pub fn with_tx_hash(mut self) -> Self {
         self.tx_hash = true;
         self
     }
 
+    /// Checks if calldata inclusion flag is set.
     pub fn has_calldata(&self) -> bool {
         self.calldata
     }
 
+    /// Checks if contract address inclusion flag is set.
     pub fn has_contract_address(&self) -> bool {
         self.contract_address
     }
 
+    /// Checks if logs inclusion flag is set.
     pub fn has_logs(&self) -> bool {
         self.logs
     }
 
+    /// Checks if function selector inclusion flag is set.
     pub fn has_function_selector(&self) -> bool {
         self.function_selector
     }
 
+    /// Checks if hash inclusion flag is set.
     pub fn has_hash(&self) -> bool {
         self.hash
     }
 
+    /// Checks if transaction hash inclusion flag is set.
     pub fn has_tx_hash(&self) -> bool {
         self.tx_hash
     }
 
+    /// Calculates the number of hints set within the PrivacyHint instance.
     fn num_hints(&self) -> usize {
         let mut num_hints = 0;
         if self.calldata {
@@ -391,6 +406,7 @@ pub struct PrivateTransactionRequest {
     /// be included.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_block_number: Option<U64>,
+    /// Preferences for private transaction.
     #[serde(default, skip_serializing_if = "PrivateTransactionPreferences::is_empty")]
     pub preferences: PrivateTransactionPreferences,
 }
@@ -514,17 +530,23 @@ pub struct StatsSimulated {
     pub sealed_by_builders_at: Vec<SealedByBuildersAt>,
 }
 
+/// Represents information about when a bundle was considered by a builder.
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConsideredByBuildersAt {
+    /// The public key of the builder.
     pub pubkey: String,
+    /// The timestamp indicating when the bundle was considered by the builder.
     pub timestamp: String,
 }
 
+/// Represents information about when a bundle was sealed by a builder.
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SealedByBuildersAt {
+    /// The public key of the builder.
     pub pubkey: String,
+    /// The timestamp indicating when the bundle was sealed by the builder.
     pub timestamp: String,
 }
 
@@ -615,17 +637,25 @@ pub struct EthCallBundle {
 #[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct EthCallBundleResponse {
+    /// The hash of the bundle bodies.
     pub bundle_hash: B256,
+    /// The gas price of the entire bundle
     #[serde(with = "u256_numeric_string")]
     pub bundle_gas_price: U256,
+    /// The difference in Ether sent to the coinbase after all transactions in the bundle
     #[serde(with = "u256_numeric_string")]
     pub coinbase_diff: U256,
+    /// The total amount of Ether sent to the coinbase after all transactions in the bundle
     #[serde(with = "u256_numeric_string")]
     pub eth_sent_to_coinbase: U256,
+    /// The total gas fees paid for all transactions in the bundle
     #[serde(with = "u256_numeric_string")]
     pub gas_fees: U256,
+    /// Results of individual transactions within the bundle
     pub results: Vec<EthCallBundleTransactionResult>,
+    /// The block number used as a base for this simulation
     pub state_block_number: u64,
+    /// The total gas used by all transactions in the bundle
     pub total_gas_used: u64,
 }
 
@@ -633,17 +663,25 @@ pub struct EthCallBundleResponse {
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EthCallBundleTransactionResult {
+    /// The difference in Ether sent to the coinbase after the transaction
     #[serde(with = "u256_numeric_string")]
     pub coinbase_diff: U256,
+    /// The amount of Ether sent to the coinbase after the transaction
     #[serde(with = "u256_numeric_string")]
     pub eth_sent_to_coinbase: U256,
+    /// The address from which the transaction originated
     pub from_address: Address,
+    /// The gas fees paid for the transaction
     #[serde(with = "u256_numeric_string")]
     pub gas_fees: U256,
+    /// The gas price used for the transaction
     #[serde(with = "u256_numeric_string")]
     pub gas_price: U256,
+    /// The amount of gas used by the transaction
     pub gas_used: u64,
+    /// The address to which the transaction is sent (optional)
     pub to_address: Option<Address>,
+    /// The transaction hash
     pub tx_hash: B256,
     /// Contains the return data if the transaction succeeded
     ///

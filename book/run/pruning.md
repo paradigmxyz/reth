@@ -78,7 +78,7 @@ Essentially, the full node is the same as following configuration for the pruned
 block_interval = 5
 
 [prune.parts]
-sender_recovery = { distance = 10_064 }
+sender_recovery = "full"
 # transaction_lookup is not pruned
 receipts = { before = 11052984 } # Beacon Deposit Contract deployment block: https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
 account_history = { distance = 10_064 }
@@ -92,7 +92,7 @@ storage_history = { distance = 10_064 }
 
 Meaning, it prunes:
 - Account History and Storage History up to the last 10064 blocks
-- Sender Recovery up to the last 10064 blocks. The caveat is that it's pruned gradually after the initial sync
+- All of Sender Recovery data. The caveat is that it's pruned gradually after the initial sync
 is completed, so the disk space is reclaimed slowly.
 - Receipts up to the last 10064 blocks, preserving all receipts with the logs from Beacon Deposit Contract
 

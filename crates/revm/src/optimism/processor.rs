@@ -2,16 +2,19 @@ use crate::processor::{verify_receipt, EVMProcessor};
 use reth_interfaces::executor::{
     BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
 };
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
-    revm::compat::into_reth_log, revm_primitives::ResultAndState, BlockWithSenders, Hardfork,
-    Receipt, U256,
+    revm_primitives::ResultAndState, BlockWithSenders, Hardfork, Receipt, TxType, U256,
 };
 use reth_provider::{BlockExecutor, BlockExecutorStats, BundleStateWithReceipts};
 use revm::DatabaseCommit;
 use std::time::Instant;
 use tracing::{debug, trace};
 
-impl<'a> BlockExecutor for EVMProcessor<'a> {
+impl<'a, EvmConfig> BlockExecutor for EVMProcessor<'a, EvmConfig>
+where
+    EvmConfig: ConfigureEvmEnv,
+{
     fn execute(
         &mut self,
         block: &BlockWithSenders,
@@ -43,7 +46,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                 block.timestamp,
             ) {
                 debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
-                return Err(error);
+                return Err(error)
             };
             self.stats.receipt_root_duration += time.elapsed();
         }
@@ -60,7 +63,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
 
         // perf: do not execute empty blocks
         if block.body.is_empty() {
-            return Ok((Vec::new(), 0));
+            return Ok((Vec::new(), 0))
         }
 
         let is_regolith =
@@ -91,7 +94,14 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into());
+                .into())
+            }
+
+            // An optimism block should never contain blob transactions.
+            if matches!(transaction.tx_type(), TxType::EIP4844) {
+                return Err(BlockExecutionError::OptimismBlockExecution(
+                    OptimismBlockExecutionError::BlobTransactionRejected,
+                ))
             }
 
             // Cache the depositor account prior to the state transition for the deposit nonce.
@@ -133,7 +143,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                 success: result.is_success(),
                 cumulative_gas_used,
                 // convert to reth log
-                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
+                logs: result.into_logs().into_iter().map(Into::into).collect(),
                 #[cfg(feature = "optimism")]
                 deposit_nonce: depositor.map(|account| account.nonce),
                 // The deposit receipt version was introduced in Canyon to indicate an update to how
@@ -153,7 +163,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
         let receipts = std::mem::take(&mut self.receipts);
         BundleStateWithReceipts::new(
-            self.evm.db().unwrap().take_bundle(),
+            self.evm.context.evm.db.take_bundle(),
             receipts,
             self.first_block.unwrap_or_default(),
         )
@@ -164,6 +174,6 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
     }
 
     fn size_hint(&self) -> Option<usize> {
-        self.evm.db.as_ref().map(|db| db.bundle_size_hint())
+        Some(self.evm.context.evm.db.bundle_size_hint())
     }
 }

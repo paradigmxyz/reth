@@ -21,8 +21,6 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms, unreachable_pub, unused_crate_dependencies)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{
@@ -64,7 +62,7 @@ use tokio::{
     time::Interval,
 };
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 
 pub mod error;
 pub mod proto;
@@ -283,6 +281,12 @@ impl Discv4 {
     /// Returning the closest nodes to the given node id.
     pub async fn lookup(&self, node_id: PeerId) -> Result<Vec<NodeRecord>, Discv4Error> {
         self.lookup_node(Some(node_id)).await
+    }
+
+    /// Performs a random lookup for node records.
+    pub async fn lookup_random(&self) -> Result<Vec<NodeRecord>, Discv4Error> {
+        let target = PeerId::random();
+        self.lookup_node(Some(target)).await
     }
 
     /// Sends a message to the service to lookup the closest nodes
@@ -635,7 +639,7 @@ impl Discv4Service {
     /// [`DiscoveryUpdate::Added`] event for the given bootnodes. So boot nodes don't appear in the
     /// update stream, which is usually desirable, since bootnodes should not be connected to.
     ///
-    /// If adding the configured boodnodes should result in a [`DiscoveryUpdate::Added`], see
+    /// If adding the configured bootnodes should result in a [`DiscoveryUpdate::Added`], see
     /// [`Self::add_all_nodes`].
     ///
     /// **Note:** This is a noop if there are no bootnodes.
@@ -1053,7 +1057,7 @@ impl Discv4Service {
         } else if needs_bond {
             self.try_ping(record, PingReason::EstablishBond);
         } else if is_proven {
-            // if node has been proven, this means we've recieved a pong and verified its endpoint
+            // if node has been proven, this means we've received a pong and verified its endpoint
             // proof. We've also sent a pong above to verify our endpoint proof, so we can now
             // send our find_nodes request if PingReason::Lookup
             if let Some((_, ctx)) = self.pending_lookup.remove(&record.id) {
@@ -1189,7 +1193,7 @@ impl Discv4Service {
     /// Handler for an incoming `FindNode` message
     fn on_find_node(&mut self, msg: FindNode, remote_addr: SocketAddr, node_id: PeerId) {
         if self.is_expired(msg.expire) {
-            // ping's expiration timestamp is in the past
+            // expiration timestamp is in the past
             return
         }
         if node_id == *self.local_peer_id() {
@@ -1607,7 +1611,9 @@ impl Discv4Service {
             // process all incoming datagrams
             while let Poll::Ready(Some(event)) = self.ingress.poll_recv(cx) {
                 match event {
-                    IngressEvent::RecvError(_) => {}
+                    IngressEvent::RecvError(err) => {
+                        debug!(target: "discv4", %err, "failed to read datagram");
+                    }
                     IngressEvent::BadPacket(from, err, data) => {
                         debug!(target: "discv4", ?from, ?err, packet=?hex::encode(&data),   "bad packet");
                     }
@@ -2012,9 +2018,9 @@ struct NodeEntry {
     last_enr_seq: Option<u64>,
     /// ForkId if retrieved via ENR requests.
     fork_id: Option<ForkId>,
-    /// Counter for failed findNode requests
+    /// Counter for failed findNode requests.
     find_node_failures: usize,
-    /// whether the endpoint of the peer is proven
+    /// Whether the endpoint of the peer is proven.
     has_endpoint_proof: bool,
 }
 
@@ -2081,7 +2087,7 @@ enum PingReason {
     /// Initial ping to a previously unknown peer that didn't fit into the table. But we still want
     /// to establish a bond.
     EstablishBond,
-    /// Re-ping a peer..
+    /// Re-ping a peer.
     RePing,
     /// Part of a lookup to ensure endpoint is proven.
     Lookup(NodeRecord, LookupContext),

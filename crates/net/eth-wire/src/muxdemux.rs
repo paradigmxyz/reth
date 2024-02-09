@@ -352,7 +352,7 @@ impl CanDisconnect<Bytes> for StreamClone {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::{net::SocketAddr, pin::Pin};
 
     use futures::{Future, SinkExt, StreamExt};

@@ -7,12 +7,15 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
-# reth 
+# reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
-
+alloy-chains.workspace = true
 # misc
 cfg-if = "1.0.0"
 

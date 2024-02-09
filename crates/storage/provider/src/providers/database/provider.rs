@@ -11,7 +11,6 @@ use crate::{
     PruneCheckpointWriter, StageCheckpointReader, StorageReader, TransactionVariant,
     TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
-use ahash::{AHashMap, AHashSet};
 use itertools::{izip, Itertools};
 use reth_db::{
     common::KeyValue,
@@ -31,26 +30,26 @@ use reth_interfaces::{
     provider::{ProviderResult, RootMismatch},
     RethError, RethResult,
 };
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     keccak256,
-    revm::{
-        config::revm_spec,
-        env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
-    },
+    revm::{config::revm_spec, env::fill_block_env},
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
     PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment,
     StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_trie::{
-    hashed_cursor::HashedPostState, prefix_set::PrefixSetMut, updates::TrieUpdates, StateRoot,
+    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
+    updates::TrieUpdates,
+    HashedPostState, StateRoot,
 };
-use revm::primitives::{BlockEnv, CfgEnv, SpecId};
+use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 use std::{
-    collections::{hash_map, BTreeMap, BTreeSet, HashMap},
+    collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
     ops::{Bound, Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
@@ -189,7 +188,7 @@ where
     while let Some((sharded_key, list)) = item {
         // If the shard does not belong to the key, break.
         if !shard_belongs_to_key(&sharded_key) {
-            break;
+            break
         }
         cursor.delete_current()?;
 
@@ -198,12 +197,12 @@ where
         let first = list.iter(0).next().expect("List can't be empty");
         if first >= block_number as usize {
             item = cursor.prev()?;
-            continue;
+            continue
         } else if block_number <= sharded_key.as_ref().highest_block_number {
             // Filter out all elements greater than block number.
-            return Ok(list.iter(0).take_while(|i| *i < block_number as usize).collect::<Vec<_>>());
+            return Ok(list.iter(0).take_while(|i| *i < block_number as usize).collect::<Vec<_>>())
         } else {
-            return Ok(list.iter(0).collect::<Vec<_>>());
+            return Ok(list.iter(0).collect::<Vec<_>>())
         }
     }
 
@@ -246,6 +245,17 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             .cursor_read::<T>()?
             .walk(Some(T::Key::default()))?
             .collect::<Result<Vec<_>, DatabaseError>>()
+    }
+
+    /// Disables long-lived read transaction safety guarantees for leaks prevention and
+    /// observability improvements.
+    ///
+    /// CAUTION: In most of the cases, you want the safety guarantees for long read transactions
+    /// enabled. Use this only if you're sure that no write transaction is open in parallel, meaning
+    /// that Reth as a node is offline and not progressing.
+    pub fn disable_long_read_transaction_safety(mut self) -> Self {
+        self.tx.disable_long_read_transaction_safety();
+        self
     }
 
     /// Gets data within a specified range, potentially spanning different snapshots and database.
@@ -332,7 +342,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             if snapshot_upper_bound
                 .map_or(false, |snapshot_upper_bound| snapshot_upper_bound >= number)
             {
-                return fetch_from_snapshot(provider);
+                return fetch_from_snapshot(provider)
             }
         }
         fetch_from_database()
@@ -393,7 +403,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BundleStateWithReceipts> {
         if range.is_empty() {
-            return Ok(BundleStateWithReceipts::default());
+            return Ok(BundleStateWithReceipts::default())
         }
         let start_block_number = *range.start();
 
@@ -571,7 +581,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let block_bodies = self.get_or_take::<tables::BlockBodyIndices, false>(range)?;
 
         if block_bodies.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
 
         // Compute the first and last tx ID in the range
@@ -580,7 +590,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         // If this is the case then all of the blocks in the range are empty
         if last_transaction < first_transaction {
-            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect());
+            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect())
         }
 
         // Get transactions and senders
@@ -709,7 +719,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         let block_headers = self.get_or_take::<tables::Headers, TAKE>(range.clone())?;
         if block_headers.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
 
         let block_header_hashes =
@@ -763,7 +773,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             // withdrawal can be missing
             let shanghai_is_active =
                 chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp);
-            let mut withdrawals = Some(Vec::new());
+            let mut withdrawals = Some(Withdrawals::default());
             if shanghai_is_active {
                 if let Some((block_number, _)) = block_withdrawals.as_ref() {
                     if *block_number == main_block_number {
@@ -815,7 +825,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         while let Some(Ok((entry_key, _))) = reverse_walker.next() {
             if selector(entry_key.clone()) <= key {
-                break;
+                break
             }
             reverse_walker.delete_current()?;
             deleted += 1;
@@ -862,7 +872,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 }
 
                 if deleted == limit {
-                    break;
+                    break
                 }
             }
         }
@@ -893,7 +903,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 }
 
                 if deleted == limit {
-                    break;
+                    break
                 }
             }
         }
@@ -913,7 +923,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             // delete old shard so new one can be inserted.
             self.tx.delete::<T>(shard_key, None)?;
             let list = list.iter(0).map(|i| i as u64).collect::<Vec<_>>();
-            return Ok(list);
+            return Ok(list)
         }
         Ok(Vec::new())
     }
@@ -1110,7 +1120,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
         if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
             // if this block is higher than the final paris(merge) block, return the final paris
             // difficulty
-            return Ok(Some(td));
+            return Ok(Some(td))
         }
 
         self.get_with_snapshot(
@@ -1259,7 +1269,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                     None => return Ok(None),
                 };
 
-                return Ok(Some(Block { header, body: transactions, ommers, withdrawals }));
+                return Ok(Some(Block { header, body: transactions, ommers, withdrawals }))
             }
         }
 
@@ -1283,11 +1293,11 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
             // If the Paris (Merge) hardfork block is known and block is after it, return empty
             // ommers.
             if self.chain_spec.final_paris_total_difficulty(number).is_some() {
-                return Ok(Some(Vec::new()));
+                return Ok(Some(Vec::new()))
             }
 
             let ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
-            return Ok(ommers);
+            return Ok(ommers)
         }
 
         Ok(None)
@@ -1348,12 +1358,19 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
             })
             .collect();
 
-        Ok(Some(Block { header, body, ommers, withdrawals }.with_senders(senders)))
+        let block = Block { header, body, ommers, withdrawals };
+        let block = block
+            // Note: we're using unchecked here because we know the block contains valid txs wrt to
+            // its height and can ignore the s value check so pre EIP-2 txs are allowed
+            .try_with_senders_unchecked(senders)
+            .map_err(|_| ProviderError::SenderRecoveryError)?;
+
+        Ok(Some(block))
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         if range.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
 
         let len = range.end().saturating_sub(*range.start()) as usize;
@@ -1551,7 +1568,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                                 excess_blob_gas: header.excess_blob_gas,
                             };
 
-                            return Ok(Some((transaction, meta)));
+                            return Ok(Some((transaction, meta)))
                         }
                     }
                 }
@@ -1689,7 +1706,7 @@ impl<TX: DbTx> WithdrawalsProvider for DatabaseProvider<TX> {
         &self,
         id: BlockHashOrNumber,
         timestamp: u64,
-    ) -> ProviderResult<Option<Vec<Withdrawal>>> {
+    ) -> ProviderResult<Option<Withdrawals>> {
         if self.chain_spec.is_shanghai_active_at_timestamp(timestamp) {
             if let Some(number) = self.convert_hash_or_number(id)? {
                 // If we are past shanghai, then all blocks should have a withdrawal list, even if
@@ -1699,7 +1716,7 @@ impl<TX: DbTx> WithdrawalsProvider for DatabaseProvider<TX> {
                     .get::<tables::BlockWithdrawals>(number)
                     .map(|w| w.map(|w| w.withdrawals))?
                     .unwrap_or_default();
-                return Ok(Some(withdrawals));
+                return Ok(Some(withdrawals))
             }
         }
         Ok(None)
@@ -1713,27 +1730,41 @@ impl<TX: DbTx> WithdrawalsProvider for DatabaseProvider<TX> {
 }
 
 impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
-    fn fill_env_at(
+    fn fill_env_at<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
         at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
-        self.fill_env_with_header(cfg, block_env, &header)
+        self.fill_env_with_header(cfg, block_env, &header, evm_config)
     }
 
-    fn fill_env_with_header(
+    fn fill_env_with_header<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
         header: &Header,
-    ) -> ProviderResult<()> {
+        _evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        fill_cfg_and_block_env(cfg, block_env, &self.chain_spec, header, total_difficulty);
+        EvmConfig::fill_cfg_and_block_env(
+            cfg,
+            block_env,
+            &self.chain_spec,
+            header,
+            total_difficulty,
+        );
         Ok(())
     }
 
@@ -1772,17 +1803,33 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         Ok(())
     }
 
-    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockHashOrNumber) -> ProviderResult<()> {
+    fn fill_cfg_env_at<EvmConfig>(
+        &self,
+        cfg: &mut CfgEnvWithHandlerCfg,
+        at: BlockHashOrNumber,
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
-        self.fill_cfg_env_with_header(cfg, &header)
+        self.fill_cfg_env_with_header(cfg, &header, evm_config)
     }
 
-    fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> ProviderResult<()> {
+    fn fill_cfg_env_with_header<EvmConfig>(
+        &self,
+        cfg: &mut CfgEnvWithHandlerCfg,
+        header: &Header,
+        _evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
+        EvmConfig::fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
         Ok(())
     }
 }
@@ -2038,8 +2085,8 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
     ) -> ProviderResult<()> {
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSetMut::default();
-        let mut storage_prefix_set: AHashMap<B256, PrefixSetMut> = AHashMap::default();
-        let mut destroyed_accounts = AHashSet::default();
+        let mut storage_prefix_sets: HashMap<B256, PrefixSetMut> = HashMap::default();
+        let mut destroyed_accounts = HashSet::default();
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 
@@ -2051,7 +2098,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
             for (hashed_address, hashed_slots) in storage_entries {
                 account_prefix_set.insert(Nibbles::unpack(hashed_address));
                 for slot in hashed_slots {
-                    storage_prefix_set
+                    storage_prefix_sets
                         .entry(hashed_address)
                         .or_default()
                         .insert(Nibbles::unpack(slot));
@@ -2078,12 +2125,16 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
         {
             // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
             // are pre-loaded.
+            let prefix_sets = TriePrefixSets {
+                account_prefix_set: account_prefix_set.freeze(),
+                storage_prefix_sets: storage_prefix_sets
+                    .into_iter()
+                    .map(|(k, v)| (k, v.freeze()))
+                    .collect(),
+                destroyed_accounts,
+            };
             let (state_root, trie_updates) = StateRoot::from_tx(&self.tx)
-                .with_changed_account_prefixes(account_prefix_set.freeze())
-                .with_changed_storage_prefixes(
-                    storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
-                )
-                .with_destroyed_accounts(destroyed_accounts)
+                .with_prefix_sets(prefix_sets)
                 .root_with_updates()
                 .map_err(Into::<reth_db::DatabaseError>::into)?;
             if state_root != expected_state_root {
@@ -2091,7 +2142,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                     root: GotExpected { got: state_root, expected: expected_state_root },
                     block_number: *range.end(),
                     block_hash: end_block_hash,
-                })));
+                })))
             }
             trie_updates.flush(&self.tx)?;
         }
@@ -2226,13 +2277,10 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
         if TAKE {
             let storage_range = BlockNumberAddress::range(range.clone());
 
-            // Initialize prefix sets.
-            let mut account_prefix_set = PrefixSetMut::default();
-            let mut storage_prefix_set: AHashMap<B256, PrefixSetMut> = AHashMap::default();
-            let mut destroyed_accounts = AHashSet::default();
-
             // Unwind account hashes. Add changed accounts to account prefix set.
             let hashed_addresses = self.unwind_account_hashing(range.clone())?;
+            let mut account_prefix_set = PrefixSetMut::with_capacity(hashed_addresses.len());
+            let mut destroyed_accounts = HashSet::default();
             for (hashed_address, account) in hashed_addresses {
                 account_prefix_set.insert(Nibbles::unpack(hashed_address));
                 if account.is_none() {
@@ -2245,15 +2293,15 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
 
             // Unwind storage hashes. Add changed account and storage keys to corresponding prefix
             // sets.
+            let mut storage_prefix_sets = HashMap::<B256, PrefixSet>::default();
             let storage_entries = self.unwind_storage_hashing(storage_range.clone())?;
             for (hashed_address, hashed_slots) in storage_entries {
                 account_prefix_set.insert(Nibbles::unpack(hashed_address));
+                let mut storage_prefix_set = PrefixSetMut::with_capacity(hashed_slots.len());
                 for slot in hashed_slots {
-                    storage_prefix_set
-                        .entry(hashed_address)
-                        .or_default()
-                        .insert(Nibbles::unpack(slot));
+                    storage_prefix_set.insert(Nibbles::unpack(slot));
                 }
+                storage_prefix_sets.insert(hashed_address, storage_prefix_set.freeze());
             }
 
             // Unwind storage history indices.
@@ -2262,12 +2310,13 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
             // Calculate the reverted merkle root.
             // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
             // are pre-loaded.
+            let prefix_sets = TriePrefixSets {
+                account_prefix_set: account_prefix_set.freeze(),
+                storage_prefix_sets,
+                destroyed_accounts,
+            };
             let (new_state_root, trie_updates) = StateRoot::from_tx(&self.tx)
-                .with_changed_account_prefixes(account_prefix_set.freeze())
-                .with_changed_storage_prefixes(
-                    storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
-                )
-                .with_destroyed_accounts(destroyed_accounts)
+                .with_prefix_sets(prefix_sets)
                 .root_with_updates()
                 .map_err(Into::<reth_db::DatabaseError>::into)?;
 
@@ -2287,7 +2336,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                     root: GotExpected { got: new_state_root, expected: parent_state_root },
                     block_number: parent_number,
                     block_hash: parent_hash,
-                })));
+                })))
             }
             trie_updates.flush(&self.tx)?;
         }
@@ -2310,7 +2359,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
             }
         }
 
-        Ok(Chain::new(blocks, execution_state))
+        Ok(Chain::new(blocks, execution_state, None))
     }
 }
 
@@ -2456,7 +2505,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to append empty block range");
-            return Ok(());
+            return Ok(())
         }
 
         let first_number = blocks.first().unwrap().number;

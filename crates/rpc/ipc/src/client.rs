@@ -116,7 +116,6 @@ impl IpcTransportClientBuilder {
 
 /// Error variants that can happen in IPC transport.
 #[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
 pub enum IpcError {
     /// Operation not supported
     #[error("operation not supported")]
@@ -128,9 +127,13 @@ pub enum IpcError {
     #[error("failed to connect to socket {path}: {err}")]
     FailedToConnect {
         /// The path of the socket.
+        #[doc(hidden)]
         path: PathBuf,
+        /// The error occurred while connecting.
+        #[doc(hidden)]
         err: io::Error,
     },
+    /// Wrapped IO Error
     #[error(transparent)]
     Io(#[from] io::Error),
 }

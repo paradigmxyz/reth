@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
@@ -21,7 +22,7 @@ fn generate_test_data_priority() -> (u128, u128, u128, u128) {
 }
 
 fn priority_bench(
-    group: &mut BenchmarkGroup<WallTime>,
+    group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
     input_data: (u128, u128, u128, u128),
 ) {
@@ -40,7 +41,7 @@ fn priority_bench(
 }
 
 fn fee_jump_bench(
-    group: &mut BenchmarkGroup<WallTime>,
+    group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
     input_data: (u128, u128),
 ) {
@@ -53,7 +54,7 @@ fn fee_jump_bench(
     });
 }
 
-pub fn blob_priority_calculation(c: &mut Criterion) {
+fn blob_priority_calculation(c: &mut Criterion) {
     let mut group = c.benchmark_group("Blob priority calculation");
     let fee_jump_input = generate_test_data_fee_delta();
 

@@ -55,6 +55,7 @@ mod tests {
         AccountHistory, DatabaseEnv,
     };
     use reth_interfaces::test_utils::generators::{self, random_block};
+    use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode,
         PruneModes, SealedBlock, U256,
@@ -81,11 +82,11 @@ mod tests {
         provider_rw.insert_block(block.clone().try_seal_with_senders().unwrap(), None).unwrap();
 
         // Fill with bogus blocks to respect PruneMode distance.
-        let mut head = block.hash;
+        let mut head = block.hash();
         let mut rng = generators::rng();
         for block_number in 2..=tip {
             let nblock = random_block(&mut rng, block_number, Some(head), Some(0), Some(0));
-            head = nblock.hash;
+            head = nblock.hash();
             provider_rw.insert_block(nblock.try_seal_with_senders().unwrap(), None).unwrap();
         }
         provider_rw.commit().unwrap();
@@ -128,13 +129,15 @@ mod tests {
             // Check execution and create receipts and changesets according to the pruning
             // configuration
             let mut execution_stage = ExecutionStage::new(
-                EvmProcessorFactory::new(Arc::new(
-                    ChainSpecBuilder::mainnet().berlin_activated().build(),
-                )),
+                EvmProcessorFactory::new(
+                    Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()),
+                    EthEvmConfig::default(),
+                ),
                 ExecutionStageThresholds {
                     max_blocks: Some(100),
                     max_changes: None,
                     max_cumulative_gas: None,
+                    max_duration: None,
                 },
                 MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
                 prune_modes.clone(),

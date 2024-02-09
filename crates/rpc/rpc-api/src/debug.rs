@@ -5,7 +5,7 @@ use reth_rpc_types::{
         BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
         TraceResult,
     },
-    Bundle, CallRequest, RichBlock, StateContext,
+    Bundle, RichBlock, StateContext, TransactionRequest,
 };
 
 /// Debug rpc interface.
@@ -102,7 +102,7 @@ pub trait DebugApi {
     #[method(name = "traceCall")]
     async fn debug_trace_call(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         block_number: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace>;

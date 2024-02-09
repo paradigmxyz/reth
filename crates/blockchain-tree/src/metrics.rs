@@ -19,6 +19,10 @@ pub struct TreeMetrics {
     pub latest_reorg_depth: Gauge,
     /// Longest sidechain height
     pub longest_sidechain_height: Gauge,
+    /// The number of times cached trie updates were used for insert.
+    pub trie_updates_insert_cached: Counter,
+    /// The number of times trie updates were recomputed for insert.
+    pub trie_updates_insert_recomputed: Counter,
 }
 
 /// Metrics for the blockchain tree block buffer

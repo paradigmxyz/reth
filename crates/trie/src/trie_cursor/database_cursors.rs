@@ -45,8 +45,10 @@ impl<C> TrieCursor for DatabaseAccountTrieCursor<C>
 where
     C: DbCursorRO<tables::AccountsTrie>,
 {
+    /// The type of key used by this cursor.
     type Key = StoredNibbles;
 
+    /// Seeks an exact match for the provided key in the account trie.
     fn seek_exact(
         &mut self,
         key: Self::Key,
@@ -54,6 +56,7 @@ where
         Ok(self.0.seek_exact(key)?.map(|value| (value.0 .0.to_vec(), value.1 .0)))
     }
 
+    /// Seeks a key in the account trie that matches or is greater than the provided key.
     fn seek(
         &mut self,
         key: Self::Key,
@@ -61,6 +64,7 @@ where
         Ok(self.0.seek(key)?.map(|value| (value.0 .0.to_vec(), value.1 .0)))
     }
 
+    /// Retrieves the current key in the cursor.
     fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
         Ok(self.0.current()?.map(|(k, _)| TrieKey::AccountNode(k)))
     }
@@ -71,6 +75,7 @@ where
 pub struct DatabaseStorageTrieCursor<C> {
     /// The underlying cursor.
     pub cursor: C,
+    /// Hashed address used for cursor positioning.
     hashed_address: B256,
 }
 
@@ -85,8 +90,10 @@ impl<C> TrieCursor for DatabaseStorageTrieCursor<C>
 where
     C: DbDupCursorRO<tables::StoragesTrie> + DbCursorRO<tables::StoragesTrie>,
 {
+    /// Defines the type for keys used in the storage trie cursor.
     type Key = StoredNibblesSubKey;
 
+    /// Seeks an exact match for the given key in the storage trie.
     fn seek_exact(
         &mut self,
         key: Self::Key,
@@ -98,6 +105,7 @@ where
             .map(|value| (value.nibbles.to_vec(), value.node)))
     }
 
+    /// Seeks the given key in the storage trie.
     fn seek(
         &mut self,
         key: Self::Key,
@@ -108,6 +116,7 @@ where
             .map(|value| (value.nibbles.to_vec(), value.node)))
     }
 
+    /// Retrieves the current value in the storage trie cursor.
     fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
         Ok(self.cursor.current()?.map(|(k, v)| TrieKey::StorageNode(k, v.nibbles)))
     }

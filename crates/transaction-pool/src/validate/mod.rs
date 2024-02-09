@@ -22,7 +22,9 @@ pub use eth::*;
 pub use task::{TransactionValidationTaskExecutor, ValidationTask};
 
 /// Validation constants.
-pub use constants::{MAX_CODE_SIZE, MAX_INIT_CODE_SIZE, TX_MAX_SIZE, TX_SLOT_SIZE};
+pub use constants::{
+    MAX_CODE_BYTE_SIZE, MAX_INIT_CODE_BYTE_SIZE, MAX_TX_INPUT_BYTES, TX_SLOT_BYTE_SIZE,
+};
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
@@ -61,17 +63,17 @@ impl<T: PoolTransaction> TransactionValidationOutcome<T> {
     }
 
     /// Returns true if the transaction is valid.
-    pub fn is_valid(&self) -> bool {
+    pub const fn is_valid(&self) -> bool {
         matches!(self, Self::Valid { .. })
     }
 
     /// Returns true if the transaction is invalid.
-    pub fn is_invalid(&self) -> bool {
+    pub const fn is_invalid(&self) -> bool {
         matches!(self, Self::Invalid(_, _))
     }
 
     /// Returns true if validation resulted in an error.
-    pub fn is_error(&self) -> bool {
+    pub const fn is_error(&self) -> bool {
         matches!(self, Self::Error(_, _))
     }
 }
@@ -114,10 +116,9 @@ impl<T> ValidTransaction<T> {
 
 impl<T: PoolTransaction> ValidTransaction<T> {
     #[inline]
-    pub(crate) fn transaction(&self) -> &T {
+    pub(crate) const fn transaction(&self) -> &T {
         match self {
-            Self::Valid(transaction) => transaction,
-            Self::ValidWithSidecar { transaction, .. } => transaction,
+            Self::Valid(transaction) | Self::ValidWithSidecar { transaction, .. } => transaction,
         }
     }
 
@@ -247,12 +248,12 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 
     /// Returns the internal identifier for the sender of this transaction
-    pub(crate) fn sender_id(&self) -> SenderId {
+    pub(crate) const fn sender_id(&self) -> SenderId {
         self.transaction_id.sender
     }
 
     /// Returns the internal identifier for this transaction.
-    pub(crate) fn id(&self) -> &TransactionId {
+    pub(crate) const fn id(&self) -> &TransactionId {
         &self.transaction_id
     }
 
@@ -309,7 +310,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 
     /// Whether the transaction originated locally.
-    pub fn is_local(&self) -> bool {
+    pub const fn is_local(&self) -> bool {
         self.origin.is_local()
     }
 
@@ -355,13 +356,12 @@ impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
 }
 
 impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(fmt, "Transaction {{ ")?;
-        write!(fmt, "hash: {:?}, ", &self.transaction.hash())?;
-        write!(fmt, "provides: {:?}, ", &self.transaction_id)?;
-        write!(fmt, "raw tx: {:?}", &self.transaction)?;
-        write!(fmt, "}}")?;
-        Ok(())
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ValidPoolTransaction")
+            .field("hash", self.transaction.hash())
+            .field("provides", &self.transaction_id)
+            .field("raw_tx", &self.transaction)
+            .finish()
     }
 }
 

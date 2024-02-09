@@ -3,6 +3,7 @@
 name: hive
 
 on:
+  workflow_dispatch:
   schedule:
     # every day
     - cron: "0 0 * * *"
@@ -27,7 +28,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: .
-          tags: paradigmxyz/reth:main
+          tags: ghcr.io/paradigmxyz/reth:latest
           build-args: BUILD_PROFILE=hivetests
           outputs: type=docker,dest=./artifacts/reth_image.tar
           cache-from: type=gha
@@ -57,50 +58,46 @@ jobs:
           path: ./artifacts
 
   test:
-    continue-on-error: ${{ matrix.experimental }}
     strategy:
+      fail-fast: false
       matrix:
-        experimental: [true]
         sim: [ethereum/rpc, smoke/genesis, smoke/network, ethereum/sync]
         include:
           - sim: devp2p
             limit: discv4
-            experimental: true
           - sim: devp2p
             limit: eth
-            # we have excluded these tests because we do not support block
-            # announcements
-            # exclude: [TestLargeAnnounce, TestBroadcast, TestBlockHashAnnounce]
             include:
+              # status
               - TestStatus
+              # get block headers
               - TestGetBlockHeaders
               - TestSimultaneousRequests
               - TestSameRequestID
               - TestZeroRequestID
+              # get block bodies
               - TestGetBlockBodies
+              # malicious handshakes + status
               - TestMaliciousHandshake
               - TestMaliciousStatus
+              # test transactions
+              - TestLargeTxRequest
               - TestTransaction
-              - TestMaliciousTx
-            experimental: true
+              - TestInvalidTxs
+              - TestNewPooledTxs
+              - TestBlobViolations
           - sim: ethereum/engine
             limit: engine-exchange-capabilities
-            experimental: true
           - sim: ethereum/engine
             limit: engine-withdrawals
-            experimental: true
           - sim: ethereum/engine
             limit: engine-auth
-            experimental: true
           - sim: ethereum/engine
             limit: engine-transition
-            experimental: true
           - sim: ethereum/engine
             limit: engine-api
-            experimental: true
           - sim: ethereum/engine
             limit: cancun
-            experimental: true
             # eth_ rpc methods
           - sim: ethereum/rpc-compat
             include:
@@ -120,7 +117,6 @@ jobs:
               - eth_getTransactionReceipt
               - eth_sendRawTransaction
               - eth_syncing
-            experimental: true
             # not running eth_getProof tests because we do not support
             # eth_getProof yet
             # - sim: ethereum/rpc-compat
@@ -129,56 +125,39 @@ jobs:
             # debug_ rpc methods
           - sim: ethereum/rpc-compat
             include: [debug_]
-            experimental: true
           # Pyspec cancun jobs
           - sim: pyspec
             include: [cancun/eip4844]
-            experimental: true
           - sim: pyspec
             include: [cancun/eip4788]
-            experimental: true
           - sim: pyspec
             include: [cancun/eip6780]
-            experimental: true
           - sim: pyspec
             include: [cancun/eip5656]
-            experimental: true
           - sim: pyspec
             include: [cancun/eip1153]
-            experimental: true
           - sim: pyspec
             include: [cancun/eip7516]
-            experimental: true
           # Pyspec shanghai jobs
           - sim: pyspec
             include: [shanghai/eip3651]
-            experimental: true
           - sim: pyspec
             include: [shanghai/eip3855]
-            experimental: true
           - sim: pyspec
             include: [shanghai/eip3860]
-            experimental: true
           - sim: pyspec
             include: [shanghai/eip4895]
-            experimental: true
           # Pyspec merge and earlier jobs
           - sim: pyspec
             include: [merge/]
-            experimental: true
           - sim: pyspec
             include: [berlin/]
-            experimental: true
           - sim: pyspec
             include: [istanbul/]
-            experimental: true
           - sim: pyspec
             include: [homestead/]
-            experimental: true
           - sim: pyspec
             include: [frontier/]
-            experimental: true
-      fail-fast: false
     needs: prepare
     name: run
     runs-on:

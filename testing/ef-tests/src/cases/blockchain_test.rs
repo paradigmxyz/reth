@@ -6,6 +6,7 @@ use crate::{
 };
 use alloy_rlp::Decodable;
 use reth_db::test_utils::create_test_rw_db;
+use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{BlockBody, SealedBlock};
 use reth_provider::{BlockWriter, HashingWriter, ProviderFactory};
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
@@ -59,7 +60,7 @@ impl Case for BlockchainTestCase {
     fn run(&self) -> Result<(), Error> {
         // If the test is marked for skipping, return a Skipped error immediately.
         if self.skip {
-            return Err(Error::Skipped);
+            return Err(Error::Skipped)
         }
 
         // Iterate through test cases, filtering by the network type to exclude specific forks.
@@ -108,6 +109,7 @@ impl Case for BlockchainTestCase {
             // network.
             let _ = ExecutionStage::new_with_factory(reth_revm::EvmProcessorFactory::new(
                 Arc::new(case.network.clone().into()),
+                EthEvmConfig::default(),
             ))
             .execute(
                 &provider,
@@ -126,7 +128,11 @@ impl Case for BlockchainTestCase {
                     // Insert state hashes into the provider based on the expected state root.
                     let last_block = last_block.unwrap_or_default();
                     provider
-                        .insert_hashes(0..=last_block.number, last_block.hash, *expected_state_root)
+                        .insert_hashes(
+                            0..=last_block.number,
+                            last_block.hash(),
+                            *expected_state_root,
+                        )
                         .map_err(|err| Error::RethError(err.into()))?;
                 }
                 _ => return Err(Error::MissingPostState),
@@ -154,6 +160,7 @@ pub fn should_skip(path: &Path) -> bool {
         // funky test with `bigint 0x00` value in json :) not possible to happen on mainnet and require
         // custom json parser. https://github.com/ethereum/tests/issues/971
         | "ValueOverflow.json"
+        | "ValueOverflowParis.json"
 
         // txbyte is of type 02 and we dont parse tx bytes for this test to fail.
         | "typeTwoBerlin.json"
@@ -166,6 +173,7 @@ pub fn should_skip(path: &Path) -> bool {
         // Test check if gas price overflows, we handle this correctly but does not match tests specific
         // exception.
         | "HighGasPrice.json"
+        | "HighGasPriceParis.json"
 
         // Skip test where basefee/accesslist/difficulty is present but it shouldn't be supported in
         // London/Berlin/TheMerge. https://github.com/ethereum/tests/blob/5b7e1ab3ffaf026d99d20b17bb30f533a2c80c8b/GeneralStateTests/stExample/eip1559.json#L130

@@ -17,7 +17,7 @@ impl BlockExecutor for TestExecutor {
         _total_difficulty: U256,
     ) -> Result<(), BlockExecutionError> {
         if self.0.is_none() {
-            return Err(BlockExecutionError::UnavailableForTest);
+            return Err(BlockExecutionError::UnavailableForTest)
         }
         Ok(())
     }
@@ -28,7 +28,7 @@ impl BlockExecutor for TestExecutor {
         _total_difficulty: U256,
     ) -> Result<(), BlockExecutionError> {
         if self.0.is_none() {
-            return Err(BlockExecutionError::UnavailableForTest);
+            return Err(BlockExecutionError::UnavailableForTest)
         }
         Ok(())
     }

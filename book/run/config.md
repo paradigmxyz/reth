@@ -131,22 +131,21 @@ The execution stage executes historical transactions. This stage is generally ve
 
 Each executed transaction also generates a number of changesets, and mutates the current state of accounts and storage.
 
-For this reason, there are two ways to control how much work to perform before the results are written to disk.
+For this reason, there are several ways to control how much work to perform before the results are written to disk.
 
 ```toml
 [stages.execution]
-# The maximum amount of blocks to execute before writing the results to disk.
+# The maximum number of blocks to process before the execution stage commits.
 max_blocks = 500000
-# The maximum amount of account and storage changes to collect before writing
-# the results to disk.
+# The maximum number of state changes to keep in memory before the execution stage commits.
 max_changes = 5000000
+# The maximum cumulative amount of gas to process before the execution stage commits.
+max_cumulative_gas = 1500000000000 # 30_000_000 * 50_000_000
+# The maximum time spent on blocks processing before the execution stage commits.
+max_duration = '10m'
 ```
 
-Either one of `max_blocks` or `max_changes` must be specified, and both can also be specified at the same time:
-
-- If only `max_blocks` is specified, reth will execute (up to) that amount of blocks before writing to disk.
-- If only `max_changes` is specified, reth will execute as many blocks as possible until the target amount of state transitions have occurred before writing to disk.
-- If both are specified, then the first threshold to be hit will determine when the results are written to disk.
+For all thresholds specified, the first to be hit will determine when the results are written to disk.
 
 Lower values correspond to more frequent disk writes, but also lower memory consumption. A lower value also negatively impacts sync speed, since reth keeps a cache around for the entire duration of blocks executed in the same range.
 
@@ -357,7 +356,7 @@ block_interval = 5
 
 [prune.parts]
 # Sender Recovery pruning configuration
-sender_recovery = { distance = 100_000 } # Prune all transaction senders before the block `head-128`, i.e. keep transaction senders for the last 129 blocks
+sender_recovery = { distance = 100_000 } # Prune all transaction senders before the block `head-100000`, i.e. keep transaction senders for the last 100001 blocks
 
 # Transaction Lookup pruning configuration
 transaction_lookup = "full" # Prune all TxNumber => TxHash mappings
@@ -366,10 +365,10 @@ transaction_lookup = "full" # Prune all TxNumber => TxHash mappings
 receipts = { before = 1920000 } # Prune all receipts from transactions before the block 1920000, i.e. keep receipts from the block 1920000
 
 # Account History pruning configuration
-account_history = { distance = 100_000 } # Prune all historical account states before the block `head-128`
+account_history = { distance = 100_000 } # Prune all historical account states before the block `head-100000`
 
 # Storage History pruning configuration
-storage_history = { distance = 100_000 } # Prune all historical storage states before the block `head-128`
+storage_history = { distance = 100_000 } # Prune all historical storage states before the block `head-100000`
 ```
 
 We can also prune receipts more granular, using the logs filtering:

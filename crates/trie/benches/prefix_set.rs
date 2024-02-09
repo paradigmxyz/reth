@@ -1,3 +1,4 @@
+#![allow(missing_docs, unreachable_pub)]
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
@@ -57,7 +58,7 @@ pub fn prefix_set_lookups(c: &mut Criterion) {
 }
 
 fn prefix_set_bench<T: PrefixSetAbstraction>(
-    group: &mut BenchmarkGroup<WallTime>,
+    group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
     (preload, input, expected): (Vec<Nibbles>, Vec<Nibbles>, Vec<bool>),
 ) {

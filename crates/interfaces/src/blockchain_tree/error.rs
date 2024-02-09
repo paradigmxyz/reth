@@ -151,8 +151,11 @@ impl std::fmt::Display for InsertBlockErrorData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Failed to insert block (hash={:?}, number={}, parent_hash={:?}): {}",
-            self.block.hash, self.block.number, self.block.parent_hash, self.kind
+            "Failed to insert block (hash={}, number={}, parent_hash={}): {}",
+            self.block.hash(),
+            self.block.number,
+            self.block.parent_hash,
+            self.kind
         )
     }
 }
@@ -161,7 +164,7 @@ impl std::fmt::Debug for InsertBlockErrorData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InsertBlockError")
             .field("error", &self.kind)
-            .field("hash", &self.block.hash)
+            .field("hash", &self.block.hash())
             .field("number", &self.block.number)
             .field("parent_hash", &self.block.parent_hash)
             .field("num_txs", &self.block.body.len())

@@ -1,6 +1,6 @@
 use crate::{
-    Address, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, Withdrawal,
-    B256,
+    Address, Bytes, GotExpected, Header, SealedHeader, TransactionSigned,
+    TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
@@ -27,7 +27,7 @@ pub struct Block {
     /// Ommers/uncles header.
     pub ommers: Vec<Header>,
     /// Block withdrawals.
-    pub withdrawals: Option<Vec<Withdrawal>>,
+    pub withdrawals: Option<Withdrawals>,
 }
 
 impl Block {
@@ -64,16 +64,37 @@ impl Block {
     ///
     /// If the number of senders does not match the number of transactions in the block
     /// and the signer recovery for one of the transactions fails.
+    ///
+    /// Note: this is expected to be called with blocks read from disk.
     #[track_caller]
-    pub fn with_senders(self, senders: Vec<Address>) -> BlockWithSenders {
+    pub fn with_senders_unchecked(self, senders: Vec<Address>) -> BlockWithSenders {
+        self.try_with_senders_unchecked(senders).expect("stored block is valid")
+    }
+
+    /// Transform into a [`BlockWithSenders`] using the given senders.
+    ///
+    /// If the number of senders does not match the number of transactions in the block, this falls
+    /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
+    /// See also [TransactionSigned::recover_signer_unchecked]
+    ///
+    /// Returns an error if a signature is invalid.
+    #[track_caller]
+    pub fn try_with_senders_unchecked(
+        self,
+        senders: Vec<Address>,
+    ) -> Result<BlockWithSenders, Self> {
         let senders = if self.body.len() == senders.len() {
             senders
         } else {
-            TransactionSigned::recover_signers(&self.body, self.body.len())
-                .expect("stored block is valid")
+            let Some(senders) =
+                TransactionSigned::recover_signers_unchecked(&self.body, self.body.len())
+            else {
+                return Err(self)
+            };
+            senders
         };
 
-        BlockWithSenders { block: self, senders }
+        Ok(BlockWithSenders { block: self, senders })
     }
 
     /// **Expensive**. Transform into a [`BlockWithSenders`] by recovering senders in the contained
@@ -98,7 +119,7 @@ impl Block {
             // take into account capacity
             self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
-            self.withdrawals.as_ref().map(|w| w.iter().map(Withdrawal::size).sum::<usize>() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
+            self.withdrawals.as_ref().map_or(std::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 }
 
@@ -198,7 +219,7 @@ pub struct SealedBlock {
     /// Ommer/uncle headers
     pub ommers: Vec<Header>,
     /// Block withdrawals.
-    pub withdrawals: Option<Vec<Withdrawal>>,
+    pub withdrawals: Option<Withdrawals>,
 }
 
 impl SealedBlock {
@@ -211,7 +232,7 @@ impl SealedBlock {
 
     /// Header hash.
     #[inline]
-    pub fn hash(&self) -> B256 {
+    pub const fn hash(&self) -> B256 {
         self.header.hash()
     }
 
@@ -295,12 +316,42 @@ impl SealedBlock {
             // take into account capacity
             self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
-            self.withdrawals.as_ref().map(|w| w.iter().map(Withdrawal::size).sum::<usize>() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
+            self.withdrawals.as_ref().map_or(std::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 
     /// Calculates the total gas used by blob transactions in the sealed block.
     pub fn blob_gas_used(&self) -> u64 {
         self.blob_transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum()
+    }
+
+    /// Ensures that the transaction root in the block header is valid.
+    ///
+    /// The transaction root is the Keccak 256-bit hash of the root node of the trie structure
+    /// populated with each transaction in the transactions list portion of the block.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the calculated transaction root matches the one stored in the header,
+    /// indicating that the transactions in the block are correctly represented in the trie.
+    ///
+    /// Returns `Err(error)` if the transaction root validation fails, providing a `GotExpected`
+    /// error containing the calculated and expected roots.
+    pub fn ensure_transaction_root_valid(&self) -> Result<(), GotExpected<B256>> {
+        let calculated_root = crate::proofs::calculate_transaction_root(&self.body);
+
+        if self.header.transactions_root != calculated_root {
+            return Err(GotExpected {
+                got: calculated_root,
+                expected: self.header.transactions_root,
+            })
+        }
+
+        Ok(())
+    }
+
+    /// Returns a vector of transactions RLP encoded with [TransactionSigned::encode_enveloped].
+    pub fn raw_transactions(&self) -> Vec<Bytes> {
+        self.body.iter().map(|tx| tx.envelope_encoded()).collect()
     }
 }
 
@@ -423,11 +474,9 @@ pub struct BlockBody {
     /// Withdrawals in the block.
     #[cfg_attr(
         any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::option::of(proptest::collection::vec(proptest::arbitrary::any::<Withdrawal>(), 0..=16))"
-        )
+        proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Withdrawals>())")
     )]
-    pub withdrawals: Option<Vec<Withdrawal>>,
+    pub withdrawals: Option<Withdrawals>,
 }
 
 impl BlockBody {
@@ -466,16 +515,12 @@ impl BlockBody {
             self.ommers.capacity() * std::mem::size_of::<Header>() +
             self.withdrawals
                 .as_ref()
-                .map(|w| {
-                    w.iter().map(Withdrawal::size).sum::<usize>() +
-                        w.capacity() * std::mem::size_of::<Withdrawal>()
-                })
-                .unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
+                .map_or(std::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::{BlockId, BlockNumberOrTag::*, *};
     use crate::hex_literal::hex;
     use alloy_rlp::{Decodable, Encodable};

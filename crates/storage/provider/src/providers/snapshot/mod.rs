@@ -39,7 +39,7 @@ impl Deref for LoadedJar {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use crate::{test_utils::create_test_provider_factory, HeaderProvider};
     use rand::{self, seq::SliceRandom};
@@ -77,7 +77,7 @@ mod test {
         let tx = provider_rw.tx_mut();
         let mut td = U256::ZERO;
         for header in headers.clone() {
-            td += header.header.difficulty;
+            td += header.header().difficulty;
             let hash = header.hash();
 
             tx.put::<CanonicalHeaders>(header.number, hash).unwrap();

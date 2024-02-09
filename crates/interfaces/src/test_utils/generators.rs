@@ -385,7 +385,7 @@ pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: O
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use reth_primitives::{
         hex, public_key_to_address, AccessList, Signature, TransactionKind, TxEip1559,

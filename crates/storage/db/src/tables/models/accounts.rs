@@ -123,7 +123,7 @@ impl Decode for BlockNumberAddress {
 impl_fixed_arbitrary!(BlockNumberAddress, 28);
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use rand::{thread_rng, Rng};
     use std::str::FromStr;

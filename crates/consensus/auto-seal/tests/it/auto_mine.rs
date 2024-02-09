@@ -7,7 +7,7 @@ use reth::{
         components::RethNodeComponents,
         ext::{NoArgs, NoArgsCliExt, RethNodeCommandConfig},
     },
-    node::NodeCommand,
+    commands::node::NodeCommand,
     runner::CliRunner,
     tasks::TaskSpawner,
 };
@@ -57,7 +57,7 @@ impl RethNodeCommandConfig for AutoMineConfig {
 /// process transactions.
 #[test]
 #[cfg_attr(feature = "optimism", ignore)]
-pub fn test_auto_mine() {
+pub(crate) fn test_auto_mine() {
     // create temp path for test
     let temp_path = tempfile::TempDir::new().expect("tempdir is okay").into_path();
     let datadir = temp_path.to_str().expect("temp path is okay");

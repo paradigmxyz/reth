@@ -1,6 +1,6 @@
 //! Connection tests
 
-use ethers_core::utils::Geth;
+use alloy_node_bindings::Geth;
 use ethers_providers::{Http, Middleware, Provider};
 use futures::StreamExt;
 use reth_discv4::Discv4Config;
@@ -21,7 +21,6 @@ use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
 use std::{collections::HashSet, net::SocketAddr, time::Duration};
 use tokio::task;
-
 #[tokio::test(flavor = "multi_thread")]
 async fn test_establish_connections() {
     reth_tracing::init_test_tracing();

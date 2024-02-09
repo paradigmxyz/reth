@@ -44,13 +44,12 @@ pub trait EngineHook: Send + Sync + 'static {
     /// Returns a human-readable name for the hook.
     fn name(&self) -> &'static str;
 
-    /// Advances the hook execution, emitting an [event][`EngineHookEvent`] and an optional
-    /// [action][`EngineHookAction`].
+    /// Advances the hook execution, emitting an [event][`EngineHookEvent`].
     fn poll(
         &mut self,
         cx: &mut Context<'_>,
         ctx: EngineContext,
-    ) -> Poll<RethResult<(EngineHookEvent, Option<EngineHookAction>)>>;
+    ) -> Poll<RethResult<EngineHookEvent>>;
 
     /// Returns [db access level][`EngineHookDBAccessLevel`] the hook needs.
     fn db_access_level(&self) -> EngineHookDBAccessLevel;
@@ -93,10 +92,6 @@ impl EngineHookEvent {
         matches!(self, Self::Finished(_))
     }
 }
-
-/// An action that the caller of [hook][`EngineHook`] should act upon.
-#[derive(Debug, Copy, Clone)]
-pub enum EngineHookAction {}
 
 /// An error returned by [hook][`EngineHook`].
 #[derive(Debug, thiserror::Error)]

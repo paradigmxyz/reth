@@ -1,3 +1,4 @@
+#![allow(unreachable_pub)]
 use itertools::concat;
 use reth_db::{
     cursor::DbCursorRO,

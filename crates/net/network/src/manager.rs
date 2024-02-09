@@ -29,7 +29,7 @@ use crate::{
     protocol::IntoRlpxSubProtocol,
     session::SessionManager,
     state::NetworkState,
-    swarm::{NetworkConnectionState, Swarm, SwarmEvent},
+    swarm::{Swarm, SwarmEvent},
     transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
@@ -224,7 +224,7 @@ where
             Arc::clone(&num_active_peers),
         );
 
-        let swarm = Swarm::new(incoming, sessions, state, NetworkConnectionState::default());
+        let swarm = Swarm::new(incoming, sessions, state);
 
         let (to_manager_tx, from_handle_rx) = mpsc::unbounded_channel();
 
@@ -524,7 +524,7 @@ where
                 if self.handle.mode().is_stake() {
                     // See [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
                     warn!(target: "net", "Peer performed block propagation, but it is not supported in proof of stake (EIP-3675)");
-                    return;
+                    return
                 }
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
                 self.swarm.state_mut().announce_new_block(msg);
@@ -551,6 +551,14 @@ where
             NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
                 self.swarm.sessions_mut().disconnect(peer_id, reason);
             }
+            NetworkHandleMessage::SetNetworkState(net_state) => {
+                // Sets network connection state between Active and Hibernate.
+                // If hibernate stops the node to fill new outbound
+                // connections, this is beneficial for sync stages that do not require a network
+                // connection.
+                self.swarm.on_network_state_change(net_state);
+            }
+
             NetworkHandleMessage::Shutdown(tx) => {
                 // Set connection status to `Shutdown`. Stops node to accept
                 // new incoming connections as well as sending connection requests to newly
@@ -647,7 +655,7 @@ where
                     // This is only possible if the channel was deliberately closed since we always
                     // have an instance of `NetworkHandle`
                     error!("Network message channel closed.");
-                    return Poll::Ready(());
+                    return Poll::Ready(())
                 }
                 Poll::Ready(Some(msg)) => this.on_handle_message(msg),
             };
@@ -918,7 +926,7 @@ where
             if budget == 0 {
                 // make sure we're woken up again
                 cx.waker().wake_by_ref();
-                break;
+                break
             }
         }
 

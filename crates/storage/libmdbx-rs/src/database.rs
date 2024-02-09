@@ -1,5 +1,5 @@
 use crate::{
-    error::{mdbx_result, Result},
+    error::{mdbx_result_with_tx_kind, Result},
     transaction::TransactionKind,
     Environment, Transaction,
 };
@@ -30,9 +30,13 @@ impl Database {
         let c_name = name.map(|n| CString::new(n).unwrap());
         let name_ptr = if let Some(c_name) = &c_name { c_name.as_ptr() } else { ptr::null() };
         let mut dbi: ffi::MDBX_dbi = 0;
-        mdbx_result(
-            txn.txn_execute(|txn| unsafe { ffi::mdbx_dbi_open(txn, name_ptr, flags, &mut dbi) }),
-        )?;
+        txn.txn_execute(|txn_ptr| {
+            mdbx_result_with_tx_kind::<K>(
+                unsafe { ffi::mdbx_dbi_open(txn_ptr, name_ptr, flags, &mut dbi) },
+                txn_ptr,
+                txn.env().txn_manager(),
+            )
+        })?;
         Ok(Self::new_from_ptr(dbi, txn.env().clone()))
     }
 

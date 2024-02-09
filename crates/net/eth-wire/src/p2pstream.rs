@@ -556,6 +556,13 @@ where
     }
 
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
+        if item.len() > MAX_PAYLOAD_SIZE {
+            return Err(P2PStreamError::MessageTooBig {
+                message_size: item.len(),
+                max_size: MAX_PAYLOAD_SIZE,
+            })
+        }
+
         // ensure we have free capacity
         if !self.has_outgoing_capacity() {
             return Err(P2PStreamError::SendBufferFull)
@@ -643,11 +650,11 @@ impl P2PMessage {
     }
 }
 
-/// The [`Encodable`] implementation for [`P2PMessage::Ping`] and [`P2PMessage::Pong`] encodes the
-/// message as RLP, and prepends a snappy header to the RLP bytes for all variants except the
-/// [`P2PMessage::Hello`] variant, because the hello message is never compressed in the `p2p`
-/// subprotocol.
 impl Encodable for P2PMessage {
+    /// The [`Encodable`] implementation for [`P2PMessage::Ping`] and [`P2PMessage::Pong`] encodes
+    /// the message as RLP, and prepends a snappy header to the RLP bytes for all variants except
+    /// the [`P2PMessage::Hello`] variant, because the hello message is never compressed in the
+    /// `p2p` subprotocol.
     fn encode(&self, out: &mut dyn BufMut) {
         (self.message_id() as u8).encode(out);
         match self {
@@ -680,13 +687,13 @@ impl Encodable for P2PMessage {
     }
 }
 
-/// The [`Decodable`] implementation for [`P2PMessage`] assumes that each of the message variants
-/// are snappy compressed, except for the [`P2PMessage::Hello`] variant since the hello message is
-/// never compressed in the `p2p` subprotocol.
-///
-/// The [`Decodable`] implementation for [`P2PMessage::Ping`] and [`P2PMessage::Pong`] expects a
-/// snappy encoded payload, see [`Encodable`] implementation.
 impl Decodable for P2PMessage {
+    /// The [`Decodable`] implementation for [`P2PMessage`] assumes that each of the message
+    /// variants are snappy compressed, except for the [`P2PMessage::Hello`] variant since the
+    /// hello message is never compressed in the `p2p` subprotocol.
+    ///
+    /// The [`Decodable`] implementation for [`P2PMessage::Ping`] and [`P2PMessage::Pong`] expects
+    /// a snappy encoded payload, see [`Encodable`] implementation.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         /// Removes the snappy prefix from the Ping/Pong buffer
         fn advance_snappy_ping_pong_payload(buf: &mut &[u8]) -> alloy_rlp::Result<()> {

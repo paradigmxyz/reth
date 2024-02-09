@@ -1,26 +1,45 @@
 //! Utils for testing purposes.
 
 use crate::{
-    error::PayloadBuilderError, traits::KeepPayloadJobAlive, BuiltPayload,
-    PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
+    error::PayloadBuilderError, traits::KeepPayloadJobAlive, EthBuiltPayload,
+    EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
     PayloadJobGenerator,
 };
+use reth_node_api::EngineTypes;
 use reth_primitives::{Block, U256};
+use reth_provider::CanonStateNotification;
 use std::{
     future::Future,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 
 /// Creates a new [PayloadBuilderService] for testing purposes.
-pub fn test_payload_service(
-) -> (PayloadBuilderService<TestPayloadJobGenerator>, PayloadBuilderHandle) {
-    PayloadBuilderService::new(Default::default())
+pub fn test_payload_service<Engine>() -> (
+    PayloadBuilderService<
+        TestPayloadJobGenerator,
+        futures_util::stream::Empty<CanonStateNotification>,
+        Engine,
+    >,
+    PayloadBuilderHandle<Engine>,
+)
+where
+    Engine: EngineTypes<
+        PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+        BuiltPayload = EthBuiltPayload,
+    >,
+{
+    PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
 }
 
 /// Creates a new [PayloadBuilderService] for testing purposes and spawns it in the background.
-pub fn spawn_test_payload_service() -> PayloadBuilderHandle {
+pub fn spawn_test_payload_service<Engine>() -> PayloadBuilderHandle<Engine>
+where
+    Engine: EngineTypes<
+            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+            BuiltPayload = EthBuiltPayload,
+        > + 'static,
+{
     let (service, handle) = test_payload_service();
     tokio::spawn(service);
     handle
@@ -36,7 +55,7 @@ impl PayloadJobGenerator for TestPayloadJobGenerator {
 
     fn new_payload_job(
         &self,
-        attr: PayloadBuilderAttributes,
+        attr: EthPayloadBuilderAttributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
         Ok(TestPayloadJob { attr })
     }
@@ -45,7 +64,7 @@ impl PayloadJobGenerator for TestPayloadJobGenerator {
 /// A [PayloadJobGenerator] for testing purposes
 #[derive(Debug)]
 pub struct TestPayloadJob {
-    attr: PayloadBuilderAttributes,
+    attr: EthPayloadBuilderAttributes,
 }
 
 impl Future for TestPayloadJob {
@@ -57,18 +76,16 @@ impl Future for TestPayloadJob {
 }
 
 impl PayloadJob for TestPayloadJob {
+    type PayloadAttributes = EthPayloadBuilderAttributes;
     type ResolvePayloadFuture =
-        futures_util::future::Ready<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
+        futures_util::future::Ready<Result<EthBuiltPayload, PayloadBuilderError>>;
+    type BuiltPayload = EthBuiltPayload;
 
-    fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
-        Ok(Arc::new(BuiltPayload::new(
-            self.attr.payload_id(),
-            Block::default().seal_slow(),
-            U256::ZERO,
-        )))
+    fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
+        Ok(EthBuiltPayload::new(self.attr.payload_id(), Block::default().seal_slow(), U256::ZERO))
     }
 
-    fn payload_attributes(&self) -> Result<PayloadBuilderAttributes, PayloadBuilderError> {
+    fn payload_attributes(&self) -> Result<EthPayloadBuilderAttributes, PayloadBuilderError> {
         Ok(self.attr.clone())
     }
 

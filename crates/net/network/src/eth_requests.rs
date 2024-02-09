@@ -98,7 +98,7 @@ where
         };
 
         let skip = skip as u64;
-        let mut total_bytes = APPROX_HEADER_SIZE;
+        let mut total_bytes = 0;
 
         for _ in 0..limit {
             if let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
@@ -128,13 +128,11 @@ where
                 }
 
                 headers.push(header);
-
                 if headers.len() >= MAX_HEADERS_SERVE {
                     break
                 }
 
                 total_bytes += APPROX_HEADER_SIZE;
-
                 if total_bytes > SOFT_RESPONSE_LIMIT {
                     break
                 }
@@ -166,7 +164,7 @@ where
         self.metrics.received_bodies_requests.increment(1);
         let mut bodies = Vec::new();
 
-        let mut total_bytes = APPROX_BODY_SIZE;
+        let mut total_bytes = 0;
 
         for hash in request.0 {
             if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
@@ -177,14 +175,12 @@ where
                 };
 
                 bodies.push(body);
-
-                total_bytes += APPROX_BODY_SIZE;
-
-                if total_bytes > SOFT_RESPONSE_LIMIT {
+                if bodies.len() >= MAX_BODIES_SERVE {
                     break
                 }
 
-                if bodies.len() >= MAX_BODIES_SERVE {
+                total_bytes += APPROX_BODY_SIZE;
+                if total_bytes > SOFT_RESPONSE_LIMIT {
                     break
                 }
             } else {
@@ -203,26 +199,24 @@ where
     ) {
         let mut receipts = Vec::new();
 
-        let mut total_bytes = APPROX_RECEIPT_SIZE;
+        let mut total_bytes = 0;
 
         for hash in request.0 {
             if let Some(receipts_by_block) =
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
             {
-                receipts.push(
-                    receipts_by_block
-                        .into_iter()
-                        .map(|receipt| receipt.with_bloom())
-                        .collect::<Vec<_>>(),
-                );
+                let receipt = receipts_by_block
+                    .into_iter()
+                    .map(|receipt| receipt.with_bloom())
+                    .collect::<Vec<_>>();
 
-                total_bytes += APPROX_RECEIPT_SIZE;
-
-                if total_bytes > SOFT_RESPONSE_LIMIT {
+                receipts.push(receipt);
+                if receipts.len() >= MAX_RECEIPTS_SERVE {
                     break
                 }
 
-                if receipts.len() >= MAX_RECEIPTS_SERVE {
+                total_bytes += APPROX_RECEIPT_SIZE;
+                if total_bytes > SOFT_RESPONSE_LIMIT {
                     break
                 }
             } else {
@@ -284,38 +278,49 @@ impl Borrow<(PeerId, GetBlockHeaders)> for RespondedGetBlockHeaders {
 
 /// All `eth` request related to blocks delegated by the network.
 #[derive(Debug)]
-#[allow(missing_docs)]
 pub enum IncomingEthRequest {
     /// Request Block headers from the peer.
     ///
     /// The response should be sent through the channel.
     GetBlockHeaders {
+        /// The ID of the peer to request block headers from.
         peer_id: PeerId,
+        /// The specific block headers requested.
         request: GetBlockHeaders,
+        /// The channel sender for the response containing block headers.
         response: oneshot::Sender<RequestResult<BlockHeaders>>,
     },
-    /// Request Block headers from the peer.
+    /// Request Block bodies from the peer.
     ///
     /// The response should be sent through the channel.
     GetBlockBodies {
+        /// The ID of the peer to request block bodies from.
         peer_id: PeerId,
+        /// The specific block bodies requested.
         request: GetBlockBodies,
+        /// The channel sender for the response containing block bodies.
         response: oneshot::Sender<RequestResult<BlockBodies>>,
     },
     /// Request Node Data from the peer.
     ///
     /// The response should be sent through the channel.
     GetNodeData {
+        /// The ID of the peer to request node data from.
         peer_id: PeerId,
+        /// The specific node data requested.
         request: GetNodeData,
+        /// The channel sender for the response containing node data.
         response: oneshot::Sender<RequestResult<NodeData>>,
     },
     /// Request Receipts from the peer.
     ///
     /// The response should be sent through the channel.
     GetReceipts {
+        /// The ID of the peer to request receipts from.
         peer_id: PeerId,
+        /// The specific receipts requested.
         request: GetReceipts,
+        /// The channel sender for the response containing receipts.
         response: oneshot::Sender<RequestResult<Receipts>>,
     },
 }

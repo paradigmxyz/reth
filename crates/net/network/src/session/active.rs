@@ -12,7 +12,6 @@ use crate::{
 use core::sync::atomic::Ordering;
 use fnv::FnvHashMap;
 use futures::{stream::Fuse, SinkExt, StreamExt};
-
 use reth_eth_wire::{
     capability::Capabilities,
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
@@ -161,7 +160,7 @@ impl ActiveSession {
                             // request was already timed out internally
                             self.update_request_timeout(req.timestamp, Instant::now());
                         }
-                    };
+                    }
                 } else {
                     // we received a response to a request we never sent
                     self.on_bad_message();

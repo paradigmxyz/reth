@@ -4,8 +4,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, unreachable_pub, rustdoc::all)] // TODO(danipopes): missing_docs
-#![deny(unused_must_use, rust_2018_idioms)]
+#![allow(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub use crate::{
@@ -13,7 +12,8 @@ pub use crate::{
     cursor::{Cursor, Iter, IterDup},
     database::Database,
     environment::{
-        Environment, EnvironmentBuilder, EnvironmentKind, Geometry, Info, PageSize, Stat,
+        Environment, EnvironmentBuilder, EnvironmentKind, Geometry, HandleSlowReadersCallback,
+        HandleSlowReadersReturnCode, Info, PageSize, Stat,
     },
     error::{Error, Result},
     flags::*,
@@ -23,6 +23,9 @@ pub mod ffi {
     pub use ffi::{MDBX_dbi as DBI, MDBX_log_level_t as LogLevel};
 }
 
+#[cfg(feature = "read-tx-timeouts")]
+pub use crate::environment::read_transactions::MaxReadTransactionDuration;
+
 mod codec;
 mod cursor;
 mod database;
@@ -30,6 +33,7 @@ mod environment;
 mod error;
 mod flags;
 mod transaction;
+mod txn_manager;
 
 #[cfg(test)]
 mod test_utils {
