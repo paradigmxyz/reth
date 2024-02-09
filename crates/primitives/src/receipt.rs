@@ -1,8 +1,10 @@
+#[cfg(not(feature = "optimism"))]
+use crate::proofs::calculate_receipt_root_ref;
+#[cfg(feature = "optimism")]
+use crate::proofs::calculate_receipt_root_ref_optimism;
 use crate::{
     compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR},
-    logs_bloom,
-    proofs::calculate_receipt_root_ref,
-    Bloom, Log, PruneSegmentError, TxType, B256,
+    logs_bloom, Bloom, Log, PruneSegmentError, TxType, B256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::{Buf, BufMut, BytesMut};
@@ -110,7 +112,7 @@ impl Receipts {
         chain_spec: &crate::ChainSpec,
         timestamp: u64,
     ) -> Option<B256> {
-        Some(calculate_receipt_root_ref(
+        Some(calculate_receipt_root_ref_optimism(
             &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
             chain_spec,
             timestamp,
