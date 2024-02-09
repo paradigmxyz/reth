@@ -34,15 +34,22 @@ use super::{
 #[derive(Debug)]
 #[pin_project]
 pub(super) struct TransactionFetcher {
-    /// All peers with an `inflight_requests`.
+    /// All peers with to which a [`GetPooledTransactions`] request is inflight.
     pub(super) active_peers: LruMap<PeerId, u8, ByLength>,
-    /// All currently active requests for pooled transactions.
+    /// All currently active [`GetPooledTransactions`] requests.
+    ///
+    /// The set of hashes encompassed by these requests are a subset of all hashes in the fetcher.
+    /// It's disjoint from the set of hashes which are awaiting an idle fallback peer in order to
+    /// be fetched.
     #[pin]
     pub(super) inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
-    /// Hashes that are awaiting an idle peer so they can be fetched.
+    /// Hashes that are awaiting an idle fallback peer so they can be fetched.
+    ///
+    /// This is a subset of all hashes in the fetcher, and is disjoint from the set of hashes for
+    /// which a [`GetPooledTransactions`] request is inflight.
     pub(super) hashes_pending_fetch: LruCache<TxHash>,
     /// Tracks all hashes in the transaction fetcher.
-    pub(super) hashes_unknown_to_pool: LruMap<TxHash, TxFetchMetadata, Unlimited>,
+    pub(super) hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, Unlimited>,
     /// Filter for valid eth68 announcements.
     pub(super) filter_valid_hashes: AnnouncementFilter,
     /// Info on capacity of the transaction fetcher.
@@ -59,7 +66,7 @@ impl TransactionFetcher {
         I: IntoIterator<Item = TxHash>,
     {
         for hash in hashes {
-            self.hashes_unknown_to_pool.remove(&hash);
+            self.hashes_fetch_inflight_and_pending_fetch.remove(&hash);
             self.hashes_pending_fetch.remove(&hash);
         }
     }
@@ -96,7 +103,8 @@ impl TransactionFetcher {
         hash: TxHash,
         is_session_active: impl Fn(&PeerId) -> bool,
     ) -> Option<&PeerId> {
-        let TxFetchMetadata { fallback_peers, .. } = self.hashes_unknown_to_pool.peek(&hash)?;
+        let TxFetchMetadata { fallback_peers, .. } =
+            self.hashes_fetch_inflight_and_pending_fetch.peek(&hash)?;
 
         for peer_id in fallback_peers.iter() {
             if self.is_idle(peer_id) && is_session_active(peer_id) {
@@ -261,7 +269,7 @@ impl TransactionFetcher {
         // It could be that the txns have been received over broadcast in the time being. Remove
         // the peer as fallback peer so it isn't request again for these hashes.
         hashes.retain(|hash| {
-            if let Some(entry) = self.hashes_unknown_to_pool.get(hash) {
+            if let Some(entry) = self.hashes_fetch_inflight_and_pending_fetch.get(hash) {
                 entry.fallback_peers_mut().remove(peer_failed_to_serve);
                 return true
             }
@@ -281,14 +289,14 @@ impl TransactionFetcher {
 
         for hash in hashes.into_iter() {
             debug_assert!(
-                self.hashes_unknown_to_pool.peek(&hash).is_some(),
+                self.hashes_fetch_inflight_and_pending_fetch.peek(&hash).is_some(),
                 "`%hash` in `@buffered_hashes` that's not in `@unknown_hashes`, `@buffered_hashes` should be a subset of keys in `@unknown_hashes`, broken invariant `@buffered_hashes` and `@unknown_hashes`,
 `%hash`: {hash},
 `@self`: {self:?}",
             );
 
             let Some(TxFetchMetadata { retries, fallback_peers, .. }) =
-                self.hashes_unknown_to_pool.get(&hash)
+                self.hashes_fetch_inflight_and_pending_fetch.get(&hash)
             else {
                 return
             };
@@ -411,7 +419,7 @@ impl TransactionFetcher {
         // filter out inflight hashes, and register the peer as fallback for all inflight hashes
         new_announced_hashes.retain(|hash, metadata| {
             // occupied entry
-            if let Some(TxFetchMetadata{ref mut fallback_peers, tx_encoded_length: ref mut previously_seen_size, ..}) = self.hashes_unknown_to_pool.peek_mut(hash) {
+            if let Some(TxFetchMetadata{ref mut fallback_peers, tx_encoded_length: ref mut previously_seen_size, ..}) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash) {
                 // update size metadata if available
                 if let Some((_ty, size)) = metadata {
                     if let Some(prev_size) = previously_seen_size {
@@ -472,7 +480,7 @@ impl TransactionFetcher {
             // todo: allow `MAX_ALTERNATIVE_PEERS_PER_TX` to be zero
             let limit = NonZeroUsize::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS.into()).expect("MAX_ALTERNATIVE_PEERS_PER_TX should be non-zero");
 
-            if self.hashes_unknown_to_pool.get_or_insert(*hash, ||
+            if self.hashes_fetch_inflight_and_pending_fetch.get_or_insert(*hash, ||
                 TxFetchMetadata{retries: 0, fallback_peers: LruCache::new(limit), tx_encoded_length: None}
             ).is_none() {
 
@@ -630,7 +638,7 @@ impl TransactionFetcher {
         let Some(hash) = hashes_to_request.first() else { return };
 
         let mut acc_size_response = self
-            .hashes_unknown_to_pool
+            .hashes_fetch_inflight_and_pending_fetch
             .get(hash)
             .and_then(|entry| entry.tx_encoded_len())
             .unwrap_or(AVERAGE_BYTE_SIZE_TX_ENCODED);
@@ -655,7 +663,7 @@ impl TransactionFetcher {
 
             // 3. Accumulate expected total response size.
             let size = self
-                .hashes_unknown_to_pool
+                .hashes_fetch_inflight_and_pending_fetch
                 .get(hash)
                 .and_then(|entry| entry.tx_encoded_len())
                 .unwrap_or(AVERAGE_BYTE_SIZE_TX_ENCODED);
@@ -819,7 +827,7 @@ impl Default for TransactionFetcher {
                 NonZeroUsize::new(DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH)
                     .expect("buffered cache limit should be non-zero"),
             ),
-            hashes_unknown_to_pool: LruMap::new_unlimited(),
+            hashes_fetch_inflight_and_pending_fetch: LruMap::new_unlimited(),
             filter_valid_hashes: Default::default(),
             tx_fetcher_info: TransactionFetcherInfo::default(),
         }
