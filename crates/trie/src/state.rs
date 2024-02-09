@@ -1,6 +1,6 @@
 use crate::{
     hashed_cursor::HashedPostStateCursorFactory,
-    prefix_set::{PrefixSet, PrefixSetMut},
+    prefix_set::{PrefixSetMut, TriePrefixSets},
     updates::TrieUpdates,
     StateRoot, StateRootError,
 };
@@ -163,14 +163,19 @@ impl HashedPostState {
         HashedPostStateSorted { accounts, destroyed_accounts, storages }
     }
 
-    /// Construct [PrefixSet] from hashed post state.
+    /// Construct [TriePrefixSets] from hashed post state.
     /// The prefix sets contain the hashed account and storage keys that have been changed in the
     /// post state.
-    pub fn construct_prefix_sets(&self) -> (PrefixSet, HashMap<B256, PrefixSet>) {
+    pub fn construct_prefix_sets(&self) -> TriePrefixSets {
         // Populate account prefix set.
         let mut account_prefix_set = PrefixSetMut::with_capacity(self.accounts.len());
-        for hashed_address in self.accounts.keys() {
+        let mut destroyed_accounts = HashSet::default();
+        for (hashed_address, account) in &self.accounts {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
+
+            if account.is_none() {
+                destroyed_accounts.insert(*hashed_address);
+            }
         }
 
         // Populate storage prefix sets.
@@ -185,7 +190,11 @@ impl HashedPostState {
             storage_prefix_sets.insert(*hashed_address, prefix_set.freeze());
         }
 
-        (account_prefix_set.freeze(), storage_prefix_sets)
+        TriePrefixSets {
+            account_prefix_set: account_prefix_set.freeze(),
+            storage_prefix_sets,
+            destroyed_accounts,
+        }
     }
 
     /// Calculate the state root for this [HashedPostState].
@@ -219,11 +228,10 @@ impl HashedPostState {
     /// The state root for this [HashedPostState].
     pub fn state_root<TX: DbTx>(&self, tx: &TX) -> Result<B256, StateRootError> {
         let sorted = self.clone().into_sorted();
-        let (account_prefix_set, storage_prefix_set) = self.construct_prefix_sets();
-        sorted
-            .state_root_calculator(tx)
-            .with_changed_account_prefixes(account_prefix_set)
-            .with_changed_storage_prefixes(storage_prefix_set)
+        let prefix_sets = self.construct_prefix_sets();
+        StateRoot::from_tx(tx)
+            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
+            .with_prefix_sets(prefix_sets)
             .root()
     }
 
@@ -234,11 +242,10 @@ impl HashedPostState {
         tx: &TX,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         let sorted = self.clone().into_sorted();
-        let (account_prefix_set, storage_prefix_set) = self.construct_prefix_sets();
-        sorted
-            .state_root_calculator(tx)
-            .with_changed_account_prefixes(account_prefix_set)
-            .with_changed_storage_prefixes(storage_prefix_set)
+        let prefix_sets = self.construct_prefix_sets();
+        StateRoot::from_tx(tx)
+            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
+            .with_prefix_sets(prefix_sets)
             .root_with_updates()
     }
 }
@@ -301,24 +308,6 @@ pub struct HashedPostStateSorted {
     pub(crate) destroyed_accounts: HashSet<B256>,
     /// Map of hashed addresses to hashed storage.
     pub(crate) storages: HashMap<B256, HashedStorageSorted>,
-}
-
-impl HashedPostStateSorted {
-    /// Returns all destroyed accounts.
-    pub fn destroyed_accounts(&self) -> HashSet<B256> {
-        self.destroyed_accounts.clone()
-    }
-
-    /// Returns [StateRoot] calculator based on database and in-memory state.
-    fn state_root_calculator<'a, TX: DbTx>(
-        &self,
-        tx: &'a TX,
-    ) -> StateRoot<&'a TX, HashedPostStateCursorFactory<'_, &'a TX>> {
-        let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, self);
-        StateRoot::from_tx(tx)
-            .with_hashed_cursor_factory(hashed_cursor_factory)
-            .with_destroyed_accounts(self.destroyed_accounts())
-    }
 }
 
 /// Sorted hashed storage optimized for iterating during state trie calculation.

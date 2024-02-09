@@ -42,7 +42,11 @@ use reth_primitives::{
     StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
-use reth_trie::{prefix_set::PrefixSetMut, updates::TrieUpdates, HashedPostState, StateRoot};
+use reth_trie::{
+    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
+    updates::TrieUpdates,
+    HashedPostState, StateRoot,
+};
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 use std::{
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
@@ -2081,7 +2085,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
     ) -> ProviderResult<()> {
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSetMut::default();
-        let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
+        let mut storage_prefix_sets: HashMap<B256, PrefixSetMut> = HashMap::default();
         let mut destroyed_accounts = HashSet::default();
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
@@ -2094,7 +2098,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
             for (hashed_address, hashed_slots) in storage_entries {
                 account_prefix_set.insert(Nibbles::unpack(hashed_address));
                 for slot in hashed_slots {
-                    storage_prefix_set
+                    storage_prefix_sets
                         .entry(hashed_address)
                         .or_default()
                         .insert(Nibbles::unpack(slot));
@@ -2121,12 +2125,16 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
         {
             // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
             // are pre-loaded.
+            let prefix_sets = TriePrefixSets {
+                account_prefix_set: account_prefix_set.freeze(),
+                storage_prefix_sets: storage_prefix_sets
+                    .into_iter()
+                    .map(|(k, v)| (k, v.freeze()))
+                    .collect(),
+                destroyed_accounts,
+            };
             let (state_root, trie_updates) = StateRoot::from_tx(&self.tx)
-                .with_changed_account_prefixes(account_prefix_set.freeze())
-                .with_changed_storage_prefixes(
-                    storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
-                )
-                .with_destroyed_accounts(destroyed_accounts)
+                .with_prefix_sets(prefix_sets)
                 .root_with_updates()
                 .map_err(Into::<reth_db::DatabaseError>::into)?;
             if state_root != expected_state_root {
@@ -2269,13 +2277,10 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
         if TAKE {
             let storage_range = BlockNumberAddress::range(range.clone());
 
-            // Initialize prefix sets.
-            let mut account_prefix_set = PrefixSetMut::default();
-            let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
-            let mut destroyed_accounts = HashSet::default();
-
             // Unwind account hashes. Add changed accounts to account prefix set.
             let hashed_addresses = self.unwind_account_hashing(range.clone())?;
+            let mut account_prefix_set = PrefixSetMut::with_capacity(hashed_addresses.len());
+            let mut destroyed_accounts = HashSet::default();
             for (hashed_address, account) in hashed_addresses {
                 account_prefix_set.insert(Nibbles::unpack(hashed_address));
                 if account.is_none() {
@@ -2288,15 +2293,15 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
 
             // Unwind storage hashes. Add changed account and storage keys to corresponding prefix
             // sets.
+            let mut storage_prefix_sets = HashMap::<B256, PrefixSet>::default();
             let storage_entries = self.unwind_storage_hashing(storage_range.clone())?;
             for (hashed_address, hashed_slots) in storage_entries {
                 account_prefix_set.insert(Nibbles::unpack(hashed_address));
+                let mut storage_prefix_set = PrefixSetMut::with_capacity(hashed_slots.len());
                 for slot in hashed_slots {
-                    storage_prefix_set
-                        .entry(hashed_address)
-                        .or_default()
-                        .insert(Nibbles::unpack(slot));
+                    storage_prefix_set.insert(Nibbles::unpack(slot));
                 }
+                storage_prefix_sets.insert(hashed_address, storage_prefix_set.freeze());
             }
 
             // Unwind storage history indices.
@@ -2305,12 +2310,13 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
             // Calculate the reverted merkle root.
             // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
             // are pre-loaded.
+            let prefix_sets = TriePrefixSets {
+                account_prefix_set: account_prefix_set.freeze(),
+                storage_prefix_sets,
+                destroyed_accounts,
+            };
             let (new_state_root, trie_updates) = StateRoot::from_tx(&self.tx)
-                .with_changed_account_prefixes(account_prefix_set.freeze())
-                .with_changed_storage_prefixes(
-                    storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
-                )
-                .with_destroyed_accounts(destroyed_accounts)
+                .with_prefix_sets(prefix_sets)
                 .root_with_updates()
                 .map_err(Into::<reth_db::DatabaseError>::into)?;
 
