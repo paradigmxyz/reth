@@ -8,7 +8,8 @@ use reth_primitives::{
     TransactionSigned, TransactionSignedEcRecovered, B256,
 };
 use reth_provider::{
-    BlockReader, CanonStateNotification, EvmEnvProvider, StateProviderFactory, TransactionVariant,
+    BlockReader, CanonStateNotification, Chain, EvmEnvProvider, StateProviderFactory,
+    TransactionVariant,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
@@ -359,6 +360,38 @@ where
         }
     }
 
+    fn on_reorg_block(&mut self, block_hash: B256, res: ProviderResult<Option<BlockWithSenders>>) {
+        if let Some(queued) = self.full_block_cache.remove(&block_hash) {
+            // send the response to queued senders
+            for tx in queued {
+                match tx {
+                    Either::Left(block_with_senders) => {
+                        let _ = block_with_senders.send(res.clone());
+                    }
+                    Either::Right(transaction_tx) => {
+                        let _ = transaction_tx.send(
+                            res.clone()
+                                .map(|maybe_block| maybe_block.map(|block| block.block.body)),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn on_reorg_receipts(
+        &mut self,
+        block_hash: B256,
+        res: ProviderResult<Option<Arc<Vec<Receipt>>>>,
+    ) {
+        if let Some(queued) = self.receipts_cache.remove(&block_hash) {
+            // send the response to queued senders
+            for tx in queued {
+                let _ = tx.send(res.clone());
+            }
+        }
+    }
+
     fn update_cached_metrics(&self) {
         self.full_block_cache.update_cached_metrics();
         self.receipts_cache.update_cached_metrics();
@@ -528,13 +561,27 @@ where
                                 this.evm_env_cache.insert(block_hash, data);
                             }
                         }
-                        CacheAction::CacheNewCanonicalChain { blocks, receipts } => {
-                            for block in blocks {
+                        CacheAction::CacheNewCanonicalChain { chain_change } => {
+                            for block in chain_change.blocks {
                                 this.on_new_block(block.hash(), Ok(Some(block.unseal())));
                             }
 
-                            for block_receipts in receipts {
+                            for block_receipts in chain_change.receipts {
                                 this.on_new_receipts(
+                                    block_receipts.block_hash,
+                                    Ok(Some(Arc::new(
+                                        block_receipts.receipts.into_iter().flatten().collect(),
+                                    ))),
+                                );
+                            }
+                        }
+                        CacheAction::RemoveReorgedChain { chain_change } => {
+                            for block in chain_change.blocks {
+                                this.on_reorg_block(block.hash(), Ok(Some(block.unseal())));
+                            }
+
+                            for block_receipts in chain_change.receipts {
+                                this.on_reorg_receipts(
                                     block_receipts.block_hash,
                                     Ok(Some(Arc::new(
                                         block_receipts.receipts.into_iter().flatten().collect(),
@@ -559,7 +606,8 @@ enum CacheAction {
     BlockWithSendersResult { block_hash: B256, res: ProviderResult<Option<BlockWithSenders>> },
     ReceiptsResult { block_hash: B256, res: ProviderResult<Option<Arc<Vec<Receipt>>>> },
     EnvResult { block_hash: B256, res: Box<ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>> },
-    CacheNewCanonicalChain { blocks: Vec<SealedBlockWithSenders>, receipts: Vec<BlockReceipts> },
+    CacheNewCanonicalChain { chain_change: ChainChange },
+    RemoveReorgedChain { chain_change: ChainChange },
 }
 
 struct BlockReceipts {
@@ -567,28 +615,48 @@ struct BlockReceipts {
     receipts: Vec<Option<Receipt>>,
 }
 
+/// A change of the canonical chain
+struct ChainChange {
+    blocks: Vec<SealedBlockWithSenders>,
+    receipts: Vec<BlockReceipts>,
+}
+
+impl ChainChange {
+    fn new(chain: Arc<Chain>) -> Self {
+        let (blocks, receipts): (Vec<_>, Vec<_>) = chain
+            .blocks_and_receipts()
+            .map(|(block, receipts)| {
+                let block_receipts =
+                    BlockReceipts { block_hash: block.block.hash(), receipts: receipts.clone() };
+                (block.clone(), block_receipts)
+            })
+            .unzip();
+        Self { blocks, receipts }
+    }
+}
+
 /// Awaits for new chain events and directly inserts them into the cache so they're available
 /// immediately before they need to be fetched from disk.
+///
+/// Reorged blocks are removed from the cache.
 pub async fn cache_new_blocks_task<St>(eth_state_cache: EthStateCache, mut events: St)
 where
     St: Stream<Item = CanonStateNotification> + Unpin + 'static,
 {
     while let Some(event) = events.next().await {
+        if let Some(reverted) = event.reverted() {
+            let chain_change = ChainChange::new(reverted);
+
+            let _ =
+                eth_state_cache.to_service.send(CacheAction::RemoveReorgedChain { chain_change });
+        }
+
         if let Some(committed) = event.committed() {
-            let (blocks, receipts): (Vec<_>, Vec<_>) = committed
-                .blocks_and_receipts()
-                .map(|(block, receipts)| {
-                    let block_receipts = BlockReceipts {
-                        block_hash: block.block.hash(),
-                        receipts: receipts.clone(),
-                    };
-                    (block.clone(), block_receipts)
-                })
-                .unzip();
+            let chain_change = ChainChange::new(committed);
 
             let _ = eth_state_cache
                 .to_service
-                .send(CacheAction::CacheNewCanonicalChain { blocks, receipts });
+                .send(CacheAction::CacheNewCanonicalChain { chain_change });
         }
     }
 }

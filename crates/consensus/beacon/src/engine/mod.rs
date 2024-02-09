@@ -1271,16 +1271,18 @@ where
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
         let block_hash = block.hash();
+        let start = Instant::now();
         let status = self
             .blockchain
             .insert_block_without_senders(block.clone(), BlockValidationKind::Exhaustive)?;
+        let elapsed = start.elapsed();
         let mut latest_valid_hash = None;
         let block = Arc::new(block);
         let status = match status {
             InsertPayloadOk::Inserted(BlockStatus::Valid(attachment)) => {
                 latest_valid_hash = Some(block_hash);
                 let event = if attachment.is_canonical() {
-                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block)
+                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed)
                 } else {
                     BeaconConsensusEngineEvent::ForkBlockAdded(block)
                 };

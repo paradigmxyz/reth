@@ -67,20 +67,25 @@ jobs:
             limit: discv4
           - sim: devp2p
             limit: eth
-            # we have excluded these tests because we do not support block
-            # announcements
-            # exclude: [TestLargeAnnounce, TestBroadcast, TestBlockHashAnnounce]
             include:
+              # status
               - TestStatus
+              # get block headers
               - TestGetBlockHeaders
               - TestSimultaneousRequests
               - TestSameRequestID
               - TestZeroRequestID
+              # get block bodies
               - TestGetBlockBodies
+              # malicious handshakes + status
               - TestMaliciousHandshake
               - TestMaliciousStatus
+              # test transactions
+              - TestLargeTxRequest
               - TestTransaction
-              - TestMaliciousTx
+              - TestInvalidTxs
+              - TestNewPooledTxs
+              - TestBlobViolations
           - sim: ethereum/engine
             limit: engine-exchange-capabilities
           - sim: ethereum/engine

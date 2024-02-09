@@ -1,5 +1,4 @@
 //! Contains RPC handler implementations specific to transactions
-
 use crate::{
     eth::{
         api::pending_block::PendingBlockEnv,
@@ -31,8 +30,12 @@ use reth_revm::{
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
-    CallRequest, Index, Log, Transaction, TransactionInfo, TransactionReceipt, TransactionRequest,
-    TypedTransactionRequest,
+    transaction::{
+        EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
+        LegacyTransactionRequest,
+    },
+    Index, Log, Transaction, TransactionInfo, TransactionKind as RpcTransactionKind,
+    TransactionReceipt, TransactionRequest, TypedTransactionRequest,
 };
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
@@ -69,7 +72,7 @@ pub(crate) type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
 ///
 /// ## Calls
 ///
-/// There are subtle differences between when transacting [CallRequest]:
+/// There are subtle differences between when transacting [TransactionRequest]:
 ///
 /// The endpoints `eth_call` and `eth_estimateGas` and `eth_createAccessList` should always
 /// __disable__ the base fee check in the [EnvWithHandlerCfg]
@@ -181,14 +184,14 @@ pub trait EthTransactions: Send + Sync {
     /// Returns the hash of the signed transaction.
     async fn send_transaction(&self, request: TransactionRequest) -> EthResult<B256>;
 
-    /// Prepares the state and env for the given [CallRequest] at the given [BlockId] and executes
-    /// the closure on a new task returning the result of the closure.
+    /// Prepares the state and env for the given [TransactionRequest] at the given [BlockId] and
+    /// executes the closure on a new task returning the result of the closure.
     ///
-    /// This returns the configured [EnvWithHandlerCfg] for the given [CallRequest] at the given
-    /// [BlockId] and with configured call settings: `prepare_call_env`.
+    /// This returns the configured [EnvWithHandlerCfg] for the given [TransactionRequest] at the
+    /// given [BlockId] and with configured call settings: `prepare_call_env`.
     async fn spawn_with_call_at<F, R>(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         at: BlockId,
         overrides: EvmOverrides,
         f: F,
@@ -200,7 +203,7 @@ pub trait EthTransactions: Send + Sync {
     /// Executes the call request at the given [BlockId].
     async fn transact_call_at(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         at: BlockId,
         overrides: EvmOverrides,
     ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>;
@@ -209,7 +212,7 @@ pub trait EthTransactions: Send + Sync {
     /// inspect call.
     async fn spawn_inspect_call_at<I>(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         at: BlockId,
         overrides: EvmOverrides,
         inspector: I,
@@ -379,7 +382,7 @@ where
             let PendingBlockEnv { cfg, block_env, origin } = self.pending_block_env_and_cfg()?;
             Ok((cfg, block_env, origin.state_block_id()))
         } else {
-            //  Use cached values if there is no pending block
+            // Use cached values if there is no pending block
             let block_hash = self
                 .provider()
                 .block_hash_for_id(at)?
@@ -571,21 +574,22 @@ where
 
         let estimated_gas = self
             .estimate_gas_at(
-                CallRequest {
+                TransactionRequest {
                     from: Some(from),
                     to: request.to,
                     gas: request.gas,
-                    gas_price: Some(U256::from(gas_price)),
-                    max_fee_per_gas: Some(U256::from(max_fee_per_gas)),
+                    gas_price: Some(gas_price),
+                    max_fee_per_gas: Some(max_fee_per_gas),
                     value: request.value,
-                    input: request.input.clone().into(),
+                    input: request.input.clone(),
                     nonce: request.nonce,
                     chain_id: Some(chain_id),
                     access_list: request.access_list.clone(),
-                    max_priority_fee_per_gas: Some(U256::from(max_fee_per_gas)),
+                    max_priority_fee_per_gas: Some(max_fee_per_gas),
                     transaction_type: None,
                     blob_versioned_hashes: None,
                     max_fee_per_blob_gas: None,
+                    ..Default::default()
                 },
                 BlockId::Number(BlockNumberOrTag::Pending),
                 None,
@@ -593,32 +597,146 @@ where
             .await?;
         let gas_limit = estimated_gas;
 
-        let transaction = match request.into_typed_request() {
+        let TransactionRequest {
+            to,
+            gas_price,
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
+            gas,
+            value,
+            input: data,
+            nonce,
+            mut access_list,
+            max_fee_per_blob_gas,
+            blob_versioned_hashes,
+            sidecar,
+            ..
+        } = request;
+
+        // todo: remove this inlining after https://github.com/alloy-rs/alloy/pull/183#issuecomment-1928161285
+        let transaction = match (
+            gas_price,
+            max_fee_per_gas,
+            access_list.take(),
+            max_fee_per_blob_gas,
+            blob_versioned_hashes,
+            sidecar,
+        ) {
+            // legacy transaction
+            // gas price required
+            (Some(_), None, None, None, None, None) => {
+                Some(TypedTransactionRequest::Legacy(LegacyTransactionRequest {
+                    nonce: nonce.unwrap_or_default(),
+                    gas_price: gas_price.unwrap_or_default(),
+                    gas_limit: gas.unwrap_or_default(),
+                    value: value.unwrap_or_default(),
+                    input: data.into_input().unwrap_or_default(),
+                    kind: match to {
+                        Some(to) => RpcTransactionKind::Call(to),
+                        None => RpcTransactionKind::Create,
+                    },
+                    chain_id: None,
+                }))
+            }
+            // EIP2930
+            // if only accesslist is set, and no eip1599 fees
+            (_, None, Some(access_list), None, None, None) => {
+                Some(TypedTransactionRequest::EIP2930(EIP2930TransactionRequest {
+                    nonce: nonce.unwrap_or_default(),
+                    gas_price: gas_price.unwrap_or_default(),
+                    gas_limit: gas.unwrap_or_default(),
+                    value: value.unwrap_or_default(),
+                    input: data.into_input().unwrap_or_default(),
+                    kind: match to {
+                        Some(to) => RpcTransactionKind::Call(to),
+                        None => RpcTransactionKind::Create,
+                    },
+                    chain_id: 0,
+                    access_list,
+                }))
+            }
+            // EIP1559
+            // if 4844 fields missing
+            // gas_price, max_fee_per_gas, access_list, max_fee_per_blob_gas, blob_versioned_hashes,
+            // sidecar,
+            (None, _, _, None, None, None) => {
+                // Empty fields fall back to the canonical transaction schema.
+                Some(TypedTransactionRequest::EIP1559(EIP1559TransactionRequest {
+                    nonce: nonce.unwrap_or_default(),
+                    max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
+                    max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or_default(),
+                    gas_limit: gas.unwrap_or_default(),
+                    value: value.unwrap_or_default(),
+                    input: data.into_input().unwrap_or_default(),
+                    kind: match to {
+                        Some(to) => RpcTransactionKind::Call(to),
+                        None => RpcTransactionKind::Create,
+                    },
+                    chain_id: 0,
+                    access_list: access_list.unwrap_or_default(),
+                }))
+            }
+            // EIP4884
+            // all blob fields required
+            (
+                None,
+                _,
+                _,
+                Some(max_fee_per_blob_gas),
+                Some(blob_versioned_hashes),
+                Some(sidecar),
+            ) => {
+                // As per the EIP, we follow the same semantics as EIP-1559.
+                Some(TypedTransactionRequest::EIP4844(EIP4844TransactionRequest {
+                    chain_id: 0,
+                    nonce: nonce.unwrap_or_default(),
+                    max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or_default(),
+                    max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
+                    gas_limit: gas.unwrap_or_default(),
+                    value: value.unwrap_or_default(),
+                    input: data.into_input().unwrap_or_default(),
+                    kind: match to {
+                        Some(to) => RpcTransactionKind::Call(to),
+                        None => RpcTransactionKind::Create,
+                    },
+                    access_list: access_list.unwrap_or_default(),
+
+                    // eip-4844 specific.
+                    max_fee_per_blob_gas,
+                    blob_versioned_hashes,
+                    sidecar,
+                }))
+            }
+
+            _ => None,
+        };
+
+        let transaction = match transaction {
             Some(TypedTransactionRequest::Legacy(mut m)) => {
                 m.chain_id = Some(chain_id.to());
                 m.gas_limit = gas_limit;
-                m.gas_price = gas_price;
+                m.gas_price = gas_price.unwrap_or_default();
 
                 TypedTransactionRequest::Legacy(m)
             }
             Some(TypedTransactionRequest::EIP2930(mut m)) => {
                 m.chain_id = chain_id.to();
                 m.gas_limit = gas_limit;
-                m.gas_price = gas_price;
+                m.gas_price = gas_price.unwrap_or_default();
 
                 TypedTransactionRequest::EIP2930(m)
             }
             Some(TypedTransactionRequest::EIP1559(mut m)) => {
                 m.chain_id = chain_id.to();
                 m.gas_limit = gas_limit;
-                m.max_fee_per_gas = max_fee_per_gas;
+                m.max_fee_per_gas = max_fee_per_gas.unwrap_or_default();
 
                 TypedTransactionRequest::EIP1559(m)
             }
             Some(TypedTransactionRequest::EIP4844(mut m)) => {
                 m.chain_id = chain_id.to();
                 m.gas_limit = gas_limit;
-                m.max_fee_per_gas = max_fee_per_gas;
+                m.max_fee_per_gas = max_fee_per_gas.unwrap_or_default();
 
                 TypedTransactionRequest::EIP4844(m)
             }
@@ -641,7 +759,7 @@ where
 
     async fn spawn_with_call_at<F, R>(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         at: BlockId,
         overrides: EvmOverrides,
         f: F,
@@ -674,7 +792,7 @@ where
 
     async fn transact_call_at(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         at: BlockId,
         overrides: EvmOverrides,
     ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)> {
@@ -684,7 +802,7 @@ where
 
     async fn spawn_inspect_call_at<I>(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         at: BlockId,
         overrides: EvmOverrides,
         inspector: I,
@@ -1072,7 +1190,7 @@ where
                 return match signer.sign_transaction(request, from) {
                     Ok(tx) => Ok(tx),
                     Err(e) => Err(e.into()),
-                }
+                };
             }
         }
         Err(EthApiError::InvalidTransactionSignature)
@@ -1097,7 +1215,7 @@ where
                     block_number,
                     base_fee_per_gas,
                     index.into(),
-                )))
+                )));
             }
         }
 

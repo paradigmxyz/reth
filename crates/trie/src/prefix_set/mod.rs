@@ -1,8 +1,23 @@
-use reth_primitives::trie::Nibbles;
-use std::rc::Rc;
+use reth_primitives::{trie::Nibbles, B256};
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 
 mod loader;
-pub use loader::{LoadedPrefixSets, PrefixSetLoader};
+pub use loader::PrefixSetLoader;
+
+/// Collection of trie prefix sets.
+#[derive(Default, Debug)]
+pub struct TriePrefixSets {
+    /// A set of account prefixes that have changed.
+    pub account_prefix_set: PrefixSet,
+    /// A map containing storage changes with the hashed address as key and a set of storage key
+    /// prefixes as the value.
+    pub storage_prefix_sets: HashMap<B256, PrefixSet>,
+    /// A set of hashed addresses of destroyed accounts.
+    pub destroyed_accounts: HashSet<B256>,
+}
 
 /// A container for efficiently storing and checking for the presence of key prefixes.
 ///
