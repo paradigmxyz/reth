@@ -1,0 +1,97 @@
+
+tests:
+
+# Test1
+- id: "test1"
+  schedule: true
+  name: "Test latest clients"
+  clients: clients/latest.yaml
+  kurtosis: kurtosis-config/default.yaml
+  worker: ubuntu-latest
+  backend: docker
+  clientPairs:
+  # CL: [lighthouse,prysm,teku,lodestar,nimbus]
+  # EL: [geth,besu,reth,erigon,nethermind]
+  - lodestar-geth,lighthouse-geth,nimbus-erigon
+  - nimbus-besu,teku-reth,teku-besu
+  - lodestar-erigon,nimbus-reth,prysm-reth
+  - lodestar-besu,lighthouse-reth,nimbus-nethermind
+  - lighthouse-erigon,teku-erigon,prysm-nethermind
+  - lodestar-nethermind,prysm-geth,teku-geth
+  - prysm-besu,lodestar-reth,lighthouse-nethermind
+  - lighthouse-besu,teku-nethermind,prysm-erigon
+  - nimbus-geth,lighthouse-geth,prysm-reth
+  assertoorTests:
+  - assertoor-tests/stability-check.yaml
+  - assertoor-tests/block-proposal-check.yaml
+  - assertoor-tests/eoa-transactions-test.yaml
+  - assertoor-tests/all-opcodes-test.yaml
+  - assertoor-tests/validator-withdrawal-test.yaml
+  - assertoor-tests/validator-exit-test.yaml
+  - assertoor-tests/validator-slashing-test.yaml
+
+# kubetest
+- id: "kubetest"
+  schedule: false
+  name: "Kubernetes Test"
+  clients: clients/latest.yaml
+  kurtosis: kurtosis-config/default.yaml
+  worker: ubuntu-latest
+  backend: kubernetes
+  kubernetes:
+    cluster: services
+    storageClass: do-block-storage
+  clientPairs:
+  - lighthouse-geth,prysm-reth,lodestar-besu
+  assertoorTests:
+  - assertoor-tests/stability-check.yaml
+  - assertoor-tests/block-proposal-check.yaml
+  - assertoor-tests/eoa-transactions-test.yaml
+  - assertoor-tests/all-opcodes-test.yaml
+  - assertoor-tests/validator-withdrawal-test.yaml
+  - assertoor-tests/validator-exit-test.yaml
+  - assertoor-tests/validator-slashing-test.yaml
+
+
+- id: "deneb-test"
+  schedule: true
+  name: "Test dencun clients"
+  clients: clients/deneb.yaml
+  kurtosis: kurtosis-config/deneb.yaml
+  worker: ubuntu-latest
+  backend: docker
+  clientPairs:
+  - lighthouse-geth,prysm-reth,lodestar-besu
+  - lighthouse-geth,teku-erigon,nimbus-reth
+  - lighthouse-besu,prysm-reth,teku-geth
+  assertoorTests:
+  - assertoor-tests/stability-check.yaml
+  - assertoor-tests/block-proposal-check.yaml
+  - assertoor-tests/eoa-transactions-test.yaml
+  - assertoor-tests/blob-transactions-test.yaml
+  - assertoor-tests/all-opcodes-test.yaml
+  - assertoor-tests/dencun-opcodes-test.yaml
+  - assertoor-tests/validator-withdrawal-test.yaml
+  - assertoor-tests/validator-exit-test.yaml
+  - assertoor-tests/validator-slashing-test.yaml
+
+
+- id: "verkle-test"
+  schedule: true
+  name: "Test verkle clients"
+  clients: clients/verkle.yaml
+  kurtosis: kurtosis-config/verkle-gen.yaml
+  worker: ubuntu-latest
+  backend: docker
+  clientPairs:
+  - lighthouse-geth,lighthouse-geth,lodestar-geth
+  assertoorTests:
+  - assertoor-tests/stability-check.yaml
+  - assertoor-tests/block-proposal-check.yaml
+  - assertoor-tests/eoa-transactions-test.yaml
+  - assertoor-tests/all-opcodes-test.yaml
+  - assertoor-tests/validator-withdrawal-test.yaml
+  # voluntary exit test does not work because according to EIP7044 assertoor signs exits with the capella signing domain
+  #- assertoor-tests/validator-exit-test.yaml
+  - assertoor-tests/validator-slashing-test.yaml
+

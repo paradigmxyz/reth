@@ -1,0 +1,71 @@
+name: Run manual assertoor test
+
+on:
+  workflow_dispatch:
+    inputs:
+      overrideTests:
+        description: 'Test IDs to run (eg. test1,test2)'
+        default: ""
+        type: string
+      overrideClientPairs:
+        description: 'Override client pairs to run this test with (eg. lighthouse-get,teku-besu)'
+        default: ""
+        type: string
+
+jobs:
+  get_tests:
+    name: "Load Tests"
+    runs-on: ubuntu-latest
+    outputs:
+      test_configs: ${{ steps.tests.outputs.test_configs }}
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+    - name: "Load test configurations from tests.yaml"
+      id: tests
+      shell: bash
+      run: |
+        tests_file="etc/assertoor/tests.yaml"
+        override_tests="${{ inputs.overrideTests }}"
+        override_pairs="${{ inputs.overrideClientPairs }}"
+
+        test_configs="$(cat $tests_file | yq -o json | jq -c '.tests')"
+
+        if [ -z "$override_tests" ]; then
+          test_configs="$(echo "$test_configs" | jq -c "map(select(.schedule == true))")"
+        else
+          # filter by tests
+          filter_str=""
+
+          while read test; do
+            if ! [ -z "$filter_str" ]; then
+              filter_str="$filter_str or"
+            fi
+            filter_str="$filter_str .id == \"$test\""
+          done <<< $(echo "$override_tests" | tr "," "\n")
+
+          test_configs="$(echo "$test_configs" | jq -c "map(select($filter_str))")"
+        fi
+
+        if ! [ -z "$override_pairs" ]; then
+          test_configs="$(echo "$test_configs" | jq -c "(.[]).clientPairs |= [\"$override_pairs\"]")"
+        fi
+
+        echo "test_configs<<EOF" >> $GITHUB_OUTPUT
+        echo "$test_configs" >> $GITHUB_OUTPUT
+        echo "$(echo "$test_configs" | jq)"
+        echo "EOF" >> $GITHUB_OUTPUT
+
+  run_tests:
+    needs: get_tests
+    uses: ethpandaops/assertoor-test/.github/workflows/_shared-run.yaml@master
+    name: "${{ matrix.config.name }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        config: ${{ fromJson(needs.get_tests.outputs.test_configs) }}
+    with:
+      config: ${{ toJSON(matrix.config) }}
+    secrets:
+      RANCHER_URL: ${{ secrets.RANCHER_URL }}
+      RANCHER_TOKEN: ${{ secrets.RANCHER_TOKEN }}
