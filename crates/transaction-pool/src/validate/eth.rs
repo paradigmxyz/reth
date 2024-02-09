@@ -342,7 +342,7 @@ where
                 info.l1_tx_data_fee(
                     &self.chain_spec,
                     block.timestamp,
-                    &encoded.freeze().into(),
+                    &encoded,
                     transaction.is_deposit(),
                 )
             }) {
