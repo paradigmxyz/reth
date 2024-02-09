@@ -173,7 +173,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy?branch=main#80206e7ba7686c514da291c06a5e7912b5361047"
+source = "git+https://github.com/alloy-rs/alloy?rev=80206e7#80206e7ba7686c514da291c06a5e7912b5361047"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
@@ -195,7 +195,7 @@ dependencies = [
 [[package]]
 name = "alloy-node-bindings"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy?branch=main#80206e7ba7686c514da291c06a5e7912b5361047"
+source = "git+https://github.com/alloy-rs/alloy?rev=80206e7#80206e7ba7686c514da291c06a5e7912b5361047"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -256,7 +256,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-engine-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy?branch=main#80206e7ba7686c514da291c06a5e7912b5361047"
+source = "git+https://github.com/alloy-rs/alloy?rev=80206e7#80206e7ba7686c514da291c06a5e7912b5361047"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -271,7 +271,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-trace-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy?branch=main#80206e7ba7686c514da291c06a5e7912b5361047"
+source = "git+https://github.com/alloy-rs/alloy?rev=80206e7#80206e7ba7686c514da291c06a5e7912b5361047"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
@@ -282,7 +282,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy?branch=main#80206e7ba7686c514da291c06a5e7912b5361047"
+source = "git+https://github.com/alloy-rs/alloy?rev=80206e7#80206e7ba7686c514da291c06a5e7912b5361047"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -7017,7 +7017,7 @@ dependencies = [
 [[package]]
 name = "revm-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/evm-inspectors?branch=onbjerg/rm-callrequest#70807da74e46641532f67caac9e37fbf5d7080c1"
+source = "git+https://github.com/paradigmxyz/evm-inspectors?rev=67ab6a0#67ab6a0391a340be8eae7fa88bcfa7b2aaef1724"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-trace-types",
