@@ -1850,10 +1850,10 @@ mod tests {
         let mut backups = default_cache();
         backups.insert(peer_id_1);
         tx_fetcher
-            .hashes_fetch_inflight_and_pending_fetch
+            .hashes_unknown_to_pool
             .insert(seen_hashes[1], TxFetchMetadata::new(retries, backups.clone(), None));
         tx_fetcher
-            .hashes_fetch_inflight_and_pending_fetch
+            .hashes_unknown_to_pool
             .insert(seen_hashes[0], TxFetchMetadata::new(retries, backups, None));
         tx_fetcher.hashes_pending_fetch.insert(seen_hashes[1]);
         tx_fetcher.hashes_pending_fetch.insert(seen_hashes[0]);
@@ -1904,7 +1904,7 @@ mod tests {
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
         // since hashes are already seen, no changes to length of unknown hashes
-        assert_eq!(tx_fetcher.hashes_fetch_inflight_and_pending_fetch.len(), 2);
+        assert_eq!(tx_fetcher.hashes_unknown_to_pool.len(), 2);
         // but hashes are taken out of buffer and packed into request to peer_2
         assert!(tx_fetcher.hashes_pending_fetch.is_empty());
 
