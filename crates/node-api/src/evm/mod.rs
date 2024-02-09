@@ -1,17 +1,21 @@
 use reth_primitives::{revm::env::fill_block_env, Address, ChainSpec, Header, Transaction, U256};
+use revm::{Database, Evm};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId, TxEnv};
 
 /// EVM configuration trait.
 pub trait EvmConfig: ConfigureEvmEnv + Clone + Send + Sync + 'static {}
 
 /// Trait for configuring the EVM.
-pub trait EvmConfig : ConfigureEvmEnv {
-
+pub trait EvmConfig: ConfigureEvmEnv {
     /// A hook that allows to modify the EVM before execution.
-    fn evm(&self, db: ()) -> Evm<>;
+    fn evm<DB, EXT>(&self, db: DB) -> Evm<'_, EXT, DB>
+    where
+        DB: Database;
 
-    fn evm_with_inspector<I>(&self, db: (), inspector: I) -> Evm<>;
-
+    /// A hook that allows to modify the EVM before execution, with an inspector.
+    fn evm_with_inspector<I, DB, EXT>(&self, db: DB, inspector: I) -> Evm<'_, EXT, DB>
+    where
+        DB: Database;
 }
 
 /// This represents the set of methods used to configure the EVM before execution.

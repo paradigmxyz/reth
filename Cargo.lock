@@ -6338,6 +6338,7 @@ version = "0.1.0-alpha.19"
 dependencies = [
  "reth-primitives",
  "reth-rpc-types",
+ "revm",
  "revm-primitives",
  "serde",
  "thiserror",
