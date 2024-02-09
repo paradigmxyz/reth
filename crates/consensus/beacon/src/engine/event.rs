@@ -6,11 +6,11 @@ use std::{sync::Arc, time::Duration};
 /// Events emitted by [crate::BeaconConsensusEngine].
 #[derive(Clone, Debug)]
 pub enum BeaconConsensusEngineEvent {
-    /// The fork choice state was updated.
+    /// The fork choice state was updated, and the current fork choice status
     ForkchoiceUpdated(ForkchoiceState, ForkchoiceStatus),
-    /// A block was added to the canonical chain.
-    CanonicalBlockAdded(Arc<SealedBlock>),
-    /// A canonical chain was committed.
+    /// A block was added to the canonical chain, and the elapsed time validating the block
+    CanonicalBlockAdded(Arc<SealedBlock>, Duration),
+    /// A canonical chain was committed, and the elapsed time committing the data
     CanonicalChainCommitted(Box<SealedHeader>, Duration),
     /// A block was added to the fork chain.
     ForkBlockAdded(Arc<SealedBlock>),
