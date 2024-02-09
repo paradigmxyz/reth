@@ -485,7 +485,7 @@ pub struct EthTransactionValidatorBuilder {
     /// How to handle [TransactionOrigin::Local](TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
     /// Max size in bytes of a single transaction allowed
-    max_tx_input_bytes: usize
+    max_tx_input_bytes: usize,
 }
 
 impl EthTransactionValidatorBuilder {
@@ -601,7 +601,6 @@ impl EthTransactionValidatorBuilder {
         self.max_tx_input_bytes = max_tx_input_bytes;
         self
     }
-
 
     /// Builds a the [EthTransactionValidator] without spawning validator tasks.
     pub fn build<Client, Tx, S>(
