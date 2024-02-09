@@ -182,16 +182,19 @@ impl Command {
             BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
         let blob_store = InMemoryBlobStore::default();
 
+        let pool_config = PoolConfig::default();
+
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
             .with_head_timestamp(best_block.timestamp)
             .kzg_settings(self.kzg_settings()?)
             .with_additional_tasks(1)
+            .with_max_tx_input_bytes(pool_config.max_tx_input_bytes)
             .build_with_tasks(blockchain_db.clone(), ctx.task_executor.clone(), blob_store.clone());
-
+        
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
             validator,
             blob_store.clone(),
-            PoolConfig::default(),
+            pool_config,
         );
         info!(target: "reth::cli", "Transaction pool initialized");
 

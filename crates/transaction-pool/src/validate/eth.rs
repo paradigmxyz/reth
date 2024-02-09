@@ -484,6 +484,8 @@ pub struct EthTransactionValidatorBuilder {
     kzg_settings: Arc<KzgSettings>,
     /// How to handle [TransactionOrigin::Local](TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
+    /// Max size in bytes of a single transaction allowed
+    max_tx_input_bytes: usize
 }
 
 impl EthTransactionValidatorBuilder {
@@ -510,6 +512,7 @@ impl EthTransactionValidatorBuilder {
 
             // TODO: can hard enable by default once mainnet transitioned
             cancun,
+            max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
         }
     }
 
@@ -593,6 +596,13 @@ impl EthTransactionValidatorBuilder {
         self
     }
 
+    /// Sets a max size in bytes of a single transaction allowed into the pool
+    pub const fn with_max_tx_input_bytes(mut self, max_tx_input_bytes: usize) -> Self {
+        self.max_tx_input_bytes = max_tx_input_bytes;
+        self
+    }
+
+
     /// Builds a the [EthTransactionValidator] without spawning validator tasks.
     pub fn build<Client, Tx, S>(
         self,
@@ -613,6 +623,7 @@ impl EthTransactionValidatorBuilder {
             minimum_priority_fee,
             kzg_settings,
             local_transactions_config,
+            max_tx_input_bytes,
             ..
         } = self;
 
@@ -631,8 +642,7 @@ impl EthTransactionValidatorBuilder {
             blob_store: Box::new(blob_store),
             kzg_settings,
             local_transactions_config,
-            max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES, /* TODO: Best way to bring poolconfig
-                                                             * to the scope? */
+            max_tx_input_bytes,
             _marker: Default::default(),
         };
 
