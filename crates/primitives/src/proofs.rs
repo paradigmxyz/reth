@@ -11,6 +11,7 @@ use alloy_primitives::U256;
 use alloy_rlp::Encodable;
 use bytes::{BufMut, BytesMut};
 use itertools::Itertools;
+use std::borrow::Borrow;
 
 /// Adjust the index of an item for rlp encoding.
 pub const fn adjust_index_for_rlp(i: usize, len: usize) -> usize {
@@ -24,31 +25,42 @@ pub const fn adjust_index_for_rlp(i: usize, len: usize) -> usize {
 }
 
 /// Compute a trie root of the collection of rlp encodable items.
-pub fn ordered_trie_root<T: Encodable>(items: &[T]) -> B256 {
+pub fn ordered_trie_root<I, T>(items: I) -> B256
+where
+    T: Encodable,
+    I: IntoIterator<Item = T>,
+{
     ordered_trie_root_with_encoder(items, |item, buf| item.encode(buf))
 }
 
 /// Compute a trie root of the collection of items with a custom encoder.
-pub fn ordered_trie_root_with_encoder<T, F>(items: &[T], mut encode: F) -> B256
+pub fn ordered_trie_root_with_encoder<T, F, I>(items: I, mut encode: F) -> B256
 where
-    F: FnMut(&T, &mut dyn BufMut),
+    I: IntoIterator<Item = T>,
+    F: FnMut(T, &mut dyn BufMut),
 {
     let mut index_buffer = BytesMut::new();
     let mut value_buffer = BytesMut::new();
-
     let mut hb = HashBuilder::default();
-    let items_len = items.len();
-    for i in 0..items_len {
-        let index = adjust_index_for_rlp(i, items_len);
 
+    // Enumerate and encode all keys.
+    let mut remaining = items.into_iter().enumerate().map(|(index, item)| {
         index_buffer.clear();
         index.encode(&mut index_buffer);
+        let key = Nibbles::unpack(&index_buffer);
+        (key, item)
+    });
+    let first = remaining.next().into_iter();
 
+    // Since we know all keys will be ordered, except for the key at the 0th index, there is no
+    // need to re-sort the entire iterator.  All we need to do is insert the 0th index item at the
+    // appropriate index (either rlp(0)==0x7f or last).  We can do this by merging two iterators:
+    // one that contains only the first item, and one that contains the remaining items.
+    first.merge_by(remaining, |(i, _a), (j, _b)| i < j).for_each(|(key, item)| {
         value_buffer.clear();
-        encode(&items[index], &mut value_buffer);
-
-        hb.add_leaf(Nibbles::unpack(&index_buffer), &value_buffer);
-    }
+        encode(item, &mut value_buffer);
+        hb.add_leaf(key, &value_buffer);
+    });
 
     hb.root()
 }
@@ -56,31 +68,44 @@ where
 /// Calculate a transaction root.
 ///
 /// `(rlp(index), encoded(tx))` pairs.
-pub fn calculate_transaction_root<T>(transactions: &[T]) -> B256
+pub fn calculate_transaction_root<I, T>(transactions: I) -> B256
 where
+    I: IntoIterator<Item = T>,
     T: AsRef<TransactionSigned>,
 {
-    ordered_trie_root_with_encoder(transactions, |tx: &T, buf| tx.as_ref().encode_inner(buf, false))
+    ordered_trie_root_with_encoder(transactions, |tx: T, buf| tx.as_ref().encode_inner(buf, false))
 }
 
 /// Calculates the root hash of the withdrawals.
-pub fn calculate_withdrawals_root(withdrawals: &[Withdrawal]) -> B256 {
-    ordered_trie_root(withdrawals)
+pub fn calculate_withdrawals_root<I, T>(withdrawals: I) -> B256
+where
+    I: IntoIterator<Item = T>,
+    T: Borrow<Withdrawal>,
+{
+    ordered_trie_root_with_encoder(withdrawals, |w, buf| w.borrow().encode(buf))
 }
 
 /// Calculates the receipt root for a header.
 #[cfg(not(feature = "optimism"))]
-pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
-    ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
+pub fn calculate_receipt_root<I, T>(receipts: I) -> B256
+where
+    I: IntoIterator<Item = T>,
+    T: Borrow<ReceiptWithBloom>,
+{
+    ordered_trie_root_with_encoder(receipts, |r, buf| r.borrow().encode_inner(buf, false))
 }
 
 /// Calculates the receipt root for a header.
 #[cfg(feature = "optimism")]
-pub fn calculate_receipt_root(
-    receipts: &[ReceiptWithBloom],
+pub fn calculate_receipt_root<I, T>(
+    receipts: I,
     chain_spec: &crate::ChainSpec,
     timestamp: u64,
-) -> B256 {
+) -> B256
+where
+    I: IntoIterator<Item = T>,
+    T: Borrow<ReceiptWithBloom>,
+{
     // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
     // the receipt root calculation does not include the deposit nonce in the receipt
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
@@ -89,30 +114,29 @@ pub fn calculate_receipt_root(
     if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp) &&
         !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
     {
-        let receipts = receipts
-            .iter()
-            .cloned()
-            .map(|mut r| {
-                r.receipt.deposit_nonce = None;
-                r
-            })
-            .collect::<Vec<_>>();
+        let receipts = receipts.into_iter().map(|r| {
+            let mut r = r.borrow().to_owned();
+            r.receipt.deposit_nonce = None;
+            r
+        });
 
-        return ordered_trie_root_with_encoder(receipts.as_slice(), |r, buf| {
-            r.encode_inner(buf, false)
-        })
+        return ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false));
     }
 
-    ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
+    ordered_trie_root_with_encoder(receipts, |r, buf| r.borrow().encode_inner(buf, false))
 }
 
 /// Calculates the receipt root for a header for the reference type of [Receipt].
 ///
 /// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
 #[cfg(not(feature = "optimism"))]
-pub fn calculate_receipt_root_ref(receipts: &[&Receipt]) -> B256 {
+pub fn calculate_receipt_root_ref<I, T>(receipts: I) -> B256
+where
+    I: IntoIterator<Item = T>,
+    T: Borrow<Receipt>,
+{
     ordered_trie_root_with_encoder(receipts, |r, buf| {
-        ReceiptWithBloomRef::from(*r).encode_inner(buf, false)
+        ReceiptWithBloomRef::from(r.borrow()).encode_inner(buf, false)
     })
 }
 
@@ -120,11 +144,15 @@ pub fn calculate_receipt_root_ref(receipts: &[&Receipt]) -> B256 {
 ///
 /// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
 #[cfg(feature = "optimism")]
-pub fn calculate_receipt_root_ref(
-    receipts: &[&Receipt],
+pub fn calculate_receipt_root_ref<I, T>(
+    receipts: I,
     chain_spec: &crate::ChainSpec,
     timestamp: u64,
-) -> B256 {
+) -> B256
+where
+    I: IntoIterator<Item = T>,
+    T: Borrow<Receipt>,
+{
     // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
     // the receipt root calculation does not include the deposit nonce in the receipt
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
@@ -133,22 +161,19 @@ pub fn calculate_receipt_root_ref(
     if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp) &&
         !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
     {
-        let receipts = receipts
-            .iter()
-            .map(|r| {
-                let mut r = (*r).clone();
-                r.deposit_nonce = None;
-                r
-            })
-            .collect::<Vec<_>>();
+        let receipts = receipts.into_iter().map(|r| {
+            let mut r = r.borrow().to_owned();
+            r.deposit_nonce = None;
+            r
+        });
 
-        return ordered_trie_root_with_encoder(&receipts, |r, buf| {
-            ReceiptWithBloomRef::from(r).encode_inner(buf, false)
-        })
+        return ordered_trie_root_with_encoder(receipts, |r, buf| {
+            ReceiptWithBloom::from(r).encode_inner(buf, false)
+        });
     }
 
     ordered_trie_root_with_encoder(receipts, |r, buf| {
-        ReceiptWithBloomRef::from(*r).encode_inner(buf, false)
+        ReceiptWithBloomRef::from(r.borrow()).encode_inner(buf, false)
     })
 }
 
@@ -577,6 +602,38 @@ mod tests {
     }
 
     #[test]
+    fn check_receipt_root_ref() {
+        let logs = vec![Log { address: Address::ZERO, topics: vec![], data: Default::default() }];
+        let receipt = Receipt {
+            tx_type: TxType::EIP2930,
+            success: true,
+            cumulative_gas_used: 102068,
+            logs,
+            #[cfg(feature = "optimism")]
+            deposit_nonce: None,
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: None,
+        };
+        let receipts = [receipt.clone()];
+        let root_from_ref = calculate_receipt_root_ref(
+            &receipts,
+            #[cfg(feature = "optimism")]
+            crate::OP_GOERLI.as_ref(),
+            #[cfg(feature = "optimism")]
+            0,
+        );
+        let receipts = [ReceiptWithBloom::from(receipt)];
+        let root = calculate_receipt_root(
+            &receipts,
+            #[cfg(feature = "optimism")]
+            crate::OP_GOERLI.as_ref(),
+            #[cfg(feature = "optimism")]
+            0,
+        );
+        assert_eq!(root_from_ref, root);
+    }
+
+    #[test]
     fn check_withdrawals_root() {
         // Single withdrawal, amount 0
         // https://github.com/ethereum/tests/blob/9760400e667eba241265016b02644ef62ab55de2/BlockchainTests/EIPTests/bc4895-withdrawals/amountIs0.json
@@ -585,6 +642,8 @@ mod tests {
         assert!(block.withdrawals.is_some());
         let withdrawals = block.withdrawals.as_ref().unwrap();
         assert_eq!(withdrawals.len(), 1);
+        let withdrawals_root = calculate_withdrawals_root(withdrawals);
+        assert_eq!(block.withdrawals_root, Some(withdrawals_root));
         let withdrawals_root = calculate_withdrawals_root(withdrawals);
         assert_eq!(block.withdrawals_root, Some(withdrawals_root));
 
@@ -666,5 +725,12 @@ mod tests {
             expected_holesky_state_root, calculated_holesky_state_root,
             "holesky state root mismatch"
         );
+    }
+
+    #[test]
+    fn check_ordered_trie_root_many() {
+        let items = (0..0x99).map(|i: u32| i.to_be_bytes());
+        let root = ordered_trie_root(items);
+        assert_eq!(root, b256!("77d1b5deb309b84a0cd4d27afc17b13ff51cd172d6c0fea1f37f37a7ebfecf00"));
     }
 }

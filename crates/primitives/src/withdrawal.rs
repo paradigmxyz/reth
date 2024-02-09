@@ -84,6 +84,15 @@ impl IntoIterator for Withdrawals {
     }
 }
 
+impl<'a> IntoIterator for &'a Withdrawals {
+    type Item = &'a Withdrawal;
+    type IntoIter = std::slice::Iter<'a, Withdrawal>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
 impl AsRef<[Withdrawal]> for Withdrawals {
     fn as_ref(&self) -> &[Withdrawal] {
         &self.0
