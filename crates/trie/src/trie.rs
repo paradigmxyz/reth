@@ -427,8 +427,7 @@ where
         }
 
         let trie_cursor = self.trie_cursor_factory.storage_tries_cursor(self.hashed_address)?;
-        let walker =
-            TrieWalker::new(trie_cursor, self.prefix_set.clone()).with_updates(retain_updates);
+        let walker = TrieWalker::new(trie_cursor, self.prefix_set).with_updates(retain_updates);
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
 
