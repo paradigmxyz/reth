@@ -1,10 +1,11 @@
-use crate::processor::{verify_receipt_optimism, EVMProcessor};
+use crate::processor::{compare_receipts_root_and_logs_bloom, EVMProcessor};
 use reth_interfaces::executor::{
     BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
 };
 use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
-    revm_primitives::ResultAndState, BlockWithSenders, Hardfork, Receipt, TxType, U256,
+    proofs::calculate_receipt_root_optimism, revm_primitives::ResultAndState, BlockWithSenders,
+    Bloom, ChainSpec, Hardfork, Receipt, ReceiptWithBloom, TxType, B256, U256,
 };
 use reth_provider::{BlockExecutor, BlockExecutorStats, BundleStateWithReceipts};
 use revm::DatabaseCommit;
@@ -21,11 +22,8 @@ pub fn verify_receipt_optimism<'a>(
 ) -> Result<(), BlockExecutionError> {
     // Calculate receipts root.
     let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
-    let receipts_root = reth_primitives::proofs::calculate_receipt_root_optimism(
-        &receipts_with_bloom,
-        chain_spec,
-        timestamp,
-    );
+    let receipts_root =
+        calculate_receipt_root_optimism(&receipts_with_bloom, chain_spec, timestamp);
 
     // Create header log bloom.
     let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
