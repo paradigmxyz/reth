@@ -20,7 +20,8 @@ use reth_provider::{
 };
 use reth_revm::{access_list::AccessListInspector, database::StateProviderDatabase};
 use reth_rpc_types::{
-    state::StateOverride, AccessListWithGasUsed, Bundle, CallRequest, EthCallResponse, StateContext,
+    state::StateOverride, AccessListWithGasUsed, Bundle, EthCallResponse, StateContext,
+    TransactionRequest,
 };
 use reth_transaction_pool::TransactionPool;
 use revm::{
@@ -47,7 +48,7 @@ where
     /// Estimate gas needed for execution of the `request` at the [BlockId].
     pub async fn estimate_gas_at(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         at: BlockId,
         state_override: Option<StateOverride>,
     ) -> EthResult<U256> {
@@ -63,7 +64,7 @@ where
     /// Executes the call request (`eth_call`) and returns the output
     pub async fn call(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         block_number: Option<BlockId>,
         overrides: EvmOverrides,
     ) -> EthResult<Bytes> {
@@ -88,7 +89,7 @@ where
     ) -> EthResult<Vec<EthCallResponse>> {
         let Bundle { transactions, block_override } = bundle;
         if transactions.is_empty() {
-            return Err(EthApiError::InvalidParams(String::from("transactions are empty.")))
+            return Err(EthApiError::InvalidParams(String::from("transactions are empty.")));
         }
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
@@ -173,12 +174,12 @@ where
 
     /// Estimates the gas usage of the `request` with the state.
     ///
-    /// This will execute the [CallRequest] and find the best gas limit via binary search
+    /// This will execute the [TransactionRequest] and find the best gas limit via binary search
     pub fn estimate_gas_with<S>(
         &self,
         mut cfg: CfgEnvWithHandlerCfg,
         block: BlockEnv,
-        request: CallRequest,
+        request: TransactionRequest,
         state: S,
         state_override: Option<StateOverride>,
     ) -> EthResult<U256>
@@ -223,9 +224,9 @@ where
                         if env.tx.value > available_funds {
                             return Err(
                                 RpcInvalidTransactionError::InsufficientFundsForTransfer.into()
-                            )
+                            );
                         }
-                        return Ok(U256::from(MIN_TRANSACTION_GAS))
+                        return Ok(U256::from(MIN_TRANSACTION_GAS));
                     }
                 }
             }
@@ -257,7 +258,7 @@ where
             // if price or limit was included in the request then we can execute the request
             // again with the block's gas limit to check if revert is gas related or not
             if request_gas.is_some() || request_gas_price.is_some() {
-                return Err(map_out_of_gas_err(env_gas_limit, env, &mut db))
+                return Err(map_out_of_gas_err(env_gas_limit, env, &mut db));
             }
         }
 
@@ -269,7 +270,7 @@ where
             ExecutionResult::Halt { reason, gas_used } => {
                 // here we don't check for invalid opcode because already executed with highest gas
                 // limit
-                return Err(RpcInvalidTransactionError::halt(reason, gas_used).into())
+                return Err(RpcInvalidTransactionError::halt(reason, gas_used).into());
             }
             ExecutionResult::Revert { output, .. } => {
                 // if price or limit was included in the request then we can execute the request
@@ -279,7 +280,7 @@ where
                 } else {
                     // the transaction did revert
                     Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into())
-                }
+                };
             }
         }
 
@@ -316,7 +317,7 @@ where
 
                 // new midpoint
                 mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;
-                continue
+                continue;
             }
 
             let (res, _) = ethres?;
@@ -342,7 +343,7 @@ where
                         err => {
                             // these should be unreachable because we know the transaction succeeds,
                             // but we consider these cases an error
-                            return Err(RpcInvalidTransactionError::EvmHalt(err).into())
+                            return Err(RpcInvalidTransactionError::EvmHalt(err).into());
                         }
                     }
                 }
@@ -357,7 +358,7 @@ where
     /// Creates the AccessList for the `request` at the [BlockId] or latest.
     pub(crate) async fn create_access_list_at(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         block_number: Option<BlockId>,
     ) -> EthResult<AccessListWithGasUsed> {
         self.on_blocking_task(|this| async move {
@@ -368,7 +369,7 @@ where
 
     async fn create_access_list_with(
         &self,
-        mut request: CallRequest,
+        mut request: TransactionRequest,
         at: Option<BlockId>,
     ) -> EthResult<AccessListWithGasUsed> {
         let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));

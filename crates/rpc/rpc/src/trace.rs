@@ -22,7 +22,7 @@ use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
     state::StateOverride,
     trace::{filter::TraceFilter, parity::*, tracerequest::TraceCallRequest},
-    BlockError, BlockOverrides, CallRequest, Index,
+    BlockError, BlockOverrides, Index, TransactionRequest,
 };
 use revm::{
     db::{CacheDB, DatabaseCommit},
@@ -125,7 +125,7 @@ where
     /// Note: Allows tracing dependent transactions, hence all transactions are traced in sequence
     pub async fn trace_call_many(
         &self,
-        calls: Vec<(CallRequest, HashSet<TraceType>)>,
+        calls: Vec<(TransactionRequest, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> EthResult<Vec<TraceResults>> {
         let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
@@ -211,7 +211,7 @@ where
     ) -> EthResult<Option<LocalizedTransactionTrace>> {
         if indices.len() != 1 {
             // The OG impl failed if it gets more than a single index
-            return Ok(None)
+            return Ok(None);
         }
         self.trace_get_index(hash, indices[0]).await
     }
@@ -249,7 +249,7 @@ where
         if distance > 100 {
             return Err(EthApiError::InvalidParams(
                 "Block range too large; currently limited to 100 blocks".to_string(),
-            ))
+            ));
         }
 
         // fetch all blocks in that range
@@ -285,7 +285,7 @@ where
                     if let Some(idx) = tx_info.index {
                         if !indices.contains(&idx) {
                             // only record traces for relevant transactions
-                            return Ok(None)
+                            return Ok(None);
                         }
                     }
                     let traces = inspector
@@ -432,7 +432,7 @@ where
     /// Handler for `trace_call`
     async fn trace_call(
         &self,
-        call: CallRequest,
+        call: TransactionRequest,
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
         state_overrides: Option<StateOverride>,
@@ -447,7 +447,7 @@ where
     /// Handler for `trace_callMany`
     async fn trace_call_many(
         &self,
-        calls: Vec<(CallRequest, HashSet<TraceType>)>,
+        calls: Vec<(TransactionRequest, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>> {
         let _permit = self.acquire_trace_permit().await;
