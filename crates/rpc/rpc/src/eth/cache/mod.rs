@@ -575,7 +575,7 @@ where
                                 );
                             }
                         }
-                        CacheAction::UncacheOldCanonicalChain { chain_change } => {
+                        CacheAction::RemoveReorgedChain { chain_change } => {
                             for block in chain_change.blocks {
                                 this.on_reorg_block(block.hash(), Ok(Some(block.unseal())));
                             }
@@ -607,7 +607,7 @@ enum CacheAction {
     ReceiptsResult { block_hash: B256, res: ProviderResult<Option<Arc<Vec<Receipt>>>> },
     EnvResult { block_hash: B256, res: Box<ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>> },
     CacheNewCanonicalChain { chain_change: ChainChange },
-    UncacheOldCanonicalChain { chain_change: ChainChange },
+    RemoveReorgedChain { chain_change: ChainChange },
 }
 
 struct BlockReceipts {
@@ -615,6 +615,7 @@ struct BlockReceipts {
     receipts: Vec<Option<Receipt>>,
 }
 
+/// A change of the canonical chain
 struct ChainChange {
     blocks: Vec<SealedBlockWithSenders>,
     receipts: Vec<BlockReceipts>,
@@ -636,6 +637,8 @@ impl ChainChange {
 
 /// Awaits for new chain events and directly inserts them into the cache so they're available
 /// immediately before they need to be fetched from disk.
+///
+/// Reorged blocks are removed from the cache.
 pub async fn cache_new_blocks_task<St>(eth_state_cache: EthStateCache, mut events: St)
 where
     St: Stream<Item = CanonStateNotification> + Unpin + 'static,
@@ -644,9 +647,8 @@ where
         if let Some(reverted) = event.reverted() {
             let chain_change = ChainChange::new(reverted);
 
-            let _ = eth_state_cache
-                .to_service
-                .send(CacheAction::UncacheOldCanonicalChain { chain_change });
+            let _ =
+                eth_state_cache.to_service.send(CacheAction::RemoveReorgedChain { chain_change });
         }
 
         if let Some(committed) = event.committed() {
