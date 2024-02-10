@@ -4,7 +4,8 @@ use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     Address, ChainSpec, Head, Header, Transaction, U256,
 };
-use revm::{Database, Evm};
+use reth_revm::processor::EVMProcessor;
+use revm::Database;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone, Copy, Default)]
@@ -49,17 +50,13 @@ impl ConfigureEvmEnv for EthEvmConfig {
 impl EvmConfig for EthEvmConfig {}
 
 impl EvmConfig for EthEvmConfig {
-    fn evm<DB, EXT>(&self, db: DB) -> Evm<'_, EXT, DB>
-    where
-        DB: Database,
-    {
+    type Executor = EVMProcessor<'_, EthEvmConfig>;
+
+    fn evm(&self, db: impl Database) -> Self::Executor {
         todo!()
     }
 
-    fn evm_with_inspector<I, DB, EXT>(&self, db: DB, inspector: I) -> Evm<'_, EXT, DB>
-    where
-        DB: Database,
-    {
+    fn evm_with_inspector<I>(&self, db: impl Database, inspector: I) -> Self::Executor {
         todo!()
     }
 }
