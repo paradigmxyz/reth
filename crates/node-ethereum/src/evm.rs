@@ -50,13 +50,13 @@ impl ConfigureEvmEnv for EthEvmConfig {
 impl EvmConfig for EthEvmConfig {}
 
 impl EvmConfig for EthEvmConfig {
-    type Executor = EVMProcessor<'_, EthEvmConfig>;
+    type Executor<'a> = EVMProcessor<'a, EthEvmConfig>;
 
-    fn evm(&self, db: impl Database) -> Self::Executor {
+    fn evm(&self, db: impl Database) -> Self::Executor<'_> {
         todo!()
     }
 
-    fn evm_with_inspector<I>(&self, db: impl Database, inspector: I) -> Self::Executor {
+    fn evm_with_inspector<I>(&self, db: impl Database, inspector: I) -> Self::Executor<'_> {
         todo!()
     }
 }
