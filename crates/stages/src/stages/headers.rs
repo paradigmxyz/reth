@@ -195,7 +195,7 @@ where
             // the block number of this header as tip.
             BlockHashOrNumber::Hash(hash) => downloaded_headers
                 .first()
-                .and_then(|header| (header.hash == hash).then_some(header.number)),
+                .and_then(|header| (header.hash() == hash).then_some(header.number)),
             // If tip is number, we can just grab it and not resolve using downloaded headers.
             BlockHashOrNumber::Number(number) => Some(number),
         };

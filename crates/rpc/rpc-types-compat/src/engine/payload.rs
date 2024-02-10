@@ -102,15 +102,7 @@ pub fn try_block_to_payload(value: SealedBlock) -> ExecutionPayload {
 
 /// Converts [SealedBlock] to [ExecutionPayloadV1]
 pub fn try_block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
-    let transactions = value
-        .body
-        .iter()
-        .map(|tx| {
-            let mut encoded = Vec::new();
-            tx.encode_enveloped(&mut encoded);
-            encoded.into()
-        })
-        .collect();
+    let transactions = value.raw_transactions();
     ExecutionPayloadV1 {
         parent_hash: value.parent_hash,
         fee_recipient: value.beneficiary,
@@ -131,15 +123,7 @@ pub fn try_block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
 
 /// Converts [SealedBlock] to [ExecutionPayloadV2]
 pub fn try_block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
-    let transactions = value
-        .body
-        .iter()
-        .map(|tx| {
-            let mut encoded = Vec::new();
-            tx.encode_enveloped(&mut encoded);
-            encoded.into()
-        })
-        .collect();
+    let transactions = value.raw_transactions();
     let standalone_withdrawals: Vec<reth_rpc_types::withdrawal::Withdrawal> = value
         .withdrawals
         .clone()
@@ -171,15 +155,7 @@ pub fn try_block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
 
 /// Converts [SealedBlock] to [ExecutionPayloadV3]
 pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
-    let transactions = value
-        .body
-        .iter()
-        .map(|tx| {
-            let mut encoded = Vec::new();
-            tx.encode_enveloped(&mut encoded);
-            encoded.into()
-        })
-        .collect();
+    let transactions = value.raw_transactions();
 
     let withdrawals: Vec<reth_rpc_types::withdrawal::Withdrawal> = value
         .withdrawals
@@ -362,15 +338,7 @@ pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
 
 /// Transforms a [SealedBlock] into a [ExecutionPayloadV1]
 pub fn execution_payload_from_sealed_block(value: SealedBlock) -> ExecutionPayloadV1 {
-    let transactions = value
-        .body
-        .iter()
-        .map(|tx| {
-            let mut encoded = Vec::new();
-            tx.encode_enveloped(&mut encoded);
-            encoded.into()
-        })
-        .collect();
+    let transactions = value.raw_transactions();
     ExecutionPayloadV1 {
         parent_hash: value.parent_hash,
         fee_recipient: value.beneficiary,

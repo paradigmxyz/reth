@@ -21,8 +21,10 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, info, trace, warn};
 
+type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
+
 /// A communication channel to the [PayloadBuilderService] that can retrieve payloads.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PayloadStore<Engine: EngineTypes> {
     inner: PayloadBuilderHandle<Engine>,
 }
@@ -65,6 +67,15 @@ where
     }
 }
 
+impl<Engine> Clone for PayloadStore<Engine>
+where
+    Engine: EngineTypes,
+{
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
+}
+
 impl<Engine> From<PayloadBuilderHandle<Engine>> for PayloadStore<Engine>
 where
     Engine: EngineTypes,
@@ -77,7 +88,7 @@ where
 /// A communication channel to the [PayloadBuilderService].
 ///
 /// This is the API used to create new payloads and to get the current state of existing ones.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PayloadBuilderHandle<Engine: EngineTypes> {
     /// Sender half of the message channel to the [PayloadBuilderService].
     to_service: mpsc::UnboundedSender<PayloadServiceCommand<Engine>>,
@@ -158,6 +169,15 @@ where
         attr: Engine::PayloadBuilderAttributes,
     ) -> Result<PayloadId, PayloadBuilderError> {
         self.send_new_payload(attr).await?
+    }
+}
+
+impl<Engine> Clone for PayloadBuilderHandle<Engine>
+where
+    Engine: EngineTypes,
+{
+    fn clone(&self) -> Self {
+        Self { to_service: self.to_service.clone() }
     }
 }
 
@@ -396,9 +416,6 @@ where
         }
     }
 }
-
-// TODO: make generic over built payload type
-type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
 
 /// Message type for the [PayloadBuilderService].
 pub enum PayloadServiceCommand<Engine: EngineTypes> {

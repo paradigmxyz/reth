@@ -12,7 +12,7 @@ use reth_rpc_builder::{
 };
 use reth_rpc_engine_api::EngineApi;
 use reth_tasks::TokioTaskExecutor;
-use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+use reth_transaction_pool::test_utils::{TestPool, TestPoolBuilder};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -103,7 +103,7 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
 > {
     RpcModuleBuilder::default()
         .with_provider(NoopProvider::default())
-        .with_pool(testing_pool())
+        .with_pool(TestPoolBuilder::default().into())
         .with_network(NoopNetwork::default())
         .with_executor(TokioTaskExecutor::default())
         .with_events(TestCanonStateSubscriptions::default())

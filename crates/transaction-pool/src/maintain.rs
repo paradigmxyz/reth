@@ -59,7 +59,7 @@ pub struct LocalTransactionBackupConfig {
 
 impl LocalTransactionBackupConfig {
     /// Receive path to transactions backup and return initialized config
-    pub fn with_local_txs_backup(transactions_path: PathBuf) -> Self {
+    pub const fn with_local_txs_backup(transactions_path: PathBuf) -> Self {
         Self { transactions_path: Some(transactions_path) }
     }
 }
@@ -106,7 +106,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         let latest = latest.seal_slow();
         let chain_spec = client.chain_spec();
         let info = BlockInfo {
-            last_seen_block_hash: latest.hash,
+            last_seen_block_hash: latest.hash(),
             last_seen_block_number: latest.number,
             pending_basefee: latest
                 .next_block_base_fee(chain_spec.base_fee_params(latest.timestamp + 12))
@@ -275,7 +275,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 // for these we need to fetch the nonce+balance from the db at the new tip
                 let mut changed_accounts =
-                    match load_accounts(client.clone(), new_tip.hash, missing_changed_acc) {
+                    match load_accounts(client.clone(), new_tip.hash(), missing_changed_acc) {
                         Ok(LoadedAccounts { accounts, failed_to_load }) => {
                             // extend accounts we failed to load from database
                             dirty_addresses.extend(failed_to_load);
@@ -288,7 +288,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                 target: "txpool",
                                 ?err,
                                 "failed to load missing changed accounts at new tip: {:?}",
-                                new_tip.hash
+                                new_tip.hash()
                             );
                             dirty_addresses.extend(addresses);
                             vec![]
@@ -384,7 +384,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     maintained_state = MaintainedPoolState::Drifted;
                     debug!(target: "txpool", ?depth, "skipping deep canonical update");
                     let info = BlockInfo {
-                        last_seen_block_hash: tip.hash,
+                        last_seen_block_hash: tip.hash(),
                         last_seen_block_number: tip.number,
                         pending_basefee: pending_block_base_fee,
                         pending_blob_fee: pending_block_blob_fee,
@@ -436,7 +436,7 @@ struct FinalizedBlockTracker {
 }
 
 impl FinalizedBlockTracker {
-    fn new(last_finalized_block: Option<BlockNumber>) -> Self {
+    const fn new(last_finalized_block: Option<BlockNumber>) -> Self {
         Self { last_finalized_block }
     }
 
@@ -473,7 +473,7 @@ enum MaintainedPoolState {
 impl MaintainedPoolState {
     /// Returns `true` if the pool is assumed to be out of sync with the current state.
     #[inline]
-    fn is_drifted(&self) -> bool {
+    const fn is_drifted(&self) -> bool {
         matches!(self, MaintainedPoolState::Drifted)
     }
 }

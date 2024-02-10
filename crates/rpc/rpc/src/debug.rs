@@ -14,10 +14,8 @@ use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
-    revm::env::tx_env_with_recovered,
-    revm_primitives::{db::DatabaseCommit, BlockEnv, CfgEnv},
-    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, Withdrawals,
-    B256,
+    revm::env::tx_env_with_recovered, Address, Block, BlockId, BlockNumberOrTag, Bytes,
+    TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,
@@ -29,9 +27,12 @@ use reth_rpc_types::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
         GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
     },
-    BlockError, Bundle, CallRequest, RichBlock, StateContext,
+    BlockError, Bundle, RichBlock, StateContext, TransactionRequest,
 };
-use revm::{db::CacheDB, primitives::Env};
+use revm::{
+    db::CacheDB,
+    primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
+};
 use revm_inspectors::tracing::{
     js::{JsInspector, TransactionContext},
     FourByteInspector, TracingInspector, TracingInspectorConfig,
@@ -73,7 +74,7 @@ where
         &self,
         at: BlockId,
         transactions: Vec<TransactionSignedEcRecovered>,
-        cfg: CfgEnv,
+        cfg: CfgEnvWithHandlerCfg,
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
     ) -> EthResult<Vec<TraceResult>> {
@@ -89,7 +90,10 @@ where
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
                     let tx = tx_env_with_recovered(&tx);
-                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                    let env = EnvWithHandlerCfg::new(
+                        Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
+                        cfg.handler_cfg.spec_id,
+                    );
                     let (result, state_changes) = this
                         .trace_transaction(
                             opts.clone(),
@@ -208,12 +212,12 @@ where
             None => return Err(EthApiError::TransactionNotFound),
             Some(res) => res,
         };
-        let (cfg, block_env, _) = self.inner.eth_api.evm_env_at(block.hash.into()).await?;
+        let (cfg, block_env, _) = self.inner.eth_api.evm_env_at(block.hash().into()).await?;
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
         let state_at: BlockId = block.parent_hash.into();
-        let block_hash = block.hash;
+        let block_hash = block.hash();
         let block_txs = block.into_transactions_ecrecovered();
 
         let this = self.clone();
@@ -233,7 +237,10 @@ where
                     tx.hash,
                 )?;
 
-                let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
+                let env = EnvWithHandlerCfg::new(
+                    Env::boxed(cfg.cfg_env.clone(), block_env, tx_env_with_recovered(&tx)),
+                    cfg.handler_cfg.spec_id,
+                );
                 this.trace_transaction(
                     opts,
                     env,
@@ -256,7 +263,7 @@ where
     ///  - `debug_traceCall` executes with __enabled__ basefee check, `eth_call` does not: <https://github.com/paradigmxyz/reth/issues/6240>
     pub async fn debug_trace_call(
         &self,
-        call: CallRequest,
+        call: TransactionRequest,
         block_id: Option<BlockId>,
         opts: GethDebugTracingCallOptions,
     ) -> EthResult<GethTrace> {
@@ -279,7 +286,7 @@ where
                                 Ok(inspector)
                             })
                             .await?;
-                        return Ok(FourByteFrame::from(inspector).into())
+                        return Ok(FourByteFrame::from(inspector).into());
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
@@ -302,7 +309,7 @@ where
                                 Ok(frame.into())
                             })
                             .await?;
-                        return Ok(frame)
+                        return Ok(frame);
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
                         let prestate_config = tracer_config
@@ -327,7 +334,7 @@ where
                                     Ok(frame)
                                 })
                                 .await?;
-                        return Ok(frame.into())
+                        return Ok(frame.into());
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                 },
@@ -349,7 +356,7 @@ where
 
                     Ok(GethTrace::JS(res))
                 }
-            }
+            };
         }
 
         // default structlog tracer
@@ -381,7 +388,7 @@ where
         opts: Option<GethDebugTracingCallOptions>,
     ) -> EthResult<Vec<Vec<GethTrace>>> {
         if bundles.is_empty() {
-            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")))
+            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")));
         }
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
@@ -406,7 +413,7 @@ where
         // but if all transactions are to be replayed, we can use the state at the block itself
         let num_txs = transaction_index.index().unwrap_or(block.body.len());
         if num_txs == block.body.len() {
-            at = block.hash;
+            at = block.hash();
             replay_block_txs = false;
         }
 
@@ -426,7 +433,10 @@ where
                     // Execute all transactions until index
                     for tx in transactions {
                         let tx = tx_env_with_recovered(&tx);
-                        let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                        let env = EnvWithHandlerCfg::new(
+                            Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
+                            cfg.handler_cfg.spec_id,
+                        );
                         let (res, _) = transact(&mut db, env)?;
                         db.commit(res.state);
                     }
@@ -483,7 +493,7 @@ where
     fn trace_transaction(
         &self,
         opts: GethDebugTracingOptions,
-        env: Env,
+        env: EnvWithHandlerCfg,
         db: &mut SubState<StateProviderBox>,
         transaction_context: Option<TransactionContext>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {
@@ -495,7 +505,7 @@ where
                     GethDebugBuiltInTracerType::FourByteTracer => {
                         let mut inspector = FourByteInspector::default();
                         let (res, _) = inspect(db, env, &mut inspector)?;
-                        return Ok((FourByteFrame::from(inspector).into(), res.state))
+                        return Ok((FourByteFrame::from(inspector).into(), res.state));
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
@@ -513,7 +523,7 @@ where
                             .into_geth_builder()
                             .geth_call_traces(call_config, res.result.gas_used());
 
-                        return Ok((frame.into(), res.state))
+                        return Ok((frame.into(), res.state));
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
                         let prestate_config = tracer_config
@@ -534,7 +544,7 @@ where
                             &*db,
                         )?;
 
-                        return Ok((frame.into(), res.state))
+                        return Ok((frame.into(), res.state));
                     }
                     GethDebugBuiltInTracerType::NoopTracer => {
                         Ok((NoopFrame::default().into(), Default::default()))
@@ -553,7 +563,7 @@ where
                     let result = inspector.json_result(res, &env, db)?;
                     Ok((GethTrace::JS(result), state))
                 }
-            }
+            };
         }
 
         // default structlog tracer
@@ -711,7 +721,7 @@ where
     /// Handler for `debug_traceCall`
     async fn debug_trace_call(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         block_number: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace> {

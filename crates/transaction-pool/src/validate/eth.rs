@@ -31,10 +31,7 @@ use reth_revm::optimism::RethL1BlockInfo;
 
 /// Validator for Ethereum transactions.
 #[derive(Debug, Clone)]
-pub struct EthTransactionValidator<Client, T>
-where
-    Client: BlockReaderIdExt,
-{
+pub struct EthTransactionValidator<Client, T> {
     /// The type that performs the actual validation.
     inner: Arc<EthTransactionValidatorInner<Client, T>>,
 }
@@ -98,10 +95,7 @@ where
 
 /// A [TransactionValidator] implementation that validates ethereum transaction.
 #[derive(Debug)]
-pub(crate) struct EthTransactionValidatorInner<Client, T>
-where
-    Client: BlockReaderIdExt,
-{
+pub(crate) struct EthTransactionValidatorInner<Client, T> {
     /// Spec of the chain
     chain_spec: Arc<ChainSpec>,
     /// This type fetches account info from the db
@@ -130,10 +124,7 @@ where
 
 // === impl EthTransactionValidatorInner ===
 
-impl<Client, Tx> EthTransactionValidatorInner<Client, Tx>
-where
-    Client: BlockReaderIdExt,
-{
+impl<Client, Tx> EthTransactionValidatorInner<Client, Tx> {
     /// Returns the configured chain id
     pub(crate) fn chain_id(&self) -> u64 {
         self.chain_spec.chain().id()
@@ -152,7 +143,7 @@ where
         mut transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         #[cfg(feature = "optimism")]
-        if transaction.is_deposit() {
+        if transaction.is_deposit() || transaction.is_eip4844() {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TxTypeNotSupported.into(),
@@ -351,7 +342,7 @@ where
                 info.l1_tx_data_fee(
                     &self.chain_spec,
                     block.timestamp,
-                    &encoded.freeze().into(),
+                    &encoded,
                     transaction.is_deposit(),
                 )
             }) {
@@ -519,7 +510,7 @@ impl EthTransactionValidatorBuilder {
     }
 
     /// Disables the Cancun fork.
-    pub fn no_cancun(self) -> Self {
+    pub const fn no_cancun(self) -> Self {
         self.set_cancun(false)
     }
 
@@ -533,40 +524,40 @@ impl EthTransactionValidatorBuilder {
     }
 
     /// Set the Cancun fork.
-    pub fn set_cancun(mut self, cancun: bool) -> Self {
+    pub const fn set_cancun(mut self, cancun: bool) -> Self {
         self.cancun = cancun;
         self
     }
 
     /// Disables the Shanghai fork.
-    pub fn no_shanghai(self) -> Self {
+    pub const fn no_shanghai(self) -> Self {
         self.set_shanghai(false)
     }
 
     /// Set the Shanghai fork.
-    pub fn set_shanghai(mut self, shanghai: bool) -> Self {
+    pub const fn set_shanghai(mut self, shanghai: bool) -> Self {
         self.shanghai = shanghai;
         self
     }
 
     /// Disables the eip2718 support.
-    pub fn no_eip2718(self) -> Self {
+    pub const fn no_eip2718(self) -> Self {
         self.set_eip2718(false)
     }
 
     /// Set eip2718 support.
-    pub fn set_eip2718(mut self, eip2718: bool) -> Self {
+    pub const fn set_eip2718(mut self, eip2718: bool) -> Self {
         self.eip2718 = eip2718;
         self
     }
 
     /// Disables the eip1559 support.
-    pub fn no_eip1559(self) -> Self {
+    pub const fn no_eip1559(self) -> Self {
         self.set_eip1559(false)
     }
 
     /// Set the eip1559 support.
-    pub fn set_eip1559(mut self, eip1559: bool) -> Self {
+    pub const fn set_eip1559(mut self, eip1559: bool) -> Self {
         self.eip1559 = eip1559;
         self
     }
@@ -578,13 +569,13 @@ impl EthTransactionValidatorBuilder {
     }
 
     /// Sets a minimum priority fee that's enforced for acceptance into the pool.
-    pub fn with_minimum_priority_fee(mut self, minimum_priority_fee: u128) -> Self {
+    pub const fn with_minimum_priority_fee(mut self, minimum_priority_fee: u128) -> Self {
         self.minimum_priority_fee = Some(minimum_priority_fee);
         self
     }
 
     /// Sets the number of additional tasks to spawn.
-    pub fn with_additional_tasks(mut self, additional_tasks: usize) -> Self {
+    pub const fn with_additional_tasks(mut self, additional_tasks: usize) -> Self {
         self.additional_tasks = additional_tasks;
         self
     }
@@ -605,7 +596,6 @@ impl EthTransactionValidatorBuilder {
         blob_store: S,
     ) -> EthTransactionValidator<Client, Tx>
     where
-        Client: BlockReaderIdExt,
         S: BlobStore,
     {
         let Self {
@@ -656,7 +646,6 @@ impl EthTransactionValidatorBuilder {
         blob_store: S,
     ) -> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>>
     where
-        Client: BlockReaderIdExt,
         T: TaskSpawner,
         S: BlobStore,
     {

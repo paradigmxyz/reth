@@ -70,7 +70,7 @@ impl BlockBuffer {
 
     /// Insert a correct block inside the buffer.
     pub fn insert_block(&mut self, block: SealedBlockWithSenders) {
-        let hash = block.hash;
+        let hash = block.hash();
 
         self.parent_to_child.entry(block.parent_hash).or_default().insert(hash);
         self.earliest_blocks.entry(block.number).or_default().insert(hash);
@@ -221,16 +221,16 @@ mod tests {
 
     /// Assert that the block was removed from all buffer collections.
     fn assert_block_removal(buffer: &BlockBuffer, block: &SealedBlockWithSenders) {
-        assert!(buffer.blocks.get(&block.hash).is_none());
+        assert!(buffer.blocks.get(&block.hash()).is_none());
         assert!(buffer
             .parent_to_child
             .get(&block.parent_hash)
-            .and_then(|p| p.get(&block.hash))
+            .and_then(|p| p.get(&block.hash()))
             .is_none());
         assert!(buffer
             .earliest_blocks
             .get(&block.number)
-            .and_then(|hashes| hashes.get(&block.hash))
+            .and_then(|hashes| hashes.get(&block.hash()))
             .is_none());
     }
 
@@ -243,7 +243,7 @@ mod tests {
 
         buffer.insert_block(block1.clone());
         assert_buffer_lengths(&buffer, 1);
-        assert_eq!(buffer.block(&block1.hash), Some(&block1));
+        assert_eq!(buffer.block(&block1.hash()), Some(&block1));
     }
 
     #[test]
@@ -252,8 +252,8 @@ mod tests {
 
         let main_parent_hash = rng.gen();
         let block1 = create_block(&mut rng, 10, main_parent_hash);
-        let block2 = create_block(&mut rng, 11, block1.hash);
-        let block3 = create_block(&mut rng, 12, block2.hash);
+        let block2 = create_block(&mut rng, 11, block1.hash());
+        let block3 = create_block(&mut rng, 12, block2.hash());
         let parent4 = rng.gen();
         let block4 = create_block(&mut rng, 14, parent4);
 
@@ -265,13 +265,13 @@ mod tests {
         buffer.insert_block(block4.clone());
 
         assert_buffer_lengths(&buffer, 4);
-        assert_eq!(buffer.block(&block4.hash), Some(&block4));
-        assert_eq!(buffer.block(&block2.hash), Some(&block2));
+        assert_eq!(buffer.block(&block4.hash()), Some(&block4));
+        assert_eq!(buffer.block(&block2.hash()), Some(&block2));
         assert_eq!(buffer.block(&main_parent_hash), None);
 
-        assert_eq!(buffer.lowest_ancestor(&block4.hash), Some(&block4));
-        assert_eq!(buffer.lowest_ancestor(&block3.hash), Some(&block1));
-        assert_eq!(buffer.lowest_ancestor(&block1.hash), Some(&block1));
+        assert_eq!(buffer.lowest_ancestor(&block4.hash()), Some(&block4));
+        assert_eq!(buffer.lowest_ancestor(&block3.hash()), Some(&block1));
+        assert_eq!(buffer.lowest_ancestor(&block1.hash()), Some(&block1));
         assert_eq!(
             buffer.remove_block_with_children(&main_parent_hash),
             vec![block1, block2, block3]
@@ -285,9 +285,9 @@ mod tests {
 
         let main_parent_hash = rng.gen();
         let block1 = create_block(&mut rng, 10, main_parent_hash);
-        let block2 = create_block(&mut rng, 11, block1.hash);
-        let block3 = create_block(&mut rng, 11, block1.hash);
-        let block4 = create_block(&mut rng, 12, block2.hash);
+        let block2 = create_block(&mut rng, 11, block1.hash());
+        let block3 = create_block(&mut rng, 11, block1.hash());
+        let block4 = create_block(&mut rng, 12, block2.hash());
 
         let mut buffer = BlockBuffer::new(5);
 
@@ -301,13 +301,13 @@ mod tests {
             buffer
                 .remove_block_with_children(&main_parent_hash)
                 .into_iter()
-                .map(|b| (b.hash, b))
+                .map(|b| (b.hash(), b))
                 .collect::<HashMap<_, _>>(),
             HashMap::from([
-                (block1.hash, block1),
-                (block2.hash, block2),
-                (block3.hash, block3),
-                (block4.hash, block4)
+                (block1.hash(), block1),
+                (block2.hash(), block2),
+                (block3.hash(), block3),
+                (block4.hash(), block4)
             ])
         );
         assert_buffer_lengths(&buffer, 0);
@@ -319,9 +319,9 @@ mod tests {
 
         let main_parent = BlockNumHash::new(9, rng.gen());
         let block1 = create_block(&mut rng, 10, main_parent.hash);
-        let block2 = create_block(&mut rng, 11, block1.hash);
-        let block3 = create_block(&mut rng, 11, block1.hash);
-        let block4 = create_block(&mut rng, 12, block2.hash);
+        let block2 = create_block(&mut rng, 11, block1.hash());
+        let block3 = create_block(&mut rng, 11, block1.hash());
+        let block4 = create_block(&mut rng, 12, block2.hash());
 
         let mut buffer = BlockBuffer::new(5);
 
@@ -333,15 +333,15 @@ mod tests {
         assert_buffer_lengths(&buffer, 4);
         assert_eq!(
             buffer
-                .remove_block_with_children(&block1.hash)
+                .remove_block_with_children(&block1.hash())
                 .into_iter()
-                .map(|b| (b.hash, b))
+                .map(|b| (b.hash(), b))
                 .collect::<HashMap<_, _>>(),
             HashMap::from([
-                (block1.hash, block1),
-                (block2.hash, block2),
-                (block3.hash, block3),
-                (block4.hash, block4)
+                (block1.hash(), block1),
+                (block2.hash(), block2),
+                (block3.hash(), block3),
+                (block4.hash(), block4)
             ])
         );
         assert_buffer_lengths(&buffer, 0);
@@ -353,8 +353,8 @@ mod tests {
 
         let main_parent = BlockNumHash::new(9, rng.gen());
         let block1 = create_block(&mut rng, 10, main_parent.hash);
-        let block2 = create_block(&mut rng, 11, block1.hash);
-        let block3 = create_block(&mut rng, 12, block2.hash);
+        let block2 = create_block(&mut rng, 11, block1.hash());
+        let block3 = create_block(&mut rng, 12, block2.hash());
         let parent4 = rng.gen();
         let block4 = create_block(&mut rng, 14, parent4);
 
@@ -376,9 +376,9 @@ mod tests {
 
         let main_parent = BlockNumHash::new(9, rng.gen());
         let block1 = create_block(&mut rng, 10, main_parent.hash);
-        let block2 = create_block(&mut rng, 11, block1.hash);
-        let block3 = create_block(&mut rng, 11, block1.hash);
-        let block4 = create_block(&mut rng, 12, block2.hash);
+        let block2 = create_block(&mut rng, 11, block1.hash());
+        let block3 = create_block(&mut rng, 11, block1.hash());
+        let block4 = create_block(&mut rng, 12, block2.hash());
 
         let mut buffer = BlockBuffer::new(5);
 
@@ -399,8 +399,8 @@ mod tests {
         let main_parent = BlockNumHash::new(9, rng.gen());
         let block1 = create_block(&mut rng, 10, main_parent.hash);
         let block1a = create_block(&mut rng, 10, main_parent.hash);
-        let block2 = create_block(&mut rng, 11, block1.hash);
-        let block2a = create_block(&mut rng, 11, block1.hash);
+        let block2 = create_block(&mut rng, 11, block1.hash());
+        let block2a = create_block(&mut rng, 11, block1.hash());
         let random_parent1 = rng.gen();
         let random_block1 = create_block(&mut rng, 10, random_parent1);
         let random_parent2 = rng.gen();
@@ -419,17 +419,17 @@ mod tests {
         buffer.insert_block(random_block3.clone());
 
         // check that random blocks are their own ancestor, and that chains have proper ancestors
-        assert_eq!(buffer.lowest_ancestor(&random_block1.hash), Some(&random_block1));
-        assert_eq!(buffer.lowest_ancestor(&random_block2.hash), Some(&random_block2));
-        assert_eq!(buffer.lowest_ancestor(&random_block3.hash), Some(&random_block3));
+        assert_eq!(buffer.lowest_ancestor(&random_block1.hash()), Some(&random_block1));
+        assert_eq!(buffer.lowest_ancestor(&random_block2.hash()), Some(&random_block2));
+        assert_eq!(buffer.lowest_ancestor(&random_block3.hash()), Some(&random_block3));
 
         // descendants have ancestors
-        assert_eq!(buffer.lowest_ancestor(&block2a.hash), Some(&block1));
-        assert_eq!(buffer.lowest_ancestor(&block2.hash), Some(&block1));
+        assert_eq!(buffer.lowest_ancestor(&block2a.hash()), Some(&block1));
+        assert_eq!(buffer.lowest_ancestor(&block2.hash()), Some(&block1));
 
         // roots are themselves
-        assert_eq!(buffer.lowest_ancestor(&block1a.hash), Some(&block1a));
-        assert_eq!(buffer.lowest_ancestor(&block1.hash), Some(&block1));
+        assert_eq!(buffer.lowest_ancestor(&block1a.hash()), Some(&block1a));
+        assert_eq!(buffer.lowest_ancestor(&block1.hash()), Some(&block1));
 
         assert_buffer_lengths(&buffer, 7);
         buffer.remove_old_blocks(10);
@@ -442,8 +442,8 @@ mod tests {
 
         let main_parent = BlockNumHash::new(9, rng.gen());
         let block1 = create_block(&mut rng, 10, main_parent.hash);
-        let block2 = create_block(&mut rng, 11, block1.hash);
-        let block3 = create_block(&mut rng, 12, block2.hash);
+        let block2 = create_block(&mut rng, 11, block1.hash());
+        let block3 = create_block(&mut rng, 12, block2.hash());
         let parent4 = rng.gen();
         let block4 = create_block(&mut rng, 13, parent4);
 
@@ -454,21 +454,21 @@ mod tests {
         buffer.insert_block(block3.clone());
 
         // pre-eviction block1 is the root
-        assert_eq!(buffer.lowest_ancestor(&block3.hash), Some(&block1));
-        assert_eq!(buffer.lowest_ancestor(&block2.hash), Some(&block1));
-        assert_eq!(buffer.lowest_ancestor(&block1.hash), Some(&block1));
+        assert_eq!(buffer.lowest_ancestor(&block3.hash()), Some(&block1));
+        assert_eq!(buffer.lowest_ancestor(&block2.hash()), Some(&block1));
+        assert_eq!(buffer.lowest_ancestor(&block1.hash()), Some(&block1));
 
         buffer.insert_block(block4.clone());
 
-        assert_eq!(buffer.lowest_ancestor(&block4.hash), Some(&block4));
+        assert_eq!(buffer.lowest_ancestor(&block4.hash()), Some(&block4));
 
         // block1 gets evicted
         assert_block_removal(&buffer, &block1);
 
         // check lowest ancestor results post eviction
-        assert_eq!(buffer.lowest_ancestor(&block3.hash), Some(&block2));
-        assert_eq!(buffer.lowest_ancestor(&block2.hash), Some(&block2));
-        assert_eq!(buffer.lowest_ancestor(&block1.hash), None);
+        assert_eq!(buffer.lowest_ancestor(&block3.hash()), Some(&block2));
+        assert_eq!(buffer.lowest_ancestor(&block2.hash()), Some(&block2));
+        assert_eq!(buffer.lowest_ancestor(&block1.hash()), None);
 
         assert_buffer_lengths(&buffer, 3);
     }
@@ -479,8 +479,8 @@ mod tests {
 
         let main_parent = BlockNumHash::new(9, rng.gen());
         let block1 = create_block(&mut rng, 10, main_parent.hash);
-        let block2 = create_block(&mut rng, 11, block1.hash);
-        let block3 = create_block(&mut rng, 12, block2.hash);
+        let block2 = create_block(&mut rng, 11, block1.hash());
+        let block3 = create_block(&mut rng, 12, block2.hash());
         let parent4 = rng.gen();
         let block4 = create_block(&mut rng, 13, parent4);
 

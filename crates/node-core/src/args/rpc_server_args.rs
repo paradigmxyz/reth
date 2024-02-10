@@ -19,7 +19,7 @@ use clap::{
 use futures::TryFutureExt;
 use rand::Rng;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_node_api::{EngineTypes, EvmEnvConfig};
+use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, StateProviderFactory,
@@ -273,7 +273,7 @@ impl RpcServerArgs {
     /// Returns the handles for the launched regular RPC server(s) (if any) and the server handle
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
-    pub async fn start_servers<Reth, Engine, Conf, EngineT: EngineTypes>(
+    pub async fn start_servers<Reth, Engine, Conf, EngineT>(
         &self,
         components: &Reth,
         engine_api: Engine,
@@ -281,8 +281,9 @@ impl RpcServerArgs {
         conf: &mut Conf,
     ) -> eyre::Result<RethRpcServerHandles>
     where
-        Reth: RethNodeComponents,
+        EngineT: EngineTypes + 'static,
         Engine: EngineApiServer<EngineT>,
+        Reth: RethNodeComponents,
         Conf: RethNodeCommandConfig,
     {
         let auth_config = self.auth_server_config(jwt_secret)?;
@@ -367,7 +368,7 @@ impl RpcServerArgs {
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         Events: CanonStateSubscriptions + Clone + 'static,
-        EvmConfig: EvmEnvConfig + 'static,
+        EvmConfig: ConfigureEvmEnv + 'static,
     {
         reth_rpc_builder::launch(
             provider,
@@ -407,7 +408,7 @@ impl RpcServerArgs {
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         EngineT: EngineTypes + 'static,
-        EvmConfig: EvmEnvConfig + 'static,
+        EvmConfig: ConfigureEvmEnv + 'static,
     {
         let socket_address = SocketAddr::new(self.auth_addr, self.auth_port);
 
@@ -606,7 +607,7 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
         val.parse::<RpcModuleSelection>().map_err(|err| {
             let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
-            let possible_values = RethRpcModule::all_variants().to_vec().join(",");
+            let possible_values = RethRpcModule::all_variant_names().to_vec().join(",");
             let msg = format!(
                 "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
             );
@@ -615,7 +616,7 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
     }
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
-        let values = RethRpcModule::all_variants().iter().map(PossibleValue::new);
+        let values = RethRpcModule::all_variant_names().iter().map(PossibleValue::new);
         Some(Box::new(values))
     }
 }

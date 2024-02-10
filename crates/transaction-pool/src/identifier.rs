@@ -57,7 +57,7 @@ pub struct SenderId(u64);
 
 impl SenderId {
     /// Returns a `Bound` for `TransactionId` starting with nonce `0`
-    pub(crate) fn start_bound(self) -> std::ops::Bound<TransactionId> {
+    pub(crate) const fn start_bound(self) -> std::ops::Bound<TransactionId> {
         std::ops::Bound::Included(TransactionId::new(self, 0))
     }
 }
@@ -84,14 +84,14 @@ pub struct TransactionId {
 
 impl TransactionId {
     /// Create a new identifier pair
-    pub fn new(sender: SenderId, nonce: u64) -> Self {
+    pub const fn new(sender: SenderId, nonce: u64) -> Self {
         Self { sender, nonce }
     }
 
     /// Returns the `TransactionId` this transaction depends on.
     ///
     /// This returns `transaction_nonce - 1` if `transaction_nonce` is higher than the
-    /// `on_chain_none`
+    /// `on_chain_nonce`
     pub fn ancestor(
         transaction_nonce: u64,
         on_chain_nonce: u64,
@@ -110,13 +110,13 @@ impl TransactionId {
     }
 
     /// Returns the `TransactionId` that directly follows this transaction: `self.nonce + 1`
-    pub fn descendant(&self) -> TransactionId {
+    pub const fn descendant(&self) -> TransactionId {
         TransactionId::new(self.sender, self.nonce + 1)
     }
 
-    /// Returns the nonce the follows directly after this.
+    /// Returns the nonce that follows immediately after this one.
     #[inline]
-    pub(crate) fn next_nonce(&self) -> u64 {
+    pub(crate) const fn next_nonce(&self) -> u64 {
         self.nonce + 1
     }
 }

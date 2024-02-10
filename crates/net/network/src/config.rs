@@ -79,7 +79,7 @@ pub struct NetworkConfig<C> {
     pub optimism_network_config: OptimismNetworkConfig,
 }
 
-/// Optimmism Network Config
+/// Optimism Network Config
 #[cfg(feature = "optimism")]
 #[derive(Debug, Clone, Default)]
 pub struct OptimismNetworkConfig {
@@ -410,6 +410,14 @@ impl NetworkConfigBuilder {
     pub fn sequencer_endpoint(mut self, endpoint: Option<String>) -> Self {
         self.optimism_network_config.sequencer_endpoint = endpoint;
         self
+    }
+
+    /// Convenience function for creating a [NetworkConfig] with a noop provider that does nothing.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn build_with_noop_provider(
+        self,
+    ) -> NetworkConfig<reth_provider::test_utils::NoopProvider> {
+        self.build(reth_provider::test_utils::NoopProvider::default())
     }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]

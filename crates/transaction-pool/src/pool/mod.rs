@@ -177,7 +177,7 @@ where
     }
 
     /// Returns the configured blob store.
-    pub(crate) fn blob_store(&self) -> &S {
+    pub(crate) const fn blob_store(&self) -> &S {
         &self.blob_store
     }
 
@@ -222,12 +222,12 @@ where
     }
 
     /// Get the config the pool was configured with.
-    pub fn config(&self) -> &PoolConfig {
+    pub const fn config(&self) -> &PoolConfig {
         &self.config
     }
 
     /// Get the validator reference.
-    pub fn validator(&self) -> &V {
+    pub const fn validator(&self) -> &V {
         &self.validator
     }
 
@@ -498,8 +498,10 @@ where
             return added
         }
 
-        let mut listener = self.event_listener.write();
-        discarded.iter().for_each(|tx| listener.discarded(tx));
+        {
+            let mut listener = self.event_listener.write();
+            discarded.iter().for_each(|tx| listener.discarded(tx));
+        }
 
         // It may happen that a newly added transaction is immediately discarded, so we need to
         // adjust the result here
@@ -622,16 +624,6 @@ where
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block with
-    /// the given base fee.
-    pub(crate) fn best_transactions_with_base_fee(
-        &self,
-        base_fee: u64,
-    ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
-    {
-        self.get_pool_data().best_transactions_with_base_fee(base_fee)
-    }
-
-    /// Returns an iterator that yields transactions that are ready to be included in the block with
     /// the given base fee and optional blob fee attributes.
     pub(crate) fn best_transactions_with_attributes(
         &self,
@@ -745,6 +737,11 @@ where
     /// Whether the pool is empty
     pub(crate) fn is_empty(&self) -> bool {
         self.get_pool_data().is_empty()
+    }
+
+    /// Returns whether or not the pool is over its configured size and transaction count limits.
+    pub(crate) fn is_exceeded(&self) -> bool {
+        self.pool.read().is_exceeded()
     }
 
     /// Enforces the size limits of pool and returns the discarded transactions if violated.
@@ -999,7 +996,7 @@ pub enum AddedTransaction<T: PoolTransaction> {
 
 impl<T: PoolTransaction> AddedTransaction<T> {
     /// Returns whether the transaction has been added to the pending pool.
-    pub(crate) fn as_pending(&self) -> Option<&AddedPendingTransaction<T>> {
+    pub(crate) const fn as_pending(&self) -> Option<&AddedPendingTransaction<T>> {
         match self {
             AddedTransaction::Pending(tx) => Some(tx),
             _ => None,
@@ -1007,7 +1004,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the replaced transaction if there was one
-    pub(crate) fn replaced(&self) -> Option<&Arc<ValidPoolTransaction<T>>> {
+    pub(crate) const fn replaced(&self) -> Option<&Arc<ValidPoolTransaction<T>>> {
         match self {
             AddedTransaction::Pending(tx) => tx.replaced.as_ref(),
             AddedTransaction::Parked { replaced, .. } => replaced.as_ref(),
@@ -1049,7 +1046,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
 
     /// Returns the subpool this transaction was added to
     #[cfg(test)]
-    pub(crate) fn subpool(&self) -> SubPool {
+    pub(crate) const fn subpool(&self) -> SubPool {
         match self {
             AddedTransaction::Pending(_) => SubPool::Pending,
             AddedTransaction::Parked { subpool, .. } => *subpool,
@@ -1104,5 +1101,97 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
     ) -> impl Iterator<Item = NewTransactionEvent<T>> + '_ {
         let iter = self.promoted.iter();
         FullPendingTransactionIter { kind, iter }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        blobstore::{BlobStore, InMemoryBlobStore},
+        test_utils::{MockTransaction, TestPoolBuilder},
+        validate::ValidTransaction,
+        BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
+    };
+    use reth_primitives::{kzg::Blob, transaction::generate_blob_sidecar};
+    use std::{fs, path::PathBuf};
+
+    #[test]
+    fn test_discard_blobs_on_blob_tx_eviction() {
+        // Define the maximum limit for blobs in the sub-pool.
+        let blob_limit = SubPoolLimit::new(1000, usize::MAX);
+
+        // Create a test pool with default configuration and the specified blob limit.
+        let test_pool = &TestPoolBuilder::default()
+            .with_config(PoolConfig { blob_limit, ..Default::default() })
+            .pool;
+
+        // Set the block info for the pool, including a pending blob fee.
+        test_pool
+            .set_block_info(BlockInfo { pending_blob_fee: Some(10_000_000), ..Default::default() });
+
+        // Read the contents of the JSON file into a string.
+        let json_content = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/blob1.json"),
+        )
+        .expect("Failed to read the blob data file");
+
+        // Parse the JSON contents into a serde_json::Value.
+        let json_value: serde_json::Value =
+            serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
+
+        // Extract blob data from JSON and convert it to Blob.
+        let blobs: Vec<Blob> = vec![Blob::from_hex(
+            // Extract the "data" field from the JSON and parse it as a string.
+            json_value.get("data").unwrap().as_str().expect("Data is not a valid string"),
+        )
+        .unwrap()];
+
+        // Generate a BlobTransactionSidecar from the blobs.
+        let sidecar = generate_blob_sidecar(blobs.clone());
+
+        // Create an in-memory blob store.
+        let blob_store = InMemoryBlobStore::default();
+
+        // Loop to add transactions to the pool and test blob eviction.
+        for n in 0..blob_limit.max_txs + 10 {
+            // Create a mock transaction with the generated blob sidecar.
+            let mut tx = MockTransaction::eip4844_with_sidecar(sidecar.clone());
+
+            // Set non zero size
+            tx.set_size(1844674407370951);
+
+            // Insert the sidecar into the blob store if the current index is within the blob limit.
+            if n < blob_limit.max_txs {
+                blob_store.insert(tx.get_hash(), sidecar.clone()).unwrap();
+            }
+
+            // Add the transaction to the pool with external origin and valid outcome.
+            test_pool
+                .add_transaction(
+                    TransactionOrigin::External,
+                    TransactionValidationOutcome::Valid {
+                        balance: U256::from(1_000),
+                        state_nonce: 0,
+                        transaction: ValidTransaction::ValidWithSidecar {
+                            transaction: tx,
+                            sidecar: sidecar.clone(),
+                        },
+                        propagate: true,
+                    },
+                )
+                .unwrap();
+
+            // Evict the worst transactions from the pool.
+            test_pool.discard_worst();
+        }
+
+        // Assert that the size of the pool's blob component is equal to the maximum blob limit.
+        assert_eq!(test_pool.size().blob, blob_limit.max_txs);
+
+        // Assert that the size of the pool's blob_size component matches the expected value.
+        assert_eq!(test_pool.size().blob_size, 1844674407370951000);
+
+        // Assert that the pool's blob store matches the expected blob store.
+        assert_eq!(*test_pool.blob_store(), blob_store);
     }
 }
