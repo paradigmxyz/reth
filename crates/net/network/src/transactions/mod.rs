@@ -1179,7 +1179,7 @@ where
 
             if this.enable_tx_refetch {
                 // try drain buffered transactions
-                this.request_buffered_hashes();
+                this.request_buffered_hashes(256);
             }
 
             this.update_request_metrics();
