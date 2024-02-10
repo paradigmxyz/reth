@@ -1,4 +1,4 @@
-use crate::{validate::DEFAULT_MAX_TX_INPUT_BYTES, TransactionOrigin};
+use crate::TransactionOrigin;
 use reth_primitives::{Address, EIP4844_TX_TYPE_ID};
 use std::collections::HashSet;
 /// Guarantees max transactions for one sender, compatible with geth/erigon
@@ -36,8 +36,6 @@ pub struct PoolConfig {
     /// How to handle locally received transactions:
     /// [TransactionOrigin::Local](crate::TransactionOrigin).
     pub local_transactions_config: LocalTransactionConfig,
-    /// Maximum size a single transaction can have
-    pub max_tx_input_bytes: usize,
 }
 
 impl Default for PoolConfig {
@@ -50,7 +48,6 @@ impl Default for PoolConfig {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
             local_transactions_config: Default::default(),
-            max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
         }
     }
 }
