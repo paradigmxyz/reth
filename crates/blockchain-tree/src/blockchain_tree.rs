@@ -1283,7 +1283,7 @@ mod tests {
         );
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         let consensus = Arc::new(TestConsensus::default());
-        let executor_factory = TestExecutorFactory::new(chain_spec.clone());
+        let executor_factory = TestExecutorFactory::default();
         executor_factory.extend(exec_res);
 
         TreeExternals::new(provider_factory, consensus, executor_factory)
