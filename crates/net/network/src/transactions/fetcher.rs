@@ -473,14 +473,6 @@ impl TransactionFetcher {
             #[cfg(debug_assertions)]
             previously_unseen_hashes.push(*hash);
 
-            trace!(target: "net::tx",
-                peer_id=format!("{peer_id:#}"),
-                hash=%hash,
-                msg_version=%msg_version,
-                client_version=%client_version,
-                "new hash seen in announcement by peer"
-            );
-
             // todo: allow `MAX_ALTERNATIVE_PEERS_PER_TX` to be zero
             let limit = NonZeroUsize::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS.into()).expect("MAX_ALTERNATIVE_PEERS_PER_TX should be non-zero");
 
