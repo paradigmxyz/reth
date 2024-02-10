@@ -213,8 +213,6 @@ pub struct TransactionsManager<Pool> {
     pool_imports: FuturesUnordered<PoolImportFuture>,
     /// Stats on pending pool imports that help the node self-monitor.
     pending_pool_imports_info: PendingPoolImportsInfo,
-    /// Bad imports.
-    bad_imports: LruCache<>,
     /// All the connected peers.
     peers: HashMap<PeerId, Peer>,
     /// Send half for the command channel.
@@ -1007,7 +1005,7 @@ where
         self.transactions_by_peers.remove(&hash);
     }
 
-    /// Penalize the peers that sent the bad transaction and cache it to avoid fetching or 
+    /// Penalize the peers that sent the bad transaction and cache it to avoid fetching or
     /// importing it again.
     fn on_bad_import(&mut self, hash: TxHash) {
         if let Some(peers) = self.transactions_by_peers.remove(&hash) {
@@ -1015,7 +1013,6 @@ where
                 self.report_peer_bad_transactions(peer_id);
             }
         }
-        self.bad_imports.insert(hash);
     }
 
     /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns  
