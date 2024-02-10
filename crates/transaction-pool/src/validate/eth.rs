@@ -120,7 +120,7 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     kzg_settings: Arc<KzgSettings>,
     /// How to handle [TransactionOrigin::Local](TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
-    /// Maximum size a single transaction can have
+    /// Maximum size in bytes a single transaction can have in order to be accepted into the pool.
     max_tx_input_bytes: usize,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
@@ -501,6 +501,7 @@ impl EthTransactionValidatorBuilder {
             additional_tasks: 1,
             kzg_settings: Arc::clone(&MAINNET_KZG_TRUSTED_SETUP),
             local_transactions_config: Default::default(),
+            max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
 
             // by default all transaction types are allowed
             eip2718: true,
@@ -512,7 +513,6 @@ impl EthTransactionValidatorBuilder {
 
             // TODO: can hard enable by default once mainnet transitioned
             cancun,
-            max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
         }
     }
 
