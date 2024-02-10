@@ -25,7 +25,7 @@ pub const SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST: usize = 25
 /// request. Spec'd at 2 MiB.
 ///
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
-pub const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE: usize = 128 * 1024;
+pub const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE: usize = 2 * 1024 * 1024;
 
 pub mod tx_manager {
     use super::{
@@ -33,8 +33,8 @@ pub mod tx_manager {
         SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST,
     };
 
-    /// Default limit for number transactions to keep track of for a single peer, for transactions
-    /// that the peer's pool and local pool have in common.
+    /// Default limit for number of transactions to keep track of for a single peer, for
+    /// transactions that the peer's pool and local pool have in common.
     pub const DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER_AND_IN_POOL: usize = 10 * 1024;
 
     /// Default limit for the number of transactions to keep track of for a single peer, for
@@ -45,6 +45,9 @@ pub mod tx_manager {
     pub const DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS: usize =
         SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST *
             DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS as usize;
+
+    /// Default limit for number of bad imports to keep track of. Default is 10 KiB.
+    pub const DEFAULT_CAPACITY_CACHE_BAD_IMPORTS: usize = 10 * 1024;
 }
 
 pub mod tx_fetcher {

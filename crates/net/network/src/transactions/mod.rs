@@ -213,6 +213,8 @@ pub struct TransactionsManager<Pool> {
     pool_imports: FuturesUnordered<PoolImportFuture>,
     /// Stats on pending pool imports that help the node self-monitor.
     pending_pool_imports_info: PendingPoolImportsInfo,
+    /// Bad imports.
+    bad_imports: LruCache<TxHash>,
     /// All the connected peers.
     peers: HashMap<PeerId, Peer>,
     /// Send half for the command channel.
@@ -250,6 +252,12 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             transaction_fetcher: Default::default(),
             transactions_by_peers: Default::default(),
             pool_imports: Default::default(),
+            pending_pool_imports_info: PendingPoolImportsInfo::new(
+                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+            ),
+            bad_imports: LruCache::new(
+                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_BAD_IMPORTS).unwrap(),
+            ),
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
@@ -259,9 +267,6 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
             metrics: Default::default(),
-            pending_pool_imports_info: PendingPoolImportsInfo::new(
-                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
-            ),
         }
     }
 }
@@ -758,7 +763,7 @@ where
 
                 let has_blob_txs = msg.has_eip4844();
 
-                let non_blob_txs = msg
+                let mut non_blob_txs = msg
                     .0
                     .into_iter()
                     .map(PooledTransactionsElement::try_from_broadcast)
@@ -923,11 +928,20 @@ where
                         entry.get_mut().push(peer_id);
                     }
                     Entry::Vacant(entry) => {
-                        // this is a new transaction that should be imported into the pool
-                        let pool_transaction = <Pool::Transaction as FromRecoveredPooledTransaction>::from_recovered_pooled_transaction(tx);
-                        new_txs.push(pool_transaction);
+                        if !self.bad_imports.contains(tx.hash()) {
+                            // this is a new transaction that should be imported into the pool
+                            let pool_transaction = <Pool::Transaction as FromRecoveredPooledTransaction>::from_recovered_pooled_transaction(tx);
+                            new_txs.push(pool_transaction);
 
-                        entry.insert(vec![peer_id]);
+                            entry.insert(vec![peer_id]);
+                        } else {
+                            trace!(target: "net::tx",
+                                peer_id=format!("{peer_id:#}"),
+                                hash=%tx.hash(),
+                                "received an invalid transaction from peer"
+                            );
+                            self.metrics.bad_imports.increment(1);
+                        }
                     }
                 }
             }
@@ -1005,13 +1019,15 @@ where
         self.transactions_by_peers.remove(&hash);
     }
 
-    /// Penalize the peers that sent the bad transaction
+    /// Penalize the peers that sent the bad transaction and cache it to avoid fetching or
+    /// importing it again.
     fn on_bad_import(&mut self, hash: TxHash) {
         if let Some(peers) = self.transactions_by_peers.remove(&hash) {
             for peer_id in peers {
                 self.report_peer_bad_transactions(peer_id);
             }
         }
+        self.bad_imports.insert(hash);
     }
 
     /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns  

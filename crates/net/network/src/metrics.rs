@@ -67,6 +67,8 @@ pub struct TransactionsManagerMetrics {
     pub(crate) messages_with_already_seen_transactions: Counter,
     /// Number of transactions about to be imported into the pool.
     pub(crate) pending_pool_imports: Gauge,
+    /// Total number of bad imports.
+    pub(crate) bad_imports: Counter,
     /// Currently active outgoing GetPooledTransactions requests.
     pub(crate) inflight_transaction_requests: Gauge,
     /// Hashes in currently active outgoing
