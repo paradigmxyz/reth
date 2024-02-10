@@ -123,4 +123,4 @@ optimism = [
 jemalloc = ["dep:jemalloc-ctl"]
 
 [build-dependencies]
-vergen = { version = "8.0.0", features = ["build", "cargo", "git", "git2"] }
+vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }
