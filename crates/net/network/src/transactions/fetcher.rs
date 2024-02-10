@@ -21,7 +21,7 @@ use tracing::{debug, trace};
 
 use super::{
     constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
-    AnnouncementFilter, Peer, PooledTransactions, TransactionsManagerMetrics,
+    AnnouncementFilter, Peer, PooledTransactions,
 };
 
 /// The type responsible for fetching missing transactions from peers.
