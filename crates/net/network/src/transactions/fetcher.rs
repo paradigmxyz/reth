@@ -533,12 +533,12 @@ impl TransactionFetcher {
         let peer_id: PeerId = peer.request_tx.peer_id;
         let conn_eth_version = peer.version;
 
-        if self.active_peers.len() >= self.tx_fetcher_info.max_inflight_transaction_requests {
+        if self.active_peers.len() >= self.tx_fetcher_info.max_inflight_requests {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 new_announced_hashes=?*new_announced_hashes,
                 conn_eth_version=%conn_eth_version,
-                max_inflight_transaction_requests=self.tx_fetcher_info.max_inflight_transaction_requests,
+                max_inflight_transaction_requests=self.tx_fetcher_info.max_inflight_requests,
                 "limit for concurrent `GetPooledTransactions` requests reached, dropping request for hashes to peer"
             );
             return Some(new_announced_hashes)
@@ -703,8 +703,14 @@ impl TransactionFetcher {
     pub(super) fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
         let info = &self.tx_fetcher_info;
 
-        self.inflight_requests.len() <= info.max_inflight_transaction_requests ||
-            self.hashes_pending_fetch.len() >= info.max_hashes_pending_fetch
+        self.has_capacity(info.max_inflight_requests, info.max_hashes_pending_fetch)
+    }
+
+    /// Returns `true` if the number of inflight requests is under a given tolerated max, or if 
+    /// the number of hashes pending fetch exceeds a tolerated max.
+    fn has_capacity(&self, max_inflight_requests: usize, max_hashes_pending_fetch: usize) -> bool {
+        self.inflight_requests.len() <= max_inflight_requests ||
+            self.hashes_pending_fetch.len() >= max_hashes_pending_fetch
     }
 
     /// Returns the limit to enforce when looking for any pending hash with an idle fallback peer.
@@ -713,13 +719,15 @@ impl TransactionFetcher {
     /// Returns `None`, unlimited, if [`TransactionFetcher`] is not that busy or too many hashes
     /// are pending.
     pub(super) fn search_breadth_budget_find_idle_fallback_peer(&self) -> Option<usize> {
-        if self.has_capacity_for_fetching_pending_hashes() {
+        let info = &self.tx_fetcher_info;
+
+        if self.has_capacity(info.max_inflight_requests / 2, info.max_hashes_pending_fetch) {
             // unlimited search breadth
             trace!(target: "net::tx",
                 inflight_requests=self.inflight_requests.len(),
-                max_inflight_transaction_requests=self.tx_fetcher_info.max_inflight_transaction_requests,
+                max_inflight_transaction_requests=info.max_inflight_requests,
                 hashes_pending_fetch=self.hashes_pending_fetch.len(),
-                max_hashes_pending_fetch=self.tx_fetcher_info.max_hashes_pending_fetch,
+                max_hashes_pending_fetch=info.max_hashes_pending_fetch,
                 "no limit on search breadth in search for idle fallback peer for some hash pending fetch"
             );
             None
@@ -729,9 +737,9 @@ impl TransactionFetcher {
 
             trace!(target: "net::tx",
                 inflight_requests=self.inflight_requests.len(),
-                max_inflight_transaction_requests=self.tx_fetcher_info.max_inflight_transaction_requests,
+                max_inflight_transaction_requests=info.max_inflight_requests,
                 hashes_pending_fetch=self.hashes_pending_fetch.len(),
-                max_hashes_pending_fetch=self.tx_fetcher_info.max_hashes_pending_fetch,
+                max_hashes_pending_fetch=info.max_hashes_pending_fetch,
                 limit=limit,
                 "search breadth limited in search for idle fallback peer for some hash pending fetch"
             );
@@ -748,11 +756,13 @@ impl TransactionFetcher {
     pub(super) fn search_breadth_budget_find_intersection_pending_hashes_and_hashes_seen_by_peer(
         &self,
     ) -> Option<usize> {
-        if self.has_capacity_for_fetching_pending_hashes() {
+        let info = &self.tx_fetcher_info;
+
+        if self.has_capacity(info.max_inflight_requests / 2, info.max_hashes_pending_fetch) {
             // unlimited search breadth
             trace!(target: "net::tx",
                 inflight_requests=self.inflight_requests.len(),
-                max_inflight_transaction_requests=self.tx_fetcher_info.max_inflight_transaction_requests,
+                max_inflight_transaction_requests=self.tx_fetcher_info.max_inflight_requests,
                 hashes_pending_fetch=self.hashes_pending_fetch.len(),
                 max_hashes_pending_fetch=self.tx_fetcher_info.max_hashes_pending_fetch,
                 "no limit on search breadth in search for intersection of hashes announced by peer and hashes pending fetch"
@@ -764,7 +774,7 @@ impl TransactionFetcher {
 
             trace!(target: "net::tx",
                 inflight_requests=self.inflight_requests.len(),
-                max_inflight_transaction_requests=self.tx_fetcher_info.max_inflight_transaction_requests,
+                max_inflight_transaction_requests=self.tx_fetcher_info.max_inflight_requests,
                 hashes_pending_fetch=self.hashes_pending_fetch.len(),
                 max_hashes_pending_fetch=self.tx_fetcher_info.max_hashes_pending_fetch,
                 limit=limit,
@@ -965,14 +975,14 @@ impl Future for GetPooledTxRequestFut {
 #[derive(Debug)]
 pub struct TransactionFetcherInfo {
     /// Currently active outgoing [`GetPooledTransactions`] requests.
-    max_inflight_transaction_requests: usize,
+    max_inflight_requests: usize,
     /// Number of pending hashes.
     max_hashes_pending_fetch: usize,
 }
 
 impl TransactionFetcherInfo {
     pub fn new(max_inflight_transaction_requests: usize, max_hashes_pending_fetch: usize) -> Self {
-        Self { max_inflight_transaction_requests, max_hashes_pending_fetch }
+        Self { max_inflight_requests: max_inflight_transaction_requests, max_hashes_pending_fetch }
     }
 }
 
