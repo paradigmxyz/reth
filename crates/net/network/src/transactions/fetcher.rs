@@ -507,6 +507,7 @@ impl TransactionFetcher {
             peer_id=format!("{peer_id:#}"),
             msg_version=%msg_version,
             client_version=%client_version,
+            previously_unseen_hashes_len=?previously_unseen_hashes.len(),
             previously_unseen_hashes=?previously_unseen_hashes,
             "received previously unseen hashes in announcement from peer"
         );
