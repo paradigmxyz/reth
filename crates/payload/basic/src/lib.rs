@@ -105,7 +105,12 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
     // See also <https://github.com/ethereum/execution-apis/blob/431cf72fd3403d946ca3e3afc36b973fc87e0e89/src/engine/paris.md?plain=1#L137>
     #[inline]
     fn max_job_duration(&self, unix_timestamp: u64) -> Duration {
-        self.config.deadline + duration_until(unix_timestamp).min(self.config.deadline * 3)
+        let duration_until_timestamp = duration_until(unix_timestamp);
+
+        // safety in case clocks are bad
+        let duration_until_timestamp = duration_until_timestamp.min(self.config.deadline * 3);
+
+        self.config.deadline + duration_until_timestamp
     }
 
     /// Returns the [Instant](tokio::time::Instant) at which the job should be terminated because it
