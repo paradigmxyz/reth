@@ -4,7 +4,7 @@ use crate::{
     blobstore::BlobStore,
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     traits::TransactionOrigin,
-    validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE},
+    validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE, MAX_TX_INPUT_BYTES},
     EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig, PoolTransaction,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
@@ -28,8 +28,6 @@ use tokio::sync::Mutex;
 
 #[cfg(feature = "optimism")]
 use reth_revm::optimism::RethL1BlockInfo;
-
-use super::constants::DEFAULT_MAX_TX_INPUT_BYTES;
 
 /// Validator for Ethereum transactions.
 #[derive(Debug, Clone)]
@@ -120,8 +118,6 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     kzg_settings: Arc<KzgSettings>,
     /// How to handle [TransactionOrigin::Local](TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
-    /// Maximum size in bytes a single transaction can have in order to be accepted into the pool.
-    max_tx_input_bytes: usize,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
 }
@@ -196,11 +192,11 @@ where
         };
 
         // Reject transactions over defined size to prevent DOS attacks
-        if transaction.size() > self.max_tx_input_bytes {
+        if transaction.size() > MAX_TX_INPUT_BYTES {
             let size = transaction.size();
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::OversizedData(size, self.max_tx_input_bytes),
+                InvalidPoolTransactionError::OversizedData(size, MAX_TX_INPUT_BYTES),
             )
         }
 
@@ -484,8 +480,6 @@ pub struct EthTransactionValidatorBuilder {
     kzg_settings: Arc<KzgSettings>,
     /// How to handle [TransactionOrigin::Local](TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
-    /// Max size in bytes of a single transaction allowed
-    max_tx_input_bytes: usize,
 }
 
 impl EthTransactionValidatorBuilder {
@@ -501,7 +495,6 @@ impl EthTransactionValidatorBuilder {
             additional_tasks: 1,
             kzg_settings: Arc::clone(&MAINNET_KZG_TRUSTED_SETUP),
             local_transactions_config: Default::default(),
-            max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
 
             // by default all transaction types are allowed
             eip2718: true,
@@ -596,12 +589,6 @@ impl EthTransactionValidatorBuilder {
         self
     }
 
-    /// Sets a max size in bytes of a single transaction allowed into the pool
-    pub const fn with_max_tx_input_bytes(mut self, max_tx_input_bytes: usize) -> Self {
-        self.max_tx_input_bytes = max_tx_input_bytes;
-        self
-    }
-
     /// Builds a the [EthTransactionValidator] without spawning validator tasks.
     pub fn build<Client, Tx, S>(
         self,
@@ -622,7 +609,6 @@ impl EthTransactionValidatorBuilder {
             minimum_priority_fee,
             kzg_settings,
             local_transactions_config,
-            max_tx_input_bytes,
             ..
         } = self;
 
@@ -641,7 +627,6 @@ impl EthTransactionValidatorBuilder {
             blob_store: Box::new(blob_store),
             kzg_settings,
             local_transactions_config,
-            max_tx_input_bytes,
             _marker: Default::default(),
         };
 
