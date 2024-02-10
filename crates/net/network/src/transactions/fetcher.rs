@@ -21,7 +21,8 @@ use tracing::{debug, trace};
 
 use super::{
     constants::{
-        tx_fetcher::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+        tx_fetcher::*,
+        DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST,
         SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST,
     },
     AnnouncementFilter, Peer, PooledTransactions, TransactionsManagerMetrics,
@@ -193,7 +194,7 @@ impl TransactionFetcher {
             hashes_to_request.push(hash);
 
             // tx is really big, pack request with single tx
-            if size >= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE {
+            if size >= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST {
                 return hashes_from_announcement_iter.collect::<RequestTxHashes>()
             } else {
                 acc_size_response = size;
@@ -211,7 +212,7 @@ impl TransactionFetcher {
 
             let next_acc_size = acc_size_response + size;
 
-            if next_acc_size <= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE {
+            if next_acc_size <= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST {
                 // only update accumulated size of tx response if tx will fit in without exceeding
                 // soft limit
                 acc_size_response = next_acc_size;
@@ -221,7 +222,7 @@ impl TransactionFetcher {
             }
 
             let free_space =
-                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE - acc_size_response;
+                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST - acc_size_response;
 
             if free_space < MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED {
                 break 'fold_size
@@ -985,8 +986,8 @@ mod test {
             B256::from_slice(&[5; 32]),
         ];
         let eth68_hashes_sizes = [
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE - 2,
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE, /* this one will
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST - 2,
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST, /* this one will
                                                                         * not fit */
             2,
             9, // this one won't

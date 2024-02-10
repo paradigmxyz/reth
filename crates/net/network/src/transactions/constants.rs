@@ -21,11 +21,18 @@ pub const DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE: usize = 1
 pub const SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST: usize = 256;
 
 /// Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions)
-/// response. This defaults to less than the standard maximum response size of 2 MiB (see specs).
-/// Default is 128 KiB.
+/// response on assembling a [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions)
+/// request. Spec'd at 2 MiB.
 ///
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
-pub const DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE: usize = 128 * 1024;
+pub const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE: usize = 128 * 1024;
+
+/// Default soft limit for the byte size of a
+/// [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on assembling a
+/// [`GetPooledTransactions`](reth_eth_wire::PooledTransactions) request. This defaults to less
+/// than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when assembling a
+/// [`PooledTransactions`](reth_eth_wire::PooledTransactions) response. Default is 128 KiB.
+pub const DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST: usize = 128 * 1024;
 
 pub mod tx_manager {
     use super::{
@@ -51,7 +58,7 @@ pub mod tx_fetcher {
     use crate::peers::{DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND};
 
     use super::{
-        DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+        DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST,
         SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST,
     };
 
@@ -142,7 +149,7 @@ pub mod tx_fetcher {
     /// [`DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], which defaults to 256 KiB, so
     /// 128 KiB.
     pub const DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING_HASHES:
-        usize = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE / 2;
+        usize = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST / 2;
 
     /* ================== ROUGH MEASURES ================== */
 
@@ -151,7 +158,7 @@ pub mod tx_fetcher {
     /// divided by [`SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST`], which defaults to
     /// 256 hashes, so 521 bytes.
     pub const AVERAGE_BYTE_SIZE_TX_ENCODED: usize =
-        DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE /
+        DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST /
             SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST;
 
     /// Median observed size in bytes of a small encoded legacy transaction. Default is 120 bytes.
