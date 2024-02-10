@@ -154,12 +154,11 @@ impl BlockBuffer {
     /// The block might be missing from other collections, the method will only ensure that it has
     /// been removed.
     fn remove_block(&mut self, hash: &BlockHash) -> Option<SealedBlockWithSenders> {
-        self.blocks.remove(hash).map(|block| {
-            self.remove_from_earliest_blocks(block.number, hash);
-            self.remove_from_parent(block.parent_hash, hash);
-            self.lru.pop(hash);
-            block
-        })
+        let block = self.blocks.remove(hash)?;
+        self.remove_from_earliest_blocks(block.number, hash);
+        self.remove_from_parent(block.parent_hash, hash);
+        self.lru.pop(hash);
+        Some(block)
     }
 
     /// Remove all children and their descendants for the given blocks and return them.
