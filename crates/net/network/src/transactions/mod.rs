@@ -1078,7 +1078,7 @@ where
                 some_ready = true;
             }
 
-            this.update_request_metrics();
+            this.update_fetch_metrics();
 
             // drain fetching transaction events
             if let Poll::Ready(Some(fetch_event)) = this.transaction_fetcher.poll_next_unpin(cx) {
@@ -1098,7 +1098,7 @@ where
                 some_ready = true;
             }
 
-            this.update_request_metrics();
+            this.update_fetch_metrics();
 
             // Advance all imports
             if let Poll::Ready(Some(batch_import_res)) = this.pool_imports.poll_next_unpin(cx) {
