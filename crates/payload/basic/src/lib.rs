@@ -128,12 +128,7 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
     /// Returns the pre-cached reads for the given parent block if it matches the cached state's
     /// block.
     fn maybe_pre_cached(&self, parent: B256) -> Option<CachedReads> {
-        let pre_cached = self.pre_cached.as_ref()?;
-        if pre_cached.block == parent {
-            Some(pre_cached.cached.clone())
-        } else {
-            None
-        }
+        self.pre_cached.as_ref().filter(|pc| pc.block == parent).map(|pc| pc.cached.clone())
     }
 }
 
