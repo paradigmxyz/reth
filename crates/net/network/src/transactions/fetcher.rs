@@ -734,13 +734,6 @@ impl TransactionFetcher {
 
         if tx_fetcher_has_capacity && tx_pool_has_capacity {
             // unlimited search breadth
-            trace!(target: "net::tx",
-                inflight_requests=self.inflight_requests.len(),
-                max_inflight_transaction_requests=info.max_inflight_requests,
-                hashes_pending_fetch=self.hashes_pending_fetch.len(),
-                max_hashes_pending_fetch=info.max_hashes_pending_fetch,
-                "no limit on search breadth in search for idle fallback peer for some hash pending fetch"
-            );
             None
         } else {
             // limited breadth of search for idle peer
@@ -781,13 +774,6 @@ impl TransactionFetcher {
 
         if tx_fetcher_has_capacity && tx_pool_has_capacity {
             // unlimited search breadth
-            trace!(target: "net::tx",
-                inflight_requests=self.inflight_requests.len(),
-                max_inflight_transaction_requests=self.info.max_inflight_requests,
-                hashes_pending_fetch=self.hashes_pending_fetch.len(),
-                max_hashes_pending_fetch=self.info.max_hashes_pending_fetch,
-                "no limit on search breadth in search for intersection of hashes announced by peer and hashes pending fetch"
-            );
             None
         } else {
             // limited breadth of search for idle peer
