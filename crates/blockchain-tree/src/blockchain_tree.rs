@@ -1243,10 +1243,14 @@ mod tests {
     use reth_db::{tables, test_utils::TempDatabase, transaction::DbTxMut, DatabaseEnv};
     use reth_interfaces::test_utils::TestConsensus;
     use reth_node_ethereum::EthEvmConfig;
+    #[cfg(not(feature = "optimism"))]
+    use reth_primitives::proofs::calculate_receipt_root;
+    #[cfg(feature = "optimism")]
+    use reth_primitives::proofs::calculate_receipt_root_optimism;
     use reth_primitives::{
         constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH, ETHEREUM_BLOCK_GAS_LIMIT},
         keccak256,
-        proofs::{calculate_receipt_root, calculate_transaction_root, state_root_unhashed},
+        proofs::{calculate_transaction_root, state_root_unhashed},
         revm_primitives::AccountInfo,
         stage::StageCheckpoint,
         Account, Address, ChainSpecBuilder, Genesis, GenesisAccount, Header, Signature,
@@ -1279,7 +1283,7 @@ mod tests {
         );
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         let consensus = Arc::new(TestConsensus::default());
-        let executor_factory = TestExecutorFactory::new(chain_spec.clone());
+        let executor_factory = TestExecutorFactory::default();
         executor_factory.extend(exec_res);
 
         TreeExternals::new(provider_factory, consensus, executor_factory)
@@ -1466,7 +1470,7 @@ mod tests {
             let receipts_root = calculate_receipt_root(&receipts);
 
             #[cfg(feature = "optimism")]
-            let receipts_root = calculate_receipt_root(&receipts, &chain_spec, 0);
+            let receipts_root = calculate_receipt_root_optimism(&receipts, &chain_spec, 0);
 
             SealedBlockWithSenders::new(
                 SealedBlock {
