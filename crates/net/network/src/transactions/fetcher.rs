@@ -330,8 +330,8 @@ impl TransactionFetcher {
     pub(super) fn on_fetch_pending_hashes(
         &mut self,
         peers: &HashMap<PeerId, Peer>,
-        metrics: &TransactionsManagerMetrics,
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
+        metrics_increment_egress_peer_channel_full: impl FnOnce(),
     ) {
         let mut hashes_to_request = RequestTxHashes::with_capacity(32);
         let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
@@ -377,11 +377,11 @@ impl TransactionFetcher {
         );
 
         // request the buffered missing transactions
-        if let Some(failed_to_request_hashes) =
-            self.request_transactions_from_peer(hashes_to_request, peer, || {
-                metrics.egress_peer_channel_full.increment(1)
-            })
-        {
+        if let Some(failed_to_request_hashes) = self.request_transactions_from_peer(
+            hashes_to_request,
+            peer,
+            metrics_increment_egress_peer_channel_full,
+        ) {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 failed_to_request_hashes=?failed_to_request_hashes,

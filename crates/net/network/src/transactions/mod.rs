@@ -1050,10 +1050,14 @@ where
                 let has_capacity_wrt_pending_pool_imports =
                     |divisor| info.has_capacity(max_pending_pool_imports / divisor);
 
+                let metrics = &this.metrics;
+                let metrics_increment_egress_peer_channel_full =
+                    || metrics.egress_peer_channel_full.increment(1);
+
                 this.transaction_fetcher.on_fetch_pending_hashes(
                     &this.peers,
-                    &this.metrics,
                     has_capacity_wrt_pending_pool_imports,
+                    metrics_increment_egress_peer_channel_full,
                 );
             }
             // drain commands
@@ -1872,7 +1876,7 @@ mod tests {
         assert!(tx_fetcher.is_idle(&peer_id_1));
 
         // sends request for buffered hashes to peer_1
-        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, &tx_manager.metrics, |_| true);
+        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true, || ());
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
