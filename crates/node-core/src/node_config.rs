@@ -464,8 +464,6 @@ impl NodeConfig {
             .kzg_settings(self.kzg_settings()?)
             // use an additional validation task so we can validate transactions in parallel
             .with_additional_tasks(1)
-            // set the max tx size in bytes allowed to enter the pool
-            .with_max_tx_input_bytes(self.txpool.max_tx_input_bytes)
             .build_with_tasks(blockchain_db.clone(), executor.clone(), blob_store.clone());
 
         let transaction_pool =

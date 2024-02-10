@@ -331,11 +331,6 @@ TxPool:
           
           [default: 100]
 
-      --txpool.max_tx_input_bytes <MAX_TX_INPUT_BYTES>
-        Maximum size a single transaction can have
-
-          [default: 131072]
-
       --txpool.nolocals
           Flag to disable local transaction exemptions
 

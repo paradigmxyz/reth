@@ -188,8 +188,11 @@ impl Command {
             .with_additional_tasks(1)
             .build_with_tasks(blockchain_db.clone(), ctx.task_executor.clone(), blob_store.clone());
 
-        let transaction_pool =
-            reth_transaction_pool::Pool::eth_pool(validator, blob_store.clone(), pool_config);
+        let transaction_pool = reth_transaction_pool::Pool::eth_pool(
+            validator,
+            blob_store.clone(),
+            PoolConfig::default(),
+        );
         info!(target: "reth::cli", "Transaction pool initialized");
 
         let mut blobs_bundle = self
