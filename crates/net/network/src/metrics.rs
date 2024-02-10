@@ -71,6 +71,8 @@ pub struct TransactionsManagerMetrics {
     pub(crate) inflight_transaction_requests: Gauge,
     /// How often we failed to send a request to the peer because the channel was full.
     pub(crate) egress_peer_channel_full: Counter,
+    /// Total number of hashes pending fetch.
+    pub(crate) hashes_pending_fetch: Gauge,
 }
 
 /// Metrics for Disconnection types

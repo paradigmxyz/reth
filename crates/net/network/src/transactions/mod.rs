@@ -287,6 +287,9 @@ where
         self.metrics
             .inflight_transaction_requests
             .set(self.transaction_fetcher.inflight_requests.len() as f64);
+        self.metrics
+            .hashes_pending_fetch
+            .set(self.transaction_fetcher.hashes_pending_fetch.len() as f64)
     }
 
     /// Request handler for an incoming request for transactions
