@@ -55,9 +55,4 @@ where
         }
         evm
     }
-
-    /// Return internal chainspec
-    fn chain_spec(&self) -> &ChainSpec {
-        self.chain_spec.as_ref()
-    }
 }

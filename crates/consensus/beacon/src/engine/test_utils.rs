@@ -262,13 +262,6 @@ where
     A: ExecutorFactory,
     B: ExecutorFactory,
 {
-    fn chain_spec(&self) -> &ChainSpec {
-        match self {
-            EitherExecutorFactory::Left(a) => a.chain_spec(),
-            EitherExecutorFactory::Right(b) => b.chain_spec(),
-        }
-    }
-
     fn with_state<'a, SP: reth_provider::StateProvider + 'a>(
         &'a self,
         sp: SP,
@@ -467,8 +460,7 @@ where
         // use either test executor or real executor
         let executor_factory = match self.base_config.executor_config {
             TestExecutorConfig::Test(results) => {
-                let executor_factory =
-                    TestExecutorFactory::new(self.base_config.chain_spec.clone());
+                let executor_factory = TestExecutorFactory::default();
                 executor_factory.extend(results);
                 EitherExecutorFactory::Left(executor_factory)
             }
