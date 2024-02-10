@@ -69,6 +69,9 @@ pub struct TransactionsManagerMetrics {
     pub(crate) pending_pool_imports: Gauge,
     /// Currently active outgoing GetPooledTransactions requests.
     pub(crate) inflight_transaction_requests: Gauge,
+    /// Hashes in currently active outgoing
+    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) requests.
+    pub(crate) hashes_inflight_transaction_requests: Gauge,
     /// How often we failed to send a request to the peer because the channel was full.
     pub(crate) egress_peer_channel_full: Counter,
     /// Total number of hashes pending fetch.

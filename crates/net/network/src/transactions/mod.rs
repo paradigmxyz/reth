@@ -283,13 +283,16 @@ where
     Pool: TransactionPool + 'static,
 {
     #[inline]
-    fn update_request_metrics(&self) {
-        self.metrics
-            .inflight_transaction_requests
-            .set(self.transaction_fetcher.inflight_requests.len() as f64);
-        self.metrics
-            .hashes_pending_fetch
-            .set(self.transaction_fetcher.hashes_pending_fetch.len() as f64)
+    fn update_fetch_metrics(&self) {
+        let tx_fetcher = &self.transaction_fetcher;
+
+        self.metrics.inflight_transaction_requests.set(tx_fetcher.inflight_requests.len() as f64);
+
+        let hashes_pending_fetch = tx_fetcher.hashes_pending_fetch.len() as f64;
+        let total_hashes = tx_fetcher.hashes_fetch_inflight_and_pending_fetch.len() as f64;
+
+        self.metrics.hashes_pending_fetch.set(hashes_pending_fetch);
+        self.metrics.hashes_inflight_transaction_requests.set(total_hashes - hashes_pending_fetch);
     }
 
     /// Request handler for an incoming request for transactions
