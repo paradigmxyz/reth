@@ -211,8 +211,8 @@ pub struct TransactionsManager<Pool> {
     transactions_by_peers: HashMap<TxHash, Vec<PeerId>>,
     /// Transactions that are currently imported into the `Pool`
     pool_imports: FuturesUnordered<PoolImportFuture>,
-    /// Stats on pool imports that help the node self-monitor.
-    pool_imports_info: PoolImportsInfo,
+    /// Stats on pending pool imports that help the node self-monitor.
+    pending_pool_imports_info: PendingPoolImportsInfo,
     /// All the connected peers.
     peers: HashMap<PeerId, Peer>,
     /// Send half for the command channel.
@@ -259,7 +259,9 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
             metrics: Default::default(),
-            pool_imports_info: PoolImportsInfo::new(DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS),
+            pending_pool_imports_info: PendingPoolImportsInfo::new(
+                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+            ),
         }
     }
 }
@@ -932,11 +934,11 @@ where
                 metric_pending_pool_imports.increment(new_txs.len() as f64);
 
                 // update self-monitoring info
-                self.pool_imports_info
+                self.pending_pool_imports_info
                     .pending_pool_imports
                     .fetch_add(new_txs.len(), Ordering::Relaxed);
                 let tx_manager_info_pending_pool_imports =
-                    self.pool_imports_info.pending_pool_imports.clone();
+                    self.pending_pool_imports_info.pending_pool_imports.clone();
 
                 let import = Box::pin(async move {
                     let added = new_txs.len();
@@ -1006,13 +1008,11 @@ where
         }
     }
 
+    /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns  
+    /// `false` if [`TransactionsManager`] is operating close to full capacity.
     fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
-        if self.network.is_initially_syncing() {
-            return false
-        }
-        let info = &self.pool_imports_info;
-
-        info.pending_pool_imports.load(Ordering::Relaxed) < info.max_pending_pool_imports &&
+        self.pending_pool_imports_info
+            .has_capacity(self.pending_pool_imports_info.max_pending_pool_imports) &&
             self.transaction_fetcher.has_capacity_for_fetching_pending_hashes()
     }
 }
@@ -1045,10 +1045,15 @@ where
 
             if this.has_capacity_for_fetching_pending_hashes() {
                 // try drain buffered transactions.
+                let info = &this.pending_pool_imports_info;
+                let max_pending_pool_imports = info.max_pending_pool_imports;
+                let has_capacity_wrt_pending_pool_imports =
+                    |divisor| info.has_capacity(max_pending_pool_imports / divisor);
+
                 this.transaction_fetcher.on_fetch_pending_hashes(
                     &this.peers,
                     &this.metrics,
-                    this.transaction_fetcher.search_breadth_budget_find_idle_fallback_peer(),
+                    has_capacity_wrt_pending_pool_imports,
                 );
             }
             // drain commands
@@ -1407,16 +1412,21 @@ pub enum NetworkTransactionEvent {
 
 /// Tracks stats about the [`TransactionsManager`].
 #[derive(Debug)]
-struct PoolImportsInfo {
+struct PendingPoolImportsInfo {
     /// Number of transactions about to be imported into the pool.
     pending_pool_imports: Arc<AtomicUsize>,
     /// Max number of transactions about to be imported into the pool.
     max_pending_pool_imports: usize,
 }
 
-impl PoolImportsInfo {
+impl PendingPoolImportsInfo {
     pub fn new(max_pending_pool_imports: usize) -> Self {
         Self { pending_pool_imports: Arc::new(AtomicUsize::default()), max_pending_pool_imports }
+    }
+
+    /// Returns `true` if the number of pool imports is under a given tolerated max.
+    pub fn has_capacity(&self, max_pending_pool_imports: usize) -> bool {
+        self.pending_pool_imports.load(Ordering::Relaxed) < max_pending_pool_imports
     }
 }
 
@@ -1862,7 +1872,7 @@ mod tests {
         assert!(tx_fetcher.is_idle(&peer_id_1));
 
         // sends request for buffered hashes to peer_1
-        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, &tx_manager.metrics, Some(1));
+        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, &tx_manager.metrics, |_| true);
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 

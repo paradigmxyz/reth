@@ -20,11 +20,7 @@ use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError}
 use tracing::{debug, trace};
 
 use super::{
-    constants::{
-        tx_fetcher::*,
-        DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST,
-        SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST,
-    },
+    constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
     AnnouncementFilter, Peer, PooledTransactions, TransactionsManagerMetrics,
 };
 
@@ -54,7 +50,7 @@ pub(super) struct TransactionFetcher {
     /// Filter for valid eth68 announcements.
     pub(super) filter_valid_hashes: AnnouncementFilter,
     /// Info on capacity of the transaction fetcher.
-    tx_fetcher_info: TransactionFetcherInfo,
+    info: TransactionFetcherInfo,
 }
 
 // === impl TransactionFetcher ===
@@ -247,13 +243,13 @@ impl TransactionFetcher {
         hashes_from_announcement: ValidAnnouncementData,
     ) -> RequestTxHashes {
         let (mut request_hashes, _version) = hashes_from_announcement.into_request_hashes();
-        if request_hashes.len() <= SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST {
+        if request_hashes.len() <= SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST {
             *hashes_to_request = request_hashes;
 
             RequestTxHashes::default()
         } else {
             let surplus_hashes = request_hashes
-                .split_off(SOFT_LIMIT_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST - 1);
+                .split_off(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST - 1);
 
             *hashes_to_request = request_hashes;
 
@@ -335,12 +331,15 @@ impl TransactionFetcher {
         &mut self,
         peers: &HashMap<PeerId, Peer>,
         metrics: &TransactionsManagerMetrics,
-        budget_find_idle_fallback_peer: Option<usize>,
+        has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
     ) {
         let mut hashes_to_request = RequestTxHashes::with_capacity(32);
         let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
 
         // budget to look for an idle peer before giving up
+        let budget_find_idle_fallback_peer = self
+            .search_breadth_budget_find_idle_fallback_peer(&has_capacity_wrt_pending_pool_imports);
+
         let Some(peer_id) = self.find_any_idle_fallback_peer_for_any_pending_hash(
             &mut hashes_to_request,
             is_session_active,
@@ -354,13 +353,17 @@ impl TransactionFetcher {
 
         // fill the request with more hashes pending fetch that have been announced by the peer.
         // the search for more hashes is done with respect to the given budget, which determines
-        // how many hashes to loop through before giving up and sending a request with the single
-        // hash that was taken out of the cache above.
+        // how many hashes to loop through before giving up. if no more hashes are found wrt to
+        // the budget, the single hash that was taken out of the cache above is sent in a request.
+        let budget_fill_request = self
+            .search_breadth_budget_find_intersection_pending_hashes_and_hashes_seen_by_peer(
+                &has_capacity_wrt_pending_pool_imports,
+            );
 
         self.fill_request_from_hashes_pending_fetch(
             &mut hashes_to_request,
             peer.seen_transactions.maybe_pending_transaction_hashes(),
-            self.search_breadth_budget_find_intersection_pending_hashes_and_hashes_seen_by_peer(),
+            budget_fill_request,
         );
 
         // free unused memory
@@ -533,12 +536,12 @@ impl TransactionFetcher {
         let peer_id: PeerId = peer.request_tx.peer_id;
         let conn_eth_version = peer.version;
 
-        if self.active_peers.len() >= self.tx_fetcher_info.max_inflight_requests {
+        if self.active_peers.len() >= self.info.max_inflight_requests {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 new_announced_hashes=?*new_announced_hashes,
                 conn_eth_version=%conn_eth_version,
-                max_inflight_transaction_requests=self.tx_fetcher_info.max_inflight_requests,
+                max_inflight_transaction_requests=self.info.max_inflight_requests,
                 "limit for concurrent `GetPooledTransactions` requests reached, dropping request for hashes to peer"
             );
             return Some(new_announced_hashes)
@@ -635,7 +638,7 @@ impl TransactionFetcher {
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         seen_hashes: &LruCache<TxHash>,
-        mut budget: Option<usize>, // only check `budget` lru pending hashes
+        mut budget_fill_request: Option<usize>, // only check `budget` lru pending hashes
     ) {
         let Some(hash) = hashes_to_request.first() else { return };
 
@@ -683,7 +686,7 @@ impl TransactionFetcher {
                 break
             }
 
-            if let Some(ref mut bud) = budget {
+            if let Some(ref mut bud) = budget_fill_request {
                 *bud = bud.saturating_sub(1);
                 if *bud == 0 {
                     return
@@ -698,30 +701,38 @@ impl TransactionFetcher {
     }
 
     /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes. Returns  
-    /// `false` if [`TransactionFetcher`] is operating close to full capacity, or if too many
-    /// hashes are pending fetch.
+    /// `false` if [`TransactionFetcher`] is operating close to full capacity.
     pub(super) fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
-        let info = &self.tx_fetcher_info;
+        let info = &self.info;
 
-        self.has_capacity(info.max_inflight_requests, info.max_hashes_pending_fetch)
+        self.has_capacity(info.max_inflight_requests)
     }
 
-    /// Returns `true` if the number of inflight requests is under a given tolerated max, or if 
-    /// the number of hashes pending fetch exceeds a tolerated max.
-    fn has_capacity(&self, max_inflight_requests: usize, max_hashes_pending_fetch: usize) -> bool {
-        self.inflight_requests.len() <= max_inflight_requests ||
-            self.hashes_pending_fetch.len() >= max_hashes_pending_fetch
+    /// Returns `true` if the number of inflight requests are under a given tolerated max.
+    fn has_capacity(&self, max_inflight_requests: usize) -> bool {
+        self.inflight_requests.len() <= max_inflight_requests
     }
 
     /// Returns the limit to enforce when looking for any pending hash with an idle fallback peer.
     ///
-    /// Returns `Some(limit)` if [`TransactionFetcher`] is operating close to full capacity.
-    /// Returns `None`, unlimited, if [`TransactionFetcher`] is not that busy or too many hashes
-    /// are pending.
-    pub(super) fn search_breadth_budget_find_idle_fallback_peer(&self) -> Option<usize> {
-        let info = &self.tx_fetcher_info;
+    /// Returns `Some(limit)` if [`TransactionFetcher`] and the
+    /// [`TransactionPool`](reth_transaction_pool::TransactionPool) are operating close to full
+    /// capacity. Returns `None`, unlimited, if they are not that busy.
+    pub(super) fn search_breadth_budget_find_idle_fallback_peer(
+        &self,
+        has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
+    ) -> Option<usize> {
+        let info = &self.info;
 
-        if self.has_capacity(info.max_inflight_requests / 2, info.max_hashes_pending_fetch) {
+        let tx_fetcher_has_capacity = self.has_capacity(
+            info.max_inflight_requests /
+                DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_IDLE_PEER,
+        );
+        let tx_pool_has_capacity = has_capacity_wrt_pending_pool_imports(
+            DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_IDLE_PEER,
+        );
+
+        if tx_fetcher_has_capacity && tx_pool_has_capacity {
             // unlimited search breadth
             trace!(target: "net::tx",
                 inflight_requests=self.inflight_requests.len(),
@@ -748,23 +759,33 @@ impl TransactionFetcher {
         }
     }
 
-    /// Returns the limit to enforce when looking for any pending hash with an idle fallback peer.
+    /// Returns the limit to enforce when looking for the intersection between hashes announced by
+    /// peer and hashes pending fetch.
     ///
-    /// Returns `Some(limit)` if [`TransactionFetcher`] is operating close to full capacity.
-    /// Returns `None`, unlimited, if [`TransactionFetcher`] is not that busy or too many hashes
-    /// are pending.
+    /// Returns `Some(limit)` if [`TransactionFetcher`] and the
+    /// [`TransactionPool`](reth_transaction_pool::TransactionPool) are operating close to full
+    /// capacity. Returns `None`, unlimited, if they are not that busy.
     pub(super) fn search_breadth_budget_find_intersection_pending_hashes_and_hashes_seen_by_peer(
         &self,
+        has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
     ) -> Option<usize> {
-        let info = &self.tx_fetcher_info;
+        let info = &self.info;
 
-        if self.has_capacity(info.max_inflight_requests / 2, info.max_hashes_pending_fetch) {
+        let tx_fetcher_has_capacity = self.has_capacity(
+            info.max_inflight_requests /
+                DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_INTERSECTION,
+        );
+        let tx_pool_has_capacity = has_capacity_wrt_pending_pool_imports(
+            DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_INTERSECTION,
+        );
+
+        if tx_fetcher_has_capacity && tx_pool_has_capacity {
             // unlimited search breadth
             trace!(target: "net::tx",
                 inflight_requests=self.inflight_requests.len(),
-                max_inflight_transaction_requests=self.tx_fetcher_info.max_inflight_requests,
+                max_inflight_transaction_requests=self.info.max_inflight_requests,
                 hashes_pending_fetch=self.hashes_pending_fetch.len(),
-                max_hashes_pending_fetch=self.tx_fetcher_info.max_hashes_pending_fetch,
+                max_hashes_pending_fetch=self.info.max_hashes_pending_fetch,
                 "no limit on search breadth in search for intersection of hashes announced by peer and hashes pending fetch"
             );
             None
@@ -774,9 +795,9 @@ impl TransactionFetcher {
 
             trace!(target: "net::tx",
                 inflight_requests=self.inflight_requests.len(),
-                max_inflight_transaction_requests=self.tx_fetcher_info.max_inflight_requests,
+                max_inflight_transaction_requests=self.info.max_inflight_requests,
                 hashes_pending_fetch=self.hashes_pending_fetch.len(),
-                max_hashes_pending_fetch=self.tx_fetcher_info.max_hashes_pending_fetch,
+                max_hashes_pending_fetch=self.info.max_hashes_pending_fetch,
                 limit=limit,
                 "search breadth limited in search for intersection of hashes announced by peer and hashes pending fetch"
             );
@@ -861,7 +882,7 @@ impl Default for TransactionFetcher {
             ),
             hashes_fetch_inflight_and_pending_fetch: LruMap::new_unlimited(),
             filter_valid_hashes: Default::default(),
-            tx_fetcher_info: TransactionFetcherInfo::default(),
+            info: TransactionFetcherInfo::default(),
         }
     }
 }
@@ -989,7 +1010,7 @@ impl TransactionFetcherInfo {
 impl Default for TransactionFetcherInfo {
     fn default() -> Self {
         Self::new(
-            DEFAULT_MAX_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES,
+            DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES,
             DEFAULT_MAX_COUNT_PENDING_FETCH,
         )
     }
