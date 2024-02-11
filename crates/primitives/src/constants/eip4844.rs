@@ -2,7 +2,11 @@
 #[cfg(feature = "c-kzg")]
 pub use trusted_setup::*;
 
-pub use alloy_eips::eip4844::*;
+pub use alloy_eips::eip4844::{
+    BLOB_GASPRICE_UPDATE_FRACTION, BLOB_TX_MIN_BLOB_GASPRICE, DATA_GAS_PER_BLOB,
+    FIELD_ELEMENTS_PER_BLOB, FIELD_ELEMENT_BYTES, MAX_BLOBS_PER_BLOCK, MAX_DATA_GAS_PER_BLOCK,
+    TARGET_BLOBS_PER_BLOCK, TARGET_DATA_GAS_PER_BLOCK, VERSIONED_HASH_VERSION_KZG,
+};
 
 #[cfg(feature = "c-kzg")]
 mod trusted_setup {
