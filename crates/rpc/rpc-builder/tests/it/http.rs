@@ -1209,6 +1209,99 @@ async fn test_eth_get_transaction_by_block_number_and_index_rpc_call() {
     .await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_transaction_receipt_rpc_call() {
+    // Initialize test tracing for logging
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting transaction receipt by transaction hash with proper fields
+    test_rpc_call_ok::<Option<TransactionReceipt>>(
+        &client,
+        "eth_getTransactionReceipt",
+        rpc_params!["0x85d995eba9763907fdf35cd2034144dd9d53ce32cbec21349d4b12823c6860c5"],
+    )
+    .await;
+
+    // Requesting transaction receipt by transaction hash with additional fields
+    test_rpc_call_ok::<Option<TransactionReceipt>>(
+        &client,
+        "eth_getTransactionReceipt",
+        rpc_params!["0x85d995eba9763907fdf35cd2034144dd9d53ce32cbec21349d4b12823c6860c5", true],
+    )
+    .await;
+
+    // Requesting transaction receipt by transaction hash with missing fields
+    test_rpc_call_err::<Option<TransactionReceipt>>(
+        &client,
+        "eth_getTransactionReceipt",
+        rpc_params![],
+    )
+    .await;
+
+    // Requesting transaction receipt by transaction hash with wrong fields
+    test_rpc_call_err::<Option<TransactionReceipt>>(
+        &client,
+        "eth_getTransactionReceipt",
+        rpc_params![true],
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_balance_rpc_call() {
+    // Initialize test tracing for logging
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Vec of block number items
+    let block_number = vec!["latest", "earliest", "pending", "0x2"];
+
+    // Iterate over test cases
+    for param in block_number {
+        // Requesting balance by address with proper fields
+        test_rpc_call_ok::<U256>(
+            &client,
+            "eth_getBalance",
+            rpc_params!["0x407d73d8a49eeb85d32cf465507dd71d507100c1", param],
+        )
+        .await;
+    }
+
+    // Requesting balance by address with additional fields
+    test_rpc_call_ok::<U256>(
+        &client,
+        "eth_getBalance",
+        rpc_params!["0x407d73d8a49eeb85d32cf465507dd71d507100c1", "latest", true],
+    )
+    .await;
+
+    // Requesting balance by address without block number which is optional
+    test_rpc_call_ok::<U256>(
+        &client,
+        "eth_getBalance",
+        rpc_params!["0x407d73d8a49eeb85d32cf465507dd71d507100c1"],
+    )
+    .await;
+
+    // Requesting balance by address with no field
+    test_rpc_call_err::<U256>(&client, "eth_getBalance", rpc_params![]).await;
+
+    // Requesting balance by address with wrong fields
+    test_rpc_call_err::<U256>(
+        &client,
+        "eth_getBalance",
+        rpc_params![true], // Incorrect parameters
+    )
+    .await;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
