@@ -20,7 +20,7 @@ use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError}
 use tracing::{debug, trace};
 
 use super::{
-    constants::{tx_fetcher::*,SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
+    constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
     AnnouncementFilter, Peer, PooledTransactions,
     DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
@@ -52,7 +52,8 @@ pub(super) struct TransactionFetcher {
     pub(super) filter_valid_hashes: AnnouncementFilter,
     /// Info on capacity of the transaction fetcher.
     info: TransactionFetcherInfo,
-    /// Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response.
+    /// Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions)
+    /// response.
     pub(super) soft_limit_byte_size_pooled_transactions_response: usize,
 }
 
@@ -865,7 +866,8 @@ impl Default for TransactionFetcher {
             hashes_fetch_inflight_and_pending_fetch: LruMap::new_unlimited(),
             filter_valid_hashes: Default::default(),
             info: TransactionFetcherInfo::default(),
-            soft_limit_byte_size_pooled_transactions_response: DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE
+            soft_limit_byte_size_pooled_transactions_response:
+                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
         }
     }
 }
