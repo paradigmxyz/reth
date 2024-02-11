@@ -813,6 +813,27 @@ async fn test_eth_syncing_rpc_call() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_coinbase_rpc_call() {
+    // Initialize test tracing for logging
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting coinbase address without any parameter should return Unimplemented
+    match client.request::<Address, _>("eth_coinbase", rpc_params![]).await {
+        Ok(_) => {
+            // If there's a response, it's unexpected, panic
+            panic!("Expected Unimplemented error, got successful response");
+        }
+        Err(err) => {
+            assert!(is_unimplemented(err));
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
