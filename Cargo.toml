@@ -184,6 +184,7 @@ alloy-dyn-abi = "0.6"
 alloy-sol-types = "0.6"
 alloy-rlp = "0.3"
 alloy-trie = "0.2"
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "098ad56" }
 alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "098ad56" }
 alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "098ad56" }
 alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "098ad56" }
