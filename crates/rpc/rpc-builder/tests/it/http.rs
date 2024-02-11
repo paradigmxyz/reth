@@ -1302,6 +1302,69 @@ async fn test_eth_get_balance_rpc_call() {
     .await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_storage_at_rpc_call() {
+    // Initialize test tracing for logging
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Vec of block number items
+    let block_number = vec!["latest", "earliest", "pending", "0x2"];
+
+    // Iterate over test cases
+    for param in block_number {
+        // Requesting storage at a given address with proper fields
+        test_rpc_call_ok::<Bytes>(
+            &client,
+            "eth_getStorageAt",
+            rpc_params![
+                "0x295a70b2de5e3953354a6a8344e616ed314d7251", // Address
+                "0x0",                                        // Position in the storage
+                param                                         // Block number or tag
+            ],
+        )
+        .await;
+    }
+
+    // Requesting storage at a given address with additional fields
+    test_rpc_call_ok::<Bytes>(
+        &client,
+        "eth_getStorageAt",
+        rpc_params![
+            "0x295a70b2de5e3953354a6a8344e616ed314d7251", // Address
+            "0x0",                                        // Position in the storage
+            "latest",                                     // Block number or tag
+            true                                          // Additional field
+        ],
+    )
+    .await;
+
+    // Requesting storage at a given address without block number which is optional
+    test_rpc_call_ok::<Bytes>(
+        &client,
+        "eth_getStorageAt",
+        rpc_params![
+            "0x295a70b2de5e3953354a6a8344e616ed314d7251", // Address
+            "0x0"                                         // Position in the storage
+        ],
+    )
+    .await;
+
+    // Requesting storage at a given address with no field
+    test_rpc_call_err::<Bytes>(&client, "eth_getStorageAt", rpc_params![]).await;
+
+    // Requesting storage at a given address with wrong fields
+    test_rpc_call_err::<Bytes>(
+        &client,
+        "eth_getStorageAt",
+        rpc_params![true], // Incorrect parameters
+    )
+    .await;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
