@@ -110,7 +110,6 @@ impl RethTransactionPoolConfig for TxPoolArgs {
                 default_price_bump: self.price_bump,
                 replace_blob_tx_price_bump: self.blob_transaction_price_bump,
             },
-            max_tx_input_bytes: self.max_tx_input_bytes,
         }
     }
 }
