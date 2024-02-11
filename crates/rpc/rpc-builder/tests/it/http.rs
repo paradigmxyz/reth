@@ -8,6 +8,7 @@ use jsonrpsee::{
         error::Error,
         params::ArrayParams,
     },
+    http_client::HttpClient,
     rpc_params,
     types::error::ErrorCode,
 };
@@ -37,6 +38,25 @@ fn is_unimplemented(err: Error) -> bool {
         }
         _ => false,
     }
+}
+
+async fn test_rpc_call_ok(client: &HttpClient, method_name: &str, params: ArrayParams) {
+    // Make the RPC request
+    match client.request::<Option<String>, _>(method_name, params).await {
+        Ok(_) => {} // If the request is successful, do nothing
+        Err(e) => {
+            // If an error occurs, panic with the error message
+            panic!("Expected successful response, got error: {:?}", e);
+        }
+    }
+}
+
+async fn test_rpc_call_err(client: &HttpClient, method_name: &str, params: ArrayParams) {
+    // Make the RPC request
+    if let Ok(resp) = client.request::<Option<String>, _>(method_name, params).await {
+        // Panic if an unexpected successful response is received
+        panic!("Expected error response, got successful response: {:?}", resp);
+    };
 }
 
 /// Represents a builder for creating JSON-RPC requests.
@@ -1173,6 +1193,42 @@ async fn test_eth_get_block_receipts_rpc_call() {
         // Panic if an unexpected successful response is received
         panic!("Expected error response, got successful response: {:?}", resp);
     };
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
+    // Initialize test tracing for logging
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting uncle by block hash and index with proper fields
+    test_rpc_call_ok(
+        &client,
+        "eth_getUncleByBlockHashAndIndex",
+        rpc_params!["0xc6ef2fc5426d6ad6fd9e2a26abeab0aa2411b7ab17f30a99d3cb96aed1d1055b", "0x0"],
+    )
+    .await;
+
+    // Requesting uncle by block hash and index with additional fields
+    test_rpc_call_ok(
+        &client,
+        "eth_getUncleByBlockHashAndIndex",
+        rpc_params![
+            "0xc6ef2fc5426d6ad6fd9e2a26abeab0aa2411b7ab17f30a99d3cb96aed1d1055b",
+            "0x0",
+            true
+        ],
+    )
+    .await;
+
+    // Requesting uncle by block hash and index with missing fields
+    test_rpc_call_err(&client, "eth_getUncleByBlockHashAndIndex", rpc_params![]).await;
+
+    // Requesting uncle by block hash and index with wrong fields
+    test_rpc_call_err(&client, "eth_getUncleByBlockHashAndIndex", rpc_params![true]).await;
 }
 
 #[cfg(test)]
