@@ -1167,6 +1167,48 @@ async fn test_eth_get_transaction_by_block_hash_and_index_rpc_call() {
     .await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_transaction_by_block_number_and_index_rpc_call() {
+    // Initialize test tracing for logging
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting transaction by block number and index with proper fields
+    test_rpc_call_ok::<Option<Transaction>>(
+        &client,
+        "eth_getTransactionByBlockNumberAndIndex",
+        rpc_params!["0x29c", "0x0"],
+    )
+    .await;
+
+    // Requesting transaction by block number and index with additional fields
+    test_rpc_call_ok::<Option<Transaction>>(
+        &client,
+        "eth_getTransactionByBlockNumberAndIndex",
+        rpc_params!["0x29c", "0x0", true],
+    )
+    .await;
+
+    // Requesting transaction by block number and index with missing fields
+    test_rpc_call_err::<Option<Transaction>>(
+        &client,
+        "eth_getTransactionByBlockNumberAndIndex",
+        rpc_params![],
+    )
+    .await;
+
+    // Requesting transaction by block number and index with wrong fields
+    test_rpc_call_err::<Option<Transaction>>(
+        &client,
+        "eth_getTransactionByBlockNumberAndIndex",
+        rpc_params![true],
+    )
+    .await;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
