@@ -77,7 +77,10 @@ use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESS
 use fetcher::{FetchEvent, TransactionFetcher};
 pub use validation::*;
 
-pub use self::constants::SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE;
+pub use self::constants::{
+    tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST,
+    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+};
 use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE};
 
 /// The future for inserting a function into the pool
