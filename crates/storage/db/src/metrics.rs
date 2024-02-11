@@ -1,4 +1,4 @@
-use crate::{Tables, NUM_TABLES};
+use crate::Tables;
 use dashmap::DashMap;
 use metrics::{Gauge, Histogram};
 use reth_libmdbx::CommitLatency;
@@ -25,7 +25,7 @@ impl DatabaseEnvMetrics {
     pub(crate) fn new() -> Self {
         Self {
             operations: DashMap::with_capacity_and_hasher(
-                NUM_TABLES * Operation::COUNT,
+                Tables::COUNT * Operation::COUNT,
                 BuildHasherDefault::<FxHasher>::default(),
             ),
         }
