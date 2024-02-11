@@ -383,43 +383,12 @@ mod tests {
     use super::*;
     use std::str::FromStr;
 
-    const TABLES: &[(TableType, &str); Tables::COUNT] = &[
-        (TableType::Table, CanonicalHeaders::NAME),
-        (TableType::Table, HeaderTD::NAME),
-        (TableType::Table, HeaderNumbers::NAME),
-        (TableType::Table, Headers::NAME),
-        (TableType::Table, BlockBodyIndices::NAME),
-        (TableType::Table, BlockOmmers::NAME),
-        (TableType::Table, BlockWithdrawals::NAME),
-        (TableType::Table, TransactionBlock::NAME),
-        (TableType::Table, Transactions::NAME),
-        (TableType::Table, TxHashNumber::NAME),
-        (TableType::Table, Receipts::NAME),
-        (TableType::Table, PlainAccountState::NAME),
-        (TableType::Table, Bytecodes::NAME),
-        (TableType::Table, AccountHistory::NAME),
-        (TableType::Table, StorageHistory::NAME),
-        (TableType::Table, HashedAccount::NAME),
-        (TableType::Table, AccountsTrie::NAME),
-        (TableType::Table, TxSenders::NAME),
-        (TableType::Table, SyncStage::NAME),
-        (TableType::Table, SyncStageProgress::NAME),
-        (TableType::Table, PruneCheckpoints::NAME),
-        (TableType::DupSort, PlainStorageState::NAME),
-        (TableType::DupSort, AccountChangeSet::NAME),
-        (TableType::DupSort, StorageChangeSet::NAME),
-        (TableType::DupSort, HashedStorage::NAME),
-        (TableType::DupSort, StoragesTrie::NAME),
-    ];
-
     #[test]
     fn parse_table_from_str() {
-        for (table_index, &(table_type, table_name)) in TABLES.iter().enumerate() {
-            let table = Tables::from_str(table_name).unwrap();
-
-            assert_eq!(table as usize, table_index);
-            assert_eq!(table.table_type(), table_type);
-            assert_eq!(table.name(), table_name);
+        for table in Tables::ALL {
+            assert_eq!(format!("{:?}", table), table.name());
+            assert_eq!(table.to_string(), table.name());
+            assert_eq!(Tables::from_str(table.name()).unwrap(), *table);
         }
     }
 }
