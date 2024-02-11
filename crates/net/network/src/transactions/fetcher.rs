@@ -1007,8 +1007,6 @@ mod test {
 
     use reth_primitives::B256;
 
-    use crate::transactions::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE;
-
     use super::*;
 
     #[test]
