@@ -15,9 +15,10 @@ use std::{
     fmt,
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, info, trace, warn};
 
@@ -209,6 +210,8 @@ where
     metrics: PayloadBuilderServiceMetrics,
     /// Chain events notification stream
     chain_events: St,
+    /// Payload events handler, used to broadcast and subscribe to payload events.
+    payload_events: PayloadEventBroadcaster<Engine>,
 }
 
 // === impl PayloadBuilderService ===
@@ -227,6 +230,7 @@ where
     /// additional logic when new state is committed. See also [PayloadJobGenerator::on_new_state].
     pub fn new(generator: Gen, chain_events: St) -> (Self, PayloadBuilderHandle<Engine>) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
+
         let service = Self {
             generator,
             payload_jobs: Vec::new(),
@@ -234,10 +238,28 @@ where
             command_rx: UnboundedReceiverStream::new(command_rx),
             metrics: Default::default(),
             chain_events,
+            payload_events: PayloadEventBroadcaster::new(),
         };
 
         let handle = service.handle();
         (service, handle)
+    }
+
+    /// Notifies the service on new attribute event.
+    pub fn on_new_attributes(
+        &self,
+        attributes: &Option<
+            Result<<Engine as EngineTypes>::PayloadBuilderAttributes, PayloadBuilderError>,
+        >,
+    ) {
+        if let Some(Ok(ref attributes)) = attributes {
+            self.payload_events.broadcast(PayloadEvents::Attributes(attributes.clone())).ok();
+        }
+    }
+
+    /// Notifies the service on new payload resolve event.
+    pub fn on_resolve(&self, fut: Arc<PayloadFuture<Engine::BuiltPayload>>) {
+        self.payload_events.broadcast(PayloadEvents::Resolve(fut)).ok();
     }
 
     /// Returns a handle to the service.
@@ -402,10 +424,16 @@ where
                         let _ = tx.send(this.best_payload(id));
                     }
                     PayloadServiceCommand::PayloadAttributes(id, tx) => {
-                        let _ = tx.send(this.payload_attributes(id));
+                        let attributes = this.payload_attributes(id);
+                        this.on_new_attributes(&attributes);
+                        let _ = tx.send(attributes);
                     }
                     PayloadServiceCommand::Resolve(id, tx) => {
                         let _ = tx.send(this.resolve(id));
+                    }
+                    PayloadServiceCommand::Subscribe(tx) => {
+                        let new_rx = this.payload_events.subscribe();
+                        let _ = tx.send(new_rx);
                     }
                 }
             }
@@ -436,6 +464,52 @@ pub enum PayloadServiceCommand<Engine: EngineTypes> {
     ),
     /// Resolve the payload and return the payload
     Resolve(PayloadId, oneshot::Sender<Option<PayloadFuture<Engine::BuiltPayload>>>),
+    /// Payload service events
+    Subscribe(oneshot::Sender<broadcast::Receiver<PayloadEvents<Engine>>>),
+}
+
+#[derive(Clone)]
+pub enum PayloadEvents<Engine: EngineTypes> {
+    Attributes(Engine::PayloadBuilderAttributes),
+    Resolve(Arc<PayloadFuture<Engine::BuiltPayload>>),
+}
+
+/// A struct for managing subscriptions to payload builder events.
+#[derive(Debug)]
+pub(crate) struct PayloadEventBroadcaster<Engine: EngineTypes> {
+    sender: broadcast::Sender<PayloadEvents<Engine>>,
+}
+
+impl<Engine: EngineTypes> PayloadEventBroadcaster<Engine> {
+    /// Creates a new EventBroadcaster and its associated channel.
+    pub(crate) fn new() -> Self {
+        let (sender, _) = broadcast::channel(16); // Adjust the capacity as needed
+        Self { sender }
+    }
+
+    /// Subscribes to the broadcaster, returning a new receiver for listening to events.
+    pub(crate) fn subscribe(&self) -> broadcast::Receiver<PayloadEvents<Engine>> {
+        self.sender.subscribe()
+    }
+
+    /// Broadcasts an event to all current subscribers.
+    pub(crate) fn broadcast(
+        &self,
+        event: PayloadEvents<Engine>,
+    ) -> Result<usize, broadcast::error::SendError<PayloadEvents<Engine>>> {
+        self.sender.send(event)
+    }
+}
+
+impl<Engine: EngineTypes> fmt::Debug for PayloadEvents<Engine> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PayloadEvents::Attributes(attrs) => f.debug_tuple("Attributes").field(attrs).finish(),
+            PayloadEvents::Resolve(_) => {
+                f.debug_tuple("Resolve").field(&"Arc<PayloadFuture>").finish()
+            }
+        }
+    }
 }
 
 impl<Engine> fmt::Debug for PayloadServiceCommand<Engine>
@@ -454,6 +528,7 @@ where
                 f.debug_tuple("PayloadAttributes").field(&f0).field(&f1).finish()
             }
             PayloadServiceCommand::Resolve(f0, _f1) => f.debug_tuple("Resolve").field(&f0).finish(),
+            PayloadServiceCommand::Subscribe(f0) => f.debug_tuple("Subscribe").field(&f0).finish(),
         }
     }
 }
