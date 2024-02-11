@@ -32,13 +32,13 @@ impl DatabaseEnvMetrics {
     }
 
     /// Record a metric for database operation executed in `f`. Panics if the table name is unknown.
-    pub(crate) fn record_operation<T>(
+    pub(crate) fn record_operation<R>(
         &self,
         table: &'static str,
         operation: Operation,
         value_size: Option<usize>,
-        f: impl FnOnce() -> T,
-    ) -> T {
+        f: impl FnOnce() -> R,
+    ) -> R {
         let handle = self
             .operations
             .entry((Tables::from_str(table).expect("unknown table name"), operation))
@@ -246,7 +246,7 @@ impl OperationMetrics {
     ///
     /// The duration it took to execute the closure is recorded only if the provided `value_size` is
     /// larger than [LARGE_VALUE_THRESHOLD_BYTES].
-    pub(crate) fn record<T>(&self, value_size: Option<usize>, f: impl FnOnce() -> T) -> T {
+    pub(crate) fn record<R>(&self, value_size: Option<usize>, f: impl FnOnce() -> R) -> R {
         self.calls_total.increment(1);
 
         // Record duration only for large values to prevent the performance hit of clock syscall
