@@ -1,7 +1,7 @@
 use super::{TrieCursor, TrieCursorFactory};
 use crate::updates::TrieKey;
 use reth_db::DatabaseError;
-use reth_primitives::trie::{BranchNodeCompact, StoredNibbles, StoredNibblesSubKey};
+use reth_primitives::trie::{BranchNodeCompact, Nibbles};
 
 /// Noop trie cursor factory.
 #[derive(Default, Debug)]
@@ -10,9 +10,7 @@ pub struct NoopTrieCursorFactory;
 
 impl TrieCursorFactory for NoopTrieCursorFactory {
     /// Generates a Noop account trie cursor.
-    fn account_trie_cursor(
-        &self,
-    ) -> Result<Box<dyn TrieCursor<Key = StoredNibbles> + '_>, DatabaseError> {
+    fn account_trie_cursor(&self) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
         Ok(Box::<NoopAccountTrieCursor>::default())
     }
 
@@ -20,7 +18,7 @@ impl TrieCursorFactory for NoopTrieCursorFactory {
     fn storage_tries_cursor(
         &self,
         _hashed_address: reth_primitives::B256,
-    ) -> Result<Box<dyn TrieCursor<Key = StoredNibblesSubKey> + '_>, DatabaseError> {
+    ) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
         Ok(Box::<NoopStorageTrieCursor>::default())
     }
 }
@@ -31,21 +29,19 @@ impl TrieCursorFactory for NoopTrieCursorFactory {
 pub struct NoopAccountTrieCursor;
 
 impl TrieCursor for NoopAccountTrieCursor {
-    type Key = StoredNibbles;
-
     /// Seeks within the account trie.
     fn seek(
         &mut self,
-        _key: Self::Key,
-    ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
+        _key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         Ok(None)
     }
 
     /// Seeks an exact match within the account trie.
     fn seek_exact(
         &mut self,
-        _key: Self::Key,
-    ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
+        _key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         Ok(None)
     }
 
@@ -61,21 +57,19 @@ impl TrieCursor for NoopAccountTrieCursor {
 pub struct NoopStorageTrieCursor;
 
 impl TrieCursor for NoopStorageTrieCursor {
-    type Key = StoredNibblesSubKey;
-
     /// Seeks a key in storage tries.
     fn seek(
         &mut self,
-        _key: Self::Key,
-    ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
+        _key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         Ok(None)
     }
 
     /// Seeks an exact match in storage tries.
     fn seek_exact(
         &mut self,
-        _key: Self::Key,
-    ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
+        _key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         Ok(None)
     }
 
