@@ -978,8 +978,6 @@ impl Future for GetPooledTxRequestFut {
 pub struct TransactionFetcherInfo {
     /// Currently active outgoing [`GetPooledTransactions`] requests.
     pub(super) max_inflight_requests: usize,
-    /// Number of pending hashes.
-    max_hashes_pending_fetch: usize,
     /// Soft limit for the byte size of the expected
     /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on packing a
     /// [`GetPooledTransactions`] request with hashes.
@@ -993,13 +991,11 @@ pub struct TransactionFetcherInfo {
 impl TransactionFetcherInfo {
     pub fn new(
         max_inflight_transaction_requests: usize,
-        max_hashes_pending_fetch: usize,
         soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
         soft_limit_byte_size_pooled_transactions_response: usize,
     ) -> Self {
         Self {
             max_inflight_requests: max_inflight_transaction_requests,
-            max_hashes_pending_fetch,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             soft_limit_byte_size_pooled_transactions_response,
         }
@@ -1010,7 +1006,6 @@ impl Default for TransactionFetcherInfo {
     fn default() -> Self {
         Self::new(
             DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES,
-            DEFAULT_MAX_COUNT_PENDING_FETCH,
             DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST,
             SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE
         )
