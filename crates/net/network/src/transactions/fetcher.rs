@@ -20,11 +20,9 @@ use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError}
 use tracing::{debug, trace};
 
 use super::{
-    constants::{
-        tx_fetcher::*,
-        SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST,
-    },
-    AnnouncementFilter, Peer, PooledTransactions, TransactionsManagerMetrics, DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+    constants::{tx_fetcher::*,SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
+    AnnouncementFilter, Peer, PooledTransactions,
+    DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 
 /// The type responsible for fetching missing transactions from peers.
@@ -184,7 +182,7 @@ impl TransactionFetcher {
     pub(super) fn pack_hashes_eth68(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
-        hashes_from_announcement: ValidAnnouncementData
+        hashes_from_announcement: ValidAnnouncementData,
     ) -> RequestTxHashes {
         let mut acc_size_response = 0;
         let hashes_from_announcement_len = hashes_from_announcement.len();
@@ -193,7 +191,7 @@ impl TransactionFetcher {
 
         if let Some((hash, Some((_ty, size)))) = hashes_from_announcement_iter.next() {
             hashes_to_request.push(hash);
-           
+
             // tx is really big, pack request with single tx
             if size >= self.soft_limit_byte_size_pooled_transactions_response {
                 return hashes_from_announcement_iter.collect::<RequestTxHashes>()
