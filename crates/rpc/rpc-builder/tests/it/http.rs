@@ -814,6 +814,40 @@ async fn test_eth_syncing_rpc_call() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_eth_protocol_version_rpc_call() {
+    // Initialize test tracing for logging
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting protocol version without any parameter should return Unimplemented
+    match client.request::<U64, _>("eth_protocolVersion", rpc_params![]).await {
+        Ok(_) => {}
+        Err(e) => {
+            // Panic if an error is encountered
+            panic!("Expected successful response, got error: {:?}", e);
+        }
+    };
+
+    // Define test cases with invalid parameters
+    let invalid_params = vec!["latest", "earliest", "pending", "0x2"];
+
+    // Iterate over test cases
+    for param in invalid_params {
+        // Requesting protocol version with invalid parameter should not throw an error
+        match client.request::<U64, _>("eth_protocolVersion", rpc_params![param]).await {
+            Ok(_) => {}
+            Err(e) => {
+                // Panic if an error is encountered
+                panic!("Expected successful response, got error: {:?}", e);
+            }
+        };
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_eth_coinbase_rpc_call() {
     // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
