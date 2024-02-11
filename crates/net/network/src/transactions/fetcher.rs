@@ -50,7 +50,7 @@ pub(super) struct TransactionFetcher {
     /// Filter for valid eth68 announcements.
     pub(super) filter_valid_hashes: AnnouncementFilter,
     /// Info on capacity of the transaction fetcher.
-    info: TransactionFetcherInfo,
+    pub(super) info: TransactionFetcherInfo,
 }
 
 // === impl TransactionFetcher ===
@@ -736,7 +736,6 @@ impl TransactionFetcher {
                 inflight_requests=self.inflight_requests.len(),
                 max_inflight_transaction_requests=info.max_inflight_requests,
                 hashes_pending_fetch=self.hashes_pending_fetch.len(),
-                max_hashes_pending_fetch=info.max_hashes_pending_fetch,
                 limit=limit,
                 "search breadth limited in search for idle fallback peer for some hash pending fetch"
             );
@@ -776,7 +775,6 @@ impl TransactionFetcher {
                 inflight_requests=self.inflight_requests.len(),
                 max_inflight_transaction_requests=self.info.max_inflight_requests,
                 hashes_pending_fetch=self.hashes_pending_fetch.len(),
-                max_hashes_pending_fetch=self.info.max_hashes_pending_fetch,
                 limit=limit,
                 "search breadth limited in search for intersection of hashes announced by peer and hashes pending fetch"
             );
@@ -975,23 +973,18 @@ impl Future for GetPooledTxRequestFut {
 #[derive(Debug)]
 pub struct TransactionFetcherInfo {
     /// Currently active outgoing [`GetPooledTransactions`] requests.
-    max_inflight_requests: usize,
-    /// Number of pending hashes.
-    max_hashes_pending_fetch: usize,
+    pub(super) max_inflight_requests: usize,
 }
 
 impl TransactionFetcherInfo {
-    pub fn new(max_inflight_transaction_requests: usize, max_hashes_pending_fetch: usize) -> Self {
-        Self { max_inflight_requests: max_inflight_transaction_requests, max_hashes_pending_fetch }
+    pub fn new(max_inflight_transaction_requests: usize) -> Self {
+        Self { max_inflight_requests: max_inflight_transaction_requests }
     }
 }
 
 impl Default for TransactionFetcherInfo {
     fn default() -> Self {
-        Self::new(
-            DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES,
-            DEFAULT_MAX_COUNT_PENDING_FETCH,
-        )
+        Self::new(DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES)
     }
 }
 
