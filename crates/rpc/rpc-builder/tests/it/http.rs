@@ -711,6 +711,40 @@ async fn test_eth_get_code_rpc_call() {
     };
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_block_number_rpc_call() {
+    // Initialize test tracing for logging
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting block number without any parameter
+    match client.request::<Option<String>, _>("eth_blockNumber", rpc_params![]).await {
+        Ok(_) => {}
+        Err(e) => {
+            // Panic if an error is encountered
+            panic!("Expected successful response, got error: {:?}", e);
+        }
+    };
+
+    // Define test cases with different default block parameters
+    let invalid_default_block_params = vec!["finalized", "0x2"];
+
+    // Iterate over test cases
+    for param in invalid_default_block_params {
+        // Requesting block number with invalid parameter should not throw an error
+        match client.request::<Option<String>, _>("eth_blockNumber", rpc_params![param]).await {
+            Ok(_) => {}
+            Err(e) => {
+                // Panic if an error is encountered
+                panic!("Expected successful response, got error: {:?}", e);
+            }
+        };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
