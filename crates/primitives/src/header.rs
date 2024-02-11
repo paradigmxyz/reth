@@ -374,6 +374,7 @@ impl Header {
             // Adding blob_gas_used length if it exists.
             length += U256::from(blob_gas_used).length();
         }
+
         //  else if self.has_excess_blob_gas() || self.has_parent_beacon_block_root() {
         //     // Placeholder code for empty lists.
         //     length += 1;
@@ -383,6 +384,7 @@ impl Header {
             // Adding excess_blob_gas length if it exists.
             length += U256::from(excess_blob_gas).length();
         }
+
         // else if self.has_parent_beacon_block_root() {
         //     // Placeholder code for empty lists.
         //     length += 1;
@@ -438,40 +440,44 @@ impl Encodable for Header {
         // but withdrawals root is present.
         if let Some(ref base_fee) = self.base_fee_per_gas {
             U256::from(*base_fee).encode(out);
-        } else if self.has_withdrawals_root() ||
-            self.has_blob_gas_used() ||
-            self.has_excess_blob_gas() ||
-            self.has_parent_beacon_block_root()
-        {
-            out.put_u8(EMPTY_LIST_CODE);
         }
+        // else if self.has_withdrawals_root() ||
+        //     self.has_blob_gas_used() ||
+        //     self.has_excess_blob_gas() ||
+        //     self.has_parent_beacon_block_root()
+        // {
+        //     out.put_u8(EMPTY_LIST_CODE);
+        // }
 
         // Encode withdrawals root. Put empty string if withdrawals root is missing,
         // but blob gas used is present.
         if let Some(ref root) = self.withdrawals_root {
             root.encode(out);
-        } else if self.has_blob_gas_used() ||
-            self.has_excess_blob_gas() ||
-            self.has_parent_beacon_block_root()
-        {
-            out.put_u8(EMPTY_STRING_CODE);
         }
+        //  else if self.has_blob_gas_used() ||
+        //     self.has_excess_blob_gas() ||
+        //     self.has_parent_beacon_block_root()
+        // {
+        //     out.put_u8(EMPTY_STRING_CODE);
+        // }
 
         // Encode blob gas used. Put empty list if blob gas used is missing,
         // but excess blob gas is present.
         if let Some(ref blob_gas_used) = self.blob_gas_used {
             U256::from(*blob_gas_used).encode(out);
-        } else if self.has_excess_blob_gas() || self.has_parent_beacon_block_root() {
-            out.put_u8(EMPTY_LIST_CODE);
         }
+        // else if self.has_excess_blob_gas() || self.has_parent_beacon_block_root() {
+        //     out.put_u8(EMPTY_LIST_CODE);
+        // }
 
         // Encode excess blob gas. Put empty list if excess blob gas is missing,
         // but parent beacon block root is present.
         if let Some(ref excess_blob_gas) = self.excess_blob_gas {
             U256::from(*excess_blob_gas).encode(out);
-        } else if self.has_parent_beacon_block_root() {
-            out.put_u8(EMPTY_LIST_CODE);
         }
+        //  else if self.has_parent_beacon_block_root() {
+        //     out.put_u8(EMPTY_LIST_CODE);
+        // }
 
         // Encode parent beacon block root. If new fields are added, the above pattern will need to
         // be repeated and placeholders added. Otherwise, it's impossible to tell _which_
@@ -499,7 +505,6 @@ impl Decodable for Header {
         if !rlp_head.list {
             return Err(alloy_rlp::Error::UnexpectedString)
         }
-        let started_len = buf.len();
         let mut this = Self {
             parent_hash: Decodable::decode(buf)?,
             ommers_hash: Decodable::decode(buf)?,
@@ -523,39 +528,39 @@ impl Decodable for Header {
             parent_beacon_block_root: Some(B256::decode(buf)?),
         };
 
-        if started_len - buf.len() < rlp_head.payload_length {
-            if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
-                buf.advance(1)
-            } else {
-                this.base_fee_per_gas = Some(u64::decode(buf)?);
-            }
-        }
+        // if started_len - buf.len() < rlp_head.payload_length {
+        //     if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
+        //         buf.advance(1)
+        //     } else {
+        //         this.base_fee_per_gas = Some(u64::decode(buf)?);
+        //     }
+        // }
 
         // Withdrawals root for post-shanghai headers
-        if started_len - buf.len() < rlp_head.payload_length {
-            if buf.first().map(|b| *b == EMPTY_STRING_CODE).unwrap_or_default() {
-                buf.advance(1)
-            } else {
-                this.withdrawals_root = Some(Decodable::decode(buf)?);
-            }
-        }
+        // if started_len - buf.len() < rlp_head.payload_length {
+        //     if buf.first().map(|b| *b == EMPTY_STRING_CODE).unwrap_or_default() {
+        //         buf.advance(1)
+        //     } else {
+        //         this.withdrawals_root = Some(Decodable::decode(buf)?);
+        //     }
+        // }
 
         // Blob gas used and excess blob gas for post-cancun headers
-        if started_len - buf.len() < rlp_head.payload_length {
-            if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
-                buf.advance(1)
-            } else {
-                this.blob_gas_used = Some(u64::decode(buf)?);
-            }
-        }
+        // if started_len - buf.len() < rlp_head.payload_length {
+        //     if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
+        //         buf.advance(1)
+        //     } else {
+        //         this.blob_gas_used = Some(u64::decode(buf)?);
+        //     }
+        // }
 
-        if started_len - buf.len() < rlp_head.payload_length {
-            if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
-                buf.advance(1)
-            } else {
-                this.excess_blob_gas = Some(u64::decode(buf)?);
-            }
-        }
+        // if started_len - buf.len() < rlp_head.payload_length {
+        //     if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
+        //         buf.advance(1)
+        //     } else {
+        //         this.excess_blob_gas = Some(u64::decode(buf)?);
+        //     }
+        // }
 
         // Decode parent beacon block root. If new fields are added, the above pattern will need to
         // be repeated and placeholders decoded. Otherwise, it's impossible to tell _which_
@@ -564,17 +569,17 @@ impl Decodable for Header {
         //  * A header is created with a withdrawals root, but no base fee. Shanghai blocks are
         //    post-London, so this is technically not valid. However, a tool like proptest would
         //    generate a block like this.
-        if started_len - buf.len() < rlp_head.payload_length {
-            this.parent_beacon_block_root = Some(B256::decode(buf)?);
-        }
+        // if started_len - buf.len() < rlp_head.payload_length {
+        //     this.parent_beacon_block_root = Some(B256::decode(buf)?);
+        // }
 
-        let consumed = started_len - buf.len();
-        if consumed != rlp_head.payload_length {
-            return Err(alloy_rlp::Error::ListLengthMismatch {
-                expected: rlp_head.payload_length,
-                got: consumed,
-            })
-        }
+        // let consumed = started_len - buf.len();
+        // if consumed != rlp_head.payload_length {
+        //     return Err(alloy_rlp::Error::ListLengthMismatch {
+        //         expected: rlp_head.payload_length,
+        //         got: consumed,
+        //     })
+        // }
         Ok(this)
     }
 }
