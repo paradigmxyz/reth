@@ -77,7 +77,7 @@ use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESS
 use fetcher::{FetchEvent, TransactionFetcher};
 pub use validation::*;
 
-pub use self::constants::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE;
+pub use self::constants::SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE;
 use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE};
 
 /// The future for inserting a function into the pool
@@ -308,7 +308,7 @@ where
             let transactions = self.pool.get_pooled_transaction_elements(
                 request.0,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
-                    self.transaction_fetcher.soft_limit_byte_size_pooled_transactions_response,
+                    self.transaction_fetcher.info.soft_limit_byte_size_pooled_transactions_response,
                 ),
             );
 

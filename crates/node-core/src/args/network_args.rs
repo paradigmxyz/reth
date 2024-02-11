@@ -6,8 +6,8 @@ use reth_config::Config;
 use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_net_nat::NatResolver;
 use reth_network::{
-    transactions::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
-    HelloMessageWithProtocols, NetworkConfigBuilder,
+    transactions::SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE, HelloMessageWithProtocols,
+    NetworkConfigBuilder,
 };
 use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use secp256k1::SecretKey;
@@ -79,7 +79,7 @@ pub struct NetworkArgs {
 
     /// Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions)
     /// response.
-    #[arg(long = "pooled-tx-response-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE)]
+    #[arg(long = "pooled-tx-response-soft-limit", value_name = "BYTES", default_value_t = SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE)]
     pub soft_limit_byte_size_pooled_transactions_response: usize,
 }
 
@@ -164,7 +164,7 @@ impl Default for NetworkArgs {
             max_outbound_peers: None,
             max_inbound_peers: None,
             soft_limit_byte_size_pooled_transactions_response:
-                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+                SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
         }
     }
 }

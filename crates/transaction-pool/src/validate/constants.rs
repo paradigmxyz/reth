@@ -4,8 +4,8 @@
 /// O(maxslots), where max slots are 4 currently).
 pub const TX_SLOT_BYTE_SIZE: usize = 32 * 1024;
 
-/// [`DEFAULT_MAX_TX_INPUT_BYTES`] is the default maximum size a single transaction can have. This field has
-/// non-trivial consequences: larger transactions are significantly harder and
+/// [`DEFAULT_MAX_TX_INPUT_BYTES`] is the default maximum size a single transaction can have. This
+/// field has non-trivial consequences: larger transactions are significantly harder and
 /// more expensive to propagate; larger transactions also take more resources
 /// to validate whether they fit into the pool or not.
 pub const DEFAULT_MAX_TX_INPUT_BYTES: usize = 4 * TX_SLOT_BYTE_SIZE; // 128KB

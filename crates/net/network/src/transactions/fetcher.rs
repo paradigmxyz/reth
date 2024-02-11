@@ -22,7 +22,7 @@ use tracing::{debug, trace};
 use super::{
     constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
     AnnouncementFilter, Peer, PooledTransactions,
-    DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 
 /// The type responsible for fetching missing transactions from peers.
@@ -51,10 +51,7 @@ pub(super) struct TransactionFetcher {
     /// Filter for valid eth68 announcements.
     pub(super) filter_valid_hashes: AnnouncementFilter,
     /// Info on capacity of the transaction fetcher.
-    info: TransactionFetcherInfo,
-    /// Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions)
-    /// response.
-    pub(super) soft_limit_byte_size_pooled_transactions_response: usize,
+    pub(super) info: TransactionFetcherInfo,
 }
 
 // === impl TransactionFetcher ===
@@ -194,7 +191,7 @@ impl TransactionFetcher {
             hashes_to_request.push(hash);
 
             // tx is really big, pack request with single tx
-            if size >= self.soft_limit_byte_size_pooled_transactions_response {
+            if size >= self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request {
                 return hashes_from_announcement_iter.collect::<RequestTxHashes>()
             } else {
                 acc_size_response = size;
@@ -212,7 +209,9 @@ impl TransactionFetcher {
 
             let next_acc_size = acc_size_response + size;
 
-            if next_acc_size <= self.soft_limit_byte_size_pooled_transactions_response {
+            if next_acc_size <=
+                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
+            {
                 // only update accumulated size of tx response if tx will fit in without exceeding
                 // soft limit
                 acc_size_response = next_acc_size;
@@ -222,7 +221,8 @@ impl TransactionFetcher {
             }
 
             let free_space =
-                self.soft_limit_byte_size_pooled_transactions_response - acc_size_response;
+                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request -
+                    acc_size_response;
 
             if free_space < MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED {
                 break 'fold_size
@@ -866,8 +866,6 @@ impl Default for TransactionFetcher {
             hashes_fetch_inflight_and_pending_fetch: LruMap::new_unlimited(),
             filter_valid_hashes: Default::default(),
             info: TransactionFetcherInfo::default(),
-            soft_limit_byte_size_pooled_transactions_response:
-                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
         }
     }
 }
@@ -984,11 +982,29 @@ pub struct TransactionFetcherInfo {
     max_inflight_requests: usize,
     /// Number of pending hashes.
     max_hashes_pending_fetch: usize,
+    /// Soft limit for the byte size of the expected
+    /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on packing a
+    /// [`GetPooledTransactions`] request with hashes.
+    soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
+    /// Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions)
+    /// response on assembling a [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions)
+    /// request. Spec'd at 2 MiB.
+    pub(super) soft_limit_byte_size_pooled_transactions_response: usize,
 }
 
 impl TransactionFetcherInfo {
-    pub fn new(max_inflight_transaction_requests: usize, max_hashes_pending_fetch: usize) -> Self {
-        Self { max_inflight_requests: max_inflight_transaction_requests, max_hashes_pending_fetch }
+    pub fn new(
+        max_inflight_transaction_requests: usize,
+        max_hashes_pending_fetch: usize,
+        soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
+        soft_limit_byte_size_pooled_transactions_response: usize,
+    ) -> Self {
+        Self {
+            max_inflight_requests: max_inflight_transaction_requests,
+            max_hashes_pending_fetch,
+            soft_limit_byte_size_pooled_transactions_response_on_pack_request,
+            soft_limit_byte_size_pooled_transactions_response,
+        }
     }
 }
 
@@ -997,6 +1013,8 @@ impl Default for TransactionFetcherInfo {
         Self::new(
             DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES,
             DEFAULT_MAX_COUNT_PENDING_FETCH,
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST,
+            SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE
         )
     }
 }
