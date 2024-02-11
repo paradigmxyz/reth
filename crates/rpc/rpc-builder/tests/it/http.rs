@@ -23,7 +23,7 @@ use reth_rpc_api::{
 use reth_rpc_builder::RethRpcModule;
 use reth_rpc_types::{
     trace::filter::TraceFilter, Filter, Index, Log, PendingTransactionFilterKind, RichBlock,
-    SyncStatus, TransactionRequest,
+    SyncStatus, TransactionReceipt, TransactionRequest,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1114,6 +1114,61 @@ async fn test_eth_get_uncle_count_by_block_number_rpc_call() {
     // Requesting uncle count by block number with wrong field
     if let Ok(resp) =
         client.request::<Option<U256>, _>("eth_getUncleCountByBlockNumber", rpc_params![true]).await
+    {
+        // Panic if an unexpected successful response is received
+        panic!("Expected error response, got successful response: {:?}", resp);
+    };
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_block_receipts_rpc_call() {
+    // Initialize test tracing for logging
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting block receipts by block hash with proper fields
+    match client
+        .request::<Option<Vec<TransactionReceipt>>, _>("eth_getBlockReceipts", rpc_params!["0xe8"])
+        .await
+    {
+        Ok(_) => {}
+        Err(e) => {
+            // Panic if an error is encountered
+            panic!("Expected successful response, got error: {:?}", e);
+        }
+    };
+
+    // Requesting block receipts by block hash with additional fields
+    match client
+        .request::<Option<Vec<TransactionReceipt>>, _>(
+            "eth_getBlockReceipts",
+            rpc_params!["0xe8", true],
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(e) => {
+            // Panic if an error is encountered
+            panic!("Expected successful response, got error: {:?}", e);
+        }
+    };
+
+    // Requesting block receipts by block hash with missing fields
+    if let Ok(resp) = client
+        .request::<Option<Vec<TransactionReceipt>>, _>("eth_getBlockReceipts", rpc_params![])
+        .await
+    {
+        // Panic if an unexpected successful response is received
+        panic!("Expected error response, got successful response: {:?}", resp);
+    };
+
+    // Requesting block receipts by block hash with wrong field
+    if let Ok(resp) = client
+        .request::<Option<Vec<TransactionReceipt>>, _>("eth_getBlockReceipts", rpc_params![true])
+        .await
     {
         // Panic if an unexpected successful response is received
         panic!("Expected error response, got successful response: {:?}", resp);
