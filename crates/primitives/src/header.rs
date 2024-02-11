@@ -7,7 +7,7 @@ use crate::{
     },
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
     keccak256, Address, BaseFeeParams, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes,
-    ChainSpec, GotExpected, GotExpectedBoxed, Hardfork, B256, B64, U256,
+    ChainSpec, GotExpected, GotExpectedBoxed, Hardfork, B256, B64, U256, U64,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use bytes::{Buf, BufMut, BytesMut};
@@ -438,45 +438,40 @@ impl Encodable for Header {
         // but withdrawals root is present.
         if let Some(ref base_fee) = self.base_fee_per_gas {
             U256::from(*base_fee).encode(out);
+        } else if self.has_withdrawals_root() ||
+            self.has_blob_gas_used() ||
+            self.has_excess_blob_gas() ||
+            self.has_parent_beacon_block_root()
+        {
+            out.put_u8(EMPTY_LIST_CODE);
         }
-
-        // } else if self.has_withdrawals_root() ||
-        //     self.has_blob_gas_used() ||
-        //     self.has_excess_blob_gas() ||
-        //     self.has_parent_beacon_block_root()
-        // {
-        //     out.put_u8(EMPTY_LIST_CODE);
-        // }
 
         // Encode withdrawals root. Put empty string if withdrawals root is missing,
         // but blob gas used is present.
         if let Some(ref root) = self.withdrawals_root {
             root.encode(out);
+        } else if self.has_blob_gas_used() ||
+            self.has_excess_blob_gas() ||
+            self.has_parent_beacon_block_root()
+        {
+            out.put_u8(EMPTY_STRING_CODE);
         }
-        // } else if self.has_blob_gas_used() ||
-        //     self.has_excess_blob_gas() ||
-        //     self.has_parent_beacon_block_root()
-        // {
-        //     out.put_u8(EMPTY_STRING_CODE);
-        // }
 
         // Encode blob gas used. Put empty list if blob gas used is missing,
         // but excess blob gas is present.
         if let Some(ref blob_gas_used) = self.blob_gas_used {
             U256::from(*blob_gas_used).encode(out);
+        } else if self.has_excess_blob_gas() || self.has_parent_beacon_block_root() {
+            out.put_u8(EMPTY_LIST_CODE);
         }
-        // } else if self.has_excess_blob_gas() || self.has_parent_beacon_block_root() {
-        //     out.put_u8(EMPTY_LIST_CODE);
-        // }
 
         // Encode excess blob gas. Put empty list if excess blob gas is missing,
         // but parent beacon block root is present.
         if let Some(ref excess_blob_gas) = self.excess_blob_gas {
             U256::from(*excess_blob_gas).encode(out);
+        } else if self.has_parent_beacon_block_root() {
+            out.put_u8(EMPTY_LIST_CODE);
         }
-        // } else if self.has_parent_beacon_block_root() {
-        //     out.put_u8(EMPTY_LIST_CODE);
-        // }
 
         // Encode parent beacon block root. If new fields are added, the above pattern will need to
         // be repeated and placeholders added. Otherwise, it's impossible to tell _which_
@@ -528,39 +523,39 @@ impl Decodable for Header {
             parent_beacon_block_root: Some(B256::decode(buf)?),
         };
 
-        // if started_len - buf.len() < rlp_head.payload_length {
-        //     if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
-        //         buf.advance(1)
-        //     } else {
-        //         this.base_fee_per_gas = Some(u64::decode(buf)?);
-        //     }
-        // }
+        if started_len - buf.len() < rlp_head.payload_length {
+            if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
+                buf.advance(1)
+            } else {
+                this.base_fee_per_gas = Some(u64::decode(buf)?);
+            }
+        }
 
-        // // Withdrawals root for post-shanghai headers
-        // if started_len - buf.len() < rlp_head.payload_length {
-        //     if buf.first().map(|b| *b == EMPTY_STRING_CODE).unwrap_or_default() {
-        //         buf.advance(1)
-        //     } else {
-        //         this.withdrawals_root = Some(Decodable::decode(buf)?);
-        //     }
-        // }
+        // Withdrawals root for post-shanghai headers
+        if started_len - buf.len() < rlp_head.payload_length {
+            if buf.first().map(|b| *b == EMPTY_STRING_CODE).unwrap_or_default() {
+                buf.advance(1)
+            } else {
+                this.withdrawals_root = Some(Decodable::decode(buf)?);
+            }
+        }
 
         // Blob gas used and excess blob gas for post-cancun headers
-        // if started_len - buf.len() < rlp_head.payload_length {
-        //     if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
-        //         buf.advance(1)
-        //     } else {
-        //         this.blob_gas_used = Some(u64::decode(buf)?);
-        //     }
-        // }
+        if started_len - buf.len() < rlp_head.payload_length {
+            if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
+                buf.advance(1)
+            } else {
+                this.blob_gas_used = Some(u64::decode(buf)?);
+            }
+        }
 
-        // if started_len - buf.len() < rlp_head.payload_length {
-        //     if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
-        //         buf.advance(1)
-        //     } else {
-        //         this.excess_blob_gas = Some(u64::decode(buf)?);
-        //     }
-        // }
+        if started_len - buf.len() < rlp_head.payload_length {
+            if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
+                buf.advance(1)
+            } else {
+                this.excess_blob_gas = Some(u64::decode(buf)?);
+            }
+        }
 
         // Decode parent beacon block root. If new fields are added, the above pattern will need to
         // be repeated and placeholders decoded. Otherwise, it's impossible to tell _which_
@@ -569,17 +564,17 @@ impl Decodable for Header {
         //  * A header is created with a withdrawals root, but no base fee. Shanghai blocks are
         //    post-London, so this is technically not valid. However, a tool like proptest would
         //    generate a block like this.
-        // if started_len - buf.len() < rlp_head.payload_length {
-        //     this.parent_beacon_block_root = Some(B256::decode(buf)?);
-        // }
+        if started_len - buf.len() < rlp_head.payload_length {
+            this.parent_beacon_block_root = Some(B256::decode(buf)?);
+        }
 
-        // let consumed = started_len - buf.len();
-        // if consumed != rlp_head.payload_length {
-        //     return Err(alloy_rlp::Error::ListLengthMismatch {
-        //         expected: rlp_head.payload_length,
-        //         got: consumed,
-        //     })
-        // }
+        let consumed = started_len - buf.len();
+        if consumed != rlp_head.payload_length {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: rlp_head.payload_length,
+                got: consumed,
+            })
+        }
         Ok(this)
     }
 }
@@ -940,17 +935,14 @@ impl SealedHeader {
 impl proptest::arbitrary::Arbitrary for SealedHeader {
     type Parameters = ();
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::prop_compose;
-
         prop_compose! {
-            fn arbitrary_res()(
-                eip_4844_active in any::<bool>(),
-                blob_gas_used in any::<u64>(),
-                excess_blob_gas in any::<u64>(),
-                parent_beacon_block_root in any::<B256>(),
-                mut header in any::<Header>(),
-                block_hash in any::<BlockHash>()
-            ) -> Header{
+            fn valid_header()(
+               mut header in any::<Header>(),
+               eip_4844_active in any::<bool>(),
+               blob_gas_used in any::<u64>(),
+               excess_blob_gas in any::<u64>(),
+               parent_beacon_block_root in any::<B256>()
+            ) -> SealedHeader{
                     // 1559 not active
                     if header.base_fee_per_gas.is_none() {
                         header.withdrawals_root = None;
@@ -959,82 +951,139 @@ impl proptest::arbitrary::Arbitrary for SealedHeader {
                         header.parent_beacon_block_root = None;
                     }
                     // 1559 is active
-                    else if header.base_fee_per_gas.is_some() {
+                    else  {
+                        // 4895 is not active
                         if header.withdrawals_root.is_none() {
                             header.blob_gas_used = None;
                             header.excess_blob_gas = None;
                             header.parent_beacon_block_root = None;
+                            // 4895 is active
                         } else {
-                            let strategy = if eip_4844_active {
+                           if eip_4844_active {
                                 // EIP-4844 is active
                                 header.blob_gas_used =Some(blob_gas_used);
                                 header.excess_blob_gas = Some(excess_blob_gas);
                                 header.parent_beacon_block_root = Some(parent_beacon_block_root);
-                                Just(header.clone()).boxed()
+
                             } else {
                                 // EIP-4844 is not active
                                 header.blob_gas_used = None;
                                 header.excess_blob_gas = None;
                                 header.parent_beacon_block_root = None;
-                                Just(header.clone()).boxed()
+
                             };
                     }
                 };
-                header
+                header.seal_slow()
             }
-            arbitrary_res().boxed()
+
         }
+        valid_header().boxed()
     }
     type Strategy = proptest::strategy::BoxedStrategy<SealedHeader>;
 }
 
-#[cfg(any(test, feature = "arbitrary"))]
+use proptest::prelude::*;
+
+// #[cfg(any(test, feature = "arbitrary"))]
+// impl proptest::arbitrary::Arbitrary for SealedHeader {
+//     type Parameters = ();
+//     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+//         use proptest::prelude::*;
+
+//         (any::<Header>(), any::<BlockHash>(), any::<bool>(),any::<u64>,)
+//             .prop_map(move |(mut header, block_hash, eip_4844_active,blob_gas_used)| {
+
+//                 // Set fields based on EIP-1559 activation
+//                 if header.base_fee_per_gas.is_none() {
+//                     // EIP-1559 not active, clear related fields
+//                     header.withdrawals_root = None;
+//                     header.blob_gas_used = None;
+//                     header.excess_blob_gas = None;
+//                     header.parent_beacon_block_root = None;
+//                 } else {
+//                     // EIP-1559 is active, conditional fields based on EIP-4844
+//                     if eip_4844_active {
+//                         // EIP-4844 is active, set fields
+//                         if header.blob_gas_used.is_none() {
+//                           (any::<u64>()).prop_map(move |v| {
+
+//                             });
+//                         };
+
+//                         if header.excess_blob_gas.is_none() {
+//                             (any::<u64>()).prop_map(move |v| {
+//                                 header.excess_blob_gas = Some(v);
+//                             });
+//                         };
+//                         if header.parent_beacon_block_root.is_none() {
+//                             (any::<B256>()).prop_map(move |v| {
+//                                 header.parent_beacon_block_root = Some(v);
+//                             });
+//                         };
+//                         if header.withdrawals_root.is_none() {
+//                             (any::<B256>()).prop_map(move |v| {
+//                                 header.withdrawals_root = Some(v);
+//                             });
+//                         };
+//                     } else {
+//                         // EIP-4844 not active, clear fields
+//                         header.blob_gas_used = None;
+//                         header.excess_blob_gas = None;
+//                         header.parent_beacon_block_root = None;
+//                     }
+//                 }
+
+//                 // Seal the header and create SealedHeader
+//                 header.seal_slow()
+//             })
+//             .boxed()
+//     }
+//     type Strategy = BoxedStrategy<Self>;
+// }
+
 impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        use proptest::prelude::prop_compose;
+        // Directly generate values for Header and BlockHash using Unstructured
+        let mut header: Header = u.arbitrary()?;
+        let block_hash: BlockHash = u.arbitrary()?;
+        let blob_gas_used: u64 = u.arbitrary()?;
+        let excess_blob_gas: u64 = u.arbitrary()?;
+        let parent_beacon_block_root: B256 = u.arbitrary()?;
+        // Determine if EIP-4844 is active using a random bool
+        let eip_4844_active: bool = u.arbitrary()?;
 
-        prop_compose! {
-            fn arbitrary_res()(
-                eip_4844_active in any::<bool>(),
-                blob_gas_used in any::<u64>(),
-                excess_blob_gas in any::<u64>(),
-                parent_beacon_block_root in any::<B256>(),
-                mut header in any::<Header>(),
-                block_hash in any::<BlockHash>()
-            ) -> Header{
-                    // 1559 not active
-                    if header.base_fee_per_gas.is_none() {
-                        header.withdrawals_root = None;
-                        header.blob_gas_used = None;
-                        header.excess_blob_gas = None;
-                        header.parent_beacon_block_root = None;
-                    }
-                    // 1559 is active
-                    else if header.base_fee_per_gas.is_some() {
-                        if header.withdrawals_root.is_none() {
-                            header.blob_gas_used = None;
-                            header.excess_blob_gas = None;
-                            header.parent_beacon_block_root = None;
-                        } else {
-                            let strategy = if eip_4844_active {
-                                // EIP-4844 is active
-                                header.blob_gas_used =Some(blob_gas_used);
-                                header.excess_blob_gas = Some(excess_blob_gas);
-                                header.parent_beacon_block_root = Some(parent_beacon_block_root);
-                                Just(header.clone()).boxed()
-                            } else {
-                                // EIP-4844 is not active
-                                header.blob_gas_used = None;
-                                header.excess_blob_gas = None;
-                                header.parent_beacon_block_root = None;
-                                Just(header.clone()).boxed()
-                            };
-                    }
+        // Set fields based on EIP-1559 activation
+        if header.base_fee_per_gas.is_none() {
+            // EIP-1559 not active, clear related fields
+            header.withdrawals_root = None;
+            header.blob_gas_used = None;
+            header.excess_blob_gas = None;
+            header.parent_beacon_block_root = None;
+        } else {
+            // 4895 is not active
+            if header.withdrawals_root.is_none() {
+                header.blob_gas_used = None;
+                header.excess_blob_gas = None;
+                header.parent_beacon_block_root = None;
+            } else {
+                // 4895 is active
+                if eip_4844_active {
+                    // EIP-4844 is active
+                    header.blob_gas_used = Some(blob_gas_used);
+                    header.excess_blob_gas = Some(excess_blob_gas);
+                    header.parent_beacon_block_root = Some(parent_beacon_block_root);
+                } else {
+                    // EIP-4844 is not active
+                    header.blob_gas_used = None;
+                    header.excess_blob_gas = None;
+                    header.parent_beacon_block_root = None;
                 };
-                header
             }
-            arbitrary_res().boxed()
         }
+
+        // Seal the header and create SealedHeader
+        Ok(SealedHeader { header, hash: block_hash })
     }
 }
 
