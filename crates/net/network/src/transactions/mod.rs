@@ -696,7 +696,7 @@ where
         // limit on the response (2MB)
         let mut hashes_to_request = RequestTxHashes::with_capacity(valid_announcement_data.len());
         let surplus_hashes =
-            self.transaction_fetcher.pack_hashes(&mut hashes_to_request, valid_announcement_data);
+            self.transaction_fetcher.pack_request(&mut hashes_to_request, valid_announcement_data);
         hashes_to_request.shrink_to_fit();
 
         if !surplus_hashes.is_empty() {

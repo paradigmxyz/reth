@@ -121,7 +121,7 @@ impl TransactionFetcher {
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         is_session_active: impl Fn(&PeerId) -> bool,
-        mut budget: Option<usize>, // try to find `budget` idle peers before giving up
+        mut budget: Option<usize>, // search fallback peers for max `budget` lru pending hashes
     ) -> Option<PeerId> {
         let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
 
@@ -631,7 +631,7 @@ impl TransactionFetcher {
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         seen_hashes: &LruCache<TxHash>,
-        mut budget_fill_request: Option<usize>, // only check `budget` lru pending hashes
+        mut budget_fill_request: Option<usize>, // check max `budget` lru pending hashes
     ) {
         let Some(hash) = hashes_to_request.first() else { return };
 
