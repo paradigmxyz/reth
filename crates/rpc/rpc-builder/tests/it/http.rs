@@ -551,25 +551,20 @@ async fn test_eth_get_block_by_number_rpc_call() {
     };
 
     // Requesting block by number with wrong fields
-    match client
+    if let Ok(resp) = client
         .request::<Option<RichBlock>, _>("eth_getBlockByNumber", rpc_params!["0x1b4", "0x1b4"])
         .await
     {
-        Ok(resp) => {
-            // Panic if an unexpected successful response is received
-            panic!("Expected error response, got successful response: {:?}", resp);
-        }
-        Err(_) => {}
+        // Panic if an unexpected successful response is received
+        panic!("Expected error response, got successful response: {:?}", resp);
     };
 
     // Requesting block by number with missing fields
-    match client.request::<Option<RichBlock>, _>("eth_getBlockByNumber", rpc_params!["0x1b4"]).await
+    if let Ok(resp) =
+        client.request::<Option<RichBlock>, _>("eth_getBlockByNumber", rpc_params!["0x1b4"]).await
     {
-        Ok(resp) => {
-            // Panic if an unexpected successful response is received
-            panic!("Expected error response, got successful response: {:?}", resp);
-        }
-        Err(_) => {}
+        // Panic if an unexpected successful response is received
+        panic!("Expected error response, got successful response: {:?}", resp);
     };
 }
 
@@ -601,7 +596,7 @@ async fn test_eth_get_block_by_hash_rpc_call() {
     };
 
     // Requesting block by hash with wrong fields
-    match client
+    if let Ok(resp) = client
         .request::<Option<RichBlock>, _>(
             "eth_getBlockByHash",
             rpc_params![
@@ -611,26 +606,20 @@ async fn test_eth_get_block_by_hash_rpc_call() {
         )
         .await
     {
-        Ok(resp) => {
-            // Panic if an unexpected successful response is received
-            panic!("Expected error response, got successful response: {:?}", resp);
-        }
-        Err(_) => {}
+        // Panic if an unexpected successful response is received
+        panic!("Expected error response, got successful response: {:?}", resp);
     };
 
     // Requesting block by hash with missing fields
-    match client
+    if let Ok(resp) = client
         .request::<Option<RichBlock>, _>(
             "eth_getBlockByHash",
             rpc_params!["0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae"],
         )
         .await
     {
-        Ok(resp) => {
-            // Panic if an unexpected successful response is received
-            panic!("Expected error response, got successful response: {:?}", resp);
-        }
-        Err(_) => {}
+        // Panic if an unexpected successful response is received
+        panic!("Expected error response, got successful response: {:?}", resp);
     };
 }
 
