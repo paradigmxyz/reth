@@ -24,7 +24,7 @@ use reth_rpc_api::{
 use reth_rpc_builder::RethRpcModule;
 use reth_rpc_types::{
     trace::filter::TraceFilter, Filter, Index, Log, PendingTransactionFilterKind, RichBlock,
-    SyncStatus, TransactionReceipt, TransactionRequest,
+    SyncStatus, Transaction, TransactionReceipt, TransactionRequest,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
@@ -1078,6 +1078,90 @@ async fn test_eth_get_uncle_by_block_number_and_index_rpc_call() {
     test_rpc_call_err::<Option<RichBlock>>(
         &client,
         "eth_getUncleByBlockNumberAndIndex",
+        rpc_params![true],
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_transaction_by_hash_rpc_call() {
+    // Initialize test tracing for logging
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting transaction by hash with proper fields
+    test_rpc_call_ok::<Option<Transaction>>(
+        &client,
+        "eth_getTransactionByHash",
+        rpc_params!["0x88df016429689c079f3b2f6ad39fa052532c56795b733da78a91ebe6a713944b"],
+    )
+    .await;
+
+    // Requesting transaction by hash with additional fields
+    test_rpc_call_ok::<Option<Transaction>>(
+        &client,
+        "eth_getTransactionByHash",
+        rpc_params!["0x88df016429689c079f3b2f6ad39fa052532c56795b733da78a91ebe6a713944b", true],
+    )
+    .await;
+
+    // Requesting transaction by hash with missing fields
+    test_rpc_call_err::<Option<Transaction>>(&client, "eth_getTransactionByHash", rpc_params![])
+        .await;
+
+    // Requesting transaction by hash with wrong fields
+    test_rpc_call_err::<Option<Transaction>>(
+        &client,
+        "eth_getTransactionByHash",
+        rpc_params![true],
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_transaction_by_block_hash_and_index_rpc_call() {
+    // Initialize test tracing for logging
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting transaction by block hash and index with proper fields
+    test_rpc_call_ok::<Option<Transaction>>(
+        &client,
+        "eth_getTransactionByBlockHashAndIndex",
+        rpc_params!["0x1dad0df7c027bcc86d06b3a6709ff78decd732c37b73123453ba7d9463eae60d", "0x0"],
+    )
+    .await;
+
+    // Requesting transaction by block hash and index with additional fields
+    test_rpc_call_ok::<Option<Transaction>>(
+        &client,
+        "eth_getTransactionByBlockHashAndIndex",
+        rpc_params![
+            "0x1dad0df7c027bcc86d06b3a6709ff78decd732c37b73123453ba7d9463eae60d",
+            "0x0",
+            true
+        ],
+    )
+    .await;
+
+    // Requesting transaction by block hash and index with missing fields
+    test_rpc_call_err::<Option<Transaction>>(
+        &client,
+        "eth_getTransactionByBlockHashAndIndex",
+        rpc_params![],
+    )
+    .await;
+
+    // Requesting transaction by block hash and index with wrong fields
+    test_rpc_call_err::<Option<Transaction>>(
+        &client,
+        "eth_getTransactionByBlockHashAndIndex",
         rpc_params![true],
     )
     .await;
