@@ -26,7 +26,7 @@ use reth_rpc_types::{
     trace::filter::TraceFilter, Filter, Index, Log, PendingTransactionFilterKind, RichBlock,
     SyncStatus, TransactionReceipt, TransactionRequest,
 };
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 
@@ -40,9 +40,12 @@ fn is_unimplemented(err: Error) -> bool {
     }
 }
 
-async fn test_rpc_call_ok(client: &HttpClient, method_name: &str, params: ArrayParams) {
+async fn test_rpc_call_ok<R>(client: &HttpClient, method_name: &str, params: ArrayParams)
+where
+    R: DeserializeOwned,
+{
     // Make the RPC request
-    match client.request::<Option<String>, _>(method_name, params).await {
+    match client.request::<R, _>(method_name, params).await {
         Ok(_) => {} // If the request is successful, do nothing
         Err(e) => {
             // If an error occurs, panic with the error message
@@ -51,9 +54,12 @@ async fn test_rpc_call_ok(client: &HttpClient, method_name: &str, params: ArrayP
     }
 }
 
-async fn test_rpc_call_err(client: &HttpClient, method_name: &str, params: ArrayParams) {
+async fn test_rpc_call_err<R>(client: &HttpClient, method_name: &str, params: ArrayParams)
+where
+    R: DeserializeOwned + std::fmt::Debug,
+{
     // Make the RPC request
-    if let Ok(resp) = client.request::<Option<String>, _>(method_name, params).await {
+    if let Ok(resp) = client.request::<R, _>(method_name, params).await {
         // Panic if an unexpected successful response is received
         panic!("Expected error response, got successful response: {:?}", resp);
     };
@@ -556,36 +562,24 @@ async fn test_eth_get_block_by_number_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting block by number with proper fields
-    match client
-        .request::<Option<RichBlock>, _>(
-            "eth_getBlockByNumber",
-            rpc_params!["0x1b4", true], // Block number and full transaction object flag
-        )
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<Option<RichBlock>>(
+        &client,
+        "eth_getBlockByNumber",
+        rpc_params!["0x1b4", true], // Block number and full transaction object flag
+    )
+    .await;
 
     // Requesting block by number with wrong fields
-    if let Ok(resp) = client
-        .request::<Option<RichBlock>, _>("eth_getBlockByNumber", rpc_params!["0x1b4", "0x1b4"])
-        .await
-    {
-        // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
-    };
+    test_rpc_call_err::<Option<RichBlock>>(
+        &client,
+        "eth_getBlockByNumber",
+        rpc_params!["0x1b4", "0x1b4"],
+    )
+    .await;
 
     // Requesting block by number with missing fields
-    if let Ok(resp) =
-        client.request::<Option<RichBlock>, _>("eth_getBlockByNumber", rpc_params!["0x1b4"]).await
-    {
-        // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
-    };
+    test_rpc_call_err::<Option<RichBlock>>(&client, "eth_getBlockByNumber", rpc_params!["0x1b4"])
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -598,49 +592,28 @@ async fn test_eth_get_block_by_hash_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting block by hash with proper fields
-    match client
-        .request::<Option<RichBlock>, _>(
-            "eth_getBlockByHash",
-            rpc_params![
-                "0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae",
-                false
-            ],
-        )
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<Option<RichBlock>>(
+        &client,
+        "eth_getBlockByHash",
+        rpc_params!["0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae", false],
+    )
+    .await;
 
     // Requesting block by hash with wrong fields
-    if let Ok(resp) = client
-        .request::<Option<RichBlock>, _>(
-            "eth_getBlockByHash",
-            rpc_params![
-                "0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae",
-                "0x1b4"
-            ],
-        )
-        .await
-    {
-        // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
-    };
+    test_rpc_call_err::<Option<RichBlock>>(
+        &client,
+        "eth_getBlockByHash",
+        rpc_params!["0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae", "0x1b4"],
+    )
+    .await;
 
     // Requesting block by hash with missing fields
-    if let Ok(resp) = client
-        .request::<Option<RichBlock>, _>(
-            "eth_getBlockByHash",
-            rpc_params!["0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae"],
-        )
-        .await
-    {
-        // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
-    };
+    test_rpc_call_err::<Option<RichBlock>>(
+        &client,
+        "eth_getBlockByHash",
+        rpc_params!["0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae"],
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -653,22 +626,15 @@ async fn test_eth_get_code_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting code at a given address with proper fields
-    match client
-        .request::<Bytes, _>(
-            "eth_getCode",
-            rpc_params![
-                "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
-                "0x2" // 2
-            ],
-        )
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<Bytes>(
+        &client,
+        "eth_getCode",
+        rpc_params![
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "0x2" // 2
+        ],
+    )
+    .await;
 
     // Define test cases with different default block parameters
     let default_block_params = vec!["earliest", "latest", "pending"];
@@ -676,59 +642,37 @@ async fn test_eth_get_code_rpc_call() {
     // Iterate over test cases
     for param in default_block_params {
         // Requesting code at a given address with default block parameter
-        match client
-            .request::<Bytes, _>(
-                "eth_getCode",
-                rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b", param],
-            )
-            .await
-        {
-            Ok(_) => {}
-            Err(e) => {
-                // Panic if an error is encountered
-                panic!("Expected successful response, got error: {:?}", e);
-            }
-        };
+        test_rpc_call_ok::<Bytes>(
+            &client,
+            "eth_getCode",
+            rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b", param],
+        )
+        .await;
     }
 
     // Without block number which is optional
-    match client
-        .request::<Bytes, _>(
-            "eth_getCode",
-            rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"],
-        )
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<Bytes>(
+        &client,
+        "eth_getCode",
+        rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"],
+    )
+    .await;
 
     // Requesting code at a given address with invalid default block parameter
-    if let Ok(resp) = client
-        .request::<Bytes, _>(
-            "eth_getCode",
-            rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b", "finalized"],
-        )
-        .await
-    {
-        // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
-    };
+    test_rpc_call_err::<Bytes>(
+        &client,
+        "eth_getCode",
+        rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b", "finalized"],
+    )
+    .await;
 
     // Requesting code at a given address with wrong fields
-    if let Ok(resp) = client
-        .request::<Bytes, _>(
-            "eth_getCode",
-            rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b", false],
-        )
-        .await
-    {
-        // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
-    };
+    test_rpc_call_err::<Bytes>(
+        &client,
+        "eth_getCode",
+        rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b", false],
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -741,13 +685,7 @@ async fn test_eth_block_number_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting block number without any parameter
-    match client.request::<U256, _>("eth_blockNumber", rpc_params![]).await {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<U256>(&client, "eth_blockNumber", rpc_params![]).await;
 
     // Define test cases with different default block parameters
     let invalid_default_block_params = vec!["finalized", "0x2"];
@@ -755,13 +693,7 @@ async fn test_eth_block_number_rpc_call() {
     // Iterate over test cases
     for param in invalid_default_block_params {
         // Requesting block number with invalid parameter should not throw an error
-        match client.request::<U256, _>("eth_blockNumber", rpc_params![param]).await {
-            Ok(_) => {}
-            Err(e) => {
-                // Panic if an error is encountered
-                panic!("Expected successful response, got error: {:?}", e);
-            }
-        };
+        test_rpc_call_ok::<U256>(&client, "eth_blockNumber", rpc_params![param]).await;
     }
 }
 
@@ -775,13 +707,7 @@ async fn test_eth_chain_id_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting chain ID without any parameter
-    match client.request::<Option<U64>, _>("eth_chainId", rpc_params![]).await {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<Option<U64>>(&client, "eth_chainId", rpc_params![]).await;
 
     // Define test cases with different invalid parameters
     let invalid_params = vec!["finalized", "0x2"];
@@ -789,13 +715,7 @@ async fn test_eth_chain_id_rpc_call() {
     // Iterate over test cases
     for param in invalid_params {
         // Requesting chain ID with invalid parameter should not throw an error
-        match client.request::<Option<U64>, _>("eth_chainId", rpc_params![param]).await {
-            Ok(_) => {}
-            Err(e) => {
-                // Panic if an error is encountered
-                panic!("Expected successful response, got error: {:?}", e);
-            }
-        };
+        test_rpc_call_ok::<Option<U64>>(&client, "eth_chainId", rpc_params![param]).await;
     }
 }
 
@@ -809,13 +729,7 @@ async fn test_eth_syncing_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting syncing status
-    match client.request::<Option<SyncStatus>, _>("eth_syncing", rpc_params![]).await {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<Option<SyncStatus>>(&client, "eth_syncing", rpc_params![]).await;
 
     // Define test cases with invalid parameters
     let invalid_params = vec!["latest", "earliest", "pending", "0x2"];
@@ -823,13 +737,7 @@ async fn test_eth_syncing_rpc_call() {
     // Iterate over test cases
     for param in invalid_params {
         // Requesting syncing status with invalid parameter should not throw an error
-        match client.request::<Option<SyncStatus>, _>("eth_syncing", rpc_params![param]).await {
-            Ok(_) => {}
-            Err(e) => {
-                // Panic if an error is encountered
-                panic!("Expected successful response, got error: {:?}", e);
-            }
-        };
+        test_rpc_call_ok::<Option<SyncStatus>>(&client, "eth_syncing", rpc_params![param]).await;
     }
 }
 
@@ -843,13 +751,7 @@ async fn test_eth_protocol_version_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting protocol version without any parameter
-    match client.request::<U64, _>("eth_protocolVersion", rpc_params![]).await {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<U64>(&client, "eth_protocolVersion", rpc_params![]).await;
 
     // Define test cases with invalid parameters
     let invalid_params = vec!["latest", "earliest", "pending", "0x2"];
@@ -857,13 +759,7 @@ async fn test_eth_protocol_version_rpc_call() {
     // Iterate over test cases
     for param in invalid_params {
         // Requesting protocol version with invalid parameter should not throw an error
-        match client.request::<U64, _>("eth_protocolVersion", rpc_params![param]).await {
-            Ok(_) => {}
-            Err(e) => {
-                // Panic if an error is encountered
-                panic!("Expected successful response, got error: {:?}", e);
-            }
-        };
+        test_rpc_call_ok::<U64>(&client, "eth_protocolVersion", rpc_params![param]).await;
     }
 }
 
@@ -898,13 +794,7 @@ async fn test_eth_accounts_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting accounts without any parameter
-    match client.request::<Option<Vec<Address>>, _>("eth_accounts", rpc_params![]).await {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<Option<Vec<Address>>>(&client, "eth_accounts", rpc_params![]).await;
 
     // Define test cases with invalid parameters
     let invalid_params = vec!["latest", "earliest", "pending", "0x2"];
@@ -912,13 +802,7 @@ async fn test_eth_accounts_rpc_call() {
     // Iterate over test cases
     for param in invalid_params {
         // Requesting accounts with invalid parameter should not throw an error
-        match client.request::<Option<Vec<Address>>, _>("eth_accounts", rpc_params![param]).await {
-            Ok(_) => {}
-            Err(e) => {
-                // Panic if an error is encountered
-                panic!("Expected successful response, got error: {:?}", e);
-            }
-        };
+        test_rpc_call_ok::<Option<Vec<Address>>>(&client, "eth_accounts", rpc_params![param]).await;
     }
 }
 
@@ -932,51 +816,32 @@ async fn test_eth_get_block_transaction_count_by_hash_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting transaction count by block hash with proper fields
-    match client
-        .request::<Option<U256>, _>(
-            "eth_getBlockTransactionCountByHash",
-            rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238"],
-        )
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<Option<U256>>(
+        &client,
+        "eth_getBlockTransactionCountByHash",
+        rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238"],
+    )
+    .await;
 
-    // Requesting transaction count by block hash with additonal fields
-    match client
-        .request::<Option<U256>, _>(
-            "eth_getBlockTransactionCountByHash",
-            rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238", true],
-        )
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    // Requesting transaction count by block hash with additional fields
+    test_rpc_call_ok::<Option<U256>>(
+        &client,
+        "eth_getBlockTransactionCountByHash",
+        rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238", true],
+    )
+    .await;
 
     // Requesting transaction count by block hash with missing fields
-    if let Ok(resp) =
-        client.request::<Option<U256>, _>("eth_getBlockTransactionCountByHash", rpc_params![]).await
-    {
-        // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
-    };
+    test_rpc_call_err::<Option<U256>>(&client, "eth_getBlockTransactionCountByHash", rpc_params![])
+        .await;
 
     // Requesting transaction count by block hash with wrong field
-    if let Ok(resp) = client
-        .request::<Option<U256>, _>("eth_getBlockTransactionCountByHash", rpc_params![true])
-        .await
-    {
-        // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
-    };
+    test_rpc_call_err::<Option<U256>>(
+        &client,
+        "eth_getBlockTransactionCountByHash",
+        rpc_params![true],
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -989,49 +854,36 @@ async fn test_eth_get_block_transaction_count_by_number_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting transaction count by block number with proper fields
-    match client
-        .request::<Option<U256>, _>("eth_getBlockTransactionCountByNumber", rpc_params!["0xe8"])
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<Option<U256>>(
+        &client,
+        "eth_getBlockTransactionCountByNumber",
+        rpc_params!["0xe8"],
+    )
+    .await;
 
-    // Requesting transaction count by block number with additonal fields
-    match client
-        .request::<Option<U256>, _>(
-            "eth_getBlockTransactionCountByNumber",
-            rpc_params!["0xe8", true],
-        )
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    // Requesting transaction count by block number with additional fields
+    test_rpc_call_ok::<Option<U256>>(
+        &client,
+        "eth_getBlockTransactionCountByNumber",
+        rpc_params!["0xe8", true],
+    )
+    .await;
 
     // Requesting transaction count by block number with missing fields
-    if let Ok(resp) = client
-        .request::<Option<U256>, _>("eth_getBlockTransactionCountByNumber", rpc_params![])
-        .await
-    {
-        // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
-    };
+    test_rpc_call_err::<Option<U256>>(
+        &client,
+        "eth_getBlockTransactionCountByNumber",
+        rpc_params![],
+    )
+    .await;
 
     // Requesting transaction count by block number with wrong field
-    if let Ok(resp) = client
-        .request::<Option<U256>, _>("eth_getBlockTransactionCountByNumber", rpc_params![true])
-        .await
-    {
-        // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
-    };
+    test_rpc_call_err::<Option<U256>>(
+        &client,
+        "eth_getBlockTransactionCountByNumber",
+        rpc_params![true],
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1044,50 +896,27 @@ async fn test_eth_get_uncle_count_by_block_hash_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting uncle count by block hash with proper fields
-    match client
-        .request::<Option<U256>, _>(
-            "eth_getUncleCountByBlockHash",
-            rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238"],
-        )
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<Option<U256>>(
+        &client,
+        "eth_getUncleCountByBlockHash",
+        rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238"],
+    )
+    .await;
 
     // Requesting uncle count by block hash with additional fields
-    match client
-        .request::<Option<U256>, _>(
-            "eth_getUncleCountByBlockHash",
-            rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238", true],
-        )
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<Option<U256>>(
+        &client,
+        "eth_getUncleCountByBlockHash",
+        rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238", true],
+    )
+    .await;
 
     // Requesting uncle count by block hash with missing fields
-    if let Ok(resp) =
-        client.request::<Option<U256>, _>("eth_getUncleCountByBlockHash", rpc_params![]).await
-    {
-        // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
-    };
+    test_rpc_call_err::<Option<U256>>(&client, "eth_getUncleCountByBlockHash", rpc_params![]).await;
 
     // Requesting uncle count by block hash with wrong field
-    if let Ok(resp) =
-        client.request::<Option<U256>, _>("eth_getUncleCountByBlockHash", rpc_params![true]).await
-    {
-        // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
-    };
+    test_rpc_call_err::<Option<U256>>(&client, "eth_getUncleCountByBlockHash", rpc_params![true])
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1100,44 +929,28 @@ async fn test_eth_get_uncle_count_by_block_number_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting uncle count by block number with proper fields
-    match client
-        .request::<Option<U256>, _>("eth_getUncleCountByBlockNumber", rpc_params!["0xe8"])
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<Option<U256>>(
+        &client,
+        "eth_getUncleCountByBlockNumber",
+        rpc_params!["0xe8"],
+    )
+    .await;
 
     // Requesting uncle count by block number with additional fields
-    match client
-        .request::<Option<U256>, _>("eth_getUncleCountByBlockNumber", rpc_params!["0xe8", true])
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<Option<U256>>(
+        &client,
+        "eth_getUncleCountByBlockNumber",
+        rpc_params!["0xe8", true],
+    )
+    .await;
 
     // Requesting uncle count by block number with missing fields
-    if let Ok(resp) =
-        client.request::<Option<U256>, _>("eth_getUncleCountByBlockNumber", rpc_params![]).await
-    {
-        // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
-    };
+    test_rpc_call_err::<Option<U256>>(&client, "eth_getUncleCountByBlockNumber", rpc_params![])
+        .await;
 
     // Requesting uncle count by block number with wrong field
-    if let Ok(resp) =
-        client.request::<Option<U256>, _>("eth_getUncleCountByBlockNumber", rpc_params![true]).await
-    {
-        // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
-    };
+    test_rpc_call_err::<Option<U256>>(&client, "eth_getUncleCountByBlockNumber", rpc_params![true])
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1150,49 +963,36 @@ async fn test_eth_get_block_receipts_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting block receipts by block hash with proper fields
-    match client
-        .request::<Option<Vec<TransactionReceipt>>, _>("eth_getBlockReceipts", rpc_params!["0xe8"])
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<Option<Vec<TransactionReceipt>>>(
+        &client,
+        "eth_getBlockReceipts",
+        rpc_params!["0xe8"],
+    )
+    .await;
 
     // Requesting block receipts by block hash with additional fields
-    match client
-        .request::<Option<Vec<TransactionReceipt>>, _>(
-            "eth_getBlockReceipts",
-            rpc_params!["0xe8", true],
-        )
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            // Panic if an error is encountered
-            panic!("Expected successful response, got error: {:?}", e);
-        }
-    };
+    test_rpc_call_ok::<Option<Vec<TransactionReceipt>>>(
+        &client,
+        "eth_getBlockReceipts",
+        rpc_params!["0xe8", true],
+    )
+    .await;
 
     // Requesting block receipts by block hash with missing fields
-    if let Ok(resp) = client
-        .request::<Option<Vec<TransactionReceipt>>, _>("eth_getBlockReceipts", rpc_params![])
-        .await
-    {
-        // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
-    };
+    test_rpc_call_err::<Option<Vec<TransactionReceipt>>>(
+        &client,
+        "eth_getBlockReceipts",
+        rpc_params![],
+    )
+    .await;
 
     // Requesting block receipts by block hash with wrong field
-    if let Ok(resp) = client
-        .request::<Option<Vec<TransactionReceipt>>, _>("eth_getBlockReceipts", rpc_params![true])
-        .await
-    {
-        // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
-    };
+    test_rpc_call_err::<Option<Vec<TransactionReceipt>>>(
+        &client,
+        "eth_getBlockReceipts",
+        rpc_params![true],
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1205,7 +1005,7 @@ async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting uncle by block hash and index with proper fields
-    test_rpc_call_ok(
+    test_rpc_call_ok::<Option<RichBlock>>(
         &client,
         "eth_getUncleByBlockHashAndIndex",
         rpc_params!["0xc6ef2fc5426d6ad6fd9e2a26abeab0aa2411b7ab17f30a99d3cb96aed1d1055b", "0x0"],
@@ -1213,7 +1013,7 @@ async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
     .await;
 
     // Requesting uncle by block hash and index with additional fields
-    test_rpc_call_ok(
+    test_rpc_call_ok::<Option<RichBlock>>(
         &client,
         "eth_getUncleByBlockHashAndIndex",
         rpc_params![
@@ -1225,10 +1025,20 @@ async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
     .await;
 
     // Requesting uncle by block hash and index with missing fields
-    test_rpc_call_err(&client, "eth_getUncleByBlockHashAndIndex", rpc_params![]).await;
+    test_rpc_call_err::<Option<RichBlock>>(
+        &client,
+        "eth_getUncleByBlockHashAndIndex",
+        rpc_params![],
+    )
+    .await;
 
     // Requesting uncle by block hash and index with wrong fields
-    test_rpc_call_err(&client, "eth_getUncleByBlockHashAndIndex", rpc_params![true]).await;
+    test_rpc_call_err::<Option<RichBlock>>(
+        &client,
+        "eth_getUncleByBlockHashAndIndex",
+        rpc_params![true],
+    )
+    .await;
 }
 
 #[cfg(test)]
