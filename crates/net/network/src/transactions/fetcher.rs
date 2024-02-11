@@ -20,8 +20,11 @@ use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError}
 use tracing::{debug, trace};
 
 use super::{
-    constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
-    AnnouncementFilter, Peer, PooledTransactions,
+    constants::{
+        tx_fetcher::*,
+        SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST,
+    },
+    AnnouncementFilter, Peer, PooledTransactions, TransactionsManagerMetrics, DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 
 /// The type responsible for fetching missing transactions from peers.
@@ -51,6 +54,8 @@ pub(super) struct TransactionFetcher {
     pub(super) filter_valid_hashes: AnnouncementFilter,
     /// Info on capacity of the transaction fetcher.
     info: TransactionFetcherInfo,
+    /// Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response.
+    pub(super) soft_limit_byte_size_pooled_transactions_response: usize,
 }
 
 // === impl TransactionFetcher ===
@@ -179,7 +184,7 @@ impl TransactionFetcher {
     pub(super) fn pack_hashes_eth68(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
-        hashes_from_announcement: ValidAnnouncementData,
+        hashes_from_announcement: ValidAnnouncementData
     ) -> RequestTxHashes {
         let mut acc_size_response = 0;
         let hashes_from_announcement_len = hashes_from_announcement.len();
@@ -188,9 +193,9 @@ impl TransactionFetcher {
 
         if let Some((hash, Some((_ty, size)))) = hashes_from_announcement_iter.next() {
             hashes_to_request.push(hash);
-
+           
             // tx is really big, pack request with single tx
-            if size >= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST {
+            if size >= self.soft_limit_byte_size_pooled_transactions_response {
                 return hashes_from_announcement_iter.collect::<RequestTxHashes>()
             } else {
                 acc_size_response = size;
@@ -208,7 +213,7 @@ impl TransactionFetcher {
 
             let next_acc_size = acc_size_response + size;
 
-            if next_acc_size <= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST {
+            if next_acc_size <= self.soft_limit_byte_size_pooled_transactions_response {
                 // only update accumulated size of tx response if tx will fit in without exceeding
                 // soft limit
                 acc_size_response = next_acc_size;
@@ -218,7 +223,7 @@ impl TransactionFetcher {
             }
 
             let free_space =
-                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST - acc_size_response;
+                self.soft_limit_byte_size_pooled_transactions_response - acc_size_response;
 
             if free_space < MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED {
                 break 'fold_size
@@ -862,6 +867,7 @@ impl Default for TransactionFetcher {
             hashes_fetch_inflight_and_pending_fetch: LruMap::new_unlimited(),
             filter_valid_hashes: Default::default(),
             info: TransactionFetcherInfo::default(),
+            soft_limit_byte_size_pooled_transactions_response: DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE
         }
     }
 }
@@ -1000,6 +1006,8 @@ mod test {
     use std::collections::HashSet;
 
     use reth_primitives::B256;
+
+    use crate::transactions::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE;
 
     use super::*;
 
