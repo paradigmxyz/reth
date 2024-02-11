@@ -2297,9 +2297,9 @@ dependencies = [
 
 [[package]]
 name = "either"
-version = "1.9.0"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a26ae43d7bcc3b814de94796a5e736d4029efb0ee900c12e2d54c993ad1a1e07"
+checksum = "11157ac094ffbdde99aa67b23417ebdd801842852b500e395a45a9c0aac03e4a"
 
 [[package]]
 name = "elliptic-curve"
@@ -3759,9 +3759,9 @@ dependencies = [
 
 [[package]]
 name = "is-terminal"
-version = "0.4.11"
+version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe8f25ce1159c7740ff0b9b2f5cdf4a8428742ba7c112b9f20f22cd5219c7dab"
+checksum = "f23ff5ef2b80d608d61efee834934d862cd92461afc0560dedf493e4c033738b"
 dependencies = [
  "hermit-abi",
  "libc",
@@ -6967,7 +6967,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "4.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#52c517c395a28baaef2981d545669611a4bec3e2"
+source = "git+https://github.com/bluealloy/revm?branch=main#4ff9ac01d738fe20d79bf993a5284f4ea7107822"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -6997,7 +6997,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "2.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#52c517c395a28baaef2981d545669611a4bec3e2"
+source = "git+https://github.com/bluealloy/revm?branch=main#4ff9ac01d738fe20d79bf993a5284f4ea7107822"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -7006,7 +7006,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "3.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#52c517c395a28baaef2981d545669611a4bec3e2"
+source = "git+https://github.com/bluealloy/revm?branch=main#4ff9ac01d738fe20d79bf993a5284f4ea7107822"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -7023,7 +7023,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "2.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#52c517c395a28baaef2981d545669611a4bec3e2"
+source = "git+https://github.com/bluealloy/revm?branch=main#4ff9ac01d738fe20d79bf993a5284f4ea7107822"
 dependencies = [
  "alloy-primitives",
  "auto_impl",
