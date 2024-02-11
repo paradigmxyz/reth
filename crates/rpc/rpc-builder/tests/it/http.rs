@@ -13,7 +13,7 @@ use jsonrpsee::{
 };
 use reth_primitives::{
     hex_literal::hex, Address, BlockId, BlockNumberOrTag, Bytes, NodeRecord, TxHash, B256, B64,
-    U256,
+    U256, U64,
 };
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},
@@ -23,7 +23,7 @@ use reth_rpc_api::{
 use reth_rpc_builder::RethRpcModule;
 use reth_rpc_types::{
     trace::filter::TraceFilter, Filter, Index, Log, PendingTransactionFilterKind, RichBlock,
-    TransactionRequest,
+    SyncStatus, TransactionRequest,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -634,7 +634,7 @@ async fn test_eth_get_code_rpc_call() {
 
     // Requesting code at a given address with proper fields
     match client
-        .request::<Option<String>, _>(
+        .request::<Bytes, _>(
             "eth_getCode",
             rpc_params![
                 "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
@@ -657,7 +657,7 @@ async fn test_eth_get_code_rpc_call() {
     for param in default_block_params {
         // Requesting code at a given address with default block parameter
         match client
-            .request::<Option<String>, _>(
+            .request::<Bytes, _>(
                 "eth_getCode",
                 rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b", param],
             )
@@ -673,7 +673,7 @@ async fn test_eth_get_code_rpc_call() {
 
     // Without block number which is optional
     match client
-        .request::<Option<String>, _>(
+        .request::<Bytes, _>(
             "eth_getCode",
             rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"],
         )
@@ -688,7 +688,7 @@ async fn test_eth_get_code_rpc_call() {
 
     // Requesting code at a given address with invalid default block parameter
     if let Ok(resp) = client
-        .request::<Option<String>, _>(
+        .request::<Bytes, _>(
             "eth_getCode",
             rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b", "finalized"],
         )
@@ -700,7 +700,7 @@ async fn test_eth_get_code_rpc_call() {
 
     // Requesting code at a given address with wrong fields
     if let Ok(resp) = client
-        .request::<Option<String>, _>(
+        .request::<Bytes, _>(
             "eth_getCode",
             rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b", false],
         )
@@ -721,7 +721,7 @@ async fn test_eth_block_number_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting block number without any parameter
-    match client.request::<Option<String>, _>("eth_blockNumber", rpc_params![]).await {
+    match client.request::<U256, _>("eth_blockNumber", rpc_params![]).await {
         Ok(_) => {}
         Err(e) => {
             // Panic if an error is encountered
@@ -735,7 +735,7 @@ async fn test_eth_block_number_rpc_call() {
     // Iterate over test cases
     for param in invalid_default_block_params {
         // Requesting block number with invalid parameter should not throw an error
-        match client.request::<Option<String>, _>("eth_blockNumber", rpc_params![param]).await {
+        match client.request::<U256, _>("eth_blockNumber", rpc_params![param]).await {
             Ok(_) => {}
             Err(e) => {
                 // Panic if an error is encountered
@@ -755,7 +755,7 @@ async fn test_eth_chain_id_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting chain ID without any parameter
-    match client.request::<Option<String>, _>("eth_chainId", rpc_params![]).await {
+    match client.request::<Option<U64>, _>("eth_chainId", rpc_params![]).await {
         Ok(_) => {}
         Err(e) => {
             // Panic if an error is encountered
@@ -769,7 +769,41 @@ async fn test_eth_chain_id_rpc_call() {
     // Iterate over test cases
     for param in invalid_params {
         // Requesting chain ID with invalid parameter should not throw an error
-        match client.request::<Option<String>, _>("eth_chainId", rpc_params![param]).await {
+        match client.request::<Option<U64>, _>("eth_chainId", rpc_params![param]).await {
+            Ok(_) => {}
+            Err(e) => {
+                // Panic if an error is encountered
+                panic!("Expected successful response, got error: {:?}", e);
+            }
+        };
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_syncing_rpc_call() {
+    // Initialize test tracing for logging
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting syncing status
+    match client.request::<Option<SyncStatus>, _>("eth_syncing", rpc_params![]).await {
+        Ok(_) => {}
+        Err(e) => {
+            // Panic if an error is encountered
+            panic!("Expected successful response, got error: {:?}", e);
+        }
+    };
+
+    // Define test cases with invalid parameters
+    let invalid_params = vec!["latest", "earliest", "pending", "0x2"];
+
+    // Iterate over test cases
+    for param in invalid_params {
+        // Requesting syncing status with invalid parameter should not throw an error
+        match client.request::<Option<SyncStatus>, _>("eth_syncing", rpc_params![param]).await {
             Ok(_) => {}
             Err(e) => {
                 // Panic if an error is encountered
