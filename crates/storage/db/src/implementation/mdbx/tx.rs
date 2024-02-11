@@ -3,7 +3,7 @@
 use super::cursor::Cursor;
 use crate::{
     metrics::{
-        Operation, OperationMetrics, TransactionMetrics, TransactionMode, TransactionOutcome,
+        DatabaseEnvMetrics, Operation, TransactionMetrics, TransactionMode, TransactionOutcome,
     },
     table::{Compress, DupSort, Encode, Table, TableImporter},
     tables::{utils::decode_one, Tables, NUM_TABLES},
@@ -50,9 +50,12 @@ impl<K: TransactionKind> Tx<K> {
 
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
     #[track_caller]
-    pub fn new_with_metrics(inner: Transaction<K>, with_metrics: bool) -> Self {
-        let metrics_handler = if with_metrics {
-            let handler = MetricsHandler::<K>::new(inner.id());
+    pub fn new_with_metrics(
+        inner: Transaction<K>,
+        metrics: Option<Arc<DatabaseEnvMetrics>>,
+    ) -> Self {
+        let metrics_handler = if let Some(metrics) = metrics {
+            let handler = MetricsHandler::<K>::new(inner.id(), metrics);
             TransactionMetrics::record_open(handler.transaction_mode());
             handler.log_transaction_opened();
             Some(handler)
@@ -90,7 +93,10 @@ impl<K: TransactionKind> Tx<K> {
             .cursor_with_dbi(self.get_dbi::<T>()?)
             .map_err(|e| DatabaseError::InitCursor(e.into()))?;
 
-        Ok(Cursor::new_with_metrics(inner, self.metrics_handler.is_some()))
+        Ok(Cursor::new_with_metrics(
+            inner,
+            self.metrics_handler.as_ref().map(|h| h.env_metrics.clone()),
+        ))
     }
 
     /// If `self.metrics_handler == Some(_)`, measure the time it takes to execute the closure and
@@ -137,7 +143,9 @@ impl<K: TransactionKind> Tx<K> {
     ) -> R {
         if let Some(metrics_handler) = &self.metrics_handler {
             metrics_handler.log_backtrace_on_long_read_transaction();
-            OperationMetrics::record(T::NAME, operation, value_size, || f(&self.inner))
+            metrics_handler
+                .env_metrics
+                .record_operation(T::NAME, operation, value_size, || f(&self.inner))
         } else {
             f(&self.inner)
         }
@@ -159,17 +167,19 @@ struct MetricsHandler<K: TransactionKind> {
     /// If `true`, the backtrace of transaction has already been recorded and logged.
     /// See [MetricsHandler::log_backtrace_on_long_read_transaction].
     backtrace_recorded: AtomicBool,
+    env_metrics: Arc<DatabaseEnvMetrics>,
     _marker: PhantomData<K>,
 }
 
 impl<K: TransactionKind> MetricsHandler<K> {
-    fn new(txn_id: u64) -> Self {
+    fn new(txn_id: u64, env_metrics: Arc<DatabaseEnvMetrics>) -> Self {
         Self {
             txn_id,
             start: Instant::now(),
             close_recorded: false,
             record_backtrace: true,
             backtrace_recorded: AtomicBool::new(false),
+            env_metrics,
             _marker: PhantomData,
         }
     }
