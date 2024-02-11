@@ -623,6 +623,94 @@ async fn test_eth_get_block_by_hash_rpc_call() {
     };
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_code_rpc_call() {
+    // Initialize test tracing for logging
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting code at a given address with proper fields
+    match client
+        .request::<Option<String>, _>(
+            "eth_getCode",
+            rpc_params![
+                "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+                "0x2" // 2
+            ],
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(e) => {
+            // Panic if an error is encountered
+            panic!("Expected successful response, got error: {:?}", e);
+        }
+    };
+
+    // Define test cases with different default block parameters
+    let default_block_params = vec!["earliest", "latest", "pending"];
+
+    // Iterate over test cases
+    for param in default_block_params {
+        // Requesting code at a given address with default block parameter
+        match client
+            .request::<Option<String>, _>(
+                "eth_getCode",
+                rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b", param],
+            )
+            .await
+        {
+            Ok(_) => {}
+            Err(e) => {
+                // Panic if an error is encountered
+                panic!("Expected successful response, got error: {:?}", e);
+            }
+        };
+    }
+
+    // Without block number which is optional
+    match client
+        .request::<Option<String>, _>(
+            "eth_getCode",
+            rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"],
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(e) => {
+            // Panic if an error is encountered
+            panic!("Expected successful response, got error: {:?}", e);
+        }
+    };
+
+    // Requesting code at a given address with invalid default block parameter
+    if let Ok(resp) = client
+        .request::<Option<String>, _>(
+            "eth_getCode",
+            rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b", "finalized"],
+        )
+        .await
+    {
+        // Panic if an unexpected successful response is received
+        panic!("Expected error response, got successful response: {:?}", resp);
+    };
+
+    // Requesting code at a given address with wrong fields
+    if let Ok(resp) = client
+        .request::<Option<String>, _>(
+            "eth_getCode",
+            rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b", false],
+        )
+        .await
+    {
+        // Panic if an unexpected successful response is received
+        panic!("Expected error response, got successful response: {:?}", resp);
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
