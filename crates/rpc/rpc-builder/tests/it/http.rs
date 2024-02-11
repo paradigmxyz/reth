@@ -8,6 +8,7 @@ use jsonrpsee::{
         error::Error,
         params::ArrayParams,
     },
+    rpc_params,
     types::error::ErrorCode,
 };
 use reth_primitives::{
@@ -21,7 +22,7 @@ use reth_rpc_api::{
 };
 use reth_rpc_builder::RethRpcModule;
 use reth_rpc_types::{
-    trace::filter::TraceFilter, Filter, Index, Log, PendingTransactionFilterKind,
+    trace::filter::TraceFilter, Filter, Index, Log, PendingTransactionFilterKind, RichBlock,
     TransactionRequest,
 };
 use serde::{Deserialize, Serialize};
@@ -523,6 +524,103 @@ async fn test_eth_logs_args() {
     params.insert( serde_json::json!({"blockHash":"0x58dc57ab582b282c143424bd01e8d923cddfdcda9455bad02a29522f6274a948"})).unwrap();
 
     let _resp = client.request::<Vec<Log>, _>("eth_getLogs", params).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_block_by_number_rpc_call() {
+    // Initialize test tracing for logging
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting block by number with proper fields
+    match client
+        .request::<Option<RichBlock>, _>(
+            "eth_getBlockByNumber",
+            rpc_params!["0x1b4", true], // Block number and full transaction object flag
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(e) => {
+            // Panic if an error is encountered
+            panic!("Expected successful response, got error: {:?}", e);
+        }
+    };
+
+    // Requesting block by number with wrong fields
+    if let Ok(resp) = client
+        .request::<Option<RichBlock>, _>("eth_getBlockByNumber", rpc_params!["0x1b4", "0x1b4"])
+        .await
+    {
+        // Panic if an unexpected successful response is received
+        panic!("Expected error response, got successful response: {:?}", resp);
+    };
+
+    // Requesting block by number with missing fields
+    if let Ok(resp) =
+        client.request::<Option<RichBlock>, _>("eth_getBlockByNumber", rpc_params!["0x1b4"]).await
+    {
+        // Panic if an unexpected successful response is received
+        panic!("Expected error response, got successful response: {:?}", resp);
+    };
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_block_by_hash_rpc_call() {
+    // Initialize test tracing for logging
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting block by hash with proper fields
+    match client
+        .request::<Option<RichBlock>, _>(
+            "eth_getBlockByHash",
+            rpc_params![
+                "0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae",
+                false
+            ],
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(e) => {
+            // Panic if an error is encountered
+            panic!("Expected successful response, got error: {:?}", e);
+        }
+    };
+
+    // Requesting block by hash with wrong fields
+    if let Ok(resp) = client
+        .request::<Option<RichBlock>, _>(
+            "eth_getBlockByHash",
+            rpc_params![
+                "0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae",
+                "0x1b4"
+            ],
+        )
+        .await
+    {
+        // Panic if an unexpected successful response is received
+        panic!("Expected error response, got successful response: {:?}", resp);
+    };
+
+    // Requesting block by hash with missing fields
+    if let Ok(resp) = client
+        .request::<Option<RichBlock>, _>(
+            "eth_getBlockByHash",
+            rpc_params!["0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae"],
+        )
+        .await
+    {
+        // Panic if an unexpected successful response is received
+        panic!("Expected error response, got successful response: {:?}", resp);
+    };
 }
 
 #[cfg(test)]
