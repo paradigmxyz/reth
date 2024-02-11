@@ -1014,6 +1014,62 @@ async fn test_eth_get_block_transaction_count_by_number_rpc_call() {
     };
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_uncle_count_by_block_hash_rpc_call() {
+    // Initialize test tracing for logging
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting uncle count by block hash with proper fields
+    match client
+        .request::<Option<U256>, _>(
+            "eth_getUncleCountByBlockHash",
+            rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238"],
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(e) => {
+            // Panic if an error is encountered
+            panic!("Expected successful response, got error: {:?}", e);
+        }
+    };
+
+    // Requesting uncle count by block hash with additional fields
+    match client
+        .request::<Option<U256>, _>(
+            "eth_getUncleCountByBlockHash",
+            rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238", true],
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(e) => {
+            // Panic if an error is encountered
+            panic!("Expected successful response, got error: {:?}", e);
+        }
+    };
+
+    // Requesting uncle count by block hash with missing fields
+    if let Ok(resp) =
+        client.request::<Option<U256>, _>("eth_getUncleCountByBlockHash", rpc_params![]).await
+    {
+        // Panic if an unexpected successful response is received
+        panic!("Expected error response, got successful response: {:?}", resp);
+    };
+
+    // Requesting uncle count by block hash with wrong field
+    if let Ok(resp) =
+        client.request::<Option<U256>, _>("eth_getUncleCountByBlockHash", rpc_params![true]).await
+    {
+        // Panic if an unexpected successful response is received
+        panic!("Expected error response, got successful response: {:?}", resp);
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
