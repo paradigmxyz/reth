@@ -1,6 +1,13 @@
-use reth_primitives::{revm::env::fill_block_env, Address, ChainSpec, Header, Transaction, U256, BlockWithSenders, Receipt};
+use std::time::Duration;
+
+use reth_primitives::{
+    revm::env::fill_block_env, Address, BlockWithSenders, ChainSpec, Header, Receipt, Transaction,
+    U256,
+};
 use revm::Database;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId, TxEnv};
+
+use super::BundleStateWithReceipts;
 
 /// Trait for configuring the EVM.
 pub trait EvmConfig: ConfigureEvmEnv {
@@ -9,13 +16,13 @@ pub trait EvmConfig: ConfigureEvmEnv {
     // _that_ is only because Evm has a lifetime parameter.
     // _that_ is because Handler and DBBox have lifetime parameters.
     /// The type that can executes transactions and full blocks.
-    type Executor<'a>: BlockExecutor where Self: 'a;
+    type Executor: BlockExecutor;
 
     /// A hook that allows to modify the EVM before execution.
-    fn evm(&self, db: impl Database) -> Self::Executor<'_>;
+    fn evm(&self, db: impl Database) -> Self::Executor;
 
     /// A hook that allows to modify the EVM before execution, with an inspector.
-    fn evm_with_inspector<I>(&self, db: impl Database, inspector: I) -> Self::Executor<'_>;
+    fn evm_with_inspector<I>(&self, db: impl Database, inspector: I) -> Self::Executor;
 }
 
 /// This represents the set of methods used to configure the EVM before execution.
@@ -97,6 +104,7 @@ pub trait BlockExecutor {
     fn size_hint(&self) -> Option<usize>;
 }
 
+// TODO: extension trait for stats
 /// Block execution statistics. Contains duration of each step of block execution.
 #[derive(Clone, Debug, Default)]
 pub struct BlockExecutorStats {
@@ -116,7 +124,7 @@ pub struct BlockExecutorStats {
 impl BlockExecutorStats {
     /// Log duration to info level log.
     pub fn log_info(&self) {
-        debug!(
+        tracing::debug!(
             target: "evm",
             evm_transact = ?self.execution_duration,
             apply_state = ?self.apply_state_duration,
