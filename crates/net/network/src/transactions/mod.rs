@@ -653,9 +653,10 @@ where
         //
         // for any seen hashes add the peer as fallback. unseen hashes are loaded into the tx
         // fetcher, hence they should be valid at this point.
-        //
+        let bad_imports = &self.bad_imports;
         self.transaction_fetcher.filter_unseen_and_pending_hashes(
             &mut valid_announcement_data,
+            |hash| bad_imports.contains(hash),
             &peer_id,
             |peer_id| self.peers.contains_key(&peer_id),
             &client_version,
@@ -763,7 +764,7 @@ where
 
                 let has_blob_txs = msg.has_eip4844();
 
-                let mut non_blob_txs = msg
+                let non_blob_txs = msg
                     .0
                     .into_iter()
                     .map(PooledTransactionsElement::try_from_broadcast)
@@ -771,7 +772,7 @@ where
                     .collect::<Vec<_>>();
 
                 // mark the transactions as received
-                self.transaction_fetcher.on_received_full_transactions_broadcast(
+                self.transaction_fetcher.remove_hashes_from_transaction_fetcher(
                     non_blob_txs.iter().map(|tx| *tx.hash()),
                 );
 
@@ -938,6 +939,7 @@ where
                             trace!(target: "net::tx",
                                 peer_id=format!("{peer_id:#}"),
                                 hash=%tx.hash(),
+                                client_version=%peer.client_version,
                                 "received an invalid transaction from peer"
                             );
                             self.metrics.bad_imports.increment(1);
@@ -1027,6 +1029,7 @@ where
                 self.report_peer_bad_transactions(peer_id);
             }
         }
+        self.transaction_fetcher.remove_hashes_from_transaction_fetcher([hash]);
         self.bad_imports.insert(hash);
     }
 
