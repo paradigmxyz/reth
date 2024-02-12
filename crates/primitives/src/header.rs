@@ -12,7 +12,6 @@ use crate::{
 use alloy_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use bytes::{Buf, BufMut, BytesMut};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
-use secp256k1::rand;
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
 /// Errors that can occur during header sanity checks.
@@ -458,7 +457,7 @@ impl Encodable for Header {
         //     self.has_excess_blob_gas() ||
         //     self.has_parent_beacon_block_root()
         // {
-        //     out.put_u8(EMPTY_STRING_CODE);
+            // out.put_u8(EMPTY_STRING_CODE);
         // }
 
         // Encode blob gas used. Put empty list if blob gas used is missing,
@@ -505,6 +504,7 @@ impl Decodable for Header {
         if !rlp_head.list {
             return Err(alloy_rlp::Error::UnexpectedString)
         }
+        let started_len = buf.len();
         let mut this = Self {
             parent_hash: Decodable::decode(buf)?,
             ommers_hash: Decodable::decode(buf)?,
@@ -522,7 +522,7 @@ impl Decodable for Header {
             mix_hash: Decodable::decode(buf)?,
             nonce: u64::from_be_bytes(B64::decode(buf)?.0),
             base_fee_per_gas: Some(u64::decode(buf)?),
-            withdrawals_root: Some(Decodable::decode(buf)?),
+            withdrawals_root: Some(B256::decode(buf)?),
             blob_gas_used: Some(u64::decode(buf)?),
             excess_blob_gas: Some(u64::decode(buf)?),
             parent_beacon_block_root: Some(B256::decode(buf)?),
