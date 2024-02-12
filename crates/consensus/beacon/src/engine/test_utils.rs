@@ -25,8 +25,9 @@ use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, B256};
 use reth_provider::{
-    providers::BlockchainProvider, test_utils::TestExecutorFactory, BundleStateWithReceipts,
-    ExecutorFactory, HeaderSyncMode, ProviderFactory, PrunableBlockExecutor,
+    providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor,
+    BundleStateWithReceipts, ExecutorFactory, HeaderSyncMode, ProviderFactory,
+    PrunableBlockExecutor,
 };
 use reth_prune::Pruner;
 use reth_revm::EvmProcessorFactory;
@@ -166,18 +167,101 @@ pub enum EitherExecutorFactory<A: ExecutorFactory, B: ExecutorFactory> {
     Right(B),
 }
 
+/// The type used for associated types in EitherExecutorFactory.
+#[derive(Debug)]
+pub enum EitherExecutor<A, B> {
+    /// The first executor variant
+    Left(A),
+    /// The second executor variant
+    Right(B),
+}
+
+impl<A, B> BlockExecutor for EitherExecutor<A, B>
+where
+    A: BlockExecutor,
+    B: BlockExecutor,
+{
+    fn execute(
+        &mut self,
+        block: &reth_primitives::BlockWithSenders,
+        total_difficulty: reth_primitives::U256,
+    ) -> Result<(), reth_interfaces::executor::BlockExecutionError> {
+        match self {
+            EitherExecutor::Left(a) => a.execute(block, total_difficulty),
+            EitherExecutor::Right(b) => b.execute(block, total_difficulty),
+        }
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        match self {
+            EitherExecutor::Left(a) => a.size_hint(),
+            EitherExecutor::Right(b) => b.size_hint(),
+        }
+    }
+
+    fn take_output_state(self) -> BundleStateWithReceipts {
+        match self {
+            EitherExecutor::Left(a) => a.take_output_state(),
+            EitherExecutor::Right(b) => b.take_output_state(),
+        }
+    }
+    fn execute_transactions(
+        &mut self,
+        block: &reth_primitives::BlockWithSenders,
+        total_difficulty: reth_primitives::U256,
+    ) -> Result<(Vec<reth_primitives::Receipt>, u64), reth_interfaces::executor::BlockExecutionError>
+    {
+        match self {
+            EitherExecutor::Left(a) => a.execute_transactions(block, total_difficulty),
+            EitherExecutor::Right(b) => b.execute_transactions(block, total_difficulty),
+        }
+    }
+    fn execute_and_verify_receipt(
+        &mut self,
+        block: &reth_primitives::BlockWithSenders,
+        total_difficulty: reth_primitives::U256,
+    ) -> Result<(), reth_interfaces::executor::BlockExecutionError> {
+        match self {
+            EitherExecutor::Left(a) => a.execute_and_verify_receipt(block, total_difficulty),
+            EitherExecutor::Right(b) => b.execute_and_verify_receipt(block, total_difficulty),
+        }
+    }
+}
+
+impl<A, B> PrunableBlockExecutor for EitherExecutor<A, B>
+where
+    A: PrunableBlockExecutor,
+    B: PrunableBlockExecutor,
+{
+    fn set_tip(&mut self, tip: BlockNumber) {
+        match self {
+            EitherExecutor::Left(a) => a.set_tip(tip),
+            EitherExecutor::Right(b) => b.set_tip(tip),
+        }
+    }
+
+    fn set_prune_modes(&mut self, prune_modes: reth_primitives::PruneModes) {
+        match self {
+            EitherExecutor::Left(a) => a.set_prune_modes(prune_modes),
+            EitherExecutor::Right(b) => b.set_prune_modes(prune_modes),
+        }
+    }
+}
+
 impl<A, B> ExecutorFactory for EitherExecutorFactory<A, B>
 where
     A: ExecutorFactory,
     B: ExecutorFactory,
 {
+    type Executor<'a> = EitherExecutor<A::Executor<'a>, B::Executor<'a>>;
+
     fn with_state<'a, SP: reth_provider::StateProvider + 'a>(
         &'a self,
         sp: SP,
-    ) -> Box<dyn PrunableBlockExecutor + 'a> {
+    ) -> Self::Executor<'a> {
         match self {
-            EitherExecutorFactory::Left(a) => a.with_state::<'a, SP>(sp),
-            EitherExecutorFactory::Right(b) => b.with_state::<'a, SP>(sp),
+            EitherExecutorFactory::Left(a) => EitherExecutor::Left(a.with_state::<'a, SP>(sp)),
+            EitherExecutorFactory::Right(b) => EitherExecutor::Right(b.with_state::<'a, SP>(sp)),
         }
     }
 }

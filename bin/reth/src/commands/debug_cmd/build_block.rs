@@ -39,8 +39,8 @@ use reth_primitives::{
     SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ExecutorFactory,
-    ProviderFactory, StageCheckpointReader, StateProviderFactory,
+    providers::BlockchainProvider, BlockExecutor, BlockHashReader, BlockReader, BlockWriter,
+    ExecutorFactory, ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
 use reth_revm::EvmProcessorFactory;
 #[cfg(feature = "optimism")]

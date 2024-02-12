@@ -20,7 +20,7 @@ use reth_network_api::NetworkInfo;
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
 use reth_provider::{
-    AccountExtReader, BlockWriter, ExecutorFactory, HashingWriter, HeaderProvider,
+    AccountExtReader, BlockExecutor, BlockWriter, ExecutorFactory, HashingWriter, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
     StorageReader,
 };

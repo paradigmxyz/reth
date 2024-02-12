@@ -315,7 +315,7 @@ impl StorageInner {
     pub(crate) fn execute<EvmConfig>(
         &mut self,
         block: &BlockWithSenders,
-        executor: &mut EVMProcessor<'_, EvmConfig>,
+        mut executor: EVMProcessor<'_, EvmConfig>,
     ) -> Result<(BundleStateWithReceipts, u64), BlockExecutionError>
     where
         EvmConfig: ConfigureEvmEnv,
@@ -447,9 +447,9 @@ impl StorageInner {
             .with_database_boxed(Box::new(StateProviderDatabase::new(client.latest().unwrap())))
             .with_bundle_update()
             .build();
-        let mut executor = EVMProcessor::new_with_state(chain_spec.clone(), db, evm_config);
+        let executor = EVMProcessor::new_with_state(chain_spec.clone(), db, evm_config);
 
-        let (bundle_state, gas_used) = self.execute(&block, &mut executor)?;
+        let (bundle_state, gas_used) = self.execute(&block, executor)?;
 
         let Block { header, body, .. } = block.block;
         let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };

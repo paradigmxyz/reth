@@ -40,9 +40,9 @@ impl<EvmConfig> ExecutorFactory for EvmProcessorFactory<EvmConfig>
 where
     EvmConfig: ConfigureEvmEnv + Send + Sync + Clone + 'static,
 {
-    type Executor = for<'this> EVMProcessor<'this, EvmConfig>;
+    type Executor<'a> = EVMProcessor<'a, EvmConfig>;
 
-    fn with_state<'a, SP: StateProvider + 'a>(&'a self, sp: SP) -> EVMProcessor<'a, EvmConfig> {
+    fn with_state<'a, SP: StateProvider + 'a>(&'a self, sp: SP) -> Self::Executor<'a> {
         let database_state = StateProviderDatabase::new(sp);
         let mut evm = EVMProcessor::new_with_db(
             self.chain_spec.clone(),
