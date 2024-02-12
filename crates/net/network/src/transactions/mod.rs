@@ -74,7 +74,7 @@ mod fetcher;
 mod validation;
 
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
-use fetcher::{FetchEvent, TransactionFetcher};
+pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
 pub use validation::*;
 
 use self::constants::{

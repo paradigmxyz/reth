@@ -30,7 +30,7 @@ use super::{
 /// new requests on announced hashes.
 #[derive(Debug)]
 #[pin_project]
-pub(super) struct TransactionFetcher {
+pub(crate) struct TransactionFetcher {
     /// All peers with to which a [`GetPooledTransactions`] request is inflight.
     pub(super) active_peers: LruMap<PeerId, u8, ByLength>,
     /// All currently active [`GetPooledTransactions`] requests.
@@ -899,7 +899,7 @@ impl TxFetchMetadata {
 
 /// Represents possible events from fetching transactions.
 #[derive(Debug)]
-pub(super) enum FetchEvent {
+pub(crate) enum FetchEvent {
     /// Triggered when transactions are successfully fetched.
     TransactionsFetched {
         /// The ID of the peer from which transactions were fetched.
