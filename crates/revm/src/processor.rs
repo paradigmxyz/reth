@@ -17,7 +17,6 @@ use reth_provider::{
 use revm::{
     db::{states::bundle_state::BundleRetention, EmptyDBTyped, StateDBBox},
     inspector_handle_register,
-    interpreter::Host,
     primitives::{CfgEnvWithHandlerCfg, ResultAndState},
     Evm, State, StateBuilder,
 };
@@ -282,7 +281,7 @@ where
             hash_recalculated = true; // Mark that the hash has been calculated
         }
 
-        let should_inspect = self.evm.context.external.should_inspect(self.evm.env(), hash);
+        let should_inspect = matches!(self.evm.context.external.hook, Hook::Transaction(_));
 
         let out = if should_inspect {
             // push inspector handle register.
