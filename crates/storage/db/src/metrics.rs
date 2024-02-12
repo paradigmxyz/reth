@@ -6,7 +6,6 @@ use reth_metrics::{metrics::Counter, Metrics};
 use rustc_hash::FxHasher;
 use std::{
     hash::BuildHasherDefault,
-    str::FromStr,
     time::{Duration, Instant},
 };
 use strum::EnumCount;
@@ -34,20 +33,17 @@ impl DatabaseEnvMetrics {
     /// Record a metric for database operation executed in `f`. Panics if the table name is unknown.
     pub(crate) fn record_operation<R>(
         &self,
-        table: &'static str,
+        table: Tables,
         operation: Operation,
         value_size: Option<usize>,
         f: impl FnOnce() -> R,
     ) -> R {
-        let handle = self
-            .operations
-            .entry((Tables::from_str(table).expect("unknown table name"), operation))
-            .or_insert_with(|| {
-                OperationMetrics::new_with_labels(&[
-                    (Labels::Table.as_str(), table),
-                    (Labels::Operation.as_str(), operation.as_str()),
-                ])
-            });
+        let handle = self.operations.entry((table, operation)).or_insert_with(|| {
+            OperationMetrics::new_with_labels(&[
+                (Labels::Table.as_str(), table.name()),
+                (Labels::Operation.as_str(), operation.as_str()),
+            ])
+        });
         handle.record(value_size, f)
     }
 }
