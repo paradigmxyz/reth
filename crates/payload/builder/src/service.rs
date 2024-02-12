@@ -318,7 +318,7 @@ where
         let fut = async move {
             let res = fut.await;
             if let Ok(ref payload) = res {
-                let _ = payload_events.send(PayloadEvents::BuiltPayload(payload.clone().into()));
+                payload_events.send(PayloadEvents::BuiltPayload(payload.clone().into())).ok();
 
                 resolved_metrics
                     .set_resolved_revenue(payload.block().number, f64::from(payload.fees()));
@@ -481,7 +481,7 @@ pub enum PayloadServiceCommand<Engine: EngineTypes> {
 }
 
 /// Payload builder events.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum PayloadEvents<Engine: EngineTypes> {
     /// The payload attributes as
     /// they are received from the CL through the engine api.
@@ -496,17 +496,6 @@ pub enum PayloadEvents<Engine: EngineTypes> {
 #[derive(Debug)]
 pub struct PayloadEventReceiver<Engine: EngineTypes> {
     pub receiver: broadcast::Receiver<PayloadEvents<Engine>>,
-}
-
-impl<Engine: EngineTypes> fmt::Debug for PayloadEvents<Engine> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PayloadEvents::Attributes(attrs) => f.debug_tuple("Attributes").field(attrs).finish(),
-            PayloadEvents::BuiltPayload(payload) => {
-                f.debug_tuple("BuiltPayload").field(payload).finish()
-            }
-        }
-    }
 }
 
 impl<Engine> fmt::Debug for PayloadServiceCommand<Engine>
