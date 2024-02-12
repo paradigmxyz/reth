@@ -410,9 +410,12 @@ where
         let mut at = block.parent_hash;
         let mut replay_block_txs = true;
 
-        // but if all transactions are to be replayed, we can use the state at the block itself
+        // if a transaction index is provided, we need to replay the transactions until the index
         let num_txs = transaction_index.index().unwrap_or(block.body.len());
-        if num_txs == block.body.len() {
+        // but if all transactions are to be replayed, we can use the state at the block itself
+        // this works with the exception of the PENDING block, because its state might not exist if
+        // built locally
+        if !target_block.is_pending() && num_txs == block.body.len() {
             at = block.hash();
             replay_block_txs = false;
         }
