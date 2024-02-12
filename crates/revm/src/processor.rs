@@ -270,7 +270,7 @@ where
         let mut hash = transaction.hash();
         let mut hash_recalculated = false;
         let needs_hash_for_inspection =
-            if let Hook::Transaction(_) = self.evm.context.external.hook { true } else { false };
+            matches!(self.evm.context.external.hook, Hook::Transaction(_));
         // TODO?: Might add as a method to transaction
         let is_hash_empty = |hash: &B256| hash.iter().all(|&byte| byte == 0);
 
@@ -281,7 +281,7 @@ where
             hash_recalculated = true; // Mark that the hash has been calculated
         }
 
-        let should_inspect = matches!(self.evm.context.external.hook, Hook::Transaction(_));
+        let should_inspect = self.evm.context.external.should_inspect(self.evm.env(), hash);
 
         let out = if should_inspect {
             // push inspector handle register.
