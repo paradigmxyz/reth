@@ -64,9 +64,9 @@ impl Command {
             DatabaseArguments::default().log_level(self.second_db.log_level),
         )?;
 
-        let tables = match self.table {
-            Some(table) => vec![table],
-            None => Tables::ALL.to_vec(),
+        let tables = match &self.table {
+            Some(table) => std::slice::from_ref(table),
+            None => Tables::ALL,
         };
 
         for table in tables {

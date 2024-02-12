@@ -6,7 +6,7 @@ use crate::{
         DatabaseEnvMetrics, Operation, TransactionMetrics, TransactionMode, TransactionOutcome,
     },
     table::{Compress, DupSort, Encode, Table, TableImporter},
-    tables::{utils::decode_one, Tables, NUM_TABLES},
+    tables::{utils::decode_one, Tables},
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
@@ -34,7 +34,7 @@ pub struct Tx<K: TransactionKind> {
     /// Libmdbx-sys transaction.
     pub inner: Transaction<K>,
     /// Database table handle cache.
-    pub(crate) db_handles: Arc<RwLock<[Option<DBI>; NUM_TABLES]>>,
+    pub(crate) db_handles: Arc<RwLock<[Option<DBI>; Tables::COUNT]>>,
     /// Handler for metrics with its own [Drop] implementation for cases when the transaction isn't
     /// closed by [Tx::commit] or [Tx::abort], but we still need to report it in the metrics.
     ///
