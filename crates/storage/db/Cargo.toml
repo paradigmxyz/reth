@@ -38,7 +38,6 @@ parking_lot.workspace = true
 derive_more.workspace = true
 eyre.workspace = true
 paste = "1.0"
-dashmap = "5.5.3"
 rustc-hash = "1.1.0"
 
 # arbitrary utils
