@@ -11,10 +11,6 @@ use super::BundleStateWithReceipts;
 
 /// Trait for configuring the EVM.
 pub trait EvmConfig: ConfigureEvmEnv {
-    // TODO: It would be great if this didn't need to be a GAT, this is only because EVMProcessor
-    // has a lifetime parameter.
-    // _that_ is only because Evm has a lifetime parameter.
-    // _that_ is because Handler and DBBox have lifetime parameters.
     /// The type that can executes transactions and full blocks.
     type Executor: BlockExecutor;
 
