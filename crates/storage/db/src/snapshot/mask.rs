@@ -80,7 +80,7 @@ macro_rules! add_snapshot_mask {
         }
     };
     ($mask_struct:tt, $type1:ty, $type2:ty, $type3:ty, $mask:expr) => {
-        impl ColumnSelectorTwo for $mask_struct<$type1, $type2, $type3> {
+        impl ColumnSelectorThree for $mask_struct<$type1, $type2, $type3> {
             type FIRST = $type1;
             type SECOND = $type2;
             type THIRD = $type3;
