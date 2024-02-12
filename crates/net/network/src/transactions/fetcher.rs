@@ -50,7 +50,7 @@ pub(super) struct TransactionFetcher {
     /// Filter for valid eth68 announcements.
     pub(super) filter_valid_hashes: AnnouncementFilter,
     /// Info on capacity of the transaction fetcher.
-    info: TransactionFetcherInfo,
+    pub(super) info: TransactionFetcherInfo,
 }
 
 // === impl TransactionFetcher ===
@@ -121,7 +121,7 @@ impl TransactionFetcher {
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         is_session_active: impl Fn(&PeerId) -> bool,
-        mut budget: Option<usize>, // try to find `budget` idle peers before giving up
+        mut budget: Option<usize>, // search fallback peers for max `budget` lru pending hashes
     ) -> Option<PeerId> {
         let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
 
@@ -155,15 +155,15 @@ impl TransactionFetcher {
     /// a [`RequestTxHashes`] buffer as parameter for filling with hashes to request.
     ///
     /// Returns left over hashes.
-    pub(super) fn pack_hashes(
+    pub(super) fn pack_request(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: ValidAnnouncementData,
     ) -> RequestTxHashes {
         if hashes_from_announcement.msg_version().is_eth68() {
-            return self.pack_hashes_eth68(hashes_to_request, hashes_from_announcement)
+            return self.pack_request_eth68(hashes_to_request, hashes_from_announcement)
         }
-        self.pack_hashes_eth66(hashes_to_request, hashes_from_announcement)
+        self.pack_request_eth66(hashes_to_request, hashes_from_announcement)
     }
 
     /// Packages hashes for a [`GetPooledTxRequest`] from an
@@ -176,7 +176,7 @@ impl TransactionFetcher {
     /// Loops through hashes passed as parameter and checks if a hash fits in the expected
     /// response. If no, it's added to surplus hashes. If yes, it's added to hashes to the request
     /// and expected response size is accumulated.
-    pub(super) fn pack_hashes_eth68(
+    pub(super) fn pack_request_eth68(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: ValidAnnouncementData,
@@ -190,7 +190,7 @@ impl TransactionFetcher {
             hashes_to_request.push(hash);
 
             // tx is really big, pack request with single tx
-            if size >= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST {
+            if size >= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST {
                 return hashes_from_announcement_iter.collect::<RequestTxHashes>()
             } else {
                 acc_size_response = size;
@@ -208,7 +208,7 @@ impl TransactionFetcher {
 
             let next_acc_size = acc_size_response + size;
 
-            if next_acc_size <= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST {
+            if next_acc_size <= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST {
                 // only update accumulated size of tx response if tx will fit in without exceeding
                 // soft limit
                 acc_size_response = next_acc_size;
@@ -218,7 +218,7 @@ impl TransactionFetcher {
             }
 
             let free_space =
-                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST - acc_size_response;
+                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST - acc_size_response;
 
             if free_space < MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED {
                 break 'fold_size
@@ -237,7 +237,7 @@ impl TransactionFetcher {
     /// hashes to request.
     ///
     /// Returns left over hashes.
-    pub(super) fn pack_hashes_eth66(
+    pub(super) fn pack_request_eth66(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: ValidAnnouncementData,
@@ -627,7 +627,7 @@ impl TransactionFetcher {
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         seen_hashes: &LruCache<TxHash>,
-        mut budget_fill_request: Option<usize>, // only check `budget` lru pending hashes
+        mut budget_fill_request: Option<usize>, // check max `budget` lru pending hashes
     ) {
         let Some(hash) = hashes_to_request.first() else { return };
 
@@ -732,7 +732,6 @@ impl TransactionFetcher {
                 inflight_requests=self.inflight_requests.len(),
                 max_inflight_transaction_requests=info.max_inflight_requests,
                 hashes_pending_fetch=self.hashes_pending_fetch.len(),
-                max_hashes_pending_fetch=info.max_hashes_pending_fetch,
                 limit=limit,
                 "search breadth limited in search for idle fallback peer for some hash pending fetch"
             );
@@ -772,7 +771,6 @@ impl TransactionFetcher {
                 inflight_requests=self.inflight_requests.len(),
                 max_inflight_transaction_requests=self.info.max_inflight_requests,
                 hashes_pending_fetch=self.hashes_pending_fetch.len(),
-                max_hashes_pending_fetch=self.info.max_hashes_pending_fetch,
                 limit=limit,
                 "search breadth limited in search for intersection of hashes announced by peer and hashes pending fetch"
             );
@@ -971,23 +969,18 @@ impl Future for GetPooledTxRequestFut {
 #[derive(Debug)]
 pub struct TransactionFetcherInfo {
     /// Currently active outgoing [`GetPooledTransactions`] requests.
-    max_inflight_requests: usize,
-    /// Number of pending hashes.
-    max_hashes_pending_fetch: usize,
+    pub(super) max_inflight_requests: usize,
 }
 
 impl TransactionFetcherInfo {
-    pub fn new(max_inflight_transaction_requests: usize, max_hashes_pending_fetch: usize) -> Self {
-        Self { max_inflight_requests: max_inflight_transaction_requests, max_hashes_pending_fetch }
+    pub fn new(max_inflight_transaction_requests: usize) -> Self {
+        Self { max_inflight_requests: max_inflight_transaction_requests }
     }
 }
 
 impl Default for TransactionFetcherInfo {
     fn default() -> Self {
-        Self::new(
-            DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES,
-            DEFAULT_MAX_COUNT_PENDING_FETCH,
-        )
+        Self::new(DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES)
     }
 }
 
@@ -1013,8 +1006,8 @@ mod test {
             B256::from_slice(&[5; 32]),
         ];
         let eth68_hashes_sizes = [
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST - 2,
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_ASSEMBLE_GET_POOLED_TRANSACTIONS_REQUEST, /* this one will
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST - 2,
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST, /* this one will
                                                                         * not fit */
             2,
             9, // this one won't
@@ -1043,7 +1036,7 @@ mod test {
             valid_announcement_data.insert(eth68_hashes[i], Some((0, eth68_hashes_sizes[i])));
         }
         let surplus_eth68_hashes =
-            tx_fetcher.pack_hashes_eth68(&mut eth68_hashes_to_request, valid_announcement_data);
+            tx_fetcher.pack_request_eth68(&mut eth68_hashes_to_request, valid_announcement_data);
 
         let combo_surplus_hashes = surplus_eth68_hashes.into_iter().collect::<HashSet<_>>();
         for combo in possible_outcomes.clone() {

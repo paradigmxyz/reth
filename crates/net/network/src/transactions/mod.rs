@@ -241,15 +241,27 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
         let network_events = network.event_listener();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
+        let transaction_fetcher = TransactionFetcher::default();
+
         // install a listener for new pending transactions that are allowed to be propagated over
         // the network
         let pending = pool.pending_transactions_listener();
+        let pending_pool_imports_info =
+            PendingPoolImportsInfo::new(DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS);
+
+        let metrics = TransactionsManagerMetrics::default();
+        metrics
+            .capacity_inflight_requests
+            .increment(transaction_fetcher.info.max_inflight_requests as u64);
+        metrics
+            .capacity_pending_pool_imports
+            .increment(pending_pool_imports_info.max_pending_pool_imports as u64);
 
         Self {
             pool,
             network,
             network_events,
-            transaction_fetcher: Default::default(),
+            transaction_fetcher,
             transactions_by_peers: Default::default(),
             pool_imports: Default::default(),
             pending_pool_imports_info: PendingPoolImportsInfo::new(
@@ -266,7 +278,8 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 from_network,
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
-            metrics: Default::default(),
+            metrics,
+            pending_pool_imports_info,
         }
     }
 }
@@ -702,7 +715,7 @@ where
         // limit on the response (2MB)
         let mut hashes_to_request = RequestTxHashes::with_capacity(valid_announcement_data.len());
         let surplus_hashes =
-            self.transaction_fetcher.pack_hashes(&mut hashes_to_request, valid_announcement_data);
+            self.transaction_fetcher.pack_request(&mut hashes_to_request, valid_announcement_data);
         hashes_to_request.shrink_to_fit();
 
         if !surplus_hashes.is_empty() {
