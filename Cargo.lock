@@ -88,9 +88,9 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.8.7"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77c3a9648d43b9cd48db467b3f87fdd6e146bcc88ab0180006cef2179fe11d01"
+checksum = "42cd52102d3df161c77a887b608d7a4897d7cc112886a9537b738a887a03aaff"
 dependencies = [
  "cfg-if",
  "getrandom 0.2.12",
@@ -5946,6 +5946,7 @@ dependencies = [
  "assert_matches",
  "bytes",
  "criterion",
+ "dashmap",
  "derive_more",
  "eyre",
  "iai",
@@ -5967,8 +5968,10 @@ dependencies = [
  "reth-nippy-jar",
  "reth-primitives",
  "reth-tracing",
+ "rustc-hash",
  "serde",
  "serde_json",
+ "strum 0.26.1",
  "tempfile",
  "test-fuzz 5.0.0",
  "thiserror",
