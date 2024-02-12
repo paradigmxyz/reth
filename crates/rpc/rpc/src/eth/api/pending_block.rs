@@ -309,7 +309,12 @@ where
 pub(crate) enum PendingBlockEnvOrigin {
     /// The pending block as received from the CL.
     ActualPending(SealedBlockWithSenders),
-    /// The header of the latest block
+    /// The _modified_ header of the latest block.
+    ///
+    /// This derives the pending state based on the latest header by modifying:
+    ///  - the timestamp
+    ///  - the block number
+    ///  - fees
     DerivedFromLatest(SealedHeader),
 }
 
@@ -330,7 +335,7 @@ impl PendingBlockEnvOrigin {
     /// Returns the [BlockId] that represents the state of the block.
     ///
     /// If this is the actual pending block, the state is the "Pending" tag, otherwise we can safely
-    /// identify the block by its hash.
+    /// identify the block by its hash (latest block).
     pub(crate) fn state_block_id(&self) -> BlockId {
         match self {
             PendingBlockEnvOrigin::ActualPending(_) => BlockNumberOrTag::Pending.into(),
@@ -339,6 +344,9 @@ impl PendingBlockEnvOrigin {
     }
 
     /// Returns the hash of the block the pending block should be built on.
+    ///
+    /// For the [PendingBlockEnvOrigin::ActualPending] this is the parent hash of the block.
+    /// For the [PendingBlockEnvOrigin::DerivedFromLatest] this is the hash of the _latest_ header.
     fn build_target_hash(&self) -> B256 {
         match self {
             PendingBlockEnvOrigin::ActualPending(block) => block.parent_hash,

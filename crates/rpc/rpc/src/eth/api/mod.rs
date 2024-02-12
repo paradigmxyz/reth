@@ -281,10 +281,10 @@ where
             let latest =
                 self.provider().latest_header()?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
-            let (mut latest_header, _block_hash) = latest.split();
+            let (mut latest_header, block_hash) = latest.split();
             // child block
             latest_header.number += 1;
-            // assumed child block is in the next slot
+            // assumed child block is in the next slot: 12s
             latest_header.timestamp += 12;
             // base fee of the child block
             let chain_spec = self.provider().chain_spec();
@@ -292,7 +292,7 @@ where
             latest_header.base_fee_per_gas = latest_header
                 .next_block_base_fee(chain_spec.base_fee_params(latest_header.timestamp));
 
-            let block_hash = latest_header.hash_slow();
+            // we're reusing the same block hash because we need this to lookup the block's state
             let latest = SealedHeader::new(latest_header, block_hash);
 
             PendingBlockEnvOrigin::DerivedFromLatest(latest)
