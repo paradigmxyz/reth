@@ -20,7 +20,7 @@ pub struct NoopPayloadBuilderService<Engine: EngineTypes> {
 
 impl<Engine> NoopPayloadBuilderService<Engine>
 where
-    Engine: EngineTypes,
+    Engine: EngineTypes + 'static,
 {
     /// Creates a new [NoopPayloadBuilderService].
     pub fn new() -> (Self, PayloadBuilderHandle<Engine>) {

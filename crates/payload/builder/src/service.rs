@@ -17,7 +17,10 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{
+    broadcast, mpsc,
+    oneshot::{self, error::RecvError},
+};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, info, trace, warn};
 
@@ -33,7 +36,7 @@ pub struct PayloadStore<Engine: EngineTypes> {
 
 impl<Engine> PayloadStore<Engine>
 where
-    Engine: EngineTypes,
+    Engine: EngineTypes + 'static,
 {
     /// Resolves the payload job and returns the best payload that has been built so far.
     ///
@@ -98,7 +101,7 @@ pub struct PayloadBuilderHandle<Engine: EngineTypes> {
 
 impl<Engine> PayloadBuilderHandle<Engine>
 where
-    Engine: EngineTypes,
+    Engine: EngineTypes + 'static,
 {
     /// Creates a new payload builder handle for the given channel.
     ///
@@ -172,11 +175,11 @@ where
     }
 
     /// Sends a message to the service to subscribe to payload events.
-    /// Returns a receiver that will receive the payload events.
-    pub fn subscribe(&self) -> oneshot::Receiver<broadcast::Receiver<PayloadEvents<Engine>>> {
+    /// Returns a receiver that will receive them.
+    pub async fn subscribe(&self) -> Result<PayloadEventReceiver<Engine>, RecvError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_service.send(PayloadServiceCommand::Subscribe(tx));
-        rx
+        Ok(PayloadEventReceiver { receiver: rx.await? })
     }
 }
 
@@ -477,10 +480,22 @@ pub enum PayloadServiceCommand<Engine: EngineTypes> {
     Subscribe(oneshot::Sender<broadcast::Receiver<PayloadEvents<Engine>>>),
 }
 
+/// Payload builder events.
 #[derive(Clone)]
 pub enum PayloadEvents<Engine: EngineTypes> {
+    /// The payload attributes as
+    /// they are received from the CL through the engine api.
     Attributes(Engine::PayloadBuilderAttributes),
+    /// The built payload that has been just built.
+    /// Triggered by the CL whenever it asks for an execution payload.
+    /// This event is only thrown if the CL is a validator.
     BuiltPayload(Engine::BuiltPayload),
+}
+
+/// Represents a receiver for various payload events.
+#[derive(Debug)]
+pub struct PayloadEventReceiver<Engine: EngineTypes> {
+    pub receiver: broadcast::Receiver<PayloadEvents<Engine>>,
 }
 
 impl<Engine: EngineTypes> fmt::Debug for PayloadEvents<Engine> {
