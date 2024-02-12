@@ -68,7 +68,7 @@ pub trait BlockExecutorMetadata {
 }
 
 /// A [BlockExecutor] capable of in-memory pruning of the data that will be written to the database.
-pub trait PrunableBlockExecutor: BlockExecutor {
+pub trait PrunableBlockExecutor: BlockExecutor + BlockExecutorMetadata {
     /// Set tip - highest known block number.
     fn set_tip(&mut self, tip: BlockNumber);
 

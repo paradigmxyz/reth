@@ -1,6 +1,6 @@
 use crate::{
-    bundle_state::BundleStateWithReceipts, BlockExecutor, BlockExecutorStats, ExecutorFactory,
-    PrunableBlockExecutor, StateProvider,
+    bundle_state::BundleStateWithReceipts, BlockExecutor, BlockExecutorMetadata,
+    BlockExecutorStats, ExecutorFactory, PrunableBlockExecutor, StateProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::executor::BlockExecutionError;
@@ -44,7 +44,9 @@ impl BlockExecutor for TestExecutor {
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
         self.0.clone().unwrap_or_default()
     }
+}
 
+impl BlockExecutorMetadata for TestExecutor {
     fn stats(&self) -> BlockExecutorStats {
         BlockExecutorStats::default()
     }
