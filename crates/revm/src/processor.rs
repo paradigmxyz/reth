@@ -12,8 +12,7 @@ use reth_primitives::{
     TransactionSigned, Withdrawals, B256, MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_provider::{
-    BlockExecutor, BlockExecutorMetadata, BlockExecutorStats, ProviderError, PrunableBlockExecutor,
-    StateProvider,
+    BlockExecutor, BlockExecutorStats, ProviderError, PrunableBlockExecutor, StateProvider,
 };
 use revm::{
     db::{states::bundle_state::BundleRetention, EmptyDBTyped, StateDBBox},
@@ -500,22 +499,14 @@ where
         Ok((receipts, cumulative_gas_used))
     }
 
-    fn take_output_state(&mut self) -> BundleStateWithReceipts {
-        let receipts = std::mem::take(&mut self.receipts);
+    fn take_output_state(self) -> BundleStateWithReceipts {
+        // log the stats whenever we take the output state.
+        self.stats.log_info();
         BundleStateWithReceipts::new(
-            self.evm.context.evm.db.take_bundle(),
-            receipts,
+            self.evm.context.evm.db.bundle_state,
+            self.receipts,
             self.first_block.unwrap_or_default(),
         )
-    }
-}
-
-impl<'a, EvmConfig> BlockExecutorMetadata for EVMProcessor<'a, EvmConfig>
-where
-    EvmConfig: ConfigureEvmEnv,
-{
-    fn stats(&self) -> BlockExecutorStats {
-        self.stats.clone()
     }
 
     fn size_hint(&self) -> Option<usize> {

@@ -5,7 +5,7 @@ use crate::{
 };
 use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::ChainSpec;
-use reth_provider::{ExecutorFactory, PrunableBlockExecutor, StateProvider};
+use reth_provider::{ExecutorFactory, StateProvider};
 use std::sync::Arc;
 
 /// Factory for creating [EVMProcessor].
@@ -40,16 +40,15 @@ impl<EvmConfig> ExecutorFactory for EvmProcessorFactory<EvmConfig>
 where
     EvmConfig: ConfigureEvmEnv + Send + Sync + Clone + 'static,
 {
-    fn with_state<'a, SP: StateProvider + 'a>(
-        &'a self,
-        sp: SP,
-    ) -> Box<dyn PrunableBlockExecutor + 'a> {
+    type Executor = for<'this> EVMProcessor<'this, EvmConfig>;
+
+    fn with_state<'a, SP: StateProvider + 'a>(&'a self, sp: SP) -> EVMProcessor<'a, EvmConfig> {
         let database_state = StateProviderDatabase::new(sp);
-        let mut evm = Box::new(EVMProcessor::new_with_db(
+        let mut evm = EVMProcessor::new_with_db(
             self.chain_spec.clone(),
             database_state,
             self.evm_config.clone(),
-        ));
+        );
         if let Some(ref stack) = self.stack {
             evm.set_stack(stack.clone());
         }

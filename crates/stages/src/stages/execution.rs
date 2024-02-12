@@ -18,8 +18,9 @@ use reth_primitives::{
     BlockNumber, Header, PruneModes, U256,
 };
 use reth_provider::{
-    BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, TransactionVariant,
+    BlockExecutor, BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, PrunableBlockExecutor,
+    TransactionVariant,
 };
 use std::{
     ops::RangeInclusive,
@@ -205,8 +206,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             write = ?db_write_duration,
             "Execution time"
         );
-
-        executor.stats().log_info();
 
         let done = stage_progress == max_block;
         Ok(ExecOutput {

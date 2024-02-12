@@ -10,11 +10,12 @@ use tracing::debug;
 ///
 /// It can be used to mock executor.
 pub trait ExecutorFactory: Send + Sync + 'static {
+    /// Type of block executor to return, this must be an associated type so the executor can be
+    /// consumed when it's done executing.
+    type Executor: PrunableBlockExecutor;
+
     /// Executor with [`StateProvider`]
-    fn with_state<'a, SP: StateProvider + 'a>(
-        &'a self,
-        _sp: SP,
-    ) -> Box<dyn PrunableBlockExecutor + 'a>;
+    fn with_state<'a, SP: StateProvider + 'a>(&'a self, _sp: SP) -> Self::Executor;
 }
 
 /// An executor capable of executing a block.
@@ -54,21 +55,14 @@ pub trait BlockExecutor {
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>;
 
     /// Return bundle state. This is output of executed blocks.
-    fn take_output_state(&mut self) -> BundleStateWithReceipts;
-}
-
-/// A [BlockExecutor] that can return metadata like current in-memory changes and internal
-/// statistics.
-pub trait BlockExecutorMetadata {
-    /// Internal statistics of execution.
-    fn stats(&self) -> BlockExecutorStats;
+    fn take_output_state(self) -> BundleStateWithReceipts;
 
     /// Returns the size hint of current in-memory changes.
     fn size_hint(&self) -> Option<usize>;
 }
 
 /// A [BlockExecutor] capable of in-memory pruning of the data that will be written to the database.
-pub trait PrunableBlockExecutor: BlockExecutor + BlockExecutorMetadata {
+pub trait PrunableBlockExecutor: BlockExecutor {
     /// Set tip - highest known block number.
     fn set_tip(&mut self, tip: BlockNumber);
 

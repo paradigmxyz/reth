@@ -18,8 +18,8 @@ use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
-    providers::BundleStateProvider, BundleStateDataProvider, BundleStateWithReceipts, Chain,
-    ExecutorFactory, StateRootProvider,
+    providers::BundleStateProvider, BlockExecutor, BundleStateDataProvider,
+    BundleStateWithReceipts, Chain, ExecutorFactory, StateRootProvider,
 };
 use reth_trie::updates::TrieUpdates;
 use std::{
