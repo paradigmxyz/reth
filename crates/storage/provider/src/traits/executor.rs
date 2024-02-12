@@ -55,7 +55,11 @@ pub trait BlockExecutor {
 
     /// Return bundle state. This is output of executed blocks.
     fn take_output_state(&mut self) -> BundleStateWithReceipts;
+}
 
+/// A [BlockExecutor] that can return metadata like current in-memory changes and internal
+/// statistics.
+pub trait BlockExecutorMetadata {
     /// Internal statistics of execution.
     fn stats(&self) -> BlockExecutorStats;
 

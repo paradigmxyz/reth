@@ -195,12 +195,4 @@ where
             self.first_block.unwrap_or_default(),
         )
     }
-
-    fn stats(&self) -> BlockExecutorStats {
-        self.stats.clone()
-    }
-
-    fn size_hint(&self) -> Option<usize> {
-        Some(self.evm.context.evm.db.bundle_size_hint())
-    }
 }

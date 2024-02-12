@@ -12,7 +12,8 @@ use reth_primitives::{
     TransactionSigned, Withdrawals, B256, MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_provider::{
-    BlockExecutor, BlockExecutorStats, ProviderError, PrunableBlockExecutor, StateProvider,
+    BlockExecutor, BlockExecutorMetadata, BlockExecutorStats, ProviderError, PrunableBlockExecutor,
+    StateProvider,
 };
 use revm::{
     db::{states::bundle_state::BundleRetention, EmptyDBTyped, StateDBBox},
@@ -507,7 +508,12 @@ where
             self.first_block.unwrap_or_default(),
         )
     }
+}
 
+impl<'a, EvmConfig> BlockExecutorMetadata for EVMProcessor<'a, EvmConfig>
+where
+    EvmConfig: ConfigureEvmEnv,
+{
     fn stats(&self) -> BlockExecutorStats {
         self.stats.clone()
     }
