@@ -60,10 +60,6 @@ pub enum TableType {
 ///     table::{DupSort, Table},
 ///     TableViewer, Tables,
 /// };
-/// use std::str::FromStr;
-///
-/// let headers = Tables::from_str("Headers").unwrap();
-/// let transactions = Tables::from_str("Transactions").unwrap();
 ///
 /// struct MyTableViewer;
 ///
@@ -83,8 +79,8 @@ pub enum TableType {
 ///
 /// let viewer = MyTableViewer {};
 ///
-/// let _ = headers.view(&viewer);
-/// let _ = transactions.view(&viewer);
+/// let _ = Tables::Headers.view(&viewer);
+/// let _ = Tables::Transactions.view(&viewer);
 /// ```
 pub trait TableViewer<R> {
     /// The error type returned by the viewer.
@@ -143,6 +139,11 @@ macro_rules! tables {
                 }
             )?
         )*
+
+        // Tables enum.
+        // NOTE: the ordering of the enum does not matter, but it is assumed that the discriminants
+        // start at 0 and increment by 1 for each variant (the default behavior).
+        // See for example `reth_db::implementation::mdbx::tx::Tx::db_handles`.
 
         /// A table in the database.
         #[derive(Clone, Copy, PartialEq, Eq, Hash)]

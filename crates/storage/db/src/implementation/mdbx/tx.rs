@@ -17,7 +17,6 @@ use reth_tracing::tracing::{trace, warn};
 use std::{
     backtrace::Backtrace,
     marker::PhantomData,
-    str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -74,7 +73,7 @@ impl<K: TransactionKind> Tx<K> {
     pub fn get_dbi<T: Table>(&self) -> Result<DBI, DatabaseError> {
         let mut handles = self.db_handles.write();
 
-        let table = Tables::from_str(T::NAME).expect("Requested table should be part of `Tables`.");
+        let table = T::TABLE;
 
         let dbi_handle = handles.get_mut(table as usize).expect("should exist");
         if dbi_handle.is_none() {
@@ -145,7 +144,7 @@ impl<K: TransactionKind> Tx<K> {
             metrics_handler.log_backtrace_on_long_read_transaction();
             metrics_handler
                 .env_metrics
-                .record_operation(T::NAME, operation, value_size, || f(&self.inner))
+                .record_operation(T::TABLE, operation, value_size, || f(&self.inner))
         } else {
             f(&self.inner)
         }
