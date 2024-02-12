@@ -2,6 +2,7 @@ use crate::{
     cache::{LruCache, LruMap},
     message::PeerRequest,
 };
+use derive_more::Constructor;
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{
@@ -348,6 +349,7 @@ impl TransactionFetcher {
             // no peers are idle or budget is depleted
             return
         };
+        // peer should always exist since `is_session_active` already checked
         let Some(peer) = peers.get(&peer_id) else { return };
         let conn_eth_version = peer.version;
 
@@ -865,7 +867,7 @@ impl Default for TransactionFetcher {
 }
 
 /// Metadata of a transaction hash that is yet to be fetched.
-#[derive(Debug)]
+#[derive(Debug, Constructor)]
 pub(super) struct TxFetchMetadata {
     /// The number of times a request attempt has been made for the hash.
     retries: u8,
@@ -885,15 +887,6 @@ impl TxFetchMetadata {
 
     pub fn tx_encoded_len(&self) -> Option<usize> {
         self.tx_encoded_length
-    }
-
-    #[cfg(test)]
-    pub fn new(
-        retries: u8,
-        fallback_peers: LruCache<PeerId>,
-        tx_encoded_length: Option<usize>,
-    ) -> Self {
-        Self { retries, fallback_peers, tx_encoded_length }
     }
 }
 
@@ -992,7 +985,10 @@ impl Default for TransactionFetcherInfo {
 mod test {
     use std::collections::HashSet;
 
+    use reth_eth_wire::EthVersion;
     use reth_primitives::B256;
+
+    use crate::transactions::tests::{default_cache, new_mock_session};
 
     use super::*;
 
@@ -1057,5 +1053,101 @@ mod test {
         }
 
         assert!(combo_match)
+    }
+
+    #[tokio::test]
+    async fn test_on_fetch_pending_hashes() {
+        reth_tracing::init_test_tracing();
+
+        let tx_fetcher = &mut TransactionFetcher::default();
+
+        // RIG TEST
+
+        // hashes that will be fetched because they are stored as pending fetch
+        let seen_hashes = [
+            B256::from_slice(&[1; 32]),
+            B256::from_slice(&[2; 32]),
+            B256::from_slice(&[3; 32]),
+            B256::from_slice(&[4; 32]),
+        ];
+        //
+        // txns 1-3 are small, all will fit in request. no metadata has been made available for
+        // hash 4, it has only been seen over eth66 conn, so average tx size will be assumed in
+        // filling request.
+        let seen_eth68_hashes_sizes = [120, 158, 116];
+
+        // peer that will fetch seen hashes because they are pending fetch
+        let peer_1 = PeerId::new([1; 64]);
+        // second peer, won't do anything in this test
+        let peer_2 = PeerId::new([2; 64]);
+
+        // add seen hashes to peers seen transactions
+        //
+        // get handle for peer_1's session to receive request for pending hashes
+        let (mut peer_1_data, mut peer_1_mock_session_rx) =
+            new_mock_session(peer_1, EthVersion::Eth66);
+        for hash in &seen_hashes {
+            peer_1_data.seen_transactions.seen_in_announcement(*hash);
+        }
+        let (mut peer_2_data, _) = new_mock_session(peer_2, EthVersion::Eth66);
+        for hash in &seen_hashes {
+            peer_2_data.seen_transactions.seen_in_announcement(*hash);
+        }
+        let mut peers = HashMap::new();
+        peers.insert(peer_1, peer_1_data);
+        peers.insert(peer_2, peer_2_data);
+
+        // insert peer_2 as fallback peer for seen_hashes
+        let mut backups = default_cache();
+        backups.insert(peer_2);
+        // insert seen_hashes into tx fetcher
+        for i in 0..3 {
+            let meta = TxFetchMetadata::new(0, backups.clone(), Some(seen_eth68_hashes_sizes[i]));
+            tx_fetcher.hashes_fetch_inflight_and_pending_fetch.insert(seen_hashes[i], meta);
+        }
+        let meta = TxFetchMetadata::new(0, backups.clone(), None);
+        tx_fetcher.hashes_fetch_inflight_and_pending_fetch.insert(seen_hashes[3], meta);
+        //
+        // insert pending hash without peer_1 as fallback peer, only with peer_2 as fallback peer
+        let hash_other = B256::from_slice(&[5; 32]);
+        tx_fetcher
+            .hashes_fetch_inflight_and_pending_fetch
+            .insert(hash_other, TxFetchMetadata::new(0, backups, None));
+        tx_fetcher.hashes_pending_fetch.insert(hash_other);
+
+        // add peer_1 as lru fallback peer for seen hashes
+        for hash in &seen_hashes {
+            tx_fetcher
+                .hashes_fetch_inflight_and_pending_fetch
+                .get(hash)
+                .unwrap()
+                .fallback_peers_mut()
+                .insert(peer_1);
+        }
+
+        // mark seen hashes as pending fetch
+        for i in 0..4 {
+            tx_fetcher.hashes_pending_fetch.insert(seen_hashes[i]);
+        }
+
+        // seen hashes and the random hash from peer_2 are pending fetch
+        assert_eq!(tx_fetcher.hashes_pending_fetch.len(), 5);
+
+        // TEST
+
+        tx_fetcher.on_fetch_pending_hashes(&peers, |_| true, || ());
+
+        // mock session of peer_1 receives request
+        let req = peer_1_mock_session_rx
+            .recv()
+            .await
+            .expect("peer session should receive request with buffered hashes");
+        let PeerRequest::GetPooledTransactions { request, .. } = req else { unreachable!() };
+        let GetPooledTransactions(requested_hashes) = request;
+
+        assert_eq!(
+            requested_hashes.into_iter().collect::<HashSet<_>>(),
+            seen_hashes.into_iter().collect::<HashSet<_>>()
+        )
     }
 }

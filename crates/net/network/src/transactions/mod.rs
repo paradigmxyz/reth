@@ -1496,7 +1496,7 @@ mod tests {
     }
 
     // Returns (peer, channel-to-send-get-pooled-tx-response-on).
-    fn new_mock_session(
+    pub(super) fn new_mock_session(
         peer_id: PeerId,
         version: EthVersion,
     ) -> (Peer, mpsc::Receiver<PeerRequest>) {
