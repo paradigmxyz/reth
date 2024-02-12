@@ -8,7 +8,7 @@ use crate::{
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
     Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
     HeaderSyncMode, HistoryWriter, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, StageCheckpointReader, StorageReader, TransactionVariant,
+    PruneCheckpointWriter, StageCheckpointReader, StateWriter, StorageReader, TransactionVariant,
     TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
@@ -2541,6 +2541,45 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         durations_recorder.record_relative(metrics::Action::UpdatePipelineStages);
 
         debug!(target: "providers::db", range = ?first_number..=last_block_number, actions = ?durations_recorder.actions, "Appended blocks");
+
+        Ok(())
+    }
+}
+
+impl<TX: DbTxMut + DbTx> StateWriter for DatabaseProvider<TX> {
+
+    /// Write bundle state to database.
+    ///
+    /// `is_value_known` should be set to true if bundle has some of it data
+    /// detached, This would make some original values not known.
+    fn write_state(&self, state: &BundleStateWithReceipts, is_value_known: OriginalValuesKnown) -> ProviderResult<()> {
+        let (plain_state, reverts) = self.bundle.into_plain_state_and_reverts(is_value_known);
+
+        StateReverts(reverts).write_to_db(tx, self.first_block)?;
+
+        // write receipts
+        let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+        let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
+
+        for (idx, receipts) in self.receipts.into_iter().enumerate() {
+            if !receipts.is_empty() {
+                let block_number = self.first_block + idx as u64;
+                let (_, body_indices) =
+                    bodies_cursor.seek_exact(block_number)?.unwrap_or_else(|| {
+                        let last_available = bodies_cursor.last().ok().flatten().map(|(number, _)| number);
+                        panic!("body indices for block {block_number} must exist. last available block number: {last_available:?}");
+                    });
+
+                let first_tx_index = body_indices.first_tx_num();
+                for (tx_idx, receipt) in receipts.into_iter().enumerate() {
+                    if let Some(receipt) = receipt {
+                        receipts_cursor.append(first_tx_index + tx_idx as u64, receipt)?;
+                    }
+                }
+            }
+        }
+
+        StateChanges(plain_state).write_to_db(tx)?;
 
         Ok(())
     }

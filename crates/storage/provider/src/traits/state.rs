@@ -7,6 +7,7 @@ use reth_primitives::{
     Bytecode, StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,
 };
 use reth_trie::updates::TrieUpdates;
+use revm::db::states::{StateChangeset, PlainStateReverts};
 
 /// Type alias of boxed [StateProvider].
 pub type StateProviderBox = Box<dyn StateProvider>;
@@ -215,7 +216,7 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
 /// * [`BundleStateWithReceipts`] contains all changed of accounts and storage of pending chain
 /// * block hashes of pending chain and canonical blocks.
 /// * canonical fork, the block on what pending chain was forked from.
-#[auto_impl[Box,&]]
+#[auto_impl[Box, &]]
 pub trait BundleStateDataProvider: Send + Sync {
     /// Return post state
     fn state(&self) -> &BundleStateWithReceipts;
@@ -227,8 +228,28 @@ pub trait BundleStateDataProvider: Send + Sync {
     fn canonical_fork(&self) -> BlockNumHash;
 }
 
+/// Allows for writing a [BundleStateWithReceipts] to the database.
+#[auto_impl[Box, &, Arc]]
+pub trait StateWriter: Send + Sync {
+    /// Writes the given [BundleStateWithReceipts] to the database.
+    fn write_state(&self, state: &BundleStateWithReceipts) -> ProviderResult<()>;
+
+    /// Writes the given [StateChangeset] to the database.
+    fn write_state_changes(&self, changeset: StateChangeset) -> ProviderResult<()>;
+
+    /// Writes the given [PlainStateReverts] to the database.
+    fn write_state_reverts(&self, reverts: PlainStateReverts) -> ProviderResult<()>;
+}
+
+/// Allows for writing a [HashedPostState] to the database.
+#[auto_impl[Box, &, Arc]]
+pub trait StateWriter: Send + Sync {
+    /// Writes the given [HashedPostState] to the database.
+    fn write_state(&self, state: &HashedPostState) -> ProviderResult<()>;
+}
+
 /// A type that can compute the state root of a given post state.
-#[auto_impl[Box,&, Arc]]
+#[auto_impl[Box, &, Arc]]
 pub trait StateRootProvider: Send + Sync {
     /// Returns the state root of the `BundleState` on top of the current state.
     ///
