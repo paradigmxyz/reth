@@ -17,18 +17,16 @@ use reth_downloaders::{
 };
 use reth_interfaces::{
     consensus::Consensus,
-    executor::BlockExecutionError,
     p2p::{bodies::client::BodiesClient, either::EitherDownloader, headers::client::HeadersClient},
     sync::NoopSyncStateUpdater,
     test_utils::{NoopFullBlockClient, TestConsensus},
 };
 use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, ChainSpec, PruneModes, Receipt, B256, U256};
+use reth_primitives::{BlockNumber, ChainSpec, B256};
 use reth_provider::{
-    providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor,
-    BundleStateWithReceipts, ExecutorFactory, HeaderSyncMode, ProviderFactory,
-    PrunableBlockExecutor,
+    providers::BlockchainProvider, test_utils::TestExecutorFactory, BundleStateWithReceipts,
+    ExecutorFactory, HeaderSyncMode, ProviderFactory, PrunableBlockExecutor,
 };
 use reth_prune::Pruner;
 use reth_revm::EvmProcessorFactory;
@@ -166,95 +164,6 @@ pub enum EitherExecutorFactory<A: ExecutorFactory, B: ExecutorFactory> {
     Left(A),
     /// The second factory variant
     Right(B),
-}
-
-// A type that represents one of two possible BlockExecutor types.
-#[derive(Debug)]
-pub enum EitherBlockExecutor<A, B> {
-    /// The first executor variant
-    Left(A),
-    /// The second executor variant
-    Right(B),
-}
-
-impl<A, B> BlockExecutor for EitherBlockExecutor<A, B>
-where
-    A: BlockExecutor,
-    B: BlockExecutor,
-{
-    fn execute(
-        &mut self,
-        block: &reth_primitives::BlockWithSenders,
-        total_difficulty: U256,
-    ) -> Result<(), BlockExecutionError> {
-        match self {
-            EitherBlockExecutor::Left(a) => a.execute(block, total_difficulty),
-            EitherBlockExecutor::Right(b) => b.execute(block, total_difficulty),
-        }
-    }
-
-    fn execute_and_verify_receipt(
-        &mut self,
-        block: &reth_primitives::BlockWithSenders,
-        total_difficulty: U256,
-    ) -> Result<(), BlockExecutionError> {
-        match self {
-            EitherBlockExecutor::Left(a) => a.execute_and_verify_receipt(block, total_difficulty),
-            EitherBlockExecutor::Right(b) => b.execute_and_verify_receipt(block, total_difficulty),
-        }
-    }
-
-    fn execute_transactions(
-        &mut self,
-        block: &reth_primitives::BlockWithSenders,
-        total_difficulty: U256,
-    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
-        match self {
-            EitherBlockExecutor::Left(a) => a.execute_transactions(block, total_difficulty),
-            EitherBlockExecutor::Right(b) => b.execute_transactions(block, total_difficulty),
-        }
-    }
-
-    fn take_output_state(&mut self) -> BundleStateWithReceipts {
-        match self {
-            EitherBlockExecutor::Left(a) => a.take_output_state(),
-            EitherBlockExecutor::Right(b) => b.take_output_state(),
-        }
-    }
-
-    fn stats(&self) -> reth_provider::BlockExecutorStats {
-        match self {
-            EitherBlockExecutor::Left(a) => a.stats(),
-            EitherBlockExecutor::Right(b) => b.stats(),
-        }
-    }
-
-    fn size_hint(&self) -> Option<usize> {
-        match self {
-            EitherBlockExecutor::Left(a) => a.size_hint(),
-            EitherBlockExecutor::Right(b) => b.size_hint(),
-        }
-    }
-}
-
-impl<A, B> PrunableBlockExecutor for EitherBlockExecutor<A, B>
-where
-    B: PrunableBlockExecutor,
-    A: PrunableBlockExecutor,
-{
-    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
-        match self {
-            EitherBlockExecutor::Left(a) => a.set_prune_modes(prune_modes),
-            EitherBlockExecutor::Right(b) => b.set_prune_modes(prune_modes),
-        }
-    }
-
-    fn set_tip(&mut self, tip: BlockNumber) {
-        match self {
-            EitherBlockExecutor::Left(a) => a.set_tip(tip),
-            EitherBlockExecutor::Right(b) => b.set_tip(tip),
-        }
-    }
 }
 
 impl<A, B> ExecutorFactory for EitherExecutorFactory<A, B>
