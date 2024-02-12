@@ -1126,8 +1126,8 @@ mod test {
         }
 
         // mark seen hashes as pending fetch
-        for i in 0..4 {
-            tx_fetcher.hashes_pending_fetch.insert(seen_hashes[i]);
+        for hash in &seen_hashes {
+            tx_fetcher.hashes_pending_fetch.insert(*hash);
         }
 
         // seen hashes and the random hash from peer_2 are pending fetch
