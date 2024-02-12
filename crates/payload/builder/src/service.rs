@@ -15,7 +15,6 @@ use std::{
     fmt,
     future::Future,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -171,6 +170,14 @@ where
     ) -> Result<PayloadId, PayloadBuilderError> {
         self.send_new_payload(attr).await?
     }
+
+    /// Sends a message to the service to subscribe to payload events.
+    /// Returns a receiver that will receive the payload events.
+    pub fn subscribe(&self) -> oneshot::Receiver<broadcast::Receiver<PayloadEvents<Engine>>> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(PayloadServiceCommand::Subscribe(tx));
+        rx
+    }
 }
 
 impl<Engine> Clone for PayloadBuilderHandle<Engine>
@@ -214,11 +221,13 @@ where
     payload_events: broadcast::Sender<PayloadEvents<Engine>>,
 }
 
+const PAYLOAD_EVENTS_BUFFER_SIZE: usize = 20;
+
 // === impl PayloadBuilderService ===
 
 impl<Gen, St, Engine> PayloadBuilderService<Gen, St, Engine>
 where
-    Engine: EngineTypes,
+    Engine: EngineTypes + 'static,
     Gen: PayloadJobGenerator,
     Gen::Job: PayloadJob<PayloadAttributes = Engine::PayloadBuilderAttributes>,
     <Gen::Job as PayloadJob>::BuiltPayload: Into<Engine::BuiltPayload>,
@@ -230,7 +239,7 @@ where
     /// additional logic when new state is committed. See also [PayloadJobGenerator::on_new_state].
     pub fn new(generator: Gen, chain_events: St) -> (Self, PayloadBuilderHandle<Engine>) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
-        let (payload_events, _) = broadcast::channel(16);
+        let (payload_events, _) = broadcast::channel(PAYLOAD_EVENTS_BUFFER_SIZE);
 
         let service = Self {
             generator,
@@ -256,11 +265,6 @@ where
         if let Some(Ok(ref attributes)) = attributes {
             self.payload_events.send(PayloadEvents::Attributes(attributes.clone())).ok();
         }
-    }
-
-    /// Notifies the service on new payload resolve event.
-    pub fn on_resolve(&self, fut: Arc<PayloadFuture<Engine::BuiltPayload>>) {
-        self.payload_events.send(PayloadEvents::Resolve(fut)).ok();
     }
 
     /// Returns a handle to the service.
@@ -306,9 +310,13 @@ where
         // Since the fees will not be known until the payload future is resolved / awaited, we wrap
         // the future in a new future that will update the metrics.
         let resolved_metrics = self.metrics.clone();
+        let payload_events = self.payload_events.clone();
+
         let fut = async move {
             let res = fut.await;
             if let Ok(ref payload) = res {
+                let _ = payload_events.send(PayloadEvents::BuiltPayload(payload.clone().into()));
+
                 resolved_metrics
                     .set_resolved_revenue(payload.block().number, f64::from(payload.fees()));
             }
@@ -347,7 +355,7 @@ where
 
 impl<Gen, St, Engine> Future for PayloadBuilderService<Gen, St, Engine>
 where
-    Engine: EngineTypes,
+    Engine: EngineTypes + 'static,
     Gen: PayloadJobGenerator + Unpin + 'static,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
@@ -472,15 +480,15 @@ pub enum PayloadServiceCommand<Engine: EngineTypes> {
 #[derive(Clone)]
 pub enum PayloadEvents<Engine: EngineTypes> {
     Attributes(Engine::PayloadBuilderAttributes),
-    Resolve(Arc<PayloadFuture<Engine::BuiltPayload>>),
+    BuiltPayload(Engine::BuiltPayload),
 }
 
 impl<Engine: EngineTypes> fmt::Debug for PayloadEvents<Engine> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PayloadEvents::Attributes(attrs) => f.debug_tuple("Attributes").field(attrs).finish(),
-            PayloadEvents::Resolve(_) => {
-                f.debug_tuple("Resolve").field(&"Arc<PayloadFuture>").finish()
+            PayloadEvents::BuiltPayload(payload) => {
+                f.debug_tuple("BuiltPayload").field(payload).finish()
             }
         }
     }
