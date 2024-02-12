@@ -108,7 +108,7 @@ macro_rules! tables {
         (TableType::Table, [$($table:ident),*]),
         (TableType::DupSort, [$($dupsort:ident),*])
     ]) => {
-        #[derive(Debug, PartialEq, Copy, Clone)]
+        #[derive(Debug, PartialEq, Copy, Clone, Hash, Eq)]
         /// Default tables that should be present inside database.
         pub enum Tables {
             $(

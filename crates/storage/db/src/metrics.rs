@@ -1,9 +1,56 @@
+use crate::{Tables, NUM_TABLES};
+use dashmap::DashMap;
 use metrics::{Gauge, Histogram};
 use reth_libmdbx::CommitLatency;
 use reth_metrics::{metrics::Counter, Metrics};
-use std::time::{Duration, Instant};
+use rustc_hash::FxHasher;
+use std::{
+    hash::BuildHasherDefault,
+    str::FromStr,
+    time::{Duration, Instant},
+};
+use strum::EnumCount;
 
 const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
+
+/// Caches metric handles for database environment to make sure handles are not re-created
+/// on every operation.
+#[derive(Debug)]
+pub struct DatabaseEnvMetrics {
+    /// Caches OperationMetrics handles for each table and operation tuple.
+    operations: DashMap<(Tables, Operation), OperationMetrics, BuildHasherDefault<FxHasher>>,
+}
+
+impl DatabaseEnvMetrics {
+    pub(crate) fn new() -> Self {
+        Self {
+            operations: DashMap::with_capacity_and_hasher(
+                NUM_TABLES * Operation::COUNT,
+                BuildHasherDefault::<FxHasher>::default(),
+            ),
+        }
+    }
+
+    /// Record a metric for database operation executed in `f`. Panics if the table name is unknown.
+    pub(crate) fn record_operation<R>(
+        &self,
+        table: &'static str,
+        operation: Operation,
+        value_size: Option<usize>,
+        f: impl FnOnce() -> R,
+    ) -> R {
+        let handle = self
+            .operations
+            .entry((Tables::from_str(table).expect("unknown table name"), operation))
+            .or_insert_with(|| {
+                OperationMetrics::new_with_labels(&[
+                    (Labels::Table.as_str(), table),
+                    (Labels::Operation.as_str(), operation.as_str()),
+                ])
+            });
+        handle.record(value_size, f)
+    }
+}
 
 /// Transaction mode for the database, either read-only or read-write.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
@@ -51,7 +98,7 @@ impl TransactionOutcome {
 }
 
 /// Types of operations conducted on the database: get, put, delete, and various cursor operations.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, EnumCount)]
 pub(crate) enum Operation {
     /// Database get operation.
     Get,
@@ -199,24 +246,15 @@ impl OperationMetrics {
     ///
     /// The duration it took to execute the closure is recorded only if the provided `value_size` is
     /// larger than [LARGE_VALUE_THRESHOLD_BYTES].
-    pub(crate) fn record<T>(
-        table: &'static str,
-        operation: Operation,
-        value_size: Option<usize>,
-        f: impl FnOnce() -> T,
-    ) -> T {
-        let metrics = Self::new_with_labels(&[
-            (Labels::Table.as_str(), table),
-            (Labels::Operation.as_str(), operation.as_str()),
-        ]);
-        metrics.calls_total.increment(1);
+    pub(crate) fn record<R>(&self, value_size: Option<usize>, f: impl FnOnce() -> R) -> R {
+        self.calls_total.increment(1);
 
         // Record duration only for large values to prevent the performance hit of clock syscall
         // on small operations
         if value_size.map_or(false, |size| size > LARGE_VALUE_THRESHOLD_BYTES) {
             let start = Instant::now();
             let result = f();
-            metrics.large_value_duration_seconds.record(start.elapsed());
+            self.large_value_duration_seconds.record(start.elapsed());
             result
         } else {
             f()

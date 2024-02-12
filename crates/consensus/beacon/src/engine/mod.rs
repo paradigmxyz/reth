@@ -83,7 +83,7 @@ pub(crate) mod sync;
 /// [consensus engine][`crate::engine::BeaconConsensusEngine`].
 pub mod hooks;
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(test)]
 pub mod test_utils;
 
 /// The maximum number of invalid headers that can be tracked by the engine.

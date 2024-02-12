@@ -97,10 +97,7 @@ impl BlockBuffer {
         parent_hash: &BlockHash,
     ) -> Vec<SealedBlockWithSenders> {
         // remove parent block if present
-        let mut removed = Vec::new();
-        if let Some(block) = self.remove_block(parent_hash) {
-            removed.push(block);
-        }
+        let mut removed = self.remove_block(parent_hash).into_iter().collect::<Vec<_>>();
 
         removed.extend(self.remove_children(vec![*parent_hash]));
         self.metrics.blocks.set(self.blocks.len() as f64);
@@ -157,14 +154,11 @@ impl BlockBuffer {
     /// The block might be missing from other collections, the method will only ensure that it has
     /// been removed.
     fn remove_block(&mut self, hash: &BlockHash) -> Option<SealedBlockWithSenders> {
-        if let Some(block) = self.blocks.remove(hash) {
-            self.remove_from_earliest_blocks(block.number, hash);
-            self.remove_from_parent(block.parent_hash, hash);
-            self.lru.pop(hash);
-            Some(block)
-        } else {
-            None
-        }
+        let block = self.blocks.remove(hash)?;
+        self.remove_from_earliest_blocks(block.number, hash);
+        self.remove_from_parent(block.parent_hash, hash);
+        self.lru.pop(hash);
+        Some(block)
     }
 
     /// Remove all children and their descendants for the given blocks and return them.
