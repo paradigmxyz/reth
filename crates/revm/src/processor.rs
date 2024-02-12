@@ -21,6 +21,7 @@ use revm::{
     primitives::{CfgEnvWithHandlerCfg, ResultAndState},
     Evm, State, StateBuilder,
 };
+use revm_inspectors::stack::Hook;
 use std::{sync::Arc, time::Instant};
 
 #[cfg(feature = "optimism")]
@@ -267,8 +268,22 @@ where
             fill_op_tx_env(self.evm.tx_mut(), transaction, sender, envelope_buf.into());
         }
 
-        let hash = transaction.recalculate_hash();
+        let mut hash = transaction.hash();
+        let mut hash_recalculated = false;
+        let needs_hash_for_inspection =
+            if let Hook::Transaction(_) = self.evm.context.external.hook { true } else { false };
+        // TODO?: Might add as a method to transaction
+        let is_hash_empty = |hash: &B256| hash.iter().all(|&byte| byte == 0);
+
+        // need statistic to understand which condition to put first but performance gain maybe
+        // negligible
+        if needs_hash_for_inspection && is_hash_empty(&hash) {
+            hash = transaction.recalculate_hash();
+            hash_recalculated = true; // Mark that the hash has been calculated
+        }
+
         let should_inspect = self.evm.context.external.should_inspect(self.evm.env(), hash);
+
         let out = if should_inspect {
             // push inspector handle register.
             self.evm.handler.append_handler_register_plain(inspector_handle_register);
@@ -282,10 +297,17 @@ where
             self.evm.handler.pop_handle_register();
             output
         } else {
-            // main execution.
+            // Main execution without needing the hash
             self.evm.transact()
         };
-        out.map_err(move |e| BlockValidationError::EVM { hash, error: e.into() }.into())
+
+        out.map_err(move |e| {
+            // Ensure hash is calculated for error log, if not already done
+            if !hash_recalculated {
+                hash = transaction.recalculate_hash();
+            }
+            BlockValidationError::EVM { hash, error: e.into() }.into()
+        })
     }
 
     /// Execute the block, verify gas usage and apply post-block state changes.
