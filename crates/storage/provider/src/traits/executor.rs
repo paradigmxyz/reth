@@ -6,6 +6,9 @@ use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt, U256};
 use std::time::Duration;
 use tracing::debug;
 
+/// re-export node-api BlockExecutor for now
+pub use reth_node_api::evm::BlockExecutor;
+
 /// Executor factory that would create the EVM with particular state provider.
 ///
 /// It can be used to mock executor.
@@ -15,52 +18,6 @@ pub trait ExecutorFactory: Send + Sync + 'static {
         &'a self,
         _sp: SP,
     ) -> Box<dyn PrunableBlockExecutor + 'a>;
-}
-
-/// An executor capable of executing a block.
-pub trait BlockExecutor {
-    /// Execute a block.
-    fn execute(
-        &mut self,
-        block: &BlockWithSenders,
-        total_difficulty: U256,
-    ) -> Result<(), BlockExecutionError>;
-
-    /// Executes the block and checks receipts.
-    ///
-    /// See [execute](BlockExecutor::execute) for more details.
-    fn execute_and_verify_receipt(
-        &mut self,
-        block: &BlockWithSenders,
-        total_difficulty: U256,
-    ) -> Result<(), BlockExecutionError>;
-
-    /// Runs the provided transactions and commits their state to the run-time database.
-    ///
-    /// The returned [BundleStateWithReceipts] can be used to persist the changes to disk, and
-    /// contains the changes made by each transaction.
-    ///
-    /// The changes in [BundleStateWithReceipts] have a transition ID associated with them: there is
-    /// one transition ID for each transaction (with the first executed tx having transition ID
-    /// 0, and so on).
-    ///
-    /// The second returned value represents the total gas used by this block of transactions.
-    ///
-    /// See [execute](BlockExecutor::execute) for more details.
-    fn execute_transactions(
-        &mut self,
-        block: &BlockWithSenders,
-        total_difficulty: U256,
-    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>;
-
-    /// Return bundle state. This is output of executed blocks.
-    fn take_output_state(&mut self) -> BundleStateWithReceipts;
-
-    /// Internal statistics of execution.
-    fn stats(&self) -> BlockExecutorStats;
-
-    /// Returns the size hint of current in-memory changes.
-    fn size_hint(&self) -> Option<usize>;
 }
 
 /// A [BlockExecutor] capable of in-memory pruning of the data that will be written to the database.

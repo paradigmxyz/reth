@@ -1,4 +1,4 @@
-use crate::{StateChanges, StateReverts};
+use revm::{StateChanges, StateReverts};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     tables,

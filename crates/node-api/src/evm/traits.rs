@@ -1,5 +1,4 @@
-use std::time::Duration;
-
+use crate::evm::BundleStateWithReceipts;
 use reth_primitives::{
     revm::env::fill_block_env, Address, BlockWithSenders, ChainSpec, Header, Receipt, Transaction,
     U256,
@@ -7,10 +6,8 @@ use reth_primitives::{
 use revm::Database;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId, TxEnv};
 
-use super::BundleStateWithReceipts;
-
-/// Trait for configuring the EVM.
-pub trait EvmConfig: ConfigureEvmEnv {
+/// Trait for configuring the EVM for executing full blocks.
+pub trait EvmConfig {
     /// The type that can executes transactions and full blocks.
     type Executor: BlockExecutor;
 
@@ -56,12 +53,15 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
 
 /// An executor capable of executing a block.
 pub trait BlockExecutor {
+    /// The error type returned by the executor.
+    type Error;
+
     /// Execute a block.
     fn execute(
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(), BlockExecutionError>;
+    ) -> Result<(), Self::Error>;
 
     /// Executes the block and checks receipts.
     ///
@@ -70,7 +70,7 @@ pub trait BlockExecutor {
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(), BlockExecutionError>;
+    ) -> Result<(), Self::Error>;
 
     /// Runs the provided transactions and commits their state to the run-time database.
     ///
@@ -88,46 +88,8 @@ pub trait BlockExecutor {
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>;
+    ) -> Result<(Vec<Receipt>, u64), Self::Error>;
 
     /// Return bundle state. This is output of executed blocks.
     fn take_output_state(&mut self) -> BundleStateWithReceipts;
-
-    /// Internal statistics of execution.
-    fn stats(&self) -> BlockExecutorStats;
-
-    /// Returns the size hint of current in-memory changes.
-    fn size_hint(&self) -> Option<usize>;
-}
-
-// TODO: extension trait for stats
-/// Block execution statistics. Contains duration of each step of block execution.
-#[derive(Clone, Debug, Default)]
-pub struct BlockExecutorStats {
-    /// Execution duration.
-    pub execution_duration: Duration,
-    /// Time needed to apply output of revm execution to revm cached state.
-    pub apply_state_duration: Duration,
-    /// Time needed to apply post execution state changes.
-    pub apply_post_execution_state_changes_duration: Duration,
-    /// Time needed to merge transitions and create reverts.
-    /// It this time transitions are applies to revm bundle state.
-    pub merge_transitions_duration: Duration,
-    /// Time needed to calculate receipt roots.
-    pub receipt_root_duration: Duration,
-}
-
-impl BlockExecutorStats {
-    /// Log duration to info level log.
-    pub fn log_info(&self) {
-        tracing::debug!(
-            target: "evm",
-            evm_transact = ?self.execution_duration,
-            apply_state = ?self.apply_state_duration,
-            apply_post_state = ?self.apply_post_execution_state_changes_duration,
-            merge_transitions = ?self.merge_transitions_duration,
-            receipt_root = ?self.receipt_root_duration,
-            "Execution time"
-        );
-    }
 }
