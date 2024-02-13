@@ -185,7 +185,7 @@ impl<Node: FullNodeComponents> Clone for RpcRegistry<Node> {
     }
 }
 
-/// Helper container to encapsulate [RethModuleRegistry],[TransportRpcModules] and [AuthRpcModule].
+/// Helper container to encapsulate [RethModuleRegistry], [TransportRpcModules] and [AuthRpcModule].
 ///
 /// This can be used to access installed modules, or create commonly used handlers like
 /// [reth_rpc::EthApi], and ultimately merge additional rpc handler into the configured transport
