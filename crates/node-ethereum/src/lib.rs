@@ -17,4 +17,5 @@ pub use engine::EthEngineTypes;
 pub mod evm;
 pub use evm::EthEvmConfig;
 
+#[cfg(not(feature = "optimism"))]
 pub mod node;
