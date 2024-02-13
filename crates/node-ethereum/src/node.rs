@@ -49,7 +49,7 @@ impl NodeTypes for EthereumNode {
     }
 }
 
-/// A basic ethereum pool.
+/// A basic ethereum transaction pool.
 ///
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
