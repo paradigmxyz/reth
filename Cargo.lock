@@ -6373,7 +6373,9 @@ name = "reth-node-builder"
 version = "0.1.0-alpha.17"
 dependencies = [
  "eyre",
+ "fdlimit",
  "reth-blockchain-tree",
+ "reth-config",
  "reth-db",
  "reth-interfaces",
  "reth-network",
@@ -6382,7 +6384,10 @@ dependencies = [
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
+ "reth-prune",
  "reth-revm",
+ "reth-snapshot",
+ "reth-stages",
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",

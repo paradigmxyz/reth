@@ -11,7 +11,8 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-# reth
+
+## reth
 reth-blockchain-tree.workspace = true
 reth-provider.workspace = true
 reth-revm.workspace = true
@@ -25,9 +26,19 @@ reth-transaction-pool.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
 reth-interfaces.workspace = true
+reth-snapshot.workspace = true
+reth-prune.workspace = true
+reth-stages.workspace = true
+reth-config.workspace = true
 
-# misc
+## async
+tokio = { workspace = true, features = [
+    "sync",
+    "macros",
+    "time",
+    "rt-multi-thread",
+] }
+
+## misc
 eyre.workspace = true
-
-[dev-dependencies]
-tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
+fdlimit = "0.3.0"

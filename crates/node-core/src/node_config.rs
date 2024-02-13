@@ -349,6 +349,11 @@ impl NodeConfig {
         }
     }
 
+    /// Returns pruning configuration.
+    pub fn prune_config(&self) -> eyre::Result<Option<PruneConfig>> {
+        self.pruning.prune_config(Arc::clone(&self.chain))
+    }
+
     /// Returns the max block that the node should run to, looking it up from the network if
     /// necessary
     pub async fn max_block<Provider, Client>(

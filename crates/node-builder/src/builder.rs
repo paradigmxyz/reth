@@ -21,14 +21,15 @@ use reth_node_core::{
 };
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
-    ChainSpec,
+    ChainSpec, DisplayHardforks,
 };
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFactory};
 use reth_revm::EvmProcessorFactory;
 use reth_tasks::TaskExecutor;
+use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::PoolConfig;
-use std::{marker::PhantomData, sync::Arc};
-use std::path::PathBuf;
+use std::{marker::PhantomData, path::PathBuf, sync::Arc};
+use tokio::sync::mpsc::unbounded_channel;
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -62,8 +63,6 @@ pub struct NodeBuilder<DB, State> {
     state: State,
     /// The configured database for the node.
     database: DB,
-    /// What consensus type to use
-    consensus_kind: NodeConsensus,
 }
 
 impl<DB, State> NodeBuilder<DB, State> {
@@ -71,30 +70,19 @@ impl<DB, State> NodeBuilder<DB, State> {
     pub fn config(&self) -> &NodeConfig {
         &self.config
     }
-
 }
 
 impl NodeBuilder<(), InitState> {
     /// Create a new [`NodeBuilder`].
     pub fn new(config: NodeConfig) -> Self {
-        Self {
-            config,
-            database: (),
-            state: InitState::default(),
-            consensus_kind: Default::default(),
-        }
+        Self { config, database: (), state: InitState::default() }
     }
 }
 
 impl<DB> NodeBuilder<DB, InitState> {
     /// Configures the additional external context, e.g. additional context captured via CLI args.
     pub fn with_database<D>(self, database: D) -> NodeBuilder<D, InitState> {
-        NodeBuilder {
-            config: self.config,
-            state: self.state,
-            database,
-            consensus_kind: Default::default(),
-        }
+        NodeBuilder { config: self.config, state: self.state, database }
     }
 }
 
@@ -112,7 +100,6 @@ where
             config: self.config,
             state: TypesState { types, adapter: FullNodeTypesAdapter::default() },
             database: self.database,
-            consensus_kind: self.consensus_kind,
         }
     }
 }
@@ -145,9 +132,8 @@ where
         NodeBuilder {
             config: self.config,
             database: self.database,
-            consensus_kind: self.consensus_kind,
             state: ComponentsState {
-                _maker: Default::default(),
+                types: self.state.types,
                 components_builder,
                 hooks: NodeHooks::new(),
                 rpc: RpcHooks::new(),
@@ -180,9 +166,8 @@ where
         Self {
             config: self.config,
             database: self.database,
-            consensus_kind: self.consensus_kind,
             state: ComponentsState {
-                _maker: Default::default(),
+                types: self.state.types,
                 components_builder: f(self.state.components_builder),
                 hooks: self.state.hooks,
                 rpc: self.state.rpc,
@@ -215,9 +200,8 @@ where
         NodeBuilder {
             config: self.config,
             database: self.database,
-            consensus_kind: self.consensus_kind,
             state: ComponentsState {
-                _maker: Default::default(),
+                types: self.state.types,
                 components_builder,
                 hooks: NodeHooks::new(),
                 rpc: RpcHooks::new(),
@@ -297,7 +281,8 @@ where
     /// Launches the node and returns a handle to it.
     pub async fn launch(
         self,
-        _executor: TaskExecutor,
+        executor: TaskExecutor,
+        data_dir: ChainPath<DataDirPath>,
     ) -> eyre::Result<
         NodeHandle<
             FullNodeComponentsAdapter<
@@ -306,23 +291,47 @@ where
             >,
         >,
     > {
-        let Self { config, state, database, consensus_kind } = self;
-        // TODO move data dir to NodeConfig
+        let Self { config, state, database } = self;
 
-        // TODO
-        // raise_fd_limit
-        // install prometheus
-        // load config
+        // Raise the fd limit of the process.
+        // Does not do anything on windows.
+        fdlimit::raise_fd_limit()?;
 
+        // get config
+        let reth_config = load_config()?;
+
+        let prometheus_handle = config.install_prometheus_recorder()?;
+        config.start_metrics_endpoint(prometheus_handle, database.clone()).await?;
+
+        info!(target: "reth::cli", "Database opened");
 
         let mut provider_factory =
             ProviderFactory::new(database.clone(), Arc::clone(&config.chain));
 
-        // 0. blockchain provider setup
-        // 1. create the `BuilderContext`
-        // 2. build the components
-        // 3. build/customize rpc
-        // 4. apply hooks
+        // configure snapshotter
+        let snapshotter = reth_snapshot::Snapshotter::new(
+            provider_factory.clone(),
+            data_dir.snapshots_path(),
+            config.chain.snapshot_block_interval,
+        )?;
+
+        provider_factory = provider_factory
+            .with_snapshots(data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver())?;
+
+        debug!(target: "reth::cli", chain=%config.chain.chain, genesis=?config.chain.genesis_hash(), "Initializing genesis");
+
+        // let genesis_hash = init_genesis(Arc::clone(&self.db), self.config.chain.clone())?;
+
+        info!(target: "reth::cli", "{}", DisplayHardforks::new(config.chain.hardforks()));
+
+        let consensus = config.consensus();
+
+        debug!(target: "reth::cli", "Spawning stages metrics listener task");
+        let (sync_metrics_tx, sync_metrics_rx) = unbounded_channel();
+        let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
+        executor.spawn_critical("stages metrics listener task", sync_metrics_listener);
+
+        let prune_config = config.prune_config()?.or(reth_config.prune.clone());
 
         todo!()
     }
@@ -333,6 +342,10 @@ where
     pub fn check_launch(self) -> Self {
         self
     }
+}
+
+fn load_config() -> eyre::Result<reth_config::Config> {
+    todo!()
 }
 
 /// Captures the necessary context for building the components of the node.
@@ -426,22 +439,12 @@ where
 /// node's launch lifecycle.
 #[derive(Debug)]
 pub struct ComponentsState<Types, Components, FullNode: FullNodeComponents> {
-    _maker: PhantomData<Types>,
+    /// The types of the node.
+    types: Types,
+    /// Type that builds the components of the node.
     components_builder: Components,
     /// Additional NodeHooks that are called at specific points in the node's launch lifecycle.
     hooks: NodeHooks<FullNode>,
+    /// Additional RPC hooks.
     rpc: RpcHooks<FullNode>,
-}
-
-/// What consensus type to use
-// TODO eventually this depend on the node's primitive types
-#[derive(Clone, Default)]
-pub enum NodeConsensus {
-    /// Beacon consensus
-    #[default]
-    Beacon,
-    /// Autoseal consensus
-    Autoseal,
-    /// Custom consensus implementation
-    Other(Arc<dyn Consensus>),
 }
