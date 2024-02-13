@@ -561,7 +561,7 @@ mod tests {
 
             // Ensure the entry is a file and not a directory
             if !file_path.is_file() || file_path.extension().unwrap_or_default() != "json" {
-                continue;
+                continue
             }
 
             // Read the contents of the JSON file into a string.
