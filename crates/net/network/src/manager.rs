@@ -678,6 +678,7 @@ where
                 DEFAULT_BUDGET_TRY_DRAIN_STREAM,
                 this.from_handle_rx.poll_next_unpin(cx),
                 |msg| this.on_handle_message(msg),
+                error!("Network channel closed");
             );
 
             let maybe_more_swarm_events = poll_nested_stream_with_yield_points!(

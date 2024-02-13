@@ -8,9 +8,7 @@ pub const BUDGET_POLL_ONCE: u32 = 1;
 /// register wake up, caller's scope is responsible for doing so.
 #[macro_export]
 macro_rules! poll_nested_stream_with_yield_points {
-    ($target:literal, $label:literal, $budget:ident, $poll_stream:expr, $on_ready_some:expr $(,)?) => {{
-        use tracing::log::error;
-
+    ($target:literal, $label:literal, $budget:ident, $poll_stream:expr, $on_ready_some:expr $(, $on_ready_none:expr;)? $(,)?) => {{
         let mut budget: u32 = $budget;
 
         loop {
@@ -25,7 +23,7 @@ macro_rules! poll_nested_stream_with_yield_points {
                     }
                 }
                 Poll::Ready(None) => {
-                    error!("{} closed.", $label);
+                    $($on_ready_none;)?
                     break false
                 }
                 Poll::Pending => break false,
