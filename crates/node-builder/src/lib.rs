@@ -25,3 +25,8 @@ pub mod provider;
 
 pub use builder::*;
 pub use handle::NodeHandle;
+
+/// Re-export the core configuration traits.
+pub use reth_node_core::cli::config::{
+    PayloadBuilderConfig, RethNetworkConfig, RethRpcConfig, RethTransactionPoolConfig,
+};

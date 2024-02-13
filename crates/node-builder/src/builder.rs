@@ -22,7 +22,7 @@ use reth_db::{
 };
 use reth_interfaces::{consensus::Consensus, p2p::either::EitherDownloader};
 use reth_node_core::{
-    cli::config::RethTransactionPoolConfig,
+    cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
     primitives::{kzg::KzgSettings, Head},
@@ -34,6 +34,7 @@ use reth_primitives::{
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFactory};
 use reth_prune::{PrunerBuilder, PrunerEvent};
 use reth_revm::EvmProcessorFactory;
+use reth_rpc_engine_api::EngineApi;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{PoolConfig, TransactionPool};
@@ -377,7 +378,7 @@ where
         let NodeComponents { transaction_pool, network, payload_builder } =
             components_builder.build_components(&ctx)?;
 
-        let BuilderContext { head, provider: blockchain_db, executor, data_dir, config } = ctx;
+        let BuilderContext { head, provider: blockchain_db, executor, data_dir, mut config } = ctx;
 
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
@@ -490,6 +491,24 @@ where
         )?;
         info!(target: "reth::cli", "Consensus engine initialized");
 
+        // TODO spawn events
+
+        let engine_api = EngineApi::new(
+            blockchain_db.clone(),
+            config.chain.clone(),
+            beacon_engine_handle,
+            payload_builder.into(),
+            Box::new(executor.clone()),
+        );
+        info!(target: "reth::cli", "Engine API handler initialized");
+
+        // extract the jwt secret from the args if possible
+        let default_jwt_path = data_dir.jwt_path();
+        let jwt_secret = config.rpc.auth_jwt_secret(default_jwt_path)?;
+
+        // adjust rpc port numbers based on instance number
+        config.adjust_instance_ports();
+
         // launch rpc
 
         // NodeHandle {
@@ -578,6 +597,11 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         } else {
             Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
         }
+    }
+
+    /// Returns the config for payload building.
+    pub fn payload_builder_config(&self) -> impl PayloadBuilderConfig {
+        self.config.builder.clone()
     }
 }
 

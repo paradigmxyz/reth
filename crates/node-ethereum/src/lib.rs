@@ -16,3 +16,5 @@ pub use engine::EthEngineTypes;
 /// [ConfigureEvmEnv](reth_node_api::ConfigureEvmEnv) trait.
 pub mod evm;
 pub use evm::EthEvmConfig;
+
+pub mod node;
