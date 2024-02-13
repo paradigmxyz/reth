@@ -15,4 +15,4 @@ To run Reth, Grafana or Prometheus with Docker Compose, refer to the [docker doc
 
 ### Import Grafana dashboards
 
-Running Grafana in Docker makes it possible to import existing dashboards, refer to [docker docs on how to run only grafana in docker](/book/installation/docker.md#using-docker-compose#run-only-grafana-in-docker).
+Running Grafana in Docker makes it possible to import existing dashboards, refer to [docs on how to run only Grafana in Docker](/book/installation/docker.md#using-docker-compose#run-only-grafana-in-docker).
