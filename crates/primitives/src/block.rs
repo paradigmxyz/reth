@@ -17,7 +17,6 @@ pub use reth_rpc_types::{
 #[derive(
     Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
-#[derive_arbitrary(rlp, 25)]
 #[rlp(trailing)]
 pub struct Block {
     /// Block header.
@@ -28,6 +27,53 @@ pub struct Block {
     pub ommers: Vec<Header>,
     /// Block withdrawals.
     pub withdrawals: Option<Withdrawals>,
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for Block {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::{collection::vec, prelude::*};
+
+        let header_strategy = Header::arbitrary_with(Default::default());
+
+        let body_strategy = vec(any::<TransactionSigned>(), 0..25);
+
+        let ommers_strategy = vec(Header::arbitrary_with(Default::default()), 0..=2);
+
+        let withdrawals_strategy = any::<Option<Withdrawals>>();
+
+        (header_strategy, body_strategy, ommers_strategy, withdrawals_strategy)
+            .prop_map(|(header, body, ommers, withdrawals)| Self {
+                header,
+                body,
+                ommers,
+                withdrawals,
+            })
+            .boxed()
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for Block {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let header: Header = Header::arbitrary(u)?;
+
+        let body: Vec<TransactionSigned> = u.arbitrary()?;
+
+        let ommers_count: usize = u.int_in_range(0..=2)?;
+        let mut ommers = Vec::with_capacity(ommers_count);
+        for _ in 0..ommers_count {
+            let ommer: Header = Header::arbitrary(u)?;
+            ommers.push(ommer);
+        }
+
+        let withdrawals: Option<Withdrawals> = u.arbitrary()?;
+
+        Ok(Block { header, body, ommers, withdrawals })
+    }
 }
 
 impl Block {
@@ -206,7 +252,6 @@ impl std::ops::DerefMut for BlockWithSenders {
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive_arbitrary(rlp, 10)]
 #[derive(
     Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
@@ -220,6 +265,50 @@ pub struct SealedBlock {
     pub ommers: Vec<Header>,
     /// Block withdrawals.
     pub withdrawals: Option<Withdrawals>,
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for SealedBlock {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::{collection::vec, prelude::*};
+
+        let header_strategy = SealedHeader::arbitrary_with(Default::default());
+        let body_strategy = vec(any::<TransactionSigned>(), 0..10);
+        let ommers_strategy = vec(any::<Header>(), 0..2);
+        let withdrawals_strategy = any::<Option<Withdrawals>>();
+
+        (header_strategy, body_strategy, ommers_strategy, withdrawals_strategy)
+            .prop_map(|(header, body, ommers, withdrawals)| Self {
+                header,
+                body,
+                ommers,
+                withdrawals,
+            })
+            .boxed()
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for SealedBlock {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let header: SealedHeader = SealedHeader::arbitrary(u)?;
+
+        let body: Vec<TransactionSigned> = u.arbitrary()?;
+
+        let ommers_count: usize = u.int_in_range(0..=2)?;
+        let mut ommers = Vec::with_capacity(ommers_count);
+        for _ in 0..ommers_count {
+            let ommer: Header = Header::arbitrary(u)?;
+            ommers.push(ommer);
+        }
+
+        let withdrawals: Option<Withdrawals> = u.arbitrary()?;
+
+        Ok(SealedBlock { header, body, ommers, withdrawals })
+    }
 }
 
 impl SealedBlock {
@@ -449,34 +538,60 @@ impl std::ops::DerefMut for SealedBlockWithSenders {
 /// A response to `GetBlockBodies`, containing bodies if any bodies were found.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive_arbitrary(rlp, 10)]
 #[derive(
     Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
 #[rlp(trailing)]
 pub struct BlockBody {
     /// Transactions in the block
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=100)"
-        )
-    )]
     pub transactions: Vec<TransactionSigned>,
     /// Uncle headers for the given block
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<Header>(), 0..=2)"
-        )
-    )]
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Withdrawals>())")
-    )]
     pub withdrawals: Option<Withdrawals>,
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let transactions: Vec<TransactionSigned> = u.arbitrary()?;
+
+        let ommers_count: usize = u.int_in_range(0..=2)?;
+        let mut ommers = Vec::with_capacity(ommers_count);
+        for _ in 0..ommers_count {
+            let sealed_header: SealedHeader = u.arbitrary()?;
+            ommers.push(sealed_header.header().clone());
+        }
+
+        let withdrawals: Option<Withdrawals> = u.arbitrary()?;
+
+        Ok(BlockBody { transactions, ommers, withdrawals })
+    }
+}
+
+use proptest::prelude::BoxedStrategy;
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for BlockBody {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::{collection::vec, prelude::*};
+
+        let headers_strategy = vec(SealedHeader::arbitrary_with(Default::default()), 0..=2)
+            .prop_map(|sealed_headers| {
+                sealed_headers.into_iter().map(|sh| sh.header().clone()).collect::<Vec<_>>()
+            });
+
+        (vec(any::<TransactionSigned>(), 0..=100), headers_strategy, any::<Option<Withdrawals>>())
+            .prop_map(|(transactions, ommers, withdrawals)| Self {
+                transactions,
+                ommers,
+                withdrawals,
+            })
+            .boxed()
+    }
 }
 
 impl BlockBody {
