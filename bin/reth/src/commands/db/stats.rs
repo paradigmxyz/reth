@@ -6,7 +6,7 @@ use human_bytes::human_bytes;
 use itertools::Itertools;
 use reth_db::{database::Database, mdbx, snapshot::iter_snapshots, DatabaseEnv, Tables};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_primitives::snapshot::find_fixed_range;
+use reth_primitives::snapshot::{find_fixed_range, SegmentRangeInclusive};
 use reth_provider::providers::SnapshotProvider;
 use std::fs::File;
 
@@ -16,6 +16,9 @@ pub struct Command {
     /// Show only the total size for snapshot files.
     #[arg(long, default_value_t = false)]
     only_total_size: bool,
+    /// Show only the summary per snapshot segment.
+    #[arg(long, default_value_t = false)]
+    summary: bool,
 }
 
 impl Command {
@@ -25,7 +28,7 @@ impl Command {
         data_dir: ChainPath<DataDirPath>,
         tool: &DbTool<DatabaseEnv>,
     ) -> eyre::Result<()> {
-        let snapshots_stats_table = self.snapshots_stats_table(data_dir, self.only_total_size)?;
+        let snapshots_stats_table = self.snapshots_stats_table(data_dir)?;
         println!("{snapshots_stats_table}");
 
         println!("\n");
@@ -116,15 +119,11 @@ impl Command {
         Ok(table)
     }
 
-    fn snapshots_stats_table(
-        &self,
-        data_dir: ChainPath<DataDirPath>,
-        only_total_size: bool,
-    ) -> eyre::Result<ComfyTable> {
+    fn snapshots_stats_table(&self, data_dir: ChainPath<DataDirPath>) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
 
-        if !only_total_size {
+        if !self.only_total_size {
             table.set_header([
                 "Segment",
                 "Block Range",
@@ -149,7 +148,16 @@ impl Command {
         let mut total_config_size = 0;
 
         for (segment, ranges) in snapshots.into_iter().sorted_by_key(|(segment, _)| *segment) {
-            for (block_range, tx_range) in ranges {
+            let (
+                mut segment_columns,
+                mut segment_rows,
+                mut segment_data_size,
+                mut segment_index_size,
+                mut segment_offsets_size,
+                mut segment_config_size,
+            ) = (0, 0, 0, 0, 0, 0);
+
+            for (block_range, tx_range) in &ranges {
                 let fixed_block_range = find_fixed_range(block_range.start());
                 let jar_provider = snapshot_provider
                     .get_segment_provider(segment, || Some(fixed_block_range), None)?
@@ -174,28 +182,74 @@ impl Command {
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
 
+                if self.summary {
+                    if segment_columns > 0 {
+                        assert_eq!(segment_columns, columns);
+                    } else {
+                        segment_columns = columns;
+                    }
+                    segment_rows += rows;
+                    segment_data_size += data_size;
+                    segment_index_size += index_size;
+                    segment_offsets_size += offsets_size;
+                    segment_config_size += config_size;
+                } else {
+                    let mut row = Row::new();
+                    row.add_cell(Cell::new(segment))
+                        .add_cell(Cell::new(format!("{block_range}")))
+                        .add_cell(Cell::new(
+                            tx_range.map_or("N/A".to_string(), |tx_range| format!("{tx_range}")),
+                        ))
+                        .add_cell(Cell::new(format!("{columns} x {rows}")));
+                    if !self.only_total_size {
+                        row.add_cell(Cell::new(human_bytes(data_size as f64)))
+                            .add_cell(Cell::new(human_bytes(index_size as f64)))
+                            .add_cell(Cell::new(human_bytes(offsets_size as f64)))
+                            .add_cell(Cell::new(human_bytes(config_size as f64)));
+                    }
+                    row.add_cell(Cell::new(human_bytes(
+                        (data_size + index_size + offsets_size + config_size) as f64,
+                    )));
+                    table.add_row(row);
+                }
+
+                total_data_size += data_size;
+                total_index_size += index_size;
+                total_offsets_size += offsets_size;
+                total_config_size += config_size;
+            }
+
+            if self.summary {
+                let first_ranges = ranges.first().expect("not empty list of ranges");
+                let last_ranges = ranges.last().expect("not empty list of ranges");
+
+                let block_range =
+                    SegmentRangeInclusive::new(first_ranges.0.start(), last_ranges.0.end());
+                let tx_range = first_ranges
+                    .1
+                    .zip(last_ranges.1)
+                    .map(|(first, last)| SegmentRangeInclusive::new(first.start(), last.end()));
+
                 let mut row = Row::new();
                 row.add_cell(Cell::new(segment))
                     .add_cell(Cell::new(format!("{block_range}")))
                     .add_cell(Cell::new(
                         tx_range.map_or("N/A".to_string(), |tx_range| format!("{tx_range}")),
                     ))
-                    .add_cell(Cell::new(format!("{columns} x {rows}")));
-                if !only_total_size {
-                    row.add_cell(Cell::new(human_bytes(data_size as f64)))
-                        .add_cell(Cell::new(human_bytes(index_size as f64)))
-                        .add_cell(Cell::new(human_bytes(offsets_size as f64)))
-                        .add_cell(Cell::new(human_bytes(config_size as f64)));
+                    .add_cell(Cell::new(format!("{segment_columns} x {segment_rows}")));
+                if !self.only_total_size {
+                    row.add_cell(Cell::new(human_bytes(segment_data_size as f64)))
+                        .add_cell(Cell::new(human_bytes(segment_index_size as f64)))
+                        .add_cell(Cell::new(human_bytes(segment_offsets_size as f64)))
+                        .add_cell(Cell::new(human_bytes(segment_config_size as f64)));
                 }
                 row.add_cell(Cell::new(human_bytes(
-                    (data_size + index_size + offsets_size + config_size) as f64,
+                    (segment_data_size +
+                        segment_index_size +
+                        segment_offsets_size +
+                        segment_config_size) as f64,
                 )));
                 table.add_row(row);
-
-                total_data_size += data_size;
-                total_index_size += index_size;
-                total_offsets_size += offsets_size;
-                total_config_size += config_size;
             }
         }
 
@@ -211,7 +265,7 @@ impl Command {
             .add_cell(Cell::new(""))
             .add_cell(Cell::new(""))
             .add_cell(Cell::new(""));
-        if !only_total_size {
+        if !self.only_total_size {
             row.add_cell(Cell::new(human_bytes(total_data_size as f64)))
                 .add_cell(Cell::new(human_bytes(total_index_size as f64)))
                 .add_cell(Cell::new(human_bytes(total_offsets_size as f64)))
