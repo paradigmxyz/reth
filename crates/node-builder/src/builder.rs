@@ -2,6 +2,15 @@
 
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
+use crate::{
+    components::{
+        FullNodeComponents, FullNodeComponentsAdapter, NodeComponents, NodeComponentsBuilder,
+    },
+    hooks::NodeHooks,
+    node::{FullNode, FullNodeTypes, FullNodeTypesAdapter, NodeTypes},
+    rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
+    NodeHandle,
+};
 use eyre::Context;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
@@ -9,7 +18,6 @@ use reth_beacon_consensus::{
     BeaconConsensusEngine,
 };
 use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree};
-use reth_config::Config;
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -39,16 +47,6 @@ use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{PoolConfig, TransactionPool};
 use std::sync::Arc;
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
-
-use crate::{
-    components::{
-        FullNodeComponents, FullNodeComponentsAdapter, NodeComponents, NodeComponentsBuilder,
-    },
-    hooks::NodeHooks,
-    node::{FullNode, FullNodeTypes, FullNodeTypesAdapter, NodeTypes},
-    rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
-    NodeHandle,
-};
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -91,10 +89,10 @@ impl<DB, State> NodeBuilder<DB, State> {
     }
 
     /// Loads the reth config with the given datadir root
-    fn load_config(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<Config> {
+    fn load_config(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<reth_config::Config> {
         let config_path = self.config.config.clone().unwrap_or_else(|| data_dir.config_path());
 
-        let mut config = confy::load_path::<Config>(&config_path)
+        let mut config = confy::load_path::<reth_config::Config>(&config_path)
             .wrap_err_with(|| format!("Could not load config file {:?}", config_path))?;
 
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
