@@ -1,6 +1,6 @@
 //! Support for handling events emitted by node components.
 
-use crate::{commands::node::cl_events::ConsensusLayerHealthEvent, primitives::B256};
+use crate::events::cl::ConsensusLayerHealthEvent;
 use futures::Stream;
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, ForkchoiceStatus};
 use reth_db::{database::Database, database_metrics::DatabaseMetadata};
@@ -10,7 +10,7 @@ use reth_network_api::PeersInfo;
 use reth_primitives::{
     constants,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    BlockNumber,
+    BlockNumber, B256,
 };
 use reth_prune::PrunerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
