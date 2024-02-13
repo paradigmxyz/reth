@@ -72,7 +72,11 @@ where
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
             .with_additional_tasks(1)
-            .build_with_tasks(ctx.provider().clone(), ctx.executor().clone(), blob_store.clone());
+            .build_with_tasks(
+                ctx.provider().clone(),
+                ctx.task_executor().clone(),
+                blob_store.clone(),
+            );
 
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, ctx.pool_config());
@@ -87,7 +91,7 @@ where
             let transactions_backup_config =
                 reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
 
-            ctx.executor().spawn_critical_with_graceful_shutdown_signal(
+            ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
                 "local transactions backup task",
                 |shutdown| {
                     reth_transaction_pool::maintain::backup_local_transactions_task(
@@ -99,13 +103,13 @@ where
             );
 
             // spawn the maintenance task
-            ctx.executor().spawn_critical(
+            ctx.task_executor().spawn_critical(
                 "txpool maintenance task",
                 reth_transaction_pool::maintain::maintain_transaction_pool_future(
                     client,
                     pool,
                     chain_events,
-                    ctx.executor().clone(),
+                    ctx.task_executor().clone(),
                     Default::default(),
                 ),
             );
@@ -144,7 +148,7 @@ where
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             ctx.provider().clone(),
             pool,
-            ctx.executor().clone(),
+            ctx.task_executor().clone(),
             payload_job_config,
             ctx.chain_spec(),
             payload_builder,
@@ -152,7 +156,7 @@ where
         let (payload_service, payload_builder) =
             PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
 
-        ctx.executor().spawn_critical("payload builder service", Box::pin(payload_service));
+        ctx.task_executor().spawn_critical("payload builder service", Box::pin(payload_service));
 
         Ok(payload_builder)
     }

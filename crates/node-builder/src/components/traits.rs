@@ -28,7 +28,7 @@ pub trait FullNodeComponents: FullNodeTypes + 'static {
     fn payload_builder(&self) -> &PayloadBuilderHandle<Self::Engine>;
 
     /// Returns the task executor.
-    fn executor(&self) -> &TaskExecutor;
+    fn task_executor(&self) -> &TaskExecutor;
 }
 
 /// A type that encapsulates all the components of the node.
@@ -88,7 +88,7 @@ where
         &self.payload_builder
     }
 
-    fn executor(&self) -> &TaskExecutor {
+    fn task_executor(&self) -> &TaskExecutor {
         &self.executor
     }
 }

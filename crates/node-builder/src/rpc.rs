@@ -248,7 +248,7 @@ where
         .with_pool(node.pool().clone())
         .with_network(node.network().clone())
         .with_events(node.provider().clone())
-        .with_executor(node.executor().clone())
+        .with_executor(node.task_executor().clone())
         .with_evm_config(node.evm_config())
         .build_with_auth_server(module_config, engine_api);
 

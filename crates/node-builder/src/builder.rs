@@ -672,7 +672,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Returns the executor of the node.
     ///
     /// This can be used to execute async tasks or functions during the setup.
-    pub fn executor(&self) -> &TaskExecutor {
+    pub fn task_executor(&self) -> &TaskExecutor {
         &self.executor
     }
 
