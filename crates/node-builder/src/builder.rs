@@ -10,7 +10,7 @@ use crate::{
     NodeHandle,
 };
 use eyre::Context;
-use futures::{future::Either, stream};
+use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook},
     BeaconConsensusEngine,
@@ -21,10 +21,11 @@ use reth_db::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
 use reth_interfaces::{consensus::Consensus, p2p::either::EitherDownloader};
-use reth_network::{NetworkBuilder, NetworkHandle};
+use reth_network::{NetworkBuilder, NetworkEvents, NetworkHandle};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath},
+    events::cl::ConsensusLayerHealthEvents,
     init::init_genesis,
     node_config::NodeConfig,
     primitives::{kzg::KzgSettings, Head},
@@ -505,7 +506,29 @@ where
         )?;
         info!(target: "reth::cli", "Consensus engine initialized");
 
-        // TODO spawn events
+        let events = stream_select!(
+            network.event_listener().map(Into::into),
+            beacon_engine_handle.event_listener().map(Into::into),
+            pipeline_events.map(Into::into),
+            if config.debug.tip.is_none() {
+                Either::Left(
+                    ConsensusLayerHealthEvents::new(Box::new(blockchain_db.clone()))
+                        .map(Into::into),
+                )
+            } else {
+                Either::Right(stream::empty())
+            },
+            pruner_events.map(Into::into)
+        );
+        executor.spawn_critical(
+            "events task",
+            reth_node_core::events::node::handle_events(
+                Some(network.clone()),
+                Some(head.number),
+                events,
+                database.clone(),
+            ),
+        );
 
         let engine_api = EngineApi::new(
             blockchain_db.clone(),
