@@ -6,9 +6,7 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs,
     },
-    commands::node::events,
     dirs::{DataDirPath, MaybePlatformPath},
-    init::init_genesis,
     runner::CliContext,
     utils::get_single_header,
 };
@@ -27,6 +25,7 @@ use reth_interfaces::{
 };
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
+use reth_node_core::init::init_genesis;
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, B256};
 use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
@@ -253,7 +252,12 @@ impl Command {
         );
         ctx.task_executor.spawn_critical(
             "events task",
-            events::handle_events(Some(network.clone()), latest_block_number, events, db.clone()),
+            reth_node_core::events::node::handle_events(
+                Some(network.clone()),
+                latest_block_number,
+                events,
+                db.clone(),
+            ),
         );
 
         let mut current_max_block = latest_block_number.unwrap_or_default();

@@ -168,13 +168,8 @@ reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 
 # revm
-revm = { version = "5", features = [
-    "std",
-    "secp256k1",
-], default-features = false }
-revm-primitives = { version = "2", features = [
-    "std",
-], default-features = false }
+revm = { version = "5.0", features = ["std", "secp256k1"], default-features = false }
+revm-primitives = { version = "2.0", features = ["std"], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "b63ec73" }
 
 # eth
@@ -189,6 +184,7 @@ alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "a445
 alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "a4453d4" }
 alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "a4453d4" }
 alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "a4453d4" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "a4453d4" }
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }

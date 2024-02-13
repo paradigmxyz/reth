@@ -1,9 +1,62 @@
+use crate::Tables;
 use metrics::{Gauge, Histogram};
 use reth_libmdbx::CommitLatency;
 use reth_metrics::{metrics::Counter, Metrics};
-use std::time::{Duration, Instant};
+use rustc_hash::FxHasher;
+use std::{
+    collections::HashMap,
+    hash::BuildHasherDefault,
+    time::{Duration, Instant},
+};
+use strum::{EnumCount, EnumIter, IntoEnumIterator};
 
 const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
+
+/// Caches metric handles for database environment to make sure handles are not re-created
+/// on every operation.
+#[derive(Debug)]
+pub struct DatabaseEnvMetrics {
+    /// Caches OperationMetrics handles for each table and operation tuple.
+    operations: HashMap<(Tables, Operation), OperationMetrics, BuildHasherDefault<FxHasher>>,
+}
+
+impl DatabaseEnvMetrics {
+    pub(crate) fn new() -> Self {
+        // Pre-populate the map with all possible table and operation combinations
+        // to avoid runtime locks on the map when recording metrics.
+        let mut operations = HashMap::with_capacity_and_hasher(
+            Tables::COUNT * Operation::COUNT,
+            BuildHasherDefault::<FxHasher>::default(),
+        );
+        for table in Tables::ALL {
+            for operation in Operation::iter() {
+                operations.insert(
+                    (*table, operation),
+                    OperationMetrics::new_with_labels(&[
+                        (Labels::Table.as_str(), table.name()),
+                        (Labels::Operation.as_str(), operation.as_str()),
+                    ]),
+                );
+            }
+        }
+        Self { operations }
+    }
+
+    /// Record a metric for database operation executed in `f`.
+    /// Panics if a metric recorder is not found for the given table and operation.
+    pub(crate) fn record_operation<R>(
+        &self,
+        table: Tables,
+        operation: Operation,
+        value_size: Option<usize>,
+        f: impl FnOnce() -> R,
+    ) -> R {
+        self.operations
+            .get(&(table, operation))
+            .expect("operation & table metric handle not found")
+            .record(value_size, f)
+    }
+}
 
 /// Transaction mode for the database, either read-only or read-write.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
@@ -51,7 +104,7 @@ impl TransactionOutcome {
 }
 
 /// Types of operations conducted on the database: get, put, delete, and various cursor operations.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, EnumCount, EnumIter)]
 pub(crate) enum Operation {
     /// Database get operation.
     Get,
@@ -199,24 +252,15 @@ impl OperationMetrics {
     ///
     /// The duration it took to execute the closure is recorded only if the provided `value_size` is
     /// larger than [LARGE_VALUE_THRESHOLD_BYTES].
-    pub(crate) fn record<T>(
-        table: &'static str,
-        operation: Operation,
-        value_size: Option<usize>,
-        f: impl FnOnce() -> T,
-    ) -> T {
-        let metrics = Self::new_with_labels(&[
-            (Labels::Table.as_str(), table),
-            (Labels::Operation.as_str(), operation.as_str()),
-        ]);
-        metrics.calls_total.increment(1);
+    pub(crate) fn record<R>(&self, value_size: Option<usize>, f: impl FnOnce() -> R) -> R {
+        self.calls_total.increment(1);
 
         // Record duration only for large values to prevent the performance hit of clock syscall
         // on small operations
         if value_size.map_or(false, |size| size > LARGE_VALUE_THRESHOLD_BYTES) {
             let start = Instant::now();
             let result = f();
-            metrics.large_value_duration_seconds.record(start.elapsed());
+            self.large_value_duration_seconds.record(start.elapsed());
             result
         } else {
             f()
