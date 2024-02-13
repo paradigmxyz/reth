@@ -16,7 +16,7 @@ pub use error::AttributesValidationError;
 pub mod payload;
 pub use payload::PayloadOrAttributes;
 
-/// The types that are used by the engine.
+/// The types that are used by the engine API.
 pub trait EngineTypes:
     serde::de::DeserializeOwned + fmt::Debug + Unpin + Send + Sync + Clone
 {
