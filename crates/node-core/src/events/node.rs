@@ -455,7 +455,7 @@ impl Eta {
     /// Update the ETA given the checkpoint, if possible.
     fn update(&mut self, checkpoint: StageCheckpoint) {
         let Some(current) = checkpoint.entities() else {
-            return;
+            return
         };
 
         if let Some(last_checkpoint_time) = &self.last_checkpoint_time {

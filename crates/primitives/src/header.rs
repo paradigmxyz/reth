@@ -753,7 +753,7 @@ impl SealedHeader {
                 return Err(HeaderValidationError::GasLimitInvalidIncrease {
                     parent_gas_limit,
                     child_gas_limit: self.gas_limit,
-                });
+                })
             }
         }
         // Check for a decrease in gas limit beyond the allowed threshold.
@@ -761,13 +761,13 @@ impl SealedHeader {
             return Err(HeaderValidationError::GasLimitInvalidDecrease {
                 parent_gas_limit,
                 child_gas_limit: self.gas_limit,
-            });
+            })
         }
         // Check if the self gas limit is below the minimum required limit.
         else if self.gas_limit < MINIMUM_GAS_LIMIT {
             return Err(HeaderValidationError::GasLimitInvalidMinimum {
                 child_gas_limit: self.gas_limit,
-            });
+            })
         }
 
         Ok(())

@@ -88,7 +88,6 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
         chain_spec: &ChainSpec,
         parent: &Header,
     ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
-        // TODO: should be different once revm has configurable CfgEnvWithHandlerCfg
         // configure evm env based on parent block
         let mut cfg = CfgEnv::default();
         cfg.chain_id = chain_spec.chain().id();
@@ -130,7 +129,18 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
             blob_excess_gas_and_price,
         };
 
-        (CfgEnvWithHandlerCfg::new(cfg, spec_id), block_env)
+        #[cfg(feature = "optimism")]
+        {
+            let cfg_with_handler_cfg = CfgEnvWithHandlerCfg {
+                cfg_env: cfg,
+                handler_cfg: HandlerCfg { spec_id, is_optimism: chain_spec.is_optimism() },
+            };
+        }
+
+        #[cfg(not(feature = "optimism"))]
+        let cfg_with_handler_cfg = CfgEnvWithHandlerCfg::new(cfg, spec_id);
+
+        (cfg_with_handler_cfg, block_env)
     }
 }
 
