@@ -1,9 +1,6 @@
 //! Contains types and methods that can be used to launch a node based off of a [NodeConfig].
 
-use crate::commands::{
-    debug_cmd::engine_api_store::EngineApiStore,
-    node::{cl_events::ConsensusLayerHealthEvents, events},
-};
+use crate::commands::debug_cmd::engine_api_store::EngineApiStore;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, stream, stream_select, StreamExt};
@@ -29,6 +26,7 @@ use reth_node_core::{
         ext::{DefaultRethNodeCommandConfig, RethCliExt, RethNodeCommandConfig},
     },
     dirs::{ChainPath, DataDirPath},
+    events::cl::ConsensusLayerHealthEvents,
     init::init_genesis,
     version::SHORT_VERSION,
 };
@@ -378,7 +376,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         );
         executor.spawn_critical(
             "events task",
-            events::handle_events(
+            reth_node_core::events::node::handle_events(
                 Some(network.clone()),
                 Some(head.number),
                 events,
