@@ -669,16 +669,16 @@ where
         removed
     }
 
-    /// Removes all transactions that are present in the pool.
-    pub(crate) fn retain_unknown<A: HandleAnnouncement>(&self, announcement: &mut A)
+    /// Removes and returns all transactions that are present in the pool.
+    pub(crate) fn retain_unknown<A: HandleAnnouncement>(&self, announcement: &mut A) -> Option<A>
     where
         A: HandleAnnouncement,
     {
         if announcement.is_empty() {
-            return
+            return None
         }
         let pool = self.get_pool_data();
-        announcement.retain_by_hash(|tx| !pool.contains(&tx))
+        Some(announcement.retain_by_hash(|tx| !pool.contains(tx)))
     }
 
     /// Returns the transaction by hash.

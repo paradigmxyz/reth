@@ -53,7 +53,7 @@ pub struct SessionManagerMetrics {
     pub(crate) total_dial_successes: Counter,
 }
 
-/// Metrics for the TransactionsManager
+/// Metrics for the [`TransactionsManager`](crate::transactions::TransactionsManager).
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct TransactionsManagerMetrics {
@@ -67,10 +67,26 @@ pub struct TransactionsManagerMetrics {
     pub(crate) messages_with_already_seen_transactions: Counter,
     /// Number of transactions about to be imported into the pool.
     pub(crate) pending_pool_imports: Gauge,
-    /// Currently active outgoing GetPooledTransactions requests.
+    /// Number of inflight requests at which the
+    /// [`TransactionPool`](reth_transaction_pool::TransactionPool) is considered to be at
+    /// capacity. Note, this is not a limit to the number of inflight requests, but a health
+    /// measure.
+    pub(crate) capacity_pending_pool_imports: Counter,
+    /// Currently active outgoing [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions)
+    /// requests.
     pub(crate) inflight_transaction_requests: Gauge,
+    /// Number of inflight requests at which the
+    /// [`TransactionFetcher`](crate::transactions::TransactionFetcher) is considered to be at
+    /// capacity. Note, this is not a limit to the number of inflight requests, but a health
+    /// measure.
+    pub(crate) capacity_inflight_requests: Counter,
+    /// Hashes in currently active outgoing
+    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) requests.
+    pub(crate) hashes_inflight_transaction_requests: Gauge,
     /// How often we failed to send a request to the peer because the channel was full.
     pub(crate) egress_peer_channel_full: Counter,
+    /// Total number of hashes pending fetch.
+    pub(crate) hashes_pending_fetch: Gauge,
 }
 
 /// Metrics for Disconnection types
