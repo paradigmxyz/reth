@@ -12,10 +12,10 @@ use tracing::debug;
 pub trait ExecutorFactory: Send + Sync + 'static {
     /// Type of block executor to return, this must be an associated type so the executor can be
     /// consumed when it's done executing.
-    type Executor<'a>: PrunableBlockExecutor;
+    type Executor: PrunableBlockExecutor;
 
     /// Executor with [`StateProvider`]
-    fn with_state<'a, SP: StateProvider + 'a>(&'a self, _sp: SP) -> Self::Executor<'a>;
+    fn with_state<SP: StateProvider + 'static>(&self, _sp: SP) -> Self::Executor;
 }
 
 /// An executor capable of executing a block.

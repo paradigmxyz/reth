@@ -70,9 +70,9 @@ impl TestExecutorFactory {
 }
 
 impl ExecutorFactory for TestExecutorFactory {
-    type Executor<'a> = TestExecutor;
+    type Executor = TestExecutor;
 
-    fn with_state<'a, SP: StateProvider + 'a>(&'a self, _sp: SP) -> Self::Executor<'a> {
+    fn with_state<SP: StateProvider>(&self, _sp: SP) -> Self::Executor {
         let exec_res = self.exec_results.lock().pop();
         TestExecutor(exec_res)
     }
