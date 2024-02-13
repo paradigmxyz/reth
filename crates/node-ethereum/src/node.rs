@@ -5,15 +5,15 @@
 use crate::{EthEngineTypes, EthEvmConfig};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_network::NetworkHandle;
-use reth_node_api::EngineTypes;
+
 use reth_node_builder::{
     components::{ComponentsBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder},
     node::{FullNodeTypes, NodeTypes},
     BuilderContext, PayloadBuilderConfig,
 };
-use reth_payload_builder::{EthBuiltPayload, PayloadBuilderHandle, PayloadBuilderService};
+use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
-use reth_rpc_types::engine::PayloadAttributes;
+
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
@@ -162,7 +162,7 @@ where
 /// A basic ethereum payload service.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EthereumNetwork {
-    // TODO add options for network args
+    // TODO add closure to modify network
 }
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for EthereumNetwork
@@ -171,8 +171,9 @@ where
     Pool: TransactionPool + Unpin + 'static,
 {
     fn build_network(self, ctx: &BuilderContext<Node>, pool: Pool) -> eyre::Result<NetworkHandle> {
-        let mut network = ctx.network_builder_blocking()?;
+        let network = ctx.network_builder_blocking()?;
+        let handle = ctx.start_network(network, pool);
 
-        todo!()
+        Ok(handle)
     }
 }
