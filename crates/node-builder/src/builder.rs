@@ -372,13 +372,27 @@ where
         let blockchain_db =
             BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
 
-        let ctx = BuilderContext { head, provider: blockchain_db, executor, data_dir, config };
+        let ctx = BuilderContext {
+            head,
+            provider: blockchain_db,
+            executor,
+            data_dir,
+            config,
+            reth_config,
+        };
 
         debug!(target: "reth::cli", "creating components");
         let NodeComponents { transaction_pool, network, payload_builder } =
             components_builder.build_components(&ctx)?;
 
-        let BuilderContext { head, provider: blockchain_db, executor, data_dir, mut config } = ctx;
+        let BuilderContext {
+            head,
+            provider: blockchain_db,
+            executor,
+            data_dir,
+            mut config,
+            reth_config,
+        } = ctx;
 
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
@@ -546,6 +560,8 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     data_dir: ChainPath<DataDirPath>,
     /// The config of the node
     config: NodeConfig,
+    /// loaded config
+    reth_config: reth_config::Config,
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
