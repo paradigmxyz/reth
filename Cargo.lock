@@ -5946,7 +5946,6 @@ dependencies = [
  "assert_matches",
  "bytes",
  "criterion",
- "dashmap",
  "derive_more",
  "eyre",
  "iai",

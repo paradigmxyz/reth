@@ -1,14 +1,14 @@
 use crate::Tables;
-use dashmap::DashMap;
 use metrics::{Gauge, Histogram};
 use reth_libmdbx::CommitLatency;
 use reth_metrics::{metrics::Counter, Metrics};
 use rustc_hash::FxHasher;
 use std::{
+    collections::HashMap,
     hash::BuildHasherDefault,
     time::{Duration, Instant},
 };
-use strum::EnumCount;
+use strum::{EnumCount, EnumIter, IntoEnumIterator};
 
 const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 
@@ -17,20 +17,33 @@ const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 #[derive(Debug)]
 pub struct DatabaseEnvMetrics {
     /// Caches OperationMetrics handles for each table and operation tuple.
-    operations: DashMap<(Tables, Operation), OperationMetrics, BuildHasherDefault<FxHasher>>,
+    operations: HashMap<(Tables, Operation), OperationMetrics, BuildHasherDefault<FxHasher>>,
 }
 
 impl DatabaseEnvMetrics {
     pub(crate) fn new() -> Self {
-        Self {
-            operations: DashMap::with_capacity_and_hasher(
-                Tables::COUNT * Operation::COUNT,
-                BuildHasherDefault::<FxHasher>::default(),
-            ),
+        // Pre-populate the map with all possible table and operation combinations
+        // to avoid runtime locks on the map when recording metrics.
+        let mut operations = HashMap::with_capacity_and_hasher(
+            Tables::COUNT * Operation::COUNT,
+            BuildHasherDefault::<FxHasher>::default(),
+        );
+        for table in Tables::ALL {
+            for operation in Operation::iter() {
+                operations.insert(
+                    (*table, operation),
+                    OperationMetrics::new_with_labels(&[
+                        (Labels::Table.as_str(), table.name()),
+                        (Labels::Operation.as_str(), operation.as_str()),
+                    ]),
+                );
+            }
         }
+        Self { operations }
     }
 
-    /// Record a metric for database operation executed in `f`. Panics if the table name is unknown.
+    /// Record a metric for database operation executed in `f`.
+    /// Panics if a metric recorder is not found for the given table and operation.
     pub(crate) fn record_operation<R>(
         &self,
         table: Tables,
@@ -38,13 +51,10 @@ impl DatabaseEnvMetrics {
         value_size: Option<usize>,
         f: impl FnOnce() -> R,
     ) -> R {
-        let handle = self.operations.entry((table, operation)).or_insert_with(|| {
-            OperationMetrics::new_with_labels(&[
-                (Labels::Table.as_str(), table.name()),
-                (Labels::Operation.as_str(), operation.as_str()),
-            ])
-        });
-        handle.record(value_size, f)
+        self.operations
+            .get(&(table, operation))
+            .expect("operation & table metric handle not found")
+            .record(value_size, f)
     }
 }
 
@@ -94,7 +104,7 @@ impl TransactionOutcome {
 }
 
 /// Types of operations conducted on the database: get, put, delete, and various cursor operations.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, EnumCount)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, EnumCount, EnumIter)]
 pub(crate) enum Operation {
     /// Database get operation.
     Get,
