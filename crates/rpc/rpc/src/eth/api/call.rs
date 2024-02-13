@@ -423,7 +423,7 @@ where
         let access_list = inspector.into_access_list();
 
         let cfg_with_spec_id =
-            CfgEnvWithHandlerCfg { cfg_env: env.cfg.clone(), handler_cfg: env.handler_cfg.clone() };
+            CfgEnvWithHandlerCfg { cfg_env: env.cfg.clone(), handler_cfg: env.handler_cfg };
 
         // calculate the gas used using the access list
         request.access_list = Some(access_list.clone());
