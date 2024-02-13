@@ -5,7 +5,6 @@ use futures::{
     future::{Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
-
 use metrics::atomics::AtomicU64;
 use reth_primitives::{
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
@@ -59,16 +58,11 @@ impl FeeHistoryCache {
     /// This function is used to populate the cache with missing blocks, which can happen if the
     /// node switched to stage sync node.
     async fn missing_consecutive_blocks(&self) -> VecDeque<u64> {
-        let mut missing_blocks = VecDeque::new();
-        let lower_bound = self.lower_bound();
-        let upper_bound = self.upper_bound();
         let entries = self.inner.entries.read().await;
-        for block_number in (lower_bound..upper_bound).rev() {
-            if !entries.contains_key(&block_number) {
-                missing_blocks.push_back(block_number);
-            }
-        }
-        missing_blocks
+        (self.lower_bound()..self.upper_bound())
+            .rev()
+            .filter(|&block_number| !entries.contains_key(&block_number))
+            .collect()
     }
 
     /// Insert block data into the cache.

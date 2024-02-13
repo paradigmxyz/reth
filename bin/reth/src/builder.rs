@@ -199,7 +199,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             self.config.build_and_spawn_txpool(&blockchain_db, head, &executor, &self.data_dir)?;
 
         // build network
-        let (network_client, mut network_builder) = self
+        let mut network_builder = self
             .config
             .build_network(
                 &config,
@@ -227,7 +227,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             network_builder,
             &executor,
             transaction_pool.clone(),
-            network_client,
+            provider_factory.clone(),
             &self.data_dir,
         );
 
