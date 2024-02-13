@@ -2,7 +2,6 @@
 
 use crate::{
     commands::node::events::{handle_events, NodeEvent},
-    init::init_genesis,
     version::SHORT_VERSION,
 };
 use clap::Parser;
@@ -16,6 +15,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::consensus::Consensus;
+use reth_node_core::init::init_genesis;
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageId, ChainSpec, B256};
 use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};

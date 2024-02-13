@@ -1,11 +1,8 @@
 //! Contains types and methods that can be used to launch a node based off of a [NodeConfig].
 
-use crate::{
-    commands::{
-        debug_cmd::engine_api_store::EngineApiStore,
-        node::{cl_events::ConsensusLayerHealthEvents, events},
-    },
-    init::init_genesis,
+use crate::commands::{
+    debug_cmd::engine_api_store::EngineApiStore,
+    node::{cl_events::ConsensusLayerHealthEvents, events},
 };
 use eyre::Context;
 use fdlimit::raise_fd_limit;
@@ -32,6 +29,7 @@ use reth_node_core::{
         ext::{DefaultRethNodeCommandConfig, RethCliExt, RethNodeCommandConfig},
     },
     dirs::{ChainPath, DataDirPath},
+    init::init_genesis,
     version::SHORT_VERSION,
 };
 #[cfg(not(feature = "optimism"))]

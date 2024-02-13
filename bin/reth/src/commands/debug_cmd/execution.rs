@@ -8,7 +8,6 @@ use crate::{
     },
     commands::node::events,
     dirs::{DataDirPath, MaybePlatformPath},
-    init::init_genesis,
     runner::CliContext,
     utils::get_single_header,
 };
@@ -27,6 +26,7 @@ use reth_interfaces::{
 };
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
+use reth_node_core::init::init_genesis;
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, B256};
 use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
