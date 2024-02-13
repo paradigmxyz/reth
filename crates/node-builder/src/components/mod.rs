@@ -5,7 +5,7 @@
 //!  - The network implementation.
 //!  - The payload builder service.
 //!
-//! Components depend on a fully type configured node: [FullNodeTypes].
+//! Components depend on a fully type configured node: [FullNodeTypes](crate::node::FullNodeTypes).
 
 use crate::node::FullNodeTypes;
 pub use builder::*;
