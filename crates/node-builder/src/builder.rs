@@ -24,6 +24,7 @@ use reth_interfaces::{consensus::Consensus, p2p::either::EitherDownloader};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath},
+    init::init_genesis,
     node_config::NodeConfig,
     primitives::{kzg::KzgSettings, Head},
 };
@@ -334,9 +335,7 @@ where
 
         debug!(target: "reth::cli", chain=%config.chain.chain, genesis=?config.chain.genesis_hash(), "Initializing genesis");
 
-        // TODO
-        // let genesis_hash = init_genesis(Arc::clone(&self.db), self.config.chain.clone())?;
-        let genesis_hash = Default::default();
+        let genesis_hash = init_genesis(database.clone(), config.chain.clone())?;
 
         info!(target: "reth::cli", "{}", DisplayHardforks::new(config.chain.hardforks()));
 
