@@ -238,7 +238,7 @@ where
     /// Sets the hook that is run once the node has started.
     pub fn on_node_started<F>(mut self, hook: F) -> Self
     where
-        F: FnOnce(
+        F: Fn(
                 FullNode<
                     FullNodeComponentsAdapter<
                         FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
@@ -255,7 +255,7 @@ where
     /// Sets the hook that is run once the rpc server is started.
     pub fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
-        F: FnOnce(
+        F: Fn(
                 RpcContext<
                     '_,
                     FullNodeComponentsAdapter<
@@ -274,7 +274,7 @@ where
     /// Sets the hook that is run to configure the rpc modules.
     pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
     where
-        F: FnOnce(
+        F: Fn(
                 RpcContext<
                     '_,
                     FullNodeComponentsAdapter<
@@ -385,27 +385,26 @@ where
             components_builder.build_components(&ctx)?;
 
         let BuilderContext {
-            head,
             provider: blockchain_db,
             executor,
             data_dir,
             mut config,
             reth_config,
+            ..
         } = ctx;
 
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
-        // let node_adapter =  FullNodeComponentsAdapter {
-        //     evm_config: evm_config.clone(),
-        //     pool: transaction_pool,
-        //     network,
-        //     provider: ctx.provider().clone(),
-        //     payload_builder,
-        //     tasks: ctx.executor().clone(),
-        // };
-
-        // TODO solve hooks
-        // on_component_initialized.on_event(node_adapter)?;
+        let node_adapter = FullNodeComponentsAdapter {
+            evm_config: evm_config.clone(),
+            pool: transaction_pool.clone(),
+            network: network.clone(),
+            provider: blockchain_db.clone(),
+            payload_builder: payload_builder.clone(),
+            tasks: executor.clone(),
+        };
+        debug!(target: "reth::cli", "calling on_component_initialized hook");
+        on_component_initialized.on_event(node_adapter)?;
 
         // create pipeline
         let network_client = network.fetch_client().await?;

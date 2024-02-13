@@ -85,7 +85,7 @@ impl<Node: FullNodeComponents> fmt::Debug for RpcHooks<Node> {
 pub trait OnRpcStarted<Node: FullNodeComponents> {
     /// The hook that is called once the rpc server is started.
     fn on_rpc_started(
-        self,
+        &self,
         ctx: RpcContext<'_, Node>,
         handles: RethRpcServerHandles,
     ) -> eyre::Result<()>;
@@ -93,11 +93,11 @@ pub trait OnRpcStarted<Node: FullNodeComponents> {
 
 impl<Node, F> OnRpcStarted<Node> for F
 where
-    F: FnOnce(RpcContext<'_, Node>, RethRpcServerHandles) -> eyre::Result<()>,
+    F: Fn(RpcContext<'_, Node>, RethRpcServerHandles) -> eyre::Result<()>,
     Node: FullNodeComponents,
 {
     fn on_rpc_started(
-        self,
+        &self,
         ctx: RpcContext<'_, Node>,
         handles: RethRpcServerHandles,
     ) -> eyre::Result<()> {
@@ -106,7 +106,7 @@ where
 }
 
 impl<Node: FullNodeComponents> OnRpcStarted<Node> for () {
-    fn on_rpc_started(self, _: RpcContext<'_, Node>, _: RethRpcServerHandles) -> eyre::Result<()> {
+    fn on_rpc_started(&self, _: RpcContext<'_, Node>, _: RethRpcServerHandles) -> eyre::Result<()> {
         Ok(())
     }
 }
@@ -114,21 +114,21 @@ impl<Node: FullNodeComponents> OnRpcStarted<Node> for () {
 /// Event hook that is called when the rpc server is started.
 pub trait ExtendRpcModules<Node: FullNodeComponents> {
     /// The hook that is called once the rpc server is started.
-    fn extend_rpc_modules(self, ctx: RpcContext<'_, Node>) -> eyre::Result<()>;
+    fn extend_rpc_modules(&self, ctx: RpcContext<'_, Node>) -> eyre::Result<()>;
 }
 
 impl<Node, F> ExtendRpcModules<Node> for F
 where
-    F: FnOnce(RpcContext<'_, Node>) -> eyre::Result<()>,
+    F: Fn(RpcContext<'_, Node>) -> eyre::Result<()>,
     Node: FullNodeComponents,
 {
-    fn extend_rpc_modules(self, ctx: RpcContext<'_, Node>) -> eyre::Result<()> {
+    fn extend_rpc_modules(&self, ctx: RpcContext<'_, Node>) -> eyre::Result<()> {
         self(ctx)
     }
 }
 
 impl<Node: FullNodeComponents> ExtendRpcModules<Node> for () {
-    fn extend_rpc_modules(self, _: RpcContext<'_, Node>) -> eyre::Result<()> {
+    fn extend_rpc_modules(&self, _: RpcContext<'_, Node>) -> eyre::Result<()> {
         Ok(())
     }
 }

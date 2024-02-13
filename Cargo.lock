@@ -6473,6 +6473,7 @@ version = "0.1.0-alpha.17"
 dependencies = [
  "eyre",
  "reth-basic-payload-builder",
+ "reth-db",
  "reth-ethereum-payload-builder",
  "reth-network",
  "reth-node-api",

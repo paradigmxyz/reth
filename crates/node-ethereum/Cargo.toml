@@ -27,3 +27,6 @@ reth-network.workspace = true
 # misc
 eyre.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+reth-db.workspace = true

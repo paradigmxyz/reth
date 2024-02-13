@@ -30,3 +30,5 @@ pub use handle::NodeHandle;
 pub use reth_node_core::cli::config::{
     PayloadBuilderConfig, RethNetworkConfig, RethRpcConfig, RethTransactionPoolConfig,
 };
+
+pub use reth_node_core::node_config::NodeConfig;
