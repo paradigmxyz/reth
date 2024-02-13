@@ -84,17 +84,12 @@ impl<DB> NodeState<DB> {
                     target,
                 };
 
-                let stage_progress = OptionalField(
-                    checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
-                );
-
                 if let Some(stage_eta) = current_stage.eta.fmt_for_stage(stage_id) {
                     info!(
                         pipeline_stages = %pipeline_stages_progress,
                         stage = %stage_id,
                         checkpoint = %checkpoint.block_number,
                         target = %OptionalField(target),
-                        %stage_progress,
                         %stage_eta,
                         "Executing stage",
                     );
@@ -104,7 +99,6 @@ impl<DB> NodeState<DB> {
                         stage = %stage_id,
                         checkpoint = %checkpoint.block_number,
                         target = %OptionalField(target),
-                        %stage_progress,
                         "Executing stage",
                     );
                 }
@@ -479,13 +473,20 @@ impl Eta {
         self.last_checkpoint_time = Some(Instant::now());
     }
 
+    /// Returns `true` if the ETA is available, i.e. at least one checkpoint has been reported.
+    fn is_available(&self) -> bool {
+        self.eta.zip(self.last_checkpoint_time).is_some()
+    }
+
     /// Format ETA for a given stage.
     ///
     /// NOTE: Currently ETA is enabled only for the stages that have predictable progress.
     /// It's not the case for network-dependent ([StageId::Headers] and [StageId::Bodies]) and
     /// [StageId::Execution] stages.
     fn fmt_for_stage(&self, stage: StageId) -> Option<String> {
-        if matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution) {
+        if !self.is_available() ||
+            matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution)
+        {
             None
         } else {
             Some(self.to_string())
@@ -503,7 +504,7 @@ impl Display for Eta {
                     f,
                     "{}",
                     humantime::format_duration(Duration::from_secs(remaining.as_secs()))
-                );
+                )
             }
         }
 
