@@ -128,7 +128,7 @@ impl Command {
                 "Segment",
                 "Block Range",
                 "Transaction Range",
-                "Shape",
+                "Shape (columns x rows)",
                 "Data Size",
                 "Index Size",
                 "Offsets Size",
@@ -136,7 +136,13 @@ impl Command {
                 "Total Size",
             ]);
         } else {
-            table.set_header(["Segment", "Block Range", "Transaction Range", "Shape", "Size"]);
+            table.set_header([
+                "Segment",
+                "Block Range",
+                "Transaction Range",
+                "Shape (columns x rows)",
+                "Size",
+            ]);
         }
 
         let snapshots = iter_snapshots(data_dir.snapshots_path())?;
