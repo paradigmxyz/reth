@@ -128,7 +128,7 @@ Refer to the [CLI docs](../cli/cli.md) to interact with Reth once inside the Ret
 
 ## Run only Grafana in Docker
 
-This allows importing existing Grafana dashboards, without running reth in Docker.
+This allows importing existing Grafana dashboards, without running Reth in Docker.
 
 ```bash
 docker compose -f etc/docker-compose.yml up -d --no-deps grafana
