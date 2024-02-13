@@ -4,7 +4,6 @@ use reth_db::test_utils::create_test_rw_db;
 use reth_node_builder::{components::FullNodeComponents, NodeBuilder, NodeConfig};
 use reth_node_ethereum::node::EthereumNode;
 
-#[cfg(not(feature = "optimism"))]
 #[test]
 fn test_basic_setup() {
     // parse CLI -> config
