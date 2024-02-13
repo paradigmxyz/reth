@@ -1,6 +1,15 @@
+use crate::{components::FullNodeComponents, rpc::RethRpcServerHandles};
 use reth_db::database::Database;
+use reth_network::NetworkHandle;
 use reth_node_api::{evm::EvmConfig, primitives::NodePrimitives, EngineTypes};
-use reth_node_core::cli::components::FullProvider;
+use reth_node_core::{
+    cli::components::FullProvider,
+    dirs::{ChainPath, DataDirPath},
+    node_config::NodeConfig,
+};
+use reth_payload_builder::PayloadBuilderHandle;
+use reth_tasks::TaskExecutor;
+use reth_transaction_pool::TransactionPool;
 use std::marker::PhantomData;
 
 /// The type that configures stateless node types, the node's primitive types.
@@ -66,7 +75,17 @@ where
 
 /// The launched node with all components including RPC handlers.
 #[derive(Debug)]
-pub struct FullNode<Node> {
-    node: Node,
-    // TODO add rpc handlers
+pub struct FullNode<Node: FullNodeComponents> {
+    pub(crate) evm_config: Node::Evm,
+    pub(crate) pool: Node::Pool,
+    pub(crate) network: NetworkHandle,
+    pub(crate) provider: Node::Provider,
+    pub(crate) payload_builder: PayloadBuilderHandle<Node::Engine>,
+    pub(crate) tasks: TaskExecutor,
+    pub(crate) handles: RethRpcServerHandles,
+    // TODO add rpc registry
+    /// The initial node config.
+    pub(crate) config: NodeConfig,
+    /// The data dir of the node.
+    pub(crate) data_dir: ChainPath<DataDirPath>,
 }

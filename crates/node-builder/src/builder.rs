@@ -43,7 +43,7 @@ use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{PoolConfig, TransactionPool};
 use std::{marker::PhantomData, path::PathBuf, sync::Arc};
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -546,7 +546,28 @@ where
         // adjust rpc port numbers based on instance number
         config.adjust_instance_ports();
 
-        // launch rpc
+        // Start RPC servers
+        // TODO
+
+        // Run consensus engine to completion
+        let (tx, rx) = oneshot::channel();
+        info!(target: "reth::cli", "Starting consensus engine");
+        executor.spawn_critical_blocking("consensus engine", async move {
+            let res = beacon_consensus_engine.await;
+            let _ = tx.send(res);
+        });
+
+        // let full_node = FullNode {
+        //     evm_config: (),
+        //     pool: (),
+        //     network,
+        //     provider: (),
+        //     payload_builder: (),
+        //     tasks: (),
+        //     handles: RethRpcServerHandles {},
+        // };
+        // // Notify on node started
+        // on_node_started.on_event(full_node)?;
 
         // NodeHandle {
         //     node: (),
