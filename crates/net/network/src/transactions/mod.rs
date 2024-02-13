@@ -1063,10 +1063,9 @@ where
                             let mut f = $on_ready_some;
                             f(item);
 
-                            maybe_more_work = true;
-
                             budget -= 1;
                             if budget <= 0 {
+                                maybe_more_work = true;
                                 break
                             }
                         }
@@ -1102,7 +1101,7 @@ where
                     metrics_increment_egress_peer_channel_full,
                 );
             }
-            
+
             // drain commands
             poll_nested_stream_with_yield_points!(1, this.command_rx.poll_next_unpin(cx), |cmd| {
                 this.on_command(cmd)
