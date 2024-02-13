@@ -4,7 +4,10 @@
 //! Once a new payload is created, it is continuously updated.
 
 use crate::{
-    error::PayloadBuilderError, metrics::PayloadBuilderServiceMetrics, traits::PayloadJobGenerator,
+    error::PayloadBuilderError,
+    events::{Events, PayloadEvents},
+    metrics::PayloadBuilderServiceMetrics,
+    traits::PayloadJobGenerator,
     KeepPayloadJobAlive, PayloadJob,
 };
 use futures_util::{future::FutureExt, Stream, StreamExt};
@@ -21,9 +24,7 @@ use tokio::sync::{
     broadcast, mpsc,
     oneshot::{self, error::RecvError},
 };
-use tokio_stream::wrappers::{
-    errors::BroadcastStreamRecvError, BroadcastStream, UnboundedReceiverStream,
-};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, info, trace, warn};
 
 type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
@@ -178,10 +179,10 @@ where
 
     /// Sends a message to the service to subscribe to payload events.
     /// Returns a receiver that will receive them.
-    pub async fn subscribe(&self) -> Result<PayloadEventReceiver<Engine>, RecvError> {
+    pub async fn subscribe(&self) -> Result<PayloadEvents<Engine>, RecvError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_service.send(PayloadServiceCommand::Subscribe(tx));
-        Ok(PayloadEventReceiver { receiver: rx.await? })
+        Ok(PayloadEvents { receiver: rx.await? })
     }
 }
 
@@ -223,7 +224,7 @@ where
     /// Chain events notification stream
     chain_events: St,
     /// Payload events handler, used to broadcast and subscribe to payload events.
-    payload_events: broadcast::Sender<PayloadEvents<Engine>>,
+    payload_events: broadcast::Sender<Events<Engine>>,
 }
 
 const PAYLOAD_EVENTS_BUFFER_SIZE: usize = 20;
@@ -268,7 +269,7 @@ where
         >,
     ) {
         if let Some(Ok(ref attributes)) = attributes {
-            self.payload_events.send(PayloadEvents::Attributes(attributes.clone())).ok();
+            self.payload_events.send(Events::Attributes(attributes.clone())).ok();
         }
     }
 
@@ -320,7 +321,7 @@ where
         let fut = async move {
             let res = fut.await;
             if let Ok(ref payload) = res {
-                payload_events.send(PayloadEvents::BuiltPayload(payload.clone().into())).ok();
+                payload_events.send(Events::BuiltPayload(payload.clone().into())).ok();
 
                 resolved_metrics
                     .set_resolved_revenue(payload.block().number, f64::from(payload.fees()));
@@ -479,34 +480,7 @@ pub enum PayloadServiceCommand<Engine: EngineTypes> {
     /// Resolve the payload and return the payload
     Resolve(PayloadId, oneshot::Sender<Option<PayloadFuture<Engine::BuiltPayload>>>),
     /// Payload service events
-    Subscribe(oneshot::Sender<broadcast::Receiver<PayloadEvents<Engine>>>),
-}
-
-/// Payload builder events.
-#[derive(Clone, Debug)]
-pub enum PayloadEvents<Engine: EngineTypes> {
-    /// The payload attributes as
-    /// they are received from the CL through the engine api.
-    Attributes(Engine::PayloadBuilderAttributes),
-    /// The built payload that has been just built.
-    /// Triggered by the CL whenever it asks for an execution payload.
-    /// This event is only thrown if the CL is a validator.
-    BuiltPayload(Engine::BuiltPayload),
-}
-
-/// Represents a receiver for various payload events.
-#[derive(Debug)]
-pub struct PayloadEvents<Engine: EngineTypes> {
-    pub receiver: broadcast::Receiver<PayloadEvents<Engine>>,
-}
-
-impl<Engine: EngineTypes + 'static> PayloadEventReceiver<Engine> {
-    // Convert this receiver into a stream of PayloadEvents.
-    pub fn into_stream(
-        self,
-    ) -> impl Stream<Item = Result<PayloadEvents<Engine>, BroadcastStreamRecvError>> {
-        BroadcastStream::new(self.receiver)
-    }
+    Subscribe(oneshot::Sender<broadcast::Receiver<Events<Engine>>>),
 }
 
 impl<Engine> fmt::Debug for PayloadServiceCommand<Engine>
