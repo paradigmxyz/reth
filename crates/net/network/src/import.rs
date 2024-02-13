@@ -15,7 +15,7 @@ pub trait BlockImport:
     /// > the basic header validity of the block, checking whether the proof-of-work value is valid.
     ///
     /// This is supposed to start verification. The results are then expected to be returned via
-    /// [`BlockImport::poll`].
+    /// polling the `BlockImport` stream.
     fn on_new_block(&mut self, peer_id: PeerId, incoming_block: NewBlockMessage);
 }
 
