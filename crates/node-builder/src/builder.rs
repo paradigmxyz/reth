@@ -9,6 +9,7 @@ use reth_beacon_consensus::{
     BeaconConsensusEngine,
 };
 use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree};
+use reth_config::Config;
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -88,6 +89,28 @@ impl<DB, State> NodeBuilder<DB, State> {
     pub fn config(&self) -> &NodeConfig {
         &self.config
     }
+
+    /// Loads the reth config with the given datadir root
+    fn load_config(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<Config> {
+        let config_path = self.config.config.clone().unwrap_or_else(|| data_dir.config_path());
+
+        let mut config = confy::load_path::<Config>(&config_path)
+            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))?;
+
+        info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
+
+        // Update the config with the command line arguments
+        config.peers.connect_trusted_nodes_only = self.config.network.trusted_only;
+
+        if !self.config.network.trusted_peers.is_empty() {
+            info!(target: "reth::cli", "Adding trusted nodes");
+            self.config.network.trusted_peers.iter().for_each(|peer| {
+                config.peers.trusted_nodes.insert(*peer);
+            });
+        }
+
+        Ok(config)
+    }
 }
 
 impl NodeBuilder<(), InitState> {
@@ -109,7 +132,6 @@ where
     DB: Database + Clone + 'static,
 {
     /// Configures the types of the node.
-    // TODO this can be made independent of Database
     pub fn with_types<T>(self, types: T) -> NodeBuilder<DB, TypesState<T, DB>>
     where
         T: NodeTypes,
@@ -309,6 +331,9 @@ where
             >,
         >,
     > {
+        // get config
+        let reth_config = self.load_config(&data_dir)?;
+
         let Self {
             config,
             state: ComponentsState { types, components_builder, hooks, rpc },
@@ -318,9 +343,6 @@ where
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         fdlimit::raise_fd_limit()?;
-
-        // get config
-        let reth_config = load_config()?;
 
         let prometheus_handle = config.install_prometheus_recorder()?;
         config.start_metrics_endpoint(prometheus_handle, database.clone()).await?;
@@ -607,10 +629,6 @@ where
     pub fn check_launch(self) -> Self {
         self
     }
-}
-
-fn load_config() -> eyre::Result<reth_config::Config> {
-    todo!()
 }
 
 /// Captures the necessary context for building the components of the node.

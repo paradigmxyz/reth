@@ -6372,6 +6372,7 @@ dependencies = [
 name = "reth-node-builder"
 version = "0.1.0-alpha.17"
 dependencies = [
+ "confy",
  "eyre",
  "fdlimit",
  "futures",
