@@ -7,6 +7,7 @@ use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_net_nat::NatResolver;
 use reth_network::{
     transactions::{
+        TransactionFetcherConfig, TransactionsManagerConfig,
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     },
@@ -122,12 +123,21 @@ impl NetworkArgs {
             .with_max_inbound_opt(self.max_inbound_peers)
             .with_max_outbound_opt(self.max_outbound_peers);
 
+        // Configure transactions manager
+        let transactions_manager_config = TransactionsManagerConfig {
+            transaction_fetcher_config: TransactionFetcherConfig::new(
+                self.soft_limit_byte_size_pooled_transactions_response,
+                self.soft_limit_byte_size_pooled_transactions_response_on_pack_request,
+            ),
+        };
+
         // Configure basic network stack
         let mut network_config_builder = config
             .network_config(self.nat, self.persistent_peers_file(peers_file), secret_key)
             .peer_config(peer_config)
             .boot_nodes(self.bootnodes.clone().unwrap_or(chain_bootnodes))
-            .chain_spec(chain_spec);
+            .chain_spec(chain_spec)
+            .transactions_manager_config(transactions_manager_config);
 
         // Configure node identity
         let peer_id = network_config_builder.get_peer_id();
@@ -141,7 +151,7 @@ impl NetworkArgs {
     /// If `no_persist_peers` is true then this returns the path to the persistent peers file path.
     pub fn persistent_peers_file(&self, peers_file: PathBuf) -> Option<PathBuf> {
         if self.no_persist_peers {
-            return None
+            return None;
         }
 
         Some(peers_file)

@@ -30,7 +30,7 @@ use crate::{
     session::SessionManager,
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
-    transactions::NetworkTransactionEvent,
+    transactions::{NetworkTransactionEvent, TransactionsManagerConfig},
     FetchClient, NetworkBuilder,
 };
 use futures::{pin_mut, Future, StreamExt};
@@ -108,6 +108,8 @@ pub struct NetworkManager<C> {
     metrics: NetworkMetrics,
     /// Disconnect metrics for the Network
     disconnect_metrics: DisconnectMetrics,
+    /// Transaction manager config
+    transactions_manager_config: TransactionsManagerConfig,
 }
 
 // === impl NetworkManager ===
@@ -147,6 +149,12 @@ impl<C> NetworkManager<C> {
     pub fn secret_key(&self) -> SecretKey {
         self.swarm.sessions().secret_key()
     }
+
+    /// Returns a sharable reference to the transactions manager config
+    /// It's safe to return the reference here since no set method is provided on TransactionsManagerConfig, which means it's immutable throughout its lifetime
+    pub fn transactions_manager_config(&self) -> &TransactionsManagerConfig {
+        &self.transactions_manager_config
+    }
 }
 
 impl<C> NetworkManager<C>
@@ -177,6 +185,7 @@ where
             dns_discovery_config,
             extra_protocols,
             tx_gossip_disabled,
+            transactions_manager_config,
             #[cfg(feature = "optimism")]
                 optimism_network_config: crate::config::OptimismNetworkConfig { sequencer_endpoint },
         } = config;
@@ -254,6 +263,7 @@ where
             num_active_peers,
             metrics: Default::default(),
             disconnect_metrics: Default::default(),
+            transactions_manager_config,
         })
     }
 
@@ -524,7 +534,7 @@ where
                 if self.handle.mode().is_stake() {
                     // See [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
                     warn!(target: "net", "Peer performed block propagation, but it is not supported in proof of stake (EIP-3675)");
-                    return
+                    return;
                 }
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
                 self.swarm.state_mut().announce_new_block(msg);
@@ -655,7 +665,7 @@ where
                     // This is only possible if the channel was deliberately closed since we always
                     // have an instance of `NetworkHandle`
                     error!("Network message channel closed.");
-                    return Poll::Ready(())
+                    return Poll::Ready(());
                 }
                 Poll::Ready(Some(msg)) => this.on_handle_message(msg),
             };
@@ -926,7 +936,7 @@ where
             if budget == 0 {
                 // make sure we're woken up again
                 cx.waker().wake_by_ref();
-                break
+                break;
             }
         }
 

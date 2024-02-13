@@ -20,6 +20,7 @@ use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError}
 use tracing::{debug, trace};
 
 use super::{
+    config::TransactionFetcherConfig,
     constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
     AnnouncementFilter, Peer, PooledTransactions,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
@@ -57,6 +58,14 @@ pub(super) struct TransactionFetcher {
 // === impl TransactionFetcher ===
 
 impl TransactionFetcher {
+    /// Sets up transaction fetcher with config
+    pub fn with_transaction_fetcher_config(&mut self, config: &TransactionFetcherConfig) {
+        self.info.soft_limit_byte_size_pooled_transactions_response =
+            config.soft_limit_byte_size_pooled_transactions_response;
+        self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request =
+            config.soft_limit_byte_size_pooled_transactions_response_on_pack_request;
+    }
+
     /// Removes the specified hashes from inflight tracking.
     #[inline]
     fn remove_from_unknown_hashes<I>(&mut self, hashes: I)
@@ -74,7 +83,7 @@ impl TransactionFetcher {
         let remove = || -> bool {
             if let Some(inflight_count) = self.active_peers.get(peer_id) {
                 if *inflight_count <= DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
-                    return true
+                    return true;
                 }
                 *inflight_count -= 1;
             }
@@ -90,7 +99,7 @@ impl TransactionFetcher {
     pub(super) fn is_idle(&self, peer_id: &PeerId) -> bool {
         let Some(inflight_count) = self.active_peers.peek(peer_id) else { return true };
         if *inflight_count < DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
-            return true
+            return true;
         }
         false
     }
@@ -106,7 +115,7 @@ impl TransactionFetcher {
 
         for peer_id in fallback_peers.iter() {
             if self.is_idle(peer_id) && is_session_active(peer_id) {
-                return Some(peer_id)
+                return Some(peer_id);
             }
         }
 
@@ -133,13 +142,13 @@ impl TransactionFetcher {
 
             if idle_peer.is_some() {
                 hashes_to_request.push(hash);
-                break idle_peer.copied()
+                break idle_peer.copied();
             }
 
             if let Some(ref mut bud) = budget {
                 *bud = bud.saturating_sub(1);
                 if *bud == 0 {
-                    return None
+                    return None;
                 }
             }
         };
@@ -162,7 +171,7 @@ impl TransactionFetcher {
         hashes_from_announcement: ValidAnnouncementData,
     ) -> RequestTxHashes {
         if hashes_from_announcement.msg_version().is_eth68() {
-            return self.pack_request_eth68(hashes_to_request, hashes_from_announcement)
+            return self.pack_request_eth68(hashes_to_request, hashes_from_announcement);
         }
         self.pack_request_eth66(hashes_to_request, hashes_from_announcement)
     }
@@ -192,7 +201,7 @@ impl TransactionFetcher {
 
             // tx is really big, pack request with single tx
             if size >= self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request {
-                return hashes_from_announcement_iter.collect::<RequestTxHashes>()
+                return hashes_from_announcement_iter.collect::<RequestTxHashes>();
             } else {
                 acc_size_response = size;
             }
@@ -209,8 +218,8 @@ impl TransactionFetcher {
 
             let next_acc_size = acc_size_response + size;
 
-            if next_acc_size <=
-                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
+            if next_acc_size
+                <= self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
             {
                 // only update accumulated size of tx response if tx will fit in without exceeding
                 // soft limit
@@ -221,11 +230,11 @@ impl TransactionFetcher {
             }
 
             let free_space =
-                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request -
-                    acc_size_response;
+                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
+                    - acc_size_response;
 
             if free_space < MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED {
-                break 'fold_size
+                break 'fold_size;
             }
         }
 
@@ -272,7 +281,7 @@ impl TransactionFetcher {
         hashes.retain(|hash| {
             if let Some(entry) = self.hashes_fetch_inflight_and_pending_fetch.get(hash) {
                 entry.fallback_peers_mut().remove(peer_failed_to_serve);
-                return true
+                return true;
             }
             // tx has been seen over broadcast in the time it took for the request to resolve
             false
@@ -299,7 +308,7 @@ impl TransactionFetcher {
             let Some(TxFetchMetadata { retries, fallback_peers, .. }) =
                 self.hashes_fetch_inflight_and_pending_fetch.get(&hash)
             else {
-                return
+                return;
             };
 
             if let Some(peer_id) = fallback_peer {
@@ -350,7 +359,7 @@ impl TransactionFetcher {
             budget_find_idle_fallback_peer,
         ) else {
             // no peers are idle or budget is depleted
-            return
+            return;
         };
         let Some(peer) = peers.get(&peer_id) else { return };
         let conn_eth_version = peer.version;
@@ -541,7 +550,7 @@ impl TransactionFetcher {
                 max_inflight_transaction_requests=self.info.max_inflight_requests,
                 "limit for concurrent `GetPooledTransactions` requests reached, dropping request for hashes to peer"
             );
-            return Some(new_announced_hashes)
+            return Some(new_announced_hashes);
         }
 
         let Some(inflight_count) = self.active_peers.get_or_insert(peer_id, || 0) else {
@@ -551,7 +560,7 @@ impl TransactionFetcher {
                 conn_eth_version=%conn_eth_version,
                 "failed to cache active peer in schnellru::LruMap, dropping request to peer"
             );
-            return Some(new_announced_hashes)
+            return Some(new_announced_hashes);
         };
 
         if *inflight_count >= DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
@@ -562,7 +571,7 @@ impl TransactionFetcher {
                 MAX_CONCURRENT_TX_REQUESTS_PER_PEER=DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
                 "limit for concurrent `GetPooledTransactions` requests per peer reached"
             );
-            return Some(new_announced_hashes)
+            return Some(new_announced_hashes);
         }
 
         *inflight_count += 1;
@@ -597,7 +606,7 @@ impl TransactionFetcher {
                     let req = req.into_get_pooled_transactions().expect("is get pooled tx");
 
                     metrics_increment_egress_peer_channel_full();
-                    return Some(RequestTxHashes::new(req.0))
+                    return Some(RequestTxHashes::new(req.0));
                 }
             }
         } else {
@@ -646,10 +655,10 @@ impl TransactionFetcher {
             .unwrap_or(AVERAGE_BYTE_SIZE_TX_ENCODED);
 
         // if request full enough already, we're satisfied, send request for single tx
-        if acc_size_response >=
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING_HASHES
+        if acc_size_response
+            >= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING_HASHES
         {
-            return
+            return;
         }
 
         // try to fill request by checking if any other hashes pending fetch (in lru order) are
@@ -686,7 +695,7 @@ impl TransactionFetcher {
             if let Some(ref mut bud) = budget_fill_request {
                 *bud = bud.saturating_sub(1);
                 if *bud == 0 {
-                    return
+                    return;
                 }
             }
         }
@@ -722,8 +731,8 @@ impl TransactionFetcher {
         let info = &self.info;
 
         let tx_fetcher_has_capacity = self.has_capacity(
-            info.max_inflight_requests /
-                DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_IDLE_PEER,
+            info.max_inflight_requests
+                / DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_IDLE_PEER,
         );
         let tx_pool_has_capacity = has_capacity_wrt_pending_pool_imports(
             DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_IDLE_PEER,
@@ -761,8 +770,8 @@ impl TransactionFetcher {
         let info = &self.info;
 
         let tx_fetcher_has_capacity = self.has_capacity(
-            info.max_inflight_requests /
-                DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_INTERSECTION,
+            info.max_inflight_requests
+                / DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_INTERSECTION,
         );
         let tx_pool_has_capacity = has_capacity_wrt_pending_pool_imports(
             DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_INTERSECTION,
@@ -819,7 +828,7 @@ impl Stream for TransactionFetcher {
                         if transactions.hashes().any(|hash| hash == requested_hash) {
                             // hash is now known, stop tracking
                             fetched.push(*requested_hash);
-                            return false
+                            return false;
                         }
                         true
                     });
@@ -845,7 +854,7 @@ impl Stream for TransactionFetcher {
                         error: RequestError::ChannelClosed,
                     }))
                 }
-            }
+            };
         }
 
         Poll::Pending

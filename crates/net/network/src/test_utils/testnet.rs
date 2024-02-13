@@ -5,7 +5,7 @@ use crate::{
     error::NetworkError,
     eth_requests::EthRequestHandler,
     protocol::IntoRlpxSubProtocol,
-    transactions::{TransactionsHandle, TransactionsManager},
+    transactions::{TransactionsHandle, TransactionsManager, TransactionsManagerConfig},
     NetworkConfig, NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkHandle,
     NetworkManager,
 };
@@ -291,7 +291,7 @@ impl<C, Pool> TestnetHandle<C, Pool> {
     /// Connects all peers with each other
     pub async fn connect_peers(&self) {
         if self.peers.len() < 2 {
-            return
+            return;
         }
 
         let mut streams = Vec::with_capacity(self.peers.len());
@@ -393,7 +393,12 @@ where
     pub fn install_transactions_manager(&mut self, pool: Pool) {
         let (tx, rx) = unbounded_channel();
         self.network.set_transactions(tx);
-        let transactions_manager = TransactionsManager::new(self.handle(), pool.clone(), rx);
+        let transactions_manager = TransactionsManager::new(
+            self.handle(),
+            pool.clone(),
+            rx,
+            &TransactionsManagerConfig::default(),
+        );
         self.transactions_manager = Some(transactions_manager);
         self.pool = Some(pool);
     }
@@ -406,8 +411,12 @@ where
         let Self { mut network, request_handler, client, secret_key, .. } = self;
         let (tx, rx) = unbounded_channel();
         network.set_transactions(tx);
-        let transactions_manager =
-            TransactionsManager::new(network.handle().clone(), pool.clone(), rx);
+        let transactions_manager = TransactionsManager::new(
+            network.handle().clone(),
+            pool.clone(),
+            rx,
+            &TransactionsManagerConfig::default(),
+        );
         Peer {
             network,
             request_handler,
@@ -604,7 +613,7 @@ impl NetworkEventStream {
     /// Awaits the next `num` events for an established session
     pub async fn take_session_established(&mut self, mut num: usize) -> Vec<PeerId> {
         if num == 0 {
-            return Vec::new()
+            return Vec::new();
         }
         let mut peers = Vec::with_capacity(num);
         while let Some(ev) = self.inner.next().await {
@@ -613,7 +622,7 @@ impl NetworkEventStream {
                     peers.push(peer_id);
                     num -= 1;
                     if num == 0 {
-                        return peers
+                        return peers;
                     }
                 }
                 _ => continue,

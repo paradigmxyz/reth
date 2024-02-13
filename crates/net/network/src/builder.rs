@@ -59,7 +59,8 @@ impl<C, Tx, Eth> NetworkBuilder<C, Tx, Eth> {
         let (tx, rx) = mpsc::unbounded_channel();
         network.set_transactions(tx);
         let handle = network.handle().clone();
-        let transactions = TransactionsManager::new(handle, pool, rx);
+        let transactions =
+            TransactionsManager::new(handle, pool, rx, network.transactions_manager_config());
         NetworkBuilder { network, request_handler, transactions }
     }
 
