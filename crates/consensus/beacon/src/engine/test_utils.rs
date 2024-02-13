@@ -253,15 +253,12 @@ where
     A: ExecutorFactory,
     B: ExecutorFactory,
 {
-    type Executor<'a> = EitherExecutor<A::Executor<'a>, B::Executor<'a>>;
+    type Executor = EitherExecutor<A::Executor<'static>, B::Executor<'static>>;
 
-    fn with_state<'a, SP: reth_provider::StateProvider + 'a>(
-        &'a self,
-        sp: SP,
-    ) -> Self::Executor<'a> {
+    fn with_state<SP: reth_provider::StateProvider + 'static>(&self, sp: SP) -> Self::Executor {
         match self {
-            EitherExecutorFactory::Left(a) => EitherExecutor::Left(a.with_state::<'a, SP>(sp)),
-            EitherExecutorFactory::Right(b) => EitherExecutor::Right(b.with_state::<'a, SP>(sp)),
+            EitherExecutorFactory::Left(a) => EitherExecutor::Left(a.with_state::<SP>(sp)),
+            EitherExecutorFactory::Right(b) => EitherExecutor::Right(b.with_state::<SP>(sp)),
         }
     }
 }
