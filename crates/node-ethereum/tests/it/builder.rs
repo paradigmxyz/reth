@@ -10,17 +10,18 @@ fn test_basic_setup() {
     let config = NodeConfig::test();
     let db = create_test_rw_db();
     let msg = "On components".to_string();
-    let builder = NodeBuilder::new(config)
+    let _builder = NodeBuilder::new(config)
         .with_database(db)
         .with_types(EthereumNode::default())
         .with_components(EthereumNode::components())
         .on_component_initialized(move |ctx| {
-            let provider = ctx.provider();
+            let _provider = ctx.provider();
             println!("{msg}");
             Ok(())
         })
-        .on_node_started(|ctx| {
-            println!("Node started");
+        .on_node_started(|_full_node| Ok(()))
+        .on_rpc_started(|_ctx, handles| {
+            let _client = handles.rpc.http_client();
             Ok(())
         })
         .extend_rpc_modules(|ctx| {
