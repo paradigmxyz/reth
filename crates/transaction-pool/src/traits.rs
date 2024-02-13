@@ -279,10 +279,10 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Retains only those hashes that are unknown to the pool.
     /// In other words, removes all transactions from the given set that are currently present in
-    /// the pool.
+    /// the pool. Returns hashes already known to the pool.
     ///
     /// Consumer: P2P
-    fn retain_unknown<A>(&self, announcement: &mut A)
+    fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
     where
         A: HandleAnnouncement;
 
