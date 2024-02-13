@@ -4,5 +4,5 @@
 // TODO(mattsse): this is currently a placeholder
 pub trait NodePrimitives {}
 
-// Placeholder
+// TODO(mattsse): Placeholder
 impl NodePrimitives for () {}
