@@ -21,12 +21,14 @@ use reth_db::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
 use reth_interfaces::{consensus::Consensus, p2p::either::EitherDownloader};
+use reth_network::{NetworkBuilder, NetworkHandle};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath},
     init::init_genesis,
     node_config::NodeConfig,
     primitives::{kzg::KzgSettings, Head},
+    utils::write_peers_to_file,
 };
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
@@ -616,6 +618,54 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Returns the config for payload building.
     pub fn payload_builder_config(&self) -> impl PayloadBuilderConfig {
         self.config.builder.clone()
+    }
+
+    /// Creates the [NetworkBuilder] for the node.
+    pub async fn network_builder(&self) -> eyre::Result<NetworkBuilder<Node::Provider, (), ()>> {
+        self.config
+            .build_network(
+                &self.reth_config,
+                self.provider.clone(),
+                self.executor.clone(),
+                self.head.clone(),
+                self.data_dir(),
+            )
+            .await
+    }
+
+    /// Creates the [NetworkBuilder] for the node and blocks until it is ready.
+    pub fn network_builder_blocking(&self) -> eyre::Result<NetworkBuilder<Node::Provider, (), ()>> {
+        self.executor.block_on(self.network_builder())
+    }
+
+    /// Spawns the configured network and associated tasks and returns the [NetworkHandle] connected
+    /// to that network.
+    pub fn start_network<Pool>(
+        &self,
+        builder: NetworkBuilder<Node::Provider, (), ()>,
+        pool: Pool,
+    ) -> NetworkHandle
+    where
+        Pool: TransactionPool + Unpin + 'static,
+    {
+        let (handle, network, txpool, eth) =
+            builder.transactions(pool).request_handler(self.provider().clone()).split_with_handle();
+
+        self.executor.spawn_critical("p2p txpool", txpool);
+        self.executor.spawn_critical("p2p eth request handler", eth);
+
+        let default_peers_path = self.data_dir().known_peers_path();
+        let known_peers_file = self.config.network.persistent_peers_file(default_peers_path);
+        self.executor.spawn_critical_with_graceful_shutdown_signal(
+            "p2p network task",
+            |shutdown| {
+                network.run_until_graceful_shutdown(shutdown, |network| {
+                    write_peers_to_file(network, known_peers_file)
+                })
+            },
+        );
+
+        handle
     }
 }
 

@@ -388,7 +388,9 @@ impl NodeConfig {
         }
     }
 
-    /// Build a network and spawn it
+    /// Create the [NetworkBuilder].
+    ///
+    /// This only configures it and does not spawn it.
     pub async fn build_network<C>(
         &self,
         config: &Config,

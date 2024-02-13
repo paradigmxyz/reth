@@ -171,6 +171,8 @@ where
     Pool: TransactionPool + Unpin + 'static,
 {
     fn build_network(self, ctx: &BuilderContext<Node>, pool: Pool) -> eyre::Result<NetworkHandle> {
+        let mut network = ctx.network_builder_blocking()?;
+
         todo!()
     }
 }
