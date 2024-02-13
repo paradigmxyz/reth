@@ -58,8 +58,6 @@ use reth_revm::optimism::RethL1BlockInfo;
 use reth_rpc_types::OptimismTransactionReceiptFields;
 #[cfg(feature = "optimism")]
 use revm::L1BlockInfo;
-#[cfg(feature = "optimism")]
-use std::ops::Div;
 
 /// Helper alias type for the state's [CacheDB]
 pub(crate) type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
@@ -1115,7 +1113,7 @@ where
         let mut envelope_buf = bytes::BytesMut::new();
         tx.encode_enveloped(&mut envelope_buf);
 
-        let (l1_fee, l1_data_gas) = if tx.is_deposit() {
+        let (l1_fee, l1_data_gas) = if !tx.is_deposit() {
             let inner_l1_fee = l1_block_info
                 .l1_tx_data_fee(
                     &self.inner.provider.chain_spec(),
@@ -1373,7 +1371,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
                     .l1_data_gas
                     .map(|dg| dg + l1_block_info.l1_fee_overhead.unwrap_or_default());
                 op_fields.l1_fee_scalar =
-                    Some(l1_block_info.l1_base_fee_scalar.div(U256::from(1_000_000)));
+                    Some(f64::from(l1_block_info.l1_base_fee_scalar) / 1_000_000.0);
                 op_fields.l1_gas_price = Some(l1_block_info.l1_base_fee);
             }
         }
