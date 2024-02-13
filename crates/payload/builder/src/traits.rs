@@ -25,7 +25,7 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
         + Sync
         + 'static;
     /// Represents the built payload type that is returned to the CL.
-    type BuiltPayload: BuiltPayload + std::fmt::Debug;
+    type BuiltPayload: BuiltPayload + Clone + std::fmt::Debug;
 
     /// Returns the best payload that has been built so far.
     ///
