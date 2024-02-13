@@ -17,7 +17,6 @@ use reth_db::{
 use reth_primitives::{fs, snapshot::find_fixed_range, stage::StageId, ChainSpec, SnapshotSegment};
 use reth_provider::ProviderFactory;
 use std::sync::Arc;
-use tracing::info;
 
 /// `reth drop-stage` command
 #[derive(Debug, Parser)]
