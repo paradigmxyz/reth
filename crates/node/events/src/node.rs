@@ -227,7 +227,7 @@ impl<DB> NodeState<DB> {
                         _ => Eta::default(),
                     },
                     checkpoint: input.checkpoint,
-                    target: None,
+                    target: Some(input.unwind_to),
                 };
 
                 self.current_stage = Some(current_stage);
