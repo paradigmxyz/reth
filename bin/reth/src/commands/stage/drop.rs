@@ -66,8 +66,35 @@ impl Command {
 
         let tool = DbTool::new(provider_factory, self.chain.clone())?;
 
+        let snapshot_segment = match self.stage {
+            StageEnum::Headers => Some(SnapshotSegment::Headers),
+            StageEnum::Bodies => Some(SnapshotSegment::Transactions),
+            StageEnum::Execution => Some(SnapshotSegment::Receipts),
+            _ => None,
+        };
+
+        // Delete snapshot segment data before inserting the genesis header below
+        if let Some(snapshot_segment) = snapshot_segment {
+            let snapshot_provider = tool.provider_factory.snapshot_provider();
+            let snapshots = iter_snapshots(snapshot_provider.directory())?;
+            if let Some(segment_snapshots) = snapshots.get(&snapshot_segment) {
+                for (block_range, _) in segment_snapshots {
+                    snapshot_provider
+                        .delete_jar(snapshot_segment, find_fixed_range(block_range.start()))?;
+                }
+            }
+        }
+
         tool.provider_factory.db_ref().update(|tx| {
             match self.stage {
+                StageEnum::Headers => {
+                    tx.clear::<tables::CanonicalHeaders>()?;
+                    tx.clear::<tables::Headers>()?;
+                    tx.clear::<tables::HeaderTD>()?;
+                    tx.clear::<tables::HeaderNumbers>()?;
+                    tx.put::<tables::SyncStage>(StageId::Headers.to_string(), Default::default())?;
+                    insert_genesis_header::<DatabaseEnv>(tx, snapshot_provider, self.chain)?;
+                }
                 StageEnum::Bodies => {
                     tx.clear::<tables::BlockBodyIndices>()?;
                     tx.clear::<tables::Transactions>()?;
@@ -170,34 +197,12 @@ impl Command {
                     )?;
                     insert_genesis_header::<DatabaseEnv>(tx, snapshot_provider, self.chain)?;
                 }
-                _ => {
-                    info!("Nothing to do for stage {:?}", self.stage);
-                    return Ok(())
-                }
             }
 
             tx.put::<tables::SyncStage>(StageId::Finish.to_string(), Default::default())?;
 
             Ok::<_, eyre::Error>(())
         })??;
-
-        let snapshot_segment = match self.stage {
-            StageEnum::Headers => Some(SnapshotSegment::Headers),
-            StageEnum::Bodies => Some(SnapshotSegment::Transactions),
-            StageEnum::Execution => Some(SnapshotSegment::Receipts),
-            _ => None,
-        };
-
-        if let Some(snapshot_segment) = snapshot_segment {
-            let snapshot_provider = tool.provider_factory.snapshot_provider();
-            let snapshots = iter_snapshots(snapshot_provider.directory())?;
-            if let Some(segment_snapshots) = snapshots.get(&snapshot_segment) {
-                for (block_range, _) in segment_snapshots {
-                    snapshot_provider
-                        .delete_jar(snapshot_segment, find_fixed_range(block_range.start()))?;
-                }
-            }
-        }
 
         Ok(())
     }
