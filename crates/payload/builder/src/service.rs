@@ -496,7 +496,7 @@ pub enum PayloadEvents<Engine: EngineTypes> {
 
 /// Represents a receiver for various payload events.
 #[derive(Debug)]
-pub struct PayloadEventReceiver<Engine: EngineTypes> {
+pub struct PayloadEvents<Engine: EngineTypes> {
     pub receiver: broadcast::Receiver<PayloadEvents<Engine>>,
 }
 
