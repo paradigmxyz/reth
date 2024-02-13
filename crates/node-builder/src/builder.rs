@@ -222,7 +222,7 @@ where
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(mut self, hook: F) -> Self
     where
-        F: FnOnce(
+        F: Fn(
                 FullNodeComponentsAdapter<
                     FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
                     Components::Pool,

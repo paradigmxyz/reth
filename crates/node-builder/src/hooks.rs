@@ -75,14 +75,14 @@ pub trait OnComponentInitializedHook<Node> {
     /// Consumes the event hook and runs it.
     ///
     /// If this returns an error, the node launch will be aborted.
-    fn on_event(self, node: Node) -> eyre::Result<()>;
+    fn on_event(&self, node: Node) -> eyre::Result<()>;
 }
 
 impl<Node, F> OnComponentInitializedHook<Node> for F
 where
-    F: FnOnce(Node) -> eyre::Result<()>,
+    F: Fn(Node) -> eyre::Result<()>,
 {
-    fn on_event(self, node: Node) -> eyre::Result<()> {
+    fn on_event(&self, node: Node) -> eyre::Result<()> {
         self(node)
     }
 }
@@ -105,7 +105,7 @@ where
 }
 
 impl<Node> OnComponentInitializedHook<Node> for () {
-    fn on_event(self, _node: Node) -> eyre::Result<()> {
+    fn on_event(&self, _node: Node) -> eyre::Result<()> {
         Ok(())
     }
 }

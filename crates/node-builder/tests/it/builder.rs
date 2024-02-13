@@ -1,7 +1,7 @@
 //! Node builder setup tests.
 
 use reth_db::test_utils::create_test_rw_db;
-use reth_node_builder::{components::FullNodeComponents, ethereum::EthereumNode, NodeBuilder};
+use reth_node_builder::{components::FullNodeComponents, NodeBuilder};
 use reth_node_core::node_config::NodeConfig;
 
 #[test]
