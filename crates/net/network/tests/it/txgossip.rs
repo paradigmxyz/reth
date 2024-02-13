@@ -5,7 +5,7 @@ use reth_network::test_utils::Testnet;
 use reth_primitives::{TransactionSigned, U256};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tx_gossip() {
     reth_tracing::init_test_tracing();
@@ -61,10 +61,11 @@ async fn test_4844_tx_gossip_penalization() {
     // connect all the peers
     handle.connect_peers().await;
 
-    // let mut peer0_tx_listener = peer0.pool().unwrap().pending_transactions_listener();
     let mut peer1_tx_listener = peer1.pool().unwrap().pending_transactions_listener();
 
     let mut gen = TransactionGenerator::new(thread_rng());
+
+    // peer 0 will be penalised for sending txs[0] over gossip
     let txs = vec![gen.gen_eip4844_pooled(), gen.gen_eip1559_pooled()];
 
     txs.iter().for_each(|tx| {
@@ -88,6 +89,9 @@ async fn test_4844_tx_gossip_penalization() {
         peer1.peer_handle().peer_by_id(peer0.peer_id().clone()).await.unwrap().reputation();
     assert_ne!(peer0_reputation_before, peer0_reputation_after);
     assert_eq!(received, txs[1].transaction().hash);
+
+    // this will return an [`Empty`] error because blob txs are disallowed to be broadcasted
+    assert!(peer1_tx_listener.try_recv().is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -106,7 +110,6 @@ async fn test_sending_invalid_transactions() {
     // connect all the peers
     handle.connect_peers().await;
 
-    // let mut peer0_tx_listener = peer0.pool().unwrap().pending_transactions_listener();
     let mut peer1_tx_listener = peer1.pool().unwrap().pending_transactions_listener();
 
     let invalid_txs: Vec<Arc<TransactionSigned>> = vec![Arc::new(TransactionSigned::default())];
@@ -115,19 +118,6 @@ async fn test_sending_invalid_transactions() {
 
     network_handle.send_transactions(peer1.peer_id().clone(), invalid_txs);
 
-    let received = peer1_tx_listener.recv();
-
-    let timeout_duration = Duration::from_secs(15);
-    let timeout_received_future = tokio::time::timeout(timeout_duration, received);
-
-    match timeout_received_future.await {
-        Ok(received) => {
-            let received = received.unwrap();
-            // fail the test
-            assert!(false, "peer1 received invalid transaction: {:?}", received);
-        }
-        Err(_) => {
-            assert!(true, "peer1 did not receive invalid transaction");
-        }
-    }
+    // this will return an [`Empty`] error because bad txs are disallowed to be broadcasted
+    assert!(peer1_tx_listener.try_recv().is_err());
 }

@@ -173,7 +173,7 @@ impl TransactionBuilder {
             self.signer,
         )
     }
-    /// Converts the transaction builder into a transaction format using EIP-1559.
+    /// Converts the transaction builder into a transaction format using EIP-4844.
     pub fn into_eip4844(self) -> TransactionSigned {
         TransactionBuilder::signed(
             TxEip4844 {
