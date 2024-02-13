@@ -1,7 +1,7 @@
 //! clap [Args](clap::Args) for op-reth rollup configuration
 
 /// Parameters for rollup configuration
-#[derive(Debug, Default, PartialEq, Eq, clap::Args)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
 #[clap(next_help_heading = "Rollup")]
 pub struct RollupArgs {
     /// HTTP endpoint for the sequencer mempool

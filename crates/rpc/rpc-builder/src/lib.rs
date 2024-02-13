@@ -928,7 +928,7 @@ impl Serialize for RethRpcModule {
 }
 
 /// A Helper type the holds instances of the configured modules.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig> {
     provider: Provider,
     pool: Pool,

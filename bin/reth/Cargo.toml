@@ -161,6 +161,7 @@ optimism = [
     "reth-payload-builder/optimism",
     "reth-optimism-payload-builder/optimism",
     "reth-ethereum-payload-builder/optimism",
+    "reth-node-ethereum/optimism",
     "dep:reth-node-optimism",
     "reth-node-core/optimism",
 ]
