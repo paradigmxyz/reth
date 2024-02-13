@@ -6,7 +6,6 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs,
     },
-    commands::node::events,
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
     utils::get_single_header,
@@ -253,7 +252,12 @@ impl Command {
         );
         ctx.task_executor.spawn_critical(
             "events task",
-            events::handle_events(Some(network.clone()), latest_block_number, events, db.clone()),
+            reth_node_core::events::node::handle_events(
+                Some(network.clone()),
+                latest_block_number,
+                events,
+                db.clone(),
+            ),
         );
 
         let mut current_max_block = latest_block_number.unwrap_or_default();
