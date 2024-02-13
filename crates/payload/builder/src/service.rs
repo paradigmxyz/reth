@@ -21,7 +21,9 @@ use tokio::sync::{
     broadcast, mpsc,
     oneshot::{self, error::RecvError},
 };
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::{
+    errors::BroadcastStreamRecvError, BroadcastStream, UnboundedReceiverStream,
+};
 use tracing::{debug, info, trace, warn};
 
 type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
@@ -496,6 +498,15 @@ pub enum PayloadEvents<Engine: EngineTypes> {
 #[derive(Debug)]
 pub struct PayloadEventReceiver<Engine: EngineTypes> {
     pub receiver: broadcast::Receiver<PayloadEvents<Engine>>,
+}
+
+impl<Engine: EngineTypes + 'static> PayloadEventReceiver<Engine> {
+    // Convert this receiver into a stream of PayloadEvents.
+    pub fn into_stream(
+        self,
+    ) -> impl Stream<Item = Result<PayloadEvents<Engine>, BroadcastStreamRecvError>> {
+        BroadcastStream::new(self.receiver)
+    }
 }
 
 impl<Engine> fmt::Debug for PayloadServiceCommand<Engine>
