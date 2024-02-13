@@ -16,7 +16,7 @@ pub mod payload;
 pub use payload::PayloadOrAttributes;
 
 /// The types that are used by the engine.
-pub trait EngineTypes: serde::de::DeserializeOwned + Unpin + Send + Sync {
+pub trait EngineTypes: serde::de::DeserializeOwned + Unpin + Send + Sync + Clone {
     /// The RPC payload attributes type the CL node emits via the engine API.
     type PayloadAttributes: PayloadAttributes + Unpin;
 
