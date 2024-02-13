@@ -35,11 +35,10 @@ where
 
     /// Polls to accept a new incoming connection to the endpoint.
     pub(crate) fn poll_accept(&mut self, cx: &mut Context<'_>) -> Poll<<Self as Stream>::Item> {
-        let res = match ready!(self.poll_next_unpin(cx)) {
-            None => Err(io::Error::new(io::ErrorKind::ConnectionAborted, "ipc connection closed")),
-            Some(conn) => conn,
-        };
-        Poll::Ready(res)
+        Poll::Ready(ready!(self.poll_next_unpin(cx)).map_or(
+            Err(io::Error::new(io::ErrorKind::ConnectionAborted, "ipc connection closed")),
+            |conn| conn,
+        ))
     }
 }
 

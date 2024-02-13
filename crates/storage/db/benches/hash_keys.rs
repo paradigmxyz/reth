@@ -40,7 +40,7 @@ pub fn hash_keys(c: &mut Criterion) {
 
 fn measure_table_insertion<T>(group: &mut BenchmarkGroup<'_, WallTime>, size: usize)
 where
-    T: Table + Default,
+    T: Table,
     T::Key: Default
         + Clone
         + for<'de> serde::Deserialize<'de>
@@ -132,7 +132,7 @@ where
 #[allow(clippy::type_complexity)]
 fn generate_batches<T>(size: usize) -> (Vec<TableRow<T>>, Vec<TableRow<T>>)
 where
-    T: Table + Default,
+    T: Table,
     T::Key: std::hash::Hash + Arbitrary,
     T::Value: Arbitrary,
 {
@@ -159,7 +159,7 @@ where
 
 fn append<T>(db: DatabaseEnv, input: Vec<(<T as Table>::Key, <T as Table>::Value)>) -> DatabaseEnv
 where
-    T: Table + Default,
+    T: Table,
 {
     {
         let tx = db.tx_mut().expect("tx");
@@ -177,7 +177,7 @@ where
 
 fn insert<T>(db: DatabaseEnv, input: Vec<(<T as Table>::Key, <T as Table>::Value)>) -> DatabaseEnv
 where
-    T: Table + Default,
+    T: Table,
 {
     {
         let tx = db.tx_mut().expect("tx");
@@ -195,7 +195,7 @@ where
 
 fn put<T>(db: DatabaseEnv, input: Vec<(<T as Table>::Key, <T as Table>::Value)>) -> DatabaseEnv
 where
-    T: Table + Default,
+    T: Table,
 {
     {
         let tx = db.tx_mut().expect("tx");
@@ -223,7 +223,7 @@ struct TableStats {
 
 fn get_table_stats<T>(db: DatabaseEnv)
 where
-    T: Table + Default,
+    T: Table,
 {
     db.view(|tx| {
         let table_db = tx.inner.open_db(Some(T::NAME)).map_err(|_| "Could not open db.").unwrap();

@@ -1,7 +1,7 @@
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{AccountNode, AccountNodeIter, StorageNode, StorageNodeIter},
-    prefix_set::{PrefixSet, PrefixSetLoader, PrefixSetMut},
+    prefix_set::{PrefixSet, PrefixSetLoader, PrefixSetMut, TriePrefixSets},
     progress::{IntermediateStateRootState, StateRootProgress},
     trie_cursor::TrieCursorFactory,
     updates::{TrieKey, TrieOp, TrieUpdates},
@@ -16,10 +16,7 @@ use reth_primitives::{
     trie::{HashBuilder, Nibbles, TrieAccount},
     Address, BlockNumber, B256,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    ops::RangeInclusive,
-};
+use std::ops::RangeInclusive;
 use tracing::{debug, trace};
 
 /// StateRoot is used to compute the root node of a state trie.
@@ -29,13 +26,8 @@ pub struct StateRoot<T, H> {
     pub trie_cursor_factory: T,
     /// The factory for hashed cursors.
     pub hashed_cursor_factory: H,
-    /// A set of account prefixes that have changed.
-    pub changed_account_prefixes: PrefixSet,
-    /// A map containing storage changes with the hashed address as key and a set of storage key
-    /// prefixes as the value.
-    pub changed_storage_prefixes: HashMap<B256, PrefixSet>,
-    /// A map containing keys of accounts that were destroyed.
-    pub destroyed_accounts: HashSet<B256>,
+    /// A set of prefix sets that have changes.
+    pub prefix_sets: TriePrefixSets,
     /// Previous intermediate state.
     previous_state: Option<IntermediateStateRootState>,
     /// The number of updates after which the intermediate progress should be returned.
@@ -43,21 +35,9 @@ pub struct StateRoot<T, H> {
 }
 
 impl<T, H> StateRoot<T, H> {
-    /// Set the changed account prefixes.
-    pub fn with_changed_account_prefixes(mut self, prefixes: PrefixSet) -> Self {
-        self.changed_account_prefixes = prefixes;
-        self
-    }
-
-    /// Set the changed storage prefixes.
-    pub fn with_changed_storage_prefixes(mut self, prefixes: HashMap<B256, PrefixSet>) -> Self {
-        self.changed_storage_prefixes = prefixes;
-        self
-    }
-
-    /// Set the destroyed accounts.
-    pub fn with_destroyed_accounts(mut self, accounts: HashSet<B256>) -> Self {
-        self.destroyed_accounts = accounts;
+    /// Set the prefix sets.
+    pub fn with_prefix_sets(mut self, prefix_sets: TriePrefixSets) -> Self {
+        self.prefix_sets = prefix_sets;
         self
     }
 
@@ -84,9 +64,7 @@ impl<T, H> StateRoot<T, H> {
         StateRoot {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
-            changed_account_prefixes: self.changed_account_prefixes,
-            changed_storage_prefixes: self.changed_storage_prefixes,
-            destroyed_accounts: self.destroyed_accounts,
+            prefix_sets: self.prefix_sets,
             threshold: self.threshold,
             previous_state: self.previous_state,
         }
@@ -97,9 +75,7 @@ impl<T, H> StateRoot<T, H> {
         StateRoot {
             trie_cursor_factory,
             hashed_cursor_factory: self.hashed_cursor_factory,
-            changed_account_prefixes: self.changed_account_prefixes,
-            changed_storage_prefixes: self.changed_storage_prefixes,
-            destroyed_accounts: self.destroyed_accounts,
+            prefix_sets: self.prefix_sets,
             threshold: self.threshold,
             previous_state: self.previous_state,
         }
@@ -112,9 +88,7 @@ impl<'a, TX: DbTx> StateRoot<&'a TX, &'a TX> {
         Self {
             trie_cursor_factory: tx,
             hashed_cursor_factory: tx,
-            changed_account_prefixes: PrefixSetMut::default().freeze(),
-            changed_storage_prefixes: HashMap::default(),
-            destroyed_accounts: HashSet::default(),
+            prefix_sets: TriePrefixSets::default(),
             previous_state: None,
             threshold: 100_000,
         }
@@ -131,16 +105,7 @@ impl<'a, TX: DbTx> StateRoot<&'a TX, &'a TX> {
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
         let loaded_prefix_sets = PrefixSetLoader::new(tx).load(range)?;
-        Ok(Self::from_tx(tx)
-            .with_changed_account_prefixes(loaded_prefix_sets.account_prefix_set.freeze())
-            .with_changed_storage_prefixes(
-                loaded_prefix_sets
-                    .storage_prefix_sets
-                    .into_iter()
-                    .map(|(k, v)| (k, v.freeze()))
-                    .collect(),
-            )
-            .with_destroyed_accounts(loaded_prefix_sets.destroyed_accounts))
+        Ok(Self::from_tx(tx).with_prefix_sets(loaded_prefix_sets))
     }
 
     /// Computes the state root of the trie with the changed account and storage prefixes and
@@ -243,7 +208,7 @@ where
                 let walker = TrieWalker::from_stack(
                     trie_cursor,
                     state.walker_stack,
-                    self.changed_account_prefixes,
+                    self.prefix_sets.account_prefix_set,
                 );
                 (
                     state.hash_builder,
@@ -252,7 +217,7 @@ where
                 )
             }
             None => {
-                let walker = TrieWalker::new(trie_cursor, self.changed_account_prefixes);
+                let walker = TrieWalker::new(trie_cursor, self.prefix_sets.account_prefix_set);
                 (HashBuilder::default(), AccountNodeIter::new(walker, hashed_account_cursor))
             }
         };
@@ -282,8 +247,9 @@ where
                         self.hashed_cursor_factory.clone(),
                         hashed_address,
                     )
-                    .with_changed_prefixes(
-                        self.changed_storage_prefixes
+                    .with_prefix_set(
+                        self.prefix_sets
+                            .storage_prefix_sets
                             .get(&hashed_address)
                             .cloned()
                             .unwrap_or_default(),
@@ -340,8 +306,9 @@ where
 
         trie_updates.extend(walker_updates.into_iter());
         trie_updates.extend_with_account_updates(hash_builder_updates);
-        trie_updates
-            .extend_with_deletes(self.destroyed_accounts.into_iter().map(TrieKey::StorageTrie));
+        trie_updates.extend_with_deletes(
+            self.prefix_sets.destroyed_accounts.into_iter().map(TrieKey::StorageTrie),
+        );
 
         Ok(StateRootProgress::Complete(root, hashed_entries_walked, trie_updates))
     }
@@ -357,7 +324,7 @@ pub struct StorageRoot<T, H> {
     /// The hashed address of an account.
     pub hashed_address: B256,
     /// The set of storage slot prefixes that have changed.
-    pub changed_prefixes: PrefixSet,
+    pub prefix_set: PrefixSet,
 }
 
 impl<T, H> StorageRoot<T, H> {
@@ -376,13 +343,13 @@ impl<T, H> StorageRoot<T, H> {
             trie_cursor_factory,
             hashed_cursor_factory,
             hashed_address,
-            changed_prefixes: PrefixSetMut::default().freeze(),
+            prefix_set: PrefixSetMut::default().freeze(),
         }
     }
 
     /// Set the changed prefixes.
-    pub fn with_changed_prefixes(mut self, prefixes: PrefixSet) -> Self {
-        self.changed_prefixes = prefixes;
+    pub fn with_prefix_set(mut self, prefix_set: PrefixSet) -> Self {
+        self.prefix_set = prefix_set;
         self
     }
 
@@ -392,7 +359,7 @@ impl<T, H> StorageRoot<T, H> {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
             hashed_address: self.hashed_address,
-            changed_prefixes: self.changed_prefixes,
+            prefix_set: self.prefix_set,
         }
     }
 
@@ -402,7 +369,7 @@ impl<T, H> StorageRoot<T, H> {
             trie_cursor_factory,
             hashed_cursor_factory: self.hashed_cursor_factory,
             hashed_address: self.hashed_address,
-            changed_prefixes: self.changed_prefixes,
+            prefix_set: self.prefix_set,
         }
     }
 }
@@ -429,7 +396,7 @@ where
     /// # Returns
     ///
     /// The storage root and storage trie updates for a given address.
-    pub fn root_with_updates(&self) -> Result<(B256, usize, TrieUpdates), StorageRootError> {
+    pub fn root_with_updates(self) -> Result<(B256, usize, TrieUpdates), StorageRootError> {
         self.calculate(true)
     }
 
@@ -438,13 +405,13 @@ where
     /// # Returns
     ///
     /// The storage root.
-    pub fn root(&self) -> Result<B256, StorageRootError> {
+    pub fn root(self) -> Result<B256, StorageRootError> {
         let (root, _, _) = self.calculate(false)?;
         Ok(root)
     }
 
     fn calculate(
-        &self,
+        self,
         retain_updates: bool,
     ) -> Result<(B256, usize, TrieUpdates), StorageRootError> {
         trace!(target: "trie::storage_root", hashed_address = ?self.hashed_address, "calculating storage root");
@@ -460,8 +427,7 @@ where
         }
 
         let trie_cursor = self.trie_cursor_factory.storage_tries_cursor(self.hashed_address)?;
-        let walker = TrieWalker::new(trie_cursor, self.changed_prefixes.clone())
-            .with_updates(retain_updates);
+        let walker = TrieWalker::new(trie_cursor, self.prefix_set).with_updates(retain_updates);
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
 
@@ -586,7 +552,7 @@ mod tests {
         let mut storage_changes = PrefixSetMut::default();
         storage_changes.insert(Nibbles::unpack(modified_key));
         let loader = StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address)
-            .with_changed_prefixes(storage_changes.freeze());
+            .with_prefix_set(storage_changes.freeze());
         let incremental_root = loader.root().unwrap();
 
         assert_eq!(modified_root, incremental_root);
@@ -1001,7 +967,10 @@ mod tests {
                 .unwrap();
 
         let (root, trie_updates) = StateRoot::from_tx(tx.tx_ref())
-            .with_changed_account_prefixes(prefix_set.freeze())
+            .with_prefix_sets(TriePrefixSets {
+                account_prefix_set: prefix_set.freeze(),
+                ..Default::default()
+            })
             .root_with_updates()
             .unwrap();
         assert_eq!(root, expected_state_root);
@@ -1053,7 +1022,10 @@ mod tests {
             ]);
 
             let (root, trie_updates) = StateRoot::from_tx(tx.tx_ref())
-                .with_changed_account_prefixes(account_prefix_set.freeze())
+                .with_prefix_sets(TriePrefixSets {
+                    account_prefix_set: account_prefix_set.freeze(),
+                    ..Default::default()
+                })
                 .root_with_updates()
                 .unwrap();
             assert_eq!(root, computed_expected_root);
@@ -1110,7 +1082,10 @@ mod tests {
             ]);
 
             let (root, trie_updates) = StateRoot::from_tx(tx.tx_ref())
-                .with_changed_account_prefixes(account_prefix_set.freeze())
+                .with_prefix_sets(TriePrefixSets {
+                    account_prefix_set: account_prefix_set.freeze(),
+                    ..Default::default()
+                })
                 .root_with_updates()
                 .unwrap();
             assert_eq!(root, computed_expected_root);
@@ -1205,14 +1180,14 @@ mod tests {
                     let should_generate_changeset = !state.is_empty();
                     let mut changes = PrefixSetMut::default();
                     for (hashed_address, balance) in accounts.clone() {
-                        hashed_account_cursor.upsert(hashed_address, Account { balance,..Default::default() }).unwrap();
+                        hashed_account_cursor.upsert(hashed_address, Account { balance, ..Default::default() }).unwrap();
                         if should_generate_changeset {
                             changes.insert(Nibbles::unpack(hashed_address));
                         }
                     }
 
                     let (state_root, trie_updates) = StateRoot::from_tx(tx.tx_ref())
-                        .with_changed_account_prefixes(changes.freeze())
+                        .with_prefix_sets(TriePrefixSets { account_prefix_set: changes.freeze(), ..Default::default() })
                         .root_with_updates()
                         .unwrap();
 

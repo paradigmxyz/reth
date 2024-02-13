@@ -31,23 +31,20 @@ pub struct Command {
 impl Command {
     /// Execute `db get` command
     pub fn execute<DB: Database>(self, tool: &DbTool<'_, DB>) -> eyre::Result<()> {
-        self.table.view(&GetValueViewer { tool, args: &self })?;
-
-        Ok(())
+        self.table.view(&GetValueViewer { tool, args: &self })
     }
 
     /// Get an instance of key for given table
     pub fn table_key<T: Table>(&self) -> Result<T::Key, eyre::Error> {
-        assert_eq!(T::NAME, self.table.name());
-
-        serde_json::from_str::<T::Key>(&self.key).map_err(|e| eyre::eyre!(e))
+        assert_eq!(T::TABLE, self.table);
+        serde_json::from_str::<T::Key>(&self.key).map_err(Into::into)
     }
 
     /// Get an instance of subkey for given dupsort table
     fn table_subkey<T: DupSort>(&self) -> Result<T::SubKey, eyre::Error> {
-        assert_eq!(T::NAME, self.table.name());
+        assert_eq!(T::TABLE, self.table);
         serde_json::from_str::<T::SubKey>(&self.subkey.clone().unwrap_or_default())
-            .map_err(|e| eyre::eyre!(e))
+            .map_err(Into::into)
     }
 }
 

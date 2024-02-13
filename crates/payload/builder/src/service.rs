@@ -21,8 +21,10 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, info, trace, warn};
 
+type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
+
 /// A communication channel to the [PayloadBuilderService] that can retrieve payloads.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PayloadStore<Engine: EngineTypes> {
     inner: PayloadBuilderHandle<Engine>,
 }
@@ -62,6 +64,15 @@ where
         id: PayloadId,
     ) -> Option<Result<Engine::PayloadBuilderAttributes, PayloadBuilderError>> {
         self.inner.payload_attributes(id).await
+    }
+}
+
+impl<Engine> Clone for PayloadStore<Engine>
+where
+    Engine: EngineTypes,
+{
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
     }
 }
 
@@ -161,7 +172,10 @@ where
     }
 }
 
-impl<Engine: EngineTypes> Clone for PayloadBuilderHandle<Engine> {
+impl<Engine> Clone for PayloadBuilderHandle<Engine>
+where
+    Engine: EngineTypes,
+{
     fn clone(&self) -> Self {
         Self { to_service: self.to_service.clone() }
     }
@@ -402,9 +416,6 @@ where
         }
     }
 }
-
-// TODO: make generic over built payload type
-type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
 
 /// Message type for the [PayloadBuilderService].
 pub enum PayloadServiceCommand<Engine: EngineTypes> {

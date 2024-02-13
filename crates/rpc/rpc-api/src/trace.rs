@@ -3,7 +3,7 @@ use reth_primitives::{BlockId, Bytes, B256};
 use reth_rpc_types::{
     state::StateOverride,
     trace::{filter::TraceFilter, parity::*},
-    BlockOverrides, CallRequest, Index,
+    BlockOverrides, Index, TransactionRequest,
 };
 use std::collections::HashSet;
 
@@ -15,7 +15,7 @@ pub trait TraceApi {
     #[method(name = "call")]
     async fn trace_call(
         &self,
-        call: CallRequest,
+        call: TransactionRequest,
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
         state_overrides: Option<StateOverride>,
@@ -28,7 +28,7 @@ pub trait TraceApi {
     #[method(name = "callMany")]
     async fn trace_call_many(
         &self,
-        calls: Vec<(CallRequest, HashSet<TraceType>)>,
+        calls: Vec<(TransactionRequest, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> RpcResult<Vec<TraceResults>>;
 
