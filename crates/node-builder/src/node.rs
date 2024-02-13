@@ -9,8 +9,10 @@ use reth_node_core::{
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_tasks::TaskExecutor;
-use reth_transaction_pool::TransactionPool;
+
 use std::marker::PhantomData;
+
+use crate::rpc::RpcRegistry;
 
 /// The type that configures stateless node types, the node's primitive types.
 pub trait NodeTypes: Send + Sync + 'static {
@@ -81,11 +83,28 @@ pub struct FullNode<Node: FullNodeComponents> {
     pub(crate) network: NetworkHandle,
     pub(crate) provider: Node::Provider,
     pub(crate) payload_builder: PayloadBuilderHandle<Node::Engine>,
-    pub(crate) tasks: TaskExecutor,
-    pub(crate) handles: RethRpcServerHandles,
-    // TODO add rpc registry
+    pub(crate) executor: TaskExecutor,
+    pub(crate) rpc_server_handles: RethRpcServerHandles,
+    pub(crate) rpc_registry: RpcRegistry<Node>,
     /// The initial node config.
     pub(crate) config: NodeConfig,
     /// The data dir of the node.
     pub(crate) data_dir: ChainPath<DataDirPath>,
+}
+
+impl<Node: FullNodeComponents> Clone for FullNode<Node> {
+    fn clone(&self) -> Self {
+        Self {
+            evm_config: self.evm_config.clone(),
+            pool: self.pool.clone(),
+            network: self.network.clone(),
+            provider: self.provider.clone(),
+            payload_builder: self.payload_builder.clone(),
+            executor: self.executor.clone(),
+            rpc_server_handles: self.rpc_server_handles.clone(),
+            rpc_registry: self.rpc_registry.clone(),
+            config: self.config.clone(),
+            data_dir: self.data_dir.clone(),
+        }
+    }
 }

@@ -39,7 +39,7 @@ pub struct FullNodeComponentsAdapter<Node: FullNodeTypes, Pool> {
     pub(crate) network: NetworkHandle,
     pub(crate) provider: Node::Provider,
     pub(crate) payload_builder: PayloadBuilderHandle<Node::Engine>,
-    pub(crate) tasks: TaskExecutor,
+    pub(crate) executor: TaskExecutor,
 }
 
 impl<Node, Pool> FullNodeTypes for FullNodeComponentsAdapter<Node, Pool>
@@ -89,7 +89,23 @@ where
     }
 
     fn executor(&self) -> &TaskExecutor {
-        &self.tasks
+        &self.executor
+    }
+}
+
+impl<Node: FullNodeTypes, Pool> Clone for FullNodeComponentsAdapter<Node, Pool>
+where
+    Pool: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            evm_config: self.evm_config.clone(),
+            pool: self.pool.clone(),
+            network: self.network.clone(),
+            provider: self.provider.clone(),
+            payload_builder: self.payload_builder.clone(),
+            executor: self.executor.clone(),
+        }
     }
 }
 

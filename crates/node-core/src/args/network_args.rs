@@ -11,7 +11,7 @@ use secp256k1::SecretKey;
 use std::{net::Ipv4Addr, path::PathBuf, sync::Arc};
 
 /// Parameters for configuring the network more granularity via CLI
-#[derive(Debug, Args, PartialEq, Eq)]
+#[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[clap(next_help_heading = "Networking")]
 pub struct NetworkArgs {
     /// Disable the discovery service.
@@ -160,7 +160,7 @@ impl Default for NetworkArgs {
 }
 
 /// Arguments to setup discovery
-#[derive(Debug, Args, PartialEq, Eq)]
+#[derive(Debug, Clone, Args, PartialEq, Eq)]
 pub struct DiscoveryArgs {
     /// Disable the discovery service.
     #[arg(short, long, default_value_if("dev", "true", "true"))]

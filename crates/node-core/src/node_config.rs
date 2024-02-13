@@ -136,7 +136,7 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 ///     let builder = builder.with_rpc(rpc);
 /// }
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NodeConfig {
     /// The test database
     pub database: DatabaseBuilder,

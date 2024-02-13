@@ -1,14 +1,7 @@
 //! Customizable node builder.
 
-use crate::{
-    components::{
-        FullNodeComponents, FullNodeComponentsAdapter, NodeComponents, NodeComponentsBuilder,
-    },
-    hooks::NodeHooks,
-    node::{FullNode, FullNodeTypes, FullNodeTypesAdapter, NodeTypes},
-    rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
-    NodeHandle,
-};
+#![allow(clippy::type_complexity, missing_debug_implementations)]
+
 use eyre::Context;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
@@ -20,12 +13,13 @@ use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
-use reth_interfaces::{consensus::Consensus, p2p::either::EitherDownloader};
+use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkEvents, NetworkHandle};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath},
     events::cl::ConsensusLayerHealthEvents,
+    exit::NodeExitFuture,
     init::init_genesis,
     node_config::NodeConfig,
     primitives::{kzg::KzgSettings, Head},
@@ -42,8 +36,18 @@ use reth_rpc_engine_api::EngineApi;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{PoolConfig, TransactionPool};
-use std::{marker::PhantomData, path::PathBuf, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
+
+use crate::{
+    components::{
+        FullNodeComponents, FullNodeComponentsAdapter, NodeComponents, NodeComponentsBuilder,
+    },
+    hooks::NodeHooks,
+    node::{FullNode, FullNodeTypes, FullNodeTypesAdapter, NodeTypes},
+    rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
+    NodeHandle,
+};
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -398,20 +402,20 @@ where
 
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
-        let node_adapter = FullNodeComponentsAdapter {
+        let node_components = FullNodeComponentsAdapter {
             evm_config: evm_config.clone(),
             pool: transaction_pool.clone(),
             network: network.clone(),
             provider: blockchain_db.clone(),
             payload_builder: payload_builder.clone(),
-            tasks: executor.clone(),
+            executor: executor.clone(),
         };
         debug!(target: "reth::cli", "calling on_component_initialized hook");
-        on_component_initialized.on_event(node_adapter)?;
+        on_component_initialized.on_event(node_components.clone())?;
 
         // create pipeline
         let network_client = network.fetch_client().await?;
-        let (consensus_engine_tx, mut consensus_engine_rx) = unbounded_channel();
+        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
         let max_block = config.max_block(&network_client, provider_factory.clone()).await?;
 
         // Configure the pipeline
@@ -547,7 +551,15 @@ where
         config.adjust_instance_ports();
 
         // Start RPC servers
-        // TODO
+
+        let (rpc_server_handles, rpc_registry) = crate::rpc::launch_rpc_servers(
+            node_components.clone(),
+            engine_api,
+            &config,
+            jwt_secret,
+            rpc,
+        )
+        .await?;
 
         // Run consensus engine to completion
         let (tx, rx) = oneshot::channel();
@@ -557,26 +569,36 @@ where
             let _ = tx.send(res);
         });
 
-        // let full_node = FullNode {
-        //     evm_config: (),
-        //     pool: (),
-        //     network,
-        //     provider: (),
-        //     payload_builder: (),
-        //     tasks: (),
-        //     handles: RethRpcServerHandles {},
-        // };
-        // // Notify on node started
-        // on_node_started.on_event(full_node)?;
+        let FullNodeComponentsAdapter {
+            evm_config,
+            pool,
+            network,
+            provider,
+            payload_builder,
+            executor,
+        } = node_components;
 
-        // NodeHandle {
-        //     node: (),
-        //     config,
-        //     rpc_handles: RethRpcServerHandles {},
-        //     data_dir,
-        //     node_exit_future: (),
-        // }
-        todo!()
+        let full_node = FullNode {
+            evm_config,
+            pool,
+            network,
+            provider,
+            payload_builder,
+            executor,
+            rpc_server_handles,
+            rpc_registry,
+            config,
+            data_dir,
+        };
+        // Notify on node started
+        on_node_started.on_event(full_node.clone())?;
+
+        let handle = NodeHandle {
+            node_exit_future: NodeExitFuture::new(rx, full_node.config.debug.terminate),
+            node: full_node,
+        };
+
+        Ok(handle)
     }
 
     /// Check that the builder can be launched
@@ -609,6 +631,7 @@ pub struct BuilderContext<Node: FullNodeTypes> {
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
+    /// Returns the configured provider to interact with the blockchain.
     pub fn provider(&self) -> &Node::Provider {
         &self.provider
     }
@@ -671,7 +694,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                 &self.reth_config,
                 self.provider.clone(),
                 self.executor.clone(),
-                self.head.clone(),
+                self.head,
                 self.data_dir(),
             )
             .await

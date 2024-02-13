@@ -1,3 +1,5 @@
+//! Helper provider traits to encapsulate all provider traits for simplicity.
+
 use reth_db::database::Database;
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
