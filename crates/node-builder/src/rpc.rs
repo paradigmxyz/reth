@@ -195,12 +195,12 @@ pub struct RpcContext<'a, Node: FullNodeComponents> {
     /// The node components.
     pub(crate) node: Node,
 
+    /// Gives access to the node configuration.
     pub(crate) config: &'a NodeConfig,
 
     /// A Helper type the holds instances of the configured modules.
     ///
     /// This provides easy access to rpc handlers, such as [RethModuleRegistry::eth_api].
-    // TODO simplify registry trait bounds
     pub registry: &'a mut RpcRegistry<Node>,
     /// Holds installed modules per transport type.
     ///
