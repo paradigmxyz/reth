@@ -6369,6 +6369,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-node-builder"
+version = "0.1.0-alpha.17"
+dependencies = [
+ "confy",
+ "eyre",
+ "fdlimit",
+ "futures",
+ "reth-auto-seal-consensus",
+ "reth-beacon-consensus",
+ "reth-blockchain-tree",
+ "reth-config",
+ "reth-db",
+ "reth-interfaces",
+ "reth-network",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-provider",
+ "reth-prune",
+ "reth-revm",
+ "reth-rpc",
+ "reth-rpc-engine-api",
+ "reth-snapshot",
+ "reth-stages",
+ "reth-tasks",
+ "reth-tracing",
+ "reth-transaction-pool",
+ "tokio",
+]
+
+[[package]]
 name = "reth-node-core"
 version = "0.1.0-alpha.18"
 dependencies = [
@@ -6441,10 +6473,19 @@ dependencies = [
 name = "reth-node-ethereum"
 version = "0.1.0-alpha.18"
 dependencies = [
+ "eyre",
+ "reth-basic-payload-builder",
+ "reth-db",
+ "reth-ethereum-payload-builder",
+ "reth-network",
  "reth-node-api",
+ "reth-node-builder",
  "reth-payload-builder",
  "reth-primitives",
+ "reth-provider",
  "reth-rpc-types",
+ "reth-tracing",
+ "reth-transaction-pool",
  "serde",
 ]
 

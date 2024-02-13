@@ -1,5 +1,6 @@
 //! This contains the [EngineTypes] trait and implementations for ethereum mainnet types.
 
+use core::fmt;
 use reth_primitives::{ChainSpec, Hardfork};
 
 /// Contains traits to abstract over payload attributes types and default implementations of the
@@ -15,8 +16,10 @@ pub use error::AttributesValidationError;
 pub mod payload;
 pub use payload::PayloadOrAttributes;
 
-/// The types that are used by the engine.
-pub trait EngineTypes: serde::de::DeserializeOwned + Send + Sync + Clone {
+/// The types that are used by the engine API.
+pub trait EngineTypes:
+    serde::de::DeserializeOwned + fmt::Debug + Unpin + Send + Sync + Clone
+{
     /// The RPC payload attributes type the CL node emits via the engine API.
     type PayloadAttributes: PayloadAttributes + Unpin;
 
