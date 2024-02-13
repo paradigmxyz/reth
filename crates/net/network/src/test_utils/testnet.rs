@@ -4,6 +4,7 @@ use crate::{
     builder::ETH_REQUEST_CHANNEL_CAPACITY,
     error::NetworkError,
     eth_requests::EthRequestHandler,
+    peers::PeersHandle,
     protocol::IntoRlpxSubProtocol,
     transactions::{TransactionsHandle, TransactionsManager},
     NetworkConfig, NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkHandle,
@@ -473,6 +474,10 @@ impl<Pool> PeerHandle<Pool> {
     /// Returns the [`PeerId`] used in the network.
     pub fn peer_id(&self) -> &PeerId {
         self.network.peer_id()
+    }
+
+    pub fn peer_handle(&self) -> &PeersHandle {
+        self.network.peers_handle()
     }
 
     pub fn local_addr(&self) -> SocketAddr {
