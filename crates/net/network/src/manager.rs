@@ -16,6 +16,7 @@
 //! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the RLPx session.
 
 use crate::{
+    budget::{BUDGET_POLL_ONCE, DEFAULT_BUDGET_TRY_DRAIN_STREAM},
     config::NetworkConfig,
     discovery::Discovery,
     error::{NetworkError, ServiceKind},
@@ -26,6 +27,7 @@ use crate::{
     metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     network::{NetworkHandle, NetworkHandleMessage},
     peers::{PeersHandle, PeersManager},
+    poll_nested_stream_with_yield_points,
     protocol::IntoRlpxSubProtocol,
     session::SessionManager,
     state::NetworkState,
@@ -642,25 +644,6 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        // poll new block imports
-        while let Poll::Ready(outcome) = this.block_import.poll(cx) {
-            this.on_block_import_result(outcome);
-        }
-
-        // process incoming messages from a handle
-        loop {
-            match this.from_handle_rx.poll_next_unpin(cx) {
-                Poll::Pending => break,
-                Poll::Ready(None) => {
-                    // This is only possible if the channel was deliberately closed since we always
-                    // have an instance of `NetworkHandle`
-                    error!("Network message channel closed.");
-                    return Poll::Ready(())
-                }
-                Poll::Ready(Some(msg)) => this.on_handle_message(msg),
-            };
-        }
-
         // This loop drives the entire state of network and does a lot of work.
         // Under heavy load (many messages/events), data may arrive faster than it can be processed
         // (incoming messages/requests -> events), and it is possible that more data has already
@@ -673,13 +656,36 @@ where
         // If the budget is exhausted we manually yield back control to the (coop) scheduler. This
         // manual yield point should prevent situations where polling appears to be frozen. See also <https://tokio.rs/blog/2020-04-preemption>
         // And tokio's docs on cooperative scheduling <https://docs.rs/tokio/latest/tokio/task/#cooperative-scheduling>
-        let mut budget = 1024;
+        let mut budget_tx_manager = 1024;
 
         loop {
-            // advance the swarm
-            match this.swarm.poll_next_unpin(cx) {
-                Poll::Pending | Poll::Ready(None) => break,
-                Poll::Ready(Some(event)) => {
+            // poll new block imports (dummy stream)
+            let maybe_more_block_imports = poll_nested_stream_with_yield_points!(
+                "net",
+                "Block imports stream",
+                BUDGET_POLL_ONCE,
+                this.block_import.poll_next_unpin(cx),
+                |outcome| this.on_block_import_result(outcome),
+            );
+
+            // process incoming messages from a handle
+            //
+            // will only be closed if the channel was deliberately closed since we always have an
+            // instance of `NetworkHandle`
+            let maybe_more_handle_messages = poll_nested_stream_with_yield_points!(
+                "net",
+                "Network message channel",
+                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+                this.from_handle_rx.poll_next_unpin(cx),
+                |msg| this.on_handle_message(msg),
+            );
+
+            let maybe_more_swarm_events = poll_nested_stream_with_yield_points!(
+                "net",
+                "Swarm events stream",
+                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+                this.swarm.poll_next_unpin(cx),
+                |event| {
                     // handle event
                     match event {
                         SwarmEvent::ValidMessage { peer_id, message } => {
@@ -918,19 +924,24 @@ where
                             );
                         }
                     }
-                }
+                },
+            );
+
+            // all streams are fully drained and import futures pending
+            if !maybe_more_block_imports && !maybe_more_handle_messages && !maybe_more_swarm_events
+            {
+                return Poll::Pending
             }
 
-            // ensure we still have enough budget for another iteration
-            budget -= 1;
-            if budget == 0 {
+            // some streams are still ready, continue looping if there is still budget for another
+            // iteration
+            budget_tx_manager -= 1;
+            if budget_tx_manager <= 0 {
                 // make sure we're woken up again
                 cx.waker().wake_by_ref();
-                break
+                return Poll::Pending
             }
         }
-
-        Poll::Pending
     }
 }
 
