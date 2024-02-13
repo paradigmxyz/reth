@@ -118,8 +118,7 @@ impl<T: PoolTransaction> ValidTransaction<T> {
     #[inline]
     pub(crate) const fn transaction(&self) -> &T {
         match self {
-            Self::Valid(transaction) => transaction,
-            Self::ValidWithSidecar { transaction, .. } => transaction,
+            Self::Valid(transaction) | Self::ValidWithSidecar { transaction, .. } => transaction,
         }
     }
 

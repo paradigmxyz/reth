@@ -27,6 +27,7 @@ alloy-trie = { workspace = true, features = ["serde"] }
 ethers-core = { workspace = true, default-features = false, optional = true }
 nybbles = { version = "0.1.2", features = ["serde", "rlp"] }
 alloy-genesis.workspace = true
+alloy-eips.workspace = true
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
 
@@ -42,7 +43,7 @@ bytes.workspace = true
 byteorder = "1"
 clap = { workspace = true, features = ["derive"], optional = true }
 derive_more = "0.99"
-itertools = "0.11"
+itertools.workspace = true
 modular-bitfield = "0.11.2"
 num_enum = "0.7"
 once_cell.workspace = true
@@ -54,6 +55,7 @@ sucds = "~0.6"
 tempfile.workspace = true
 thiserror.workspace = true
 zstd = { version = "0.12", features = ["experimental"] }
+cfg-if = "1.0.0"
 
 # `test-utils` feature
 hash-db = { version = "~0.15", optional = true }

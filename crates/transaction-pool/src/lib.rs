@@ -268,6 +268,11 @@ where
     pub fn is_empty(&self) -> bool {
         self.pool.is_empty()
     }
+
+    /// Returns whether or not the pool is over its configured size and transaction count limits.
+    pub fn is_exceeded(&self) -> bool {
+        self.pool.is_exceeded()
+    }
 }
 
 impl<Client, S> EthTransactionPool<Client, S>

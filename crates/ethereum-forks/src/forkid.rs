@@ -10,6 +10,7 @@ use arbitrary::Arbitrary;
 use crc::*;
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest_derive::Arbitrary as PropTestArbitrary;
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
@@ -22,18 +23,10 @@ use thiserror::Error;
 const CRC_32_IEEE: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 
 /// `CRC32` hash of all previous forks starting from genesis block.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(PropTestArbitrary, Arbitrary))]
 #[derive(
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    RlpEncodableWrapper,
-    RlpDecodableWrapper,
-    RlpMaxEncodedLen,
-    Serialize,
-    Deserialize,
+    Clone, Copy, PartialEq, Eq, Hash, RlpEncodableWrapper, RlpDecodableWrapper, RlpMaxEncodedLen,
 )]
 pub struct ForkHash(pub [u8; 4]);
 
@@ -75,7 +68,8 @@ where
 }
 
 /// How to filter forks.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ForkFilterKey {
     /// By block number activation.
     Block(BlockNumber),
@@ -111,20 +105,10 @@ impl From<ForkFilterKey> for u64 {
 
 /// A fork identifier as defined by EIP-2124.
 /// Serves as the chain compatibility identifier.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(PropTestArbitrary, Arbitrary))]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    RlpEncodable,
-    RlpDecodable,
-    RlpMaxEncodedLen,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable, RlpMaxEncodedLen)]
+
 pub struct ForkId {
     /// CRC32 checksum of the all fork blocks and timestamps from genesis.
     pub hash: ForkHash,
@@ -157,7 +141,8 @@ pub enum ValidationError {
 
 /// Filter that describes the state of blockchain and can be used to check incoming `ForkId`s for
 /// compatibility.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForkFilter {
     /// The forks in the filter are keyed by `(timestamp, block)`. This ensures that block-based
     /// forks (`time == 0`) are processed before time-based forks as required by
@@ -335,7 +320,8 @@ pub struct ForkTransition {
     pub past: ForkId,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Cache {
     // An epoch is a period between forks.
     // When we progress from one fork to the next one we move to the next epoch.

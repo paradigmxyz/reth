@@ -53,7 +53,7 @@ pub struct SessionManagerMetrics {
     pub(crate) total_dial_successes: Counter,
 }
 
-/// Metrics for the [`TransactionsManager`].
+/// Metrics for the [`TransactionsManager`](crate::transactions::TransactionsManager).
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct TransactionsManagerMetrics {
@@ -67,13 +67,16 @@ pub struct TransactionsManagerMetrics {
     pub(crate) messages_with_already_seen_transactions: Counter,
     /// Number of transactions about to be imported into the pool.
     pub(crate) pending_pool_imports: Gauge,
-    /// Number of inflight requests at which the [`TransactionPool`] is considered to be at
+    /// Number of inflight requests at which the
+    /// [`TransactionPool`](reth_transaction_pool::TransactionPool) is considered to be at
     /// capacity. Note, this is not a limit to the number of inflight requests, but a health
     /// measure.
     pub(crate) capacity_pending_pool_imports: Counter,
-    /// Currently active outgoing GetPooledTransactions requests.
+    /// Currently active outgoing [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions)
+    /// requests.
     pub(crate) inflight_transaction_requests: Gauge,
-    /// Number of inflight requests at which the [`TransactionFetcher`] is considered to be at
+    /// Number of inflight requests at which the
+    /// [`TransactionFetcher`](crate::transactions::TransactionFetcher) is considered to be at
     /// capacity. Note, this is not a limit to the number of inflight requests, but a health
     /// measure.
     pub(crate) capacity_inflight_requests: Counter,

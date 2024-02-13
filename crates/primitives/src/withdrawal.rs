@@ -44,7 +44,13 @@ pub struct Withdrawals(Vec<Withdrawal>);
 impl Withdrawals {
     /// Create a new Withdrawals instance.
     pub fn new(withdrawals: Vec<Withdrawal>) -> Self {
-        Withdrawals(withdrawals)
+        Self(withdrawals)
+    }
+
+    /// Calculate the total size, including capacity, of the Withdrawals.
+    #[inline]
+    pub fn total_size(&self) -> usize {
+        self.size() + self.capacity() * std::mem::size_of::<Withdrawal>()
     }
 
     /// Calculate a heuristic for the in-memory size of the [Withdrawals].

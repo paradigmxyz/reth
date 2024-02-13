@@ -210,13 +210,13 @@ pub fn insert_genesis_header<DB: Database>(
     tx: &<DB as Database>::TXMut,
     chain: Arc<ChainSpec>,
 ) -> ProviderResult<()> {
-    let header = chain.sealed_genesis_header();
+    let (header, block_hash) = chain.sealed_genesis_header().split();
 
-    tx.put::<tables::CanonicalHeaders>(0, header.hash)?;
-    tx.put::<tables::HeaderNumbers>(header.hash, 0)?;
+    tx.put::<tables::CanonicalHeaders>(0, block_hash)?;
+    tx.put::<tables::HeaderNumbers>(block_hash, 0)?;
     tx.put::<tables::BlockBodyIndices>(0, Default::default())?;
     tx.put::<tables::HeaderTD>(0, header.difficulty.into())?;
-    tx.put::<tables::Headers>(0, header.header)?;
+    tx.put::<tables::Headers>(0, header)?;
 
     Ok(())
 }

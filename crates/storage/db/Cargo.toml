@@ -38,11 +38,13 @@ parking_lot.workspace = true
 derive_more.workspace = true
 eyre.workspace = true
 paste = "1.0"
+rustc-hash = "1.1.0"
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
+strum = { workspace = true, features = ["derive"] }
 once_cell.workspace = true
 
 [dev-dependencies]

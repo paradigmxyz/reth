@@ -1,15 +1,16 @@
 //! Support for handling events emitted by node components.
 
-use crate::commands::node::cl_events::ConsensusLayerHealthEvent;
+use crate::events::cl::ConsensusLayerHealthEvent;
 use futures::Stream;
-use reth_beacon_consensus::BeaconConsensusEngineEvent;
+use reth_beacon_consensus::{BeaconConsensusEngineEvent, ForkchoiceStatus};
 use reth_db::{database::Database, database_metrics::DatabaseMetadata};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
 use reth_primitives::{
+    constants,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    BlockNumber,
+    BlockNumber, B256,
 };
 use reth_prune::PrunerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
@@ -18,7 +19,7 @@ use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::time::Interval;
 use tracing::{info, warn};
@@ -38,11 +39,28 @@ struct NodeState<DB> {
     current_stage: Option<CurrentStage>,
     /// The latest block reached by either pipeline or consensus engine.
     latest_block: Option<BlockNumber>,
+    /// The time of the latest block seen by the pipeline
+    latest_block_time: Option<u64>,
+    /// Hash of the head block last set by fork choice update
+    head_block_hash: Option<B256>,
+    /// Hash of the safe block last set by fork choice update
+    safe_block_hash: Option<B256>,
+    /// Hash of finalized block last set by fork choice update
+    finalized_block_hash: Option<B256>,
 }
 
 impl<DB> NodeState<DB> {
     fn new(db: DB, network: Option<NetworkHandle>, latest_block: Option<BlockNumber>) -> Self {
-        Self { db, network, current_stage: None, latest_block }
+        Self {
+            db,
+            network,
+            current_stage: None,
+            latest_block,
+            latest_block_time: None,
+            head_block_hash: None,
+            safe_block_hash: None,
+            finalized_block_hash: None,
+        }
     }
 
     fn num_connected_peers(&self) -> usize {
@@ -66,17 +84,12 @@ impl<DB> NodeState<DB> {
                     target,
                 };
 
-                let stage_progress = OptionalField(
-                    checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
-                );
-
                 if let Some(stage_eta) = current_stage.eta.fmt_for_stage(stage_id) {
                     info!(
                         pipeline_stages = %pipeline_stages_progress,
                         stage = %stage_id,
                         checkpoint = %checkpoint.block_number,
                         target = %OptionalField(target),
-                        %stage_progress,
                         %stage_eta,
                         "Executing stage",
                     );
@@ -86,7 +99,6 @@ impl<DB> NodeState<DB> {
                         stage = %stage_id,
                         checkpoint = %checkpoint.block_number,
                         target = %OptionalField(target),
-                        %stage_progress,
                         "Executing stage",
                     );
                 }
@@ -155,24 +167,45 @@ impl<DB> NodeState<DB> {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
                 let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
                     state;
-                info!(
-                    ?head_block_hash,
-                    ?safe_block_hash,
-                    ?finalized_block_hash,
-                    ?status,
-                    "Forkchoice updated"
-                );
+                if status != ForkchoiceStatus::Valid ||
+                    (self.safe_block_hash != Some(safe_block_hash) &&
+                        self.finalized_block_hash != Some(finalized_block_hash))
+                {
+                    info!(
+                        ?head_block_hash,
+                        ?safe_block_hash,
+                        ?finalized_block_hash,
+                        ?status,
+                        "Forkchoice updated"
+                    );
+                }
+                self.head_block_hash = Some(head_block_hash);
+                self.safe_block_hash = Some(safe_block_hash);
+                self.finalized_block_hash = Some(finalized_block_hash);
             }
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(block) => {
-                info!(number=block.number, hash=?block.hash, "Block added to canonical chain");
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed) => {
+                info!(
+                    number=block.number,
+                    hash=?block.hash(),
+                    peers=self.num_connected_peers(),
+                    txs=block.body.len(),
+                    mgas=%format!("{:.3}", block.header.gas_used as f64 / constants::MGAS_TO_GAS as f64),
+                    full=%format!("{:.1}%", block.header.gas_used as f64 * 100.0 / block.header.gas_limit as f64),
+                    base_fee=%format!("{:.2}gwei", block.header.base_fee_per_gas.unwrap_or(0) as f64 / constants::GWEI_TO_WEI as f64),
+                    blobs=block.header.blob_gas_used.unwrap_or(0) / constants::eip4844::DATA_GAS_PER_BLOB,
+                    excess_blobs=block.header.excess_blob_gas.unwrap_or(0) / constants::eip4844::DATA_GAS_PER_BLOB,
+                    ?elapsed,
+                    "Block added to canonical chain"
+                );
             }
             BeaconConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
                 self.latest_block = Some(head.number);
+                self.latest_block_time = Some(head.timestamp);
 
-                info!(number=head.number, hash=?head.hash, ?elapsed, "Canonical chain committed");
+                info!(number=head.number, hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
             BeaconConsensusEngineEvent::ForkBlockAdded(block) => {
-                info!(number=block.number, hash=?block.hash, "Block added to fork chain");
+                info!(number=block.number, hash=?block.hash(), "Block added to fork chain");
             }
         }
     }
@@ -357,13 +390,19 @@ where
                     );
                 }
             } else if let Some(latest_block) = this.state.latest_block {
-                info!(
-                    target: "reth::cli",
-                    connected_peers = this.state.num_connected_peers(),
-                    %freelist,
-                    %latest_block,
-                    "Status"
-                );
+                let now =
+                    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+                if now - this.state.latest_block_time.unwrap_or(0) > 60 {
+                    // Once we start receiving consensus nodes, don't emit status unless stalled for
+                    // 1 minute
+                    info!(
+                        target: "reth::cli",
+                        connected_peers = this.state.num_connected_peers(),
+                        %freelist,
+                        %latest_block,
+                        "Status"
+                    );
+                }
             } else {
                 info!(
                     target: "reth::cli",
@@ -415,7 +454,9 @@ struct Eta {
 impl Eta {
     /// Update the ETA given the checkpoint, if possible.
     fn update(&mut self, checkpoint: StageCheckpoint) {
-        let Some(current) = checkpoint.entities() else { return };
+        let Some(current) = checkpoint.entities() else {
+            return;
+        };
 
         if let Some(last_checkpoint_time) = &self.last_checkpoint_time {
             let processed_since_last = current.processed - self.last_checkpoint.processed;
@@ -432,13 +473,20 @@ impl Eta {
         self.last_checkpoint_time = Some(Instant::now());
     }
 
+    /// Returns `true` if the ETA is available, i.e. at least one checkpoint has been reported.
+    fn is_available(&self) -> bool {
+        self.eta.zip(self.last_checkpoint_time).is_some()
+    }
+
     /// Format ETA for a given stage.
     ///
     /// NOTE: Currently ETA is enabled only for the stages that have predictable progress.
     /// It's not the case for network-dependent ([StageId::Headers] and [StageId::Bodies]) and
     /// [StageId::Execution] stages.
     fn fmt_for_stage(&self, stage: StageId) -> Option<String> {
-        if matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution) {
+        if !self.is_available() ||
+            matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution)
+        {
             None
         } else {
             Some(self.to_string())

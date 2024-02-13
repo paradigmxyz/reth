@@ -147,7 +147,7 @@ where
         mut transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         #[cfg(feature = "optimism")]
-        if transaction.is_deposit() {
+        if transaction.is_deposit() || transaction.is_eip4844() {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TxTypeNotSupported.into(),
@@ -346,7 +346,7 @@ where
                 info.l1_tx_data_fee(
                     &self.chain_spec,
                     block.timestamp,
-                    &encoded.freeze().into(),
+                    &encoded,
                     transaction.is_deposit(),
                 )
             }) {
