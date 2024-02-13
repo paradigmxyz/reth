@@ -13,6 +13,8 @@ workspace = true
 [dependencies]
 
 ## reth
+reth-auto-seal-consensus.workspace = true
+reth-beacon-consensus.workspace = true
 reth-blockchain-tree.workspace = true
 reth-provider.workspace = true
 reth-revm.workspace = true
@@ -31,7 +33,9 @@ reth-prune.workspace = true
 reth-stages.workspace = true
 reth-config.workspace = true
 
+
 ## async
+futures.workspace = true
 tokio = { workspace = true, features = [
     "sync",
     "macros",

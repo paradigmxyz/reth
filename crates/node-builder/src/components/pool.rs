@@ -5,7 +5,7 @@ use reth_transaction_pool::TransactionPool;
 /// A type that knows how to build the transaction pool.
 pub trait PoolBuilder<Node: FullNodeTypes> {
     /// The transaction pool to build.
-    type Pool: TransactionPool + 'static;
+    type Pool: TransactionPool + Unpin + 'static;
 
     /// Creates the transaction pool.
     fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool>;
@@ -14,7 +14,7 @@ pub trait PoolBuilder<Node: FullNodeTypes> {
 impl<Node, F, Pool> PoolBuilder<Node> for F
 where
     Node: FullNodeTypes,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool + Unpin + 'static,
     F: FnOnce(&BuilderContext<Node>) -> eyre::Result<Pool>,
 {
     type Pool = Pool;

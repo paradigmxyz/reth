@@ -11,6 +11,9 @@ pub trait NodeTypes: Send + Sync + 'static {
     type Engine: EngineTypes;
     /// The node's evm configuration.
     type Evm: EvmConfig;
+
+    /// Returns the node's evm config.
+    fn evm_config(&self) -> Self::Evm;
 }
 
 /// A helper type that is downstream of the node types and adds stateful components to the node.
@@ -24,14 +27,15 @@ pub trait FullNodeTypes: NodeTypes + 'static {
 /// An adapter type that adds the builtin provider type to the user configured node types.
 #[derive(Debug)]
 pub struct FullNodeTypesAdapter<Types, DB, Provider> {
-    _types: PhantomData<Types>,
+    pub(crate) types: Types,
     _db: PhantomData<DB>,
     _provider: PhantomData<Provider>,
 }
 
-impl<Types, DB, Provider> Default for FullNodeTypesAdapter<Types, DB, Provider> {
-    fn default() -> Self {
-        Self { _types: Default::default(), _db: Default::default(), _provider: Default::default() }
+impl<Types, DB, Provider> FullNodeTypesAdapter<Types, DB, Provider> {
+    /// Create a new adapter from the given node types.
+    pub fn new(types: Types) -> Self {
+        Self { types, _db: Default::default(), _provider: Default::default() }
     }
 }
 
@@ -44,6 +48,10 @@ where
     type Primitives = Types::Primitives;
     type Engine = Types::Engine;
     type Evm = Types::Evm;
+
+    fn evm_config(&self) -> Self::Evm {
+        self.types.evm_config()
+    }
 }
 
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>

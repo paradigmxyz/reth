@@ -5,7 +5,7 @@ use std::fmt;
 pub(crate) struct NodeHooks<Node> {
     pub(crate) on_component_initialized: Box<dyn OnComponentInitializedHook<Node>>,
     pub(crate) on_node_started: Box<dyn OnNodeStartedHook<Node>>,
-    _marker: std::marker::PhantomData<Node>,
+    pub(crate) _marker: std::marker::PhantomData<Node>,
 }
 
 impl<Node> NodeHooks<Node> {

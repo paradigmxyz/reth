@@ -6374,6 +6374,9 @@ version = "0.1.0-alpha.17"
 dependencies = [
  "eyre",
  "fdlimit",
+ "futures",
+ "reth-auto-seal-consensus",
+ "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-config",
  "reth-db",

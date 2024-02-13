@@ -1,18 +1,26 @@
 //! Customizable node builder.
 
 use crate::{
-    components::{FullNodeComponents, FullNodeComponentsAdapter, NodeComponentsBuilder},
+    components::{
+        FullNodeComponents, FullNodeComponentsAdapter, NodeComponents, NodeComponentsBuilder,
+    },
     hooks::NodeHooks,
     node::{FullNode, FullNodeTypes, FullNodeTypesAdapter, NodeTypes},
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
     NodeHandle,
 };
-use reth_blockchain_tree::ShareableBlockchainTree;
+use eyre::Context;
+use futures::{future::Either, stream};
+use reth_beacon_consensus::{
+    hooks::{EngineHooks, PruneHook},
+    BeaconConsensusEngine,
+};
+use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree};
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
-use reth_interfaces::consensus::Consensus;
+use reth_interfaces::{consensus::Consensus, p2p::either::EitherDownloader};
 use reth_node_core::{
     cli::config::RethTransactionPoolConfig,
     dirs::{ChainPath, DataDirPath},
@@ -24,10 +32,11 @@ use reth_primitives::{
     ChainSpec, DisplayHardforks,
 };
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFactory};
+use reth_prune::{PrunerBuilder, PrunerEvent};
 use reth_revm::EvmProcessorFactory;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
-use reth_transaction_pool::PoolConfig;
+use reth_transaction_pool::{PoolConfig, TransactionPool};
 use std::{marker::PhantomData, path::PathBuf, sync::Arc};
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -98,7 +107,7 @@ where
     {
         NodeBuilder {
             config: self.config,
-            state: TypesState { types, adapter: FullNodeTypesAdapter::default() },
+            state: TypesState { adapter: FullNodeTypesAdapter::new(types) },
             database: self.database,
         }
     }
@@ -133,7 +142,7 @@ where
             config: self.config,
             database: self.database,
             state: ComponentsState {
-                types: self.state.types,
+                types: self.state.adapter.types,
                 components_builder,
                 hooks: NodeHooks::new(),
                 rpc: RpcHooks::new(),
@@ -291,7 +300,11 @@ where
             >,
         >,
     > {
-        let Self { config, state, database } = self;
+        let Self {
+            config,
+            state: ComponentsState { types, components_builder, hooks, rpc },
+            database,
+        } = self;
 
         // Raise the fd limit of the process.
         // Does not do anything on windows.
@@ -320,7 +333,9 @@ where
 
         debug!(target: "reth::cli", chain=%config.chain.chain, genesis=?config.chain.genesis_hash(), "Initializing genesis");
 
+        // TODO
         // let genesis_hash = init_genesis(Arc::clone(&self.db), self.config.chain.clone())?;
+        let genesis_hash = Default::default();
 
         info!(target: "reth::cli", "{}", DisplayHardforks::new(config.chain.hardforks()));
 
@@ -333,6 +348,157 @@ where
 
         let prune_config = config.prune_config()?.or(reth_config.prune.clone());
 
+        let evm_config = types.evm_config();
+        let tree_config = BlockchainTreeConfig::default();
+        let tree = config.build_blockchain_tree(
+            provider_factory.clone(),
+            consensus.clone(),
+            prune_config.clone(),
+            sync_metrics_tx.clone(),
+            tree_config,
+            evm_config.clone(),
+        )?;
+
+        let canon_state_notification_sender = tree.canon_state_notification_sender();
+        let blockchain_tree = ShareableBlockchainTree::new(tree);
+        debug!(target: "reth::cli", "configured blockchain tree");
+
+        // fetch the head block from the database
+        let head =
+            config.lookup_head(provider_factory.clone()).wrap_err("the head block is missing")?;
+
+        // setup the blockchain provider
+        let blockchain_db =
+            BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
+
+        let ctx = BuilderContext { head, provider: blockchain_db, executor, data_dir, config };
+
+        debug!(target: "reth::cli", "creating components");
+        let NodeComponents { transaction_pool, network, payload_builder } =
+            components_builder.build_components(&ctx)?;
+
+        let BuilderContext { head, provider: blockchain_db, executor, data_dir, config } = ctx;
+
+        let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
+
+        // let node_adapter =  FullNodeComponentsAdapter {
+        //     evm_config: evm_config.clone(),
+        //     pool: transaction_pool,
+        //     network,
+        //     provider: ctx.provider().clone(),
+        //     payload_builder,
+        //     tasks: ctx.executor().clone(),
+        // };
+
+        // TODO solve hooks
+        // on_component_initialized.on_event(node_adapter)?;
+
+        // create pipeline
+        let network_client = network.fetch_client().await?;
+        let (consensus_engine_tx, mut consensus_engine_rx) = unbounded_channel();
+        let max_block = config.max_block(&network_client, provider_factory.clone()).await?;
+
+        // Configure the pipeline
+        let (mut pipeline, client) = if config.dev.dev {
+            info!(target: "reth::cli", "Starting Reth in dev mode");
+            let mining_mode = config.mining_mode(transaction_pool.pending_transactions_listener());
+
+            let (_, client, mut task) = reth_auto_seal_consensus::AutoSealBuilder::new(
+                Arc::clone(&config.chain),
+                blockchain_db.clone(),
+                transaction_pool.clone(),
+                consensus_engine_tx.clone(),
+                canon_state_notification_sender,
+                mining_mode,
+                evm_config.clone(),
+            )
+            .build();
+
+            let mut pipeline = config
+                .build_networked_pipeline(
+                    &reth_config.stages,
+                    client.clone(),
+                    Arc::clone(&consensus),
+                    provider_factory.clone(),
+                    &executor,
+                    sync_metrics_tx,
+                    prune_config.clone(),
+                    max_block,
+                    evm_config,
+                )
+                .await?;
+
+            let pipeline_events = pipeline.events();
+            task.set_pipeline_events(pipeline_events);
+            debug!(target: "reth::cli", "Spawning auto mine task");
+            executor.spawn(Box::pin(task));
+
+            (pipeline, EitherDownloader::Left(client))
+        } else {
+            let pipeline = config
+                .build_networked_pipeline(
+                    &reth_config.stages,
+                    network_client.clone(),
+                    Arc::clone(&consensus),
+                    provider_factory.clone(),
+                    &executor,
+                    sync_metrics_tx,
+                    prune_config.clone(),
+                    max_block,
+                    evm_config,
+                )
+                .await?;
+
+            (pipeline, EitherDownloader::Right(network_client))
+        };
+
+        let pipeline_events = pipeline.events();
+
+        let initial_target = config.initial_pipeline_target(genesis_hash);
+        let mut hooks = EngineHooks::new();
+
+        let pruner_events = if let Some(prune_config) = prune_config {
+            let mut pruner = PrunerBuilder::new(prune_config.clone())
+                .max_reorg_depth(tree_config.max_reorg_depth() as usize)
+                .prune_delete_limit(config.chain.prune_delete_limit)
+                .build(provider_factory, snapshotter.highest_snapshot_receiver());
+
+            let events = pruner.events();
+            hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));
+
+            info!(target: "reth::cli", ?prune_config, "Pruner initialized");
+            Either::Left(events)
+        } else {
+            Either::Right(stream::empty::<PrunerEvent>())
+        };
+
+        // Configure the consensus engine
+        let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
+            client,
+            pipeline,
+            blockchain_db.clone(),
+            Box::new(executor.clone()),
+            Box::new(network.clone()),
+            max_block,
+            config.debug.continuous,
+            payload_builder.clone(),
+            initial_target,
+            reth_beacon_consensus::MIN_BLOCKS_FOR_PIPELINE_RUN,
+            consensus_engine_tx,
+            consensus_engine_rx,
+            hooks,
+        )?;
+        info!(target: "reth::cli", "Consensus engine initialized");
+
+        // launch rpc
+
+        // NodeHandle {
+        //     node: (),
+        //     config,
+        //     rpc_handles: RethRpcServerHandles {},
+        //     data_dir,
+        //     node_exit_future: (),
+        // }
         todo!()
     }
 
@@ -427,7 +593,6 @@ where
     DB: Database + Clone + 'static,
     Types: NodeTypes,
 {
-    types: Types,
     adapter: FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
 }
 

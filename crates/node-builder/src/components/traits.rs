@@ -34,6 +34,7 @@ pub trait FullNodeComponents: FullNodeTypes + 'static {
 /// A type that encapsulates all the components of the node.
 #[derive(Debug)]
 pub struct FullNodeComponentsAdapter<Node: FullNodeTypes, Pool> {
+    pub(crate) evm_config: Node::Evm,
     pub(crate) pool: Pool,
     pub(crate) network: NetworkHandle,
     pub(crate) provider: Node::Provider,
@@ -58,6 +59,10 @@ where
     type Primitives = Node::Primitives;
     type Engine = Node::Engine;
     type Evm = Node::Evm;
+
+    fn evm_config(&self) -> Self::Evm {
+        self.evm_config.clone()
+    }
 }
 
 impl<Node, Pool> FullNodeComponents for FullNodeComponentsAdapter<Node, Pool>
@@ -98,7 +103,7 @@ where
 /// Optimism.
 pub trait NodeComponentsBuilder<Node: FullNodeTypes> {
     /// The transaction pool to use.
-    type Pool: TransactionPool + 'static;
+    type Pool: TransactionPool + Unpin + 'static;
 
     /// Builds the components of the node.
     fn build_components(
@@ -111,7 +116,7 @@ impl<Node, F, Pool> NodeComponentsBuilder<Node> for F
 where
     Node: FullNodeTypes,
     F: FnOnce(&BuilderContext<Node>) -> eyre::Result<NodeComponents<Node, Pool>>,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool + Unpin + 'static,
 {
     type Pool = Pool;
 
