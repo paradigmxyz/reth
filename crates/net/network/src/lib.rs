@@ -113,6 +113,7 @@
 /// Common helpers for network testing.
 pub mod test_utils;
 
+mod budget;
 mod builder;
 mod cache;
 pub mod config;

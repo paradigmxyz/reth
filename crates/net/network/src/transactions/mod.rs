@@ -28,11 +28,12 @@
 //! enough to buffer many hashes during network failure, to allow for recovery.
 
 use crate::{
+    budget::{BUDGET_POLL_ONCE, DEFAULT_BUDGET_TRY_DRAIN_STREAM},
     cache::LruCache,
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
-    NetworkEvents, NetworkHandle,
+    poll_nested_stream_with_yield_points, NetworkEvents, NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
@@ -1051,35 +1052,13 @@ where
         // yield back control to tokio. See `NetworkManager` for more context on the design
         // pattern.
         let mut budget_tx_manager = 1024;
-        let mut maybe_more_work = false;
-
-        macro_rules! poll_nested_stream_with_yield_points {
-            ($budget:literal, $poll_stream:expr, $on_ready_some:expr) => {
-                let mut budget = $budget;
-
-                loop {
-                    match $poll_stream {
-                        Poll::Ready(Some(item)) => {
-                            let mut f = $on_ready_some;
-                            f(item);
-
-                            budget -= 1;
-                            if budget <= 0 {
-                                maybe_more_work = true;
-                                break
-                            }
-                        }
-                        Poll::Ready(None) => break, // todo: handle stream closed as error
-                        Poll::Pending => break,
-                    }
-                }
-            };
-        }
 
         loop {
-            // drain network/peer related events
-            poll_nested_stream_with_yield_points!(
-                1,
+            // advance network/peer related events
+            let maybe_more_network_events = poll_nested_stream_with_yield_points!(
+                "net::tx",
+                "Network events",
+                BUDGET_POLL_ONCE,
                 this.network_events.poll_next_unpin(cx),
                 |event| this.on_network_event(event)
             );
@@ -1102,23 +1081,31 @@ where
                 );
             }
 
-            // drain commands
-            poll_nested_stream_with_yield_points!(1, this.command_rx.poll_next_unpin(cx), |cmd| {
-                this.on_command(cmd)
-            });
+            // advance commands
+            let maybe_more_commands = poll_nested_stream_with_yield_points!(
+                "net::tx",
+                "Commands channel",
+                BUDGET_POLL_ONCE,
+                this.command_rx.poll_next_unpin(cx),
+                |cmd| { this.on_command(cmd) }
+            );
 
-            // drain incoming transaction events
-            poll_nested_stream_with_yield_points!(
-                1,
+            // advance incoming transaction events
+            let maybe_more_tx_events = poll_nested_stream_with_yield_points!(
+                "net::tx",
+                "Transaction events",
+                BUDGET_POLL_ONCE,
                 this.transaction_events.poll_next_unpin(cx),
                 |event| this.on_network_tx_event(event)
             );
 
             this.update_fetch_metrics();
 
-            // drain fetching transaction events
-            poll_nested_stream_with_yield_points!(
-                1,
+            // advance fetching transaction events
+            let maybe_more_tx_fetch_events = poll_nested_stream_with_yield_points!(
+                "net::tx",
+                "Transaction fetch events",
+                BUDGET_POLL_ONCE,
                 this.transaction_fetcher.poll_next_unpin(cx),
                 |fetch_event| {
                     match fetch_event {
@@ -1139,9 +1126,11 @@ where
 
             this.update_fetch_metrics();
 
-            // Advance all imports
-            poll_nested_stream_with_yield_points!(
-                1,
+            // advance pool imports
+            let maybe_more_pool_imports = poll_nested_stream_with_yield_points!(
+                "net::tx",
+                "Pool imports stream",
+                BUDGET_POLL_ONCE,
                 this.pool_imports.poll_next_unpin(cx),
                 |batch_import_res: Vec<PoolResult<TxHash>>| {
                     for res in batch_import_res {
@@ -1170,8 +1159,10 @@ where
             // handle and propagate new transactions. this is highly prioritized, hence the budget
             // is high.
             let mut new_txs = Vec::new();
-            poll_nested_stream_with_yield_points!(
-                1024,
+            let maybe_more_pending_txns = poll_nested_stream_with_yield_points!(
+                "net::tx",
+                "Pending transactions stream",
+                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
                 this.pending_transactions.poll_next_unpin(cx),
                 |hash| new_txs.push(hash)
             );
@@ -1181,7 +1172,13 @@ where
             }
 
             // all channels are fully drained and import futures pending
-            if !maybe_more_work {
+            if !maybe_more_network_events &&
+                !maybe_more_commands &&
+                !maybe_more_tx_events &&
+                !maybe_more_tx_fetch_events &&
+                !maybe_more_pool_imports &&
+                !maybe_more_pending_txns
+            {
                 return Poll::Pending
             }
 
