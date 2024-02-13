@@ -311,7 +311,7 @@ impl TransactionFetcher {
                     );
 
                     max_retried_and_evicted_hashes.push(hash);
-                    continue;
+                    continue
                 }
                 *retries += 1;
             }
@@ -655,7 +655,7 @@ impl TransactionFetcher {
         for hash in self.hashes_pending_fetch.iter() {
             // 1. Check if a hash pending fetch is seen by peer.
             if !seen_hashes.contains(hash) {
-                continue;
+                continue
             };
 
             // 2. Optimistically include the hash in the request.
