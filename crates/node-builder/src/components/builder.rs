@@ -120,15 +120,6 @@ where
     }
 }
 
-impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB>
-where
-    Node: FullNodeTypes,
-    PoolB: PoolBuilder<Node>,
-    NetworkB: NetworkBuilder<Node, PoolB::Pool>,
-    PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
-{
-}
-
 impl<Node, PoolB, PayloadB, NetworkB> NodeComponentsBuilder<Node>
     for ComponentsBuilder<Node, PoolB, PayloadB, NetworkB>
 where
