@@ -320,7 +320,7 @@ impl StorageInner {
         executor: &mut EVMProcessor<'_, EvmConfig>,
     ) -> Result<(BundleStateWithReceipts, u64), BlockExecutionError>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: reth_node_api::EvmConfig,
     {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
         // TODO: there isn't really a parent beacon block root here, so not sure whether or not to
@@ -434,7 +434,7 @@ impl StorageInner {
         evm_config: EvmConfig,
     ) -> Result<(SealedHeader, BundleStateWithReceipts), BlockExecutionError>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: reth_node_api::EvmConfig,
     {
         let header = self.build_header_template(&transactions, chain_spec.clone());
 

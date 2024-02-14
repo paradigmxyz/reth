@@ -88,7 +88,7 @@ where
     Pool: TransactionPool + Unpin + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
     Engine: EngineTypes + 'static,
-    EvmConfig: ConfigureEvmEnv + Clone + Unpin + Send + Sync + 'static,
+    EvmConfig: reth_node_api::EvmConfig + Clone + Unpin + Send + Sync + 'static,
 {
     type Output = ();
 

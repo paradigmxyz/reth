@@ -433,7 +433,7 @@ impl NodeConfig {
     ) -> eyre::Result<BlockchainTree<DB, EvmProcessorFactory<EvmConfig>>>
     where
         DB: Database + Unpin + Clone + 'static,
-        EvmConfig: ConfigureEvmEnv + Clone + 'static,
+        EvmConfig: reth_node_api::EvmConfig + Clone + 'static,
     {
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
@@ -547,7 +547,7 @@ impl NodeConfig {
     where
         DB: Database + Unpin + Clone + 'static,
         Client: HeadersClient + BodiesClient + Clone + 'static,
-        EvmConfig: ConfigureEvmEnv + Clone + 'static,
+        EvmConfig: reth_node_api::EvmConfig + Clone + 'static,
     {
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
@@ -796,7 +796,7 @@ impl NodeConfig {
         DB: Database + Clone + 'static,
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,
-        EvmConfig: ConfigureEvmEnv + Clone + 'static,
+        EvmConfig: reth_node_api::EvmConfig + Clone + 'static,
     {
         let mut builder = Pipeline::builder();
 

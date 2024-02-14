@@ -83,7 +83,7 @@ pub struct EVMProcessor<'a, EvmConfig> {
 
 impl<'a, EvmConfig> EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: ConfigureEvmEnv,
+    EvmConfig: reth_node_api::EvmConfig,
 {
     /// Return chain spec.
     pub fn chain_spec(&self) -> &Arc<ChainSpec> {
@@ -409,7 +409,7 @@ where
 #[cfg(not(feature = "optimism"))]
 impl<'a, EvmConfig> BlockExecutor for EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: ConfigureEvmEnv,
+    EvmConfig: reth_node_api::EvmConfig,
 {
     type Error = BlockExecutionError;
 
@@ -523,7 +523,7 @@ where
 
 impl<'a, EvmConfig> PrunableBlockExecutor for EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: ConfigureEvmEnv,
+    EvmConfig: reth_node_api::EvmConfig,
 {
     fn set_tip(&mut self, tip: BlockNumber) {
         self.tip = Some(tip);

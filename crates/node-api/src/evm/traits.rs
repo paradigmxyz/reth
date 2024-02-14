@@ -3,15 +3,17 @@ use reth_primitives::{
     U256,
 };
 // use revm::{builder::SetGenericStage, db::EmptyDB, EvmBuilder};
-// use revm::{builder::SetGenericStage, db::EmptyDB, EvmBuilder};
+use revm::{db::EmptyDB, Database, Evm, EvmBuilder};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId, TxEnv};
 
 /// Trait for configuring the EVM for executing full blocks.
-pub trait EvmConfig {
-    //// Returns new EVM builder
-    // fn evm(&self) -> EvmBuilder<'static, SetGenericStage, (), EmptyDB> {
-    //     Default::default()
-    // }
+pub trait EvmConfig: ConfigureEvmEnv {
+    // type Executor;
+
+    /// Returns new EVM builder
+    fn evm<DB: Database>(&self, db: DB) -> Evm<'static, (), DB> {
+        EvmBuilder::default().with_db(db).build()
+    }
 }
 
 /// This represents the set of methods used to configure the EVM before execution.

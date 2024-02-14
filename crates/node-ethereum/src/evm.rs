@@ -4,8 +4,6 @@ use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     Address, ChainSpec, Head, Header, Transaction, U256,
 };
-use reth_revm::processor::EVMProcessor;
-use revm::Database;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone, Copy, Default)]
@@ -46,7 +44,8 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 }
 
-impl EvmConfig for EthEvmConfig {}
+impl EvmConfig for EthEvmConfig {
+}
 
 #[cfg(test)]
 mod tests {

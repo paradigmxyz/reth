@@ -39,7 +39,7 @@ impl<EvmConfig> EvmProcessorFactory<EvmConfig> {
 
 impl<EvmConfig> ExecutorFactory for EvmProcessorFactory<EvmConfig>
 where
-    EvmConfig: ConfigureEvmEnv + Send + Sync + Clone + 'static,
+    EvmConfig: reth_node_api::EvmConfig + Send + Sync + Clone + 'static,
 {
     fn with_state<'a, SP: StateProvider + 'a>(
         &'a self,
