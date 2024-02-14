@@ -50,6 +50,9 @@ pub mod updates;
 mod progress;
 pub use progress::{IntermediateStateRootState, StateRootProgress};
 
+/// TODO:
+pub mod database_provider;
+
 /// Collection of trie-related test utilities.
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

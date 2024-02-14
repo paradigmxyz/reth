@@ -26,6 +26,8 @@ alloy-chains.workspace = true
 tracing.workspace = true
 
 # misc
+tokio = { workspace = true, default-features = false, features = ["rt"] }
+async-scoped = { version = "0.9.0", features = ["use-tokio"] }
 thiserror.workspace = true
 derive_more = "0.99"
 auto_impl = "1"

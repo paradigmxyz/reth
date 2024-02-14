@@ -75,7 +75,7 @@ impl TrieUpdates {
     }
 
     /// Extend the updates with trie updates.
-    pub fn extend(&mut self, updates: impl Iterator<Item = (TrieKey, TrieOp)>) {
+    pub fn extend(&mut self, updates: impl IntoIterator<Item = (TrieKey, TrieOp)>) {
         self.trie_operations.extend(updates);
     }
 

@@ -1,4 +1,5 @@
 use crate::{
+    database_provider::ConsistentDatabaseProvider,
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::{PrefixSetMut, TriePrefixSets},
     updates::TrieUpdates,
@@ -6,6 +7,7 @@ use crate::{
 };
 use reth_db::{
     cursor::DbCursorRO,
+    database::Database,
     models::{AccountBeforeTx, BlockNumberAddress},
     tables,
     transaction::DbTx,
@@ -247,6 +249,33 @@ impl HashedPostState {
             .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
             .with_prefix_sets(prefix_sets)
             .root_with_updates()
+    }
+
+    /// TODO:
+    pub fn state_root_parallel<DB: Database + Clone>(
+        &self,
+        db: DB,
+    ) -> Result<B256, StateRootError> {
+        let sorted = self.clone().into_sorted();
+        let prefix_sets = self.construct_prefix_sets();
+        let database = ConsistentDatabaseProvider::new(db)?;
+        StateRoot::from_db(database.clone())
+            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(database, &sorted))
+            .with_prefix_sets(prefix_sets)
+            .root_parallel()
+    }
+
+    pub fn state_root_parallel_with_updates<DB: Database + Clone>(
+        &self,
+        db: DB,
+    ) -> Result<(B256, TrieUpdates), StateRootError> {
+        let sorted = self.clone().into_sorted();
+        let prefix_sets = self.construct_prefix_sets();
+        let database = ConsistentDatabaseProvider::new(db)?;
+        StateRoot::from_db(database.clone())
+            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(database, &sorted))
+            .with_prefix_sets(prefix_sets)
+            .root_parallel_with_updates()
     }
 }
 

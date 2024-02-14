@@ -1,7 +1,8 @@
 use super::{TrieCursor, TrieCursorFactory};
-use crate::updates::TrieKey;
+use crate::{database_provider::ConsistentDatabaseProvider, updates::TrieKey};
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
+    database::Database,
     tables,
     transaction::DbTx,
     DatabaseError,
@@ -10,6 +11,24 @@ use reth_primitives::{
     trie::{BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey},
     B256,
 };
+
+impl<DB: Database> TrieCursorFactory for ConsistentDatabaseProvider<DB> {
+    fn account_trie_cursor(&self) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
+        Ok(Box::new(DatabaseAccountTrieCursor::new(
+            self.tx()?.cursor_read::<tables::AccountsTrie>()?,
+        )))
+    }
+
+    fn storage_tries_cursor(
+        &self,
+        hashed_address: B256,
+    ) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
+        Ok(Box::new(DatabaseStorageTrieCursor::new(
+            self.tx()?.cursor_dup_read::<tables::StoragesTrie>()?,
+            hashed_address,
+        )))
+    }
+}
 
 /// Implementation of the trie cursor factory for a database transaction.
 impl<'a, TX: DbTx> TrieCursorFactory for &'a TX {
