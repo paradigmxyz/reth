@@ -28,7 +28,10 @@
 //! enough to buffer many hashes during network failure, to allow for recovery.
 
 use crate::{
-    budget::{BUDGET_POLL_ONCE, DEFAULT_BUDGET_TRY_DRAIN_STREAM},
+    budget::{
+        DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
+        DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+    },
     cache::LruCache,
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
@@ -220,8 +223,8 @@ pub struct TransactionsManager<Pool> {
     command_tx: mpsc::UnboundedSender<TransactionsCommand>,
     /// Incoming commands from [`TransactionsHandle`].
     command_rx: UnboundedReceiverStream<TransactionsCommand>,
-    /// Incoming commands from [`TransactionsHandle`].
-    pending_transactions: ReceiverStream<TxHash>,
+    /// Streams transactions that have been successfully imported into the pool.
+    imported_transactions: ReceiverStream<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
     /// TransactionsManager metrics
@@ -244,7 +247,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
 
         // install a listener for new pending transactions that are allowed to be propagated over
         // the network
-        let pending = pool.pending_transactions_listener();
+        let imported = pool.pending_transactions_listener();
         let pending_pool_imports_info =
             PendingPoolImportsInfo::new(DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS);
 
@@ -266,7 +269,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
-            pending_transactions: ReceiverStream::new(pending),
+            imported_transactions: ReceiverStream::new(imported),
             transaction_events: UnboundedMeteredReceiver::new(
                 from_network,
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
@@ -1054,11 +1057,11 @@ where
         let mut budget_tx_manager = 1024;
 
         loop {
-            // try drain pool imports
+            // try drain pool imports (flush txns to pool)
             let maybe_more_pool_imports = poll_nested_stream_with_yield_points!(
                 "net::tx",
                 "Pool imports stream",
-                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+                DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
                 this.pool_imports.poll_next_unpin(cx),
                 |batch_import_res: Vec<PoolResult<TxHash>>| {
                     for res in batch_import_res {
@@ -1084,7 +1087,7 @@ where
                 }
             );
 
-            // advance network/peer related events
+            // advance network/peer related events (update peers)
             let maybe_more_network_events = poll_nested_stream_with_yield_points!(
                 "net::tx",
                 "Network events",
@@ -1093,45 +1096,24 @@ where
                 |event| this.on_network_event(event)
             );
 
-            if this.has_capacity_for_fetching_pending_hashes() {
-                // try drain buffered transactions.
-                let info = &this.pending_pool_imports_info;
-                let max_pending_pool_imports = info.max_pending_pool_imports;
-                let has_capacity_wrt_pending_pool_imports =
-                    |divisor| info.has_capacity(max_pending_pool_imports / divisor);
+            // try drain successfully imported transactions to propagate (inform peers which txns
+            // we have seen)
+            let mut new_txs = Vec::new();
 
-                let metrics = &this.metrics;
-                let metrics_increment_egress_peer_channel_full =
-                    || metrics.egress_peer_channel_full.increment(1);
+            let maybe_more_pending_txns = poll_nested_stream_with_yield_points!(
+                "net::tx",
+                "Pending transactions stream",
+                DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
+                this.imported_transactions.poll_next_unpin(cx),
+                |hash| new_txs.push(hash)
+            );
 
-                this.transaction_fetcher.on_fetch_pending_hashes(
-                    &this.peers,
-                    has_capacity_wrt_pending_pool_imports,
-                    metrics_increment_egress_peer_channel_full,
-                );
+            if !new_txs.is_empty() {
+                this.on_new_transactions(new_txs);
             }
 
-            // advance commands
-            let maybe_more_commands = poll_nested_stream_with_yield_points!(
-                "net::tx",
-                "Commands channel",
-                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-                this.command_rx.poll_next_unpin(cx),
-                |cmd| { this.on_command(cmd) }
-            );
-
-            // advance incoming transaction events
-            let maybe_more_tx_events = poll_nested_stream_with_yield_points!(
-                "net::tx",
-                "Transaction events",
-                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-                this.transaction_events.poll_next_unpin(cx),
-                |event| this.on_network_tx_event(event)
-            );
-
-            this.update_fetch_metrics();
-
-            // advance fetching transaction events
+            // try drain fetching transaction events (flush transaction fetcher and queue for
+            // import to pool)
             let maybe_more_tx_fetch_events = poll_nested_stream_with_yield_points!(
                 "net::tx",
                 "Transaction fetch events",
@@ -1154,22 +1136,44 @@ where
                 }
             );
 
-            this.update_fetch_metrics();
-
-            // handle and propagate new transactions. this is highly prioritized, hence the budget
-            // is high.
-            let mut new_txs = Vec::new();
-            let maybe_more_pending_txns = poll_nested_stream_with_yield_points!(
+            // try drain incoming transaction events (stream new txns/announcements from network
+            // manager and queue for import to pool/fetch txns)
+            let maybe_more_tx_events = poll_nested_stream_with_yield_points!(
                 "net::tx",
-                "Pending transactions stream",
+                "Transaction events",
                 DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-                this.pending_transactions.poll_next_unpin(cx),
-                |hash| new_txs.push(hash)
+                this.transaction_events.poll_next_unpin(cx),
+                |event| this.on_network_tx_event(event)
             );
 
-            if !new_txs.is_empty() {
-                this.on_new_transactions(new_txs);
+            // try drain hashes pending fetch if there is capacity (fetch txns)
+            if this.has_capacity_for_fetching_pending_hashes() {
+                let info = &this.pending_pool_imports_info;
+                let max_pending_pool_imports = info.max_pending_pool_imports;
+                let has_capacity_wrt_pending_pool_imports =
+                    |divisor| info.has_capacity(max_pending_pool_imports / divisor);
+
+                let metrics = &this.metrics;
+                let metrics_increment_egress_peer_channel_full =
+                    || metrics.egress_peer_channel_full.increment(1);
+
+                this.transaction_fetcher.on_fetch_pending_hashes(
+                    &this.peers,
+                    has_capacity_wrt_pending_pool_imports,
+                    metrics_increment_egress_peer_channel_full,
+                );
             }
+
+            // try drain commands (propagate/fetch/serve txns)
+            let maybe_more_commands = poll_nested_stream_with_yield_points!(
+                "net::tx",
+                "Commands channel",
+                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+                this.command_rx.poll_next_unpin(cx),
+                |cmd| { this.on_command(cmd) }
+            );
+
+            this.update_fetch_metrics();
 
             // all channels are fully drained and import futures pending
             if !maybe_more_network_events &&

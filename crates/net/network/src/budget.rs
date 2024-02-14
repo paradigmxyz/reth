@@ -8,6 +8,17 @@ pub const BUDGET_POLL_ONCE: u32 = 1;
 /// channel.
 pub const DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL: u32 = 4 * 1024;
 
+/// Default budget to try and flush pending pool imports to pool from
+/// [`TransactionsManager`](crate::TransactionsManager) channel. Default is 4096 pending pool
+/// imports.
+pub const DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS: u32 = 4 * 1024;
+
+/// Default budget to try and flush pending pool imports to pool from
+/// [`TransactionsManager`](crate::TransactionsManager) channel. Default is
+/// [`DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS`], which defaults to 4096 pending pool imports,
+/// so 4096 pool imports.
+pub const DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS: u32 = 4 * 1024;
+
 /// Polls the given stream. Breaks with `true` if there maybe is more work. Note: this does not
 /// register wake up, caller's scope is responsible for doing so.
 #[macro_export]
