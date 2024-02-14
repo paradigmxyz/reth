@@ -13,7 +13,7 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
 };
-use clap::{value_parser, Parser};
+use clap::{value_parser, Parser, Args};
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_interfaces::consensus::Consensus;
@@ -242,6 +242,11 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         }
     }
 }
+
+/// No Additional arguments
+#[derive(Debug, Clone, Copy, Default, Args)]
+#[non_exhaustive]
+pub struct NoArgs;
 
 #[cfg(test)]
 mod tests {
