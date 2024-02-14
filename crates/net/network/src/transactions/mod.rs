@@ -1088,7 +1088,7 @@ where
             let maybe_more_network_events = poll_nested_stream_with_yield_points!(
                 "net::tx",
                 "Network events",
-                BUDGET_POLL_ONCE,
+                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
                 this.network_events.poll_next_unpin(cx),
                 |event| this.on_network_event(event)
             );
@@ -1115,7 +1115,7 @@ where
             let maybe_more_commands = poll_nested_stream_with_yield_points!(
                 "net::tx",
                 "Commands channel",
-                BUDGET_POLL_ONCE,
+                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
                 this.command_rx.poll_next_unpin(cx),
                 |cmd| { this.on_command(cmd) }
             );
@@ -1124,7 +1124,7 @@ where
             let maybe_more_tx_events = poll_nested_stream_with_yield_points!(
                 "net::tx",
                 "Transaction events",
-                BUDGET_POLL_ONCE,
+                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
                 this.transaction_events.poll_next_unpin(cx),
                 |event| this.on_network_tx_event(event)
             );
@@ -1135,7 +1135,7 @@ where
             let maybe_more_tx_fetch_events = poll_nested_stream_with_yield_points!(
                 "net::tx",
                 "Transaction fetch events",
-                BUDGET_POLL_ONCE,
+                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
                 this.transaction_fetcher.poll_next_unpin(cx),
                 |fetch_event| {
                     match fetch_event {
