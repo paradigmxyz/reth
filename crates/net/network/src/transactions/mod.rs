@@ -70,7 +70,7 @@ use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
 
 mod config;
-mod constants;
+pub mod constants;
 mod fetcher;
 mod validation;
 pub use config::{TransactionFetcherConfig, TransactionsManagerConfig};
@@ -578,7 +578,11 @@ where
         &mut self,
         peer_id: PeerId,
         mut msg: NewPooledTransactionHashes,
+        cx: &mut Context<'_>
     ) {
+                // try free active peers
+                self.transaction_fetcher.try_drain_inflight_requests(cx);
+
         // If the node is initially syncing, ignore transactions
         if self.network.is_initially_syncing() {
             return
@@ -586,6 +590,9 @@ where
         if self.network.tx_gossip_disabled() {
             return
         }
+
+        // try to free up active peers
+        self.transaction_fetcher.try_drain_inflight_requests(cx);
 
         // get handle to peer's session, if the session is still active
         let Some(peer) = self.peers.get_mut(&peer_id) else {
@@ -773,7 +780,7 @@ where
     }
 
     /// Handles dedicated transaction events related to the `eth` protocol.
-    fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
+    fn on_network_tx_event(&mut self, event: NetworkTransactionEvent, cx: &mut Context<'_>) {
         match event {
             NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
                 // ensure we didn't receive any blob transactions as these are disallowed to be
@@ -801,7 +808,7 @@ where
                 }
             }
             NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
-                self.on_new_pooled_transaction_hashes(peer_id, msg)
+                self.on_new_pooled_transaction_hashes(peer_id, msg, cx)
             }
             NetworkTransactionEvent::GetPooledTransactions { peer_id, request, response } => {
                 self.on_get_pooled_transactions(peer_id, request, response)
@@ -1198,6 +1205,8 @@ where
                 return Poll::Pending
             }
         }
+
+        Poll::Pending
     }
 }
 
@@ -1500,6 +1509,7 @@ mod tests {
     use alloy_rlp::Decodable;
     use constants::tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
     use futures::FutureExt;
+    use futures_test::task::noop_context;
     use reth_interfaces::sync::{NetworkSyncUpdater, SyncState};
     use reth_network_api::NetworkInfo;
     use reth_primitives::hex;
@@ -1623,7 +1633,7 @@ mod tests {
         transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
             peer_id: *handle1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
-        });
+        }, &mut noop_context());
         poll_fn(|cx| {
             let _ = transactions.poll_unpin(cx);
             Poll::Ready(())
@@ -1709,7 +1719,7 @@ mod tests {
         transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
             peer_id: *handle1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
-        });
+        }, &mut noop_context());
         poll_fn(|cx| {
             let _ = transactions.poll_unpin(cx);
             Poll::Ready(())
@@ -1793,7 +1803,7 @@ mod tests {
         transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
             peer_id: *handle1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
-        });
+        }, &mut noop_context());
         assert_eq!(
             *handle1.peer_id(),
             transactions.transactions_by_peers.get(&signed_tx.hash()).unwrap()[0]
@@ -1890,7 +1900,7 @@ mod tests {
             peer_id: *handle1.peer_id(),
             request,
             response: send,
-        });
+        }, &mut noop_context());
 
         match receive.await.unwrap() {
             Ok(PooledTransactions(transactions)) => {
@@ -1939,7 +1949,7 @@ mod tests {
         assert!(tx_fetcher.is_idle(&peer_id_1));
 
         // sends request for buffered hashes to peer_1
-        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true, || ());
+        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true, || (), &mut noop_context());
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
@@ -1976,7 +1986,7 @@ mod tests {
         // peer_2 announces same hashes as peer_1
         let msg =
             NewPooledTransactionHashes::Eth66(NewPooledTransactionHashes66(seen_hashes.to_vec()));
-        tx_manager.on_new_pooled_transaction_hashes(peer_id_2, msg);
+        tx_manager.on_new_pooled_transaction_hashes(peer_id_2, msg, &mut noop_context());
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
