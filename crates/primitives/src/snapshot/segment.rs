@@ -128,6 +128,11 @@ impl SnapshotSegment {
 
         Some((segment, SegmentRangeInclusive::new(block_start, block_end)))
     }
+
+    /// Returns `true` if the segment is `SnapshotSegment::Headers`.
+    pub fn is_headers(&self) -> bool {
+        matches!(self, SnapshotSegment::Headers)
+    }
 }
 
 /// A segment header that contains information common to all segments. Used for storage.

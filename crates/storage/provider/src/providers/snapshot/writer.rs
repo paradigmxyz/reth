@@ -9,7 +9,11 @@ use reth_primitives::{
     BlockHash, BlockNumber, Header, Receipt, SnapshotSegment, TransactionSignedNoHash, TxNumber,
     U256,
 };
-use std::{ops::Deref, path::PathBuf, sync::Arc};
+use std::{
+    ops::Deref,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 /// Mutable reference to a dashmap element of [`SnapshotProviderRW`].
 pub type SnapshotProviderRWRefMut<'a> = RefMut<'a, SnapshotSegment, SnapshotProviderRW<'static>>;
@@ -51,21 +55,8 @@ impl<'a> SnapshotProviderRW<'a> {
                         .get_highest_snapshot_tx(segment)
                         .map(|tx| SegmentRangeInclusive::new(tx, tx));
                     let path = reader.directory().join(segment.filename(&block_range));
-                    (
-                        NippyJar::new(
-                            segment.columns(),
-                            &path,
-                            SegmentHeader::new(
-                                SegmentRangeInclusive::new(
-                                    block_range.start(),
-                                    block_range.start(),
-                                ),
-                                tx_range,
-                                segment,
-                            ),
-                        ),
-                        path,
-                    )
+
+                    (create_jar(segment, &path, block_range, tx_range), path)
                 }
                 Err(err) => return Err(err),
             };
@@ -95,7 +86,7 @@ impl<'a> SnapshotProviderRW<'a> {
         let user_header = self.writer.user_header();
         let mut max_block = Some(user_header.block_end());
 
-        if matches!(self.writer.user_header().segment(), SnapshotSegment::Headers) {
+        if self.writer.user_header().segment().is_headers() {
             // This can be a scenario where we pruned all blocks from the static file, including the
             // genesis block.
             if user_header.block_end() == 0 && self.writer.rows() == 0 {
@@ -113,7 +104,7 @@ impl<'a> SnapshotProviderRW<'a> {
     pub fn increment_block(&mut self, segment: SnapshotSegment) -> ProviderResult<BlockNumber> {
         debug_assert!(
             (self.writer.rows() as u64 + self.writer.user_header().block_end()) != 0
-            || !matches!(segment, SnapshotSegment::Headers),
+            || !segment.is_headers(),
             "This function should only be called by append_header when dealing with SnapshotSegment::Headers.");
 
         let last_block = self.writer.user_header().block_end();
@@ -347,4 +338,29 @@ impl<'a> Deref for SnapshotProviderRW<'a> {
     fn deref(&self) -> &Self::Target {
         &self.reader
     }
+}
+
+fn create_jar(
+    segment: SnapshotSegment,
+    path: &Path,
+    block_range: SegmentRangeInclusive,
+    tx_range: Option<SegmentRangeInclusive>,
+) -> NippyJar<SegmentHeader> {
+    let mut jar = NippyJar::new(
+        segment.columns(),
+        path,
+        SegmentHeader::new(
+            SegmentRangeInclusive::new(block_range.start(), block_range.start()),
+            tx_range,
+            segment,
+        ),
+    );
+
+    // Transaction and Receipt already have the compression scheme used natively in its encoding.
+    // (zstd-dictionary)
+    if segment.is_headers() {
+        jar = jar.with_lz4();
+    }
+
+    jar
 }
