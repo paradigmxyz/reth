@@ -62,7 +62,7 @@ impl Command {
         let provider_rw =
             DatabaseProviderRW::<DatabaseEnv>::with_tx(db.tx_mut()?, self.chain.clone(), &None)?;
 
-        provider_rw.update(|provider| {
+        provider_rw.commit_update(|provider| {
             match &self.stage {
                 StageEnum::Bodies => {
                     let tx = provider.tx_mut();
