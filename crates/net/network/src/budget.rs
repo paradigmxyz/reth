@@ -4,6 +4,9 @@ pub const DEFAULT_BUDGET_TRY_DRAIN_STREAM: u32 = 1024;
 /// Budget for polling stream once.
 pub const BUDGET_POLL_ONCE: u32 = 1;
 
+/// Default budget to try and drain pending pool imports stream.
+pub const DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS: u32 = 4 * 1024;
+
 /// Polls the given stream. Breaks with `true` if there maybe is more work. Note: this does not
 /// register wake up, caller's scope is responsible for doing so.
 #[macro_export]
