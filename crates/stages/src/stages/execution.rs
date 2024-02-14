@@ -19,7 +19,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, TransactionVariant,
+    OriginalValuesKnown, ProviderError, StateWriter, TransactionVariant,
 };
 use std::{
     ops::RangeInclusive,
@@ -195,7 +195,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         let time = Instant::now();
         // write output
-        state.write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)?;
+        provider.write_state(state, OriginalValuesKnown::Yes)?;
         let db_write_duration = time.elapsed();
         debug!(
             target: "sync::stages::execution",

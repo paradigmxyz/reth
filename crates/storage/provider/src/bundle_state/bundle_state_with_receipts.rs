@@ -334,7 +334,10 @@ impl BundleStateWithReceipts {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::create_test_provider_factory, AccountReader, BundleStateWithReceipts};
+    use crate::{
+        test_utils::create_test_provider_factory, AccountReader, BundleStateWithReceipts,
+        StateWriter,
+    };
     use reth_db::{
         cursor::{DbCursorRO, DbDupCursorRO},
         database::Database,
@@ -410,14 +413,10 @@ mod tests {
         let plain_state = revm_bundle_state.into_plain_state(OriginalValuesKnown::Yes);
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
-        StateChanges(plain_state)
-            .write_to_db(provider.tx_ref())
-            .expect("Could not write plain state to DB");
+        provider.write_state_changes(plain_state).expect("Could not write plain state to DB");
 
         assert_eq!(reverts.storage, [[]]);
-        StateReverts(reverts)
-            .write_to_db(provider.tx_ref(), 1)
-            .expect("Could not write reverts to DB");
+        provider.write_state_reverts(reverts, 1).expect("Could not write reverts to DB");
 
         let reth_account_a = into_reth_acc(account_a);
         let reth_account_b = into_reth_acc(account_b);
@@ -476,17 +475,13 @@ mod tests {
             [PlainStorageChangeset { address: address_b, wipe_storage: true, storage: vec![] }]
         );
         assert!(plain_state.contracts.is_empty());
-        StateChanges(plain_state)
-            .write_to_db(provider.tx_ref())
-            .expect("Could not write plain state to DB");
+        provider.write_state_changes(plain_state).expect("Could not write plain state to DB");
 
         assert_eq!(
             reverts.storage,
             [[PlainStorageRevert { address: address_b, wiped: true, storage_revert: vec![] }]]
         );
-        StateReverts(reverts)
-            .write_to_db(provider.tx_ref(), 2)
-            .expect("Could not write reverts to DB");
+        provider.write_state_reverts(reverts, 2).expect("Could not write reverts to DB");
 
         // Check new plain state for account B
         assert_eq!(
@@ -560,8 +555,9 @@ mod tests {
 
         state.merge_transitions(BundleRetention::Reverts);
 
-        BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 1)
-            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
+        let state = BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 1);
+        provider
+            .write_state(state, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         // Check plain storage state
@@ -658,8 +654,9 @@ mod tests {
         )]));
 
         state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 2)
-            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
+        let state = BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 2);
+        provider
+            .write_state(state, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         assert_eq!(
@@ -722,8 +719,9 @@ mod tests {
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0)
-            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
+        let state = BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0);
+        provider
+            .write_state(state, OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -867,8 +865,9 @@ mod tests {
 
         let bundle = state.take_bundle();
 
-        BundleStateWithReceipts::new(bundle, Receipts::new(), 1)
-            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
+        let state = BundleStateWithReceipts::new(bundle, Receipts::new(), 1);
+        provider
+            .write_state(state, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider
@@ -1030,8 +1029,9 @@ mod tests {
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0)
-            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
+        let state = BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0);
+        provider
+            .write_state(state, OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -1075,8 +1075,9 @@ mod tests {
 
         // Commit block #1 changes to the database.
         state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 1)
-            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
+        let state = BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 1);
+        provider
+            .write_state(state, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider

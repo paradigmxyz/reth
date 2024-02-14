@@ -234,7 +234,10 @@ pub trait BundleStateDataProvider: Send + Sync {
 /// Allows for writing a [BundleStateWithReceipts] to the database.
 #[auto_impl[Box, &, Arc]]
 pub trait StateWriter: Send + Sync {
-    /// Writes the given [BundleStateWithReceipts] to the database.
+    /// Write the [BundleStateWithReceipts] to the database.
+    ///
+    /// `is_value_known` should be set to `Not` if the [BundleStateWithReceipts] has some of its
+    /// state detached, This would make some original values not known.
     fn write_state(
         &self,
         state: BundleStateWithReceipts,
