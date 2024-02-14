@@ -1130,7 +1130,7 @@ where
             let maybe_more_pool_imports = poll_nested_stream_with_yield_points!(
                 "net::tx",
                 "Pool imports stream",
-                BUDGET_POLL_ONCE,
+                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
                 this.pool_imports.poll_next_unpin(cx),
                 |batch_import_res: Vec<PoolResult<TxHash>>| {
                     for res in batch_import_res {
