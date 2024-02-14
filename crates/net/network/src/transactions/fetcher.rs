@@ -235,7 +235,7 @@ impl TransactionFetcher {
                     - acc_size_response;
 
             if free_space < MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED {
-                break 'fold_size;
+                break 'fold_size
             }
         }
 
@@ -520,7 +520,6 @@ impl TransactionFetcher {
         #[cfg(debug_assertions)]
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            previously_unseen_hashes_count=previously_unseen_hashes_count,
             msg_version=%msg_version,
             client_version=%client_version,
             previously_unseen_hashes_len=?previously_unseen_hashes.len(),
@@ -553,7 +552,7 @@ impl TransactionFetcher {
                 max_inflight_transaction_requests=self.info.max_inflight_requests,
                 "limit for concurrent `GetPooledTransactions` requests reached, dropping request for hashes to peer"
             );
-            return Some(new_announced_hashes);
+            return Some(new_announced_hashes)
         }
 
         let Some(inflight_count) = self.active_peers.get_or_insert(peer_id, || 0) else {
@@ -563,7 +562,7 @@ impl TransactionFetcher {
                 conn_eth_version=%conn_eth_version,
                 "failed to cache active peer in schnellru::LruMap, dropping request to peer"
             );
-            return Some(new_announced_hashes);
+            return Some(new_announced_hashes)
         };
 
         if *inflight_count >= DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
@@ -574,7 +573,7 @@ impl TransactionFetcher {
                 MAX_CONCURRENT_TX_REQUESTS_PER_PEER=DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
                 "limit for concurrent `GetPooledTransactions` requests per peer reached"
             );
-            return Some(new_announced_hashes);
+            return Some(new_announced_hashes)
         }
 
         *inflight_count += 1;
@@ -831,7 +830,7 @@ impl Stream for TransactionFetcher {
                         if transactions.hashes().any(|hash| hash == requested_hash) {
                             // hash is now known, stop tracking
                             fetched.push(*requested_hash);
-                            return false;
+                            return false
                         }
                         true
                     });
@@ -857,7 +856,7 @@ impl Stream for TransactionFetcher {
                         error: RequestError::ChannelClosed,
                     }))
                 }
-            };
+            }
         }
 
         Poll::Pending

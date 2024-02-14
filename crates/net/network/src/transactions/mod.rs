@@ -322,7 +322,7 @@ where
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             if self.network.tx_gossip_disabled() {
                 let _ = response.send(Ok(PooledTransactions::default()));
-                return;
+                return
             }
             let transactions = self.pool.get_pooled_transaction_elements(
                 request.0,
@@ -355,10 +355,10 @@ where
     fn on_new_transactions(&mut self, hashes: Vec<TxHash>) {
         // Nothing to propagate while initially syncing
         if self.network.is_initially_syncing() {
-            return;
+            return
         }
         if self.network.tx_gossip_disabled() {
-            return;
+            return
         }
 
         trace!(target: "net::tx", num_hashes=?hashes.len(), "Start propagating transactions");
@@ -385,7 +385,7 @@ where
     ) -> PropagatedTransactions {
         let mut propagated = PropagatedTransactions::default();
         if self.network.tx_gossip_disabled() {
-            return propagated;
+            return propagated
         }
 
         // send full transactions to a fraction fo the connected peers (square root of the total
@@ -499,7 +499,7 @@ where
 
         if full_transactions.transactions.is_empty() {
             // nothing to propagate
-            return None;
+            return None
         }
 
         let new_full_transactions = full_transactions.build();
@@ -526,7 +526,7 @@ where
         let propagated = {
             let Some(peer) = self.peers.get_mut(&peer_id) else {
                 // no such peer
-                return;
+                return
             };
 
             let to_propagate: Vec<PropagateTransaction> =
@@ -548,7 +548,7 @@ where
 
             if new_pooled_hashes.is_empty() {
                 // nothing to propagate
-                return;
+                return
             }
 
             for hash in new_pooled_hashes.iter_hashes().copied() {
@@ -576,10 +576,10 @@ where
     ) {
         // If the node is initially syncing, ignore transactions
         if self.network.is_initially_syncing() {
-            return;
+            return
         }
         if self.network.tx_gossip_disabled() {
-            return;
+            return
         }
 
         // get handle to peer's session, if the session is still active
@@ -590,7 +590,7 @@ where
                 "discarding announcement from inactive peer"
             );
 
-            return;
+            return
         };
         let client_version = peer.client_version.clone();
 
@@ -622,7 +622,7 @@ where
 
         if msg.is_empty() {
             // nothing to request
-            return;
+            return
         }
 
         // 2. filter out invalid entries
@@ -675,7 +675,7 @@ where
 
         if valid_announcement_data.is_empty() {
             // nothing to request
-            return;
+            return
         }
 
         trace!(target: "net::tx",
@@ -756,7 +756,7 @@ where
                 "sending `GetPooledTransactions` request to peer's session failed, buffering hashes"
             );
             self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
-            return;
+            return
         }
 
         if num_already_seen > 0 {
@@ -861,7 +861,7 @@ where
                 // pool
                 if !self.network.is_initially_syncing() {
                     if self.network.tx_gossip_disabled() {
-                        return;
+                        return
                     }
                     let peer = self.peers.get_mut(&peer_id).expect("is present; qed");
 
@@ -872,7 +872,7 @@ where
                     );
                     if pooled_txs.is_empty() {
                         // do not send a message if there are no transactions in the pool
-                        return;
+                        return
                     }
 
                     for pooled_tx in pooled_txs.into_iter() {
@@ -897,10 +897,10 @@ where
     ) {
         // If the node is pipeline syncing, ignore transactions
         if self.network.is_initially_syncing() {
-            return;
+            return
         }
         if self.network.tx_gossip_disabled() {
-            return;
+            return
         }
 
         // tracks the quality of the given transactions
@@ -917,7 +917,7 @@ where
                     tx
                 } else {
                     has_bad_transactions = true;
-                    continue;
+                    continue
                 };
 
                 // track that the peer knows this transaction, but only if this is a new broadcast.
@@ -1005,7 +1005,7 @@ where
             RequestError::Timeout => ReputationChangeKind::Timeout,
             RequestError::ChannelClosed | RequestError::ConnectionDropped => {
                 // peer is already disconnected
-                return;
+                return
             }
             RequestError::BadResponse => return self.report_peer_bad_transactions(peer_id),
         };
@@ -1134,7 +1134,7 @@ where
                             if err.is_bad_transaction() && !this.network.is_syncing() {
                                 debug!(target: "net::tx", ?err, "bad pool transaction import");
                                 this.on_bad_import(err.hash);
-                                continue;
+                                continue
                             }
                             this.on_good_import(err.hash);
                         }
@@ -1159,14 +1159,14 @@ where
 
             // all channels are fully drained and import futures pending
             if !some_ready {
-                return Poll::Pending;
+                return Poll::Pending
             }
 
             budget -= 1;
             if budget <= 0 {
                 // Make sure we're woken up again
                 cx.waker().wake_by_ref();
-                return Poll::Pending;
+                return Poll::Pending
             }
         }
     }
@@ -1214,7 +1214,7 @@ impl FullTransactionsBuilder {
         if new_size > DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE &&
             self.total_size > 0
         {
-            return;
+            return
         }
 
         self.total_size = new_size;
