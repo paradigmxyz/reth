@@ -25,6 +25,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
 };
 use tokio::sync::Mutex;
+use reth_primitives::constants::eip4844::VERSIONED_HASH_VERSION_KZG;
 
 #[cfg(feature = "optimism")]
 use reth_revm::optimism::RethL1BlockInfo;
@@ -284,6 +285,24 @@ where
                         },
                     ),
                 )
+            }
+
+            if let Some(tx) = transaction.as_eip4844() {
+                for versioned_hash in tx.blob_versioned_hashes.iter() {
+                    let version = versioned_hash.clone()[0];
+                    if version != VERSIONED_HASH_VERSION_KZG {
+                        // versioned hash doesn't start with VERSIONED_HASH_VERSION_KZG
+                        return TransactionValidationOutcome::Invalid(
+                            transaction,
+                            InvalidPoolTransactionError::Eip4844(
+                                Eip4844PoolTransactionError::WrongEip4844HashVersion {
+                                    have: version,
+                                    permitted: VERSIONED_HASH_VERSION_KZG,
+                                },
+                            ),
+                        );
+                    }
+                }
             }
         }
 
