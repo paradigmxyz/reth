@@ -28,10 +28,7 @@
 //! enough to buffer many hashes during network failure, to allow for recovery.
 
 use crate::{
-    budget::{
-        BUDGET_POLL_ONCE, DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
-        DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-    },
+    budget::{BUDGET_POLL_ONCE, DEFAULT_BUDGET_TRY_DRAIN_STREAM},
     cache::LruCache,
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
@@ -1057,6 +1054,36 @@ where
         let mut budget_tx_manager = 1024;
 
         loop {
+            // try drain pool imports
+            let maybe_more_pool_imports = poll_nested_stream_with_yield_points!(
+                "net::tx",
+                "Pool imports stream",
+                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+                this.pool_imports.poll_next_unpin(cx),
+                |batch_import_res: Vec<PoolResult<TxHash>>| {
+                    for res in batch_import_res {
+                        match res {
+                            Ok(hash) => {
+                                this.on_good_import(hash);
+                            }
+                            Err(err) => {
+                                // if we're _currently_ syncing and the transaction is
+                                // bad we ignore it, otherwise we penalize the peer
+                                // that sent the bad transaction with the assumption
+                                // that the peer should have known that this
+                                // transaction is bad. (e.g. consensus rules)
+                                if err.is_bad_transaction() && !this.network.is_syncing() {
+                                    debug!(target: "net::tx", ?err, "bad pool transaction import");
+                                    this.on_bad_import(err.hash);
+                                    continue
+                                }
+                                this.on_good_import(err.hash);
+                            }
+                        }
+                    }
+                }
+            );
+
             // advance network/peer related events
             let maybe_more_network_events = poll_nested_stream_with_yield_points!(
                 "net::tx",
@@ -1128,36 +1155,6 @@ where
             );
 
             this.update_fetch_metrics();
-
-            // advance pool imports
-            let maybe_more_pool_imports = poll_nested_stream_with_yield_points!(
-                "net::tx",
-                "Pool imports stream",
-                DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
-                this.pool_imports.poll_next_unpin(cx),
-                |batch_import_res: Vec<PoolResult<TxHash>>| {
-                    for res in batch_import_res {
-                        match res {
-                            Ok(hash) => {
-                                this.on_good_import(hash);
-                            }
-                            Err(err) => {
-                                // if we're _currently_ syncing and the transaction is
-                                // bad we ignore it, otherwise we penalize the peer
-                                // that sent the bad transaction with the assumption
-                                // that the peer should have known that this
-                                // transaction is bad. (e.g. consensus rules)
-                                if err.is_bad_transaction() && !this.network.is_syncing() {
-                                    debug!(target: "net::tx", ?err, "bad pool transaction import");
-                                    this.on_bad_import(err.hash);
-                                    continue
-                                }
-                                this.on_good_import(err.hash);
-                            }
-                        }
-                    }
-                }
-            );
 
             // handle and propagate new transactions. this is highly prioritized, hence the budget
             // is high.
