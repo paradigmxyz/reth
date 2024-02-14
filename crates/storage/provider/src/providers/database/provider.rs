@@ -2562,7 +2562,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         // Write state and changesets to the database.
         // Must be written after blocks because of the receipt lookup.
-        self.write_state(state, OriginalValuesKnown::No)?;
+        self.write_bundle_state(state, OriginalValuesKnown::No)?;
         durations_recorder.record_relative(metrics::Action::InsertState);
 
         // insert hashes and intermediate merkle nodes
@@ -2590,7 +2590,7 @@ impl<TX: DbTxMut + DbTx> StateWriter for DatabaseProvider<TX> {
     ///
     /// `is_value_known` should be set to `Not` if the [BundleStateWithReceipts] has some of its
     /// state detached, This would make some original values not known.
-    fn write_state(
+    fn write_bundle_state(
         &self,
         state: BundleStateWithReceipts,
         is_value_known: OriginalValuesKnown,

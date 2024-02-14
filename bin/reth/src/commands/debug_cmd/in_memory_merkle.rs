@@ -199,7 +199,7 @@ impl Command {
                 .map_err(|_| BlockValidationError::SenderRecoveryError)?,
             None,
         )?;
-        provider_rw.write_state(block_state, OriginalValuesKnown::No)?;
+        provider_rw.write_bundle_state(block_state, OriginalValuesKnown::No)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
         let storages = provider_rw.plain_state_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;

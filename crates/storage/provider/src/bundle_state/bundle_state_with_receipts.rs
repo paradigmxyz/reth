@@ -510,7 +510,7 @@ mod tests {
 
         let state = BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 1);
         provider
-            .write_state(state, OriginalValuesKnown::Yes)
+            .write_bundle_state(state, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         // Check plain storage state
@@ -609,7 +609,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
         let state = BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 2);
         provider
-            .write_state(state, OriginalValuesKnown::Yes)
+            .write_bundle_state(state, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         assert_eq!(
@@ -674,7 +674,7 @@ mod tests {
         init_state.merge_transitions(BundleRetention::Reverts);
         let state = BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0);
         provider
-            .write_state(state, OriginalValuesKnown::Yes)
+            .write_bundle_state(state, OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -820,7 +820,7 @@ mod tests {
 
         let state = BundleStateWithReceipts::new(bundle, Receipts::new(), 1);
         provider
-            .write_state(state, OriginalValuesKnown::Yes)
+            .write_bundle_state(state, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider
@@ -984,7 +984,7 @@ mod tests {
         init_state.merge_transitions(BundleRetention::Reverts);
         let state = BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0);
         provider
-            .write_state(state, OriginalValuesKnown::Yes)
+            .write_bundle_state(state, OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -1030,7 +1030,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
         let state = BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 1);
         provider
-            .write_state(state, OriginalValuesKnown::Yes)
+            .write_bundle_state(state, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider

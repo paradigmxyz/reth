@@ -238,7 +238,7 @@ pub trait StateWriter: Send + Sync {
     ///
     /// `is_value_known` should be set to `Not` if the [BundleStateWithReceipts] has some of its
     /// state detached, This would make some original values not known.
-    fn write_state(
+    fn write_bundle_state(
         &self,
         state: BundleStateWithReceipts,
         is_value_known: OriginalValuesKnown,

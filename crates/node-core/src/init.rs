@@ -152,7 +152,7 @@ pub fn insert_genesis_state<DB: Database>(
         0,
     );
 
-    provider.write_state(bundle, OriginalValuesKnown::Yes)?;
+    provider.write_bundle_state(bundle, OriginalValuesKnown::Yes)?;
 
     Ok(())
 }

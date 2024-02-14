@@ -195,7 +195,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         let time = Instant::now();
         // write output
-        provider.write_state(state, OriginalValuesKnown::Yes)?;
+        provider.write_bundle_state(state, OriginalValuesKnown::Yes)?;
         let db_write_duration = time.elapsed();
         debug!(
             target: "sync::stages::execution",
