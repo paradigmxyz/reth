@@ -3,7 +3,7 @@ use revm::{Database, Evm, EvmBuilder};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId, TxEnv};
 
 /// Trait for configuring the EVM for executing full blocks.
-pub trait EvmConfig: ConfigureEvmEnv {
+pub trait ConfigureEvm: ConfigureEvmEnv {
     /// Returns new EVM with the given database
     fn evm<'a, DB: Database + 'a>(db: DB) -> Evm<'a, (), DB> {
         EvmBuilder::default().with_db(db).build()

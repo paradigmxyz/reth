@@ -5,7 +5,7 @@ use crate::{
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
 };
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
-use reth_node_api::ConfigureEvmEnv;
+use reth_node_api::ConfigureEvm;
 use reth_primitives::{
     Address, Block, BlockNumber, BlockWithSenders, Bloom, ChainSpec, GotExpected, Hardfork, Header,
     PruneMode, PruneModes, PruneSegmentError, Receipt, ReceiptWithBloom, Receipts,
@@ -83,7 +83,7 @@ pub struct EVMProcessor<'a, EvmConfig> {
 
 impl<'a, EvmConfig> EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: reth_node_api::EvmConfig,
+    EvmConfig: ConfigureEvm,
 {
     /// Return chain spec.
     pub fn chain_spec(&self) -> &Arc<ChainSpec> {
@@ -93,17 +93,14 @@ where
     /// Create a new pocessor with the given chain spec.
     pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
         // create evm with boxed empty db that is going to be set later.
-        let evm = Evm::builder()
-            .with_db(
-                Box::new(
-                    StateBuilder::new()
-                        .with_database_boxed(Box::new(EmptyDBTyped::<ProviderError>::new())),
-                )
-                .build(),
-            )
-            // Hook and inspector stack that we want to invoke on that hook.
-            .with_external_context(InspectorStack::new(InspectorStackConfig::default()))
-            .build();
+        let db = Box::new(
+            StateBuilder::new().with_database_boxed(Box::new(EmptyDBTyped::<ProviderError>::new())),
+        )
+        .build();
+
+        // Hook and inspector stack that we want to invoke on that hook.
+        let stack = InspectorStack::new(InspectorStackConfig::default());
+        let evm = EvmConfig::evm_with_inspector(db, stack);
         EVMProcessor {
             chain_spec,
             evm,
@@ -407,7 +404,7 @@ where
 #[cfg(not(feature = "optimism"))]
 impl<'a, EvmConfig> BlockExecutor for EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: reth_node_api::EvmConfig,
+    EvmConfig: ConfigureEvm,
 {
     type Error = BlockExecutionError;
 
@@ -521,7 +518,7 @@ where
 
 impl<'a, EvmConfig> PrunableBlockExecutor for EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: reth_node_api::EvmConfig,
+    EvmConfig: ConfigureEvm,
 {
     fn set_tip(&mut self, tip: BlockNumber) {
         self.tip = Some(tip);

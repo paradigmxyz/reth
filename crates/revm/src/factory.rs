@@ -4,7 +4,7 @@ use crate::{
     stack::{InspectorStack, InspectorStackConfig},
 };
 use reth_interfaces::executor::BlockExecutionError;
-use reth_node_api::ConfigureEvmEnv;
+use reth_node_api::ConfigureEvm;
 use reth_primitives::ChainSpec;
 use reth_provider::{ExecutorFactory, PrunableBlockExecutor, StateProvider};
 use std::sync::Arc;
@@ -39,7 +39,7 @@ impl<EvmConfig> EvmProcessorFactory<EvmConfig> {
 
 impl<EvmConfig> ExecutorFactory for EvmProcessorFactory<EvmConfig>
 where
-    EvmConfig: reth_node_api::EvmConfig + Send + Sync + Clone + 'static,
+    EvmConfig: ConfigureEvm + Send + Sync + Clone + 'static,
 {
     fn with_state<'a, SP: StateProvider + 'a>(
         &'a self,
