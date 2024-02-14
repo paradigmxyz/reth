@@ -6,7 +6,6 @@ use crate::{
         DatabaseArgs, StageEnum,
     },
     dirs::{DataDirPath, MaybePlatformPath},
-    utils::DbTool,
 };
 use clap::Parser;
 use reth_db::{
@@ -14,6 +13,7 @@ use reth_db::{
 };
 use reth_node_core::init::{insert_genesis_header, insert_genesis_state};
 use reth_primitives::{fs, stage::StageId, ChainSpec};
+use reth_provider::DatabaseProviderRW;
 use std::sync::Arc;
 use tracing::info;
 
@@ -59,11 +59,13 @@ impl Command {
         let db =
             open_db(db_path.as_ref(), DatabaseArguments::default().log_level(self.db.log_level))?;
 
-        let tool = DbTool::new(&db, self.chain.clone())?;
+        let provider_rw =
+            DatabaseProviderRW::<DatabaseEnv>::with_tx(db.tx_mut()?, self.chain.clone(), &None)?;
 
-        tool.db.update(|tx| {
+        provider_rw.update(|provider| {
             match &self.stage {
                 StageEnum::Bodies => {
+                    let tx = provider.tx_mut();
                     tx.clear::<tables::BlockBodyIndices>()?;
                     tx.clear::<tables::Transactions>()?;
                     tx.clear::<tables::TransactionBlock>()?;
@@ -73,6 +75,7 @@ impl Command {
                     insert_genesis_header::<DatabaseEnv>(tx, self.chain)?;
                 }
                 StageEnum::Senders => {
+                    let tx = provider.tx_mut();
                     tx.clear::<tables::TxSenders>()?;
                     tx.put::<tables::SyncStage>(
                         StageId::SenderRecovery.to_string(),
@@ -80,6 +83,7 @@ impl Command {
                     )?;
                 }
                 StageEnum::Execution => {
+                    let tx = provider.tx_mut();
                     tx.clear::<tables::PlainAccountState>()?;
                     tx.clear::<tables::PlainStorageState>()?;
                     tx.clear::<tables::AccountChangeSet>()?;
@@ -90,9 +94,11 @@ impl Command {
                         StageId::Execution.to_string(),
                         Default::default(),
                     )?;
-                    insert_genesis_state::<DatabaseEnv>(tx, self.chain.genesis())?;
+
+                    insert_genesis_state(provider, self.chain.genesis())?;
                 }
                 StageEnum::AccountHashing => {
+                    let tx = provider.tx_mut();
                     tx.clear::<tables::HashedAccount>()?;
                     tx.put::<tables::SyncStage>(
                         StageId::AccountHashing.to_string(),
@@ -100,6 +106,7 @@ impl Command {
                     )?;
                 }
                 StageEnum::StorageHashing => {
+                    let tx = provider.tx_mut();
                     tx.clear::<tables::HashedStorage>()?;
                     tx.put::<tables::SyncStage>(
                         StageId::StorageHashing.to_string(),
@@ -107,6 +114,8 @@ impl Command {
                     )?;
                 }
                 StageEnum::Hashing => {
+                    let tx = provider.tx_mut();
+
                     // Clear hashed accounts
                     tx.clear::<tables::HashedAccount>()?;
                     tx.put::<tables::SyncStage>(
@@ -122,6 +131,7 @@ impl Command {
                     )?;
                 }
                 StageEnum::Merkle => {
+                    let tx = provider.tx_mut();
                     tx.clear::<tables::AccountsTrie>()?;
                     tx.clear::<tables::StoragesTrie>()?;
                     tx.put::<tables::SyncStage>(
@@ -138,6 +148,7 @@ impl Command {
                     )?;
                 }
                 StageEnum::AccountHistory | StageEnum::StorageHistory => {
+                    let tx = provider.tx_mut();
                     tx.clear::<tables::AccountHistory>()?;
                     tx.clear::<tables::StorageHistory>()?;
                     tx.put::<tables::SyncStage>(
@@ -150,6 +161,8 @@ impl Command {
                     )?;
                 }
                 StageEnum::TotalDifficulty => {
+                    let tx = provider.tx_mut();
+
                     tx.clear::<tables::HeaderTD>()?;
                     tx.put::<tables::SyncStage>(
                         StageId::TotalDifficulty.to_string(),
@@ -158,6 +171,7 @@ impl Command {
                     insert_genesis_header::<DatabaseEnv>(tx, self.chain)?;
                 }
                 StageEnum::TxLookup => {
+                    let tx = provider.tx_mut();
                     tx.clear::<tables::TxHashNumber>()?;
                     tx.put::<tables::SyncStage>(
                         StageId::TransactionLookup.to_string(),
@@ -171,6 +185,7 @@ impl Command {
                 }
             }
 
+            let tx = provider.tx_mut();
             tx.put::<tables::SyncStage>(StageId::Finish.to_string(), Default::default())?;
 
             Ok::<_, eyre::Error>(())

@@ -13,7 +13,7 @@ use reth_primitives::{
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
     BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown,
-    ProviderError, ProviderFactory,
+    ProviderError, ProviderFactory, StateWriter,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -75,13 +75,12 @@ pub fn init_genesis<DB: Database>(
     let provider_rw = factory.provider_rw()?;
     insert_genesis_hashes(&provider_rw, genesis)?;
     insert_genesis_history(&provider_rw, genesis)?;
+    insert_genesis_state(&provider_rw, genesis)?;
     provider_rw.commit()?;
 
     // Insert header
     let tx = db.tx_mut()?;
     insert_genesis_header::<DB>(&tx, chain.clone())?;
-
-    insert_genesis_state::<DB>(&tx, genesis)?;
 
     // insert sync stage
     for stage in StageId::ALL.iter() {
@@ -94,7 +93,7 @@ pub fn init_genesis<DB: Database>(
 
 /// Inserts the genesis state into the database.
 pub fn insert_genesis_state<DB: Database>(
-    tx: &<DB as Database>::TXMut,
+    provider: &DatabaseProviderRW<DB>,
     genesis: &reth_primitives::Genesis,
 ) -> ProviderResult<()> {
     let mut state_init: BundleStateInit = HashMap::new();
@@ -153,7 +152,7 @@ pub fn insert_genesis_state<DB: Database>(
         0,
     );
 
-    bundle.write_to_db(tx, OriginalValuesKnown::Yes)?;
+    provider.write_state(bundle, OriginalValuesKnown::Yes)?;
 
     Ok(())
 }

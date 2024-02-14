@@ -74,6 +74,40 @@ pub type DatabaseProviderRO<DB> = DatabaseProvider<<DB as Database>::TX>;
 #[derive(Debug)]
 pub struct DatabaseProviderRW<DB: Database>(pub DatabaseProvider<<DB as Database>::TXMut>);
 
+impl<DB> DatabaseProviderRW<DB>
+where
+    DB: Database,
+{
+    /// Returns a provider with the given `DbTxMut` inside, which allows fetching and updating
+    /// data from the database using different types of providers.
+    #[track_caller]
+    pub fn with_tx(
+        tx: <DB as Database>::TXMut,
+        chain_spec: Arc<ChainSpec>,
+        snapshot_provider: &Option<Arc<SnapshotProvider>>,
+    ) -> ProviderResult<DatabaseProviderRW<DB>> {
+        let mut provider = DatabaseProvider::new_rw(tx, chain_spec.clone());
+
+        if let Some(snapshot_provider) = snapshot_provider {
+            provider = provider.with_snapshot_provider(snapshot_provider.clone());
+        }
+
+        Ok(DatabaseProviderRW(provider))
+    }
+
+    /// Takes a function and passes a write-read transaction into it, making sure it's committed at
+    /// the end of the execution.
+    pub fn update<T, F>(mut self, f: F) -> Result<T, DatabaseError>
+    where
+        F: FnOnce(&mut Self) -> T,
+    {
+        let res = f(&mut self);
+        self.commit()?;
+
+        Ok(res)
+    }
+}
+
 impl<DB: Database> Deref for DatabaseProviderRW<DB> {
     type Target = DatabaseProvider<<DB as Database>::TXMut>;
 
@@ -90,7 +124,7 @@ impl<DB: Database> DerefMut for DatabaseProviderRW<DB> {
 
 impl<DB: Database> DatabaseProviderRW<DB> {
     /// Commit database transaction
-    pub fn commit(self) -> ProviderResult<bool> {
+    pub fn commit(self) -> Result<bool, DatabaseError> {
         self.0.commit()
     }
 
@@ -375,7 +409,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
 
 impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     /// Commit database transaction.
-    pub fn commit(self) -> ProviderResult<bool> {
+    pub fn commit(self) -> Result<bool, DatabaseError> {
         Ok(self.tx.commit()?)
     }
 

@@ -118,13 +118,11 @@ impl<DB: Database> ProviderFactory<DB> {
     /// open.
     #[track_caller]
     pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<DB>> {
-        let mut provider = DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone());
-
-        if let Some(snapshot_provider) = &self.snapshot_provider {
-            provider = provider.with_snapshot_provider(snapshot_provider.clone());
-        }
-
-        Ok(DatabaseProviderRW(provider))
+        DatabaseProviderRW::with_tx(
+            self.db.tx_mut()?,
+            self.chain_spec.clone(),
+            &self.snapshot_provider,
+        )
     }
 
     /// Storage provider for latest block

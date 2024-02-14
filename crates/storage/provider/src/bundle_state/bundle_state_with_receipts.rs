@@ -1,10 +1,3 @@
-use crate::{StateChanges, StateReverts};
-use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
-    tables,
-    transaction::{DbTx, DbTxMut},
-};
-use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
     logs_bloom,
     revm::compat::{into_reth_acc, into_revm_acc},
@@ -289,46 +282,6 @@ impl BundleStateWithReceipts {
         // swap bundles
         std::mem::swap(&mut self.bundle, &mut other)
     }
-
-    /// Write the [BundleStateWithReceipts] to the database.
-    ///
-    /// `is_value_known` should be set to `Not` if the [BundleStateWithReceipts] has some of its
-    /// state detached, This would make some original values not known.
-    pub fn write_to_db<TX: DbTxMut + DbTx>(
-        self,
-        tx: &TX,
-        is_value_known: OriginalValuesKnown,
-    ) -> Result<(), DatabaseError> {
-        let (plain_state, reverts) = self.bundle.into_plain_state_and_reverts(is_value_known);
-
-        StateReverts(reverts).write_to_db(tx, self.first_block)?;
-
-        // write receipts
-        let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
-        let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
-
-        for (idx, receipts) in self.receipts.into_iter().enumerate() {
-            if !receipts.is_empty() {
-                let block_number = self.first_block + idx as u64;
-                let (_, body_indices) =
-                    bodies_cursor.seek_exact(block_number)?.unwrap_or_else(|| {
-                        let last_available = bodies_cursor.last().ok().flatten().map(|(number, _)| number);
-                        panic!("body indices for block {block_number} must exist. last available block number: {last_available:?}");
-                    });
-
-                let first_tx_index = body_indices.first_tx_num();
-                for (tx_idx, receipt) in receipts.into_iter().enumerate() {
-                    if let Some(receipt) = receipt {
-                        receipts_cursor.append(first_tx_index + tx_idx as u64, receipt)?;
-                    }
-                }
-            }
-        }
-
-        StateChanges(plain_state).write_to_db(tx)?;
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -344,7 +297,7 @@ mod tests {
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
         test_utils::create_test_rw_db,
-        transaction::DbTx,
+        transaction::{DbTx, DbTxMut},
     };
     use reth_primitives::{
         keccak256, revm::compat::into_reth_acc, Address, Receipt, Receipts, StorageEntry, B256,
