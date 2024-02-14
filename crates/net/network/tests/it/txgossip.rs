@@ -5,7 +5,7 @@ use reth_network::test_utils::Testnet;
 use reth_primitives::{TransactionSigned, U256};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tx_gossip() {
     reth_tracing::init_test_tracing();
@@ -83,6 +83,8 @@ async fn test_4844_tx_gossip_penalization() {
 
     network_handle.send_transactions(peer1.peer_id().clone(), signed_txs);
 
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
     let received = peer1_tx_listener.recv().await.unwrap();
 
     let peer0_reputation_after =
@@ -117,6 +119,8 @@ async fn test_sending_invalid_transactions() {
     let network_handle = peer0.network();
 
     network_handle.send_transactions(peer1.peer_id().clone(), invalid_txs);
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     // this will return an [`Empty`] error because bad txs are disallowed to be broadcasted
     assert!(peer1_tx_listener.try_recv().is_err());
