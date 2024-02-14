@@ -348,7 +348,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     where
         C: DbCursorRO<tables::Transactions>,
     {
-        self.get_range_with_snapshot(
+        self.snapshot_provider.get_range_with_snapshot_or_database(
             SnapshotSegment::Transactions,
             to_range(range),
             |snapshot, range, _| snapshot.transactions_by_tx_range(range),
@@ -1116,7 +1116,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        self.get_range_with_snapshot(
+        self.snapshot_provider.get_range_with_snapshot_or_database(
             SnapshotSegment::Headers,
             to_range(range),
             |snapshot, range, _| snapshot.headers_range(range),
@@ -1150,7 +1150,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.get_range_with_snapshot(
+        self.snapshot_provider.get_range_with_snapshot_or_database(
             SnapshotSegment::Headers,
             to_range(range),
             |snapshot, range, predicate| snapshot.sealed_headers_while(range, predicate),
@@ -1189,7 +1189,7 @@ impl<TX: DbTx> BlockHashReader for DatabaseProvider<TX> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.get_range_with_snapshot(
+        self.snapshot_provider.get_range_with_snapshot_or_database(
             SnapshotSegment::Headers,
             start..end,
             |snapshot, range, _| snapshot.canonical_hashes_range(range.start, range.end),
@@ -1418,7 +1418,7 @@ impl<TX: DbTx> TransactionsProviderExt for DatabaseProvider<TX> {
         &self,
         tx_range: Range<TxNumber>,
     ) -> ProviderResult<Vec<(TxHash, TxNumber)>> {
-        self.get_range_with_snapshot(
+        self.snapshot_provider.get_range_with_snapshot_or_database(
             SnapshotSegment::Transactions,
             tx_range,
             |snapshot, range, _| snapshot.transaction_hashes_by_range(range),
@@ -1629,7 +1629,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
-        self.get_range_with_snapshot(
+        self.snapshot_provider.get_range_with_snapshot_or_database(
             SnapshotSegment::Transactions,
             to_range(range),
             |snapshot, range, _| snapshot.raw_transactions_by_tx_range(range),
@@ -1693,7 +1693,7 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
-        self.get_range_with_snapshot(
+        self.snapshot_provider.get_range_with_snapshot_or_database(
             SnapshotSegment::Receipts,
             to_range(range),
             |snapshot, range, _| snapshot.receipts_by_tx_range(range),
