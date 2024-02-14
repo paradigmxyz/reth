@@ -93,7 +93,7 @@ where
         Ok(DatabaseProviderRW(provider))
     }
 
-    /// Takes a function and passes a write-read transaction into it, making sure it's committed at
+    /// Takes a function and passes a read-write transaction into it, making sure it's committed at
     /// the end of the execution.
     pub fn update<T, F>(mut self, f: F) -> Result<T, DatabaseError>
     where
