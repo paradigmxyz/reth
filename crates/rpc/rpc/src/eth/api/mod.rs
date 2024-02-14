@@ -292,6 +292,9 @@ where
             latest_header.base_fee_per_gas = latest_header
                 .next_block_base_fee(chain_spec.base_fee_params(latest_header.timestamp));
 
+            // update excess blob gas consumed above target
+            latest_header.excess_blob_gas = latest_header.next_block_excess_blob_gas();
+
             // we're reusing the same block hash because we need this to lookup the block's state
             let latest = SealedHeader::new(latest_header, block_hash);
 
