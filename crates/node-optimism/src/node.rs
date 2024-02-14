@@ -1,9 +1,8 @@
 //! Optimism Node types config.
 
+use crate::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_network::NetworkHandle;
-
-use crate::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_node_builder::{
     components::{ComponentsBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder},
     node::{FullNodeTypes, NodeTypes},
@@ -17,7 +16,7 @@ use reth_transaction_pool::{
     TransactionValidationTaskExecutor,
 };
 
-/// Type configuration for a regular Ethereum node.
+/// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct OptimismNode;
@@ -26,14 +25,14 @@ pub struct OptimismNode;
 impl OptimismNode {
     /// Returns a [`ComponentsBuilder`] configured for a regular Ethereum node.
     pub fn components<Node>(
-    ) -> ComponentsBuilder<Node, OptimismPoolBuilder, EthereumPayloadBuilder, OptimismNetwork>
+    ) -> ComponentsBuilder<Node, OptimismPoolBuilder, OptimismPayloadBuilder, OptimismNetwork>
     where
         Node: FullNodeTypes<Engine = OptimismEngineTypes>,
     {
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(OptimismPoolBuilder::default())
-            .payload(EthereumPayloadBuilder::default())
+            .payload(OptimismPayloadBuilder::default())
             .network(OptimismNetwork)
     }
 }
@@ -48,7 +47,7 @@ impl NodeTypes for OptimismNode {
     }
 }
 
-/// A basic ethereum transaction pool.
+/// A basic optimism transaction pool.
 ///
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
@@ -119,12 +118,12 @@ where
     }
 }
 
-/// A basic ethereum payload service.
+/// A basic optimism payload service.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct EthereumPayloadBuilder;
+pub struct OptimismPayloadBuilder;
 
-impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBuilder
+impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for OptimismPayloadBuilder
 where
     Node: FullNodeTypes<Engine = OptimismEngineTypes>,
     Pool: TransactionPool + Unpin + 'static,
