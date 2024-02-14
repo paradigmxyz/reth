@@ -151,7 +151,8 @@ impl<C> NetworkManager<C> {
     }
 
     /// Returns a sharable reference to the transactions manager config
-    /// It's safe to return the reference here since no set method is provided on TransactionsManagerConfig, which means it's immutable throughout its lifetime
+    /// It's safe to return the reference here since no set method is provided on
+    /// TransactionsManagerConfig, which means it's immutable throughout its lifetime
     pub fn transactions_manager_config(&self) -> &TransactionsManagerConfig {
         &self.transactions_manager_config
     }

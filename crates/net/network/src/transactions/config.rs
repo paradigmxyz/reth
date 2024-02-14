@@ -4,7 +4,7 @@ use super::{
 };
 
 /// Configuration for managing transactions within the network.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TransactionsManagerConfig {
     /// Configuration for fetching transactions.
@@ -15,9 +15,10 @@ pub struct TransactionsManagerConfig {
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TransactionFetcherConfig {
-    ///  Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions)
-    /// response on assembling a [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions)
-    /// request. Spec'd at 2 MiB.
+    ///  Soft limit for the byte size of a
+    /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on assembling a
+    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request. Spec'd at 2
+    /// MiB.
     pub soft_limit_byte_size_pooled_transactions_response: usize,
     /// Soft limit for the byte size of the expected
     /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on packing a
@@ -35,12 +36,6 @@ impl TransactionFetcherConfig {
             soft_limit_byte_size_pooled_transactions_response,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request,
         }
-    }
-}
-
-impl Default for TransactionsManagerConfig {
-    fn default() -> Self {
-        Self { transaction_fetcher_config: TransactionFetcherConfig::default() }
     }
 }
 

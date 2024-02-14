@@ -219,8 +219,8 @@ impl TransactionFetcher {
 
             let next_acc_size = acc_size_response + size;
 
-            if next_acc_size
-                <= self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
+            if next_acc_size <= 
+            self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
             {
                 // only update accumulated size of tx response if tx will fit in without exceeding
                 // soft limit
@@ -231,8 +231,8 @@ impl TransactionFetcher {
             }
 
             let free_space =
-                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
-                    - acc_size_response;
+                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request - 
+                acc_size_response;
 
             if free_space < MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED {
                 break 'fold_size
