@@ -3,6 +3,7 @@ use crate::{
     processor::EVMProcessor,
     stack::{InspectorStack, InspectorStackConfig},
 };
+use reth_interfaces::executor::BlockExecutionError;
 use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::ChainSpec;
 use reth_provider::{ExecutorFactory, PrunableBlockExecutor, StateProvider};
@@ -43,7 +44,7 @@ where
     fn with_state<'a, SP: StateProvider + 'a>(
         &'a self,
         sp: SP,
-    ) -> Box<dyn PrunableBlockExecutor + 'a> {
+    ) -> Box<dyn PrunableBlockExecutor<Error = BlockExecutionError> + 'a> {
         let database_state = StateProviderDatabase::new(sp);
         let mut evm = Box::new(EVMProcessor::new_with_db(
             self.chain_spec.clone(),

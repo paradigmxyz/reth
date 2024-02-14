@@ -411,6 +411,8 @@ impl<'a, EvmConfig> BlockExecutor for EVMProcessor<'a, EvmConfig>
 where
     EvmConfig: ConfigureEvmEnv,
 {
+    type Error = BlockExecutionError;
+
     fn execute(
         &mut self,
         block: &BlockWithSenders,
@@ -505,16 +507,13 @@ where
     }
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
+        self.stats.log_info();
         let receipts = std::mem::take(&mut self.receipts);
         BundleStateWithReceipts::new(
             self.evm.context.evm.db.take_bundle(),
             receipts,
             self.first_block.unwrap_or_default(),
         )
-    }
-
-    fn stats(&self) -> BlockExecutorStats {
-        self.stats.clone()
     }
 
     fn size_hint(&self) -> Option<usize> {

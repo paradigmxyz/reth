@@ -46,20 +46,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 }
 
-// TODO
 impl EvmConfig for EthEvmConfig {}
-
-impl EvmConfig for EthEvmConfig {
-    type Executor = for<'this> EVMProcessor<'this, EthEvmConfig>;
-
-    fn evm(&self, db: impl Database) -> Self::Executor {
-        todo!()
-    }
-
-    fn evm_with_inspector<I>(&self, db: impl Database, inspector: I) -> Self::Executor {
-        todo!()
-    }
-}
 
 #[cfg(test)]
 mod tests {
