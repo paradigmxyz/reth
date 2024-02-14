@@ -84,13 +84,7 @@ where
         chain_spec: Arc<ChainSpec>,
         snapshot_provider: &Option<Arc<SnapshotProvider>>,
     ) -> ProviderResult<DatabaseProviderRW<DB>> {
-        let mut provider = DatabaseProvider::new_rw(tx, chain_spec.clone());
-
-        if let Some(snapshot_provider) = snapshot_provider {
-            provider = provider.with_snapshot_provider(snapshot_provider.clone());
-        }
-
-        Ok(DatabaseProviderRW(provider))
+        DatabaseProvider::with_tx_mut(tx, chain_spec, snapshot_provider).map(DatabaseProviderRW)
     }
 
     /// Takes a function and passes a read-write transaction into it, making sure it's committed at
@@ -145,10 +139,35 @@ pub struct DatabaseProvider<TX> {
     snapshot_provider: Option<Arc<SnapshotProvider>>,
 }
 
+impl<TX> DatabaseProvider<TX> {
+    /// Creates a new [`Self`] with access to a [`SnapshotProvider`].
+    pub fn with_snapshot_provider(mut self, snapshot_provider: Arc<SnapshotProvider>) -> Self {
+        self.snapshot_provider = Some(snapshot_provider);
+        self
+    }
+}
+
 impl<TX: DbTxMut> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-write transaction.
     pub fn new_rw(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
         Self { tx, chain_spec, snapshot_provider: None }
+    }
+
+    /// Returns a provider with the given `DbTxMut` inside, which allows fetching and updating
+    /// data from the database using different types of providers.
+    #[track_caller]
+    pub fn with_tx_mut(
+        tx: TX,
+        chain_spec: Arc<ChainSpec>,
+        snapshot_provider: &Option<Arc<SnapshotProvider>>,
+    ) -> ProviderResult<DatabaseProvider<TX>> {
+        let mut provider = DatabaseProvider::new_rw(tx, chain_spec.clone());
+
+        if let Some(snapshot_provider) = snapshot_provider {
+            provider = provider.with_snapshot_provider(snapshot_provider.clone());
+        }
+
+        Ok(provider)
     }
 }
 
@@ -252,12 +271,6 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-only transaction.
     pub fn new(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
         Self { tx, chain_spec, snapshot_provider: None }
-    }
-
-    /// Creates a new [`Self`] with access to a [`SnapshotProvider`].
-    pub fn with_snapshot_provider(mut self, snapshot_provider: Arc<SnapshotProvider>) -> Self {
-        self.snapshot_provider = Some(snapshot_provider);
-        self
     }
 
     /// Consume `DbTx` or `DbTxMut`.
