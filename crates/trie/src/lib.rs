@@ -29,8 +29,8 @@ pub mod walker;
 mod errors;
 pub use errors::*;
 
-// The iterators for traversing existing intermediate hashes and updated trie leaves.
-pub(crate) mod node_iter;
+/// The iterators for traversing existing intermediate hashes and updated trie leaves.
+pub mod node_iter;
 
 /// In-memory hashed state.
 mod state;

@@ -20,7 +20,7 @@ use reth_primitives::{
     MAINNET, U256,
 };
 use reth_trie::updates::TrieUpdates;
-use revm::primitives::{BlockEnv, CfgEnv};
+use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
@@ -318,7 +318,7 @@ impl StateProvider for NoopProvider {
 impl EvmEnvProvider for NoopProvider {
     fn fill_env_at<EvmConfig>(
         &self,
-        _cfg: &mut CfgEnv,
+        _cfg: &mut CfgEnvWithHandlerCfg,
         _block_env: &mut BlockEnv,
         _at: BlockHashOrNumber,
         _evm_config: EvmConfig,
@@ -331,7 +331,7 @@ impl EvmEnvProvider for NoopProvider {
 
     fn fill_env_with_header<EvmConfig>(
         &self,
-        _cfg: &mut CfgEnv,
+        _cfg: &mut CfgEnvWithHandlerCfg,
         _block_env: &mut BlockEnv,
         _header: &Header,
         _evm_config: EvmConfig,
@@ -360,7 +360,7 @@ impl EvmEnvProvider for NoopProvider {
 
     fn fill_cfg_env_at<EvmConfig>(
         &self,
-        _cfg: &mut CfgEnv,
+        _cfg: &mut CfgEnvWithHandlerCfg,
         _at: BlockHashOrNumber,
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
@@ -372,7 +372,7 @@ impl EvmEnvProvider for NoopProvider {
 
     fn fill_cfg_env_with_header<EvmConfig>(
         &self,
-        _cfg: &mut CfgEnv,
+        _cfg: &mut CfgEnvWithHandlerCfg,
         _header: &Header,
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>

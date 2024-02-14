@@ -53,7 +53,7 @@ pub struct SessionManagerMetrics {
     pub(crate) total_dial_successes: Counter,
 }
 
-/// Metrics for the [`TransactionsManager`].
+/// Metrics for the [`TransactionsManager`](crate::transactions::TransactionsManager).
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct TransactionsManagerMetrics {

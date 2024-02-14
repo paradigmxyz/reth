@@ -1,7 +1,6 @@
 use crate::{
     args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
     dirs::{DataDirPath, MaybePlatformPath},
-    init::init_genesis,
     runner::CliContext,
 };
 use clap::Parser;
@@ -10,6 +9,7 @@ use reth_db::{
     init_db, tables,
     transaction::DbTx,
 };
+use reth_node_core::init::init_genesis;
 use reth_primitives::ChainSpec;
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFactory};
 use reth_trie::StateRoot;

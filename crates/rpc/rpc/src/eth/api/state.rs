@@ -24,15 +24,18 @@ where
     EvmConfig: ConfigureEvmEnv + 'static,
 {
     pub(crate) fn get_code(&self, address: Address, block_id: Option<BlockId>) -> EthResult<Bytes> {
-        let state = self.state_at_block_id_or_latest(block_id)?;
-        let code = state.account_code(address)?.unwrap_or_default();
-        Ok(code.original_bytes())
+        Ok(self
+            .state_at_block_id_or_latest(block_id)?
+            .account_code(address)?
+            .unwrap_or_default()
+            .original_bytes())
     }
 
     pub(crate) fn balance(&self, address: Address, block_id: Option<BlockId>) -> EthResult<U256> {
-        let state = self.state_at_block_id_or_latest(block_id)?;
-        let balance = state.account_balance(address)?.unwrap_or_default();
-        Ok(balance)
+        Ok(self
+            .state_at_block_id_or_latest(block_id)?
+            .account_balance(address)?
+            .unwrap_or_default())
     }
 
     /// Returns the number of transactions sent from an address at the given block identifier.
@@ -80,9 +83,12 @@ where
         index: JsonStorageKey,
         block_id: Option<BlockId>,
     ) -> EthResult<B256> {
-        let state = self.state_at_block_id_or_latest(block_id)?;
-        let value = state.storage(address, index.0)?.unwrap_or_default();
-        Ok(B256::new(value.to_be_bytes()))
+        Ok(B256::new(
+            self.state_at_block_id_or_latest(block_id)?
+                .storage(address, index.0)?
+                .unwrap_or_default()
+                .to_be_bytes(),
+        ))
     }
 
     pub(crate) async fn get_proof(

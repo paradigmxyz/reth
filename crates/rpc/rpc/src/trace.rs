@@ -11,8 +11,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
 use reth_primitives::{
-    revm::env::tx_env_with_recovered, revm_primitives::db::DatabaseCommit, BlockId,
-    BlockNumberOrTag, Bytes, SealedHeader, B256, U256,
+    revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, SealedHeader, B256, U256,
 };
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
@@ -23,9 +22,12 @@ use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
     state::StateOverride,
     trace::{filter::TraceFilter, parity::*, tracerequest::TraceCallRequest},
-    BlockError, BlockOverrides, CallRequest, Index,
+    BlockError, BlockOverrides, Index, TransactionRequest,
 };
-use revm::{db::CacheDB, primitives::Env};
+use revm::{
+    db::{CacheDB, DatabaseCommit},
+    primitives::EnvWithHandlerCfg,
+};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -101,7 +103,7 @@ where
             .evm_env_at(block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)))
             .await?;
         let tx = tx_env_with_recovered(&tx.into_ecrecovered_transaction());
-        let env = Env { cfg, block, tx };
+        let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block, tx);
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
 
@@ -123,7 +125,7 @@ where
     /// Note: Allows tracing dependent transactions, hence all transactions are traced in sequence
     pub async fn trace_call_many(
         &self,
-        calls: Vec<(CallRequest, HashSet<TraceType>)>,
+        calls: Vec<(TransactionRequest, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> EthResult<Vec<TraceResults>> {
         let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
@@ -222,13 +224,7 @@ where
         hash: B256,
         index: usize,
     ) -> EthResult<Option<LocalizedTransactionTrace>> {
-        match self.trace_transaction(hash).await? {
-            None => Ok(None),
-            Some(traces) => {
-                let trace = traces.into_iter().nth(index);
-                Ok(trace)
-            }
-        }
+        Ok(self.trace_transaction(hash).await?.and_then(|traces| traces.into_iter().nth(index)))
     }
 
     /// Returns all transaction traces that match the given filter.
@@ -357,7 +353,7 @@ where
             maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
         if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
-            if let Some(header_td) = self.provider().header_td(&block.header.hash)? {
+            if let Some(header_td) = self.provider().header_td(&block.header.hash())? {
                 if let Some(base_block_reward) = base_block_reward(
                     self.provider().chain_spec().as_ref(),
                     block.header.number,
@@ -436,7 +432,7 @@ where
     /// Handler for `trace_call`
     async fn trace_call(
         &self,
-        call: CallRequest,
+        call: TransactionRequest,
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
         state_overrides: Option<StateOverride>,
@@ -451,7 +447,7 @@ where
     /// Handler for `trace_callMany`
     async fn trace_call_many(
         &self,
-        calls: Vec<(CallRequest, HashSet<TraceType>)>,
+        calls: Vec<(TransactionRequest, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>> {
         let _permit = self.acquire_trace_permit().await;
@@ -553,7 +549,7 @@ struct TraceApiInner<Provider, Eth> {
 /// beneficiary.
 fn reward_trace(header: &SealedHeader, reward: RewardAction) -> LocalizedTransactionTrace {
     LocalizedTransactionTrace {
-        block_hash: Some(header.hash),
+        block_hash: Some(header.hash()),
         block_number: Some(header.number),
         transaction_hash: None,
         transaction_position: None,
