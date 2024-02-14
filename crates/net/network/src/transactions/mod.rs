@@ -244,8 +244,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
         // install a listener for new pending transactions that are allowed to be propagated over
         // the network
         let pending = pool.pending_transactions_listener();
-        let pending_pool_imports_info =
-            PendingPoolImportsInfo::new(DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS);
+        let pending_pool_imports_info = PendingPoolImportsInfo::default();
 
         let metrics = TransactionsManagerMetrics::default();
         metrics
@@ -1441,23 +1440,28 @@ struct PendingPoolImportsInfo {
 }
 
 impl PendingPoolImportsInfo {
-    pub fn new(max_pending_pool_imports: usize) -> Self {
+    fn new(max_pending_pool_imports: usize) -> Self {
         Self { pending_pool_imports: Arc::new(AtomicUsize::default()), max_pending_pool_imports }
     }
 
     /// Returns `true` if the number of pool imports is under a given tolerated max.
-    pub fn has_capacity(&self, max_pending_pool_imports: usize) -> bool {
+    fn has_capacity(&self, max_pending_pool_imports: usize) -> bool {
         self.pending_pool_imports.load(Ordering::Relaxed) < max_pending_pool_imports
+    }
+}
+
+impl Default for PendingPoolImportsInfo {
+    fn default() -> Self {
+        Self::new(DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use constants::tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
-
     use super::*;
     use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
     use alloy_rlp::Decodable;
+    use constants::tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
     use futures::FutureExt;
     use reth_interfaces::sync::{NetworkSyncUpdater, SyncState};
     use reth_network_api::NetworkInfo;
