@@ -29,8 +29,8 @@
 
 use crate::{
     budget::{
-        DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
-        DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+        DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
+        DEFAULT_BUDGET_TRY_DRAIN_STREAM,
     },
     cache::LruCache,
     manager::NetworkEvent,
@@ -1197,11 +1197,7 @@ where
                 !maybe_more_pending_txns
             {
                 return Poll::Pending
-            }
-
-            // some streams are still ready, continue looping with respect to budget depletion
-            budget_tx_manager -= 1;
-            if budget_tx_manager <= 0 {
+            } else {
                 // Make sure we're woken up again
                 cx.waker().wake_by_ref();
                 return Poll::Pending
