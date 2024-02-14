@@ -8,15 +8,16 @@ pub const BUDGET_POLL_ONCE: u32 = 1;
 /// channel.
 pub const DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL: u32 = 4 * 1024;
 
-/// Default budget to try and flush pending pool imports to pool from
-/// [`TransactionsManager`](crate::TransactionsManager) channel. Default is 4 096 pending pool 
-/// imports.
-pub const DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS: u32 = 8 * 1024;
+/// Default budget to try and flush pending pool imports to pool. This number reflects the number
+/// of transactions that can be queued for import to pool in each iteration of the loop in the
+/// [`TransactionsManager`](crate::TransactionsManager) future. from the potential number of
+/// pooled imports  Default is 23,04 million ceiled, so 24 million pool imports.
+pub const DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS: u32 = 24 * 1000000;
 
-/// Default budget to try and flush pending pool imports to pool from
-/// [`TransactionsManager`](crate::TransactionsManager) channel. Default is same as
-/// [`DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS`], 4 096 pool imports.
-pub const DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS: u32 = 8 * 1024;
+/// Default budget to try and stream hashes of successfully imported transactions from the pool.
+/// Default is naturally same as the number of transactions to attempt importing,
+/// [`DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS`], so 24 million pool imports.
+pub const DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS: u32 = 24 * 1000000;
 
 /// Polls the given stream. Breaks with `true` if there maybe is more work. Note: this does not
 /// register wake up, caller's scope is responsible for doing so.

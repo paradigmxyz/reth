@@ -29,8 +29,8 @@
 
 use crate::{
     budget::{
-        DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
-        DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+        DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
+        DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_STREAM,
     },
     cache::LruCache,
     manager::NetworkEvent,
@@ -1114,6 +1114,10 @@ where
 
             // try drain fetching transaction events (flush transaction fetcher and queue for
             // import to pool)
+            //
+            // can potentially queue 21k txns * DEFAULT_BUDGET_TRY_DRAIN_STREAM = 21k * 1024 for
+            // import to pool. each message could contain up to soft limit byte size for
+            // response / small legacy tx size: 2 MiB / 100 bytes < 21k transactions.
             let maybe_more_tx_fetch_events = poll_nested_stream_with_yield_points!(
                 "net::tx",
                 "Transaction fetch events",
@@ -1138,6 +1142,13 @@ where
 
             // try drain incoming transaction events (stream new txns/announcements from network
             // manager and queue for import to pool/fetch txns)
+            //
+            // can potentially queue 1,5k * DEFAULT_BUDGET_TRY_DRAIN_STREAM = 1,5k * 1024 txns for
+            // import to pool. each message could contain up to soft limit byte size for broadcast
+            // message / small legacy tx size: 128 KiB / 100 bytes < 1,5k transactions.
+            //
+            // this will potentially remove hashes from hashes pending fetch (same hashes are
+            // announced that didn't fit into a previous request)
             let maybe_more_tx_events = poll_nested_stream_with_yield_points!(
                 "net::tx",
                 "Transaction events",
@@ -1147,6 +1158,8 @@ where
             );
 
             // try drain hashes pending fetch if there is capacity (fetch txns)
+            //
+            // sends at most one request
             if this.has_capacity_for_fetching_pending_hashes() {
                 let info = &this.pending_pool_imports_info;
                 let max_pending_pool_imports = info.max_pending_pool_imports;
