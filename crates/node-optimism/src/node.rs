@@ -24,7 +24,7 @@ pub struct OptimismNode;
 // TODO make this stateful with evm config
 
 impl OptimismNode {
-    /// Returns a [ComponentsBuilder] configured for a regular Ethereum node.
+    /// Returns a [`ComponentsBuilder`] configured for a regular Ethereum node.
     pub fn components<Node>(
     ) -> ComponentsBuilder<Node, OptimismPoolBuilder, EthereumPayloadBuilder, OptimismNetwork>
     where
