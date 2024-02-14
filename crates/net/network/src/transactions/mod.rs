@@ -243,8 +243,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
         let network_events = network.event_listener();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-        let mut transaction_fetcher = TransactionFetcher::default();
-        transaction_fetcher.with_transaction_fetcher_config(
+        let transaction_fetcher = TransactionFetcher::default().with_transaction_fetcher_config(
             &transactions_manager_config.transaction_fetcher_config,
         );
 

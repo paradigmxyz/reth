@@ -60,11 +60,12 @@ pub(crate) struct TransactionFetcher {
 
 impl TransactionFetcher {
     /// Sets up transaction fetcher with config
-    pub fn with_transaction_fetcher_config(&mut self, config: &TransactionFetcherConfig) {
+    pub fn with_transaction_fetcher_config(mut self, config: &TransactionFetcherConfig) -> Self {
         self.info.soft_limit_byte_size_pooled_transactions_response =
             config.soft_limit_byte_size_pooled_transactions_response;
         self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request =
             config.soft_limit_byte_size_pooled_transactions_response_on_pack_request;
+        self
     }
 
     /// Removes the specified hashes from inflight tracking.
@@ -219,8 +220,8 @@ impl TransactionFetcher {
 
             let next_acc_size = acc_size_response + size;
 
-            if next_acc_size <= 
-            self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
+            if next_acc_size <=
+                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
             {
                 // only update accumulated size of tx response if tx will fit in without exceeding
                 // soft limit
@@ -231,8 +232,8 @@ impl TransactionFetcher {
             }
 
             let free_space =
-                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request - 
-                acc_size_response;
+                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request -
+                    acc_size_response;
 
             if free_space < MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED {
                 break 'fold_size
