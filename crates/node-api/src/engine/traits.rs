@@ -99,17 +99,14 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
         // cancun now, we need to set the excess blob gas to the default value
         let blob_excess_gas_and_price = parent
             .next_block_excess_blob_gas()
-            .map_or_else(
-                || {
-                    if spec_id == SpecId::CANCUN {
-                        // default excess blob gas is zero
-                        Some(0)
-                    } else {
-                        None
-                    }
-                },
-                Some,
-            )
+            .or_else(|| {
+                if spec_id == SpecId::CANCUN {
+                    // default excess blob gas is zero
+                    Some(0)
+                } else {
+                    None
+                }
+            })
             .map(BlobExcessGasAndPrice::new);
 
         let block_env = BlockEnv {
