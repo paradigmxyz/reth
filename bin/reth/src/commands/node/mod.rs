@@ -138,7 +138,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// closure.
     pub async fn execute2<L, Fut>(self, ctx: CliContext, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(Ext::Node, WithLaunchContext<Arc<DatabaseEnv>, InitState>) -> Fut,
+        L: FnOnce(WithLaunchContext<Arc<DatabaseEnv>, InitState>, Ext::Node) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
         let Self {
@@ -200,7 +200,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .with_database(database)
             .with_launch_context(ctx.task_executor, data_dir);
 
-        launcher(ext, builder).await
+        launcher(builder, ext).await
     }
 
     /// Replaces the extension of the node command

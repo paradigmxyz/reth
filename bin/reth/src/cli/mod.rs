@@ -13,9 +13,11 @@ use crate::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, Parser, Subcommand};
+use reth_db::DatabaseEnv;
+use reth_node_builder::{InitState, WithLaunchContext};
 use reth_primitives::ChainSpec;
 use reth_tracing::FileWorkerGuard;
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 
 /// Re-export of the `reth_node_core` types specifically in the `cli` module.
 ///
@@ -69,6 +71,35 @@ pub struct Cli<Ext: RethCliExt = ()> {
 
 impl<Ext: RethCliExt> Cli<Ext> {
     /// Execute the configured cli command.
+    pub fn run2<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
+    where
+        L: FnOnce(WithLaunchContext<Arc<DatabaseEnv>, InitState>, Ext::Node) -> Fut,
+        Fut: Future<Output = eyre::Result<()>>,
+    {
+        // add network name to logs dir
+        self.logs.log_file_directory =
+            self.logs.log_file_directory.join(self.chain.chain.to_string());
+
+        let _guard = self.init_tracing()?;
+
+        let runner = CliRunner;
+        match self.command {
+            Commands::Node(command) => {
+                runner.run_command_until_exit(|ctx| command.execute2(ctx, launcher))
+            }
+            Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+            Commands::Recover(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+        }
+    }
+
+    /// Execute the configured cli command.
     pub fn run(mut self) -> eyre::Result<()> {
         // add network name to logs dir
         self.logs.log_file_directory =
@@ -114,6 +145,20 @@ impl<Ext: RethCliExt> Cli<Ext> {
 #[inline]
 pub fn run() -> eyre::Result<()> {
     Cli::<()>::parse().run()
+}
+
+/// Convenience function for parsing CLI options, set up logging and run the chosen command.
+#[inline]
+pub fn run_ethereum() -> eyre::Result<()> {
+    use reth_node_ethereum::node::EthereumNode;
+    Cli::<()>::parse().run2(|builder, _| async {
+        let handle = builder
+            .with_types(EthereumNode::default())
+            .with_components(EthereumNode::components())
+            .launch()
+            .await?;
+        handle.node_exit_future.await
+    })
 }
 
 /// Commands to be executed
