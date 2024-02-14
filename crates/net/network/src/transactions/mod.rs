@@ -73,7 +73,7 @@ use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
 
-mod constants;
+pub mod constants;
 mod fetcher;
 mod validation;
 
@@ -570,7 +570,11 @@ where
         &mut self,
         peer_id: PeerId,
         mut msg: NewPooledTransactionHashes,
+        cx: &mut Context<'_>
     ) {
+                // try free active peers
+                self.transaction_fetcher.try_drain_inflight_requests(cx);
+
         // If the node is initially syncing, ignore transactions
         if self.network.is_initially_syncing() {
             return
@@ -578,6 +582,9 @@ where
         if self.network.tx_gossip_disabled() {
             return
         }
+
+        // try to free up active peers
+        self.transaction_fetcher.try_drain_inflight_requests(cx);
 
         // get handle to peer's session, if the session is still active
         let Some(peer) = self.peers.get_mut(&peer_id) else {
@@ -764,7 +771,7 @@ where
     }
 
     /// Handles dedicated transaction events related to the `eth` protocol.
-    fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
+    fn on_network_tx_event(&mut self, event: NetworkTransactionEvent, cx: &mut Context<'_>) {
         match event {
             NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
                 // ensure we didn't receive any blob transactions as these are disallowed to be
@@ -792,7 +799,7 @@ where
                 }
             }
             NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
-                self.on_new_pooled_transaction_hashes(peer_id, msg)
+                self.on_new_pooled_transaction_hashes(peer_id, msg, cx)
             }
             NetworkTransactionEvent::GetPooledTransactions { peer_id, request, response } => {
                 self.on_get_pooled_transactions(peer_id, request, response)
@@ -1147,13 +1154,22 @@ where
         //
         // this will potentially remove hashes from hashes pending fetch (same hashes are
         // announced that didn't fit into a previous request)
-        let maybe_more_tx_events = poll_nested_stream_with_yield_points!(
-            "net::tx",
-            "Transaction events",
-            DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-            this.transaction_events.poll_next_unpin(cx),
-            |event| this.on_network_tx_event(event)
-        );
+        let mut budget: u32 = DEFAULT_BUDGET_TRY_DRAIN_STREAM;
+        // avoid cloning waker to pass down context
+        let maybe_more_tx_events = loop {
+            match this.transaction_events.poll_next_unpin(cx){
+                Poll::Ready(Some(event)) => {
+                    this.on_network_tx_event(event, cx);
+
+                    budget = budget.saturating_sub(1);
+                    if budget == 0 {
+                        break true
+                    }
+                }
+                Poll::Ready(None) => break false,
+                Poll::Pending => break false,
+            }
+        };
 
         // try drain hashes pending fetch if there is capacity (fetch txns)
         //
@@ -1172,6 +1188,7 @@ where
                 &this.peers,
                 has_capacity_wrt_pending_pool_imports,
                 metrics_increment_egress_peer_channel_full,
+                cx
             );
         }
 
@@ -1187,19 +1204,19 @@ where
         this.update_fetch_metrics();
 
         // all channels are fully drained and import futures pending
-        if !maybe_more_network_events &&
-            !maybe_more_commands &&
-            !maybe_more_tx_events &&
-            !maybe_more_tx_fetch_events &&
-            !maybe_more_pool_imports &&
-            !maybe_more_pending_txns
+        if maybe_more_network_events ||
+            maybe_more_commands ||
+            maybe_more_tx_events ||
+            maybe_more_tx_fetch_events ||
+            maybe_more_pool_imports ||
+            maybe_more_pending_txns
         {
-            return Poll::Pending
-        } else {
             // Make sure we're woken up again
             cx.waker().wake_by_ref();
             return Poll::Pending
         }
+
+        Poll::Pending
     }
 }
 
@@ -1497,6 +1514,7 @@ mod tests {
     use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
     use alloy_rlp::Decodable;
     use futures::FutureExt;
+    use futures_test::task::noop_context;
     use reth_interfaces::sync::{NetworkSyncUpdater, SyncState};
     use reth_network_api::NetworkInfo;
     use reth_primitives::hex;
@@ -1618,7 +1636,7 @@ mod tests {
         transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
             peer_id: *handle1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
-        });
+        }, &mut noop_context());
         poll_fn(|cx| {
             let _ = transactions.poll_unpin(cx);
             Poll::Ready(())
@@ -1703,7 +1721,7 @@ mod tests {
         transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
             peer_id: *handle1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
-        });
+        }, &mut noop_context());
         poll_fn(|cx| {
             let _ = transactions.poll_unpin(cx);
             Poll::Ready(())
@@ -1786,7 +1804,7 @@ mod tests {
         transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
             peer_id: *handle1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
-        });
+        }, &mut noop_context());
         assert_eq!(
             *handle1.peer_id(),
             transactions.transactions_by_peers.get(&signed_tx.hash()).unwrap()[0]
@@ -1882,7 +1900,7 @@ mod tests {
             peer_id: *handle1.peer_id(),
             request,
             response: send,
-        });
+        }, &mut noop_context());
 
         match receive.await.unwrap() {
             Ok(PooledTransactions(transactions)) => {
@@ -1931,7 +1949,7 @@ mod tests {
         assert!(tx_fetcher.is_idle(&peer_id_1));
 
         // sends request for buffered hashes to peer_1
-        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true, || ());
+        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true, || (), &mut noop_context());
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
@@ -1968,7 +1986,7 @@ mod tests {
         // peer_2 announces same hashes as peer_1
         let msg =
             NewPooledTransactionHashes::Eth66(NewPooledTransactionHashes66(seen_hashes.to_vec()));
-        tx_manager.on_new_pooled_transaction_hashes(peer_id_2, msg);
+        tx_manager.on_new_pooled_transaction_hashes(peer_id_2, msg, &mut noop_context());
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 

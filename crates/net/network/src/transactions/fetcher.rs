@@ -1,14 +1,21 @@
 use crate::{
     cache::{LruCache, LruMap},
     message::PeerRequest,
+    poll_nested_stream_with_yield_points,
 };
 use derive_more::Constructor;
-use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
+use futures::{
+    stream::FuturesUnordered, Future, FutureExt, Stream,
+    StreamExt,
+};
 use pin_project::pin_project;
 use reth_eth_wire::{
     GetPooledTransactions, HandleAnnouncement, RequestTxHashes, ValidAnnouncementData,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
+use reth_metrics::common::mpsc::{
+    metered_unbounded_channel, UnboundedMeteredReceiver, UnboundedMeteredSender,
+};
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
 use schnellru::{ByLength, Unlimited};
 use std::{
@@ -18,7 +25,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 
 use super::{
     constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
@@ -52,11 +59,32 @@ pub(crate) struct TransactionFetcher {
     pub(super) filter_valid_hashes: AnnouncementFilter,
     /// Info on capacity of the transaction fetcher.
     pub(super) info: TransactionFetcherInfo,
+    /// [`FetchEvent`]s as a result of advancing inflight requests
+    #[pin]
+    pub(super) fetch_events_head: UnboundedMeteredReceiver<FetchEvent>,
+    /// Handle for queueing [`FetchEvent`]s as a result of advancing inflight requests.
+    pub(super) fetch_events_tail: UnboundedMeteredSender<FetchEvent>,
 }
 
 // === impl TransactionFetcher ===
 
 impl TransactionFetcher {
+    pub(super) fn try_drain_inflight_requests(&mut self, cx: &mut Context<'_>) {
+        // `FuturesUnordered` doesn't close when `None` is returned. so just return if empty.
+        // <https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=815be2b6c8003303757c3ced135f363e>
+        if self.inflight_requests.is_empty() {
+            return
+        }
+
+        let _ = poll_nested_stream_with_yield_points!(
+            "net::tx",
+            "Fetch events stream",
+            DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
+            self.inflight_requests.poll_next_unpin(cx),
+            |resp| self.on_resolved_get_pooled_transactions_request_fut(resp),
+        );
+    }
+
     /// Removes the specified hashes from inflight tracking.
     #[inline]
     fn remove_from_unknown_hashes<I>(&mut self, hashes: I)
@@ -333,7 +361,11 @@ impl TransactionFetcher {
         peers: &HashMap<PeerId, Peer>,
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
         metrics_increment_egress_peer_channel_full: impl FnOnce(),
+        cx: &mut Context<'_>,
     ) {
+        // try free active peers
+        self.try_drain_inflight_requests(cx);
+
         let mut hashes_to_request = RequestTxHashes::with_capacity(32);
         let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
 
@@ -784,6 +816,56 @@ impl TransactionFetcher {
             Some(limit)
         }
     }
+
+    fn on_resolved_get_pooled_transactions_request_fut(&mut self, response: GetPooledTxResponse) {
+        // update peer activity, requests for buffered hashes can only be made to idle
+        // fallback peers
+        let GetPooledTxResponse { peer_id, mut requested_hashes, result } = response;
+
+        debug_assert!(
+                self.active_peers.get(&peer_id).is_some(),
+                "`%peer_id` has been removed from `@active_peers` before inflight request(s) resolved, broken invariant `@active_peers` and `@inflight_requests`,
+`%peer_id`: {},
+`@self`: {:?}",
+                peer_id, self
+            );
+
+        self.decrement_inflight_request_count_for(&peer_id);
+
+        let event = match result {
+            Ok(Ok(transactions)) => {
+                // clear received hashes
+                let mut fetched = Vec::with_capacity(transactions.hashes().count());
+                requested_hashes.retain(|requested_hash| {
+                    if transactions.hashes().any(|hash| hash == requested_hash) {
+                        // hash is now known, stop tracking
+                        fetched.push(*requested_hash);
+                        return false
+                    }
+                    true
+                });
+
+                self.remove_from_unknown_hashes(fetched);
+                // buffer left over hashes
+                self.buffer_hashes_for_retry(requested_hashes, &peer_id);
+
+                FetchEvent::TransactionsFetched { peer_id, transactions: transactions.0 }
+            }
+            Ok(Err(req_err)) => {
+                self.buffer_hashes_for_retry(requested_hashes, &peer_id);
+                FetchEvent::FetchError { peer_id, error: req_err }
+            }
+            Err(_) => {
+                self.buffer_hashes_for_retry(requested_hashes, &peer_id);
+                // request channel closed/dropped
+                FetchEvent::FetchError { peer_id, error: RequestError::ChannelClosed }
+            }
+        };
+
+        if let Err(err) = self.fetch_events_tail.send(event) {
+            error!(target: "net::tx", err=%err, "failed to queue fetch event")
+        }
+    }
 }
 
 impl Stream for TransactionFetcher {
@@ -792,66 +874,16 @@ impl Stream for TransactionFetcher {
     /// Advances all inflight requests and returns the next event.
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.as_mut().project();
-        let res = this.inflight_requests.poll_next_unpin(cx);
 
-        if let Poll::Ready(Some(response)) = res {
-            // update peer activity, requests for buffered hashes can only be made to idle
-            // fallback peers
-            let GetPooledTxResponse { peer_id, mut requested_hashes, result } = response;
-
-            debug_assert!(
-                self.active_peers.get(&peer_id).is_some(),
-                "`%peer_id` has been removed from `@active_peers` before inflight request(s) resolved, broken invariant `@active_peers` and `@inflight_requests`,
-`%peer_id`: {},
-`@self`: {:?}",
-                peer_id, self
-            );
-
-            self.decrement_inflight_request_count_for(&peer_id);
-
-            return match result {
-                Ok(Ok(transactions)) => {
-                    // clear received hashes
-                    let mut fetched = Vec::with_capacity(transactions.hashes().count());
-                    requested_hashes.retain(|requested_hash| {
-                        if transactions.hashes().any(|hash| hash == requested_hash) {
-                            // hash is now known, stop tracking
-                            fetched.push(*requested_hash);
-                            return false
-                        }
-                        true
-                    });
-
-                    self.remove_from_unknown_hashes(fetched);
-                    // buffer left over hashes
-                    self.buffer_hashes_for_retry(requested_hashes, &peer_id);
-
-                    Poll::Ready(Some(FetchEvent::TransactionsFetched {
-                        peer_id,
-                        transactions: transactions.0,
-                    }))
-                }
-                Ok(Err(req_err)) => {
-                    self.buffer_hashes_for_retry(requested_hashes, &peer_id);
-                    Poll::Ready(Some(FetchEvent::FetchError { peer_id, error: req_err }))
-                }
-                Err(_) => {
-                    self.buffer_hashes_for_retry(requested_hashes, &peer_id);
-                    // request channel closed/dropped
-                    Poll::Ready(Some(FetchEvent::FetchError {
-                        peer_id,
-                        error: RequestError::ChannelClosed,
-                    }))
-                }
-            }
-        }
-
-        Poll::Pending
+        // dequeue next fetch event
+        this.fetch_events_head.poll_next_unpin(cx)
     }
 }
 
 impl Default for TransactionFetcher {
     fn default() -> Self {
+        let (fetch_events_tail, fetch_events_head) = metered_unbounded_channel("net::tx");
+
         Self {
             active_peers: LruMap::new(DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS),
             inflight_requests: Default::default(),
@@ -862,6 +894,8 @@ impl Default for TransactionFetcher {
             hashes_fetch_inflight_and_pending_fetch: LruMap::new_unlimited(),
             filter_valid_hashes: Default::default(),
             info: TransactionFetcherInfo::default(),
+            fetch_events_head,
+            fetch_events_tail,
         }
     }
 }
@@ -985,6 +1019,7 @@ impl Default for TransactionFetcherInfo {
 mod test {
     use std::collections::HashSet;
 
+    use futures_test::task::noop_context;
     use reth_eth_wire::EthVersion;
     use reth_primitives::B256;
 
@@ -1135,7 +1170,7 @@ mod test {
 
         // TEST
 
-        tx_fetcher.on_fetch_pending_hashes(&peers, |_| true, || ());
+        tx_fetcher.on_fetch_pending_hashes(&peers, |_| true, || (), &mut noop_context());
 
         // mock session of peer_1 receives request
         let req = peer_1_mock_session_rx

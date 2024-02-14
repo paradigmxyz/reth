@@ -1,3 +1,5 @@
+use crate::transactions::constants::tx_fetcher::DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS;
+
 /// Default budget to try and drain streams.
 pub const DEFAULT_BUDGET_TRY_DRAIN_STREAM: u32 = 1024;
 
@@ -18,6 +20,15 @@ pub const DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS: u32 = 24 * 1000000;
 /// Default is naturally same as the number of transactions to attempt importing,
 /// [`DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS`], so 24 million pool imports.
 pub const DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS: u32 = 24 * 1000000;
+
+/// Default budget to try and drain stream of
+/// [`NetworkTransactionEvent`](crate::transactions::NetworkTransactionEvent)s from
+/// [`NetworkManager`](crate::NetworkManager).
+pub const DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS: u32 = 4 * 1024;
+
+/// Default budget to try and drain stream of [`FetchEvent`](crate::transactions::FetchEvent)s
+/// from [`TransactionFetcher`](crate::transactions::TransactionFetcher).
+pub const DEFAULT_BUDGET_TRY_DRAIN_FETCH_EVENTS: u32 = DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS;
 
 /// Polls the given stream. Breaks with `true` if there maybe is more work. Note: this does not
 /// register wake up, caller's scope is responsible for doing so.
