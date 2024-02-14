@@ -289,7 +289,7 @@ where
 
             if let Some(tx) = transaction.as_eip4844() {
                 for versioned_hash in tx.blob_versioned_hashes.iter() {
-                    let version = versioned_hash.clone()[0];
+                    let version = (*versioned_hash)[0];
                     if version != VERSIONED_HASH_VERSION_KZG {
                         // versioned hash doesn't start with VERSIONED_HASH_VERSION_KZG
                         return TransactionValidationOutcome::Invalid(
