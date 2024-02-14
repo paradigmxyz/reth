@@ -59,6 +59,7 @@ reth-node-optimism = { workspace = true, optional = true, features = [
     "optimism",
 ] }
 reth-node-core.workspace = true
+reth-node-builder.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
