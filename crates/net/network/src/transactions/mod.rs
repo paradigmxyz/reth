@@ -213,6 +213,8 @@ pub struct TransactionsManager<Pool> {
     pool_imports: FuturesUnordered<PoolImportFuture>,
     /// Stats on pending pool imports that help the node self-monitor.
     pending_pool_imports_info: PendingPoolImportsInfo,
+    /// Bad imports.
+    bad_imports: LruCache<TxHash>,
     /// All the connected peers.
     peers: HashMap<PeerId, Peer>,
     /// Send half for the command channel.
@@ -261,6 +263,12 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             transaction_fetcher,
             transactions_by_peers: Default::default(),
             pool_imports: Default::default(),
+            pending_pool_imports_info: PendingPoolImportsInfo::new(
+                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+            ),
+            bad_imports: LruCache::new(
+                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_BAD_IMPORTS).unwrap(),
+            ),
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
@@ -270,7 +278,6 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
             metrics,
-            pending_pool_imports_info,
         }
     }
 }
@@ -657,9 +664,10 @@ where
         //
         // for any seen hashes add the peer as fallback. unseen hashes are loaded into the tx
         // fetcher, hence they should be valid at this point.
-        //
+        let bad_imports = &self.bad_imports;
         self.transaction_fetcher.filter_unseen_and_pending_hashes(
             &mut valid_announcement_data,
+            |hash| bad_imports.contains(hash),
             &peer_id,
             |peer_id| self.peers.contains_key(&peer_id),
             &client_version,
@@ -775,7 +783,7 @@ where
                     .collect::<Vec<_>>();
 
                 // mark the transactions as received
-                self.transaction_fetcher.on_received_full_transactions_broadcast(
+                self.transaction_fetcher.remove_hashes_from_transaction_fetcher(
                     non_blob_txs.iter().map(|tx| *tx.hash()),
                 );
 
@@ -932,11 +940,21 @@ where
                         entry.get_mut().push(peer_id);
                     }
                     Entry::Vacant(entry) => {
-                        // this is a new transaction that should be imported into the pool
-                        let pool_transaction = <Pool::Transaction as FromRecoveredPooledTransaction>::from_recovered_pooled_transaction(tx);
-                        new_txs.push(pool_transaction);
+                        if !self.bad_imports.contains(tx.hash()) {
+                            // this is a new transaction that should be imported into the pool
+                            let pool_transaction = <Pool::Transaction as FromRecoveredPooledTransaction>::from_recovered_pooled_transaction(tx);
+                            new_txs.push(pool_transaction);
 
-                        entry.insert(vec![peer_id]);
+                            entry.insert(vec![peer_id]);
+                        } else {
+                            trace!(target: "net::tx",
+                                peer_id=format!("{peer_id:#}"),
+                                hash=%tx.hash(),
+                                client_version=%peer.client_version,
+                                "received an invalid transaction from peer"
+                            );
+                            self.metrics.bad_imports.increment(1);
+                        }
                     }
                 }
             }
@@ -1022,6 +1040,8 @@ where
                 self.report_peer_bad_transactions(peer_id);
             }
         }
+        self.transaction_fetcher.remove_hashes_from_transaction_fetcher([hash]);
+        self.bad_imports.insert(hash);
     }
 
     /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns  
@@ -1440,12 +1460,12 @@ struct PendingPoolImportsInfo {
 }
 
 impl PendingPoolImportsInfo {
-    fn new(max_pending_pool_imports: usize) -> Self {
+    pub fn new(max_pending_pool_imports: usize) -> Self {
         Self { pending_pool_imports: Arc::new(AtomicUsize::default()), max_pending_pool_imports }
     }
 
     /// Returns `true` if the number of pool imports is under a given tolerated max.
-    fn has_capacity(&self, max_pending_pool_imports: usize) -> bool {
+    pub fn has_capacity(&self, max_pending_pool_imports: usize) -> bool {
         self.pending_pool_imports.load(Ordering::Relaxed) < max_pending_pool_imports
     }
 }
