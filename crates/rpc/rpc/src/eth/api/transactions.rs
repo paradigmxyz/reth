@@ -1359,21 +1359,19 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
 
     #[cfg(feature = "optimism")]
     {
-        let mut op_fields = OptimismTransactionReceiptFields {
-            deposit_nonce: receipt.deposit_nonce.map(U64::from),
-            ..Default::default()
-        };
+        let mut op_fields = OptimismTransactionReceiptFields::default();
 
-        if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
-            if !transaction.is_deposit() {
-                op_fields.l1_fee = optimism_tx_meta.l1_fee;
-                op_fields.l1_gas_used = optimism_tx_meta
-                    .l1_data_gas
-                    .map(|dg| dg + l1_block_info.l1_fee_overhead.unwrap_or_default());
-                op_fields.l1_fee_scalar =
-                    Some(f64::from(l1_block_info.l1_base_fee_scalar) / 1_000_000.0);
-                op_fields.l1_gas_price = Some(l1_block_info.l1_base_fee);
-            }
+        if transaction.is_deposit() {
+            op_fields.deposit_nonce = receipt.deposit_nonce.map(U64::from);
+            op_fields.deposit_receipt_version = receipt.deposit_receipt_version.map(U64::from);
+        } else if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
+            op_fields.l1_fee = optimism_tx_meta.l1_fee;
+            op_fields.l1_gas_used = optimism_tx_meta
+                .l1_data_gas
+                .map(|dg| dg + l1_block_info.l1_fee_overhead.unwrap_or_default());
+            op_fields.l1_fee_scalar =
+                Some(f64::from(l1_block_info.l1_base_fee_scalar) / 1_000_000.0);
+            op_fields.l1_gas_price = Some(l1_block_info.l1_base_fee);
         }
 
         res_receipt.other = op_fields.into();
