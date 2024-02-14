@@ -137,10 +137,8 @@ where
         revm_state: StateDBBox<'a, ProviderError>,
         evm_config: EvmConfig,
     ) -> Self {
-        let evm = Evm::builder()
-            .with_db(revm_state)
-            .with_external_context(InspectorStack::new(InspectorStackConfig::default()))
-            .build();
+        let stack = InspectorStack::new(InspectorStackConfig::default());
+        let evm = EvmConfig::evm_with_inspector(revm_state, stack);
         EVMProcessor {
             chain_spec,
             evm,

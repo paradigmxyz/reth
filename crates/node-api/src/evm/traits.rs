@@ -1,18 +1,17 @@
-use reth_primitives::{
-    revm::env::fill_block_env, Address, BlockWithSenders, ChainSpec, Header, Receipt, Transaction,
-    U256,
-};
-// use revm::{builder::SetGenericStage, db::EmptyDB, EvmBuilder};
-use revm::{db::EmptyDB, Database, Evm, EvmBuilder};
+use reth_primitives::{revm::env::fill_block_env, Address, ChainSpec, Header, Transaction, U256};
+use revm::{Database, Evm, EvmBuilder};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId, TxEnv};
 
 /// Trait for configuring the EVM for executing full blocks.
 pub trait EvmConfig: ConfigureEvmEnv {
-    // type Executor;
-
-    /// Returns new EVM builder
-    fn evm<DB: Database>(&self, db: DB) -> Evm<'static, (), DB> {
+    /// Returns new EVM with the given database
+    fn evm<'a, DB: Database + 'a>(db: DB) -> Evm<'a, (), DB> {
         EvmBuilder::default().with_db(db).build()
+    }
+
+    /// Returns a new EVM with the given inspector
+    fn evm_with_inspector<'a, DB: Database + 'a, I>(db: DB, inspector: I) -> Evm<'a, I, DB> {
+        EvmBuilder::default().with_db(db).with_external_context(inspector).build()
     }
 }
 

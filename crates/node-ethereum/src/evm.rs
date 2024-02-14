@@ -44,8 +44,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 }
 
-impl EvmConfig for EthEvmConfig {
-}
+impl EvmConfig for EthEvmConfig {}
 
 #[cfg(test)]
 mod tests {
