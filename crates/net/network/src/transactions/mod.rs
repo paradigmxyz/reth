@@ -29,6 +29,7 @@
 
 use crate::{
     budget::{
+        DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
         DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
         DEFAULT_BUDGET_TRY_DRAIN_STREAM,
     },
@@ -570,10 +571,10 @@ where
         &mut self,
         peer_id: PeerId,
         mut msg: NewPooledTransactionHashes,
-        cx: &mut Context<'_>
+        cx: &mut Context<'_>,
     ) {
-                // try free active peers
-                self.transaction_fetcher.try_drain_inflight_requests(cx);
+        // try free active peers
+        self.transaction_fetcher.try_drain_inflight_requests(cx);
 
         // If the node is initially syncing, ignore transactions
         if self.network.is_initially_syncing() {
@@ -1120,9 +1121,13 @@ where
         // try drain fetching transaction events (flush transaction fetcher and queue for
         // import to pool)
         //
-        // can potentially queue 21k txns * DEFAULT_BUDGET_TRY_DRAIN_STREAM = 21k * 1024 for
-        // import to pool. each message could contain up to soft limit byte size for
-        // response / small legacy tx size: 2 MiB / 100 bytes < 21k transactions.
+        // can potentially queue around 20k txns * `DEFAULT_BUDGET_TRY_DRAIN_STREAM` = 20k * 1024
+        // txns for import to pool if txns are valid. each message could contain up to soft limit
+        // byte size for response / small legacy tx size: 2 MiB / 100 bytes < 21k transactions.
+        //
+        // if txns however are invalid, and just 1 byte, since this isn't validated until import
+        // to pool, this can potentially queue 2,2 billion txns. more if the message size is
+        // bigger than 2 MiB.
         let maybe_more_tx_fetch_events = poll_nested_stream_with_yield_points!(
             "net::tx",
             "Transaction fetch events",
@@ -1148,16 +1153,22 @@ where
         // try drain incoming transaction events (stream new txns/announcements from network
         // manager and queue for import to pool/fetch txns)
         //
-        // can potentially queue 1,5k * DEFAULT_BUDGET_TRY_DRAIN_STREAM = 1,5k * 1024 txns for
-        // import to pool. each message could contain up to soft limit byte size for broadcast
-        // message / small legacy tx size: 128 KiB / 100 bytes < 1,5k transactions.
+        // can potentially queue around 1,5k txns *
+        // `DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS` = 1,5k * 1024 txns for import to
+        // pool if txns are valid. each message could contain up to soft limit byte size for
+        // response / small legacy tx size: 128 KiB / 100 bytes < 1,5k transactions.
         //
-        // this will potentially remove hashes from hashes pending fetch (same hashes are
+        // if txns however are invalid, and just 1 byte, since this isn't validated until import
+        // to pool, this can potentially queue around 0,5 billion txns. more if the message size is
+        // bigger than 128 KiB.
+        //
+        // this will potentially remove hashes from hashes pending fetch (if same hashes are
         // announced that didn't fit into a previous request)
-        let mut budget: u32 = DEFAULT_BUDGET_TRY_DRAIN_STREAM;
-        // avoid cloning waker to pass down context
+        //
+        // avoid cloning waker to pass as param to closure, to pass as param to macro rule
+        let mut budget: u32 = DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS;
         let maybe_more_tx_events = loop {
-            match this.transaction_events.poll_next_unpin(cx){
+            match this.transaction_events.poll_next_unpin(cx) {
                 Poll::Ready(Some(event)) => {
                     this.on_network_tx_event(event, cx);
 
@@ -1188,7 +1199,7 @@ where
                 &this.peers,
                 has_capacity_wrt_pending_pool_imports,
                 metrics_increment_egress_peer_channel_full,
-                cx
+                cx,
             );
         }
 
@@ -1633,10 +1644,13 @@ mod tests {
         // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
         let input = hex!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76");
         let signed_tx = TransactionSigned::decode(&mut &input[..]).unwrap();
-        transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
-            peer_id: *handle1.peer_id(),
-            msg: Transactions(vec![signed_tx.clone()]),
-        }, &mut noop_context());
+        transactions.on_network_tx_event(
+            NetworkTransactionEvent::IncomingTransactions {
+                peer_id: *handle1.peer_id(),
+                msg: Transactions(vec![signed_tx.clone()]),
+            },
+            &mut noop_context(),
+        );
         poll_fn(|cx| {
             let _ = transactions.poll_unpin(cx);
             Poll::Ready(())
@@ -1718,10 +1732,13 @@ mod tests {
         // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
         let input = hex!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76");
         let signed_tx = TransactionSigned::decode(&mut &input[..]).unwrap();
-        transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
-            peer_id: *handle1.peer_id(),
-            msg: Transactions(vec![signed_tx.clone()]),
-        }, &mut noop_context());
+        transactions.on_network_tx_event(
+            NetworkTransactionEvent::IncomingTransactions {
+                peer_id: *handle1.peer_id(),
+                msg: Transactions(vec![signed_tx.clone()]),
+            },
+            &mut noop_context(),
+        );
         poll_fn(|cx| {
             let _ = transactions.poll_unpin(cx);
             Poll::Ready(())
@@ -1801,10 +1818,13 @@ mod tests {
         // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
         let input = hex!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76");
         let signed_tx = TransactionSigned::decode(&mut &input[..]).unwrap();
-        transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
-            peer_id: *handle1.peer_id(),
-            msg: Transactions(vec![signed_tx.clone()]),
-        }, &mut noop_context());
+        transactions.on_network_tx_event(
+            NetworkTransactionEvent::IncomingTransactions {
+                peer_id: *handle1.peer_id(),
+                msg: Transactions(vec![signed_tx.clone()]),
+            },
+            &mut noop_context(),
+        );
         assert_eq!(
             *handle1.peer_id(),
             transactions.transactions_by_peers.get(&signed_tx.hash()).unwrap()[0]
@@ -1896,11 +1916,14 @@ mod tests {
 
         let (send, receive) = oneshot::channel::<RequestResult<PooledTransactions>>();
 
-        transactions.on_network_tx_event(NetworkTransactionEvent::GetPooledTransactions {
-            peer_id: *handle1.peer_id(),
-            request,
-            response: send,
-        }, &mut noop_context());
+        transactions.on_network_tx_event(
+            NetworkTransactionEvent::GetPooledTransactions {
+                peer_id: *handle1.peer_id(),
+                request,
+                response: send,
+            },
+            &mut noop_context(),
+        );
 
         match receive.await.unwrap() {
             Ok(PooledTransactions(transactions)) => {

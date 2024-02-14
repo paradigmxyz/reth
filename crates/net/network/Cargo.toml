@@ -96,6 +96,9 @@ enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
 serial_test.workspace = true
 tempfile.workspace = true
 
+# async
+futures-test = "0.3.30"
+
 ## Benchmarks
 pprof = { workspace = true, features = ["criterion", "flamegraph"] }
 criterion = { workspace = true, features = ["async_tokio", "html_reports"] }

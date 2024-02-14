@@ -4,10 +4,7 @@ use crate::{
     poll_nested_stream_with_yield_points,
 };
 use derive_more::Constructor;
-use futures::{
-    stream::FuturesUnordered, Future, FutureExt, Stream,
-    StreamExt,
-};
+use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{
     GetPooledTransactions, HandleAnnouncement, RequestTxHashes, ValidAnnouncementData,
