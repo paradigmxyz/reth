@@ -1,4 +1,4 @@
-#[cfg(not(feature = "optimism"))]
+#[cfg(feature = "optimism")]
 mod builder;
 
 fn main() {}
