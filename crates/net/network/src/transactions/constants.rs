@@ -29,11 +29,12 @@ pub const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE: usize = 2 * 1024 * 
 
 pub mod tx_manager {
     /// Default limit for number transactions to keep track of for a single peer, for transactions
-    /// that the peer's pool and local pool have in common. Default is 10 KiB.
+    /// that the peer's pool and local pool have in common. Default is 10 240 hashes.
     pub const DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER_AND_IN_POOL: usize = 10 * 1024;
 
     /// Default limit for the number of transactions to keep track of for a single peer, for
-    /// transactions that are in the peer's pool but maybe not in the local pool yet.
+    /// transactions that are in the peer's pool but maybe not in the local pool yet. Default is
+    /// 10 240 hashes.
     pub const DEFAULT_CAPACITY_CACHE_SENT_BY_PEER_AND_MAYBE_IN_POOL: usize = 10 * 1024;
 
     /// Default maximum pending pool imports to tolerate. Default is 4096 pending pool imports.
