@@ -14,8 +14,8 @@ workspace = true
 
 [package.metadata.cargo-udeps.ignore]
 normal = [
-    # Used for diagrams in docs
-    "aquamarine",
+  # Used for diagrams in docs
+  "aquamarine",
 ]
 
 [dependencies]
@@ -56,7 +56,7 @@ reth-nippy-jar.workspace = true
 reth-node-api.workspace = true
 reth-node-ethereum.workspace = true
 reth-node-optimism = { workspace = true, optional = true, features = [
-    "optimism",
+  "optimism",
 ] }
 reth-node-core.workspace = true
 
@@ -64,9 +64,9 @@ reth-node-core.workspace = true
 alloy-rlp.workspace = true
 alloy-chains.workspace = true
 secp256k1 = { workspace = true, features = [
-    "global-context",
-    "rand-std",
-    "recovery",
+  "global-context",
+  "rand-std",
+  "recovery",
 ] }
 revm-inspectors.workspace = true
 
@@ -100,10 +100,10 @@ human_bytes = "0.4.1"
 
 # async
 tokio = { workspace = true, features = [
-    "sync",
-    "macros",
-    "time",
-    "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "rt-multi-thread",
 ] }
 futures.workspace = true
 pin-project.workspace = true
@@ -146,24 +146,25 @@ min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 
 optimism = [
-    "reth-primitives/optimism",
-    "reth-revm/optimism",
-    "reth-interfaces/optimism",
-    "reth-rpc/optimism",
-    "reth-rpc-engine-api/optimism",
-    "reth-transaction-pool/optimism",
-    "reth-provider/optimism",
-    "reth-beacon-consensus/optimism",
-    "reth-auto-seal-consensus/optimism",
-    "reth-network/optimism",
-    "reth-network-api/optimism",
-    "reth-blockchain-tree/optimism",
-    "reth-payload-builder/optimism",
-    "reth-optimism-payload-builder/optimism",
-    "reth-ethereum-payload-builder/optimism",
-    "reth-node-ethereum/optimism",
-    "dep:reth-node-optimism",
-    "reth-node-core/optimism",
+  "reth-primitives/optimism",
+  "reth-revm/optimism",
+  "reth-interfaces/optimism",
+  "reth-rpc/optimism",
+  "reth-rpc-engine-api/optimism",
+  "reth-transaction-pool/optimism",
+  "reth-provider/optimism",
+  "reth-beacon-consensus/optimism",
+  "reth-auto-seal-consensus/optimism",
+  "reth-network/optimism",
+  "reth-network-api/optimism",
+  "reth-blockchain-tree/optimism",
+  "reth-payload-builder/optimism",
+  "reth-optimism-payload-builder/optimism",
+  "reth-ethereum-payload-builder/optimism",
+  "reth-node-ethereum/optimism",
+  "dep:reth-node-optimism",
+  "reth-node-core/optimism",
+  "reth-node-api/optimism",
 ]
 
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices

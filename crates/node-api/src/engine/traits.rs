@@ -1,7 +1,9 @@
 use crate::{validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion};
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge,
-    revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
+    revm_primitives::{
+        BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, HandlerCfg, SpecId,
+    },
     Address, ChainSpec, Header, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::{
@@ -129,16 +131,20 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
             blob_excess_gas_and_price,
         };
 
-        #[cfg(feature = "optimism")]
-        {
-            let cfg_with_handler_cfg = CfgEnvWithHandlerCfg {
-                cfg_env: cfg,
-                handler_cfg: HandlerCfg { spec_id, is_optimism: chain_spec.is_optimism() },
-            };
-        }
+        let cfg_with_handler_cfg = {
+            #[cfg(feature = "optimism")]
+            {
+                CfgEnvWithHandlerCfg {
+                    cfg_env: cfg,
+                    handler_cfg: HandlerCfg { spec_id, is_optimism: chain_spec.is_optimism() },
+                }
+            }
 
-        #[cfg(not(feature = "optimism"))]
-        let cfg_with_handler_cfg = CfgEnvWithHandlerCfg::new(cfg, spec_id);
+            #[cfg(not(feature = "optimism"))]
+            {
+                CfgEnvWithHandlerCfg::new(cfg, spec_id)
+            }
+        };
 
         (cfg_with_handler_cfg, block_env)
     }

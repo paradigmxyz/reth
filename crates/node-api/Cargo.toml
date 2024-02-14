@@ -19,3 +19,6 @@ thiserror.workspace = true
 
 # io
 serde.workspace = true
+
+[features]
+optimism = []
