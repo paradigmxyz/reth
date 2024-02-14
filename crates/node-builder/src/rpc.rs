@@ -94,7 +94,7 @@ impl<Node: FullNodeComponents> fmt::Debug for RpcHooks<Node> {
 }
 
 /// Event hook that is called once the rpc server is started.
-pub trait OnRpcStarted<Node: FullNodeComponents> {
+pub trait OnRpcStarted<Node: FullNodeComponents>: Send {
     /// The hook that is called once the rpc server is started.
     fn on_rpc_started(
         &self,
@@ -105,7 +105,7 @@ pub trait OnRpcStarted<Node: FullNodeComponents> {
 
 impl<Node, F> OnRpcStarted<Node> for F
 where
-    F: Fn(RpcContext<'_, Node>, RethRpcServerHandles) -> eyre::Result<()>,
+    F: Fn(RpcContext<'_, Node>, RethRpcServerHandles) -> eyre::Result<()> + Send,
     Node: FullNodeComponents,
 {
     fn on_rpc_started(
@@ -124,14 +124,14 @@ impl<Node: FullNodeComponents> OnRpcStarted<Node> for () {
 }
 
 /// Event hook that is called when the rpc server is started.
-pub trait ExtendRpcModules<Node: FullNodeComponents> {
+pub trait ExtendRpcModules<Node: FullNodeComponents>: Send {
     /// The hook that is called once the rpc server is started.
     fn extend_rpc_modules(&self, ctx: RpcContext<'_, Node>) -> eyre::Result<()>;
 }
 
 impl<Node, F> ExtendRpcModules<Node> for F
 where
-    F: Fn(RpcContext<'_, Node>) -> eyre::Result<()>,
+    F: Fn(RpcContext<'_, Node>) -> eyre::Result<()> + Send,
     Node: FullNodeComponents,
 {
     fn extend_rpc_modules(&self, ctx: RpcContext<'_, Node>) -> eyre::Result<()> {

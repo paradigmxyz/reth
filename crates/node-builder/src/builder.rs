@@ -123,6 +123,15 @@ impl<DB> NodeBuilder<DB, InitState> {
     pub fn with_database<D>(self, database: D) -> NodeBuilder<D, InitState> {
         NodeBuilder { config: self.config, state: self.state, database }
     }
+
+    /// Preconfigure the builder with the context to launch the node.
+    pub fn with_launch_context(
+        self,
+        task_executor: TaskExecutor,
+        data_dir: ChainPath<DataDirPath>,
+    ) -> WithLaunchContext<DB, InitState> {
+        WithLaunchContext { builder: self, task_executor, data_dir }
+    }
 }
 
 impl<DB> NodeBuilder<DB, InitState>
@@ -256,6 +265,7 @@ where
                     Components::Pool,
                 >,
             ) -> eyre::Result<()>
+            + Send
             + 'static,
     {
         self.state.hooks.set_on_component_initialized(hook);
@@ -273,6 +283,7 @@ where
                     >,
                 >,
             ) -> eyre::Result<()>
+            + Send
             + 'static,
     {
         self.state.hooks.set_on_node_started(hook);
@@ -292,6 +303,7 @@ where
                 >,
                 RethRpcServerHandles,
             ) -> eyre::Result<()>
+            + Send
             + 'static,
     {
         self.state.rpc.set_on_rpc_started(hook);
@@ -310,6 +322,7 @@ where
                     >,
                 >,
             ) -> eyre::Result<()>
+            + Send
             + 'static,
     {
         self.state.rpc.set_extend_rpc_modules(hook);
@@ -619,6 +632,217 @@ where
         };
 
         Ok(handle)
+    }
+
+    /// Check that the builder can be launched
+    ///
+    /// This is useful when writing tests to ensure that the builder is configured correctly.
+    pub fn check_launch(self) -> Self {
+        self
+    }
+}
+
+/// A [NodeBuilder] with it's launch context already configured
+pub struct WithLaunchContext<DB, State> {
+    builder: NodeBuilder<DB, State>,
+    task_executor: TaskExecutor,
+    data_dir: ChainPath<DataDirPath>,
+}
+
+impl<DB> WithLaunchContext<DB, InitState>
+where
+    DB: Database + Clone + 'static,
+{
+    /// Configures the types of the node.
+    pub fn with_types<T>(self, types: T) -> WithLaunchContext<DB, TypesState<T, DB>>
+    where
+        T: NodeTypes,
+    {
+        WithLaunchContext {
+            builder: self.builder.with_types(types),
+            task_executor: self.task_executor,
+            data_dir: self.data_dir,
+        }
+    }
+}
+
+impl<DB, Types> WithLaunchContext<DB, TypesState<Types, DB>>
+where
+    Types: NodeTypes,
+    DB: Database + Clone + Unpin + 'static,
+{
+    /// Configures the node's components.
+    pub fn with_components<Components>(
+        self,
+        components_builder: Components,
+    ) -> WithLaunchContext<
+        DB,
+        ComponentsState<
+            Types,
+            Components,
+            FullNodeComponentsAdapter<
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                Components::Pool,
+            >,
+        >,
+    >
+    where
+        Components: NodeComponentsBuilder<
+            FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+        >,
+    {
+        WithLaunchContext {
+            builder: self.builder.with_components(components_builder),
+            task_executor: self.task_executor,
+            data_dir: self.data_dir,
+        }
+    }
+}
+
+impl<DB, Types, Components>
+    WithLaunchContext<
+        DB,
+        ComponentsState<
+            Types,
+            Components,
+            FullNodeComponentsAdapter<
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                Components::Pool,
+            >,
+        >,
+    >
+where
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    Types: NodeTypes,
+    Components: NodeComponentsBuilder<
+        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+    >,
+{
+    /// Apply a function to the components builder.
+    pub fn map_components(self, f: impl FnOnce(Components) -> Components) -> Self {
+        Self {
+            builder: self.builder.map_components(f),
+            task_executor: self.task_executor,
+            data_dir: self.data_dir,
+        }
+    }
+
+    /// Resets the setup process to the components stage.
+    ///
+    /// CAUTION: All previously configured hooks will be lost.
+    pub fn fuse_components<C>(
+        self,
+        components_builder: C,
+    ) -> WithLaunchContext<
+        DB,
+        ComponentsState<
+            Types,
+            C,
+            FullNodeComponentsAdapter<
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                C::Pool,
+            >,
+        >,
+    >
+    where
+        C: NodeComponentsBuilder<
+            FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+        >,
+    {
+        WithLaunchContext {
+            builder: self.builder.fuse_components(components_builder),
+            task_executor: self.task_executor,
+            data_dir: self.data_dir,
+        }
+    }
+
+    /// Sets the hook that is run once the node's components are initialized.
+    pub fn on_component_initialized<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(
+                FullNodeComponentsAdapter<
+                    FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                    Components::Pool,
+                >,
+            ) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        self.builder.state.hooks.set_on_component_initialized(hook);
+        self
+    }
+
+    /// Sets the hook that is run once the node has started.
+    pub fn on_node_started<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(
+                FullNode<
+                    FullNodeComponentsAdapter<
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                        Components::Pool,
+                    >,
+                >,
+            ) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        self.builder.state.hooks.set_on_node_started(hook);
+        self
+    }
+
+    /// Sets the hook that is run once the rpc server is started.
+    pub fn on_rpc_started<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(
+                RpcContext<
+                    '_,
+                    FullNodeComponentsAdapter<
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                        Components::Pool,
+                    >,
+                >,
+                RethRpcServerHandles,
+            ) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        self.builder.state.rpc.set_on_rpc_started(hook);
+        self
+    }
+
+    /// Sets the hook that is run to configure the rpc modules.
+    pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(
+                RpcContext<
+                    '_,
+                    FullNodeComponentsAdapter<
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                        Components::Pool,
+                    >,
+                >,
+            ) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        self.builder.state.rpc.set_extend_rpc_modules(hook);
+        self
+    }
+
+    /// Launches the node and returns a handle to it.
+    pub async fn launch(
+        self,
+    ) -> eyre::Result<
+        NodeHandle<
+            FullNodeComponentsAdapter<
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                Components::Pool,
+            >,
+        >,
+    > {
+        let Self { builder, task_executor, data_dir } = self;
+
+        builder.launch(task_executor, data_dir).await
     }
 
     /// Check that the builder can be launched

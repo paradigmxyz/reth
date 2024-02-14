@@ -6474,6 +6474,7 @@ dependencies = [
 name = "reth-node-ethereum"
 version = "0.1.0-alpha.18"
 dependencies = [
+ "async-trait",
  "eyre",
  "reth-basic-payload-builder",
  "reth-db",

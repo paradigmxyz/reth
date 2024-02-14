@@ -13,14 +13,16 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
 };
-use clap::{value_parser, Parser, Args};
+use clap::{value_parser, Args, Parser};
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_beacon_consensus::BeaconConsensus;
+use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_interfaces::consensus::Consensus;
+use reth_node_builder::{InitState, NodeBuilder, WithLaunchContext};
+use reth_node_core::dirs::ChainPath;
 use reth_primitives::ChainSpec;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
-use std::future::Future;
 use reth_tasks::TaskExecutor;
+use std::{future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
 
 /// Start the node
 #[derive(Debug, Parser)]
@@ -130,12 +132,15 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
 }
 
 impl<Ext: RethCliExt> NodeCommand<Ext> {
-
     /// Launches the node
     ///
-    /// This transforms the node command into a node config and launches the node using the given closure.
-    pub async fn execute2<L, F>(self, ctx: CliContext, launch: L) -> eyre::Result<()>
-    where L: FnOnce(NodeConfig, TaskExecutor, Ext::Node) -> F, F: Future<Output = eyre::Result<()>> {
+    /// This transforms the node command into a node config and launches the node using the given
+    /// closure.
+    pub async fn execute2<L, Fut>(self, ctx: CliContext, launcher: L) -> eyre::Result<()>
+    where
+        L: FnOnce(Ext::Node, WithLaunchContext<Arc<DatabaseEnv>, InitState>) -> Fut,
+        Fut: Future<Output = eyre::Result<()>>,
+    {
         let Self {
             datadir,
             config,
@@ -157,9 +162,19 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             ext,
         } = self;
 
+        let data_dir = datadir.unwrap_or_chain_default(chain.chain);
+        let db_path = data_dir.db_path();
+
+        tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
+        let database = Arc::new(
+            init_db(db_path.clone(), DatabaseArguments::default().log_level(db.log_level.clone()))?
+                .with_metrics(),
+        );
+
         // set up node config
         let mut node_config = NodeConfig {
-            database,
+            // TODO
+            database: DatabaseBuilder::Test,
             config,
             chain,
             metrics,
@@ -181,9 +196,11 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             node_config = node_config.with_unused_ports();
         }
 
-        let task_executor = ctx.task_executor;
+        let builder = NodeBuilder::new(node_config)
+            .with_database(database)
+            .with_launch_context(ctx.task_executor, data_dir);
 
-        launch(node_config, task_executor, ext).await
+        launcher(ext, builder).await
     }
 
     /// Replaces the extension of the node command
@@ -286,18 +303,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let handle = launch_from_config::<Ext>(node_config, ext, executor).await?;
 
         handle.wait_for_node_exit().await
-    }
-
-    /// Returns the [Consensus] instance to use.
-    ///
-    /// By default this will be a [BeaconConsensus] instance, but if the `--dev` flag is set, it
-    /// will be an [AutoSealConsensus] instance.
-    pub fn consensus(&self) -> Arc<dyn Consensus> {
-        if self.dev.dev {
-            Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
-        } else {
-            Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
-        }
     }
 }
 
