@@ -278,7 +278,6 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
             metrics,
-            pending_pool_imports_info,
         }
     }
 }
@@ -1052,14 +1051,6 @@ where
             .has_capacity(self.pending_pool_imports_info.max_pending_pool_imports) &&
             self.transaction_fetcher.has_capacity_for_fetching_pending_hashes()
     }
-
-    /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns  
-    /// `false` if [`TransactionsManager`] is operating close to full capacity.
-    fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
-        self.pending_pool_imports_info
-            .has_capacity(self.pending_pool_imports_info.max_pending_pool_imports) &&
-            self.transaction_fetcher.has_capacity_for_fetching_pending_hashes()
-    }
 }
 
 /// An endless future. Preemption ensure that future is non-blocking, nonetheless. See
@@ -1487,8 +1478,6 @@ impl Default for PendingPoolImportsInfo {
 
 #[cfg(test)]
 mod tests {
-    use constants::tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
-
     use super::*;
     use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
     use alloy_rlp::Decodable;

@@ -200,7 +200,7 @@ impl TransactionFetcher {
 
         let mut surplus_hashes = RequestTxHashes::with_capacity(hashes_from_announcement_len - 1);
 
-        // folds size based on expected response size  and adds selected hashes to the request 
+        // folds size based on expected response size  and adds selected hashes to the request
         // list and the other hashes to the surplus list
         loop {
             let Some((hash, metadata)) = hashes_from_announcement_iter.next() else { break };
@@ -352,76 +352,6 @@ impl TransactionFetcher {
             return
         };
         // peer should always exist since `is_session_active` already checked
-        let Some(peer) = peers.get(&peer_id) else { return };
-        let conn_eth_version = peer.version;
-
-        // fill the request with more hashes pending fetch that have been announced by the peer.
-        // the search for more hashes is done with respect to the given budget, which determines
-        // how many hashes to loop through before giving up. if no more hashes are found wrt to
-        // the budget, the single hash that was taken out of the cache above is sent in a request.
-        let budget_fill_request = self
-            .search_breadth_budget_find_intersection_pending_hashes_and_hashes_seen_by_peer(
-                &has_capacity_wrt_pending_pool_imports,
-            );
-
-        self.fill_request_from_hashes_pending_fetch(
-            &mut hashes_to_request,
-            peer.seen_transactions.maybe_pending_transaction_hashes(),
-            budget_fill_request,
-        );
-
-        // free unused memory
-        hashes_to_request.shrink_to_fit();
-
-        trace!(target: "net::tx",
-            peer_id=format!("{peer_id:#}"),
-            hashes=?*hashes_to_request,
-            conn_eth_version=%conn_eth_version,
-            "requesting hashes that were stored pending fetch from peer"
-        );
-
-        // request the buffered missing transactions
-        if let Some(failed_to_request_hashes) = self.request_transactions_from_peer(
-            hashes_to_request,
-            peer,
-            metrics_increment_egress_peer_channel_full,
-        ) {
-            debug!(target: "net::tx",
-                peer_id=format!("{peer_id:#}"),
-                failed_to_request_hashes=?failed_to_request_hashes,
-                conn_eth_version=%conn_eth_version,
-                "failed sending request to peer's session, buffering hashes"
-            );
-
-            self.buffer_hashes(failed_to_request_hashes, Some(peer_id));
-        }
-    }
-
-    /// Removes the provided transaction hashes from the inflight requests set.
-    ///
-    /// Finds the first buffered hash with a fallback peer that is idle, if any. Fills the rest of
-    /// the request by checking the transactions seen by the peer against the buffer.
-    pub(super) fn on_fetch_pending_hashes(
-        &mut self,
-        peers: &HashMap<PeerId, Peer>,
-        has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
-        metrics_increment_egress_peer_channel_full: impl FnOnce(),
-    ) {
-        let mut hashes_to_request = RequestTxHashes::with_capacity(32);
-        let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
-
-        // budget to look for an idle peer before giving up
-        let budget_find_idle_fallback_peer = self
-            .search_breadth_budget_find_idle_fallback_peer(&has_capacity_wrt_pending_pool_imports);
-
-        let Some(peer_id) = self.find_any_idle_fallback_peer_for_any_pending_hash(
-            &mut hashes_to_request,
-            is_session_active,
-            budget_find_idle_fallback_peer,
-        ) else {
-            // no peers are idle or budget is depleted
-            return
-        };
         let Some(peer) = peers.get(&peer_id) else { return };
         let conn_eth_version = peer.version;
 
