@@ -90,10 +90,10 @@ where
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
                     let tx = tx_env_with_recovered(&tx);
-                    let env = EnvWithHandlerCfg::new(
-                        Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
-                        cfg.handler_cfg.spec_id,
-                    );
+                    let env = EnvWithHandlerCfg {
+                        env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
+                        handler_cfg: cfg.handler_cfg,
+                    };
                     let (result, state_changes) = this
                         .trace_transaction(
                             opts.clone(),
@@ -237,10 +237,11 @@ where
                     tx.hash,
                 )?;
 
-                let env = EnvWithHandlerCfg::new(
-                    Env::boxed(cfg.cfg_env.clone(), block_env, tx_env_with_recovered(&tx)),
-                    cfg.handler_cfg.spec_id,
-                );
+                let env = EnvWithHandlerCfg {
+                    env: Env::boxed(cfg.cfg_env.clone(), block_env, tx_env_with_recovered(&tx)),
+                    handler_cfg: cfg.handler_cfg,
+                };
+
                 this.trace_transaction(
                     opts,
                     env,
@@ -436,10 +437,10 @@ where
                     // Execute all transactions until index
                     for tx in transactions {
                         let tx = tx_env_with_recovered(&tx);
-                        let env = EnvWithHandlerCfg::new(
-                            Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
-                            cfg.handler_cfg.spec_id,
-                        );
+                        let env = EnvWithHandlerCfg {
+                            env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
+                            handler_cfg: cfg.handler_cfg,
+                        };
                         let (res, _) = transact(&mut db, env)?;
                         db.commit(res.state);
                     }
