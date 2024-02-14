@@ -28,7 +28,10 @@
 //! enough to buffer many hashes during network failure, to allow for recovery.
 
 use crate::{
-    budget::{BUDGET_POLL_ONCE, DEFAULT_BUDGET_TRY_DRAIN_STREAM},
+    budget::{
+        BUDGET_POLL_ONCE, DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
+        DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+    },
     cache::LruCache,
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
