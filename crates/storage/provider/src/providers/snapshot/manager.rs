@@ -175,6 +175,7 @@ impl SnapshotProvider {
         };
 
         jar.delete()?;
+        self.update_index(segment, None)?;
 
         Ok(())
     }
