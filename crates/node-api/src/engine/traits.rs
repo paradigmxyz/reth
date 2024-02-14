@@ -126,16 +126,22 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
             blob_excess_gas_and_price,
         };
 
+        let cfg_with_handler_cfg;
         #[cfg(feature = "optimism")]
         {
-            let cfg_with_handler_cfg = CfgEnvWithHandlerCfg {
+            cfg_with_handler_cfg = CfgEnvWithHandlerCfg {
                 cfg_env: cfg,
-                handler_cfg: HandlerCfg { spec_id, is_optimism: chain_spec.is_optimism() },
+                handler_cfg: revm_primitives::HandlerCfg {
+                    spec_id,
+                    is_optimism: chain_spec.is_optimism(),
+                },
             };
         }
 
         #[cfg(not(feature = "optimism"))]
-        let cfg_with_handler_cfg = CfgEnvWithHandlerCfg::new(cfg, spec_id);
+        {
+            cfg_with_handler_cfg = CfgEnvWithHandlerCfg::new(cfg, spec_id);
+        }
 
         (cfg_with_handler_cfg, block_env)
     }
@@ -211,7 +217,7 @@ impl PayloadAttributes for OptimismPayloadAttributes {
         if self.gas_limit.is_none() && chain_spec.is_optimism() {
             return Err(AttributesValidationError::InvalidParams(
                 "MissingGasLimitInPayloadAttributes".to_string().into(),
-            ))
+            ));
         }
 
         Ok(())

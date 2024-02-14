@@ -21,4 +21,4 @@ reth-node-api.workspace = true
 serde.workspace = true
 
 [features]
-optimism = []
+optimism = ["reth-node-api/optimism"]
