@@ -306,7 +306,7 @@ where
         let this = self.get_mut();
 
         // This loop advances the network's state prioritizing local work [NetworkState] over work
-        // coming in from the network [SessionManager, ConnectionListener]
+        // coming in from the network [SessionManager], [ConnectionListener]
         // Existing connections are prioritized over new __incoming__ connections
         loop {
             while let Poll::Ready(action) = this.state.poll(cx) {
