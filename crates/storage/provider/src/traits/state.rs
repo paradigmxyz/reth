@@ -261,7 +261,7 @@ pub trait StateWriter: Send + Sync {
 #[auto_impl[Box, &, Arc]]
 pub trait HashedStateWriter: Send + Sync {
     /// Writes the given [HashedPostState] to the database.
-    fn write_state(&self, state: &HashedPostState) -> ProviderResult<()>;
+    fn write_hashed_state(&self, state: HashedPostState) -> ProviderResult<()>;
 }
 
 /// A type that can compute the state root of a given post state.

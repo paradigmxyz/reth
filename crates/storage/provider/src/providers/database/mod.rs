@@ -526,12 +526,18 @@ mod tests {
     use super::ProviderFactory;
     use crate::{
         test_utils::create_test_provider_factory, BlockHashReader, BlockNumReader, BlockWriter,
-        HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
+        HashedStateWriter, HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
     };
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use rand::Rng;
-    use reth_db::{tables, test_utils::ERROR_TEMPDIR, transaction::DbTxMut, DatabaseEnv};
+    use reth_db::{
+        cursor::{DbCursorRW, DbDupCursorRO},
+        tables,
+        test_utils::ERROR_TEMPDIR,
+        transaction::{DbTx, DbTxMut},
+        DatabaseEnv,
+    };
     use reth_interfaces::{
         provider::ProviderError,
         test_utils::{
@@ -541,8 +547,10 @@ mod tests {
         RethError,
     };
     use reth_primitives::{
-        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, TxNumber, B256,
+        hex_literal::hex, keccak256, Account, Address, ChainSpecBuilder, PruneMode, PruneModes,
+        SealedBlock, StorageEntry, TxNumber, B256, U256,
     };
+    use reth_trie::{HashedPostState, HashedStorage};
     use std::{ops::RangeInclusive, sync::Arc};
     use tokio::sync::watch;
 
@@ -733,6 +741,57 @@ mod tests {
         assert_matches!(
             provider.sync_gap(mode, checkpoint),
             Err(RethError::Provider(ProviderError::InconsistentHeaderGap))
+        );
+    }
+
+    #[test]
+    fn wiped_entries_are_removed() {
+        let provider_factory = create_test_provider_factory();
+
+        let addresses = (0..10).map(|_| Address::random()).collect::<Vec<_>>();
+        let destroyed_address = *addresses.first().unwrap();
+        let destroyed_address_hashed = keccak256(destroyed_address);
+        let slot = B256::with_last_byte(1);
+        let hashed_slot = keccak256(slot);
+        {
+            let provider_rw = provider_factory.provider_rw().unwrap();
+            let mut accounts_cursor =
+                provider_rw.tx_ref().cursor_write::<tables::HashedAccount>().unwrap();
+            let mut storage_cursor =
+                provider_rw.tx_ref().cursor_write::<tables::HashedStorage>().unwrap();
+
+            for address in addresses {
+                let hashed_address = keccak256(address);
+                accounts_cursor
+                    .insert(hashed_address, Account { nonce: 1, ..Default::default() })
+                    .unwrap();
+                storage_cursor
+                    .insert(hashed_address, StorageEntry { key: hashed_slot, value: U256::from(1) })
+                    .unwrap();
+            }
+            provider_rw.commit().unwrap();
+        }
+
+        let mut hashed_state = HashedPostState::default();
+        hashed_state.accounts.insert(destroyed_address_hashed, None);
+        hashed_state.storages.insert(destroyed_address_hashed, HashedStorage::new(true));
+
+        let provider_rw = provider_factory.provider_rw().unwrap();
+        assert_eq!(provider_rw.write_hashed_state(hashed_state), Ok(()));
+        provider_rw.commit().unwrap();
+
+        let provider = provider_factory.provider().unwrap();
+        assert_eq!(
+            provider.tx_ref().get::<tables::HashedAccount>(destroyed_address_hashed),
+            Ok(None)
+        );
+        assert_eq!(
+            provider
+                .tx_ref()
+                .cursor_read::<tables::HashedStorage>()
+                .unwrap()
+                .seek_by_key_subkey(destroyed_address_hashed, hashed_slot),
+            Ok(None)
         );
     }
 }

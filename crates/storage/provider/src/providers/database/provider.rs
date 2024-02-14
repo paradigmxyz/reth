@@ -1,18 +1,16 @@
 use crate::{
-    bundle_state::{
-        BundleStateInit, BundleStateWithReceipts, HashedStateChanges, RevertsInit,
-        StorageRevertsIter,
-    },
+    bundle_state::{BundleStateInit, BundleStateWithReceipts, RevertsInit, StorageRevertsIter},
     providers::{database::metrics, SnapshotProvider},
     to_range,
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
-    Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
-    HeaderSyncMode, HistoryWriter, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, StageCheckpointReader, StateWriter, StorageReader, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
+    Chain, EvmEnvProvider, HashedStateWriter, HashingWriter, HeaderProvider, HeaderSyncGap,
+    HeaderSyncGapProvider, HeaderSyncMode, HistoryWriter, OriginalValuesKnown, ProviderError,
+    PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader, StateWriter,
+    StorageReader, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use rayon::slice::ParallelSliceMut;
@@ -410,7 +408,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
 impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     /// Commit database transaction.
     pub fn commit(self) -> Result<bool, DatabaseError> {
-        Ok(self.tx.commit()?)
+        self.tx.commit()
     }
 
     // TODO(joshie) TEMPORARY should be moved to trait providers
@@ -2569,7 +2567,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         // insert hashes and intermediate merkle nodes
         {
-            HashedStateChanges(hashed_state).write_to_db(&self.tx)?;
+            self.write_hashed_state(hashed_state)?;
             trie_updates.flush(&self.tx)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertHashes);
@@ -2751,6 +2749,49 @@ impl<TX: DbTxMut + DbTx> StateWriter for DatabaseProvider<TX> {
                     block_number,
                     AccountBeforeTx { address, info: info.map(into_reth_acc) },
                 )?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl<TX: DbTxMut + DbTx> HashedStateWriter for DatabaseProvider<TX> {
+    /// Write the bundle state to the database.
+    fn write_hashed_state(&self, state: HashedPostState) -> ProviderResult<()> {
+        // Write hashed account updates.
+        let sorted_accounts = state.accounts.into_iter().sorted_unstable_by_key(|(key, _)| *key);
+        let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccount>()?;
+        for (hashed_address, account) in sorted_accounts {
+            if let Some(account) = account {
+                hashed_accounts_cursor.upsert(hashed_address, account)?;
+            } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
+                hashed_accounts_cursor.delete_current()?;
+            }
+        }
+
+        // Write hashed storage changes.
+        let sorted_storages = state.storages.into_iter().sorted_by_key(|(key, _)| *key);
+        let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorage>()?;
+        for (hashed_address, storage) in sorted_storages {
+            if storage.wiped && hashed_storage_cursor.seek_exact(hashed_address)?.is_some() {
+                hashed_storage_cursor.delete_current_duplicates()?;
+            }
+
+            let sorted_storage = storage.storage.into_iter().sorted_by_key(|(key, _)| *key);
+            for (hashed_slot, value) in sorted_storage {
+                let entry = StorageEntry { key: hashed_slot, value };
+                if let Some(db_entry) =
+                    hashed_storage_cursor.seek_by_key_subkey(hashed_address, entry.key)?
+                {
+                    if db_entry.key == entry.key {
+                        hashed_storage_cursor.delete_current()?;
+                    }
+                }
+
+                if entry.value != U256::ZERO {
+                    hashed_storage_cursor.upsert(hashed_address, entry)?;
+                }
             }
         }
 
