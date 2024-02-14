@@ -92,7 +92,7 @@ impl StateReverts {
 
 /// Iterator over storage reverts.
 /// See [StorageRevertsIter::next] for more details.
-struct StorageRevertsIter<R: Iterator, W: Iterator> {
+pub struct StorageRevertsIter<R: Iterator, W: Iterator> {
     reverts: Peekable<R>,
     wiped: Peekable<W>,
 }
@@ -102,7 +102,8 @@ where
     R: Iterator<Item = (B256, RevertToSlot)>,
     W: Iterator<Item = (B256, U256)>,
 {
-    fn new(
+    /// Creates a [StorageRevertsIter] from the given two iterators.
+    pub fn new(
         reverts: impl IntoIterator<IntoIter = R>,
         wiped: impl IntoIterator<IntoIter = W>,
     ) -> Self {

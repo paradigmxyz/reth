@@ -10,4 +10,4 @@ pub use bundle_state_with_receipts::{
 };
 pub use hashed_state_changes::HashedStateChanges;
 pub use state_changes::StateChanges;
-pub use state_reverts::StateReverts;
+pub use state_reverts::{StateReverts, StorageRevertsIter};

@@ -99,6 +99,11 @@ impl BundleStateWithReceipts {
         &mut self.bundle
     }
 
+    /// Splits the bundle state into its components
+    pub fn into_parts(self) -> (BundleState, Receipts, BlockNumber) {
+        (self.bundle, self.receipts, self.first_block)
+    }
+
     /// Set first block.
     pub fn set_first_block(&mut self, first_block: BlockNumber) {
         self.first_block = first_block;

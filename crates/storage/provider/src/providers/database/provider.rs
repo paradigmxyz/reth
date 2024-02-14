@@ -1,5 +1,8 @@
 use crate::{
-    bundle_state::{BundleStateInit, BundleStateWithReceipts, HashedStateChanges, RevertsInit},
+    bundle_state::{
+        BundleStateInit, BundleStateWithReceipts, HashedStateChanges, RevertsInit,
+        StorageRevertsIter,
+    },
     providers::{database::metrics, SnapshotProvider},
     to_range,
     traits::{
@@ -12,9 +15,10 @@ use crate::{
     TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
+use rayon::slice::ParallelSliceMut;
 use reth_db::{
     common::KeyValue,
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
@@ -33,10 +37,10 @@ use reth_interfaces::{
 use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     keccak256,
-    revm::{config::revm_spec, env::fill_block_env},
+    revm::{compat::into_reth_acc, config::revm_spec, env::fill_block_env},
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
+    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bytecode,
     ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
     PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment,
     StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
@@ -47,7 +51,10 @@ use reth_trie::{
     updates::TrieUpdates,
     HashedPostState, StateRoot,
 };
-use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
+use revm::{
+    db::states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
+    primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId},
+};
 use std::{
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
@@ -2547,23 +2554,27 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 }
 
 impl<TX: DbTxMut + DbTx> StateWriter for DatabaseProvider<TX> {
-
     /// Write bundle state to database.
     ///
     /// `is_value_known` should be set to true if bundle has some of it data
     /// detached, This would make some original values not known.
-    fn write_state(&self, state: &BundleStateWithReceipts, is_value_known: OriginalValuesKnown) -> ProviderResult<()> {
-        let (plain_state, reverts) = self.bundle.into_plain_state_and_reverts(is_value_known);
+    fn write_state(
+        &self,
+        state: BundleStateWithReceipts,
+        is_value_known: OriginalValuesKnown,
+    ) -> ProviderResult<()> {
+        let (bundle_state, receipts, first_block) = state.into_parts();
+        let (plain_state, reverts) = bundle_state.into_plain_state_and_reverts(is_value_known);
 
-        StateReverts(reverts).write_to_db(tx, self.first_block)?;
+        self.write_state_reverts(reverts, first_block)?;
 
         // write receipts
-        let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
-        let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
+        let mut bodies_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
+        let mut receipts_cursor = self.tx.cursor_write::<tables::Receipts>()?;
 
-        for (idx, receipts) in self.receipts.into_iter().enumerate() {
+        for (idx, receipts) in receipts.into_iter().enumerate() {
             if !receipts.is_empty() {
-                let block_number = self.first_block + idx as u64;
+                let block_number = first_block + idx as u64;
                 let (_, body_indices) =
                     bodies_cursor.seek_exact(block_number)?.unwrap_or_else(|| {
                         let last_available = bodies_cursor.last().ok().flatten().map(|(number, _)| number);
@@ -2579,7 +2590,135 @@ impl<TX: DbTxMut + DbTx> StateWriter for DatabaseProvider<TX> {
             }
         }
 
-        StateChanges(plain_state).write_to_db(tx)?;
+        self.write_state_changes(plain_state)?;
+
+        Ok(())
+    }
+
+    fn write_state_changes(&self, mut changes: StateChangeset) -> ProviderResult<()> {
+        // sort all entries so they can be written to database in more performant way.
+        // and take smaller memory footprint.
+        changes.accounts.par_sort_by_key(|a| a.0);
+        changes.storage.par_sort_by_key(|a| a.address);
+        changes.contracts.par_sort_by_key(|a| a.0);
+
+        // Write new account state
+        tracing::trace!(target: "provider::bundle_state", len = changes.accounts.len(), "Writing new account state");
+        let mut accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
+        // write account to database.
+        for (address, account) in changes.accounts.into_iter() {
+            if let Some(account) = account {
+                tracing::trace!(target: "provider::bundle_state", ?address, "Updating plain state account");
+                accounts_cursor.upsert(address, into_reth_acc(account))?;
+            } else if accounts_cursor.seek_exact(address)?.is_some() {
+                tracing::trace!(target: "provider::bundle_state", ?address, "Deleting plain state account");
+                accounts_cursor.delete_current()?;
+            }
+        }
+
+        // Write bytecode
+        tracing::trace!(target: "provider::bundle_state", len = changes.contracts.len(), "Writing bytecodes");
+        let mut bytecodes_cursor = self.tx.cursor_write::<tables::Bytecodes>()?;
+        for (hash, bytecode) in changes.contracts.into_iter() {
+            bytecodes_cursor.upsert(hash, Bytecode(bytecode))?;
+        }
+
+        // Write new storage state and wipe storage if needed.
+        tracing::trace!(target: "provider::bundle_state", len = changes.storage.len(), "Writing new storage state");
+        let mut storages_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
+        for PlainStorageChangeset { address, wipe_storage, storage } in changes.storage.into_iter()
+        {
+            // Wiping of storage.
+            if wipe_storage && storages_cursor.seek_exact(address)?.is_some() {
+                storages_cursor.delete_current_duplicates()?;
+            }
+            // cast storages to B256.
+            let mut storage = storage
+                .into_iter()
+                .map(|(k, value)| StorageEntry { key: k.into(), value })
+                .collect::<Vec<_>>();
+            // sort storage slots by key.
+            storage.par_sort_unstable_by_key(|a| a.key);
+
+            for entry in storage.into_iter() {
+                tracing::trace!(target: "provider::bundle_state", ?address, ?entry.key, "Updating plain state storage");
+                if let Some(db_entry) = storages_cursor.seek_by_key_subkey(address, entry.key)? {
+                    if db_entry.key == entry.key {
+                        storages_cursor.delete_current()?;
+                    }
+                }
+
+                if entry.value != U256::ZERO {
+                    storages_cursor.upsert(address, entry)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn write_state_reverts(
+        &self,
+        reverts: PlainStateReverts,
+        first_block: BlockNumber,
+    ) -> ProviderResult<()> {
+        // Write storage changes
+        tracing::trace!(target: "provider::reverts", "Writing storage changes");
+        let mut storages_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
+        let mut storage_changeset_cursor =
+            self.tx.cursor_dup_write::<tables::StorageChangeSet>()?;
+        for (block_index, mut storage_changes) in reverts.storage.into_iter().enumerate() {
+            let block_number = first_block + block_index as BlockNumber;
+
+            tracing::trace!(target: "provider::reverts", block_number, "Writing block change");
+            // sort changes by address.
+            storage_changes.par_sort_unstable_by_key(|a| a.address);
+            for PlainStorageRevert { address, wiped, storage_revert } in storage_changes.into_iter()
+            {
+                let storage_id = BlockNumberAddress((block_number, address));
+
+                let mut storage = storage_revert
+                    .into_iter()
+                    .map(|(k, v)| (B256::new(k.to_be_bytes()), v))
+                    .collect::<Vec<_>>();
+                // sort storage slots by key.
+                storage.par_sort_unstable_by_key(|a| a.0);
+
+                // If we are writing the primary storage wipe transition, the pre-existing plain
+                // storage state has to be taken from the database and written to storage history.
+                // See [StorageWipe::Primary] for more details.
+                let mut wiped_storage = Vec::new();
+                if wiped {
+                    tracing::trace!(target: "provider::reverts", ?address, "Wiping storage");
+                    if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
+                        wiped_storage.push((entry.key, entry.value));
+                        while let Some(entry) = storages_cursor.next_dup_val()? {
+                            wiped_storage.push((entry.key, entry.value))
+                        }
+                    }
+                }
+
+                tracing::trace!(target: "provider::reverts", ?address, ?storage, "Writing storage reverts");
+                for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
+                    storage_changeset_cursor.append_dup(storage_id, StorageEntry { key, value })?;
+                }
+            }
+        }
+
+        // Write account changes
+        tracing::trace!(target: "provider::reverts", "Writing account changes");
+        let mut account_changeset_cursor =
+            self.tx.cursor_dup_write::<tables::AccountChangeSet>()?;
+        for (block_index, mut account_block_reverts) in reverts.accounts.into_iter().enumerate() {
+            let block_number = first_block + block_index as BlockNumber;
+            // Sort accounts by address.
+            account_block_reverts.par_sort_by_key(|a| a.0);
+            for (address, info) in account_block_reverts {
+                account_changeset_cursor.append_dup(
+                    block_number,
+                    AccountBeforeTx { address, info: info.map(into_reth_acc) },
+                )?;
+            }
+        }
 
         Ok(())
     }

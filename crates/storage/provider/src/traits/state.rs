@@ -6,8 +6,11 @@ use reth_primitives::{
     trie::AccountProof, Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
     Bytecode, StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,
 };
-use reth_trie::updates::TrieUpdates;
-use revm::db::states::{StateChangeset, PlainStateReverts};
+use reth_trie::{updates::TrieUpdates, HashedPostState};
+use revm::db::{
+    states::{PlainStateReverts, StateChangeset},
+    OriginalValuesKnown,
+};
 
 /// Type alias of boxed [StateProvider].
 pub type StateProviderBox = Box<dyn StateProvider>;
@@ -232,18 +235,28 @@ pub trait BundleStateDataProvider: Send + Sync {
 #[auto_impl[Box, &, Arc]]
 pub trait StateWriter: Send + Sync {
     /// Writes the given [BundleStateWithReceipts] to the database.
-    fn write_state(&self, state: &BundleStateWithReceipts) -> ProviderResult<()>;
+    fn write_state(
+        &self,
+        state: BundleStateWithReceipts,
+        is_value_known: OriginalValuesKnown,
+    ) -> ProviderResult<()>;
 
     /// Writes the given [StateChangeset] to the database.
     fn write_state_changes(&self, changeset: StateChangeset) -> ProviderResult<()>;
 
     /// Writes the given [PlainStateReverts] to the database.
-    fn write_state_reverts(&self, reverts: PlainStateReverts) -> ProviderResult<()>;
+    ///
+    /// Note:: Reverts will delete all wiped storage from plain state.
+    fn write_state_reverts(
+        &self,
+        reverts: PlainStateReverts,
+        first_block: BlockNumber,
+    ) -> ProviderResult<()>;
 }
 
 /// Allows for writing a [HashedPostState] to the database.
 #[auto_impl[Box, &, Arc]]
-pub trait StateWriter: Send + Sync {
+pub trait HashedStateWriter: Send + Sync {
     /// Writes the given [HashedPostState] to the database.
     fn write_state(&self, state: &HashedPostState) -> ProviderResult<()>;
 }
