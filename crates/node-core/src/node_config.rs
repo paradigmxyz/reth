@@ -35,7 +35,10 @@ use reth_interfaces::{
     },
     RethResult,
 };
-use reth_network::{NetworkBuilder, NetworkConfig, NetworkHandle, NetworkManager};
+use reth_network::{
+    transactions::{TransactionFetcherConfig, TransactionsManagerConfig},
+    NetworkBuilder, NetworkConfig, NetworkHandle, NetworkManager,
+};
 use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
@@ -620,8 +623,19 @@ impl NodeConfig {
         C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
         Pool: TransactionPool + Unpin + 'static,
     {
-        let (handle, network, txpool, eth) =
-            builder.transactions(pool).request_handler(client).split_with_handle();
+        let (handle, network, txpool, eth) = builder
+            .transactions(
+                pool, // Configure transactions manager
+                &TransactionsManagerConfig {
+                    transaction_fetcher_config: TransactionFetcherConfig::new(
+                        self.network.soft_limit_byte_size_pooled_transactions_response,
+                        self.network
+                            .soft_limit_byte_size_pooled_transactions_response_on_pack_request,
+                    ),
+                },
+            )
+            .request_handler(client)
+            .split_with_handle();
 
         task_executor.spawn_critical("p2p txpool", txpool);
         task_executor.spawn_critical("p2p eth request handler", eth);

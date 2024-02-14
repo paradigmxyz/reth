@@ -5,7 +5,7 @@ use super::{
 use derive_more::Constructor;
 
 /// Configuration for managing transactions within the network.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TransactionsManagerConfig {
     /// Configuration for fetching transactions.
@@ -13,7 +13,7 @@ pub struct TransactionsManagerConfig {
 }
 
 /// Configuration for fetching transactions.
-#[derive(Debug, Constructor)]
+#[derive(Debug, Constructor, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TransactionFetcherConfig {
     /// Soft limit for the byte size of a

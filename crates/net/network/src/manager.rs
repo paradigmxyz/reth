@@ -30,7 +30,7 @@ use crate::{
     session::SessionManager,
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
-    transactions::{NetworkTransactionEvent, TransactionsManagerConfig},
+    transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
 use futures::{pin_mut, Future, StreamExt};
@@ -108,8 +108,6 @@ pub struct NetworkManager<C> {
     metrics: NetworkMetrics,
     /// Disconnect metrics for the Network
     disconnect_metrics: DisconnectMetrics,
-    /// Transaction manager config
-    transactions_manager_config: TransactionsManagerConfig,
 }
 
 // === impl NetworkManager ===
@@ -150,12 +148,12 @@ impl<C> NetworkManager<C> {
         self.swarm.sessions().secret_key()
     }
 
-    /// Returns a sharable reference to the transactions manager config
-    /// It's safe to return the reference here since no set method is provided on
-    /// TransactionsManagerConfig, which means it's immutable throughout its lifetime
-    pub fn transactions_manager_config(&self) -> &TransactionsManagerConfig {
-        &self.transactions_manager_config
-    }
+    // /// Returns a sharable reference to the transactions manager config
+    // /// It's safe to return the reference here since no set method is provided on
+    // /// TransactionsManagerConfig, which means it's immutable throughout its lifetime
+    // pub fn transactions_manager_config(&self) -> &TransactionsManagerConfig {
+    //     &self.transactions_manager_config
+    // }
 }
 
 impl<C> NetworkManager<C>
@@ -186,7 +184,7 @@ where
             dns_discovery_config,
             extra_protocols,
             tx_gossip_disabled,
-            transactions_manager_config,
+            transactions_manager_config: _,
             #[cfg(feature = "optimism")]
                 optimism_network_config: crate::config::OptimismNetworkConfig { sequencer_endpoint },
         } = config;
@@ -264,7 +262,6 @@ where
             num_active_peers,
             metrics: Default::default(),
             disconnect_metrics: Default::default(),
-            transactions_manager_config,
         })
     }
 
