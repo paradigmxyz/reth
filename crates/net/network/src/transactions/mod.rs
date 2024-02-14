@@ -1054,154 +1054,151 @@ where
         // All streams are polled until their corresponding budget is exhausted, then we manually
         // yield back control to tokio. See `NetworkManager` for more context on the design
         // pattern.
-        let mut budget_tx_manager = 1024;
 
-        loop {
-            // try drain pool imports (flush txns to pool)
-            let maybe_more_pool_imports = poll_nested_stream_with_yield_points!(
-                "net::tx",
-                "Pool imports stream",
-                DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
-                this.pool_imports.poll_next_unpin(cx),
-                |batch_import_res: Vec<PoolResult<TxHash>>| {
-                    for res in batch_import_res {
-                        match res {
-                            Ok(hash) => {
-                                this.on_good_import(hash);
+        // try drain pool imports (flush txns to pool)
+        let maybe_more_pool_imports = poll_nested_stream_with_yield_points!(
+            "net::tx",
+            "Pool imports stream",
+            DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
+            this.pool_imports.poll_next_unpin(cx),
+            |batch_import_res: Vec<PoolResult<TxHash>>| {
+                for res in batch_import_res {
+                    match res {
+                        Ok(hash) => {
+                            this.on_good_import(hash);
+                        }
+                        Err(err) => {
+                            // if we're _currently_ syncing and the transaction is
+                            // bad we ignore it, otherwise we penalize the peer
+                            // that sent the bad transaction with the assumption
+                            // that the peer should have known that this
+                            // transaction is bad. (e.g. consensus rules)
+                            if err.is_bad_transaction() && !this.network.is_syncing() {
+                                debug!(target: "net::tx", ?err, "bad pool transaction import");
+                                this.on_bad_import(err.hash);
+                                continue
                             }
-                            Err(err) => {
-                                // if we're _currently_ syncing and the transaction is
-                                // bad we ignore it, otherwise we penalize the peer
-                                // that sent the bad transaction with the assumption
-                                // that the peer should have known that this
-                                // transaction is bad. (e.g. consensus rules)
-                                if err.is_bad_transaction() && !this.network.is_syncing() {
-                                    debug!(target: "net::tx", ?err, "bad pool transaction import");
-                                    this.on_bad_import(err.hash);
-                                    continue
-                                }
-                                this.on_good_import(err.hash);
-                            }
+                            this.on_good_import(err.hash);
                         }
                     }
                 }
-            );
-
-            // advance network/peer related events (update peers)
-            let maybe_more_network_events = poll_nested_stream_with_yield_points!(
-                "net::tx",
-                "Network events",
-                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-                this.network_events.poll_next_unpin(cx),
-                |event| this.on_network_event(event)
-            );
-
-            // try drain successfully imported transactions to propagate (inform peers which txns
-            // we have seen)
-            let mut new_txs = Vec::new();
-
-            let maybe_more_pending_txns = poll_nested_stream_with_yield_points!(
-                "net::tx",
-                "Pending transactions stream",
-                DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
-                this.imported_transactions.poll_next_unpin(cx),
-                |hash| new_txs.push(hash)
-            );
-
-            if !new_txs.is_empty() {
-                this.on_new_transactions(new_txs);
             }
+        );
 
-            // try drain fetching transaction events (flush transaction fetcher and queue for
-            // import to pool)
-            //
-            // can potentially queue 21k txns * DEFAULT_BUDGET_TRY_DRAIN_STREAM = 21k * 1024 for
-            // import to pool. each message could contain up to soft limit byte size for
-            // response / small legacy tx size: 2 MiB / 100 bytes < 21k transactions.
-            let maybe_more_tx_fetch_events = poll_nested_stream_with_yield_points!(
-                "net::tx",
-                "Transaction fetch events",
-                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-                this.transaction_fetcher.poll_next_unpin(cx),
-                |fetch_event| {
-                    match fetch_event {
-                        FetchEvent::TransactionsFetched { peer_id, transactions } => {
-                            this.import_transactions(
-                                peer_id,
-                                transactions,
-                                TransactionSource::Response,
-                            );
-                        }
-                        FetchEvent::FetchError { peer_id, error } => {
-                            trace!(target: "net::tx", ?peer_id, ?error, "requesting transactions from peer failed");
-                            this.on_request_error(peer_id, error);
-                        }
+        // advance network/peer related events (update peers)
+        let maybe_more_network_events = poll_nested_stream_with_yield_points!(
+            "net::tx",
+            "Network events",
+            DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+            this.network_events.poll_next_unpin(cx),
+            |event| this.on_network_event(event)
+        );
+
+        // try drain successfully imported transactions to propagate (inform peers which txns
+        // we have seen)
+        let mut new_txs = Vec::new();
+
+        let maybe_more_pending_txns = poll_nested_stream_with_yield_points!(
+            "net::tx",
+            "Pending transactions stream",
+            DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
+            this.imported_transactions.poll_next_unpin(cx),
+            |hash| new_txs.push(hash)
+        );
+
+        if !new_txs.is_empty() {
+            this.on_new_transactions(new_txs);
+        }
+
+        // try drain fetching transaction events (flush transaction fetcher and queue for
+        // import to pool)
+        //
+        // can potentially queue 21k txns * DEFAULT_BUDGET_TRY_DRAIN_STREAM = 21k * 1024 for
+        // import to pool. each message could contain up to soft limit byte size for
+        // response / small legacy tx size: 2 MiB / 100 bytes < 21k transactions.
+        let maybe_more_tx_fetch_events = poll_nested_stream_with_yield_points!(
+            "net::tx",
+            "Transaction fetch events",
+            DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+            this.transaction_fetcher.poll_next_unpin(cx),
+            |fetch_event| {
+                match fetch_event {
+                    FetchEvent::TransactionsFetched { peer_id, transactions } => {
+                        this.import_transactions(
+                            peer_id,
+                            transactions,
+                            TransactionSource::Response,
+                        );
+                    }
+                    FetchEvent::FetchError { peer_id, error } => {
+                        trace!(target: "net::tx", ?peer_id, ?error, "requesting transactions from peer failed");
+                        this.on_request_error(peer_id, error);
                     }
                 }
-            );
-
-            // try drain incoming transaction events (stream new txns/announcements from network
-            // manager and queue for import to pool/fetch txns)
-            //
-            // can potentially queue 1,5k * DEFAULT_BUDGET_TRY_DRAIN_STREAM = 1,5k * 1024 txns for
-            // import to pool. each message could contain up to soft limit byte size for broadcast
-            // message / small legacy tx size: 128 KiB / 100 bytes < 1,5k transactions.
-            //
-            // this will potentially remove hashes from hashes pending fetch (same hashes are
-            // announced that didn't fit into a previous request)
-            let maybe_more_tx_events = poll_nested_stream_with_yield_points!(
-                "net::tx",
-                "Transaction events",
-                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-                this.transaction_events.poll_next_unpin(cx),
-                |event| this.on_network_tx_event(event)
-            );
-
-            // try drain hashes pending fetch if there is capacity (fetch txns)
-            //
-            // sends at most one request
-            if this.has_capacity_for_fetching_pending_hashes() {
-                let info = &this.pending_pool_imports_info;
-                let max_pending_pool_imports = info.max_pending_pool_imports;
-                let has_capacity_wrt_pending_pool_imports =
-                    |divisor| info.has_capacity(max_pending_pool_imports / divisor);
-
-                let metrics = &this.metrics;
-                let metrics_increment_egress_peer_channel_full =
-                    || metrics.egress_peer_channel_full.increment(1);
-
-                this.transaction_fetcher.on_fetch_pending_hashes(
-                    &this.peers,
-                    has_capacity_wrt_pending_pool_imports,
-                    metrics_increment_egress_peer_channel_full,
-                );
             }
+        );
 
-            // try drain commands (propagate/fetch/serve txns)
-            let maybe_more_commands = poll_nested_stream_with_yield_points!(
-                "net::tx",
-                "Commands channel",
-                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-                this.command_rx.poll_next_unpin(cx),
-                |cmd| { this.on_command(cmd) }
+        // try drain incoming transaction events (stream new txns/announcements from network
+        // manager and queue for import to pool/fetch txns)
+        //
+        // can potentially queue 1,5k * DEFAULT_BUDGET_TRY_DRAIN_STREAM = 1,5k * 1024 txns for
+        // import to pool. each message could contain up to soft limit byte size for broadcast
+        // message / small legacy tx size: 128 KiB / 100 bytes < 1,5k transactions.
+        //
+        // this will potentially remove hashes from hashes pending fetch (same hashes are
+        // announced that didn't fit into a previous request)
+        let maybe_more_tx_events = poll_nested_stream_with_yield_points!(
+            "net::tx",
+            "Transaction events",
+            DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+            this.transaction_events.poll_next_unpin(cx),
+            |event| this.on_network_tx_event(event)
+        );
+
+        // try drain hashes pending fetch if there is capacity (fetch txns)
+        //
+        // sends at most one request
+        if this.has_capacity_for_fetching_pending_hashes() {
+            let info = &this.pending_pool_imports_info;
+            let max_pending_pool_imports = info.max_pending_pool_imports;
+            let has_capacity_wrt_pending_pool_imports =
+                |divisor| info.has_capacity(max_pending_pool_imports / divisor);
+
+            let metrics = &this.metrics;
+            let metrics_increment_egress_peer_channel_full =
+                || metrics.egress_peer_channel_full.increment(1);
+
+            this.transaction_fetcher.on_fetch_pending_hashes(
+                &this.peers,
+                has_capacity_wrt_pending_pool_imports,
+                metrics_increment_egress_peer_channel_full,
             );
+        }
 
-            this.update_fetch_metrics();
+        // try drain commands (propagate/fetch/serve txns)
+        let maybe_more_commands = poll_nested_stream_with_yield_points!(
+            "net::tx",
+            "Commands channel",
+            DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+            this.command_rx.poll_next_unpin(cx),
+            |cmd| { this.on_command(cmd) }
+        );
 
-            // all channels are fully drained and import futures pending
-            if !maybe_more_network_events &&
-                !maybe_more_commands &&
-                !maybe_more_tx_events &&
-                !maybe_more_tx_fetch_events &&
-                !maybe_more_pool_imports &&
-                !maybe_more_pending_txns
-            {
-                return Poll::Pending
-            } else {
-                // Make sure we're woken up again
-                cx.waker().wake_by_ref();
-                return Poll::Pending
-            }
+        this.update_fetch_metrics();
+
+        // all channels are fully drained and import futures pending
+        if !maybe_more_network_events &&
+            !maybe_more_commands &&
+            !maybe_more_tx_events &&
+            !maybe_more_tx_fetch_events &&
+            !maybe_more_pool_imports &&
+            !maybe_more_pending_txns
+        {
+            return Poll::Pending
+        } else {
+            // Make sure we're woken up again
+            cx.waker().wake_by_ref();
+            return Poll::Pending
         }
     }
 }
