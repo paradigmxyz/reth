@@ -50,7 +50,7 @@ pub mod tx_manager {
             DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS as usize;
 
     /// Default limit for number of bad imports to keep track of. Default is 10 KiB.
-    pub const DEFAULT_CAPACITY_CACHE_BAD_IMPORTS: usize = 10 * 1024;
+    pub const DEFAULT_CAPACITY_CACHE_BAD_IMPORTS: usize = 100 * 1024;
 }
 
 pub mod tx_fetcher {
