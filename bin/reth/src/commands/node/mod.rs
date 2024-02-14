@@ -19,6 +19,8 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_interfaces::consensus::Consensus;
 use reth_primitives::ChainSpec;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::future::Future;
+use reth_tasks::TaskExecutor;
 
 /// Start the node
 #[derive(Debug, Parser)]
@@ -128,6 +130,62 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
 }
 
 impl<Ext: RethCliExt> NodeCommand<Ext> {
+
+    /// Launches the node
+    ///
+    /// This transforms the node command into a node config and launches the node using the given closure.
+    pub async fn execute2<L, F>(self, ctx: CliContext, launch: L) -> eyre::Result<()>
+    where L: FnOnce(NodeConfig, TaskExecutor, Ext::Node) -> F, F: Future<Output = eyre::Result<()>> {
+        let Self {
+            datadir,
+            config,
+            chain,
+            metrics,
+            trusted_setup_file,
+            instance,
+            with_unused_ports,
+            network,
+            rpc,
+            txpool,
+            builder,
+            debug,
+            db,
+            dev,
+            pruning,
+            #[cfg(feature = "optimism")]
+            rollup,
+            ext,
+        } = self;
+
+        // set up node config
+        let mut node_config = NodeConfig {
+            database,
+            config,
+            chain,
+            metrics,
+            instance,
+            trusted_setup_file,
+            network,
+            rpc,
+            txpool,
+            builder,
+            debug,
+            db,
+            dev,
+            pruning,
+            #[cfg(feature = "optimism")]
+            rollup,
+        };
+
+        if with_unused_ports {
+            node_config = node_config.with_unused_ports();
+        }
+
+        let task_executor = ctx.task_executor;
+
+        launch(node_config, task_executor, ext).await
+    }
+
     /// Replaces the extension of the node command
     pub fn with_ext<E: RethCliExt>(self, ext: E::Node) -> NodeCommand<E> {
         let Self {
