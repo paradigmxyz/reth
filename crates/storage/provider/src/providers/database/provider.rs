@@ -340,41 +340,6 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         Ok(data)
     }
 
-    /// Retrieves data from the database or snapshot, wherever it's available.
-    ///
-    /// # Arguments
-    /// * `segment` - The segment of the snapshot to check against.
-    /// * `index_key` - Requested index key, usually a block or transaction number.
-    /// * `fetch_from_snapshot` - A closure that defines how to fetch the data from the snapshot
-    ///   provider.
-    /// * `fetch_from_database` - A closure that defines how to fetch the data from the database
-    ///   when the snapshot doesn't contain the required data or is not available.
-    fn get_with_snapshot<T, FS, FD>(
-        &self,
-        segment: SnapshotSegment,
-        number: u64,
-        fetch_from_snapshot: FS,
-        fetch_from_database: FD,
-    ) -> ProviderResult<Option<T>>
-    where
-        FS: Fn(&SnapshotProvider) -> ProviderResult<Option<T>>,
-        FD: Fn() -> ProviderResult<Option<T>>,
-    {
-        let snapshot_upper_bound = match segment {
-            SnapshotSegment::Headers => self.snapshot_provider.get_highest_snapshot_block(segment),
-            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
-                self.snapshot_provider.get_highest_snapshot_tx(segment)
-            }
-        };
-
-        if snapshot_upper_bound.map_or(false, |snapshot_upper_bound| snapshot_upper_bound >= number)
-        {
-            return fetch_from_snapshot(&self.snapshot_provider)
-        }
-
-        fetch_from_database()
-    }
-
     fn transactions_by_tx_range_with_cursor<C>(
         &self,
         range: impl RangeBounds<TxNumber>,
@@ -1119,7 +1084,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
-        self.get_with_snapshot(
+        self.snapshot_provider.get_with_snapshot_or_database(
             SnapshotSegment::Headers,
             num,
             |snapshot| snapshot.header_by_number(num),
@@ -1142,7 +1107,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
             return Ok(Some(td))
         }
 
-        self.get_with_snapshot(
+        self.snapshot_provider.get_with_snapshot_or_database(
             SnapshotSegment::Headers,
             number,
             |snapshot| snapshot.header_td_by_number(number),
@@ -1163,7 +1128,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        self.get_with_snapshot(
+        self.snapshot_provider.get_with_snapshot_or_database(
             SnapshotSegment::Headers,
             number,
             |snapshot| snapshot.sealed_header(number),
@@ -1211,7 +1176,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
 
 impl<TX: DbTx> BlockHashReader for DatabaseProvider<TX> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.get_with_snapshot(
+        self.snapshot_provider.get_with_snapshot_or_database(
             SnapshotSegment::Headers,
             number,
             |snapshot| snapshot.block_hash(number),
@@ -1521,7 +1486,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        self.get_with_snapshot(
+        self.snapshot_provider.get_with_snapshot_or_database(
             SnapshotSegment::Transactions,
             id,
             |snapshot| snapshot.transaction_by_id(id),
@@ -1533,7 +1498,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.get_with_snapshot(
+        self.snapshot_provider.get_with_snapshot_or_database(
             SnapshotSegment::Transactions,
             id,
             |snapshot| snapshot.transaction_by_id_no_hash(id),
@@ -1694,7 +1659,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
 
 impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        self.get_with_snapshot(
+        self.snapshot_provider.get_with_snapshot_or_database(
             SnapshotSegment::Receipts,
             id,
             |snapshot| snapshot.receipt(id),
