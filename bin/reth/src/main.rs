@@ -1,9 +1,6 @@
 // We use jemalloc for performance reasons
 #![allow(missing_docs)]
 
-use reth::cli::Cli;
-use reth_node_ethereum::EthereumNode;
-
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
@@ -13,6 +10,9 @@ compile_error!("Cannot build the `reth` binary with the `optimism` feature flag 
 
 #[cfg(not(feature = "optimism"))]
 fn main() {
+    use reth::cli::Cli;
+    use reth_node_ethereum::EthereumNode;
+
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
     if std::env::var("RUST_BACKTRACE").is_err() {
         std::env::set_var("RUST_BACKTRACE", "1");

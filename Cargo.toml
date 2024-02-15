@@ -269,7 +269,3 @@ proptest = "1.4"
 proptest-derive = "0.4"
 serial_test = "3"
 similar-asserts = "1.5.0"
-
-[workspace.metadata.cargo-udeps.ignore]
-# ignored because this is mutually exclusive with the optimism payload builder via feature flags
-normal = ["reth-ethereum-payload-builder", "reth-node-ethereum"]

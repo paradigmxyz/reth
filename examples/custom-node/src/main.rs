@@ -144,6 +144,7 @@ impl EngineTypes for CustomEngineTypes {
 }
 
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 struct MyCustomNode;
 
 /// Configure the node types

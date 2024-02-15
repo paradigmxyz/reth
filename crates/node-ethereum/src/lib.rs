@@ -16,8 +16,5 @@ pub use engine::EthEngineTypes;
 /// [ConfigureEvmEnv](reth_node_api::ConfigureEvmEnv) trait.
 pub mod evm;
 pub use evm::EthEvmConfig;
-
-#[cfg(not(feature = "optimism"))]
 pub mod node;
-#[cfg(not(feature = "optimism"))]
 pub use node::EthereumNode;
