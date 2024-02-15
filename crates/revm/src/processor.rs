@@ -268,9 +268,7 @@ where
         }
 
         let hash = transaction.hash();
-
         let should_inspect = self.evm.context.external.should_inspect(self.evm.env(), hash);
-
         let out = if should_inspect {
             // push inspector handle register.
             self.evm.handler.append_handler_register_plain(inspector_handle_register);
@@ -1085,7 +1083,6 @@ mod tests {
 
     #[test]
     fn test_transact_error_includes_correct_hash() {
-        // Setup your test environment and mocks
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
@@ -1103,7 +1100,7 @@ mod tests {
             EthEvmConfig::default(),
         );
 
-        // Create a test transaction that you know will fail and you can predict its hash
+        // Create a test transaction that gonna fail
         let transaction = TransactionSigned::from_transaction_and_signature(
             Transaction::Eip1559(TxEip1559 {
                 chain_id,
