@@ -1,6 +1,6 @@
 //! Additional Node command arguments.
 
-//! clap [Args](clap::Args) for op-reth rollup configuration
+//! clap [Args](clap::Args) for optimism rollup configuration
 
 /// Parameters for rollup configuration
 #[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]

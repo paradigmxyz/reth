@@ -156,7 +156,8 @@ where
             .interval(conf.interval())
             .deadline(conf.deadline())
             .max_payload_tasks(conf.max_payload_tasks())
-            .extradata(conf.extradata_rlp_bytes())
+            // no extradata for OP
+            .extradata(Default::default())
             .max_gas_limit(conf.max_gas_limit());
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
@@ -200,9 +201,7 @@ where
         network_config.tx_gossip_disabled = disable_txpool_gossip;
         network_config.optimism_network_config.sequencer_endpoint = sequencer_http;
 
-        let network = ctx.task_executor().block_on(
-            NetworkManager::builder(network_config)
-        )?;
+        let network = ctx.task_executor().block_on(NetworkManager::builder(network_config))?;
 
         let handle = ctx.start_network(network, pool);
 
