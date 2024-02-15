@@ -67,6 +67,8 @@ pub struct TransactionsManagerMetrics {
     pub(crate) messages_with_already_seen_transactions: Counter,
     /// Number of transactions about to be imported into the pool.
     pub(crate) pending_pool_imports: Gauge,
+    /// Total number of bad imports.
+    pub(crate) bad_imports: Counter,
     /// Number of inflight requests at which the
     /// [`TransactionPool`](reth_transaction_pool::TransactionPool) is considered to be at
     /// capacity. Note, this is not a limit to the number of inflight requests, but a health

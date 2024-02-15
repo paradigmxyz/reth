@@ -186,15 +186,17 @@ pub(crate) struct Storage {
 // == impl Storage ===
 
 impl Storage {
-    fn new(header: SealedHeader) -> Self {
-        let (header, best_hash) = header.split();
+    /// Initializes the [Storage] with the given best block. This should be initialized with the
+    /// highest block in the chain, if there is a chain already stored on-disk.
+    fn new(best_block: SealedHeader) -> Self {
+        let (header, best_hash) = best_block.split();
         let mut storage = StorageInner {
             best_hash,
             total_difficulty: header.difficulty,
             best_block: header.number,
             ..Default::default()
         };
-        storage.headers.insert(0, header);
+        storage.headers.insert(header.number, header);
         storage.bodies.insert(best_hash, BlockBody::default());
         Self { inner: Arc::new(RwLock::new(storage)) }
     }

@@ -59,7 +59,7 @@ pub(crate) struct TransactionFetcher {
 impl TransactionFetcher {
     /// Removes the specified hashes from inflight tracking.
     #[inline]
-    fn remove_from_unknown_hashes<I>(&mut self, hashes: I)
+    pub fn remove_hashes_from_transaction_fetcher<I>(&mut self, hashes: I)
     where
         I: IntoIterator<Item = TxHash>,
     {
@@ -200,7 +200,9 @@ impl TransactionFetcher {
 
         let mut surplus_hashes = RequestTxHashes::with_capacity(hashes_from_announcement_len - 1);
 
-        'fold_size: loop {
+        // folds size based on expected response size  and adds selected hashes to the request
+        // list and the other hashes to the surplus list
+        loop {
             let Some((hash, metadata)) = hashes_from_announcement_iter.next() else { break };
 
             let Some((_ty, size)) = metadata else {
@@ -222,7 +224,7 @@ impl TransactionFetcher {
                 DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST - acc_size_response;
 
             if free_space < MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED {
-                break 'fold_size
+                break
             }
         }
 
@@ -311,7 +313,7 @@ impl TransactionFetcher {
                     );
 
                     max_retried_and_evicted_hashes.push(hash);
-                    continue
+                    continue;
                 }
                 *retries += 1;
             }
@@ -321,7 +323,7 @@ impl TransactionFetcher {
             }
         }
 
-        self.remove_from_unknown_hashes(max_retried_and_evicted_hashes);
+        self.remove_hashes_from_transaction_fetcher(max_retried_and_evicted_hashes);
     }
 
     /// Tries to request hashes pending fetch.
@@ -395,22 +397,12 @@ impl TransactionFetcher {
         }
     }
 
-    /// Removes the provided transaction hashes from the inflight requests set.
-    ///
-    /// This is called when we receive full transactions that are currently scheduled for fetching.
-    #[inline]
-    pub(super) fn on_received_full_transactions_broadcast(
-        &mut self,
-        hashes: impl IntoIterator<Item = TxHash>,
-    ) {
-        self.remove_from_unknown_hashes(hashes)
-    }
-
     /// Filters out hashes that have been seen before. For hashes that have already been seen, the
     /// peer is added as fallback peer.
     pub(super) fn filter_unseen_and_pending_hashes(
         &mut self,
         new_announced_hashes: &mut ValidAnnouncementData,
+        is_tx_bad_import: impl Fn(&TxHash) -> bool,
         peer_id: &PeerId,
         is_session_active: impl Fn(PeerId) -> bool,
         client_version: &str,
@@ -424,7 +416,9 @@ impl TransactionFetcher {
 
         // filter out inflight hashes, and register the peer as fallback for all inflight hashes
         new_announced_hashes.retain(|hash, metadata| {
+
             // occupied entry
+
             if let Some(TxFetchMetadata{ref mut fallback_peers, tx_encoded_length: ref mut previously_seen_size, ..}) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash) {
                 // update size metadata if available
                 if let Some((_ty, size)) = metadata {
@@ -467,6 +461,10 @@ impl TransactionFetcher {
             }
 
             // vacant entry
+
+            if is_tx_bad_import(hash) {
+                return false
+            }
 
             #[cfg(not(debug_assertions))]
             {
@@ -822,7 +820,8 @@ impl Stream for TransactionFetcher {
                         true
                     });
 
-                    self.remove_from_unknown_hashes(fetched);
+                    self.remove_hashes_from_transaction_fetcher(fetched);
+
                     // buffer left over hashes
                     self.buffer_hashes_for_retry(requested_hashes, &peer_id);
 
