@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  node:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./config.toml:/app/config.toml
+      - ./bitfinity.spec.json:/app/bitfinity.spec.json
+    ports:
+      - '8080:8080'
+    command: node -vvvv --config /app/config.toml --chain /app/bitfinity.spec.json --http --http.port 8080 -d
+
+  block_importer:
+    build:
+      context: .
+      dockerfile: Dockerfile # Assuming your provided Dockerfile is named Dockerfile
+    volumes:
+      - ./config.toml:/app/config.toml
+      - ./bitfinity.spec.json:/app/bitfinity.spec.json
+    command: import -vvvvv --config /app/config.toml --chain /app/bitfinity.spec.json --rpc-url http://host.docker.internal:8545 --interval 10
+    depends_on:
+      - node

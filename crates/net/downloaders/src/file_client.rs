@@ -84,7 +84,7 @@ impl FileClient {
 
         let provider = ethereum_json_rpc_client::EthJsonRcpClient::new(reqwest_client);
 
-        const BATCH_SIZE: usize = 100;
+        const BATCH_SIZE: usize = 500;
 
         let latest_block = provider
             .get_block_number()
