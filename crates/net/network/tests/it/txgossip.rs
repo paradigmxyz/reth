@@ -83,7 +83,6 @@ async fn test_4844_tx_gossip_penalization() {
 
     network_handle.send_transactions(peer1.peer_id().clone(), signed_txs);
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
 
     let received = peer1_tx_listener.recv().await.unwrap();
 
