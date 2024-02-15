@@ -1,10 +1,10 @@
 use crate::Tables;
 use metrics::{Gauge, Histogram};
+use once_cell::sync::OnceCell;
 use reth_libmdbx::CommitLatency;
 use reth_metrics::{metrics::Counter, Metrics};
-use rustc_hash::FxHasher;
+use rustc_hash::{FxHashMap, FxHasher};
 use std::{
-    collections::HashMap,
     hash::BuildHasherDefault,
     time::{Duration, Instant},
 };
@@ -14,17 +14,42 @@ const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 
 /// Caches metric handles for database environment to make sure handles are not re-created
 /// on every operation.
+///
+/// Note that metric recorder should be set before recording the first metric
+/// (e.g. `::record_operation(...)`), because it registers all possible metrics at that point.
+/// If the recorder is not set, metrics will be registered to a NOOP recorder for the rest
+/// of the DB environment lifetime.
 #[derive(Debug)]
 pub struct DatabaseEnvMetrics {
     /// Caches OperationMetrics handles for each table and operation tuple.
-    operations: HashMap<(Tables, Operation), OperationMetrics, BuildHasherDefault<FxHasher>>,
+    operations: OnceCell<FxHashMap<(Tables, Operation), OperationMetrics>>,
 }
 
 impl DatabaseEnvMetrics {
     pub(crate) fn new() -> Self {
-        // Pre-populate the map with all possible table and operation combinations
-        // to avoid runtime locks on the map when recording metrics.
-        let mut operations = HashMap::with_capacity_and_hasher(
+        Self { operations: OnceCell::new() }
+    }
+
+    /// Record a metric for database operation executed in `f`.
+    /// Panics if a metric recorder is not found for the given table and operation.
+    pub(crate) fn record_operation<R>(
+        &self,
+        table: Tables,
+        operation: Operation,
+        value_size: Option<usize>,
+        f: impl FnOnce() -> R,
+    ) -> R {
+        let handles = self.operations.get_or_init(Self::generate_operation_handles);
+        handles
+            .get(&(table, operation))
+            .expect("operation & table metric handle not found")
+            .record(value_size, f)
+    }
+
+    /// Pre-populate the map with all possible table and operation combinations
+    /// to avoid runtime locks on the map when recording metrics.
+    fn generate_operation_handles() -> FxHashMap<(Tables, Operation), OperationMetrics> {
+        let mut operations = FxHashMap::with_capacity_and_hasher(
             Tables::COUNT * Operation::COUNT,
             BuildHasherDefault::<FxHasher>::default(),
         );
@@ -39,22 +64,7 @@ impl DatabaseEnvMetrics {
                 );
             }
         }
-        Self { operations }
-    }
-
-    /// Record a metric for database operation executed in `f`.
-    /// Panics if a metric recorder is not found for the given table and operation.
-    pub(crate) fn record_operation<R>(
-        &self,
-        table: Tables,
-        operation: Operation,
-        value_size: Option<usize>,
-        f: impl FnOnce() -> R,
-    ) -> R {
-        self.operations
-            .get(&(table, operation))
-            .expect("operation & table metric handle not found")
-            .record(value_size, f)
+        operations
     }
 }
 
