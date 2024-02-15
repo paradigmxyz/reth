@@ -11,7 +11,7 @@ use crate::{
     kzg::{
         self, Blob, Bytes48, KzgSettings, BYTES_PER_BLOB, BYTES_PER_COMMITMENT, BYTES_PER_PROOF,
     },
-    Signature, Transaction, TransactionSigned, TxEip4844, TxHash, EIP4844_TX_TYPE_ID, B256
+    Signature, Transaction, TransactionSigned, TxEip4844, TxHash, B256, EIP4844_TX_TYPE_ID,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use bytes::BufMut;
