@@ -397,7 +397,7 @@ where
             self.handle(),
             pool.clone(),
             rx,
-            &TransactionsManagerConfig::default(),
+            TransactionsManagerConfig::default(),
         );
         self.transactions_manager = Some(transactions_manager);
         self.pool = Some(pool);
@@ -415,7 +415,7 @@ where
             network.handle().clone(),
             pool.clone(),
             rx,
-            &TransactionsManagerConfig::default(),
+            TransactionsManagerConfig::default(),
         );
         Peer {
             network,

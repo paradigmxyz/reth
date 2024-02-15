@@ -266,7 +266,7 @@ async fn test_connect_to_trusted_peer() {
         .unwrap()
         .into_builder()
         .request_handler(client)
-        .transactions(testing_pool(), &transactions_manager_config)
+        .transactions(testing_pool(), transactions_manager_config)
         .split_with_handle();
 
     let mut events = handle.event_listener();

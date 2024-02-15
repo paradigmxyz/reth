@@ -238,7 +238,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
         network: NetworkHandle,
         pool: Pool,
         from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent>,
-        transactions_manager_config: &TransactionsManagerConfig,
+        transactions_manager_config: TransactionsManagerConfig,
     ) -> Self {
         let network_events = network.event_listener();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -1483,15 +1483,15 @@ mod tests {
             .listener_port(0)
             .disable_discovery()
             .build(client);
-        let transactions_manager_config = config.transactions_manager_config.clone();
-
+    
         let pool = testing_pool();
 
+        let transactions_manager_config = config.transactions_manager_config.clone();
         let (_network_handle, _network, transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), &transactions_manager_config)
+            .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
 
         transactions
@@ -1542,7 +1542,7 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), &transactions_manager_config)
+            .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
 
         tokio::task::spawn(network);
@@ -1625,7 +1625,7 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), &transactions_manager_config)
+            .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
 
         tokio::task::spawn(network);
@@ -1714,7 +1714,7 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), &transactions_manager_config)
+            .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
         tokio::task::spawn(network);
 
@@ -1804,7 +1804,7 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), &transactions_manager_config)
+            .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
         tokio::task::spawn(network);
 

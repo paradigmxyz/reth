@@ -626,7 +626,7 @@ impl NodeConfig {
         let (handle, network, txpool, eth) = builder
             .transactions(
                 pool, // Configure transactions manager
-                &TransactionsManagerConfig {
+                TransactionsManagerConfig {
                     transaction_fetcher_config: TransactionFetcherConfig::new(
                         self.network.soft_limit_byte_size_pooled_transactions_response,
                         self.network

@@ -55,7 +55,7 @@ impl<C, Tx, Eth> NetworkBuilder<C, Tx, Eth> {
     pub fn transactions<Pool: TransactionPool>(
         self,
         pool: Pool,
-        transactions_manager_config: &TransactionsManagerConfig,
+        transactions_manager_config: TransactionsManagerConfig,
     ) -> NetworkBuilder<C, TransactionsManager<Pool>, Eth> {
         let NetworkBuilder { mut network, request_handler, .. } = self;
         let (tx, rx) = mpsc::unbounded_channel();

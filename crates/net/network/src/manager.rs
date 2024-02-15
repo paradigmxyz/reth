@@ -147,13 +147,6 @@ impl<C> NetworkManager<C> {
     pub fn secret_key(&self) -> SecretKey {
         self.swarm.sessions().secret_key()
     }
-
-    // /// Returns a sharable reference to the transactions manager config
-    // /// It's safe to return the reference here since no set method is provided on
-    // /// TransactionsManagerConfig, which means it's immutable throughout its lifetime
-    // pub fn transactions_manager_config(&self) -> &TransactionsManagerConfig {
-    //     &self.transactions_manager_config
-    // }
 }
 
 impl<C> NetworkManager<C>
@@ -282,12 +275,13 @@ where
     ///
     ///     let config =
     ///         NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
+    ///     let transactions_manager_config = config.transactions_manager_config().clone();
     ///
     ///     // create the network instance
     ///     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
     ///         .await
     ///         .unwrap()
-    ///         .transactions(pool)
+    ///         .transactions(pool, transactions_manager_config)
     ///         .request_handler(client)
     ///         .split_with_handle();
     /// }
