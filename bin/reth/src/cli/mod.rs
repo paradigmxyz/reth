@@ -218,29 +218,29 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn override_trusted_setup_file() {
-    //     // We already have a test that asserts that this has been initialized,
-    //     // so we cheat a little bit and check that loading a random file errors.
-    //     let reth = Cli::<()>::try_parse_from(["reth", "node", "--trusted-setup-file", "README.md"])
-    //         .unwrap();
-    //     assert!(reth.run().is_err());
-    // }
+    #[test]
+    fn override_trusted_setup_file() {
+        // We already have a test that asserts that this has been initialized,
+        // so we cheat a little bit and check that loading a random file errors.
+        let reth = Cli::<()>::try_parse_from(["reth", "node", "--trusted-setup-file", "README.md"])
+            .unwrap();
+        assert!(reth.run().is_err());
+    }
 
-    // #[test]
-    // fn parse_env_filter_directives() {
-    //     let temp_dir = tempfile::tempdir().unwrap();
+    #[test]
+    fn parse_env_filter_directives() {
+        let temp_dir = tempfile::tempdir().unwrap();
 
-    //     std::env::set_var("RUST_LOG", "info,evm=debug");
-    //     let reth = Cli::<()>::try_parse_from([
-    //         "reth",
-    //         "init",
-    //         "--datadir",
-    //         temp_dir.path().to_str().unwrap(),
-    //         "--log.file.filter",
-    //         "debug,net=trace",
-    //     ])
-    //     .unwrap();
-    //     assert!(reth.run().is_ok());
-    // }
+        std::env::set_var("RUST_LOG", "info,evm=debug");
+        let reth = Cli::<()>::try_parse_from([
+            "reth",
+            "init",
+            "--datadir",
+            temp_dir.path().to_str().unwrap(),
+            "--log.file.filter",
+            "debug,net=trace",
+        ])
+        .unwrap();
+        assert!(reth.run().is_ok());
+    }
 }
