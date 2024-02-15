@@ -100,7 +100,7 @@ where
 
         // Hook and inspector stack that we want to invoke on that hook.
         let stack = InspectorStack::new(InspectorStackConfig::default());
-        let evm = EvmConfig::evm_with_inspector(db, stack);
+        let evm = evm_config.evm_with_inspector(db, stack);
         EVMProcessor {
             chain_spec,
             evm,
@@ -135,7 +135,7 @@ where
         evm_config: EvmConfig,
     ) -> Self {
         let stack = InspectorStack::new(InspectorStackConfig::default());
-        let evm = EvmConfig::evm_with_inspector(revm_state, stack);
+        let evm = evm_config.evm_with_inspector(revm_state, stack);
         EVMProcessor {
             chain_spec,
             evm,

@@ -5,12 +5,12 @@ use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId, TxEnv};
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
     /// Returns new EVM with the given database
-    fn evm<'a, DB: Database + 'a>(db: DB) -> Evm<'a, (), DB> {
+    fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, (), DB> {
         EvmBuilder::default().with_db(db).build()
     }
 
     /// Returns a new EVM with the given inspector
-    fn evm_with_inspector<'a, DB: Database + 'a, I>(db: DB, inspector: I) -> Evm<'a, I, DB> {
+    fn evm_with_inspector<'a, DB: Database + 'a, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB> {
         EvmBuilder::default().with_db(db).with_external_context(inspector).build()
     }
 }
