@@ -22,6 +22,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::consensus::Consensus;
+use reth_node_core::args::BitfinityArgs;
 use reth_node_core::{events::node::NodeEvent, init::init_genesis};
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageId, ChainSpec, B256};
@@ -63,19 +64,9 @@ pub struct ImportCommand {
     )]
     chain: Arc<ChainSpec>,
 
-    /// The RPC of the remote chain to import.
-    #[arg(long, value_name = "RPC_URL", verbatim_doc_comment)]
-    rpc_url: String,
-
-    /// The block to stop importing at.
-    #[arg(long, value_name = "END_BLOCK", verbatim_doc_comment)]
-    end_block: Option<u64>,
-
-    /// Interval at which to import blocks, in seconds.
-    ///
-    /// Defaults to 30 seconds.
-    #[arg(long, value_name = "INTERVAL", verbatim_doc_comment, default_value = "30")]
-    interval: u64,
+    /// Bitfinity Related Args
+    #[arg(flatten)]
+    bitfinity: BitfinityArgs,
 
     /// The database configuration.
     #[clap(flatten)]
@@ -88,12 +79,10 @@ impl ImportCommand {
         config: Option<PathBuf>,
         datadir: MaybePlatformPath<DataDirPath>,
         chain: Arc<ChainSpec>,
-        rpc_url: String,
-        end_block: Option<u64>,
-        interval: u64,
+        bitfinity: BitfinityArgs,
         db: DatabaseArgs,
     ) -> Self {
-        Self { config, datadir, chain, rpc_url, end_block, interval, db }
+        Self { config, datadir, chain, bitfinity: bitfinity_args, db }
     }
 
     /// Execute `import` command

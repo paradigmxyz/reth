@@ -446,22 +446,14 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             Some(self.config_path()),
             self.data_dir.clone().data_dir_path().into(),
             self.config.chain.clone(),
-            "http://0.0.0.0:8545".to_owned(),
-            None,
-            10,
+            self.config.bitfinity.clone(),
             self.config.db,
         );
 
         let job_executor = lightspeed_scheduler::JobExecutor::new_with_local_tz();
 
-        let interval = Duration::from_secs(10);
-
         // Schedule the import job
         {
-            let blockchain_db = blockchain_db.clone();
-            let db = Arc::clone(&self.db);
-            let provider_factory = provider_factory.clone();
-            let config = config.clone();
             job_executor
                 .add_job_with_scheduler(
                     Scheduler::Interval { interval_duration: interval, execute_at_startup: true },

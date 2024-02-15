@@ -17,6 +17,7 @@ use clap::{value_parser, Parser};
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_interfaces::consensus::Consensus;
+use reth_node_core::args::BitfinityArgs;
 use reth_primitives::ChainSpec;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
@@ -51,19 +52,9 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     )]
     pub chain: Arc<ChainSpec>,
 
-    /// The RPC of the remote chain to import.
-    #[arg(long, value_name = "BITFINITY_RPC_URL", verbatim_doc_comment)]
-    rpc_url: String,
-
-    /// The block to stop importing at.
-    #[arg(long, value_name = "END_BLOCK", verbatim_doc_comment)]
-    end_block: Option<u64>,
-
-    /// Interval at which to import blocks, in seconds.
-    ///
-    /// Defaults to 30 seconds.
-    #[arg(long, value_name = "INTERVAL", verbatim_doc_comment, default_value = "30")]
-    interval: u64,
+    /// Bitfinity Args
+    #[clap(flatten)]
+    pub bitfinity: BitfinityArgs,
 
     /// Enable Prometheus metrics.
     ///
@@ -162,6 +153,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             pruning,
             #[cfg(feature = "optimism")]
             rollup,
+            bitfinity,
             ..
         } = self;
         NodeCommand {
@@ -183,6 +175,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             #[cfg(feature = "optimism")]
             rollup,
             ext,
+            bitfinity,
         }
     }
 
@@ -207,6 +200,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             #[cfg(feature = "optimism")]
             rollup,
             ext,
+            bitfinity,
         } = self;
 
         // set up real database
@@ -230,6 +224,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             pruning,
             #[cfg(feature = "optimism")]
             rollup,
+            bitfinity,
         };
 
         if with_unused_ports {

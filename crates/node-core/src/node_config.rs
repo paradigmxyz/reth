@@ -1,5 +1,6 @@
 //! Support for customizing the node
 
+use crate::args::BitfinityArgs;
 use crate::{
     args::{
         get_secret_key, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
@@ -199,6 +200,9 @@ pub struct NodeConfig {
     /// Rollup related arguments
     #[cfg(feature = "optimism")]
     pub rollup: crate::args::RollupArgs,
+
+    /// Bitfinity related arguments
+    pub bitfinity: BitfinityArgs,
 }
 
 impl NodeConfig {
@@ -221,6 +225,7 @@ impl NodeConfig {
             pruning: PruningArgs::default(),
             #[cfg(feature = "optimism")]
             rollup: crate::args::RollupArgs::default(),
+            bitfinity: BitfinityArgs::default(),
         };
 
         // set all ports to zero by default for test instances
