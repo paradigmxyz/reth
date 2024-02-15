@@ -34,8 +34,6 @@ use crate::{
         DEFAULT_BUDGET_TRY_DRAIN_STREAM,
     },
     cache::LruCache,
-    debug_log_propagated, debug_track_propagated_announcement, debug_track_propagated_txns,
-    init_debug_propagated,
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
@@ -77,7 +75,6 @@ use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
 
 pub mod constants;
-mod debug_logs;
 mod fetcher;
 mod validation;
 
@@ -393,8 +390,6 @@ where
         // number of connected peers)
         let max_num_full = (self.peers.len() as f64).sqrt() as usize + 1;
 
-        init_debug_propagated!();
-
         // Note: Assuming ~random~ order due to random state of the peers map hasher
         for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
             // filter all transactions unknown to the peer
@@ -439,8 +434,6 @@ where
                         propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
                     }
 
-                    debug_track_propagated_announcement!();
-
                     trace!(target: "net::tx", ?peer_id, num_txs=?new_pooled_hashes.len(), "Propagating tx hashes to peer");
 
                     // send hashes of transactions
@@ -456,8 +449,6 @@ where
                             .push(PropagateKind::Full(*peer_id));
                     }
 
-                    debug_track_propagated_txns!();
-
                     trace!(target: "net::tx", ?peer_id, num_txs=?new_full_transactions.len(), "Propagating full transactions to peer");
 
                     // send full transactions
@@ -465,8 +456,6 @@ where
                 }
             }
         }
-
-        debug_log_propagated!();
 
         // Update propagated transactions metrics
         self.metrics.propagated_transactions.increment(propagated.0.len() as u64);
