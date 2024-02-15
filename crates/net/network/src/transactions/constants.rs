@@ -27,6 +27,7 @@ pub const SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST: usize = 25
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
 pub const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE: usize = 2 * 1024 * 1024;
 
+/// Constants used by [`TransactionsManager`].
 pub mod tx_manager {
     /// Default limit for number transactions to keep track of for a single peer, for transactions
     /// that the peer's pool and local pool have in common. Default is 10 240 hashes.
@@ -41,6 +42,7 @@ pub mod tx_manager {
     pub const DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS: usize = 4 * 1024;
 }
 
+/// Constants used by [`TransactionFetcher`].
 pub mod tx_fetcher {
     use crate::peers::{DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND};
 

@@ -75,7 +75,7 @@ impl TransactionFetcher {
 
         let _ = poll_nested_stream_with_yield_points!(
             "net::tx",
-            "Fetch events stream",
+            "Inflight requests stream",
             DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
             self.inflight_requests.poll_next_unpin(cx),
             |resp| self.on_resolved_get_pooled_transactions_request_fut(resp),

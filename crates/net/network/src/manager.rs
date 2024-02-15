@@ -659,7 +659,7 @@ where
         // If the budget is exhausted we manually yield back control to the (coop) scheduler. This
         // manual yield point should prevent situations where polling appears to be frozen. See also <https://tokio.rs/blog/2020-04-preemption>
         // And tokio's docs on cooperative scheduling <https://docs.rs/tokio/latest/tokio/task/#cooperative-scheduling>
-        let mut budget_tx_manager = 1024;
+        let mut budget_network_manager = DEFAULT_BUDGET_TRY_DRAIN_STREAM;
 
         loop {
             // poll new block imports (dummy stream)
@@ -932,19 +932,16 @@ where
             );
 
             // all streams are fully drained and import futures pending
-            if !maybe_more_block_imports && !maybe_more_handle_messages && !maybe_more_swarm_events
-            {
-                return Poll::Pending
+            if maybe_more_block_imports || maybe_more_handle_messages || maybe_more_swarm_events {
+                budget_network_manager -= 1;
+                if budget_network_manager <= 0 {
+                    // make sure we're woken up again
+                    cx.waker().wake_by_ref();
+                    return Poll::Pending
+                }
             }
 
-            // some streams are still ready, continue looping if there is still budget for another
-            // iteration
-            budget_tx_manager -= 1;
-            if budget_tx_manager <= 0 {
-                // make sure we're woken up again
-                cx.waker().wake_by_ref();
-                return Poll::Pending
-            }
+            return Poll::Pending
         }
     }
 }

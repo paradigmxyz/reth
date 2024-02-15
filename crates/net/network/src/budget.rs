@@ -1,5 +1,3 @@
-use crate::transactions::constants::tx_fetcher::DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS;
-
 /// Default budget to try and drain streams.
 pub const DEFAULT_BUDGET_TRY_DRAIN_STREAM: u32 = 1024;
 
