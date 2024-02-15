@@ -981,11 +981,11 @@ pub struct TransactionFetcherInfo {
     /// Currently active outgoing [`GetPooledTransactions`] requests.
     pub(super) max_inflight_requests: usize,
     /// Soft limit for the byte size of the expected
-    /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on packing a
+    /// [`PooledTransactions`] response on packing a
     /// [`GetPooledTransactions`] request with hashes.
     soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
-    /// Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions)
-    /// response on assembling a [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions)
+    /// Soft limit for the byte size of a [`PooledTransactions`]
+    /// response on assembling a [`GetPooledTransactions`]
     /// request. Spec'd at 2 MiB.
     pub(super) soft_limit_byte_size_pooled_transactions_response: usize,
 }
