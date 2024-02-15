@@ -21,7 +21,6 @@ use revm::{
     primitives::{CfgEnvWithHandlerCfg, ResultAndState},
     Evm, State, StateBuilder,
 };
-use revm_inspectors::stack::Hook;
 use std::{sync::Arc, time::Instant};
 
 #[cfg(feature = "optimism")]
@@ -268,19 +267,7 @@ where
             fill_op_tx_env(self.evm.tx_mut(), transaction, sender, envelope_buf.into());
         }
 
-        let mut hash = transaction.hash();
-        let mut hash_recalculated = false;
-        let needs_hash_for_inspection =
-            matches!(self.evm.context.external.hook, Hook::Transaction(_));
-        // TODO?: Might add as a method to transaction
-        let is_hash_empty = |hash: &B256| hash.iter().all(|&byte| byte == 0);
-
-        // need statistic to understand which condition to put first but performance gain maybe
-        // negligible
-        if needs_hash_for_inspection && is_hash_empty(&hash) {
-            hash = transaction.recalculate_hash();
-            hash_recalculated = true; // Mark that the hash has been calculated
-        }
+        let hash = transaction.hash();
 
         let should_inspect = self.evm.context.external.should_inspect(self.evm.env(), hash);
 
@@ -303,10 +290,8 @@ where
 
         out.map_err(move |e| {
             // Ensure hash is calculated for error log, if not already done
-            if !hash_recalculated {
-                hash = transaction.recalculate_hash();
-            }
-            BlockValidationError::EVM { hash, error: e.into() }.into()
+            BlockValidationError::EVM { hash: transaction.recalculate_hash(), error: e.into() }
+                .into()
         })
     }
 
