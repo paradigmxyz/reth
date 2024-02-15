@@ -16,7 +16,6 @@ use reth_transaction_pool::{
     TransactionValidationTaskExecutor,
 };
 
-
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
@@ -64,13 +63,9 @@ where
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
 
-    async fn build_pool(
-        self,
-        ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<Self::Pool> {
+    async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.data_dir();
-        let blob_store =
-            DiskFileBlobStore::open(data_dir.blobstore_path(), Default::default())?;
+        let blob_store = DiskFileBlobStore::open(data_dir.blobstore_path(), Default::default())?;
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
@@ -156,13 +151,10 @@ where
             ctx.chain_spec(),
             payload_builder,
         );
-        let (payload_service, payload_builder) = PayloadBuilderService::new(
-            payload_generator,
-            ctx.provider().canonical_state_stream(),
-        );
+        let (payload_service, payload_builder) =
+            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
 
-        ctx.task_executor()
-            .spawn_critical("payload builder service", Box::pin(payload_service));
+        ctx.task_executor().spawn_critical("payload builder service", Box::pin(payload_service));
 
         Ok(payload_builder)
     }

@@ -1838,15 +1838,15 @@ dependencies = [
 name = "custom-payload-builder"
 version = "0.0.0"
 dependencies = [
- "clap",
  "eyre",
  "futures-util",
  "reth",
  "reth-basic-payload-builder",
+ "reth-ethereum-payload-builder",
  "reth-node-api",
+ "reth-node-ethereum",
  "reth-payload-builder",
  "reth-primitives",
- "tokio",
  "tracing",
 ]
 

@@ -15,25 +15,26 @@
 //! Once traits are implemented and custom types are defined, the [EngineTypes] trait can be
 //! implemented:
 
-use std::convert::Infallible;
 use alloy_chains::Chain;
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-use reth::builder::node::NodeTypes;
-use reth::builder::NodeBuilder;
-use reth::tasks::TaskManager;
+use reth::{
+    builder::{node::NodeTypes, NodeBuilder},
+    tasks::TaskManager,
+};
 use reth_node_api::{
-    AttributesValidationError, EngineApiMessageVersion, EngineTypes,
-    PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes, validate_version_specific_fields,
+    validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion,
+    EngineTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{EthereumNode, EthEvmConfig};
+use reth_node_ethereum::{EthEvmConfig, EthereumNode};
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
-use reth_primitives::{Address, B256, ChainSpec, Genesis, Withdrawals};
+use reth_primitives::{Address, ChainSpec, Genesis, Withdrawals, B256};
 use reth_rpc_types::{
     engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
     withdrawal::Withdrawal,
 };
+use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
+use thiserror::Error;
 
 /// A custom payload attributes type.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,14 +178,13 @@ async fn main() -> eyre::Result<()> {
     // create node config
     let node_config = NodeConfig::test().with_rpc(rpc_args).with_chain(spec);
 
-    let handle = NodeBuilder::new(node_config).testing_node(
-        tasks.executor()
-    )
+    let handle = NodeBuilder::new(node_config)
+        .testing_node(tasks.executor())
         .with_types(MyCustomNode::default());
-        // .with_components(EthereumNode::components()
-        //     .
-        // );
-        // .launch().await?;
+    // .with_components(EthereumNode::components()
+    //     .
+    // );
+    // .launch().await?;
 
     //
     //

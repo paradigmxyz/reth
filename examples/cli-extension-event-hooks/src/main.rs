@@ -15,7 +15,7 @@
 //! > "Node started"
 //! once the node has been started.
 
-use reth::{cli::Cli};
+use reth::cli::Cli;
 use reth_node_ethereum::EthereumNode;
 
 fn main() {

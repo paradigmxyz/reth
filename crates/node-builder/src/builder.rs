@@ -2,7 +2,6 @@
 
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
-use std::str::FromStr;
 use crate::{
     components::{
         FullNodeComponents, FullNodeComponentsAdapter, NodeComponents, NodeComponentsBuilder,
@@ -19,12 +18,17 @@ use reth_beacon_consensus::{
     BeaconConsensusEngine,
 };
 use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree};
-use reth_db::{database::Database, database_metrics::{DatabaseMetadata, DatabaseMetrics}, DatabaseEnv};
+use reth_db::{
+    database::Database,
+    database_metrics::{DatabaseMetadata, DatabaseMetrics},
+    test_utils::{create_test_rw_db, TempDatabase},
+    DatabaseEnv,
+};
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
-    dirs::{ChainPath, DataDirPath},
+    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     engine_api_store::EngineApiStore,
     events::cl::ConsensusLayerHealthEvents,
     exit::NodeExitFuture,
@@ -41,13 +45,11 @@ use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFa
 use reth_prune::{PrunerBuilder, PrunerEvent};
 use reth_revm::EvmProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
-use reth_tasks::{TaskExecutor};
+use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{PoolConfig, TransactionPool};
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
-use reth_db::test_utils::{create_test_rw_db, TempDatabase};
-use reth_node_core::dirs::MaybePlatformPath;
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -135,18 +137,17 @@ impl<DB> NodeBuilder<DB, InitState> {
     }
 
     /// Creates an _ephemeral_ preconfigured node for testing purposes.
-    pub fn testing_node(self, task_executor: TaskExecutor) -> WithLaunchContext<Arc<TempDatabase<DatabaseEnv>>, InitState> {
+    pub fn testing_node(
+        self,
+        task_executor: TaskExecutor,
+    ) -> WithLaunchContext<Arc<TempDatabase<DatabaseEnv>>, InitState> {
         let db = create_test_rw_db();
         let db_path_str = db.path().to_str().expect("Path is not valid unicode");
-        let path = MaybePlatformPath::<DataDirPath>::from_str(db_path_str)
-            .expect("Path is not valid");
+        let path =
+            MaybePlatformPath::<DataDirPath>::from_str(db_path_str).expect("Path is not valid");
         let data_dir = path.unwrap_or_chain_default(self.config.chain.chain);
 
-        WithLaunchContext {
-            builder: self.with_database(db),
-            task_executor,
-            data_dir,
-        }
+        WithLaunchContext { builder: self.with_database(db), task_executor, data_dir }
     }
 }
 

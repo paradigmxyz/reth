@@ -70,7 +70,6 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
 }
 
 impl Cli {
-
     /// Parsers only the default CLI arguments
     pub fn parse_args() -> Self {
         Cli::parse()
