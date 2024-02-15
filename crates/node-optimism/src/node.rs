@@ -178,7 +178,7 @@ where
 }
 
 /// A basic ethereum payload service.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct OptimismNetwork {
     /// HTTP endpoint for the sequencer mempool
     pub sequencer_http: Option<String>,
