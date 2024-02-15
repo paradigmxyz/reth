@@ -27,6 +27,7 @@ use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath},
+    engine_api_store::EngineApiStore,
     events::cl::ConsensusLayerHealthEvents,
     exit::NodeExitFuture,
     init::init_genesis,
@@ -448,7 +449,19 @@ where
 
         // create pipeline
         let network_client = network.fetch_client().await?;
-        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
+        let (consensus_engine_tx, mut consensus_engine_rx) = unbounded_channel();
+
+        if let Some(store_path) = config.debug.engine_api_store.clone() {
+            debug!(target: "reth::cli", "spawning engine API store");
+            let (engine_intercept_tx, engine_intercept_rx) = unbounded_channel();
+            let engine_api_store = EngineApiStore::new(store_path);
+            executor.spawn_critical(
+                "engine api interceptor",
+                engine_api_store.intercept(consensus_engine_rx, engine_intercept_tx),
+            );
+            consensus_engine_rx = engine_intercept_rx;
+        };
+
         let max_block = config.max_block(&network_client, provider_factory.clone()).await?;
 
         // Configure the pipeline
