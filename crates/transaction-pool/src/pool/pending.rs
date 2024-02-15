@@ -340,9 +340,10 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.independent_transactions.remove(&tx);
 
         // switch out for the next ancestor if there is one
-        self.highest_nonces.remove(&tx);
-        if let Some(ancestor) = self.ancestor(id) {
-            self.highest_nonces.insert(ancestor.clone());
+        if self.highest_nonces.remove(&tx) {
+            if let Some(ancestor) = self.ancestor(id) {
+                self.highest_nonces.insert(ancestor.clone());
+            }
         }
         Some(tx.transaction)
     }
