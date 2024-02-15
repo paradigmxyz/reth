@@ -1507,7 +1507,7 @@ mod tests {
             .listener_port(0)
             .disable_discovery()
             .build(client);
-    
+
         let pool = testing_pool();
 
         let transactions_manager_config = config.transactions_manager_config.clone();
