@@ -95,7 +95,7 @@ impl FileClient {
         debug!(target: "downloaders::file", latest_block, "Latest block from rpc");
 
         for begin_block in (start_block..=end_block).step_by(BATCH_SIZE) {
-            let count = std::cmp::min(BATCH_SIZE as u64, (end_block - begin_block) as u64);
+            let count = std::cmp::min(BATCH_SIZE as u64, end_block - begin_block);
 
             debug!(target: "downloaders::file", begin_block, count, "Fetching blocks");
 
@@ -114,7 +114,7 @@ impl FileClient {
                 })?
                 .into_par_iter()
                 .clone()
-                .map(|block| did::Block::<did::Transaction>::from(block))
+                .map(did::Block::<did::Transaction>::from)
                 .collect::<Vec<_>>();
 
             trace!(target: "downloaders::file", blocks = full_blocks.len(), "Fetched blocks");
