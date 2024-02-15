@@ -1,8 +1,7 @@
 // We use jemalloc for performance reasons
 #![allow(missing_docs)]
 
-use clap::Parser;
-use reth::{cli::Cli, commands::node::NoArgs};
+use reth::cli::Cli;
 use reth_node_ethereum::EthereumNode;
 
 #[cfg(all(feature = "jemalloc", unix))]
