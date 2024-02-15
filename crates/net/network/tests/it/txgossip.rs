@@ -81,8 +81,8 @@ async fn test_4844_tx_gossip_penalization() {
     let peer0_reputation_before =
         peer1.peer_handle().peer_by_id(peer0.peer_id().clone()).await.unwrap().reputation();
 
+    // sends txs directly to peer1
     network_handle.send_transactions(peer1.peer_id().clone(), signed_txs);
-
 
     let received = peer1_tx_listener.recv().await.unwrap();
 
@@ -117,6 +117,7 @@ async fn test_sending_invalid_transactions() {
 
     let network_handle = peer0.network();
 
+    // sends txs directly to peer1
     network_handle.send_transactions(peer1.peer_id().clone(), invalid_txs);
 
     tokio::time::sleep(Duration::from_secs(1)).await;
