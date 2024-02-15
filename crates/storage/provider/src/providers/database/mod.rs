@@ -3,6 +3,7 @@ use crate::{
         state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
         SnapshotProvider,
     },
+    to_range,
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, EvmEnvProvider,
     HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode, ProviderError,
@@ -16,8 +17,8 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
     ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, Withdrawals, B256, U256,
+    SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -214,7 +215,12 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
-        self.provider()?.header_by_number(num)
+        self.snapshot_provider.get_with_snapshot_or_database(
+            SnapshotSegment::Headers,
+            num,
+            |snapshot| snapshot.header_by_number(num),
+            || self.provider()?.header_by_number(num),
+        )
     }
 
     fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
@@ -222,22 +228,44 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.provider()?.header_td_by_number(number)
+        if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
+            // if this block is higher than the final paris(merge) block, return the final paris
+            // difficulty
+            return Ok(Some(td))
+        }
+
+        self.snapshot_provider.get_with_snapshot_or_database(
+            SnapshotSegment::Headers,
+            number,
+            |snapshot| snapshot.header_td_by_number(number),
+            || self.provider()?.header_td_by_number(number),
+        )
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        self.provider()?.headers_range(range)
+        self.snapshot_provider.get_range_with_snapshot_or_database(
+            SnapshotSegment::Headers,
+            to_range(range),
+            |snapshot, range, _| snapshot.headers_range(range),
+            |range, _| self.provider()?.headers_range(range),
+            |_| true,
+        )
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        self.provider()?.sealed_header(number)
+        self.snapshot_provider.get_with_snapshot_or_database(
+            SnapshotSegment::Headers,
+            number,
+            |snapshot| snapshot.sealed_header(number),
+            || self.provider()?.sealed_header(number),
+        )
     }
 
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.provider()?.sealed_headers_range(range)
+        self.sealed_headers_while(range, |_| true)
     }
 
     fn sealed_headers_while(
@@ -245,13 +273,24 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.provider()?.sealed_headers_while(range, predicate)
+        self.snapshot_provider.get_range_with_snapshot_or_database(
+            SnapshotSegment::Headers,
+            to_range(range),
+            |snapshot, range, predicate| snapshot.sealed_headers_while(range, predicate),
+            |range, predicate| self.provider()?.sealed_headers_while(range, predicate),
+            predicate,
+        )
     }
 }
 
 impl<DB: Database> BlockHashReader for ProviderFactory<DB> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.provider()?.block_hash(number)
+        self.snapshot_provider.get_with_snapshot_or_database(
+            SnapshotSegment::Headers,
+            number,
+            |snapshot| snapshot.block_hash(number),
+            || self.provider()?.block_hash(number),
+        )
     }
 
     fn canonical_hashes_range(
@@ -259,7 +298,13 @@ impl<DB: Database> BlockHashReader for ProviderFactory<DB> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.provider()?.canonical_hashes_range(start, end)
+        self.snapshot_provider.get_range_with_snapshot_or_database(
+            SnapshotSegment::Headers,
+            start..end,
+            |snapshot, range, _| snapshot.canonical_hashes_range(range.start, range.end),
+            |range, _| self.provider()?.canonical_hashes_range(range.start, range.end),
+            |_| true,
+        )
     }
 }
 
@@ -332,14 +377,24 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        self.provider()?.transaction_by_id(id)
+        self.snapshot_provider.get_with_snapshot_or_database(
+            SnapshotSegment::Transactions,
+            id,
+            |snapshot| snapshot.transaction_by_id(id),
+            || self.provider()?.transaction_by_id(id),
+        )
     }
 
     fn transaction_by_id_no_hash(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.provider()?.transaction_by_id_no_hash(id)
+        self.snapshot_provider.get_with_snapshot_or_database(
+            SnapshotSegment::Transactions,
+            id,
+            |snapshot| snapshot.transaction_by_id_no_hash(id),
+            || self.provider()?.transaction_by_id_no_hash(id),
+        )
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
@@ -399,7 +454,12 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
 
 impl<DB: Database> ReceiptProvider for ProviderFactory<DB> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        self.provider()?.receipt(id)
+        self.snapshot_provider.get_with_snapshot_or_database(
+            SnapshotSegment::Receipts,
+            id,
+            |snapshot| snapshot.receipt(id),
+            || self.provider()?.receipt(id),
+        )
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
@@ -414,7 +474,13 @@ impl<DB: Database> ReceiptProvider for ProviderFactory<DB> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
-        self.provider()?.receipts_by_tx_range(range)
+        self.snapshot_provider.get_range_with_snapshot_or_database(
+            SnapshotSegment::Receipts,
+            to_range(range),
+            |snapshot, range, _| snapshot.receipts_by_tx_range(range),
+            |range, _| self.provider()?.receipts_by_tx_range(range),
+            |_| true,
+        )
     }
 }
 

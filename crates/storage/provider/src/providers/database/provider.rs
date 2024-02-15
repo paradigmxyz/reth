@@ -291,90 +291,6 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         self
     }
 
-    /// Gets data within a specified range, potentially spanning different snapshots and database.
-    ///
-    /// # Arguments
-    /// * `segment` - The segment of the snapshot to query.
-    /// * `block_range` - The range of data to fetch.
-    /// * `fetch_from_snapshot` - A function to fetch data from the snapshot.
-    /// * `fetch_from_database` - A function to fetch data from the database.
-    /// * `predicate` - A function used to evaluate each item in the fetched data. Fetching is
-    ///   terminated when this function returns false, thereby filtering the data based on the
-    ///   provided condition.
-    fn get_range_with_snapshot<T, P, FS, FD>(
-        &self,
-        segment: SnapshotSegment,
-        mut block_or_tx_range: Range<u64>,
-        fetch_from_snapshot: FS,
-        mut fetch_from_database: FD,
-        mut predicate: P,
-    ) -> ProviderResult<Vec<T>>
-    where
-        FS: Fn(&SnapshotProvider, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
-        FD: FnMut(Range<u64>, P) -> ProviderResult<Vec<T>>,
-        P: FnMut(&T) -> bool,
-    {
-        let mut data = Vec::new();
-
-        if let Some(snapshot_upper_bound) = match segment {
-            SnapshotSegment::Headers => self.snapshot_provider.get_highest_snapshot_block(segment),
-            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
-                self.snapshot_provider.get_highest_snapshot_tx(segment)
-            }
-        } {
-            if block_or_tx_range.start <= snapshot_upper_bound {
-                let end = block_or_tx_range.end.min(snapshot_upper_bound + 1);
-                data.extend(fetch_from_snapshot(
-                    &self.snapshot_provider,
-                    block_or_tx_range.start..end,
-                    &mut predicate,
-                )?);
-                block_or_tx_range.start = end;
-            }
-        }
-
-        if block_or_tx_range.end > block_or_tx_range.start {
-            data.extend(fetch_from_database(block_or_tx_range, predicate)?)
-        }
-
-        Ok(data)
-    }
-
-    /// Retrieves data from the database or snapshot, wherever it's available.
-    ///
-    /// # Arguments
-    /// * `segment` - The segment of the snapshot to check against.
-    /// * `index_key` - Requested index key, usually a block or transaction number.
-    /// * `fetch_from_snapshot` - A closure that defines how to fetch the data from the snapshot
-    ///   provider.
-    /// * `fetch_from_database` - A closure that defines how to fetch the data from the database
-    ///   when the snapshot doesn't contain the required data or is not available.
-    fn get_with_snapshot<T, FS, FD>(
-        &self,
-        segment: SnapshotSegment,
-        number: u64,
-        fetch_from_snapshot: FS,
-        fetch_from_database: FD,
-    ) -> ProviderResult<Option<T>>
-    where
-        FS: Fn(&SnapshotProvider) -> ProviderResult<Option<T>>,
-        FD: Fn() -> ProviderResult<Option<T>>,
-    {
-        let snapshot_upper_bound = match segment {
-            SnapshotSegment::Headers => self.snapshot_provider.get_highest_snapshot_block(segment),
-            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
-                self.snapshot_provider.get_highest_snapshot_tx(segment)
-            }
-        };
-
-        if snapshot_upper_bound.map_or(false, |snapshot_upper_bound| snapshot_upper_bound >= number)
-        {
-            return fetch_from_snapshot(&self.snapshot_provider)
-        }
-
-        fetch_from_database()
-    }
-
     fn transactions_by_tx_range_with_cursor<C>(
         &self,
         range: impl RangeBounds<TxNumber>,
@@ -383,7 +299,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     where
         C: DbCursorRO<tables::Transactions>,
     {
-        self.get_range_with_snapshot(
+        self.snapshot_provider.get_range_with_snapshot_or_database(
             SnapshotSegment::Transactions,
             to_range(range),
             |snapshot, range, _| snapshot.transactions_by_tx_range(range),
@@ -1119,7 +1035,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
-        self.get_with_snapshot(
+        self.snapshot_provider.get_with_snapshot_or_database(
             SnapshotSegment::Headers,
             num,
             |snapshot| snapshot.header_by_number(num),
@@ -1142,7 +1058,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
             return Ok(Some(td))
         }
 
-        self.get_with_snapshot(
+        self.snapshot_provider.get_with_snapshot_or_database(
             SnapshotSegment::Headers,
             number,
             |snapshot| snapshot.header_td_by_number(number),
@@ -1151,7 +1067,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        self.get_range_with_snapshot(
+        self.snapshot_provider.get_range_with_snapshot_or_database(
             SnapshotSegment::Headers,
             to_range(range),
             |snapshot, range, _| snapshot.headers_range(range),
@@ -1163,7 +1079,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        self.get_with_snapshot(
+        self.snapshot_provider.get_with_snapshot_or_database(
             SnapshotSegment::Headers,
             number,
             |snapshot| snapshot.sealed_header(number),
@@ -1185,7 +1101,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.get_range_with_snapshot(
+        self.snapshot_provider.get_range_with_snapshot_or_database(
             SnapshotSegment::Headers,
             to_range(range),
             |snapshot, range, predicate| snapshot.sealed_headers_while(range, predicate),
@@ -1211,7 +1127,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
 
 impl<TX: DbTx> BlockHashReader for DatabaseProvider<TX> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.get_with_snapshot(
+        self.snapshot_provider.get_with_snapshot_or_database(
             SnapshotSegment::Headers,
             number,
             |snapshot| snapshot.block_hash(number),
@@ -1224,7 +1140,7 @@ impl<TX: DbTx> BlockHashReader for DatabaseProvider<TX> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.get_range_with_snapshot(
+        self.snapshot_provider.get_range_with_snapshot_or_database(
             SnapshotSegment::Headers,
             start..end,
             |snapshot, range, _| snapshot.canonical_hashes_range(range.start, range.end),
@@ -1453,7 +1369,7 @@ impl<TX: DbTx> TransactionsProviderExt for DatabaseProvider<TX> {
         &self,
         tx_range: Range<TxNumber>,
     ) -> ProviderResult<Vec<(TxHash, TxNumber)>> {
-        self.get_range_with_snapshot(
+        self.snapshot_provider.get_range_with_snapshot_or_database(
             SnapshotSegment::Transactions,
             tx_range,
             |snapshot, range, _| snapshot.transaction_hashes_by_range(range),
@@ -1521,7 +1437,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        self.get_with_snapshot(
+        self.snapshot_provider.get_with_snapshot_or_database(
             SnapshotSegment::Transactions,
             id,
             |snapshot| snapshot.transaction_by_id(id),
@@ -1533,7 +1449,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.get_with_snapshot(
+        self.snapshot_provider.get_with_snapshot_or_database(
             SnapshotSegment::Transactions,
             id,
             |snapshot| snapshot.transaction_by_id_no_hash(id),
@@ -1664,7 +1580,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
-        self.get_range_with_snapshot(
+        self.snapshot_provider.get_range_with_snapshot_or_database(
             SnapshotSegment::Transactions,
             to_range(range),
             |snapshot, range, _| snapshot.raw_transactions_by_tx_range(range),
@@ -1694,7 +1610,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
 
 impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        self.get_with_snapshot(
+        self.snapshot_provider.get_with_snapshot_or_database(
             SnapshotSegment::Receipts,
             id,
             |snapshot| snapshot.receipt(id),
@@ -1728,7 +1644,7 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
-        self.get_range_with_snapshot(
+        self.snapshot_provider.get_range_with_snapshot_or_database(
             SnapshotSegment::Receipts,
             to_range(range),
             |snapshot, range, _| snapshot.receipts_by_tx_range(range),
