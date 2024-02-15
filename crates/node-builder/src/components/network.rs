@@ -15,17 +15,18 @@ pub trait NetworkBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Send {
     ) -> impl Future<Output = eyre::Result<NetworkHandle>> + Send;
 }
 
-impl<Node, F, Pool> NetworkBuilder<Node, Pool> for F
+impl<Node, F, Fut, Pool> NetworkBuilder<Node, Pool> for F
 where
     Node: FullNodeTypes,
     Pool: TransactionPool,
-    F: FnOnce(&BuilderContext<Node>, Pool) -> eyre::Result<NetworkHandle> + Send,
+    F: Fn(&BuilderContext<Node>, Pool) -> Fut + Send,
+    Fut: Future<Output = eyre::Result<NetworkHandle>> + Send,
 {
     fn build_network(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> impl Future<Output = eyre::Result<NetworkHandle>> + Send {
-        futures::future::ready(self(ctx, pool))
+        self(ctx, pool)
     }
 }

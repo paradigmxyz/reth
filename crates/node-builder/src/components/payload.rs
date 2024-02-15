@@ -15,18 +15,18 @@ pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Sen
     ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<Node::Engine>>> + Send;
 }
 
-impl<Node, F, Pool> PayloadServiceBuilder<Node, Pool> for F
+impl<Node, F, Fut, Pool> PayloadServiceBuilder<Node, Pool> for F
 where
     Node: FullNodeTypes,
     Pool: TransactionPool,
-    F: FnOnce(&BuilderContext<Node>, Pool) -> eyre::Result<PayloadBuilderHandle<Node::Engine>>
-        + Send,
+    F: Fn(&BuilderContext<Node>, Pool) -> Fut + Send,
+    Fut: Future<Output = eyre::Result<PayloadBuilderHandle<Node::Engine>>> + Send,
 {
     fn spawn_payload_service(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<Node::Engine>>> + Send {
-        futures::future::ready(self(ctx, pool))
+        self(ctx, pool)
     }
 }

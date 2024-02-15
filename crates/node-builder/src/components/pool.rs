@@ -15,11 +15,12 @@ pub trait PoolBuilder<Node: FullNodeTypes>: Send {
     ) -> impl Future<Output = eyre::Result<Self::Pool>> + Send;
 }
 
-impl<Node, F, Pool> PoolBuilder<Node> for F
+impl<Node, F, Fut, Pool> PoolBuilder<Node> for F
 where
     Node: FullNodeTypes,
     Pool: TransactionPool + Unpin + 'static,
-    F: FnOnce(&BuilderContext<Node>) -> eyre::Result<Pool> + Send,
+    F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
+    Fut: Future<Output = eyre::Result<Pool>> + Send,
 {
     type Pool = Pool;
 
@@ -27,6 +28,6 @@ where
         self,
         ctx: &BuilderContext<Node>,
     ) -> impl Future<Output = eyre::Result<Self::Pool>> {
-        futures::future::ready(self(ctx))
+        self(ctx)
     }
 }
