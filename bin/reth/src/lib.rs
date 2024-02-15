@@ -63,6 +63,11 @@ pub mod version {
     pub use reth_node_core::version::*;
 }
 
+/// Re-exported from `reth_node_builder`
+pub mod builder {
+    pub use reth_node_builder::*;
+}
+
 /// Re-exported from `reth_node_core`, also to prevent a breaking change. See the comment on
 /// the `reth_node_core::args` re-export for more details.
 pub mod dirs {

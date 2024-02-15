@@ -20,6 +20,7 @@ dependencies = [
  "eyre",
  "jsonrpsee",
  "reth",
+ "reth-node-ethereum",
  "reth-transaction-pool",
  "tokio",
 ]

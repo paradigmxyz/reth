@@ -14,6 +14,7 @@ use reth_node_core::{
         },
     },
 };
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_rpc::JwtSecret;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
@@ -222,6 +223,26 @@ impl<'a, Node: FullNodeComponents> RpcContext<'a, Node> {
     /// Returns a reference to the configured node.
     pub fn node(&self) -> &Node {
         &self.node
+    }
+
+    /// Returns the transaction pool instance.
+    pub fn pool(&self) -> &Node::Pool {
+        self.node.pool()
+    }
+
+    /// Returns provider to interact with the node.
+    pub fn provider(&self) -> &Node::Provider {
+        self.node.provider()
+    }
+
+    /// Returns the handle to the network
+    pub fn network(&self) -> &NetworkHandle {
+        self.node.network()
+    }
+
+    /// Returns the handle to the payload builder service
+    pub fn payload_builder(&self) -> &PayloadBuilderHandle<Node::Engine> {
+        self.node.payload_builder()
     }
 }
 
