@@ -73,7 +73,7 @@ pub(crate) fn test_auto_mine() {
         "1",
         "--debug.terminate",
     ])
-    .with_ext::<NoArgsCliExt<AutoMineConfig>>(no_args);
+    .with_ext::<AutoMineConfig>(no_args);
 
     // use custom chain spec
     command.chain = chain;

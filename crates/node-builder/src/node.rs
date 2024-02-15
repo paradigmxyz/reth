@@ -1,12 +1,12 @@
 use crate::{
     components::FullNodeComponents,
+    provider::FullProvider,
     rpc::{RethRpcServerHandles, RpcRegistry},
 };
 use reth_db::database::Database;
 use reth_network::NetworkHandle;
 use reth_node_api::{evm::EvmConfig, primitives::NodePrimitives, EngineTypes};
 use reth_node_core::{
-    cli::components::FullProvider,
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
 };

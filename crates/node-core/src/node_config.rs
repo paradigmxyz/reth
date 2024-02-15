@@ -5,8 +5,8 @@ use crate::{
         get_secret_key, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
         PruningArgs, RpcServerArgs, TxPoolArgs,
     },
-    cli::{config::RethTransactionPoolConfig, db_type::DatabaseBuilder},
-    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
+    cli::config::RethTransactionPoolConfig,
+    dirs::{ChainPath, DataDirPath},
     metrics::prometheus_exporter,
     utils::{get_single_header, write_peers_to_file},
 };
@@ -138,9 +138,6 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// ```
 #[derive(Debug, Clone)]
 pub struct NodeConfig {
-    /// The test database
-    pub database: DatabaseBuilder,
-
     /// The path to the configuration file to use.
     pub config: Option<PathBuf>,
 
@@ -205,7 +202,6 @@ impl NodeConfig {
     /// Creates a testing [NodeConfig], causing the database to be launched ephemerally.
     pub fn test() -> Self {
         let mut test = Self {
-            database: DatabaseBuilder::test(),
             config: None,
             chain: MAINNET.clone(),
             metrics: None,
@@ -226,12 +222,6 @@ impl NodeConfig {
         // set all ports to zero by default for test instances
         test = test.with_unused_ports();
         test
-    }
-
-    /// Set the datadir for the node
-    pub fn with_datadir(mut self, datadir: MaybePlatformPath<DataDirPath>) -> Self {
-        self.database = DatabaseBuilder::Real(datadir);
-        self
     }
 
     /// Set the config file for the node
@@ -894,7 +884,6 @@ impl NodeConfig {
 impl Default for NodeConfig {
     fn default() -> Self {
         Self {
-            database: DatabaseBuilder::default(),
             config: None,
             chain: MAINNET.clone(),
             metrics: None,

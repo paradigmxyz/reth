@@ -26,7 +26,7 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub mod builder;
+// pub mod builder;
 pub mod cli;
 pub mod commands;
 pub mod runner;
