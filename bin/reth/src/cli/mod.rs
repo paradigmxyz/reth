@@ -69,6 +69,14 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
     logs: LogArgs,
 }
 
+impl Cli {
+
+    /// Parsers only the default CLI arguments
+    pub fn parse_args() -> Self {
+        Cli::parse()
+    }
+}
+
 impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
     /// Execute the configured cli command.
     ///

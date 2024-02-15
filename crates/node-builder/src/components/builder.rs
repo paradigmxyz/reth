@@ -130,21 +130,19 @@ where
 {
     type Pool = PoolB::Pool;
 
-    fn build_components(
+    async fn build_components(
         self,
         context: &BuilderContext<Node>,
-    ) -> impl std::future::Future<Output = eyre::Result<NodeComponents<Node, Self::Pool>>> + Send
+    ) -> eyre::Result<NodeComponents<Node, Self::Pool>>
     {
-        async move {
-            let Self { pool_builder, payload_builder, network_builder, _marker } = self;
+        let Self { pool_builder, payload_builder, network_builder, _marker } = self;
 
-            let pool = pool_builder.build_pool(context).await?;
-            let network = network_builder.build_network(context, pool.clone()).await?;
-            let payload_builder =
-                payload_builder.spawn_payload_service(context, pool.clone()).await?;
+        let pool = pool_builder.build_pool(context).await?;
+        let network = network_builder.build_network(context, pool.clone()).await?;
+        let payload_builder =
+            payload_builder.spawn_payload_service(context, pool.clone()).await?;
 
-            Ok(NodeComponents { transaction_pool: pool, network, payload_builder })
-        }
+        Ok(NodeComponents { transaction_pool: pool, network, payload_builder })
     }
 }
 

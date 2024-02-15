@@ -15,12 +15,11 @@
 //! > "Node started"
 //! once the node has been started.
 
-use clap::Parser;
-use reth::{cli::Cli, commands::node::NoArgs};
+use reth::{cli::Cli};
 use reth_node_ethereum::EthereumNode;
 
 fn main() {
-    Cli::<NoArgs>::parse()
+    Cli::parse_args()
         .run(|builder, _| async move {
             let handle = builder
                 .with_types(EthereumNode::default())

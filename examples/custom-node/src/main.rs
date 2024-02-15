@@ -15,24 +15,25 @@
 //! Once traits are implemented and custom types are defined, the [EngineTypes] trait can be
 //! implemented:
 
+use std::convert::Infallible;
 use alloy_chains::Chain;
-use jsonrpsee::http_client::HttpClient;
-use reth::builder::spawn_node;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use reth::builder::node::NodeTypes;
+use reth::builder::NodeBuilder;
+use reth::tasks::TaskManager;
 use reth_node_api::{
-    validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion,
-    EngineTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
+    AttributesValidationError, EngineApiMessageVersion, EngineTypes,
+    PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes, validate_version_specific_fields,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
+use reth_node_ethereum::{EthereumNode, EthEvmConfig};
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
-use reth_primitives::{Address, ChainSpec, Genesis, Withdrawals, B256, U256};
-use reth_rpc_api::{EngineApiClient, EthApiClient};
+use reth_primitives::{Address, B256, ChainSpec, Genesis, Withdrawals};
 use reth_rpc_types::{
-    engine::{ForkchoiceState, PayloadAttributes as EthPayloadAttributes, PayloadId},
+    engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
     withdrawal::Withdrawal,
 };
-use serde::{Deserialize, Serialize};
-use std::convert::Infallible;
-use thiserror::Error;
 
 /// A custom payload attributes type.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,8 +142,24 @@ impl EngineTypes for CustomEngineTypes {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct MyCustomNode;
+
+/// Configure the node types
+impl NodeTypes for MyCustomNode {
+    type Primitives = ();
+    type Engine = CustomEngineTypes;
+    type Evm = EthEvmConfig;
+
+    fn evm_config(&self) -> Self::Evm {
+        Self::Evm::default()
+    }
+}
+
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+    let tasks = TaskManager::current();
+
     // this launches a test node with http
     let rpc_args = RpcServerArgs::default().with_http();
 
@@ -160,41 +177,50 @@ async fn main() -> eyre::Result<()> {
     // create node config
     let node_config = NodeConfig::test().with_rpc(rpc_args).with_chain(spec);
 
-    let (handle, _manager) = spawn_node(node_config).await.unwrap();
-
-    // call a function on the node
-    let client = handle.rpc_server_handles().auth.http_client();
-    let block_number = client.block_number().await.unwrap();
-
-    // it should be zero, since this is an ephemeral test node
-    assert_eq!(block_number, U256::ZERO);
-
-    // call the engine_forkchoiceUpdated function with payload attributes
-    let forkchoice_state = ForkchoiceState {
-        head_block_hash: genesis_hash,
-        safe_block_hash: genesis_hash,
-        finalized_block_hash: genesis_hash,
-    };
-
-    let payload_attributes = CustomPayloadAttributes {
-        inner: EthPayloadAttributes {
-            timestamp: 1,
-            prev_randao: Default::default(),
-            suggested_fee_recipient: Default::default(),
-            withdrawals: Some(vec![]),
-            parent_beacon_block_root: None,
-        },
-        custom: 42,
-    };
-
-    // call the engine_forkchoiceUpdated function with payload attributes
-    let res = <HttpClient as EngineApiClient<CustomEngineTypes>>::fork_choice_updated_v2(
-        &client,
-        forkchoice_state,
-        Some(payload_attributes),
+    let handle = NodeBuilder::new(node_config).testing_node(
+        tasks.executor()
     )
-    .await;
-    assert!(res.is_ok());
+        .with_types(MyCustomNode::default());
+        // .with_components(EthereumNode::components()
+        //     .
+        // );
+        // .launch().await?;
+
+    //
+    //
+    // // call a function on the node
+    // let client = handle.rpc_server_handles().auth.http_client();
+    // let block_number = client.block_number().await.unwrap();
+    //
+    // // it should be zero, since this is an ephemeral test node
+    // assert_eq!(block_number, U256::ZERO);
+    //
+    // // call the engine_forkchoiceUpdated function with payload attributes
+    // let forkchoice_state = ForkchoiceState {
+    //     head_block_hash: genesis_hash,
+    //     safe_block_hash: genesis_hash,
+    //     finalized_block_hash: genesis_hash,
+    // };
+    //
+    // let payload_attributes = CustomPayloadAttributes {
+    //     inner: EthPayloadAttributes {
+    //         timestamp: 1,
+    //         prev_randao: Default::default(),
+    //         suggested_fee_recipient: Default::default(),
+    //         withdrawals: Some(vec![]),
+    //         parent_beacon_block_root: None,
+    //     },
+    //     custom: 42,
+    // };
+    //
+    // // call the engine_forkchoiceUpdated function with payload attributes
+    // let res = <HttpClient as EngineApiClient<CustomEngineTypes>>::fork_choice_updated_v2(
+    //     &client,
+    //     forkchoice_state,
+    //     Some(payload_attributes),
+    // )
+    // .await;
+    // assert!(res.is_ok());
 
     Ok(())
 }

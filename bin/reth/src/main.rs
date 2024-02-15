@@ -19,7 +19,7 @@ fn main() {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
 
-    if let Err(err) = Cli::<NoArgs>::parse().run(|builder, _| async {
+    if let Err(err) = Cli::parse_args().run(|builder, _| async {
         let handle = builder
             .with_types(EthereumNode::default())
             .with_components(EthereumNode::components())
