@@ -659,290 +659,279 @@ where
         // If the budget is exhausted we manually yield back control to the (coop) scheduler. This
         // manual yield point should prevent situations where polling appears to be frozen. See also <https://tokio.rs/blog/2020-04-preemption>
         // And tokio's docs on cooperative scheduling <https://docs.rs/tokio/latest/tokio/task/#cooperative-scheduling>
-        let mut budget_network_manager = DEFAULT_BUDGET_TRY_DRAIN_STREAM;
+        // poll new block imports (dummy stream)
+        let maybe_more_block_imports = poll_nested_stream_with_yield_points!(
+            "net",
+            "Block imports stream",
+            DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+            this.block_import.poll_next_unpin(cx),
+            |outcome| this.on_block_import_result(outcome),
+        );
 
-        loop {
-            // poll new block imports (dummy stream)
-            let maybe_more_block_imports = poll_nested_stream_with_yield_points!(
-                "net",
-                "Block imports stream",
-                BUDGET_POLL_ONCE,
-                this.block_import.poll_next_unpin(cx),
-                |outcome| this.on_block_import_result(outcome),
-            );
+        // process incoming messages from a handle
+        //
+        // will only be closed if the channel was deliberately closed since we always have an
+        // instance of `NetworkHandle`
+        let maybe_more_handle_messages = poll_nested_stream_with_yield_points!(
+            "net",
+            "Network message channel",
+            DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL,
+            this.from_handle_rx.poll_next_unpin(cx),
+            |msg| this.on_handle_message(msg),
+            error!("Network channel closed");
+        );
 
-            // process incoming messages from a handle
-            //
-            // will only be closed if the channel was deliberately closed since we always have an
-            // instance of `NetworkHandle`
-            let maybe_more_handle_messages = poll_nested_stream_with_yield_points!(
-                "net",
-                "Network message channel",
-                DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL,
-                this.from_handle_rx.poll_next_unpin(cx),
-                |msg| this.on_handle_message(msg),
-                error!("Network channel closed");
-            );
+        let maybe_more_swarm_events = poll_nested_stream_with_yield_points!(
+            "net",
+            "Swarm events stream",
+            DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+            this.swarm.poll_next_unpin(cx),
+            |event| {
+                // handle event
+                match event {
+                    SwarmEvent::ValidMessage { peer_id, message } => {
+                        this.on_peer_message(peer_id, message)
+                    }
+                    SwarmEvent::InvalidCapabilityMessage { peer_id, capabilities, message } => {
+                        this.on_invalid_message(peer_id, capabilities, message);
+                        this.metrics.invalid_messages_received.increment(1);
+                    }
+                    SwarmEvent::TcpListenerClosed { remote_addr } => {
+                        trace!(target: "net", ?remote_addr, "TCP listener closed.");
+                    }
+                    SwarmEvent::TcpListenerError(err) => {
+                        trace!(target: "net", ?err, "TCP connection error.");
+                    }
+                    SwarmEvent::IncomingTcpConnection { remote_addr, session_id } => {
+                        trace!(target: "net", ?session_id, ?remote_addr, "Incoming connection");
+                        this.metrics.total_incoming_connections.increment(1);
+                        this.metrics
+                            .incoming_connections
+                            .set(this.swarm.state().peers().num_inbound_connections() as f64);
+                    }
+                    SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id } => {
+                        trace!(target: "net", ?remote_addr, ?peer_id, "Starting outbound connection.");
+                        this.metrics.total_outgoing_connections.increment(1);
+                        this.metrics
+                            .outgoing_connections
+                            .set(this.swarm.state().peers().num_outbound_connections() as f64);
+                    }
+                    SwarmEvent::SessionEstablished {
+                        peer_id,
+                        remote_addr,
+                        client_version,
+                        capabilities,
+                        version,
+                        messages,
+                        status,
+                        direction,
+                    } => {
+                        let total_active =
+                            this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
+                        this.metrics.connected_peers.set(total_active as f64);
+                        trace!(
+                            target: "net",
+                            ?remote_addr,
+                            %client_version,
+                            ?peer_id,
+                            ?total_active,
+                            kind=%direction,
+                            peer_enode=%NodeRecord::new(remote_addr, peer_id),
+                            "Session established"
+                        );
 
-            let maybe_more_swarm_events = poll_nested_stream_with_yield_points!(
-                "net",
-                "Swarm events stream",
-                DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-                this.swarm.poll_next_unpin(cx),
-                |event| {
-                    // handle event
-                    match event {
-                        SwarmEvent::ValidMessage { peer_id, message } => {
-                            this.on_peer_message(peer_id, message)
+                        if direction.is_incoming() {
+                            this.swarm
+                                .state_mut()
+                                .peers_mut()
+                                .on_incoming_session_established(peer_id, remote_addr);
                         }
-                        SwarmEvent::InvalidCapabilityMessage { peer_id, capabilities, message } => {
-                            this.on_invalid_message(peer_id, capabilities, message);
-                            this.metrics.invalid_messages_received.increment(1);
-                        }
-                        SwarmEvent::TcpListenerClosed { remote_addr } => {
-                            trace!(target: "net", ?remote_addr, "TCP listener closed.");
-                        }
-                        SwarmEvent::TcpListenerError(err) => {
-                            trace!(target: "net", ?err, "TCP connection error.");
-                        }
-                        SwarmEvent::IncomingTcpConnection { remote_addr, session_id } => {
-                            trace!(target: "net", ?session_id, ?remote_addr, "Incoming connection");
-                            this.metrics.total_incoming_connections.increment(1);
-                            this.metrics
-                                .incoming_connections
-                                .set(this.swarm.state().peers().num_inbound_connections() as f64);
-                        }
-                        SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id } => {
-                            trace!(target: "net", ?remote_addr, ?peer_id, "Starting outbound connection.");
-                            this.metrics.total_outgoing_connections.increment(1);
-                            this.metrics
-                                .outgoing_connections
-                                .set(this.swarm.state().peers().num_outbound_connections() as f64);
-                        }
-                        SwarmEvent::SessionEstablished {
+                        this.event_listeners.notify(NetworkEvent::SessionEstablished {
                             peer_id,
                             remote_addr,
                             client_version,
                             capabilities,
                             version,
-                            messages,
                             status,
-                            direction,
-                        } => {
-                            let total_active =
-                                this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
-                            this.metrics.connected_peers.set(total_active as f64);
-                            trace!(
-                                target: "net",
-                                ?remote_addr,
-                                %client_version,
-                                ?peer_id,
-                                ?total_active,
-                                kind=%direction,
-                                peer_enode=%NodeRecord::new(remote_addr, peer_id),
-                                "Session established"
-                            );
+                            messages,
+                        });
+                    }
+                    SwarmEvent::PeerAdded(peer_id) => {
+                        trace!(target: "net", ?peer_id, "Peer added");
+                        this.event_listeners.notify(NetworkEvent::PeerAdded(peer_id));
+                        this.metrics
+                            .tracked_peers
+                            .set(this.swarm.state().peers().num_known_peers() as f64);
+                    }
+                    SwarmEvent::PeerRemoved(peer_id) => {
+                        trace!(target: "net", ?peer_id, "Peer dropped");
+                        this.event_listeners.notify(NetworkEvent::PeerRemoved(peer_id));
+                        this.metrics
+                            .tracked_peers
+                            .set(this.swarm.state().peers().num_known_peers() as f64);
+                    }
+                    SwarmEvent::SessionClosed { peer_id, remote_addr, error } => {
+                        let total_active =
+                            this.num_active_peers.fetch_sub(1, Ordering::Relaxed) - 1;
+                        this.metrics.connected_peers.set(total_active as f64);
+                        trace!(
+                            target: "net",
+                            ?remote_addr,
+                            ?peer_id,
+                            ?total_active,
+                            ?error,
+                            "Session disconnected"
+                        );
 
-                            if direction.is_incoming() {
-                                this.swarm
-                                    .state_mut()
-                                    .peers_mut()
-                                    .on_incoming_session_established(peer_id, remote_addr);
-                            }
-                            this.event_listeners.notify(NetworkEvent::SessionEstablished {
-                                peer_id,
-                                remote_addr,
-                                client_version,
-                                capabilities,
-                                version,
-                                status,
-                                messages,
-                            });
-                        }
-                        SwarmEvent::PeerAdded(peer_id) => {
-                            trace!(target: "net", ?peer_id, "Peer added");
-                            this.event_listeners.notify(NetworkEvent::PeerAdded(peer_id));
-                            this.metrics
-                                .tracked_peers
-                                .set(this.swarm.state().peers().num_known_peers() as f64);
-                        }
-                        SwarmEvent::PeerRemoved(peer_id) => {
-                            trace!(target: "net", ?peer_id, "Peer dropped");
-                            this.event_listeners.notify(NetworkEvent::PeerRemoved(peer_id));
-                            this.metrics
-                                .tracked_peers
-                                .set(this.swarm.state().peers().num_known_peers() as f64);
-                        }
-                        SwarmEvent::SessionClosed { peer_id, remote_addr, error } => {
-                            let total_active =
-                                this.num_active_peers.fetch_sub(1, Ordering::Relaxed) - 1;
-                            this.metrics.connected_peers.set(total_active as f64);
-                            trace!(
-                                target: "net",
-                                ?remote_addr,
-                                ?peer_id,
-                                ?total_active,
-                                ?error,
-                                "Session disconnected"
-                            );
-
-                            let mut reason = None;
-                            if let Some(ref err) = error {
-                                // If the connection was closed due to an error, we report the peer
-                                this.swarm.state_mut().peers_mut().on_active_session_dropped(
-                                    &remote_addr,
-                                    &peer_id,
-                                    err,
-                                );
-                                reason = err.as_disconnected();
-                            } else {
-                                // Gracefully disconnected
-                                this.swarm
-                                    .state_mut()
-                                    .peers_mut()
-                                    .on_active_session_gracefully_closed(peer_id);
-                            }
-                            this.metrics.closed_sessions.increment(1);
-                            // This can either be an incoming or outgoing connection which was
-                            // closed. So we update both metrics
-                            this.metrics
-                                .incoming_connections
-                                .set(this.swarm.state().peers().num_inbound_connections() as f64);
-                            this.metrics
-                                .outgoing_connections
-                                .set(this.swarm.state().peers().num_outbound_connections() as f64);
-                            if let Some(reason) = reason {
-                                this.disconnect_metrics.increment(reason);
-                            }
-                            this.metrics.backed_off_peers.set(
-                                this.swarm.state().peers().num_backed_off_peers().saturating_sub(1)
-                                    as f64,
-                            );
-                            this.event_listeners
-                                .notify(NetworkEvent::SessionClosed { peer_id, reason });
-                        }
-                        SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
-                            trace!(
-                                target: "net",
-                                ?remote_addr,
-                                ?error,
-                                "Incoming pending session failed"
-                            );
-
-                            if let Some(ref err) = error {
-                                this.swarm
-                                    .state_mut()
-                                    .peers_mut()
-                                    .on_incoming_pending_session_dropped(remote_addr, err);
-                                this.metrics.pending_session_failures.increment(1);
-                                if let Some(reason) = err.as_disconnected() {
-                                    this.disconnect_metrics.increment(reason);
-                                }
-                            } else {
-                                this.swarm
-                                    .state_mut()
-                                    .peers_mut()
-                                    .on_incoming_pending_session_gracefully_closed();
-                            }
-                            this.metrics.closed_sessions.increment(1);
-                            this.metrics
-                                .incoming_connections
-                                .set(this.swarm.state().peers().num_inbound_connections() as f64);
-                            this.metrics.backed_off_peers.set(
-                                this.swarm.state().peers().num_backed_off_peers().saturating_sub(1)
-                                    as f64,
-                            );
-                        }
-                        SwarmEvent::OutgoingPendingSessionClosed {
-                            remote_addr,
-                            peer_id,
-                            error,
-                        } => {
-                            trace!(
-                                target: "net",
-                                ?remote_addr,
-                                ?peer_id,
-                                ?error,
-                                "Outgoing pending session failed"
-                            );
-
-                            if let Some(ref err) = error {
-                                this.swarm.state_mut().peers_mut().on_pending_session_dropped(
-                                    &remote_addr,
-                                    &peer_id,
-                                    err,
-                                );
-                                this.metrics.pending_session_failures.increment(1);
-                                if let Some(reason) = err.as_disconnected() {
-                                    this.disconnect_metrics.increment(reason);
-                                }
-                            } else {
-                                this.swarm
-                                    .state_mut()
-                                    .peers_mut()
-                                    .on_pending_session_gracefully_closed(&peer_id);
-                            }
-                            this.metrics.closed_sessions.increment(1);
-                            this.metrics
-                                .outgoing_connections
-                                .set(this.swarm.state().peers().num_outbound_connections() as f64);
-                            this.metrics.backed_off_peers.set(
-                                this.swarm.state().peers().num_backed_off_peers().saturating_sub(1)
-                                    as f64,
-                            );
-                        }
-                        SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
-                            trace!(
-                                target: "net",
-                                ?remote_addr,
-                                ?peer_id,
-                                ?error,
-                                "Outgoing connection error"
-                            );
-
-                            this.swarm.state_mut().peers_mut().on_outgoing_connection_failure(
+                        let mut reason = None;
+                        if let Some(ref err) = error {
+                            // If the connection was closed due to an error, we report the peer
+                            this.swarm.state_mut().peers_mut().on_active_session_dropped(
                                 &remote_addr,
                                 &peer_id,
-                                &error,
+                                err,
                             );
-
-                            this.metrics
-                                .outgoing_connections
-                                .set(this.swarm.state().peers().num_outbound_connections() as f64);
-                            this.metrics.backed_off_peers.set(
-                                this.swarm.state().peers().num_backed_off_peers().saturating_sub(1)
-                                    as f64,
-                            );
+                            reason = err.as_disconnected();
+                        } else {
+                            // Gracefully disconnected
+                            this.swarm
+                                .state_mut()
+                                .peers_mut()
+                                .on_active_session_gracefully_closed(peer_id);
                         }
-                        SwarmEvent::BadMessage { peer_id } => {
-                            this.swarm.state_mut().peers_mut().apply_reputation_change(
-                                &peer_id,
-                                ReputationChangeKind::BadMessage,
-                            );
-                            this.metrics.invalid_messages_received.increment(1);
+                        this.metrics.closed_sessions.increment(1);
+                        // This can either be an incoming or outgoing connection which was
+                        // closed. So we update both metrics
+                        this.metrics
+                            .incoming_connections
+                            .set(this.swarm.state().peers().num_inbound_connections() as f64);
+                        this.metrics
+                            .outgoing_connections
+                            .set(this.swarm.state().peers().num_outbound_connections() as f64);
+                        if let Some(reason) = reason {
+                            this.disconnect_metrics.increment(reason);
                         }
-                        SwarmEvent::ProtocolBreach { peer_id } => {
-                            this.swarm.state_mut().peers_mut().apply_reputation_change(
-                                &peer_id,
-                                ReputationChangeKind::BadProtocol,
-                            );
-                        }
+                        this.metrics.backed_off_peers.set(
+                            this.swarm.state().peers().num_backed_off_peers().saturating_sub(1)
+                                as f64,
+                        );
+                        this.event_listeners
+                            .notify(NetworkEvent::SessionClosed { peer_id, reason });
                     }
-                },
-            );
+                    SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
+                        trace!(
+                            target: "net",
+                            ?remote_addr,
+                            ?error,
+                            "Incoming pending session failed"
+                        );
 
-            // all streams are fully drained and import futures pending
-            if maybe_more_block_imports || maybe_more_handle_messages || maybe_more_swarm_events {
-                budget_network_manager -= 1;
-                if budget_network_manager <= 0 {
-                    // make sure we're woken up again
-                    cx.waker().wake_by_ref();
-                    return Poll::Pending
+                        if let Some(ref err) = error {
+                            this.swarm
+                                .state_mut()
+                                .peers_mut()
+                                .on_incoming_pending_session_dropped(remote_addr, err);
+                            this.metrics.pending_session_failures.increment(1);
+                            if let Some(reason) = err.as_disconnected() {
+                                this.disconnect_metrics.increment(reason);
+                            }
+                        } else {
+                            this.swarm
+                                .state_mut()
+                                .peers_mut()
+                                .on_incoming_pending_session_gracefully_closed();
+                        }
+                        this.metrics.closed_sessions.increment(1);
+                        this.metrics
+                            .incoming_connections
+                            .set(this.swarm.state().peers().num_inbound_connections() as f64);
+                        this.metrics.backed_off_peers.set(
+                            this.swarm.state().peers().num_backed_off_peers().saturating_sub(1)
+                                as f64,
+                        );
+                    }
+                    SwarmEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error } => {
+                        trace!(
+                            target: "net",
+                            ?remote_addr,
+                            ?peer_id,
+                            ?error,
+                            "Outgoing pending session failed"
+                        );
+
+                        if let Some(ref err) = error {
+                            this.swarm.state_mut().peers_mut().on_pending_session_dropped(
+                                &remote_addr,
+                                &peer_id,
+                                err,
+                            );
+                            this.metrics.pending_session_failures.increment(1);
+                            if let Some(reason) = err.as_disconnected() {
+                                this.disconnect_metrics.increment(reason);
+                            }
+                        } else {
+                            this.swarm
+                                .state_mut()
+                                .peers_mut()
+                                .on_pending_session_gracefully_closed(&peer_id);
+                        }
+                        this.metrics.closed_sessions.increment(1);
+                        this.metrics
+                            .outgoing_connections
+                            .set(this.swarm.state().peers().num_outbound_connections() as f64);
+                        this.metrics.backed_off_peers.set(
+                            this.swarm.state().peers().num_backed_off_peers().saturating_sub(1)
+                                as f64,
+                        );
+                    }
+                    SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
+                        trace!(
+                            target: "net",
+                            ?remote_addr,
+                            ?peer_id,
+                            ?error,
+                            "Outgoing connection error"
+                        );
+
+                        this.swarm.state_mut().peers_mut().on_outgoing_connection_failure(
+                            &remote_addr,
+                            &peer_id,
+                            &error,
+                        );
+
+                        this.metrics
+                            .outgoing_connections
+                            .set(this.swarm.state().peers().num_outbound_connections() as f64);
+                        this.metrics.backed_off_peers.set(
+                            this.swarm.state().peers().num_backed_off_peers().saturating_sub(1)
+                                as f64,
+                        );
+                    }
+                    SwarmEvent::BadMessage { peer_id } => {
+                        this.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .apply_reputation_change(&peer_id, ReputationChangeKind::BadMessage);
+                        this.metrics.invalid_messages_received.increment(1);
+                    }
+                    SwarmEvent::ProtocolBreach { peer_id } => {
+                        this.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .apply_reputation_change(&peer_id, ReputationChangeKind::BadProtocol);
+                    }
                 }
-            }
+            },
+        );
 
+        // all streams are fully drained and import futures pending
+        if maybe_more_block_imports || maybe_more_handle_messages || maybe_more_swarm_events {
+            // make sure we're woken up again
+            cx.waker().wake_by_ref();
             return Poll::Pending
         }
+
+        Poll::Pending
     }
 }
 
