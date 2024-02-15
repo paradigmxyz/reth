@@ -20,7 +20,6 @@ use reth_transaction_pool::{
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct EthereumNode;
-// TODO make this stateful with evm config
 
 impl EthereumNode {
     /// Returns a [ComponentsBuilder] configured for a regular Ethereum node.

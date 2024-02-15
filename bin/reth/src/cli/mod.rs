@@ -95,7 +95,7 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
         let runner = CliRunner;
         match self.command {
             Commands::Node(command) => {
-                runner.run_command_until_exit(|ctx| command.execute2(ctx, launcher))
+                runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
             }
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
@@ -210,16 +210,6 @@ mod tests {
     }
 
     #[test]
-    fn override_trusted_setup_file() {
-        // We already have a test that asserts that this has been initialized,
-        // so we cheat a little bit and check that loading a random file errors.
-        let reth =
-            Cli::<NoArgs>::try_parse_from(["reth", "node", "--trusted-setup-file", "README.md"])
-                .unwrap();
-        // assert!(reth.run().is_err());
-    }
-
-    #[test]
     fn parse_env_filter_directives() {
         let temp_dir = tempfile::tempdir().unwrap();
 
@@ -233,6 +223,6 @@ mod tests {
             "debug,net=trace",
         ])
         .unwrap();
-        // assert!(reth.run().is_ok());
+        assert!(reth.run(|_, _| async move { Ok(()) }).is_ok());
     }
 }

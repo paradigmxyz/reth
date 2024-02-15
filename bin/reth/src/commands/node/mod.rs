@@ -112,11 +112,6 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
     #[clap(flatten)]
     pub pruning: PruningArgs,
 
-    /// Rollup related arguments
-    #[cfg(feature = "optimism")]
-    #[clap(flatten)]
-    pub rollup: crate::args::RollupArgs,
-
     /// Additional cli arguments
     #[clap(flatten)]
     #[clap(next_help_heading = "Extension")]
@@ -128,7 +123,7 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
     ///
     /// This transforms the node command into a node config and launches the node using the given
     /// closure.
-    pub async fn execute2<L, Fut>(self, ctx: CliContext, launcher: L) -> eyre::Result<()>
+    pub async fn execute<L, Fut>(self, ctx: CliContext, launcher: L) -> eyre::Result<()>
     where
         L: FnOnce(WithLaunchContext<Arc<DatabaseEnv>, InitState>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
@@ -149,8 +144,6 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
             db,
             dev,
             pruning,
-            #[cfg(feature = "optimism")]
-            rollup,
             ext,
         } = self;
 

@@ -25,7 +25,7 @@ use reth_node_api::{
     EngineTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{EthEvmConfig, EthereumNode};
+use reth_node_ethereum::EthEvmConfig;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_primitives::{Address, ChainSpec, Genesis, Withdrawals, B256};
 use reth_rpc_types::{
@@ -173,12 +173,12 @@ async fn main() -> eyre::Result<()> {
         .shanghai_activated()
         .build();
 
-    let genesis_hash = spec.genesis_hash();
+    let _genesis_hash = spec.genesis_hash();
 
     // create node config
     let node_config = NodeConfig::test().with_rpc(rpc_args).with_chain(spec);
 
-    let handle = NodeBuilder::new(node_config)
+    let _handle = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
         .with_types(MyCustomNode::default());
     // .with_components(EthereumNode::components()
