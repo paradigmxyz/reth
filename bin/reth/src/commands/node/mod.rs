@@ -1,15 +1,5 @@
 //! Main node command for launching a node
 
-use clap::{value_parser, Args, Parser};
-use std::{fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
-
-use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
-
-use reth_node_builder::{InitState, NodeBuilder, WithLaunchContext};
-
-use reth_node_core::node_config::NodeConfig;
-use reth_primitives::ChainSpec;
-
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, parse_socket_address, SUPPORTED_CHAINS},
@@ -19,6 +9,12 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
 };
+use clap::{value_parser, Args, Parser};
+use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_node_builder::{InitState, NodeBuilder, WithLaunchContext};
+use reth_node_core::node_config::NodeConfig;
+use reth_primitives::ChainSpec;
+use std::{fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
 
 /// Start the node
 #[derive(Debug, Parser)]
@@ -182,8 +178,6 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
             db,
             dev,
             pruning,
-            #[cfg(feature = "optimism")]
-            rollup,
         };
 
         if with_unused_ports {

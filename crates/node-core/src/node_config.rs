@@ -192,10 +192,6 @@ pub struct NodeConfig {
 
     /// All pruning related arguments
     pub pruning: PruningArgs,
-
-    /// Rollup related arguments
-    #[cfg(feature = "optimism")]
-    pub rollup: crate::args::RollupArgs,
 }
 
 impl NodeConfig {
@@ -215,8 +211,6 @@ impl NodeConfig {
             db: DatabaseArgs::default(),
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
-            #[cfg(feature = "optimism")]
-            rollup: crate::args::RollupArgs::default(),
         };
 
         // set all ports to zero by default for test instances
@@ -302,13 +296,6 @@ impl NodeConfig {
         self
     }
 
-    /// Set the rollup args for the node
-    #[cfg(feature = "optimism")]
-    pub fn with_rollup(mut self, rollup: crate::args::RollupArgs) -> Self {
-        self.rollup = rollup;
-        self
-    }
-
     /// Get the network secret from the given data dir
     pub fn network_secret(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<SecretKey> {
         let network_secret_path =
@@ -378,6 +365,28 @@ impl NodeConfig {
         }
     }
 
+    /// Create the [NetworkConfig] for the node
+    pub fn network_config<C>(
+        &self,
+        config: &Config,
+        client: C,
+        executor: TaskExecutor,
+        head: Head,
+        data_dir: &ChainPath<DataDirPath>,
+    ) -> eyre::Result<NetworkConfig<C>> {
+        info!(target: "reth::cli", "Connecting to P2P network");
+        let secret_key = self.network_secret(data_dir)?;
+        let default_peers_path = data_dir.known_peers_path();
+        Ok(self.load_network_config(
+            config,
+            client,
+            executor.clone(),
+            head,
+            secret_key,
+            default_peers_path.clone(),
+        ))
+    }
+
     /// Create the [NetworkBuilder].
     ///
     /// This only configures it and does not spawn it.
@@ -392,18 +401,7 @@ impl NodeConfig {
     where
         C: BlockNumReader,
     {
-        info!(target: "reth::cli", "Connecting to P2P network");
-        let secret_key = self.network_secret(data_dir)?;
-        let default_peers_path = data_dir.known_peers_path();
-        let network_config = self.load_network_config(
-            config,
-            client,
-            executor.clone(),
-            head,
-            secret_key,
-            default_peers_path.clone(),
-        );
-
+        let network_config = self.network_config(config, client, executor, head, data_dir)?;
         let builder = NetworkManager::builder(network_config).await?;
         Ok(builder)
     }
@@ -740,14 +738,6 @@ impl NodeConfig {
                 self.network.port + self.instance - 1,
             )));
 
-        // When `sequencer_endpoint` is configured, the node will forward all transactions to a
-        // Sequencer node for execution and inclusion on L1, and disable its own txpool
-        // gossip to prevent other parties in the network from learning about them.
-        #[cfg(feature = "optimism")]
-        let cfg_builder = cfg_builder
-            .sequencer_endpoint(self.rollup.sequencer_http.clone())
-            .disable_tx_gossip(self.rollup.disable_txpool_gossip);
-
         cfg_builder.build(client)
     }
 
@@ -897,8 +887,6 @@ impl Default for NodeConfig {
             db: DatabaseArgs::default(),
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
-            #[cfg(feature = "optimism")]
-            rollup: crate::args::RollupArgs::default(),
         }
     }
 }

@@ -6495,6 +6495,7 @@ dependencies = [
 name = "reth-node-optimism"
 version = "0.1.0-alpha.18"
 dependencies = [
+ "clap",
  "eyre",
  "reth-basic-payload-builder",
  "reth-db",

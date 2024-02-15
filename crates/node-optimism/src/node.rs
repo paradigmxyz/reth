@@ -1,8 +1,8 @@
 //! Optimism Node types config.
 
-use crate::{OptimismEngineTypes, OptimismEvmConfig};
+use crate::{args::RollupArgs, OptimismEngineTypes, OptimismEvmConfig};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_network::NetworkHandle;
+use reth_network::{NetworkHandle, NetworkManager};
 use reth_node_builder::{
     components::{ComponentsBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder},
     node::{FullNodeTypes, NodeTypes},
@@ -22,17 +22,19 @@ use reth_transaction_pool::{
 pub struct OptimismNode;
 
 impl OptimismNode {
-    /// Returns a [`ComponentsBuilder`] configured for a regular Ethereum node.
+    /// Returns a [`ComponentsBuilder`] configured for a regular Optimism node from the given args.
     pub fn components<Node>(
+        args: RollupArgs,
     ) -> ComponentsBuilder<Node, OptimismPoolBuilder, OptimismPayloadBuilder, OptimismNetwork>
     where
         Node: FullNodeTypes<Engine = OptimismEngineTypes>,
     {
+        let RollupArgs { sequencer_http, disable_txpool_gossip, compute_pending_block, .. } = args;
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(OptimismPoolBuilder::default())
-            .payload(OptimismPayloadBuilder::default())
-            .network(OptimismNetwork)
+            .payload(OptimismPayloadBuilder::new(compute_pending_block))
+            .network(OptimismNetwork { sequencer_http, disable_txpool_gossip })
     }
 }
 
@@ -117,8 +119,24 @@ where
 
 /// A basic optimism payload service.
 #[derive(Debug, Default, Clone)]
-#[non_exhaustive]
-pub struct OptimismPayloadBuilder;
+pub struct OptimismPayloadBuilder {
+    /// By default the pending block equals the latest block
+    /// to save resources and not leak txs from the tx-pool,
+    /// this flag enables computing of the pending block
+    /// from the tx-pool instead.
+    ///
+    /// If `compute_pending_block` is not enabled, the payload builder
+    /// will use the payload attributes from the latest block. Note
+    /// that this flag is not yet functional.
+    pub compute_pending_block: bool,
+}
+
+impl OptimismPayloadBuilder {
+    /// Create a new instance with the given `compute_pending_block` flag.
+    pub const fn new(compute_pending_block: bool) -> Self {
+        Self { compute_pending_block }
+    }
+}
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for OptimismPayloadBuilder
 where
@@ -130,7 +148,8 @@ where
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>> {
-        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default();
+        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
+            .set_compute_pending_block(self.compute_pending_block);
         let conf = ctx.payload_builder_config();
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
@@ -159,7 +178,12 @@ where
 
 /// A basic ethereum payload service.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct OptimismNetwork;
+pub struct OptimismNetwork {
+    /// HTTP endpoint for the sequencer mempool
+    pub sequencer_http: Option<String>,
+    /// Disable transaction pool gossip
+    pub disable_txpool_gossip: bool,
+}
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for OptimismNetwork
 where
@@ -167,7 +191,19 @@ where
     Pool: TransactionPool + Unpin + 'static,
 {
     fn build_network(self, ctx: &BuilderContext<Node>, pool: Pool) -> eyre::Result<NetworkHandle> {
-        let network = ctx.network_builder_blocking()?;
+        let Self { sequencer_http, disable_txpool_gossip } = self;
+        let mut network_config = ctx.network_config()?;
+
+        // When `sequencer_endpoint` is configured, the node will forward all transactions to a
+        // Sequencer node for execution and inclusion on L1, and disable its own txpool
+        // gossip to prevent other parties in the network from learning about them.
+        network_config.tx_gossip_disabled = disable_txpool_gossip;
+        network_config.optimism_network_config.sequencer_endpoint = sequencer_http;
+
+        let network = ctx.task_executor().block_on(
+            NetworkManager::builder(network_config)
+        )?;
+
         let handle = ctx.start_network(network, pool);
 
         Ok(handle)

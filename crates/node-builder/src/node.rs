@@ -11,8 +11,10 @@ use reth_node_core::{
     node_config::NodeConfig,
 };
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_primitives::ChainSpec;
+use reth_provider::ChainSpecProvider;
 use reth_tasks::TaskExecutor;
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 
 /// The type that configures stateless node types, the node's primitive types.
 pub trait NodeTypes: Send + Sync + 'static {
@@ -98,6 +100,13 @@ pub struct FullNode<Node: FullNodeComponents> {
     pub config: NodeConfig,
     /// The data dir of the node.
     pub data_dir: ChainPath<DataDirPath>,
+}
+
+impl<Node: FullNodeComponents> FullNode<Node> {
+    /// Returns the [ChainSpec] of the node.
+    pub fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.provider.chain_spec()
+    }
 }
 
 impl<Node: FullNodeComponents> Clone for FullNode<Node> {

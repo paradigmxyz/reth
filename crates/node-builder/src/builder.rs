@@ -23,7 +23,7 @@ use reth_db::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
 use reth_interfaces::p2p::either::EitherDownloader;
-use reth_network::{NetworkBuilder, NetworkEvents, NetworkHandle};
+use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath},
@@ -925,6 +925,17 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Returns the config for payload building.
     pub fn payload_builder_config(&self) -> impl PayloadBuilderConfig {
         self.config.builder.clone()
+    }
+
+    /// Returns the default network config for the node.
+    pub fn network_config(&self) -> eyre::Result<NetworkConfig<Node::Provider>> {
+        self.config.network_config(
+            &self.reth_config,
+            self.provider.clone(),
+            self.executor.clone(),
+            self.head,
+            self.data_dir(),
+        )
     }
 
     /// Creates the [NetworkBuilder] for the node.

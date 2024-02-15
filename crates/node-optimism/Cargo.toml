@@ -26,7 +26,8 @@ reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
 
-# io
+# misc
+clap.workspace = true
 serde.workspace = true
 eyre.workspace = true
 
