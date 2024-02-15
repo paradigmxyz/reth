@@ -24,7 +24,6 @@ reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
 revm.workspace = true
-reth-revm.workspace = true
 
 # misc
 eyre.workspace = true
