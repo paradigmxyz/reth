@@ -215,7 +215,7 @@ where
         // if the request is a simple transfer we can optimize
         if env.tx.data.is_empty() {
             if let TransactTo::Call(to) = env.tx.transact_to {
-                if let Ok(code) = db.db.state().account_code(to) {
+                if let Ok(code) = db.db.account_code(to) {
                     let no_code_callee = code.map(|code| code.is_empty()).unwrap_or(true);
                     if no_code_callee {
                         // simple transfer, check if caller has sufficient funds
@@ -427,13 +427,8 @@ where
 
         // calculate the gas used using the access list
         request.access_list = Some(access_list.clone());
-        let gas_used = self.estimate_gas_with(
-            cfg_with_spec_id,
-            env.block.clone(),
-            request,
-            db.db.state(),
-            None,
-        )?;
+        let gas_used =
+            self.estimate_gas_with(cfg_with_spec_id, env.block.clone(), request, &*db.db, None)?;
 
         Ok(AccessListWithGasUsed { access_list, gas_used })
     }
