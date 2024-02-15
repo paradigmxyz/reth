@@ -1815,6 +1815,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "custom-dev-node"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures-util",
+ "reth",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-primitives",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "custom-node"
 version = "0.0.0"
 dependencies = [
@@ -5782,11 +5796,7 @@ dependencies = [
 name = "reth-auto-seal-consensus"
 version = "0.1.0-alpha.18"
 dependencies = [
- "clap",
- "eyre",
  "futures-util",
- "jsonrpsee",
- "reth",
  "reth-beacon-consensus",
  "reth-interfaces",
  "reth-node-api",
@@ -5795,8 +5805,6 @@ dependencies = [
  "reth-revm",
  "reth-stages",
  "reth-transaction-pool",
- "serde_json",
- "tempfile",
  "tokio",
  "tokio-stream",
  "tracing",

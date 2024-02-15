@@ -218,6 +218,12 @@ impl NodeConfig {
         test
     }
 
+    /// Sets --dev mode for the node
+    pub const fn dev(mut self) -> Self {
+        self.dev.dev = true;
+        self
+    }
+
     /// Set the config file for the node
     pub fn with_config(mut self, config: impl Into<PathBuf>) -> Self {
         self.config = Some(config.into());
