@@ -154,14 +154,6 @@ pub enum Eip4844PoolTransactionError {
         /// Number of maximum blobs the transaction can have
         permitted: usize,
     },
-    /// Thrown if an EIP-4844 transaction with the wrong versioned hash version arrives
-    #[error("wrong versioned hash version: have {have}, permitted {permitted}")]
-    WrongEip4844HashVersion {
-        /// The transaction's versioned hash version
-        have: u8,
-        /// The EIP-4844 versioned hash version
-        permitted: u8,
-    },
     /// Thrown if validating the blob sidecar for the transaction failed.
     #[error(transparent)]
     InvalidEip4844Blob(BlobTransactionValidationError),
@@ -289,10 +281,6 @@ impl InvalidPoolTransactionError {
                         true
                     }
                     Eip4844PoolTransactionError::TooManyEip4844Blobs { .. } => {
-                        // this is a malformed transaction and should not be sent over the network
-                        true
-                    }
-                    Eip4844PoolTransactionError::WrongEip4844HashVersion { .. } => {
                         // this is a malformed transaction and should not be sent over the network
                         true
                     }
