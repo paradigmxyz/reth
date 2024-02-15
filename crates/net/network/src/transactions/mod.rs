@@ -1163,7 +1163,6 @@ where
             let mut new_txs = Vec::new();
             while let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
                 new_txs.push(hash);
-                some_ready = true;
             }
             if !new_txs.is_empty() {
                 this.on_new_transactions(new_txs);
