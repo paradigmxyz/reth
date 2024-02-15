@@ -298,12 +298,6 @@ impl TaskExecutor {
         &self.on_shutdown
     }
 
-    /// Runs a future to completion on this Handle's associated Runtime.
-    #[track_caller]
-    pub fn block_on<F: Future>(&self, future: F) -> F::Output {
-        self.handle.block_on(future)
-    }
-
     /// Spawns a future on the tokio runtime depending on the [TaskKind]
     fn spawn_on_rt<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<()>
     where

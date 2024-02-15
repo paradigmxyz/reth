@@ -125,13 +125,13 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes> {
     fn build_components(
         self,
         context: &BuilderContext<Node>,
-    ) -> eyre::Result<NodeComponents<Node, Self::Pool>>;
+    ) -> impl std::future::Future<Output = eyre::Result<NodeComponents<Node, Self::Pool>>> + Send;
 }
 
 impl<Node, F, Pool> NodeComponentsBuilder<Node> for F
 where
     Node: FullNodeTypes,
-    F: FnOnce(&BuilderContext<Node>) -> eyre::Result<NodeComponents<Node, Pool>>,
+    F: FnOnce(&BuilderContext<Node>) -> eyre::Result<NodeComponents<Node, Pool>> + Send,
     Pool: TransactionPool + Unpin + 'static,
 {
     type Pool = Pool;
@@ -139,7 +139,8 @@ where
     fn build_components(
         self,
         ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<NodeComponents<Node, Pool>> {
-        self(ctx)
+    ) -> impl std::future::Future<Output = eyre::Result<NodeComponents<Node, Self::Pool>>> + Send
+    {
+        futures::future::ready(self(ctx))
     }
 }

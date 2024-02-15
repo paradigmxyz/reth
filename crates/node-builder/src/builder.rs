@@ -423,7 +423,7 @@ where
 
         debug!(target: "reth::cli", "creating components");
         let NodeComponents { transaction_pool, network, payload_builder } =
-            components_builder.build_components(&ctx)?;
+            components_builder.build_components(&ctx).await?;
 
         let BuilderContext {
             provider: blockchain_db,
