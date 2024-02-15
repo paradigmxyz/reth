@@ -1,6 +1,5 @@
 //! Module that interacts with MDBX.
 
-use crate::transaction::DbTx;
 use crate::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
@@ -109,8 +108,6 @@ impl Database for DatabaseEnv {
             self.metrics.as_ref().cloned(),
         ))
     }
-
-    
 }
 
 impl DatabaseMetrics for DatabaseEnv {

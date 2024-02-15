@@ -1,5 +1,6 @@
 use clap::{arg, Args};
 
+/// Bitfinity Related Args
 #[derive(Debug, Args, PartialEq, Default, Clone)]
 #[clap(next_help_heading = "Bitfinity Args")]
 pub struct BitfinityArgs {

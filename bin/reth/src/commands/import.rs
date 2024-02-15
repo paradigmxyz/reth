@@ -22,8 +22,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::consensus::Consensus;
-use reth_node_core::args::BitfinityArgs;
-use reth_node_core::{events::node::NodeEvent, init::init_genesis};
+use reth_node_core::{args::BitfinityArgs, events::node::NodeEvent, init::init_genesis};
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageId, ChainSpec, B256};
 use reth_provider::{BlockNumReader, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
@@ -65,7 +64,7 @@ pub struct ImportCommand {
     chain: Arc<ChainSpec>,
 
     /// Bitfinity Related Args
-    #[arg(flatten)]
+    #[clap(flatten)]
     bitfinity: BitfinityArgs,
 
     /// The database configuration.
@@ -82,7 +81,7 @@ impl ImportCommand {
         bitfinity: BitfinityArgs,
         db: DatabaseArgs,
     ) -> Self {
-        Self { config, datadir, chain, bitfinity: bitfinity_args, db }
+        Self { config, datadir, chain, bitfinity, db }
     }
 
     /// Execute `import` command
@@ -110,7 +109,7 @@ impl ImportCommand {
 
         let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone());
 
-        let interval = Duration::from_secs(self.interval);
+        let interval = Duration::from_secs(self.bitfinity.import_interval);
         println!("interval {}", interval.as_secs());
 
         let job_executor = lightspeed_scheduler::JobExecutor::new_with_local_tz();
@@ -172,8 +171,14 @@ impl ImportCommand {
 
         info!(target: "reth::cli", "Starting block: {}", start_block);
 
-        let file_client =
-            Arc::new(FileClient::from_rpc_url(&self.rpc_url, start_block, self.end_block).await?);
+        let file_client = Arc::new(
+            FileClient::from_rpc_url(
+                &self.bitfinity.rpc_url,
+                start_block,
+                self.bitfinity.end_block,
+            )
+            .await?,
+        );
 
         // override the tip
         let tip = file_client.remote_tip().expect("file client has no tip");

@@ -2211,8 +2211,8 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
                 StorageShardedKey::last(address, storage_key),
                 rem_index,
                 |storage_sharded_key| {
-                    storage_sharded_key.address == address
-                        && storage_sharded_key.sharded_key.key == storage_key
+                    storage_sharded_key.address == address &&
+                        storage_sharded_key.sharded_key.key == storage_key
                 },
             )?;
 

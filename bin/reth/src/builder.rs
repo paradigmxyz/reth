@@ -1,12 +1,10 @@
 //! Contains types and methods that can be used to launch a node based off of a [NodeConfig].
 
-use crate::commands::debug_cmd::engine_api_store::EngineApiStore;
-use crate::commands::import::ImportCommand;
+use crate::commands::{debug_cmd::engine_api_store::EngineApiStore, import::ImportCommand};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, stream, stream_select, StreamExt};
-use lightspeed_scheduler::job::Job;
-use lightspeed_scheduler::scheduler::Scheduler;
+use lightspeed_scheduler::{job::Job, scheduler::Scheduler};
 use reth_auto_seal_consensus::AutoSealBuilder;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook},
@@ -14,7 +12,7 @@ use reth_beacon_consensus::{
 };
 use reth_blockchain_tree::{config::BlockchainTreeConfig, ShareableBlockchainTree};
 use reth_config::Config;
-use reth_db::open_db;
+
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -46,8 +44,7 @@ use reth_prune::PrunerBuilder;
 use reth_rpc_engine_api::EngineApi;
 use reth_tasks::{TaskExecutor, TaskManager};
 use reth_transaction_pool::TransactionPool;
-use std::time::Duration;
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tracing::*;
 
@@ -454,6 +451,8 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
 
         // Schedule the import job
         {
+            let interval = Duration::from_secs(self.config.bitfinity.import_interval);
+            let db = Arc::clone(&self.db);
             job_executor
                 .add_job_with_scheduler(
                     Scheduler::Interval { interval_duration: interval, execute_at_startup: true },

@@ -1,10 +1,9 @@
 //! Support for customizing the node
 
-use crate::args::BitfinityArgs;
 use crate::{
     args::{
-        get_secret_key, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RpcServerArgs, TxPoolArgs,
+        get_secret_key, BitfinityArgs, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs,
+        PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     cli::{config::RethTransactionPoolConfig, db_type::DatabaseBuilder},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
@@ -915,6 +914,7 @@ impl Default for NodeConfig {
             pruning: PruningArgs::default(),
             #[cfg(feature = "optimism")]
             rollup: crate::args::RollupArgs::default(),
+            bitfinity: BitfinityArgs::default(),
         }
     }
 }
