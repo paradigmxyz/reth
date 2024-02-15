@@ -20,7 +20,6 @@ use reth_transaction_pool::{
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct OptimismNode;
-// TODO make this stateful with evm config
 
 impl OptimismNode {
     /// Returns a [`ComponentsBuilder`] configured for a regular Ethereum node.
@@ -43,7 +42,7 @@ impl NodeTypes for OptimismNode {
     type Evm = OptimismEvmConfig;
 
     fn evm_config(&self) -> Self::Evm {
-        todo!()
+        OptimismEvmConfig::default()
     }
 }
 
@@ -53,9 +52,7 @@ impl NodeTypes for OptimismNode {
 /// config.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-pub struct OptimismPoolBuilder {
-    // TODO add options for txpool args
-}
+pub struct OptimismPoolBuilder;
 
 impl<Node> PoolBuilder<Node> for OptimismPoolBuilder
 where

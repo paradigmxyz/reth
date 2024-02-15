@@ -43,7 +43,7 @@ impl NodeTypes for EthereumNode {
     type Evm = EthEvmConfig;
 
     fn evm_config(&self) -> Self::Evm {
-        todo!()
+        EthEvmConfig::default()
     }
 }
 
