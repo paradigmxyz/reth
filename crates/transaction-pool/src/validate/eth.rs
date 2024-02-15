@@ -25,7 +25,6 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
 };
 use tokio::sync::Mutex;
-use reth_primitives::constants::eip4844::VERSIONED_HASH_VERSION_KZG;
 
 #[cfg(feature = "optimism")]
 use reth_revm::optimism::RethL1BlockInfo;
