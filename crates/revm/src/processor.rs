@@ -19,7 +19,7 @@ use revm::{
     inspector_handle_register,
     interpreter::Host,
     primitives::{CfgEnvWithHandlerCfg, ResultAndState},
-    Evm, State, StateBuilder,
+    Evm, Handler, State, StateBuilder,
 };
 use std::{sync::Arc, time::Instant};
 
@@ -187,7 +187,7 @@ where
             total_difficulty,
         );
         *self.evm.cfg_mut() = cfg.cfg_env;
-        self.evm.handler.modify_spec_id(cfg.handler_cfg.spec_id);
+        self.evm.handler = Handler::new(cfg.handler_cfg);
     }
 
     /// Applies the pre-block call to the EIP-4788 beacon block root contract.

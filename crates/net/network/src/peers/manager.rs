@@ -2,8 +2,8 @@ use crate::{
     error::{BackoffKind, SessionError},
     peers::{
         reputation::{is_banned_reputation, DEFAULT_REPUTATION},
-        ReputationChangeWeights, DEFAULT_MAX_CONCURRENT_DIALS, DEFAULT_MAX_PEERS_INBOUND,
-        DEFAULT_MAX_PEERS_OUTBOUND,
+        ReputationChangeWeights, DEFAULT_MAX_COUNT_CONCURRENT_DIALS,
+        DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND,
     },
     session::{Direction, PendingSessionHandshakeError},
     swarm::NetworkConnectionState,
@@ -877,9 +877,9 @@ impl Default for ConnectionInfo {
         ConnectionInfo {
             num_outbound: 0,
             num_inbound: 0,
-            max_outbound: DEFAULT_MAX_PEERS_OUTBOUND,
-            max_inbound: DEFAULT_MAX_PEERS_INBOUND,
-            max_concurrent_outbound_dials: DEFAULT_MAX_CONCURRENT_DIALS,
+            max_outbound: DEFAULT_MAX_COUNT_PEERS_OUTBOUND as usize,
+            max_inbound: DEFAULT_MAX_COUNT_PEERS_INBOUND as usize,
+            max_concurrent_outbound_dials: DEFAULT_MAX_COUNT_CONCURRENT_DIALS,
         }
     }
 }

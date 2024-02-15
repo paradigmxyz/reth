@@ -26,6 +26,7 @@ pub trait FullProvider<DB: Database>:
     + EvmEnvProvider
     + ChainSpecProvider
     + ChangeSetReader
+    + CanonStateSubscriptions
     + Clone
     + Unpin
     + 'static
@@ -40,6 +41,7 @@ impl<T, DB: Database> FullProvider<DB> for T where
         + EvmEnvProvider
         + ChainSpecProvider
         + ChangeSetReader
+        + CanonStateSubscriptions
         + Clone
         + Unpin
         + 'static

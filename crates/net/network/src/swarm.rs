@@ -112,6 +112,9 @@ where
     }
 
     /// Handles a polled [`SessionEvent`]
+    ///
+    /// This either updates the state or produces a new [`SwarmEvent`] that is bubbled up to the
+    /// manager.
     fn on_session_event(&mut self, event: SessionEvent) -> Option<SwarmEvent> {
         match event {
             SessionEvent::SessionEstablished {
@@ -302,6 +305,9 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
+        // This loop advances the network's state prioritizing local work [NetworkState] over work
+        // coming in from the network [SessionManager], [ConnectionListener]
+        // Existing connections are prioritized over new __incoming__ connections
         loop {
             while let Poll::Ready(action) = this.state.poll(cx) {
                 if let Some(event) = this.on_state_action(action) {

@@ -88,7 +88,6 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
         chain_spec: &ChainSpec,
         parent: &Header,
     ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
-        // TODO: should be different once revm has configurable CfgEnvWithHandlerCfg
         // configure evm env based on parent block
         let mut cfg = CfgEnv::default();
         cfg.chain_id = chain_spec.chain().id();
@@ -100,17 +99,14 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
         // cancun now, we need to set the excess blob gas to the default value
         let blob_excess_gas_and_price = parent
             .next_block_excess_blob_gas()
-            .map_or_else(
-                || {
-                    if spec_id == SpecId::CANCUN {
-                        // default excess blob gas is zero
-                        Some(0)
-                    } else {
-                        None
-                    }
-                },
-                Some,
-            )
+            .or_else(|| {
+                if spec_id == SpecId::CANCUN {
+                    // default excess blob gas is zero
+                    Some(0)
+                } else {
+                    None
+                }
+            })
             .map(BlobExcessGasAndPrice::new);
 
         let block_env = BlockEnv {
@@ -130,7 +126,24 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
             blob_excess_gas_and_price,
         };
 
-        (CfgEnvWithHandlerCfg::new(cfg, spec_id), block_env)
+        let cfg_with_handler_cfg;
+        #[cfg(feature = "optimism")]
+        {
+            cfg_with_handler_cfg = CfgEnvWithHandlerCfg {
+                cfg_env: cfg,
+                handler_cfg: revm_primitives::HandlerCfg {
+                    spec_id,
+                    is_optimism: chain_spec.is_optimism(),
+                },
+            };
+        }
+
+        #[cfg(not(feature = "optimism"))]
+        {
+            cfg_with_handler_cfg = CfgEnvWithHandlerCfg::new(cfg, spec_id);
+        }
+
+        (cfg_with_handler_cfg, block_env)
     }
 }
 
@@ -204,7 +217,7 @@ impl PayloadAttributes for OptimismPayloadAttributes {
         if self.gas_limit.is_none() && chain_spec.is_optimism() {
             return Err(AttributesValidationError::InvalidParams(
                 "MissingGasLimitInPayloadAttributes".to_string().into(),
-            ))
+            ));
         }
 
         Ok(())

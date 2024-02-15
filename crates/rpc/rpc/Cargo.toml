@@ -49,7 +49,9 @@ hyper = "0.14.24"
 jsonwebtoken = "8"
 
 ## required for optimism sequencer delegation
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"], optional = true }
+reqwest = { version = "0.11", default-features = false, features = [
+    "rustls-tls",
+], optional = true }
 
 # async
 async-trait.workspace = true
@@ -66,7 +68,11 @@ metrics.workspace = true
 
 # misc
 bytes.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
@@ -95,4 +101,5 @@ optimism = [
     "reth-network/optimism",
     "reth-provider/optimism",
     "reth-transaction-pool/optimism",
+    "reth-node-api/optimism",
 ]

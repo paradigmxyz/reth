@@ -1,8 +1,11 @@
 //! Command that initializes the node by importing a chain from a file.
 
 use crate::{
-    commands::node::events::{handle_events, NodeEvent},
-    init::init_genesis,
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs,
+    },
+    dirs::{DataDirPath, MaybePlatformPath},
     version::SHORT_VERSION,
 };
 use clap::Parser;
@@ -20,6 +23,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::consensus::Consensus;
+use reth_node_core::{events::node::NodeEvent, init::init_genesis};
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageId, ChainSpec, B256};
 use reth_provider::{BlockNumReader, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
@@ -31,14 +35,6 @@ use std::time::Duration;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, info};
-
-use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
-};
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser, Clone)]
@@ -190,7 +186,12 @@ impl ImportCommand {
 
         let latest_block_number =
             provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
-        tokio::spawn(handle_events(None, latest_block_number, events, db.clone()));
+        tokio::spawn(reth_node_core::events::node::handle_events(
+            None,
+            latest_block_number,
+            events,
+            db.clone(),
+        ));
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
