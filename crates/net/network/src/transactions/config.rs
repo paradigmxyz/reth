@@ -23,7 +23,7 @@ pub struct TransactionFetcherConfig {
     pub soft_limit_byte_size_pooled_transactions_response: usize,
     /// Soft limit for the byte size of the expected
     /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on packing a
-    /// [`GetPooledTransactions`] request with hashes.
+    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request with hashes.
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
 }
 
