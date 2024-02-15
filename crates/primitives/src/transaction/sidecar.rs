@@ -11,7 +11,7 @@ use crate::{
     kzg::{
         self, Blob, Bytes48, KzgSettings, BYTES_PER_BLOB, BYTES_PER_COMMITMENT, BYTES_PER_PROOF,
     },
-    Signature, Transaction, TransactionSigned, TxEip4844, TxHash, EIP4844_TX_TYPE_ID,
+    Signature, Transaction, TransactionSigned, TxEip4844, TxHash, B256, EIP4844_TX_TYPE_ID,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use bytes::BufMut;
@@ -35,6 +35,14 @@ pub enum BlobTransactionValidationError {
     /// The inner transaction is not a blob transaction.
     #[error("unable to verify proof for non blob transaction: {0}")]
     NotBlobTransaction(u8),
+    /// The versioned hash is incorrect.
+    #[error("wrong versioned hash: have {have}, expected {expected}")]
+    WrongVersionedHash {
+        /// The versioned hash we got
+        have: B256,
+        /// The versioned hash we expected
+        expected: B256,
+    },
 }
 
 /// A response to `GetPooledTransactions` that includes blob data, their commitments, and their
