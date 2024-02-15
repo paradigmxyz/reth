@@ -15,7 +15,6 @@ use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
     TransactionValidationTaskExecutor,
 };
-use std::future::Future;
 
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -63,64 +62,58 @@ where
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
 
-    fn build_pool(
-        self,
-        ctx: &BuilderContext<Node>,
-    ) -> impl Future<Output = eyre::Result<Self::Pool>> + Send {
-        async move {
-            let data_dir = ctx.data_dir();
-            let blob_store =
-                DiskFileBlobStore::open(data_dir.blobstore_path(), Default::default())?;
-            let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
-                .with_head_timestamp(ctx.head().timestamp)
-                .kzg_settings(ctx.kzg_settings()?)
-                .with_additional_tasks(1)
-                .build_with_tasks(
-                    ctx.provider().clone(),
+    async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
+        let data_dir = ctx.data_dir();
+        let blob_store = DiskFileBlobStore::open(data_dir.blobstore_path(), Default::default())?;
+        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
+            .with_head_timestamp(ctx.head().timestamp)
+            .kzg_settings(ctx.kzg_settings()?)
+            .with_additional_tasks(1)
+            .build_with_tasks(
+                ctx.provider().clone(),
+                ctx.task_executor().clone(),
+                blob_store.clone(),
+            );
+
+        let transaction_pool =
+            reth_transaction_pool::Pool::eth_pool(validator, blob_store, ctx.pool_config());
+        info!(target: "reth::cli", "Transaction pool initialized");
+        let transactions_path = data_dir.txpool_transactions_path();
+
+        // spawn txpool maintenance task
+        {
+            let pool = transaction_pool.clone();
+            let chain_events = ctx.provider().canonical_state_stream();
+            let client = ctx.provider().clone();
+            let transactions_backup_config =
+                reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+
+            ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
+                "local transactions backup task",
+                |shutdown| {
+                    reth_transaction_pool::maintain::backup_local_transactions_task(
+                        shutdown,
+                        pool.clone(),
+                        transactions_backup_config,
+                    )
+                },
+            );
+
+            // spawn the maintenance task
+            ctx.task_executor().spawn_critical(
+                "txpool maintenance task",
+                reth_transaction_pool::maintain::maintain_transaction_pool_future(
+                    client,
+                    pool,
+                    chain_events,
                     ctx.task_executor().clone(),
-                    blob_store.clone(),
-                );
-
-            let transaction_pool =
-                reth_transaction_pool::Pool::eth_pool(validator, blob_store, ctx.pool_config());
-            info!(target: "reth::cli", "Transaction pool initialized");
-            let transactions_path = data_dir.txpool_transactions_path();
-
-            // spawn txpool maintenance task
-            {
-                let pool = transaction_pool.clone();
-                let chain_events = ctx.provider().canonical_state_stream();
-                let client = ctx.provider().clone();
-                let transactions_backup_config =
-                    reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
-
-                ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
-                    "local transactions backup task",
-                    |shutdown| {
-                        reth_transaction_pool::maintain::backup_local_transactions_task(
-                            shutdown,
-                            pool.clone(),
-                            transactions_backup_config,
-                        )
-                    },
-                );
-
-                // spawn the maintenance task
-                ctx.task_executor().spawn_critical(
-                    "txpool maintenance task",
-                    reth_transaction_pool::maintain::maintain_transaction_pool_future(
-                        client,
-                        pool,
-                        chain_events,
-                        ctx.task_executor().clone(),
-                        Default::default(),
-                    ),
-                );
-                debug!(target: "reth::cli", "Spawned txpool maintenance task");
-            }
-
-            Ok(transaction_pool)
+                    Default::default(),
+                ),
+            );
+            debug!(target: "reth::cli", "Spawned txpool maintenance task");
         }
+
+        Ok(transaction_pool)
     }
 }
 
@@ -150,42 +143,37 @@ where
     Node: FullNodeTypes<Engine = OptimismEngineTypes>,
     Pool: TransactionPool + Unpin + 'static,
 {
-    fn spawn_payload_service(
+    async fn spawn_payload_service(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<Node::Engine>>> + Send {
-        async move {
-            let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
-                .set_compute_pending_block(self.compute_pending_block);
-            let conf = ctx.payload_builder_config();
+    ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>> {
+        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
+            .set_compute_pending_block(self.compute_pending_block);
+        let conf = ctx.payload_builder_config();
 
-            let payload_job_config = BasicPayloadJobGeneratorConfig::default()
-                .interval(conf.interval())
-                .deadline(conf.deadline())
-                .max_payload_tasks(conf.max_payload_tasks())
-                // no extradata for OP
-                .extradata(Default::default())
-                .max_gas_limit(conf.max_gas_limit());
+        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
+            .interval(conf.interval())
+            .deadline(conf.deadline())
+            .max_payload_tasks(conf.max_payload_tasks())
+            // no extradata for OP
+            .extradata(Default::default())
+            .max_gas_limit(conf.max_gas_limit());
 
-            let payload_generator = BasicPayloadJobGenerator::with_builder(
-                ctx.provider().clone(),
-                pool,
-                ctx.task_executor().clone(),
-                payload_job_config,
-                ctx.chain_spec(),
-                payload_builder,
-            );
-            let (payload_service, payload_builder) = PayloadBuilderService::new(
-                payload_generator,
-                ctx.provider().canonical_state_stream(),
-            );
+        let payload_generator = BasicPayloadJobGenerator::with_builder(
+            ctx.provider().clone(),
+            pool,
+            ctx.task_executor().clone(),
+            payload_job_config,
+            ctx.chain_spec(),
+            payload_builder,
+        );
+        let (payload_service, payload_builder) =
+            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
 
-            ctx.task_executor()
-                .spawn_critical("payload builder service", Box::pin(payload_service));
+        ctx.task_executor().spawn_critical("payload builder service", Box::pin(payload_service));
 
-            Ok(payload_builder)
-        }
+        Ok(payload_builder)
     }
 }
 
@@ -203,26 +191,24 @@ where
     Node: FullNodeTypes,
     Pool: TransactionPool + Unpin + 'static,
 {
-    fn build_network(
+    async fn build_network(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> impl Future<Output = eyre::Result<NetworkHandle>> + Send {
-        async move {
-            let Self { sequencer_http, disable_txpool_gossip } = self;
-            let mut network_config = ctx.network_config()?;
+    ) -> eyre::Result<NetworkHandle> {
+        let Self { sequencer_http, disable_txpool_gossip } = self;
+        let mut network_config = ctx.network_config()?;
 
-            // When `sequencer_endpoint` is configured, the node will forward all transactions to a
-            // Sequencer node for execution and inclusion on L1, and disable its own txpool
-            // gossip to prevent other parties in the network from learning about them.
-            network_config.tx_gossip_disabled = disable_txpool_gossip;
-            network_config.optimism_network_config.sequencer_endpoint = sequencer_http;
+        // When `sequencer_endpoint` is configured, the node will forward all transactions to a
+        // Sequencer node for execution and inclusion on L1, and disable its own txpool
+        // gossip to prevent other parties in the network from learning about them.
+        network_config.tx_gossip_disabled = disable_txpool_gossip;
+        network_config.optimism_network_config.sequencer_endpoint = sequencer_http;
 
-            let network = NetworkManager::builder(network_config).await?;
+        let network = NetworkManager::builder(network_config).await?;
 
-            let handle = ctx.start_network(network, pool);
+        let handle = ctx.start_network(network, pool);
 
-            Ok(handle)
-        }
+        Ok(handle)
     }
 }
