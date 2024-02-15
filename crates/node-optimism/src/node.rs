@@ -1,6 +1,6 @@
-//! Ethereum Node types config.
+//! Optimism Node types config.
 
-use crate::{EthEngineTypes, EthEvmConfig};
+use crate::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_network::NetworkHandle;
 use reth_node_builder::{
@@ -16,48 +16,48 @@ use reth_transaction_pool::{
     TransactionValidationTaskExecutor,
 };
 
-/// Type configuration for a regular Ethereum node.
+/// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-pub struct EthereumNode;
+pub struct OptimismNode;
 // TODO make this stateful with evm config
 
-impl EthereumNode {
-    /// Returns a [ComponentsBuilder] configured for a regular Ethereum node.
+impl OptimismNode {
+    /// Returns a [`ComponentsBuilder`] configured for a regular Ethereum node.
     pub fn components<Node>(
-    ) -> ComponentsBuilder<Node, EthereumPoolBuilder, EthereumPayloadBuilder, EthereumNetwork>
+    ) -> ComponentsBuilder<Node, OptimismPoolBuilder, OptimismPayloadBuilder, OptimismNetwork>
     where
-        Node: FullNodeTypes<Engine = EthEngineTypes>,
+        Node: FullNodeTypes<Engine = OptimismEngineTypes>,
     {
         ComponentsBuilder::default()
             .node_types::<Node>()
-            .pool(EthereumPoolBuilder::default())
-            .payload(EthereumPayloadBuilder::default())
-            .network(EthereumNetwork::default())
+            .pool(OptimismPoolBuilder::default())
+            .payload(OptimismPayloadBuilder::default())
+            .network(OptimismNetwork)
     }
 }
 
-impl NodeTypes for EthereumNode {
+impl NodeTypes for OptimismNode {
     type Primitives = ();
-    type Engine = EthEngineTypes;
-    type Evm = EthEvmConfig;
+    type Engine = OptimismEngineTypes;
+    type Evm = OptimismEvmConfig;
 
     fn evm_config(&self) -> Self::Evm {
         todo!()
     }
 }
 
-/// A basic ethereum transaction pool.
+/// A basic optimism transaction pool.
 ///
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-pub struct EthereumPoolBuilder {
+pub struct OptimismPoolBuilder {
     // TODO add options for txpool args
 }
 
-impl<Node> PoolBuilder<Node> for EthereumPoolBuilder
+impl<Node> PoolBuilder<Node> for OptimismPoolBuilder
 where
     Node: FullNodeTypes,
 {
@@ -118,14 +118,14 @@ where
     }
 }
 
-/// A basic ethereum payload service.
+/// A basic optimism payload service.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct EthereumPayloadBuilder;
+pub struct OptimismPayloadBuilder;
 
-impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBuilder
+impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for OptimismPayloadBuilder
 where
-    Node: FullNodeTypes<Engine = EthEngineTypes>,
+    Node: FullNodeTypes<Engine = OptimismEngineTypes>,
     Pool: TransactionPool + Unpin + 'static,
 {
     fn spawn_payload_service(
@@ -133,7 +133,7 @@ where
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>> {
-        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
+        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default();
         let conf = ctx.payload_builder_config();
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
@@ -162,11 +162,9 @@ where
 
 /// A basic ethereum payload service.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct EthereumNetwork {
-    // TODO add closure to modify network
-}
+pub struct OptimismNetwork;
 
-impl<Node, Pool> NetworkBuilder<Node, Pool> for EthereumNetwork
+impl<Node, Pool> NetworkBuilder<Node, Pool> for OptimismNetwork
 where
     Node: FullNodeTypes,
     Pool: TransactionPool + Unpin + 'static,

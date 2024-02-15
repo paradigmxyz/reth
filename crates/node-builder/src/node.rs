@@ -1,4 +1,7 @@
-use crate::{components::FullNodeComponents, rpc::RethRpcServerHandles};
+use crate::{
+    components::FullNodeComponents,
+    rpc::{RethRpcServerHandles, RpcRegistry},
+};
 use reth_db::database::Database;
 use reth_network::NetworkHandle;
 use reth_node_api::{evm::EvmConfig, primitives::NodePrimitives, EngineTypes};
@@ -9,10 +12,7 @@ use reth_node_core::{
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_tasks::TaskExecutor;
-
 use std::marker::PhantomData;
-
-use crate::rpc::RpcRegistry;
 
 /// The type that configures stateless node types, the node's primitive types.
 pub trait NodeTypes: Send + Sync + 'static {
