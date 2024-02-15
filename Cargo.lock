@@ -799,12 +799,10 @@ name = "beacon-api-sse"
 version = "0.0.0"
 dependencies = [
  "clap",
- "eyre",
  "futures-util",
  "mev-share-sse",
  "reth",
- "serde",
- "serde_json",
+ "reth-node-ethereum",
  "tokio",
  "tracing",
 ]
@@ -1393,8 +1391,8 @@ name = "cli-extension-event-hooks"
 version = "0.0.0"
 dependencies = [
  "clap",
- "eyre",
  "reth",
+ "reth-node-ethereum",
 ]
 
 [[package]]

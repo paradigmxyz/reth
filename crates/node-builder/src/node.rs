@@ -91,7 +91,7 @@ pub struct FullNode<Node: FullNodeComponents> {
     /// Handle to the node's payload builder service.
     pub payload_builder: PayloadBuilderHandle<Node::Engine>,
     /// Task executor for the node.
-    pub executor: TaskExecutor,
+    pub task_executor: TaskExecutor,
     /// Handles to the node's rpc servers
     pub rpc_server_handles: RethRpcServerHandles,
     /// The configured rpc namespaces
@@ -117,7 +117,7 @@ impl<Node: FullNodeComponents> Clone for FullNode<Node> {
             network: self.network.clone(),
             provider: self.provider.clone(),
             payload_builder: self.payload_builder.clone(),
-            executor: self.executor.clone(),
+            task_executor: self.task_executor.clone(),
             rpc_server_handles: self.rpc_server_handles.clone(),
             rpc_registry: self.rpc_registry.clone(),
             config: self.config.clone(),

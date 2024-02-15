@@ -630,7 +630,7 @@ where
             network,
             provider,
             payload_builder,
-            executor,
+            task_executor: executor,
             rpc_server_handles,
             rpc_registry,
             config,
