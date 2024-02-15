@@ -8672,11 +8672,9 @@ name = "trace-transaction-cli"
 version = "0.0.0"
 dependencies = [
  "clap",
- "eyre",
  "futures-util",
- "jsonrpsee",
  "reth",
- "tokio",
+ "reth-node-ethereum",
 ]
 
 [[package]]
