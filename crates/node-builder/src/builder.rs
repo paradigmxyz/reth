@@ -966,7 +966,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
 
     /// Creates the [NetworkBuilder] for the node and blocks until it is ready.
     pub fn network_builder_blocking(&self) -> eyre::Result<NetworkBuilder<Node::Provider, (), ()>> {
-        self.executor.block_on(self.network_builder())
+        // TODO this shouldn't be required
+        futures::executor::block_on(self.network_builder())
     }
 
     /// Spawns the configured network and associated tasks and returns the [NetworkHandle] connected
