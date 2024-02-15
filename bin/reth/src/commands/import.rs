@@ -63,21 +63,23 @@ pub struct ImportCommand {
     )]
     chain: Arc<ChainSpec>,
 
-    /// The database configuration.
-    #[clap(flatten)]
-    db: DatabaseArgs,
-
-    /// The URL to the remote source to import from.
+    /// The RPC of the remote chain to import.
     #[arg(long, value_name = "RPC_URL", verbatim_doc_comment)]
     rpc_url: String,
 
-    /// The end block to import.
+    /// The block to stop importing at.
     #[arg(long, value_name = "END_BLOCK", verbatim_doc_comment)]
     end_block: Option<u64>,
 
-    /// Interval to import the block
+    /// Interval at which to import blocks, in seconds.
+    ///
+    /// Defaults to 30 seconds.
     #[arg(long, value_name = "INTERVAL", verbatim_doc_comment, default_value = "30")]
     interval: u64,
+
+    /// The database configuration.
+    #[clap(flatten)]
+    db: DatabaseArgs,
 }
 
 impl ImportCommand {
@@ -111,22 +113,25 @@ impl ImportCommand {
 
         let job_executor = lightspeed_scheduler::JobExecutor::new_with_local_tz();
 
-        job_executor
-            .add_job_with_scheduler(
-                Scheduler::Interval { interval_duration: interval, execute_at_startup: true },
-                Job::new("import", "block importer", None, move || {
-                    let import = self.clone();
-                    let config = config.clone();
-                    let provider_factory = provider_factory.clone();
-                    let db = db.clone();
-                    Box::pin(async move {
-                        import.import(config, provider_factory, db.into()).await?;
+        // Schedule the import job
+        {
+            job_executor
+                .add_job_with_scheduler(
+                    Scheduler::Interval { interval_duration: interval, execute_at_startup: true },
+                    Job::new("import", "block importer", None, move || {
+                        let import = self.clone();
+                        let config = config.clone();
+                        let provider_factory = provider_factory.clone();
+                        let db = db.clone();
+                        Box::pin(async move {
+                            import.import(config, provider_factory, db.into()).await?;
 
-                        Ok(())
-                    })
-                }),
-            )
-            .await;
+                            Ok(())
+                        })
+                    }),
+                )
+                .await;
+        }
 
         let job_executor_handler = job_executor.run().await?;
 
