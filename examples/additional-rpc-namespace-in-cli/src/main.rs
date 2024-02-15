@@ -55,7 +55,7 @@ impl RethNodeCommandConfig for RethCliTxpoolExt {
         Reth: RethNodeComponents,
     {
         if !self.enable_ext {
-            return Ok(())
+            return Ok(());
         }
 
         // here we get the configured pool type from the CLI.

@@ -3,6 +3,7 @@
 use crate::{commands::node::cl_events::ConsensusLayerHealthEvent, primitives::B256};
 use futures::Stream;
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, ForkchoiceStatus};
+
 use reth_db::{database::Database, database_metrics::DatabaseMetadata};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
@@ -14,6 +15,7 @@ use reth_primitives::{
 };
 use reth_prune::PrunerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
+
 use std::{
     fmt::{Display, Formatter},
     future::Future,
@@ -173,9 +175,9 @@ impl<DB> NodeState<DB> {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
                 let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
                     state;
-                if status != ForkchoiceStatus::Valid ||
-                    (self.safe_block_hash != Some(safe_block_hash) &&
-                        self.finalized_block_hash != Some(finalized_block_hash))
+                if status != ForkchoiceStatus::Valid
+                    || (self.safe_block_hash != Some(safe_block_hash)
+                        && self.finalized_block_hash != Some(finalized_block_hash))
                 {
                     info!(
                         ?head_block_hash,

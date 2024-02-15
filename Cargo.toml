@@ -1,5 +1,6 @@
 [workspace]
 members = [
+
     "bin/reth/",
     "crates/blockchain-tree/",
     "crates/config/",
@@ -66,7 +67,7 @@ members = [
     "examples/polygon-p2p/",
     "testing/ef-tests/",
 ]
-default-members = ["bin/reth"]
+default-members = ["bin/reth/"]
 
 # Explicitly set the resolver to version 2, which is the default for packages with edition >= 2021
 # https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html
@@ -168,8 +169,13 @@ reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 
 # revm
-revm = { version = "5.0", features = ["std", "secp256k1"], default-features = false }
-revm-primitives = { version = "2.0", features = ["std"], default-features = false }
+revm = { version = "5.0", features = [
+    "std",
+    "secp256k1",
+], default-features = false }
+revm-primitives = { version = "2.0", features = [
+    "std",
+], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "5622ad5" }
 
 # eth

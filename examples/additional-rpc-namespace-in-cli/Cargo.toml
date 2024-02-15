@@ -12,6 +12,7 @@ reth-transaction-pool.workspace = true
 clap = { workspace = true, features = ["derive"] }
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 eyre.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

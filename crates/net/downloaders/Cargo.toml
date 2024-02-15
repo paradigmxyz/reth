@@ -42,6 +42,12 @@ alloy-rlp.workspace = true
 tempfile = { workspace = true, optional = true }
 itertools.workspace = true
 
+rlp = "0.5"
+ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.10.x", features = [
+    "reqwest",
+] }
+did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", tag = "v0.10.x" }
+
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
