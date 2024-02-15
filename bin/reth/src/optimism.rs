@@ -21,7 +21,7 @@ fn main() {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
 
-    if let Err(err) = Cli::<RollupArgs>::parse().run(|builder, rollup_args| async {
+    if let Err(err) = Cli::<RollupArgs>::parse().run(|builder, rollup_args| async move {
         let NodeHandle { node, node_exit_future } = builder
             .with_types(OptimismNode::default())
             .with_components(OptimismNode::components(rollup_args.clone()))
