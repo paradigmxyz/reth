@@ -83,6 +83,19 @@ pub struct ImportCommand {
 }
 
 impl ImportCommand {
+    /// Create a new `ImportCommand` with the given arguments.
+    pub fn new(
+        config: Option<PathBuf>,
+        datadir: MaybePlatformPath<DataDirPath>,
+        chain: Arc<ChainSpec>,
+        rpc_url: String,
+        end_block: Option<u64>,
+        interval: u64,
+        db: DatabaseArgs,
+    ) -> Self {
+        Self { config, datadir, chain, rpc_url, end_block, interval, db }
+    }
+
     /// Execute `import` command
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);

@@ -210,9 +210,9 @@ impl<K: TransactionKind> MetricsHandler<K> {
     /// NOTE: Backtrace is recorded using [Backtrace::force_capture], so `RUST_BACKTRACE` env var is
     /// not needed.
     fn log_backtrace_on_long_read_transaction(&self) {
-        if self.record_backtrace &&
-            !self.backtrace_recorded.load(Ordering::Relaxed) &&
-            self.transaction_mode().is_read_only()
+        if self.record_backtrace
+            && !self.backtrace_recorded.load(Ordering::Relaxed)
+            && self.transaction_mode().is_read_only()
         {
             let open_duration = self.start.elapsed();
             if open_duration > LONG_TRANSACTION_DURATION {
@@ -302,6 +302,7 @@ impl<K: TransactionKind> DbTx for Tx<K> {
 
         self.inner.disable_timeout();
     }
+
 }
 
 impl DbTxMut for Tx<RW> {

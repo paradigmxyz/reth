@@ -51,6 +51,20 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     )]
     pub chain: Arc<ChainSpec>,
 
+    /// The RPC of the remote chain to import.
+    #[arg(long, value_name = "BITFINITY_RPC_URL", verbatim_doc_comment)]
+    rpc_url: String,
+
+    /// The block to stop importing at.
+    #[arg(long, value_name = "END_BLOCK", verbatim_doc_comment)]
+    end_block: Option<u64>,
+
+    /// Interval at which to import blocks, in seconds.
+    ///
+    /// Defaults to 30 seconds.
+    #[arg(long, value_name = "INTERVAL", verbatim_doc_comment, default_value = "30")]
+    interval: u64,
+
     /// Enable Prometheus metrics.
     ///
     /// The metrics will be served at the given interface and port.
@@ -225,9 +239,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let executor = ctx.task_executor;
 
         // launch the node
-        let handle = launch_from_config::<Ext>(node_config, ext, executor).await?;
+        let (node_handle, job_handle) =
+            launch_from_config::<Ext>(node_config, ext, executor).await?;
 
-        handle.wait_for_node_exit().await
+        node_handle.wait_for_node_exit().await?;
+
+        job_handle.await?;
+
+        Ok(())
     }
 
     /// Returns the [Consensus] instance to use.
