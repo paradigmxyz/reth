@@ -102,29 +102,6 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
         }
     }
 
-    // /// Execute the configured cli command.
-    // pub fn run(mut self) -> eyre::Result<()> {
-    //     // add network name to logs dir
-    //     self.logs.log_file_directory =
-    //         self.logs.log_file_directory.join(self.chain.chain.to_string());
-    //
-    //     let _guard = self.init_tracing()?;
-    //
-    //     let runner = CliRunner;
-    //     match self.command {
-    //         Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
-    //         Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-    //         Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-    //         Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-    //         Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-    //         Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
-    //         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
-    //         Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-    //         Commands::Debug(command) => runner.run_command_until_exit(|ctx|
-    // command.execute(ctx)),         Commands::Recover(command) =>
-    // runner.run_command_until_exit(|ctx| command.execute(ctx)),     }
-    // }
-
     /// Initializes tracing with the configured options.
     ///
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
@@ -133,20 +110,6 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
         let guard = self.logs.init_tracing()?;
         Ok(guard)
     }
-}
-
-/// Convenience function for parsing CLI options, set up logging and run the chosen command.
-#[inline]
-pub fn run() -> eyre::Result<()> {
-    use reth_node_ethereum::node::EthereumNode;
-    Cli::<NoArgs>::parse().run(|builder, _| async {
-        let handle = builder
-            .with_types(EthereumNode::default())
-            .with_components(EthereumNode::components())
-            .launch()
-            .await?;
-        handle.node_exit_future.await
-    })
 }
 
 /// Commands to be executed

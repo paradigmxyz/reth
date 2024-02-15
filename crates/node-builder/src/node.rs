@@ -78,18 +78,26 @@ where
 /// The launched node with all components including RPC handlers.
 #[derive(Debug)]
 pub struct FullNode<Node: FullNodeComponents> {
-    pub(crate) evm_config: Node::Evm,
-    pub(crate) pool: Node::Pool,
-    pub(crate) network: NetworkHandle,
-    pub(crate) provider: Node::Provider,
-    pub(crate) payload_builder: PayloadBuilderHandle<Node::Engine>,
-    pub(crate) executor: TaskExecutor,
-    pub(crate) rpc_server_handles: RethRpcServerHandles,
-    pub(crate) rpc_registry: RpcRegistry<Node>,
+    /// The evm configuration.
+    pub evm_config: Node::Evm,
+    /// The node's transaction pool.
+    pub pool: Node::Pool,
+    /// Handle to the node's network.
+    pub network: NetworkHandle,
+    /// Provider to interact with the node's database
+    pub provider: Node::Provider,
+    /// Handle to the node's payload builder service.
+    pub payload_builder: PayloadBuilderHandle<Node::Engine>,
+    /// Task executor for the node.
+    pub executor: TaskExecutor,
+    /// Handles to the node's rpc servers
+    pub rpc_server_handles: RethRpcServerHandles,
+    /// The configured rpc namespaces
+    pub rpc_registry: RpcRegistry<Node>,
     /// The initial node config.
-    pub(crate) config: NodeConfig,
+    pub config: NodeConfig,
     /// The data dir of the node.
-    pub(crate) data_dir: ChainPath<DataDirPath>,
+    pub data_dir: ChainPath<DataDirPath>,
 }
 
 impl<Node: FullNodeComponents> Clone for FullNode<Node> {

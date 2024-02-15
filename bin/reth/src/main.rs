@@ -1,6 +1,10 @@
 // We use jemalloc for performance reasons
 #![allow(missing_docs)]
 
+use clap::Parser;
+use reth::{cli::Cli, commands::node::NoArgs};
+use reth_node_ethereum::EthereumNode;
+
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
@@ -15,7 +19,14 @@ fn main() {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
 
-    if let Err(err) = reth::cli::run() {
+    if let Err(err) = Cli::<NoArgs>::parse().run(|builder, _| async {
+        let handle = builder
+            .with_types(EthereumNode::default())
+            .with_components(EthereumNode::components())
+            .launch()
+            .await?;
+        handle.node_exit_future.await
+    }) {
         eprintln!("Error: {err:?}");
         std::process::exit(1);
     }

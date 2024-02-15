@@ -19,3 +19,5 @@ pub use evm::EthEvmConfig;
 
 #[cfg(not(feature = "optimism"))]
 pub mod node;
+#[cfg(not(feature = "optimism"))]
+pub use node::EthereumNode;
