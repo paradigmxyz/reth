@@ -47,7 +47,7 @@ impl From<DatabaseError> for InitDatabaseError {
 
 /// Write the genesis block if it has not already been written
 pub fn init_genesis<DB: Database>(
-    db: Arc<DB>,
+    db: DB,
     chain: Arc<ChainSpec>,
 ) -> Result<B256, InitDatabaseError> {
     let genesis = chain.genesis();

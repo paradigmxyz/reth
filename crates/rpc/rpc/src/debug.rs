@@ -90,10 +90,10 @@ where
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
                     let tx = tx_env_with_recovered(&tx);
-                    let env = EnvWithHandlerCfg::new(
-                        Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
-                        cfg.handler_cfg.spec_id,
-                    );
+                    let env = EnvWithHandlerCfg {
+                        env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
+                        handler_cfg: cfg.handler_cfg,
+                    };
                     let (result, state_changes) = this
                         .trace_transaction(
                             opts.clone(),
@@ -237,10 +237,11 @@ where
                     tx.hash,
                 )?;
 
-                let env = EnvWithHandlerCfg::new(
-                    Env::boxed(cfg.cfg_env.clone(), block_env, tx_env_with_recovered(&tx)),
-                    cfg.handler_cfg.spec_id,
-                );
+                let env = EnvWithHandlerCfg {
+                    env: Env::boxed(cfg.cfg_env.clone(), block_env, tx_env_with_recovered(&tx)),
+                    handler_cfg: cfg.handler_cfg,
+                };
+
                 this.trace_transaction(
                     opts,
                     env,
@@ -286,7 +287,7 @@ where
                                 Ok(inspector)
                             })
                             .await?;
-                        return Ok(FourByteFrame::from(inspector).into());
+                        return Ok(FourByteFrame::from(inspector).into())
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
@@ -309,7 +310,7 @@ where
                                 Ok(frame.into())
                             })
                             .await?;
-                        return Ok(frame);
+                        return Ok(frame)
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
                         let prestate_config = tracer_config
@@ -334,7 +335,7 @@ where
                                     Ok(frame)
                                 })
                                 .await?;
-                        return Ok(frame.into());
+                        return Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                 },
@@ -356,7 +357,7 @@ where
 
                     Ok(GethTrace::JS(res))
                 }
-            };
+            }
         }
 
         // default structlog tracer
@@ -388,7 +389,7 @@ where
         opts: Option<GethDebugTracingCallOptions>,
     ) -> EthResult<Vec<Vec<GethTrace>>> {
         if bundles.is_empty() {
-            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")));
+            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")))
         }
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
@@ -436,10 +437,10 @@ where
                     // Execute all transactions until index
                     for tx in transactions {
                         let tx = tx_env_with_recovered(&tx);
-                        let env = EnvWithHandlerCfg::new(
-                            Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
-                            cfg.handler_cfg.spec_id,
-                        );
+                        let env = EnvWithHandlerCfg {
+                            env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
+                            handler_cfg: cfg.handler_cfg,
+                        };
                         let (res, _) = transact(&mut db, env)?;
                         db.commit(res.state);
                     }
@@ -508,7 +509,7 @@ where
                     GethDebugBuiltInTracerType::FourByteTracer => {
                         let mut inspector = FourByteInspector::default();
                         let (res, _) = inspect(db, env, &mut inspector)?;
-                        return Ok((FourByteFrame::from(inspector).into(), res.state));
+                        return Ok((FourByteFrame::from(inspector).into(), res.state))
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
@@ -526,7 +527,7 @@ where
                             .into_geth_builder()
                             .geth_call_traces(call_config, res.result.gas_used());
 
-                        return Ok((frame.into(), res.state));
+                        return Ok((frame.into(), res.state))
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
                         let prestate_config = tracer_config
@@ -547,7 +548,7 @@ where
                             &*db,
                         )?;
 
-                        return Ok((frame.into(), res.state));
+                        return Ok((frame.into(), res.state))
                     }
                     GethDebugBuiltInTracerType::NoopTracer => {
                         Ok((NoopFrame::default().into(), Default::default()))
@@ -566,7 +567,7 @@ where
                     let result = inspector.json_result(res, &env, db)?;
                     Ok((GethTrace::JS(result), state))
                 }
-            };
+            }
         }
 
         // default structlog tracer

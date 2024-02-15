@@ -37,6 +37,7 @@ members = [
     "crates/rpc/rpc-types/",
     "crates/rpc/rpc-types-compat/",
     "crates/node-ethereum/",
+    "crates/node-builder/",
     "crates/node-optimism/",
     "crates/node-core/",
     "crates/node-api/",
@@ -125,6 +126,7 @@ reth-consensus-common = { path = "crates/consensus/common" }
 reth-db = { path = "crates/storage/db" }
 reth-discv4 = { path = "crates/net/discv4" }
 reth-dns-discovery = { path = "crates/net/dns" }
+reth-node-builder = { path = "crates/node-builder" }
 reth-node-ethereum = { path = "crates/node-ethereum" }
 reth-node-optimism = { path = "crates/node-optimism" }
 reth-node-core = { path = "crates/node-core" }
@@ -170,7 +172,7 @@ reth-trie = { path = "crates/trie" }
 # revm
 revm = { version = "5.0", features = ["std", "secp256k1"], default-features = false }
 revm-primitives = { version = "2.0", features = ["std"], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "b63ec73" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "8f17f34" }
 
 # eth
 alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
@@ -179,12 +181,12 @@ alloy-dyn-abi = "0.6"
 alloy-sol-types = "0.6"
 alloy-rlp = "0.3"
 alloy-trie = "0.2"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "a4453d4" }
-alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "a4453d4" }
-alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "a4453d4" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "a4453d4" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "a4453d4" }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "a4453d4" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "b9dd518" }
+alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "b9dd518" }
+alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "b9dd518" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "b9dd518" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "b9dd518" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "b9dd518" }
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
@@ -269,4 +271,4 @@ similar-asserts = "1.5.0"
 
 [workspace.metadata.cargo-udeps.ignore]
 # ignored because this is mutually exclusive with the optimism payload builder via feature flags
-normal = ["reth-ethereum-payload-builder"]
+normal = ["reth-ethereum-payload-builder", "reth-node-ethereum"]

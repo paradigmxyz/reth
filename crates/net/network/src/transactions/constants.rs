@@ -33,8 +33,8 @@ pub mod tx_manager {
         SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST,
     };
 
-    /// Default limit for number transactions to keep track of for a single peer, for transactions
-    /// that the peer's pool and local pool have in common. Default is 10 KiB.
+    /// Default limit for number of transactions to keep track of for a single peer, for
+    /// transactions that the peer's pool and local pool have in common. Default is 10 KiB.
     pub const DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER_AND_IN_POOL: usize = 10 * 1024;
 
     /// Default limit for the number of transactions to keep track of for a single peer, for
@@ -48,6 +48,9 @@ pub mod tx_manager {
     pub const DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS: usize =
         SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST *
             DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS as usize;
+
+    /// Default limit for number of bad imports to keep track of. Default is 10 KiB.
+    pub const DEFAULT_CAPACITY_CACHE_BAD_IMPORTS: usize = 100 * 1024;
 }
 
 pub mod tx_fetcher {
