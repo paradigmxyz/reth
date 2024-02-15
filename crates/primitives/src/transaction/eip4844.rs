@@ -145,7 +145,7 @@ impl TxEip4844 {
             if *versioned_hash != calculated_versioned_hash {
                 return Err(BlobTransactionValidationError::WrongVersionedHash {
                     have: *versioned_hash,
-                    expected: calculated_versioned_hash
+                    expected: calculated_versioned_hash,
                 })
             }
         }
