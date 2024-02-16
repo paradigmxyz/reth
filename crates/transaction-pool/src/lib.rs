@@ -455,7 +455,7 @@ where
         self.pool.remove_transactions(hashes)
     }
 
-    fn retain_unknown<A>(&self, announcement: &mut A)
+    fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
     where
         A: HandleAnnouncement,
     {
@@ -547,6 +547,10 @@ where
 
     fn delete_blobs(&self, txs: Vec<TxHash>) {
         self.pool.delete_blobs(txs)
+    }
+
+    fn cleanup_blobs(&self) {
+        self.pool.cleanup_blobs()
     }
 }
 

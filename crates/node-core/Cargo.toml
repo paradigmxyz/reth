@@ -82,7 +82,11 @@ tracing.workspace = true
 # crypto
 alloy-rlp.workspace = true
 alloy-chains.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 
 # async
 futures.workspace = true

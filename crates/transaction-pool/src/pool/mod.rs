@@ -669,16 +669,16 @@ where
         removed
     }
 
-    /// Removes all transactions that are present in the pool.
-    pub(crate) fn retain_unknown<A: HandleAnnouncement>(&self, announcement: &mut A)
+    /// Removes and returns all transactions that are present in the pool.
+    pub(crate) fn retain_unknown<A: HandleAnnouncement>(&self, announcement: &mut A) -> Option<A>
     where
         A: HandleAnnouncement,
     {
         if announcement.is_empty() {
-            return
+            return None
         }
         let pool = self.get_pool_data();
-        announcement.retain_by_hash(|tx| !pool.contains(&tx))
+        Some(announcement.retain_by_hash(|tx| !pool.contains(tx)))
     }
 
     /// Returns the transaction by hash.
@@ -783,6 +783,12 @@ where
             warn!(target: "txpool", ?err,?num, "failed to delete blobs");
             self.blob_store_metrics.blobstore_failed_deletes.increment(num as u64);
         }
+        self.update_blob_store_metrics();
+    }
+
+    /// Cleans up the blob store
+    pub(crate) fn cleanup_blobs(&self) {
+        self.blob_store.cleanup();
         self.update_blob_store_metrics();
     }
 

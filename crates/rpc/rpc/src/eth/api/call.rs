@@ -89,7 +89,7 @@ where
     ) -> EthResult<Vec<EthCallResponse>> {
         let Bundle { transactions, block_override } = bundle;
         if transactions.is_empty() {
-            return Err(EthApiError::InvalidParams(String::from("transactions are empty.")));
+            return Err(EthApiError::InvalidParams(String::from("transactions are empty.")))
         }
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
@@ -215,7 +215,7 @@ where
         // if the request is a simple transfer we can optimize
         if env.tx.data.is_empty() {
             if let TransactTo::Call(to) = env.tx.transact_to {
-                if let Ok(code) = db.db.state().account_code(to) {
+                if let Ok(code) = db.db.account_code(to) {
                     let no_code_callee = code.map(|code| code.is_empty()).unwrap_or(true);
                     if no_code_callee {
                         // simple transfer, check if caller has sufficient funds
@@ -224,9 +224,9 @@ where
                         if env.tx.value > available_funds {
                             return Err(
                                 RpcInvalidTransactionError::InsufficientFundsForTransfer.into()
-                            );
+                            )
                         }
-                        return Ok(U256::from(MIN_TRANSACTION_GAS));
+                        return Ok(U256::from(MIN_TRANSACTION_GAS))
                     }
                 }
             }
@@ -258,7 +258,7 @@ where
             // if price or limit was included in the request then we can execute the request
             // again with the block's gas limit to check if revert is gas related or not
             if request_gas.is_some() || request_gas_price.is_some() {
-                return Err(map_out_of_gas_err(env_gas_limit, env, &mut db));
+                return Err(map_out_of_gas_err(env_gas_limit, env, &mut db))
             }
         }
 
@@ -270,7 +270,7 @@ where
             ExecutionResult::Halt { reason, gas_used } => {
                 // here we don't check for invalid opcode because already executed with highest gas
                 // limit
-                return Err(RpcInvalidTransactionError::halt(reason, gas_used).into());
+                return Err(RpcInvalidTransactionError::halt(reason, gas_used).into())
             }
             ExecutionResult::Revert { output, .. } => {
                 // if price or limit was included in the request then we can execute the request
@@ -280,7 +280,7 @@ where
                 } else {
                     // the transaction did revert
                     Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into())
-                };
+                }
             }
         }
 
@@ -317,7 +317,7 @@ where
 
                 // new midpoint
                 mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;
-                continue;
+                continue
             }
 
             let (res, _) = ethres?;
@@ -343,7 +343,7 @@ where
                         err => {
                             // these should be unreachable because we know the transaction succeeds,
                             // but we consider these cases an error
-                            return Err(RpcInvalidTransactionError::EvmHalt(err).into());
+                            return Err(RpcInvalidTransactionError::EvmHalt(err).into())
                         }
                     }
                 }
@@ -422,16 +422,13 @@ where
 
         let access_list = inspector.into_access_list();
 
-        let cfg_with_spec_id = CfgEnvWithHandlerCfg::new(env.cfg.clone(), env.handler_cfg.spec_id);
+        let cfg_with_spec_id =
+            CfgEnvWithHandlerCfg { cfg_env: env.cfg.clone(), handler_cfg: env.handler_cfg };
+
         // calculate the gas used using the access list
         request.access_list = Some(access_list.clone());
-        let gas_used = self.estimate_gas_with(
-            cfg_with_spec_id,
-            env.block.clone(),
-            request,
-            db.db.state(),
-            None,
-        )?;
+        let gas_used =
+            self.estimate_gas_with(cfg_with_spec_id, env.block.clone(), request, &*db.db, None)?;
 
         Ok(AccessListWithGasUsed { access_list, gas_used })
     }

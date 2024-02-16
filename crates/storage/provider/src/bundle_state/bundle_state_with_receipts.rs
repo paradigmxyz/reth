@@ -285,9 +285,9 @@ impl BundleStateWithReceipts {
         std::mem::swap(&mut self.bundle, &mut other)
     }
 
-    /// Write bundle state to database and receipts to either database or static files if
-    /// `snapshotter` is `Some`. It should be none if there is any kind of pruning/filtering over
-    /// the receipts.
+    /// Write the [BundleStateWithReceipts] to database and receipts to either database or static
+    /// files if `snapshotter` is `Some`. It should be none if there is any kind of
+    /// pruning/filtering over the receipts.
     ///
     /// `omit_changed_check` should be set to true of bundle has some of it data
     /// detached, This would make some original values not known.

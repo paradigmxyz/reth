@@ -1,6 +1,6 @@
 //! Support for handling events emitted by node components.
 
-use crate::{commands::node::cl_events::ConsensusLayerHealthEvent, primitives::B256};
+use crate::events::cl::ConsensusLayerHealthEvent;
 use futures::Stream;
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, ForkchoiceStatus};
 use reth_db::{database::Database, database_metrics::DatabaseMetadata};
@@ -10,7 +10,7 @@ use reth_network_api::PeersInfo;
 use reth_primitives::{
     constants,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    BlockNumber,
+    BlockNumber, B256,
 };
 use reth_prune::PrunerEvent;
 use reth_snapshot::SnapshotterEvent;
@@ -85,17 +85,12 @@ impl<DB> NodeState<DB> {
                     target,
                 };
 
-                let stage_progress = OptionalField(
-                    checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
-                );
-
                 if let Some(stage_eta) = current_stage.eta.fmt_for_stage(stage_id) {
                     info!(
                         pipeline_stages = %pipeline_stages_progress,
                         stage = %stage_id,
                         checkpoint = %checkpoint.block_number,
                         target = %OptionalField(target),
-                        %stage_progress,
                         %stage_eta,
                         "Executing stage",
                     );
@@ -105,7 +100,6 @@ impl<DB> NodeState<DB> {
                         stage = %stage_id,
                         checkpoint = %checkpoint.block_number,
                         target = %OptionalField(target),
-                        %stage_progress,
                         "Executing stage",
                     );
                 }
@@ -480,9 +474,7 @@ struct Eta {
 impl Eta {
     /// Update the ETA given the checkpoint, if possible.
     fn update(&mut self, checkpoint: StageCheckpoint) {
-        let Some(current) = checkpoint.entities() else {
-            return;
-        };
+        let Some(current) = checkpoint.entities() else { return };
 
         if let Some(last_checkpoint_time) = &self.last_checkpoint_time {
             let processed_since_last = current.processed - self.last_checkpoint.processed;
@@ -499,13 +491,20 @@ impl Eta {
         self.last_checkpoint_time = Some(Instant::now());
     }
 
+    /// Returns `true` if the ETA is available, i.e. at least one checkpoint has been reported.
+    fn is_available(&self) -> bool {
+        self.eta.zip(self.last_checkpoint_time).is_some()
+    }
+
     /// Format ETA for a given stage.
     ///
     /// NOTE: Currently ETA is enabled only for the stages that have predictable progress.
     /// It's not the case for network-dependent ([StageId::Headers] and [StageId::Bodies]) and
     /// [StageId::Execution] stages.
     fn fmt_for_stage(&self, stage: StageId) -> Option<String> {
-        if matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution) {
+        if !self.is_available() ||
+            matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution)
+        {
             None
         } else {
             Some(self.to_string())
@@ -523,7 +522,7 @@ impl Display for Eta {
                     f,
                     "{}",
                     humantime::format_duration(Duration::from_secs(remaining.as_secs()))
-                );
+                )
             }
         }
 

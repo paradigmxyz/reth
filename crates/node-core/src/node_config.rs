@@ -44,7 +44,7 @@ use reth_primitives::{
     BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, TxHash, B256, MAINNET,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader,
+    providers::BlockchainProvider, BlockHashReader, BlockNumReader, BlockReader,
     BlockchainTreePendingStateProvider, CanonStateSubscriptions, HeaderProvider, HeaderSyncMode,
     ProviderFactory, StageCheckpointReader,
 };
@@ -137,7 +137,7 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 ///     let builder = builder.with_rpc(rpc);
 /// }
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NodeConfig {
     /// The test database
     pub database: DatabaseBuilder,
@@ -350,6 +350,11 @@ impl NodeConfig {
         }
     }
 
+    /// Returns pruning configuration.
+    pub fn prune_config(&self) -> eyre::Result<Option<PruneConfig>> {
+        self.pruning.prune_config(Arc::clone(&self.chain))
+    }
+
     /// Returns the max block that the node should run to, looking it up from the network if
     /// necessary
     pub async fn max_block<Provider, Client>(
@@ -384,33 +389,34 @@ impl NodeConfig {
         }
     }
 
-    /// Build a network and spawn it
-    pub async fn build_network<DB>(
+    /// Create the [NetworkBuilder].
+    ///
+    /// This only configures it and does not spawn it.
+    pub async fn build_network<C>(
         &self,
         config: &Config,
-        provider_factory: ProviderFactory<DB>,
+        client: C,
         executor: TaskExecutor,
         head: Head,
         data_dir: &ChainPath<DataDirPath>,
-    ) -> eyre::Result<(ProviderFactory<DB>, NetworkBuilder<ProviderFactory<DB>, (), ()>)>
+    ) -> eyre::Result<NetworkBuilder<C, (), ()>>
     where
-        DB: Database + Unpin + Clone + 'static,
+        C: BlockNumReader,
     {
         info!(target: "reth::cli", "Connecting to P2P network");
         let secret_key = self.network_secret(data_dir)?;
         let default_peers_path = data_dir.known_peers_path();
         let network_config = self.load_network_config(
             config,
-            provider_factory,
+            client,
             executor.clone(),
             head,
             secret_key,
             default_peers_path.clone(),
         );
 
-        let client = network_config.client.clone();
         let builder = NetworkManager::builder(network_config).await?;
-        Ok((client, builder))
+        Ok(builder)
     }
 
     /// Build the blockchain tree
@@ -722,15 +728,15 @@ impl NodeConfig {
     }
 
     /// Builds the [NetworkConfig] with the given [ProviderFactory].
-    pub fn load_network_config<DB: Database>(
+    pub fn load_network_config<C>(
         &self,
         config: &Config,
-        provider_factory: ProviderFactory<DB>,
+        client: C,
         executor: TaskExecutor,
         head: Head,
         secret_key: SecretKey,
         default_peers_path: PathBuf,
-    ) -> NetworkConfig<ProviderFactory<DB>> {
+    ) -> NetworkConfig<C> {
         let cfg_builder = self
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
@@ -755,7 +761,7 @@ impl NodeConfig {
             .sequencer_endpoint(self.rollup.sequencer_http.clone())
             .disable_tx_gossip(self.rollup.disable_txpool_gossip);
 
-        cfg_builder.build(provider_factory)
+        cfg_builder.build(client)
     }
 
     /// Builds the [Pipeline] with the given [ProviderFactory] and downloaders.

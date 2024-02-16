@@ -15,10 +15,9 @@ pub struct RawTable<T: Table> {
 }
 
 impl<T: Table> Table for RawTable<T> {
-    const NAME: &'static str = T::NAME;
+    const TABLE: crate::Tables = T::TABLE;
 
     type Key = RawKey<T::Key>;
-
     type Value = RawValue<T::Value>;
 }
 
@@ -30,10 +29,9 @@ pub struct RawDupSort<T: DupSort> {
 }
 
 impl<T: DupSort> Table for RawDupSort<T> {
-    const NAME: &'static str = T::NAME;
+    const TABLE: crate::Tables = T::TABLE;
 
     type Key = RawKey<T::Key>;
-
     type Value = RawValue<T::Value>;
 }
 

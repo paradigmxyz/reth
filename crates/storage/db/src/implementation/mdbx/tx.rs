@@ -6,7 +6,7 @@ use crate::{
         DatabaseEnvMetrics, Operation, TransactionMetrics, TransactionMode, TransactionOutcome,
     },
     table::{Compress, DupSort, Encode, Table, TableImporter},
-    tables::{utils::decode_one, Tables, NUM_TABLES},
+    tables::{utils::decode_one, Tables},
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
@@ -17,7 +17,6 @@ use reth_tracing::tracing::{trace, warn};
 use std::{
     backtrace::Backtrace,
     marker::PhantomData,
-    str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -34,7 +33,7 @@ pub struct Tx<K: TransactionKind> {
     /// Libmdbx-sys transaction.
     pub inner: Transaction<K>,
     /// Database table handle cache.
-    pub(crate) db_handles: Arc<RwLock<[Option<DBI>; NUM_TABLES]>>,
+    pub(crate) db_handles: Arc<RwLock<[Option<DBI>; Tables::COUNT]>>,
     /// Handler for metrics with its own [Drop] implementation for cases when the transaction isn't
     /// closed by [Tx::commit] or [Tx::abort], but we still need to report it in the metrics.
     ///
@@ -74,7 +73,7 @@ impl<K: TransactionKind> Tx<K> {
     pub fn get_dbi<T: Table>(&self) -> Result<DBI, DatabaseError> {
         let mut handles = self.db_handles.write();
 
-        let table = Tables::from_str(T::NAME).expect("Requested table should be part of `Tables`.");
+        let table = T::TABLE;
 
         let dbi_handle = handles.get_mut(table as usize).expect("should exist");
         if dbi_handle.is_none() {
@@ -145,7 +144,7 @@ impl<K: TransactionKind> Tx<K> {
             metrics_handler.log_backtrace_on_long_read_transaction();
             metrics_handler
                 .env_metrics
-                .record_operation(T::NAME, operation, value_size, || f(&self.inner))
+                .record_operation(T::TABLE, operation, value_size, || f(&self.inner))
         } else {
             f(&self.inner)
         }

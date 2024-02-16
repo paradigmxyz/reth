@@ -49,8 +49,8 @@ impl From<DatabaseError> for InitDatabaseError {
 /// Write the genesis block if it has not already been written
 pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, InitDatabaseError> {
     let chain = factory.chain_spec();
-    let genesis = chain.genesis();
 
+    let genesis = chain.genesis();
     let hash = chain.genesis_hash();
 
     // Check if we already have the genesis header or if we have the wrong one.

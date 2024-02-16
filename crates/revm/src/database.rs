@@ -6,6 +6,7 @@ use revm::{
     primitives::{AccountInfo, Bytecode},
     Database, StateDBBox,
 };
+use std::ops::{Deref, DerefMut};
 
 /// SubState of database. Uses revm internal cache with binding to reth StateProvider trait.
 pub type SubState<DB> = CacheDB<StateProviderDatabase<DB>>;
@@ -23,19 +24,23 @@ impl<DB: StateProvider> StateProviderDatabase<DB> {
         Self(db)
     }
 
-    /// Return inner state reference
-    pub fn state(&self) -> &DB {
-        &self.0
-    }
-
-    /// Return inner state mutable reference
-    pub fn state_mut(&mut self) -> &mut DB {
-        &mut self.0
-    }
-
     /// Consume State and return inner StateProvider.
     pub fn into_inner(self) -> DB {
         self.0
+    }
+}
+
+impl<DB: StateProvider> Deref for StateProviderDatabase<DB> {
+    type Target = DB;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<DB: StateProvider> DerefMut for StateProviderDatabase<DB> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -81,7 +86,7 @@ impl<DB: StateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Returns `Ok` with `Some(AccountInfo)` if the account exists,
     /// `None` if it doesn't, or an error if encountered.
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(self.0.basic_account(address)?.map(|account| AccountInfo {
+        Ok(self.basic_account(address)?.map(|account| AccountInfo {
             balance: account.balance,
             nonce: account.nonce,
             code_hash: account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
@@ -93,7 +98,7 @@ impl<DB: StateProvider> DatabaseRef for StateProviderDatabase<DB> {
     ///
     /// Returns `Ok` with the bytecode if found, or the default bytecode otherwise.
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        Ok(self.0.bytecode_by_hash(code_hash)?.unwrap_or_default().0)
+        Ok(self.bytecode_by_hash(code_hash)?.unwrap_or_default().0)
     }
 
     /// Retrieves the storage value at a specific index for a given address.

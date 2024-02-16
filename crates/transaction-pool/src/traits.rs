@@ -279,10 +279,10 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Retains only those hashes that are unknown to the pool.
     /// In other words, removes all transactions from the given set that are currently present in
-    /// the pool.
+    /// the pool. Returns hashes already known to the pool.
     ///
     /// Consumer: P2P
-    fn retain_unknown<A>(&self, announcement: &mut A)
+    fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
     where
         A: HandleAnnouncement;
 
@@ -396,6 +396,9 @@ pub trait TransactionPoolExt: TransactionPool {
 
     /// Deletes multiple blob sidecars from the blob store
     fn delete_blobs(&self, txs: Vec<B256>);
+
+    /// Maintenance function to cleanup blobs that are no longer needed.
+    fn cleanup_blobs(&self);
 }
 
 /// Determines what kind of new transactions should be emitted by a stream of transactions.

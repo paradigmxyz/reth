@@ -54,7 +54,7 @@ pub fn serialization(c: &mut Criterion) {
 /// Measures `Encode`, `Decode`, `Compress` and `Decompress`.
 fn measure_table_serialization<T>(group: &mut BenchmarkGroup<'_, WallTime>)
 where
-    T: Table + Default,
+    T: Table,
     T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
     T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
 {
@@ -119,7 +119,7 @@ where
 /// Measures `SeqWrite`, `RandomWrite`, `SeqRead` and `RandomRead` using `cursor` and `tx.put`.
 fn measure_table_db<T>(group: &mut BenchmarkGroup<'_, WallTime>)
 where
-    T: Table + Default,
+    T: Table,
     T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
     T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
 {
@@ -215,7 +215,7 @@ where
 /// Measures `SeqWrite`, `RandomWrite` and `SeqRead`  using `cursor_dup` and `tx.put`.
 fn measure_dupsort_db<T>(group: &mut BenchmarkGroup<'_, WallTime>)
 where
-    T: Table + Default + DupSort,
+    T: Table + DupSort,
     T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
     T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
     T::SubKey: Default + Clone + for<'de> serde::Deserialize<'de>,
