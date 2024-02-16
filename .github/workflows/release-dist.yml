@@ -1,0 +1,20 @@
+# This workflow auto-publishes Reth to external package managers such as
+# Homebrew when a release is published.
+
+name: release externally
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  release-homebrew:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Homebrew formula
+        uses: dawidd6/action-homebrew-bump-formula@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          no_fork: true
+          tap: paradigmxyz/brew
+          formula: reth

@@ -222,7 +222,7 @@ impl Chain {
     pub fn append_chain(&mut self, other: Chain) -> RethResult<()> {
         let chain_tip = self.tip();
         let other_fork_block = other.fork_block();
-        if chain_tip.hash != other_fork_block.hash {
+        if chain_tip.hash() != other_fork_block.hash {
             return Err(BlockExecutionError::AppendChainDoesntConnect {
                 chain_tip: Box::new(chain_tip.num_hash()),
                 other_chain_fork: Box::new(other_fork_block),
@@ -490,12 +490,12 @@ mod tests {
         let mut block3 = block.clone();
         let mut block4 = block;
 
-        block1.block.header.hash = block1_hash;
-        block2.block.header.hash = block2_hash;
-        block3.block.header.hash = block3_hash;
-        block4.block.header.hash = block4_hash;
+        block1.block.header.set_hash(block1_hash);
+        block2.block.header.set_hash(block2_hash);
+        block3.block.header.set_hash(block3_hash);
+        block4.block.header.set_hash(block4_hash);
 
-        block3.block.header.header.parent_hash = block2_hash;
+        block3.set_parent_hash(block2_hash);
 
         let mut chain1 =
             Chain { blocks: BTreeMap::from([(1, block1), (2, block2)]), ..Default::default() };
@@ -543,14 +543,14 @@ mod tests {
 
         let mut block1 = SealedBlockWithSenders::default();
         let block1_hash = B256::new([15; 32]);
-        block1.number = 1;
-        block1.hash = block1_hash;
+        block1.set_block_number(1);
+        block1.set_hash(block1_hash);
         block1.senders.push(Address::new([4; 20]));
 
         let mut block2 = SealedBlockWithSenders::default();
         let block2_hash = B256::new([16; 32]);
-        block2.number = 2;
-        block2.hash = block2_hash;
+        block2.set_block_number(2);
+        block2.set_hash(block2_hash);
         block2.senders.push(Address::new([4; 20]));
 
         let mut block_state_extended = block_state1.clone();

@@ -11,14 +11,40 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-# reth
+## reth
+reth-auto-seal-consensus.workspace = true
+reth-beacon-consensus.workspace = true
+reth-blockchain-tree.workspace = true
+reth-provider.workspace = true
+reth-revm.workspace = true
+reth-db.workspace = true
+reth-rpc-engine-api.workspace = true
+reth-rpc.workspace = true
+reth-node-api.workspace = true
+reth-node-core.workspace = true
+reth-network.workspace = true
 reth-primitives.workspace = true
 reth-payload-builder.workspace = true
-reth-rpc-types.workspace = true
-reth-node-api.workspace = true
+reth-transaction-pool.workspace = true
+reth-tasks.workspace = true
+reth-tracing.workspace = true
+reth-interfaces.workspace = true
+reth-snapshot.workspace = true
+reth-prune.workspace = true
+reth-stages.workspace = true
+reth-config.workspace = true
 
-# io
-serde.workspace = true
 
-[features]
-optimism = ["reth-node-api/optimism"]
+## async
+futures.workspace = true
+tokio = { workspace = true, features = [
+    "sync",
+    "macros",
+    "time",
+    "rt-multi-thread",
+] }
+
+## misc
+eyre.workspace = true
+fdlimit = "0.3.0"
+confy.workspace = true

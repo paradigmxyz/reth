@@ -15,10 +15,11 @@ use crate::eth::{
 use async_trait::async_trait;
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
-use reth_node_api::EvmEnvConfig;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
-    revm_primitives::{BlockEnv, CfgEnv},
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, B256, U256, U64,
+    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
+    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, SealedHeader, B256,
+    U256, U64,
 };
 
 use reth_provider::{
@@ -27,6 +28,7 @@ use reth_provider::{
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
+use revm_primitives::{CfgEnv, SpecId};
 use std::{
     fmt::Debug,
     future::Future,
@@ -263,37 +265,47 @@ where
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: EvmEnvConfig + Clone + 'static,
+    EvmConfig: ConfigureEvmEnv + Clone + 'static,
 {
-    /// Configures the [CfgEnv] and [BlockEnv] for the pending block
+    /// Configures the [CfgEnvWithHandlerCfg] and [BlockEnv] for the pending block
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     pub(crate) fn pending_block_env_and_cfg(&self) -> EthResult<PendingBlockEnv> {
-        let origin = if let Some(pending) = self.provider().pending_block_with_senders()? {
+        let origin: PendingBlockEnvOrigin = if let Some(pending) =
+            self.provider().pending_block_with_senders()?
+        {
             PendingBlockEnvOrigin::ActualPending(pending)
         } else {
             // no pending block from the CL yet, so we use the latest block and modify the env
             // values that we can
-            let mut latest =
+            let latest =
                 self.provider().latest_header()?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
+            let (mut latest_header, block_hash) = latest.split();
             // child block
-            latest.number += 1;
-            // assumed child block is in the next slot
-            latest.timestamp += 12;
+            latest_header.number += 1;
+            // assumed child block is in the next slot: 12s
+            latest_header.timestamp += 12;
             // base fee of the child block
             let chain_spec = self.provider().chain_spec();
-            latest.base_fee_per_gas =
-                latest.next_block_base_fee(chain_spec.base_fee_params(latest.timestamp));
+
+            latest_header.base_fee_per_gas = latest_header
+                .next_block_base_fee(chain_spec.base_fee_params(latest_header.timestamp));
+
+            // update excess blob gas consumed above target
+            latest_header.excess_blob_gas = latest_header.next_block_excess_blob_gas();
+
+            // we're reusing the same block hash because we need this to lookup the block's state
+            let latest = SealedHeader::new(latest_header, block_hash);
 
             PendingBlockEnvOrigin::DerivedFromLatest(latest)
         };
 
-        let mut cfg = CfgEnv::default();
+        let mut cfg = CfgEnvWithHandlerCfg::new(CfgEnv::default(), SpecId::LATEST);
 
         #[cfg(feature = "optimism")]
         {
-            cfg.optimism = self.provider().chain_spec().is_optimism();
+            cfg.handler_cfg.is_optimism = self.provider().chain_spec().is_optimism();
         }
 
         let mut block_env = BlockEnv::default();
@@ -325,7 +337,7 @@ where
             if let Some(pending_block) = lock.as_ref() {
                 // this is guaranteed to be the `latest` header
                 if pending.block_env.number.to::<u64>() == pending_block.block.number &&
-                    pending.origin.header().hash == pending_block.block.parent_hash &&
+                    pending.origin.header().hash() == pending_block.block.parent_hash &&
                     now <= pending_block.expires_at
                 {
                     return Ok(Some(pending_block.block.clone()))
@@ -379,7 +391,7 @@ where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + 'static,
-    EvmConfig: EvmEnvConfig + 'static,
+    EvmConfig: ConfigureEvmEnv + 'static,
 {
     /// Returns the current ethereum protocol version.
     ///

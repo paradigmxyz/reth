@@ -125,3 +125,13 @@ docker exec -it reth bash
 **If Reth is running with Docker Compose, replace `reth` with `reth-reth-1` in the above command**
 
 Refer to the [CLI docs](../cli/cli.md) to interact with Reth once inside the Reth container.
+
+## Run only Grafana in Docker
+
+This allows importing existing Grafana dashboards, without running Reth in Docker.
+
+```bash
+docker compose -f etc/docker-compose.yml up -d --no-deps grafana
+```
+
+After login with `admin:admin` credentials, Prometheus should be listed under [`Grafana datasources`](http://localhost:3000/connections/datasources). Replace its `Prometheus server URL` so it points to locally running one. On Mac or Windows, use `http://host.docker.internal:9090`. On Linux, try `http://172.17.0.1:9090`.

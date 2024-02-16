@@ -20,13 +20,15 @@ pub struct NoopPayloadBuilderService<Engine: EngineTypes> {
 
 impl<Engine> NoopPayloadBuilderService<Engine>
 where
-    Engine: EngineTypes,
+    Engine: EngineTypes + 'static,
 {
     /// Creates a new [NoopPayloadBuilderService].
     pub fn new() -> (Self, PayloadBuilderHandle<Engine>) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
-        let handle = PayloadBuilderHandle::new(service_tx);
-        (Self { command_rx: UnboundedReceiverStream::new(command_rx) }, handle)
+        (
+            Self { command_rx: UnboundedReceiverStream::new(command_rx) },
+            PayloadBuilderHandle::new(service_tx),
+        )
     }
 }
 
@@ -50,6 +52,7 @@ where
                 PayloadServiceCommand::BestPayload(_, tx) => tx.send(None).ok(),
                 PayloadServiceCommand::PayloadAttributes(_, tx) => tx.send(None).ok(),
                 PayloadServiceCommand::Resolve(_, tx) => tx.send(None).ok(),
+                PayloadServiceCommand::Subscribe(_) => None,
             };
         }
     }

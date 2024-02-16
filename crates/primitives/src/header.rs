@@ -1,18 +1,19 @@
 use crate::{
     basefee::calculate_next_block_base_fee,
-    constants::{ALLOWED_FUTURE_BLOCK_TIME_SECONDS, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH},
+    constants,
+    constants::{
+        ALLOWED_FUTURE_BLOCK_TIME_SECONDS, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH,
+        MINIMUM_GAS_LIMIT,
+    },
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
-    keccak256, Address, BaseFeeParams, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes, B256,
-    B64, U256,
+    keccak256, Address, BaseFeeParams, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes,
+    ChainSpec, GotExpected, GotExpectedBoxed, Hardfork, B256, B64, U256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use bytes::{Buf, BufMut, BytesMut};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
-use std::{
-    mem,
-    ops::{Deref, DerefMut},
-};
+use std::{mem, ops::Deref};
 
 /// Errors that can occur during header sanity checks.
 #[derive(Debug, PartialEq)]
@@ -423,6 +424,12 @@ impl Encodable for Header {
         self.mix_hash.encode(out); // Encode mix hash.
         B64::new(self.nonce.to_be_bytes()).encode(out); // Encode nonce.
 
+        // The following code is needed only to handle proptest-generated headers that are
+        // technically invalid.
+        //
+        // TODO: make proptest generate more valid headers, ie if there is no base fee, there
+        // should be no withdrawals root or any future fork field.
+
         // Encode base fee. Put empty list if base fee is missing,
         // but withdrawals root is present.
         if let Some(ref base_fee) = self.base_fee_per_gas {
@@ -568,18 +575,336 @@ impl Decodable for Header {
     }
 }
 
+/// Errors that can occur during header sanity checks.
+#[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
+pub enum HeaderValidationError {
+    /// Error when the block number does not match the parent block number.
+    #[error(
+        "block number {block_number} does not match parent block number {parent_block_number}"
+    )]
+    ParentBlockNumberMismatch {
+        /// The parent block number.
+        parent_block_number: BlockNumber,
+        /// The block number.
+        block_number: BlockNumber,
+    },
+
+    /// Error when the parent hash does not match the expected parent hash.
+    #[error("mismatched parent hash: {0}")]
+    ParentHashMismatch(GotExpectedBoxed<B256>),
+
+    /// Error when the block timestamp is in the past compared to the parent timestamp.
+    #[error("block timestamp {timestamp} is in the past compared to the parent timestamp {parent_timestamp}")]
+    TimestampIsInPast {
+        /// The parent block's timestamp.
+        parent_timestamp: u64,
+        /// The block's timestamp.
+        timestamp: u64,
+    },
+
+    /// Error when the base fee is missing.
+    #[error("base fee missing")]
+    BaseFeeMissing,
+
+    /// Error when the block's base fee is different from the expected base fee.
+    #[error("block base fee mismatch: {0}")]
+    BaseFeeDiff(GotExpected<u64>),
+
+    /// Error when the child gas limit exceeds the maximum allowed decrease.
+    #[error("child gas_limit {child_gas_limit} max decrease is {parent_gas_limit}/1024")]
+    GasLimitInvalidDecrease {
+        /// The parent gas limit.
+        parent_gas_limit: u64,
+        /// The child gas limit.
+        child_gas_limit: u64,
+    },
+
+    /// Error when the child gas limit exceeds the maximum allowed increase.
+    #[error("child gas_limit {child_gas_limit} max increase is {parent_gas_limit}/1024")]
+    GasLimitInvalidIncrease {
+        /// The parent gas limit.
+        parent_gas_limit: u64,
+        /// The child gas limit.
+        child_gas_limit: u64,
+    },
+
+    /// Error indicating that the child gas limit is below the minimum allowed limit.
+    ///
+    /// This error occurs when the child gas limit is less than the specified minimum gas limit.
+    #[error("child gas limit {child_gas_limit} is below the minimum allowed limit ({MINIMUM_GAS_LIMIT})")]
+    GasLimitInvalidMinimum {
+        /// The child gas limit.
+        child_gas_limit: u64,
+    },
+
+    /// Error when blob gas used is missing.
+    #[error("missing blob gas used")]
+    BlobGasUsedMissing,
+
+    /// Error when excess blob gas is missing.
+    #[error("missing excess blob gas")]
+    ExcessBlobGasMissing,
+
+    /// Error when there is an invalid excess blob gas.
+    #[error(
+        "invalid excess blob gas: {diff}; \
+         parent excess blob gas: {parent_excess_blob_gas}, \
+         parent blob gas used: {parent_blob_gas_used}"
+    )]
+    ExcessBlobGasDiff {
+        /// The excess blob gas diff.
+        diff: GotExpected<u64>,
+        /// The parent excess blob gas.
+        parent_excess_blob_gas: u64,
+        /// The parent blob gas used.
+        parent_blob_gas_used: u64,
+    },
+}
+
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
 #[add_arbitrary_tests(rlp)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SealedHeader {
     /// Locked Header fields.
-    pub header: Header,
+    header: Header,
     /// Locked Header hash.
-    pub hash: BlockHash,
+    hash: BlockHash,
 }
 
 impl SealedHeader {
+    /// Creates the sealed header with the corresponding block hash.
+    #[inline]
+    pub const fn new(header: Header, hash: BlockHash) -> Self {
+        Self { header, hash }
+    }
+
+    /// Returns the sealed Header fields.
+    #[inline]
+    pub fn header(&self) -> &Header {
+        &self.header
+    }
+
+    /// Returns header/block hash.
+    #[inline]
+    pub const fn hash(&self) -> BlockHash {
+        self.hash
+    }
+
+    /// Updates the block header.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_header(&mut self, header: Header) {
+        self.header = header
+    }
+
+    /// Updates the block hash.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_hash(&mut self, hash: BlockHash) {
+        self.hash = hash
+    }
+
+    /// Updates the parent block hash.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_parent_hash(&mut self, hash: BlockHash) {
+        self.header.parent_hash = hash
+    }
+
+    /// Updates the block number.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_block_number(&mut self, number: BlockNumber) {
+        self.header.number = number;
+    }
+
+    /// Updates the block state root.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_state_root(&mut self, state_root: B256) {
+        self.header.state_root = state_root;
+    }
+
+    /// Updates the block difficulty.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_difficulty(&mut self, difficulty: U256) {
+        self.header.difficulty = difficulty;
+    }
+
+    /// Checks the gas limit for consistency between parent and self headers.
+    ///
+    /// The maximum allowable difference between self and parent gas limits is determined by the
+    /// parent's gas limit divided by the elasticity multiplier (1024).
+    ///
+    /// This check is skipped if the Optimism flag is enabled in the chain spec, as gas limits on
+    /// Optimism can adjust instantly.
+    #[inline(always)]
+    fn validate_gas_limit(
+        &self,
+        parent: &SealedHeader,
+        chain_spec: &ChainSpec,
+    ) -> Result<(), HeaderValidationError> {
+        // Determine the parent gas limit, considering elasticity multiplier on the London fork.
+        let mut parent_gas_limit = parent.gas_limit;
+        if chain_spec.fork(Hardfork::London).transitions_at_block(self.number) {
+            parent_gas_limit =
+                parent.gas_limit * chain_spec.base_fee_params(self.timestamp).elasticity_multiplier;
+        }
+
+        // Check for an increase in gas limit beyond the allowed threshold.
+        if self.gas_limit > parent_gas_limit {
+            if self.gas_limit - parent_gas_limit >= parent_gas_limit / 1024 {
+                return Err(HeaderValidationError::GasLimitInvalidIncrease {
+                    parent_gas_limit,
+                    child_gas_limit: self.gas_limit,
+                })
+            }
+        }
+        // Check for a decrease in gas limit beyond the allowed threshold.
+        else if parent_gas_limit - self.gas_limit >= parent_gas_limit / 1024 {
+            return Err(HeaderValidationError::GasLimitInvalidDecrease {
+                parent_gas_limit,
+                child_gas_limit: self.gas_limit,
+            })
+        }
+        // Check if the self gas limit is below the minimum required limit.
+        else if self.gas_limit < MINIMUM_GAS_LIMIT {
+            return Err(HeaderValidationError::GasLimitInvalidMinimum {
+                child_gas_limit: self.gas_limit,
+            })
+        }
+
+        Ok(())
+    }
+
+    /// Validates the integrity and consistency of a sealed block header in relation to its parent
+    /// header.
+    ///
+    /// This function checks various properties of the sealed header against its parent header and
+    /// the chain specification. It ensures that the block forms a valid and secure continuation
+    /// of the blockchain.
+    ///
+    /// ## Arguments
+    ///
+    /// * `parent` - The sealed header of the parent block.
+    /// * `chain_spec` - The chain specification providing configuration parameters for the
+    ///   blockchain.
+    ///
+    /// ## Errors
+    ///
+    /// Returns a [`HeaderValidationError`] if any validation check fails, indicating specific
+    /// issues with the sealed header. The possible errors include mismatched block numbers,
+    /// parent hash mismatches, timestamp inconsistencies, gas limit violations, base fee
+    /// discrepancies (for EIP-1559), and errors related to the blob gas fields (EIP-4844).
+    ///
+    /// ## Note
+    ///
+    /// Some checks, such as gas limit validation, are conditionally skipped based on the presence
+    /// of certain features (e.g., Optimism feature) or the activation of specific hardforks.
+    pub fn validate_against_parent(
+        &self,
+        parent: &SealedHeader,
+        chain_spec: &ChainSpec,
+    ) -> Result<(), HeaderValidationError> {
+        // Parent number is consistent.
+        if parent.number + 1 != self.number {
+            return Err(HeaderValidationError::ParentBlockNumberMismatch {
+                parent_block_number: parent.number,
+                block_number: self.number,
+            })
+        }
+
+        if parent.hash != self.parent_hash {
+            return Err(HeaderValidationError::ParentHashMismatch(
+                GotExpected { got: self.parent_hash, expected: parent.hash }.into(),
+            ))
+        }
+
+        // timestamp in past check
+        if self.header.is_timestamp_in_past(parent.timestamp) {
+            return Err(HeaderValidationError::TimestampIsInPast {
+                parent_timestamp: parent.timestamp,
+                timestamp: self.timestamp,
+            })
+        }
+
+        // TODO Check difficulty increment between parent and self
+        // Ace age did increment it by some formula that we need to follow.
+
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "optimism")] {
+                // On Optimism, the gas limit can adjust instantly, so we skip this check
+                // if the optimism feature is enabled in the chain spec.
+                if !chain_spec.is_optimism() {
+                    self.validate_gas_limit(parent, chain_spec)?;
+                }
+            } else {
+                self.validate_gas_limit(parent, chain_spec)?;
+            }
+        }
+
+        // EIP-1559 check base fee
+        if chain_spec.fork(Hardfork::London).active_at_block(self.number) {
+            let base_fee = self.base_fee_per_gas.ok_or(HeaderValidationError::BaseFeeMissing)?;
+
+            let expected_base_fee =
+                if chain_spec.fork(Hardfork::London).transitions_at_block(self.number) {
+                    constants::EIP1559_INITIAL_BASE_FEE
+                } else {
+                    // This BaseFeeMissing will not happen as previous blocks are checked to have
+                    // them.
+                    parent
+                        .next_block_base_fee(chain_spec.base_fee_params(self.timestamp))
+                        .ok_or(HeaderValidationError::BaseFeeMissing)?
+                };
+            if expected_base_fee != base_fee {
+                return Err(HeaderValidationError::BaseFeeDiff(GotExpected {
+                    expected: expected_base_fee,
+                    got: base_fee,
+                }))
+            }
+        }
+
+        // ensure that the blob gas fields for this block
+        if chain_spec.fork(Hardfork::Cancun).active_at_timestamp(self.timestamp) {
+            self.validate_4844_header_against_parent(parent)?;
+        }
+
+        Ok(())
+    }
+
+    /// Validates that the EIP-4844 header fields are correct with respect to the parent block. This
+    /// ensures that the `blob_gas_used` and `excess_blob_gas` fields exist in the child header, and
+    /// that the `excess_blob_gas` field matches the expected `excess_blob_gas` calculated from the
+    /// parent header fields.
+    pub fn validate_4844_header_against_parent(
+        &self,
+        parent: &SealedHeader,
+    ) -> Result<(), HeaderValidationError> {
+        // From [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension):
+        //
+        // > For the first post-fork block, both parent.blob_gas_used and parent.excess_blob_gas
+        // > are evaluated as 0.
+        //
+        // This means in the first post-fork block, calculate_excess_blob_gas will return 0.
+        let parent_blob_gas_used = parent.blob_gas_used.unwrap_or(0);
+        let parent_excess_blob_gas = parent.excess_blob_gas.unwrap_or(0);
+
+        if self.blob_gas_used.is_none() {
+            return Err(HeaderValidationError::BlobGasUsedMissing)
+        }
+        let excess_blob_gas =
+            self.excess_blob_gas.ok_or(HeaderValidationError::ExcessBlobGasMissing)?;
+
+        let expected_excess_blob_gas =
+            calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
+        if expected_excess_blob_gas != excess_blob_gas {
+            return Err(HeaderValidationError::ExcessBlobGasDiff {
+                diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
+                parent_excess_blob_gas,
+                parent_blob_gas_used,
+            })
+        }
+
+        Ok(())
+    }
+
     /// Extract raw header that can be modified.
     pub fn unseal(self) -> Header {
         self.header
@@ -588,11 +913,6 @@ impl SealedHeader {
     /// This is the inverse of [Header::seal_slow] which returns the raw header and hash.
     pub fn split(self) -> (Header, BlockHash) {
         (self.header, self.hash)
-    }
-
-    /// Return header/block hash.
-    pub fn hash(&self) -> BlockHash {
-        self.hash
     }
 
     /// Return the number hash tuple.
@@ -668,12 +988,6 @@ impl Deref for SealedHeader {
 
     fn deref(&self) -> &Self::Target {
         &self.header
-    }
-}
-
-impl DerefMut for SealedHeader {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.header
     }
 }
 
@@ -801,7 +1115,10 @@ mod ethers_compat {
 #[cfg(test)]
 mod tests {
     use super::{Bytes, Decodable, Encodable, Header, B256};
-    use crate::{address, b256, bloom, bytes, hex, Address, HeadersDirection, U256};
+    use crate::{
+        address, b256, bloom, bytes, header::MINIMUM_GAS_LIMIT, hex, Address, ChainSpec,
+        HeaderValidationError, HeadersDirection, SealedHeader, U256,
+    };
     use std::str::FromStr;
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
@@ -1060,5 +1377,104 @@ mod tests {
         let data = hex!("f90242a013a7ec98912f917b3e804654e37c9866092043c13eb8eab94eb64818e886cff5a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d4934794f97e180c050e5ab072211ad2c213eb5aee4df134a0ec229dbe85b0d3643ad0f471e6ec1a36bbc87deffbbd970762d22a53b35d068aa056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080830305988401c9c380808464c40d5499d883010c01846765746888676f312e32302e35856c696e7578a070ccadc40b16e2094954b1064749cc6fbac783c1712f1b271a8aac3eda2f232588000000000000000007a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421891122334455667788998401600000");
         Header::decode(&mut data.as_slice())
             .expect_err("blob_gas_used size should make this header decoding fail");
+    }
+
+    #[test]
+    fn test_valid_gas_limit_increase() {
+        let parent = SealedHeader {
+            header: Header { gas_limit: 1024 * 10, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header { gas_limit: parent.header.gas_limit + 5, ..Default::default() },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(child.validate_gas_limit(&parent, &chain_spec), Ok(()));
+    }
+
+    #[test]
+    fn test_gas_limit_below_minimum() {
+        let parent = SealedHeader {
+            header: Header { gas_limit: MINIMUM_GAS_LIMIT, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header { gas_limit: MINIMUM_GAS_LIMIT - 1, ..Default::default() },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(
+            child.validate_gas_limit(&parent, &chain_spec),
+            Err(HeaderValidationError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit })
+        );
+    }
+
+    #[test]
+    fn test_invalid_gas_limit_increase_exceeding_limit() {
+        let gas_limit = 1024 * 10;
+        let parent = SealedHeader {
+            header: Header { gas_limit, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header {
+                gas_limit: parent.header.gas_limit + parent.header.gas_limit / 1024 + 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(
+            child.validate_gas_limit(&parent, &chain_spec),
+            Err(HeaderValidationError::GasLimitInvalidIncrease {
+                parent_gas_limit: parent.header.gas_limit,
+                child_gas_limit: child.header.gas_limit,
+            })
+        );
+    }
+
+    #[test]
+    fn test_valid_gas_limit_decrease_within_limit() {
+        let gas_limit = 1024 * 10;
+        let parent = SealedHeader {
+            header: Header { gas_limit, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header { gas_limit: parent.header.gas_limit - 5, ..Default::default() },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(child.validate_gas_limit(&parent, &chain_spec), Ok(()));
+    }
+
+    #[test]
+    fn test_invalid_gas_limit_decrease_exceeding_limit() {
+        let gas_limit = 1024 * 10;
+        let parent = SealedHeader {
+            header: Header { gas_limit, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header {
+                gas_limit: parent.header.gas_limit - parent.header.gas_limit / 1024 - 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(
+            child.validate_gas_limit(&parent, &chain_spec),
+            Err(HeaderValidationError::GasLimitInvalidDecrease {
+                parent_gas_limit: parent.header.gas_limit,
+                child_gas_limit: child.header.gas_limit,
+            })
+        );
     }
 }

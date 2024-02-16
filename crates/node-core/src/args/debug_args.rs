@@ -5,7 +5,7 @@ use reth_primitives::{TxHash, B256};
 use std::path::PathBuf;
 
 /// Parameters for debugging purposes
-#[derive(Debug, Args, PartialEq, Default)]
+#[derive(Debug, Clone, Args, PartialEq, Default)]
 #[clap(next_help_heading = "Debug")]
 pub struct DebugArgs {
     /// Prompt the downloader to download blocks one at a time.

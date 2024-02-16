@@ -1,19 +1,9 @@
-use std::{
-    collections::HashMap,
-    fmt::Debug,
-    fs::{self, File},
-    hash::Hash,
-    io::Write,
-    path::{Path, PathBuf},
-};
-
-use crate::utils::DbTool;
-use clap::Parser;
-
 use crate::{
     args::DatabaseArgs,
     dirs::{DataDirPath, PlatformPath},
+    utils::DbTool,
 };
+use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO, database::Database, mdbx::DatabaseArguments, open_db_read_only,
     table::Table, transaction::DbTx, AccountChangeSet, AccountHistory, AccountsTrie,
@@ -21,6 +11,14 @@ use reth_db::{
     HashedAccount, HashedStorage, HeaderNumbers, HeaderTD, Headers, PlainAccountState,
     PlainStorageState, PruneCheckpoints, Receipts, StorageChangeSet, StorageHistory, StoragesTrie,
     SyncStage, SyncStageProgress, Tables, TransactionBlock, Transactions, TxHashNumber, TxSenders,
+};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    fs::{self, File},
+    hash::Hash,
+    io::Write,
+    path::{Path, PathBuf},
 };
 use tracing::info;
 
@@ -66,9 +64,9 @@ impl Command {
             DatabaseArguments::default().log_level(self.second_db.log_level),
         )?;
 
-        let tables = match self.table {
-            Some(table) => vec![table],
-            None => Tables::ALL.to_vec(),
+        let tables = match &self.table {
+            Some(table) => std::slice::from_ref(table),
+            None => Tables::ALL,
         };
 
         for table in tables {
@@ -160,19 +158,19 @@ where
     T::Key: Hash,
     T::Value: PartialEq,
 {
-    let table_name = T::NAME;
+    let table = T::TABLE;
 
-    info!("Analyzing table {table_name}...");
+    info!("Analyzing table {table}...");
     let result = find_diffs_advanced::<T>(&primary_tx, &secondary_tx)?;
-    info!("Done analyzing table {table_name}!");
+    info!("Done analyzing table {table}!");
 
     // Pretty info summary header: newline then header
     info!("");
-    info!("Diff results for {table_name}:");
+    info!("Diff results for {table}:");
 
     // create directory and open file
     fs::create_dir_all(output_dir.as_ref())?;
-    let file_name = format!("{table_name}.txt");
+    let file_name = format!("{table}.txt");
     let mut file = File::create(output_dir.as_ref().join(file_name.clone()))?;
 
     // analyze the result and print some stats
@@ -180,36 +178,36 @@ where
     let extra_elements = result.extra_elements.len();
 
     // Make a pretty summary header for the table
-    writeln!(file, "Diff results for {table_name}")?;
+    writeln!(file, "Diff results for {table}")?;
 
     if discrepancies > 0 {
         // write to file
-        writeln!(file, "Found {discrepancies} discrepancies in table {table_name}")?;
+        writeln!(file, "Found {discrepancies} discrepancies in table {table}")?;
 
         // also print to info
-        info!("Found {discrepancies} discrepancies in table {table_name}");
+        info!("Found {discrepancies} discrepancies in table {table}");
     } else {
         // write to file
-        writeln!(file, "No discrepancies found in table {table_name}")?;
+        writeln!(file, "No discrepancies found in table {table}")?;
 
         // also print to info
-        info!("No discrepancies found in table {table_name}");
+        info!("No discrepancies found in table {table}");
     }
 
     if extra_elements > 0 {
         // write to file
-        writeln!(file, "Found {extra_elements} extra elements in table {table_name}")?;
+        writeln!(file, "Found {extra_elements} extra elements in table {table}")?;
 
         // also print to info
-        info!("Found {extra_elements} extra elements in table {table_name}");
+        info!("Found {extra_elements} extra elements in table {table}");
     } else {
-        writeln!(file, "No extra elements found in table {table_name}")?;
+        writeln!(file, "No extra elements found in table {table}")?;
 
         // also print to info
-        info!("No extra elements found in table {table_name}");
+        info!("No extra elements found in table {table}");
     }
 
-    info!("Writing diff results for {table_name} to {file_name}...");
+    info!("Writing diff results for {table} to {file_name}...");
 
     if discrepancies > 0 {
         writeln!(file, "Discrepancies:")?;
@@ -228,7 +226,7 @@ where
     }
 
     let full_file_name = output_dir.as_ref().join(file_name);
-    info!("Done writing diff results for {table_name} to {}", full_file_name.display());
+    info!("Done writing diff results for {table} to {}", full_file_name.display());
     Ok(())
 }
 

@@ -65,7 +65,7 @@ impl From<HeadersResponseError> for ReverseHeadersDownloaderError {
 /// the batches of headers that this downloader yields will start at the chain tip and move towards
 /// the local head: falling block numbers.
 #[must_use = "Stream does nothing unless polled"]
-#[allow(missing_debug_implementations)]
+#[derive(Debug)]
 pub struct ReverseHeadersDownloader<H: HeadersClient> {
     /// Consensus client used to validate headers
     consensus: Arc<dyn Consensus>,
@@ -294,7 +294,7 @@ where
             // detached head error.
             if let Err(error) = self.consensus.validate_header_against_parent(last_header, head) {
                 // Replace the last header with a detached variant
-                error!(target: "downloaders::headers", ?error, number = last_header.number, hash = ?last_header.hash, "Header cannot be attached to known canonical chain");
+                error!(target: "downloaders::headers", ?error, number = last_header.number, hash = ?last_header.hash(), "Header cannot be attached to known canonical chain");
                 return Err(HeadersDownloaderError::DetachedHead {
                     local_head: Box::new(head.clone()),
                     header: Box::new(last_header.clone()),
@@ -892,6 +892,7 @@ where
 }
 
 /// A future that returns a list of [`Header`] on success.
+#[derive(Debug)]
 struct HeadersRequestFuture<F> {
     request: Option<HeadersRequest>,
     fut: F,
@@ -927,6 +928,7 @@ impl HeadersRequestOutcome {
 }
 
 /// Wrapper type to order responses
+#[derive(Debug)]
 struct OrderedHeadersResponse {
     headers: Vec<Header>,
     request: HeadersRequest,

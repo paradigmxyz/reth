@@ -1,30 +1,27 @@
 #![cfg(feature = "c-kzg")]
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
+#[cfg(any(test, feature = "arbitrary"))]
 use crate::{
-    keccak256, Signature, Transaction, TransactionSigned, TxEip4844, TxHash, EIP4844_TX_TYPE_ID,
+    constants::eip4844::{FIELD_ELEMENTS_PER_BLOB, MAINNET_KZG_TRUSTED_SETUP},
+    kzg::{KzgCommitment, KzgProof, BYTES_PER_FIELD_ELEMENT},
 };
-
-use crate::kzg::{
-    self, Blob, Bytes48, KzgSettings, BYTES_PER_BLOB, BYTES_PER_COMMITMENT, BYTES_PER_PROOF,
+use crate::{
+    keccak256,
+    kzg::{
+        self, Blob, Bytes48, KzgSettings, BYTES_PER_BLOB, BYTES_PER_COMMITMENT, BYTES_PER_PROOF,
+    },
+    Signature, Transaction, TransactionSigned, TxEip4844, TxHash, B256, EIP4844_TX_TYPE_ID,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use bytes::BufMut;
-
-use serde::{Deserialize, Serialize};
-
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::{
     arbitrary::{any as proptest_any, ParamsFor},
     collection::vec as proptest_vec,
     strategy::{BoxedStrategy, Strategy},
 };
-
-#[cfg(any(test, feature = "arbitrary"))]
-use crate::{
-    constants::eip4844::{FIELD_ELEMENTS_PER_BLOB, MAINNET_KZG_TRUSTED_SETUP},
-    kzg::{KzgCommitment, KzgProof, BYTES_PER_FIELD_ELEMENT},
-};
+use serde::{Deserialize, Serialize};
 
 /// An error that can occur when validating a [BlobTransaction].
 #[derive(Debug, thiserror::Error)]
@@ -38,6 +35,14 @@ pub enum BlobTransactionValidationError {
     /// The inner transaction is not a blob transaction.
     #[error("unable to verify proof for non blob transaction: {0}")]
     NotBlobTransaction(u8),
+    /// The versioned hash is incorrect.
+    #[error("wrong versioned hash: have {have}, expected {expected}")]
+    WrongVersionedHash {
+        /// The versioned hash we got
+        have: B256,
+        /// The versioned hash we expected
+        expected: B256,
+    },
 }
 
 /// A response to `GetPooledTransactions` that includes blob data, their commitments, and their
@@ -391,9 +396,9 @@ impl Decodable for BlobTransactionSidecar {
 // Wrapper for c-kzg rlp
 #[repr(C)]
 struct BlobTransactionSidecarRlp {
-    blobs: Vec<[u8; c_kzg::BYTES_PER_BLOB]>,
-    commitments: Vec<[u8; 48]>,
-    proofs: Vec<[u8; 48]>,
+    blobs: Vec<[u8; BYTES_PER_BLOB]>,
+    commitments: Vec<[u8; BYTES_PER_COMMITMENT]>,
+    proofs: Vec<[u8; BYTES_PER_PROOF]>,
 }
 
 const _: [(); std::mem::size_of::<BlobTransactionSidecar>()] =
@@ -441,7 +446,7 @@ impl<'a> arbitrary::Arbitrary<'a> for BlobTransactionSidecar {
             .map(|_| {
                 arr = arbitrary::Arbitrary::arbitrary(u).unwrap();
 
-                // Ensure that each blob is cacnonical by ensuring each field element contained in
+                // Ensure that each blob is canonical by ensuring each field element contained in
                 // the blob is < BLS_MODULUS
                 for i in 0..(FIELD_ELEMENTS_PER_BLOB as usize) {
                     arr[i * BYTES_PER_FIELD_ELEMENT] = 0;
@@ -466,7 +471,7 @@ impl proptest::arbitrary::Arbitrary for BlobTransactionSidecar {
                     .map(|mut blob| {
                         let mut arr = [0u8; BYTES_PER_BLOB];
 
-                        // Ensure that each blob is cacnonical by ensuring each field element
+                        // Ensure that each blob is canonical by ensuring each field element
                         // contained in the blob is < BLS_MODULUS
                         for i in 0..(FIELD_ELEMENTS_PER_BLOB as usize) {
                             blob[i * BYTES_PER_FIELD_ELEMENT] = 0;
@@ -485,8 +490,9 @@ impl proptest::arbitrary::Arbitrary for BlobTransactionSidecar {
     type Strategy = BoxedStrategy<BlobTransactionSidecar>;
 }
 
+/// Generates a [`BlobTransactionSidecar`] structure containing blobs, commitments, and proofs.
 #[cfg(any(test, feature = "arbitrary"))]
-fn generate_blob_sidecar(blobs: Vec<Blob>) -> BlobTransactionSidecar {
+pub fn generate_blob_sidecar(blobs: Vec<Blob>) -> BlobTransactionSidecar {
     let kzg_settings = MAINNET_KZG_TRUSTED_SETUP.clone();
 
     let commitments: Vec<Bytes48> = blobs
@@ -505,4 +511,155 @@ fn generate_blob_sidecar(blobs: Vec<Blob>) -> BlobTransactionSidecar {
         .collect();
 
     BlobTransactionSidecar { blobs, commitments, proofs }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        hex,
+        kzg::{Blob, Bytes48},
+        transaction::sidecar::generate_blob_sidecar,
+        BlobTransactionSidecar,
+    };
+    use std::{fs, path::PathBuf};
+
+    #[test]
+    fn test_blob_transaction_sidecar_generation() {
+        // Read the contents of the JSON file into a string.
+        let json_content = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/transaction/blob_data/blob1.json"),
+        )
+        .expect("Failed to read the blob data file");
+
+        // Parse the JSON contents into a serde_json::Value
+        let json_value: serde_json::Value =
+            serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
+
+        // Extract blob data from JSON and convert it to Blob
+        let blobs: Vec<Blob> = vec![Blob::from_hex(
+            json_value.get("data").unwrap().as_str().expect("Data is not a valid string"),
+        )
+        .unwrap()];
+
+        // Generate a BlobTransactionSidecar from the blobs
+        let sidecar = generate_blob_sidecar(blobs.clone());
+
+        // Assert commitment equality
+        assert_eq!(
+            sidecar.commitments,
+            vec![
+                Bytes48::from_hex(json_value.get("commitment").unwrap().as_str().unwrap()).unwrap()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_blob_transaction_sidecar_size() {
+        // Vector to store blob data from each file
+        let mut blobs: Vec<Blob> = Vec::new();
+
+        // Iterate over each file in the folder
+        for entry in fs::read_dir(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/transaction/blob_data/"),
+        )
+        .expect("Failed to read blob_data folder")
+        {
+            let entry = entry.expect("Failed to read directory entry");
+            let file_path = entry.path();
+
+            // Ensure the entry is a file and not a directory
+            if !file_path.is_file() || file_path.extension().unwrap_or_default() != "json" {
+                continue
+            }
+
+            // Read the contents of the JSON file into a string.
+            let json_content =
+                fs::read_to_string(file_path).expect("Failed to read the blob data file");
+
+            // Parse the JSON contents into a serde_json::Value
+            let json_value: serde_json::Value =
+                serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
+
+            // Extract blob data from JSON and convert it to Blob
+            if let Some(data) = json_value.get("data") {
+                if let Some(data_str) = data.as_str() {
+                    if let Ok(blob) = Blob::from_hex(data_str) {
+                        blobs.push(blob);
+                    }
+                }
+            }
+        }
+
+        // Generate a BlobTransactionSidecar from the blobs
+        let sidecar = generate_blob_sidecar(blobs.clone());
+
+        // Assert sidecar size
+        assert_eq!(sidecar.size(), 524672);
+    }
+
+    #[test]
+    fn test_blob_transaction_sidecar_rlp_encode() {
+        // Read the contents of the JSON file into a string.
+        let json_content = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/transaction/blob_data/blob1.json"),
+        )
+        .expect("Failed to read the blob data file");
+
+        // Parse the JSON contents into a serde_json::Value
+        let json_value: serde_json::Value =
+            serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
+
+        // Extract blob data from JSON and convert it to Blob
+        let blobs: Vec<Blob> = vec![Blob::from_hex(
+            json_value.get("data").unwrap().as_str().expect("Data is not a valid string"),
+        )
+        .unwrap()];
+
+        // Generate a BlobTransactionSidecar from the blobs
+        let sidecar = generate_blob_sidecar(blobs.clone());
+
+        // Create a vector to store the encoded RLP
+        let mut encoded_rlp = Vec::new();
+
+        // Encode the inner data of the BlobTransactionSidecar into RLP
+        sidecar.encode_inner(&mut encoded_rlp);
+
+        // Assert the equality between the expected RLP from the JSON and the encoded RLP
+        assert_eq!(json_value.get("rlp").unwrap().as_str().unwrap(), hex::encode(&encoded_rlp));
+    }
+
+    #[test]
+    fn test_blob_transaction_sidecar_rlp_decode() {
+        // Read the contents of the JSON file into a string.
+        let json_content = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/transaction/blob_data/blob1.json"),
+        )
+        .expect("Failed to read the blob data file");
+
+        // Parse the JSON contents into a serde_json::Value
+        let json_value: serde_json::Value =
+            serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
+
+        // Extract blob data from JSON and convert it to Blob
+        let blobs: Vec<Blob> = vec![Blob::from_hex(
+            json_value.get("data").unwrap().as_str().expect("Data is not a valid string"),
+        )
+        .unwrap()];
+
+        // Generate a BlobTransactionSidecar from the blobs
+        let sidecar = generate_blob_sidecar(blobs.clone());
+
+        // Create a vector to store the encoded RLP
+        let mut encoded_rlp = Vec::new();
+
+        // Encode the inner data of the BlobTransactionSidecar into RLP
+        sidecar.encode_inner(&mut encoded_rlp);
+
+        // Decode the RLP-encoded data back into a BlobTransactionSidecar
+        let decoded_sidecar =
+            BlobTransactionSidecar::decode_inner(&mut encoded_rlp.as_slice()).unwrap();
+
+        // Assert the equality between the original BlobTransactionSidecar and the decoded one
+        assert_eq!(sidecar, decoded_sidecar);
+    }
 }

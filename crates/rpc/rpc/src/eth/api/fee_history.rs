@@ -6,7 +6,10 @@ use futures::{
     FutureExt, Stream, StreamExt,
 };
 use metrics::atomics::AtomicU64;
-use reth_primitives::{Receipt, SealedBlock, TransactionSigned, B256, U256};
+use reth_primitives::{
+    eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
+    Receipt, SealedBlock, TransactionSigned, B256, U256,
+};
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider};
 use reth_rpc_types::TxGasAndReward;
 use serde::{Deserialize, Serialize};
@@ -55,16 +58,11 @@ impl FeeHistoryCache {
     /// This function is used to populate the cache with missing blocks, which can happen if the
     /// node switched to stage sync node.
     async fn missing_consecutive_blocks(&self) -> VecDeque<u64> {
-        let mut missing_blocks = VecDeque::new();
-        let lower_bound = self.lower_bound();
-        let upper_bound = self.upper_bound();
         let entries = self.inner.entries.read().await;
-        for block_number in (lower_bound..upper_bound).rev() {
-            if !entries.contains_key(&block_number) {
-                missing_blocks.push_back(block_number);
-            }
-        }
-        missing_blocks
+        (self.lower_bound()..self.upper_bound())
+            .rev()
+            .filter(|&block_number| !entries.contains_key(&block_number))
+            .collect()
     }
 
     /// Insert block data into the cache.
@@ -324,6 +322,17 @@ pub struct FeeHistoryEntry {
     pub base_fee_per_gas: u64,
     /// Gas used ratio this block.
     pub gas_used_ratio: f64,
+    /// The base per blob gas for EIP-4844.
+    /// For pre EIP-4844 equals to zero.
+    pub base_fee_per_blob_gas: Option<u128>,
+    /// Blob gas used ratio for this block.
+    /// Calculated as the ratio pf gasUsed and gasLimit.
+    pub blob_gas_used_ratio: f64,
+    /// The excess blob gas of the block.
+    pub excess_blob_gas: Option<u64>,
+    /// The total amount of blob gas consumed by the transactions within the block,
+    /// added in EIP-4844
+    pub blob_gas_used: Option<u64>,
     /// Gas used by this block.
     pub gas_used: u64,
     /// Gas limit by this block.
@@ -342,10 +351,31 @@ impl FeeHistoryEntry {
         FeeHistoryEntry {
             base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default(),
             gas_used_ratio: block.gas_used as f64 / block.gas_limit as f64,
+            base_fee_per_blob_gas: block.blob_fee(),
+            blob_gas_used_ratio: block.blob_gas_used() as f64 /
+                reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
+            excess_blob_gas: block.excess_blob_gas,
+            blob_gas_used: block.blob_gas_used,
             gas_used: block.gas_used,
-            header_hash: block.hash,
+            header_hash: block.hash(),
             gas_limit: block.gas_limit,
             rewards: Vec::new(),
         }
+    }
+
+    /// Returns the blob fee for the next block according to the EIP-4844 spec.
+    ///
+    /// Returns `None` if `excess_blob_gas` is None.
+    ///
+    /// See also [Self::next_block_excess_blob_gas]
+    pub fn next_block_blob_fee(&self) -> Option<u128> {
+        self.next_block_excess_blob_gas().map(calc_blob_gasprice)
+    }
+
+    /// Calculate excess blob gas for the next block according to the EIP-4844 spec.
+    ///
+    /// Returns a `None` if no excess blob gas is set, no EIP-4844 support
+    pub fn next_block_excess_blob_gas(&self) -> Option<u64> {
+        Some(calculate_excess_blob_gas(self.excess_blob_gas?, self.blob_gas_used?))
     }
 }

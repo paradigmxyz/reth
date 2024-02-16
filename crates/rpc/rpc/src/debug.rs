@@ -14,9 +14,8 @@ use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
-    revm::env::tx_env_with_recovered,
-    revm_primitives::{db::DatabaseCommit, BlockEnv, CfgEnv},
-    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256,
+    revm::env::tx_env_with_recovered, Address, Block, BlockId, BlockNumberOrTag, Bytes,
+    TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,
@@ -28,9 +27,12 @@ use reth_rpc_types::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
         GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
     },
-    BlockError, Bundle, CallRequest, RichBlock, StateContext,
+    BlockError, Bundle, RichBlock, StateContext, TransactionRequest,
 };
-use revm::{db::CacheDB, primitives::Env};
+use revm::{
+    db::CacheDB,
+    primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
+};
 use revm_inspectors::tracing::{
     js::{JsInspector, TransactionContext},
     FourByteInspector, TracingInspector, TracingInspectorConfig,
@@ -72,7 +74,7 @@ where
         &self,
         at: BlockId,
         transactions: Vec<TransactionSignedEcRecovered>,
-        cfg: CfgEnv,
+        cfg: CfgEnvWithHandlerCfg,
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
     ) -> EthResult<Vec<TraceResult>> {
@@ -88,7 +90,10 @@ where
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
                     let tx = tx_env_with_recovered(&tx);
-                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                    let env = EnvWithHandlerCfg {
+                        env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
+                        handler_cfg: cfg.handler_cfg,
+                    };
                     let (result, state_changes) = this
                         .trace_transaction(
                             opts.clone(),
@@ -207,13 +212,13 @@ where
             None => return Err(EthApiError::TransactionNotFound),
             Some(res) => res,
         };
-        let (cfg, block_env, _) = self.inner.eth_api.evm_env_at(block.hash.into()).await?;
+        let (cfg, block_env, _) = self.inner.eth_api.evm_env_at(block.hash().into()).await?;
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
         let state_at: BlockId = block.parent_hash.into();
-        let block_hash = block.hash;
-        let block_txs = block.body;
+        let block_hash = block.hash();
+        let block_txs = block.into_transactions_ecrecovered();
 
         let this = self.clone();
         self.inner
@@ -232,7 +237,11 @@ where
                     tx.hash,
                 )?;
 
-                let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
+                let env = EnvWithHandlerCfg {
+                    env: Env::boxed(cfg.cfg_env.clone(), block_env, tx_env_with_recovered(&tx)),
+                    handler_cfg: cfg.handler_cfg,
+                };
+
                 this.trace_transaction(
                     opts,
                     env,
@@ -255,7 +264,7 @@ where
     ///  - `debug_traceCall` executes with __enabled__ basefee check, `eth_call` does not: <https://github.com/paradigmxyz/reth/issues/6240>
     pub async fn debug_trace_call(
         &self,
-        call: CallRequest,
+        call: TransactionRequest,
         block_id: Option<BlockId>,
         opts: GethDebugTracingCallOptions,
     ) -> EthResult<GethTrace> {
@@ -402,10 +411,13 @@ where
         let mut at = block.parent_hash;
         let mut replay_block_txs = true;
 
-        // but if all transactions are to be replayed, we can use the state at the block itself
+        // if a transaction index is provided, we need to replay the transactions until the index
         let num_txs = transaction_index.index().unwrap_or(block.body.len());
-        if num_txs == block.body.len() {
-            at = block.hash;
+        // but if all transactions are to be replayed, we can use the state at the block itself
+        // this works with the exception of the PENDING block, because its state might not exist if
+        // built locally
+        if !target_block.is_pending() && num_txs == block.body.len() {
+            at = block.hash();
             replay_block_txs = false;
         }
 
@@ -425,7 +437,10 @@ where
                     // Execute all transactions until index
                     for tx in transactions {
                         let tx = tx_env_with_recovered(&tx);
-                        let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                        let env = EnvWithHandlerCfg {
+                            env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
+                            handler_cfg: cfg.handler_cfg,
+                        };
                         let (res, _) = transact(&mut db, env)?;
                         db.commit(res.state);
                     }
@@ -482,7 +497,7 @@ where
     fn trace_transaction(
         &self,
         opts: GethDebugTracingOptions,
-        env: Env,
+        env: EnvWithHandlerCfg,
         db: &mut SubState<StateProviderBox>,
         transaction_context: Option<TransactionContext>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {
@@ -606,7 +621,7 @@ where
         if let Some(mut block) = block {
             // In RPC withdrawals are always present
             if block.withdrawals.is_none() {
-                block.withdrawals = Some(vec![]);
+                block.withdrawals = Some(Withdrawals::default());
             }
             block.encode(&mut res);
         }
@@ -710,7 +725,7 @@ where
     /// Handler for `debug_traceCall`
     async fn debug_trace_call(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         block_number: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace> {

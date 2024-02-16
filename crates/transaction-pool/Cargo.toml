@@ -19,6 +19,7 @@ normal = [
 
 [dependencies]
 # reth
+reth-eth-wire.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-interfaces.workspace = true
@@ -56,12 +57,14 @@ proptest = { workspace = true, optional = true }
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-tracing.workspace = true
 paste = "1.0"
 rand = "0.8"
 proptest.workspace = true
 criterion.workspace = true
 assert_matches.workspace = true
 tempfile.workspace = true
+serde_json.workspace = true
 
 [features]
 default = ["serde"]

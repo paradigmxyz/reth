@@ -8,25 +8,25 @@ use reth_primitives::{trie::Nibbles, Account, StorageEntry, B256, U256};
 
 /// Represents a branch node in the trie.
 #[derive(Debug)]
-pub(crate) struct TrieBranchNode {
+pub struct TrieBranchNode {
     /// The key associated with the node.
-    pub(crate) key: Nibbles,
+    pub key: Nibbles,
     /// The value associated with the node.
-    pub(crate) value: B256,
+    pub value: B256,
     /// Indicates whether children are in the trie.
-    pub(crate) children_are_in_trie: bool,
+    pub children_are_in_trie: bool,
 }
 
 impl TrieBranchNode {
     /// Creates a new `TrieBranchNode`.
-    pub(crate) fn new(key: Nibbles, value: B256, children_are_in_trie: bool) -> Self {
+    pub fn new(key: Nibbles, value: B256, children_are_in_trie: bool) -> Self {
         Self { key, value, children_are_in_trie }
     }
 }
 
 /// Represents a variant of an account node.
 #[derive(Debug)]
-pub(crate) enum AccountNode {
+pub enum AccountNode {
     /// Branch node.
     Branch(TrieBranchNode),
     /// Leaf node.
@@ -35,7 +35,7 @@ pub(crate) enum AccountNode {
 
 /// Represents a variant of a storage node.
 #[derive(Debug)]
-pub(crate) enum StorageNode {
+pub enum StorageNode {
     /// Branch node.
     Branch(TrieBranchNode),
     /// Leaf node.
@@ -44,11 +44,11 @@ pub(crate) enum StorageNode {
 
 /// An iterator over existing intermediate branch nodes and updated leaf nodes.
 #[derive(Debug)]
-pub(crate) struct AccountNodeIter<C, H> {
+pub struct AccountNodeIter<C, H> {
     /// Underlying walker over intermediate nodes.
-    pub(crate) walker: TrieWalker<C>,
+    pub walker: TrieWalker<C>,
     /// The cursor for the hashed account entries.
-    pub(crate) hashed_account_cursor: H,
+    pub hashed_account_cursor: H,
     /// The previous account key. If the iteration was previously interrupted, this value can be
     /// used to resume iterating from the last returned leaf node.
     previous_account_key: Option<B256>,
@@ -61,7 +61,7 @@ pub(crate) struct AccountNodeIter<C, H> {
 
 impl<C, H> AccountNodeIter<C, H> {
     /// Creates a new `AccountNodeIter`.
-    pub(crate) fn new(walker: TrieWalker<C>, hashed_account_cursor: H) -> Self {
+    pub fn new(walker: TrieWalker<C>, hashed_account_cursor: H) -> Self {
         Self {
             walker,
             hashed_account_cursor,
@@ -73,7 +73,7 @@ impl<C, H> AccountNodeIter<C, H> {
 
     /// Sets the last iterated account key and returns the modified `AccountNodeIter`.
     /// This is used to resume iteration from the last checkpoint.
-    pub(crate) fn with_last_account_key(mut self, previous_account_key: B256) -> Self {
+    pub fn with_last_account_key(mut self, previous_account_key: B256) -> Self {
         self.previous_account_key = Some(previous_account_key);
         self
     }
@@ -95,7 +95,7 @@ where
     /// 5. Repeat.
     ///
     /// NOTE: The iteration will start from the key of the previous hashed entry if it was supplied.
-    pub(crate) fn try_next(&mut self) -> Result<Option<AccountNode>, StateRootError> {
+    pub fn try_next(&mut self) -> Result<Option<AccountNode>, StateRootError> {
         loop {
             // If the walker has a key...
             if let Some(key) = self.walker.key() {
@@ -151,12 +151,13 @@ where
     }
 }
 
+/// An iterator over existing intermediate storage branch nodes and updated leaf nodes.
 #[derive(Debug)]
-pub(crate) struct StorageNodeIter<C, H> {
+pub struct StorageNodeIter<C, H> {
     /// Underlying walker over intermediate nodes.
-    pub(crate) walker: TrieWalker<C>,
+    pub walker: TrieWalker<C>,
     /// The cursor for the hashed storage entries.
-    pub(crate) hashed_storage_cursor: H,
+    pub hashed_storage_cursor: H,
     /// The hashed address this storage trie belongs to.
     hashed_address: B256,
 
@@ -168,11 +169,7 @@ pub(crate) struct StorageNodeIter<C, H> {
 
 impl<C, H> StorageNodeIter<C, H> {
     /// Creates a new instance of StorageNodeIter.
-    pub(crate) fn new(
-        walker: TrieWalker<C>,
-        hashed_storage_cursor: H,
-        hashed_address: B256,
-    ) -> Self {
+    pub fn new(walker: TrieWalker<C>, hashed_storage_cursor: H, hashed_address: B256) -> Self {
         Self {
             walker,
             hashed_storage_cursor,
@@ -197,7 +194,7 @@ where
     /// 3. Reposition the hashed storage cursor on the next unprocessed key.
     /// 4. Return every hashed storage entry up to the key of the current intermediate branch node.
     /// 5. Repeat.
-    pub(crate) fn try_next(&mut self) -> Result<Option<StorageNode>, StorageRootError> {
+    pub fn try_next(&mut self) -> Result<Option<StorageNode>, StorageRootError> {
         loop {
             // Check if there's a key in the walker.
             if let Some(key) = self.walker.key() {

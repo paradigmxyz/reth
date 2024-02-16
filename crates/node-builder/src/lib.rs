@@ -6,19 +6,29 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![warn(unused_crate_dependencies)]
 
-/// Exports commonly used concrete instances of the [EngineTypes](reth_node_api::EngineTypes)
-/// trait.
-pub mod engine;
-pub use engine::EthEngineTypes;
+/// Node event hooks.
+pub mod hooks;
 
-/// Exports commonly used concrete instances of the [EvmEnvConfig](reth_node_api::EvmEnvConfig)
-/// trait.
-pub mod evm;
-pub use evm::EthEvmConfig;
+/// Support for configuring the higher level node types.
+pub mod node;
 
-/// Exports optimism-specific types that implement traits in [reth_node_api].
-#[cfg(feature = "optimism")]
-pub mod optimism;
-#[cfg(feature = "optimism")]
-pub use optimism::{OptimismEngineTypes, OptimismEvmConfig};
+/// Support for configuring the components of a node.
+pub mod components;
+
+mod builder;
+mod handle;
+pub mod rpc;
+
+pub mod provider;
+
+pub use builder::*;
+pub use handle::NodeHandle;
+
+/// Re-export the core configuration traits.
+pub use reth_node_core::cli::config::{
+    PayloadBuilderConfig, RethNetworkConfig, RethRpcConfig, RethTransactionPoolConfig,
+};
+
+pub use reth_node_core::node_config::NodeConfig;

@@ -6,10 +6,10 @@ use crate::{
         DatabaseArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
-    init::init_genesis,
 };
 use clap::Parser;
 use reth_db::{init_db, mdbx::DatabaseArguments};
+use reth_node_core::init::init_genesis;
 use reth_primitives::ChainSpec;
 use std::sync::Arc;
 use tracing::info;

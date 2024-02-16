@@ -9,15 +9,16 @@ use crate::{
 use parking_lot::Mutex;
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_interfaces::provider::{ProviderError, ProviderResult};
-use reth_node_api::EvmEnvConfig;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     keccak256, trie::AccountProof, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId,
     BlockNumber, BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
-    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
+    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
+    U256,
 };
 use reth_trie::updates::TrieUpdates;
-use revm::primitives::{BlockEnv, CfgEnv};
+use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     collections::{BTreeMap, HashMap},
     ops::{RangeBounds, RangeInclusive},
@@ -557,26 +558,26 @@ impl StateProvider for MockEthProvider {
 impl EvmEnvProvider for MockEthProvider {
     fn fill_env_at<EvmConfig>(
         &self,
-        _cfg: &mut CfgEnv,
+        _cfg: &mut CfgEnvWithHandlerCfg,
         _block_env: &mut BlockEnv,
         _at: BlockHashOrNumber,
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         Ok(())
     }
 
     fn fill_env_with_header<EvmConfig>(
         &self,
-        _cfg: &mut CfgEnv,
+        _cfg: &mut CfgEnvWithHandlerCfg,
         _block_env: &mut BlockEnv,
         _header: &Header,
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         Ok(())
     }
@@ -599,24 +600,24 @@ impl EvmEnvProvider for MockEthProvider {
 
     fn fill_cfg_env_at<EvmConfig>(
         &self,
-        _cfg: &mut CfgEnv,
+        _cfg: &mut CfgEnvWithHandlerCfg,
         _at: BlockHashOrNumber,
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         Ok(())
     }
 
     fn fill_cfg_env_with_header<EvmConfig>(
         &self,
-        _cfg: &mut CfgEnv,
+        _cfg: &mut CfgEnvWithHandlerCfg,
         _header: &Header,
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         Ok(())
     }
@@ -689,14 +690,14 @@ impl StateProviderFactory for Arc<MockEthProvider> {
 }
 
 impl WithdrawalsProvider for MockEthProvider {
-    fn latest_withdrawal(&self) -> ProviderResult<Option<reth_primitives::Withdrawal>> {
+    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         Ok(None)
     }
     fn withdrawals_by_block(
         &self,
         _id: BlockHashOrNumber,
         _timestamp: u64,
-    ) -> ProviderResult<Option<Vec<reth_primitives::Withdrawal>>> {
+    ) -> ProviderResult<Option<Withdrawals>> {
         Ok(None)
     }
 }

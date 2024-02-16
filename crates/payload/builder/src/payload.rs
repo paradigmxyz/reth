@@ -2,7 +2,10 @@
 
 use alloy_rlp::Encodable;
 use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::{Address, BlobTransactionSidecar, SealedBlock, Withdrawal, B256, U256};
+use reth_primitives::{
+    revm::config::revm_spec_by_timestamp_after_merge, Address, BlobTransactionSidecar, ChainSpec,
+    Header, SealedBlock, Withdrawals, B256, U256,
+};
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
     PayloadId,
@@ -11,6 +14,7 @@ use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v3, convert_block_to_payload_field_v2,
     convert_standalone_withdraw_to_withdrawal, try_block_to_payload_v1,
 };
+use revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 use std::convert::Infallible;
 
 /// Contains the built payload.
@@ -153,7 +157,7 @@ pub struct EthPayloadBuilderAttributes {
     /// Randomness value for the generated payload
     pub prev_randao: B256,
     /// Withdrawals for the generated payload
-    pub withdrawals: Vec<Withdrawal>,
+    pub withdrawals: Withdrawals,
     /// Root of the parent beacon block
     pub parent_beacon_block_root: Option<B256>,
 }
@@ -172,14 +176,14 @@ impl EthPayloadBuilderAttributes {
     pub fn new(parent: B256, attributes: PayloadAttributes) -> Self {
         let id = payload_id(&parent, &attributes);
 
-        let withdraw = attributes.withdrawals.map(
-            |withdrawals: Vec<reth_rpc_types::withdrawal::Withdrawal>| {
+        let withdraw = attributes.withdrawals.map(|withdrawals| {
+            Withdrawals::new(
                 withdrawals
                     .into_iter()
                     .map(convert_standalone_withdraw_to_withdrawal) // Removed the parentheses here
-                    .collect::<Vec<_>>()
-            },
-        );
+                    .collect(),
+            )
+        });
 
         Self {
             id,
@@ -228,8 +232,54 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
         self.prev_randao
     }
 
-    fn withdrawals(&self) -> &Vec<Withdrawal> {
+    fn withdrawals(&self) -> &Withdrawals {
         &self.withdrawals
+    }
+
+    fn cfg_and_block_env(
+        &self,
+        chain_spec: &ChainSpec,
+        parent: &Header,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        // configure evm env based on parent block
+        let mut cfg = CfgEnv::default();
+        cfg.chain_id = chain_spec.chain().id();
+
+        // ensure we're not missing any timestamp based hardforks
+        let spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp());
+
+        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
+        // cancun now, we need to set the excess blob gas to the default value
+        let blob_excess_gas_and_price = parent
+            .next_block_excess_blob_gas()
+            .or_else(|| {
+                if spec_id == SpecId::CANCUN {
+                    // default excess blob gas is zero
+                    Some(0)
+                } else {
+                    None
+                }
+            })
+            .map(BlobExcessGasAndPrice::new);
+
+        let block_env = BlockEnv {
+            number: U256::from(parent.number + 1),
+            coinbase: self.suggested_fee_recipient(),
+            timestamp: U256::from(self.timestamp()),
+            difficulty: U256::ZERO,
+            prevrandao: Some(self.prev_randao()),
+            gas_limit: U256::from(parent.gas_limit),
+            // calculate basefee based on parent block's gas usage
+            basefee: U256::from(
+                parent
+                    .next_block_base_fee(chain_spec.base_fee_params(self.timestamp()))
+                    .unwrap_or_default(),
+            ),
+            // calculate excess gas based on parent block's blob gas usage
+            blob_excess_gas_and_price,
+        };
+
+        (CfgEnvWithHandlerCfg::new(cfg, spec_id), block_env)
     }
 }
 

@@ -55,7 +55,8 @@ reth-rpc-types-compat.workspace = true
 reth-tracing.workspace = true
 reth-revm.workspace = true
 reth-downloaders.workspace = true
-reth-node-builder.workspace = true
+reth-node-ethereum.workspace = true
+reth-node-optimism.workspace = true
 
 assert_matches.workspace = true
 

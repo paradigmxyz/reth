@@ -181,10 +181,7 @@ pub(crate) trait DynProtocolHandler: fmt::Debug + Send + Sync + 'static {
     ) -> Option<Box<dyn DynConnectionHandler>>;
 }
 
-impl<T> DynProtocolHandler for T
-where
-    T: ProtocolHandler,
-{
+impl<T: ProtocolHandler> DynProtocolHandler for T {
     fn on_incoming(&self, socket_addr: SocketAddr) -> Option<Box<dyn DynConnectionHandler>> {
         T::on_incoming(self, socket_addr)
             .map(|handler| Box::new(handler) as Box<dyn DynConnectionHandler>)
@@ -204,13 +201,6 @@ where
 pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
     fn protocol(&self) -> Protocol;
 
-    fn on_unsupported_by_peer(
-        self,
-        supported: &SharedCapabilities,
-        direction: Direction,
-        peer_id: PeerId,
-    ) -> OnNotSupported;
-
     fn into_connection(
         self: Box<Self>,
         direction: Direction,
@@ -219,21 +209,9 @@ pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
     ) -> Pin<Box<dyn Stream<Item = BytesMut> + Send + 'static>>;
 }
 
-impl<T> DynConnectionHandler for T
-where
-    T: ConnectionHandler,
-{
+impl<T: ConnectionHandler> DynConnectionHandler for T {
     fn protocol(&self) -> Protocol {
         T::protocol(self)
-    }
-
-    fn on_unsupported_by_peer(
-        self,
-        supported: &SharedCapabilities,
-        direction: Direction,
-        peer_id: PeerId,
-    ) -> OnNotSupported {
-        T::on_unsupported_by_peer(self, supported, direction, peer_id)
     }
 
     fn into_connection(

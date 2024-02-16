@@ -295,12 +295,12 @@ where
         self.inner.task_spawner.spawn_blocking(Box::pin(async move {
             if count > MAX_PAYLOAD_BODIES_LIMIT {
                 tx.send(Err(EngineApiError::PayloadRequestTooLarge { len: count })).ok();
-                return
+                return;
             }
 
             if start == 0 || count == 0 {
                 tx.send(Err(EngineApiError::InvalidBodiesRange { start, count })).ok();
-                return
+                return;
             }
 
             let mut result = Vec::with_capacity(count as usize);
@@ -324,7 +324,7 @@ where
                     }
                     Err(err) => {
                         tx.send(Err(EngineApiError::Internal(Box::new(err)))).ok();
-                        return
+                        return;
                     }
                 };
             }
@@ -687,7 +687,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_beacon_consensus::BeaconEngineMessage;
     use reth_interfaces::test_utils::generators::random_block;
-    use reth_node_builder::EthEngineTypes;
+    use reth_node_ethereum::EthEngineTypes;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{SealedBlock, B256, MAINNET};
     use reth_provider::test_utils::MockEthProvider;

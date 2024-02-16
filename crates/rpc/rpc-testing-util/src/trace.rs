@@ -10,7 +10,7 @@ use reth_rpc_types::{
         parity::{LocalizedTransactionTrace, TraceResults, TraceType},
         tracerequest::TraceCallRequest,
     },
-    CallRequest, Index,
+    Index, TransactionRequest,
 };
 use std::{
     collections::HashSet,
@@ -29,8 +29,8 @@ pub type ReplayTransactionResult = Result<(TraceResults, TxHash), (RpcError, TxH
 /// A type representing the result of calling `trace_call_many` method.
 
 pub type CallManyTraceResult = Result<
-    (Vec<TraceResults>, Vec<(CallRequest, HashSet<TraceType>)>),
-    (RpcError, Vec<(CallRequest, HashSet<TraceType>)>),
+    (Vec<TraceResults>, Vec<(TransactionRequest, HashSet<TraceType>)>),
+    (RpcError, Vec<(TransactionRequest, HashSet<TraceType>)>),
 >;
 /// Result type for the `trace_get` method that also captures the requested transaction hash and
 /// index.
@@ -91,7 +91,7 @@ pub trait TraceApiExt {
         block_id: Option<BlockId>,
     ) -> CallManyTraceStream<'_>
     where
-        I: IntoIterator<Item = (CallRequest, HashSet<TraceType>)>;
+        I: IntoIterator<Item = (TransactionRequest, HashSet<TraceType>)>;
     /// Returns a new stream that yields the traces for the given transaction hash and indices.
     fn trace_get_stream<I>(&self, hash: B256, indices: I) -> TraceGetStream<'_>
     where
@@ -306,7 +306,7 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
         block_id: Option<BlockId>,
     ) -> CallManyTraceStream<'_>
     where
-        I: IntoIterator<Item = (CallRequest, HashSet<TraceType>)>,
+        I: IntoIterator<Item = (TransactionRequest, HashSet<TraceType>)>,
     {
         let call_set = calls.into_iter().collect::<Vec<_>>();
         let stream = futures::stream::once(async move {
@@ -569,8 +569,8 @@ mod tests {
     async fn can_create_trace_call_many_stream() {
         let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
 
-        let call_request_1 = CallRequest::default();
-        let call_request_2 = CallRequest::default();
+        let call_request_1 = TransactionRequest::default();
+        let call_request_2 = TransactionRequest::default();
         let trace_types = HashSet::from([TraceType::StateDiff, TraceType::VmTrace]);
         let calls = vec![(call_request_1, trace_types.clone()), (call_request_2, trace_types)];
 

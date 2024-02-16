@@ -1,11 +1,14 @@
+#![allow(deprecated)]
+
 use crate::{
     blobstore::BlobStoreError,
     error::PoolResult,
-    pool::{state::SubPool, TransactionEvents},
+    pool::{state::SubPool, BestTransactionFilter, TransactionEvents},
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
 use futures_util::{ready, Stream};
+use reth_eth_wire::HandleAnnouncement;
 use reth_primitives::{
     kzg::KzgSettings, AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError,
     FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
@@ -63,7 +66,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     async fn add_external_transactions(
         &self,
         transactions: Vec<Self::Transaction>,
-    ) -> PoolResult<Vec<PoolResult<TxHash>>> {
+    ) -> Vec<PoolResult<TxHash>> {
         self.add_transactions(TransactionOrigin::External, transactions).await
     }
 
@@ -97,7 +100,7 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
-    ) -> PoolResult<Vec<PoolResult<TxHash>>>;
+    ) -> Vec<PoolResult<TxHash>>;
 
     /// Returns a new transaction change event stream for the given transaction.
     ///
@@ -227,6 +230,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// given base fee.
     ///
     /// Consumer: Block production
+    #[deprecated(note = "Use best_transactions_with_attributes instead.")]
     fn best_transactions_with_base_fee(
         &self,
         base_fee: u64,
@@ -275,10 +279,12 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Retains only those hashes that are unknown to the pool.
     /// In other words, removes all transactions from the given set that are currently present in
-    /// the pool.
+    /// the pool. Returns hashes already known to the pool.
     ///
     /// Consumer: P2P
-    fn retain_unknown(&self, hashes: &mut Vec<TxHash>);
+    fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
+    where
+        A: HandleAnnouncement;
 
     /// Returns if the transaction for the given hash is already included in this pool.
     fn contains(&self, tx_hash: &TxHash) -> bool {
@@ -365,11 +371,21 @@ pub trait TransactionPoolExt: TransactionPool {
     /// Sets the current block info for the pool.
     fn set_block_info(&self, info: BlockInfo);
 
-    /// Event listener for when the pool needs to be updated
+    /// Event listener for when the pool needs to be updated.
     ///
-    /// Implementers need to update the pool accordingly.
-    /// For example the base fee of the pending block is determined after a block is mined which
+    /// Implementers need to update the pool accordingly:
+    ///
+    /// ## Fee changes
+    ///
+    /// The [CanonicalStateUpdate] includes the base and blob fee of the pending block, which
     /// affects the dynamic fee requirement of pending transactions in the pool.
+    ///
+    /// ## EIP-4844 Blob transactions
+    ///
+    /// Mined blob transactions need to be removed from the pool, but from the pool only. The blob
+    /// sidecar must not be removed from the blob store. Only after a blob transaction is
+    /// finalized, its sidecar is removed from the blob store. This ensures that in case of a reorg,
+    /// the sidecar is still available.
     fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>);
 
     /// Updates the accounts in the pool
@@ -380,6 +396,9 @@ pub trait TransactionPoolExt: TransactionPool {
 
     /// Deletes multiple blob sidecars from the blob store
     fn delete_blobs(&self, txs: Vec<B256>);
+
+    /// Maintenance function to cleanup blobs that are no longer needed.
+    fn cleanup_blobs(&self);
 }
 
 /// Determines what kind of new transactions should be emitted by a stream of transactions.
@@ -398,7 +417,7 @@ pub enum TransactionListenerKind {
 impl TransactionListenerKind {
     /// Returns true if we're only interested in transactions that are allowed to be propagated.
     #[inline]
-    pub fn is_propagate_only(&self) -> bool {
+    pub const fn is_propagate_only(&self) -> bool {
         matches!(self, Self::PropagateOnly)
     }
 }
@@ -454,7 +473,7 @@ pub enum PropagateKind {
 
 impl PropagateKind {
     /// Returns the peer the transaction was sent to
-    pub fn peer(&self) -> &PeerId {
+    pub const fn peer(&self) -> &PeerId {
         match self {
             PropagateKind::Full(peer) => peer,
             PropagateKind::Hash(peer) => peer,
@@ -487,7 +506,7 @@ impl<T: PoolTransaction> Clone for NewTransactionEvent<T> {
 }
 
 /// This type represents a new blob sidecar that has been stored in the transaction pool's
-/// blobstore; it includes the TransasctionHash of the blob transaction along with the assoc.
+/// blobstore; it includes the TransactionHash of the blob transaction along with the assoc.
 /// sidecar (blobs, commitments, proofs)
 #[derive(Debug, Clone)]
 pub struct NewBlobSidecar {
@@ -568,8 +587,8 @@ impl<'a> CanonicalStateUpdate<'a> {
     }
 
     /// Returns the hash of the tip block.
-    pub fn hash(&self) -> B256 {
-        self.new_tip.hash
+    pub const fn hash(&self) -> B256 {
+        self.new_tip.hash()
     }
 
     /// Timestamp of the latest chain update
@@ -610,7 +629,7 @@ pub struct ChangedAccount {
 
 impl ChangedAccount {
     /// Creates a new `ChangedAccount` with the given address and 0 balance and nonce.
-    pub(crate) fn empty(address: Address) -> Self {
+    pub(crate) const fn empty(address: Address) -> Self {
         Self { address, nonce: 0, balance: U256::ZERO }
     }
 }
@@ -652,6 +671,20 @@ pub trait BestTransactions: Iterator + Send {
     ///
     /// If set to true, no blob transactions will be returned.
     fn set_skip_blobs(&mut self, skip_blobs: bool);
+
+    /// Creates an iterator which uses a closure to determine if a transaction should be yielded.
+    ///
+    /// Given an element the closure must return true or false. The returned iterator will yield
+    /// only the elements for which the closure returns true.
+    ///
+    /// Descendant transactions will be skipped.
+    fn filter<P>(self, predicate: P) -> BestTransactionFilter<Self, P>
+    where
+        P: FnMut(&Self::Item) -> bool,
+        Self: Sized,
+    {
+        BestTransactionFilter::new(self, predicate)
+    }
 }
 
 /// A no-op implementation that yields no transactions.
@@ -678,17 +711,17 @@ pub struct BestTransactionsAttributes {
 
 impl BestTransactionsAttributes {
     /// Creates a new `BestTransactionsAttributes` with the given basefee and blob fee.
-    pub fn new(basefee: u64, blob_fee: Option<u64>) -> Self {
+    pub const fn new(basefee: u64, blob_fee: Option<u64>) -> Self {
         Self { basefee, blob_fee }
     }
 
     /// Creates a new `BestTransactionsAttributes` with the given basefee.
-    pub fn base_fee(basefee: u64) -> Self {
+    pub const fn base_fee(basefee: u64) -> Self {
         Self::new(basefee, None)
     }
 
     /// Sets the given blob fee.
-    pub fn with_blob_fee(mut self, blob_fee: u64) -> Self {
+    pub const fn with_blob_fee(mut self, blob_fee: u64) -> Self {
         self.blob_fee = Some(blob_fee);
         self
     }
@@ -882,7 +915,7 @@ impl EthPooledTransaction {
     }
 
     /// Return the reference to the underlying transaction.
-    pub fn transaction(&self) -> &TransactionSignedEcRecovered {
+    pub const fn transaction(&self) -> &TransactionSignedEcRecovered {
         &self.transaction
     }
 }
@@ -1075,7 +1108,7 @@ impl IntoRecoveredTransaction for EthPooledTransaction {
 }
 
 /// Represents the current status of the pool.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct PoolSize {
     /// Number of transactions in the _pending_ sub-pool.
     pub pending: usize,
@@ -1110,7 +1143,7 @@ impl PoolSize {
 }
 
 /// Represents the current status of the pool.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
 pub struct BlockInfo {
     /// Hash for the currently tracked block.
     pub last_seen_block_hash: B256,
@@ -1140,7 +1173,7 @@ pub enum GetPooledTransactionLimit {
 impl GetPooledTransactionLimit {
     /// Returns true if the given size exceeds the limit.
     #[inline]
-    pub fn exceeds(&self, size: usize) -> bool {
+    pub const fn exceeds(&self, size: usize) -> bool {
         match self {
             GetPooledTransactionLimit::None => false,
             GetPooledTransactionLimit::ResponseSizeSoftLimit(limit) => size > *limit,
@@ -1160,7 +1193,7 @@ pub struct NewSubpoolTransactionStream<Tx: PoolTransaction> {
 
 impl<Tx: PoolTransaction> NewSubpoolTransactionStream<Tx> {
     /// Create a new stream that yields full transactions from the subpool
-    pub fn new(st: Receiver<NewTransactionEvent<Tx>>, subpool: SubPool) -> Self {
+    pub const fn new(st: Receiver<NewTransactionEvent<Tx>>, subpool: SubPool) -> Self {
         Self { st, subpool }
     }
 
