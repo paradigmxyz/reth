@@ -18,3 +18,6 @@ pub use engine::OptimismEngineTypes;
 /// [ConfigureEvmEnv](reth_node_api::ConfigureEvmEnv) trait.
 pub mod evm;
 pub use evm::OptimismEvmConfig;
+
+pub mod node;
+pub use node::OptimismNode;

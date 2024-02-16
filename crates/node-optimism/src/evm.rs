@@ -1,4 +1,4 @@
-use reth_node_api::ConfigureEvmEnv;
+use reth_node_api::{evm::EvmConfig, ConfigureEvmEnv};
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_op_tx_env},
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
@@ -44,6 +44,9 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
         cfg_env.handler_cfg.is_optimism = chain_spec.is_optimism();
     }
 }
+
+// TODO
+impl EvmConfig for OptimismEvmConfig {}
 
 #[cfg(test)]
 mod tests {
