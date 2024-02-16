@@ -268,29 +268,6 @@ impl RpcServerArgs {
         self
     }
 
-    /// Restarts all servers with the same configuration.
-    pub async fn restart_servers<Reth, Engine, Conf, EngineT>(
-        &self,
-        components: &Reth,
-        engine_api: Engine,
-        jwt_secret: JwtSecret,
-        conf: &mut Conf,
-        handles: RethRpcServerHandles,
-    ) -> eyre::Result<RethRpcServerHandles>
-    where
-        EngineT: EngineTypes + 'static,
-        Engine: EngineApiServer<EngineT>,
-        Reth: RethNodeComponents,
-        Conf: RethNodeCommandConfig,
-    {
-        // stop servers
-        handles.rpc.stop()?;
-        handles.auth.stop()?;
-
-        // start servers
-        self.start_servers(components, engine_api, jwt_secret, conf).await
-    }
-
     /// Configures and launches _all_ servers.
     ///
     /// Returns the handles for the launched regular RPC server(s) (if any) and the server handle
