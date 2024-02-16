@@ -16,4 +16,9 @@ pub struct BitfinityArgs {
     /// Default: 30s
     #[arg(long, short = 'i', value_name = "IMPORT_INTERVAL", default_value = "30")]
     pub import_interval: u64,
+
+    /// Batch size for importing blocks
+    /// Default: 500
+    #[arg(long, short = 'b', value_name = "BATCH_SIZE", default_value = "500")]
+    pub batch_size: usize,
 }
