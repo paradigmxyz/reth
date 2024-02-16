@@ -4,18 +4,16 @@
 #![warn(unused_crate_dependencies)]
 
 use futures_util::StreamExt;
-use std::sync::Arc;
-
 use reth::{
     builder::{NodeBuilder, NodeHandle},
     providers::CanonStateSubscriptions,
+    rpc::eth::EthTransactions,
     tasks::TaskManager,
 };
-
-use reth::rpc::eth::EthTransactions;
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{b256, hex, ChainSpec, Genesis};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {

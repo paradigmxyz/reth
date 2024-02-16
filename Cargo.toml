@@ -60,6 +60,7 @@ members = [
     "examples/beacon-api-sse/",
     "examples/cli-extension-event-hooks/",
     "examples/custom-node/",
+    "examples/custom-node-components/",
     "examples/custom-dev-node/",
     "examples/custom-payload-builder/",
     "examples/manual-p2p/",

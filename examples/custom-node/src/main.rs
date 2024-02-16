@@ -15,23 +15,42 @@
 //! Once traits are implemented and custom types are defined, the [EngineTypes] trait can be
 //! implemented:
 
+#![warn(unused_crate_dependencies)]
+
 use alloy_chains::Chain;
 use reth::{
-    builder::{node::NodeTypes, NodeBuilder},
+    builder::{
+        components::{ComponentsBuilder, PayloadServiceBuilder},
+        node::NodeTypes,
+        BuilderContext, FullNodeTypes, Node, NodeBuilder, PayloadBuilderConfig,
+    },
+    providers::{CanonStateSubscriptions, StateProviderFactory},
     tasks::TaskManager,
+    transaction_pool::TransactionPool,
+};
+use reth_basic_payload_builder::{
+    BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
+    PayloadBuilder, PayloadConfig,
 };
 use reth_node_api::{
     validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion,
     EngineTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::EthEvmConfig;
-use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
+use reth_node_ethereum::{
+    node::{EthereumNetwork, EthereumPoolBuilder},
+    EthEvmConfig,
+};
+use reth_payload_builder::{
+    error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
+    PayloadBuilderService,
+};
 use reth_primitives::{Address, ChainSpec, Genesis, Withdrawals, B256};
 use reth_rpc_types::{
     engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
     withdrawal::Withdrawal,
 };
+use reth_tracing::{RethTracer, Tracer};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use thiserror::Error;
@@ -150,7 +169,9 @@ struct MyCustomNode;
 /// Configure the node types
 impl NodeTypes for MyCustomNode {
     type Primitives = ();
+    // use the custom engine types
     type Engine = CustomEngineTypes;
+    // use the default ethereum EVM config
     type Evm = EthEvmConfig;
 
     fn evm_config(&self) -> Self::Evm {
@@ -158,12 +179,139 @@ impl NodeTypes for MyCustomNode {
     }
 }
 
+/// Implement the Node trait for the custom node
+///
+/// This provides a preset configuration for the node
+impl<N> Node<N> for MyCustomNode
+where
+    N: FullNodeTypes<Engine = CustomEngineTypes>,
+{
+    type PoolBuilder = EthereumPoolBuilder;
+    type NetworkBuilder = EthereumNetwork;
+    type PayloadBuilder = CustomPayloadServiceBuilder;
+
+    fn components(
+        self,
+    ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder> {
+        ComponentsBuilder::default()
+            .node_types::<N>()
+            .pool(EthereumPoolBuilder::default())
+            .payload(CustomPayloadServiceBuilder::default())
+            .network(EthereumNetwork::default())
+    }
+}
+
+/// A custom payload service builder that supports the custom engine types
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
+pub struct CustomPayloadServiceBuilder;
+
+impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadServiceBuilder
+where
+    Node: FullNodeTypes<Engine = CustomEngineTypes>,
+    Pool: TransactionPool + Unpin + 'static,
+{
+    async fn spawn_payload_service(
+        self,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+    ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>> {
+        let payload_builder = CustomPayloadBuilder::default();
+        let conf = ctx.payload_builder_config();
+
+        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
+            .interval(conf.interval())
+            .deadline(conf.deadline())
+            .max_payload_tasks(conf.max_payload_tasks())
+            .extradata(conf.extradata_rlp_bytes())
+            .max_gas_limit(conf.max_gas_limit());
+
+        let payload_generator = BasicPayloadJobGenerator::with_builder(
+            ctx.provider().clone(),
+            pool,
+            ctx.task_executor().clone(),
+            payload_job_config,
+            ctx.chain_spec(),
+            payload_builder,
+        );
+        let (payload_service, payload_builder) =
+            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
+
+        ctx.task_executor().spawn_critical("payload builder service", Box::pin(payload_service));
+
+        Ok(payload_builder)
+    }
+}
+
+/// The type responsible for building custom payloads
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
+pub struct CustomPayloadBuilder;
+
+impl<Pool, Client> PayloadBuilder<Pool, Client> for CustomPayloadBuilder
+where
+    Client: StateProviderFactory,
+    Pool: TransactionPool,
+{
+    type Attributes = CustomPayloadBuilderAttributes;
+    type BuiltPayload = EthBuiltPayload;
+
+    fn try_build(
+        &self,
+        args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
+    ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
+        let BuildArguments { client, pool, cached_reads, config, cancel, best_payload } = args;
+        let PayloadConfig {
+            initialized_block_env,
+            initialized_cfg,
+            parent_block,
+            extra_data,
+            attributes,
+            chain_spec,
+        } = config;
+
+        // This reuses the default EthereumPayloadBuilder to build the payload
+        // but any custom logic can be implemented here
+        reth_ethereum_payload_builder::EthereumPayloadBuilder::default().try_build(BuildArguments {
+            client,
+            pool,
+            cached_reads,
+            config: PayloadConfig {
+                initialized_block_env,
+                initialized_cfg,
+                parent_block,
+                extra_data,
+                attributes: attributes.0,
+                chain_spec,
+            },
+            cancel,
+            best_payload,
+        })
+    }
+
+    fn build_empty_payload(
+        client: &Client,
+        config: PayloadConfig<Self::Attributes>,
+    ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
+        let PayloadConfig {
+            initialized_block_env,
+            initialized_cfg,
+            parent_block,
+            extra_data,
+            attributes,
+            chain_spec,
+        } = config;
+        <reth_ethereum_payload_builder::EthereumPayloadBuilder  as PayloadBuilder<Pool,Client>>  ::build_empty_payload(client,
+            PayloadConfig { initialized_block_env, initialized_cfg, parent_block, extra_data, attributes: attributes.0, chain_spec }
+        )
+    }
+}
+
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    let tasks = TaskManager::current();
+    let _guard = RethTracer::new().init()?;
 
-    // this launches a test node with http
-    let rpc_args = RpcServerArgs::default().with_http();
+    let tasks = TaskManager::current();
 
     // create optimism genesis with canyon at block 2
     let spec = ChainSpec::builder()
@@ -174,54 +322,17 @@ async fn main() -> eyre::Result<()> {
         .shanghai_activated()
         .build();
 
-    let _genesis_hash = spec.genesis_hash();
-
     // create node config
-    let node_config = NodeConfig::test().with_rpc(rpc_args).with_chain(spec);
+    let node_config =
+        NodeConfig::test().with_rpc(RpcServerArgs::default().with_http()).with_chain(spec);
 
-    let _handle = NodeBuilder::new(node_config)
+    let handle = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
-        .with_types(MyCustomNode::default());
-    // .with_components(EthereumNode::components()
-    //     .
-    // );
-    // .launch().await?;
+        .launch_node(MyCustomNode::default())
+        .await
+        .unwrap();
 
-    //
-    //
-    // // call a function on the node
-    // let client = handle.rpc_server_handles().auth.http_client();
-    // let block_number = client.block_number().await.unwrap();
-    //
-    // // it should be zero, since this is an ephemeral test node
-    // assert_eq!(block_number, U256::ZERO);
-    //
-    // // call the engine_forkchoiceUpdated function with payload attributes
-    // let forkchoice_state = ForkchoiceState {
-    //     head_block_hash: genesis_hash,
-    //     safe_block_hash: genesis_hash,
-    //     finalized_block_hash: genesis_hash,
-    // };
-    //
-    // let payload_attributes = CustomPayloadAttributes {
-    //     inner: EthPayloadAttributes {
-    //         timestamp: 1,
-    //         prev_randao: Default::default(),
-    //         suggested_fee_recipient: Default::default(),
-    //         withdrawals: Some(vec![]),
-    //         parent_beacon_block_root: None,
-    //     },
-    //     custom: 42,
-    // };
-    //
-    // // call the engine_forkchoiceUpdated function with payload attributes
-    // let res = <HttpClient as EngineApiClient<CustomEngineTypes>>::fork_choice_updated_v2(
-    //     &client,
-    //     forkchoice_state,
-    //     Some(payload_attributes),
-    // )
-    // .await;
-    // assert!(res.is_ok());
+    println!("Node started");
 
-    Ok(())
+    handle.node_exit_future.await
 }

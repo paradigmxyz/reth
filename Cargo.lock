@@ -1834,18 +1834,30 @@ version = "0.0.0"
 dependencies = [
  "alloy-chains",
  "eyre",
- "jsonrpsee",
  "reth",
+ "reth-basic-payload-builder",
+ "reth-ethereum-payload-builder",
  "reth-node-api",
  "reth-node-core",
  "reth-node-ethereum",
  "reth-payload-builder",
  "reth-primitives",
- "reth-rpc-api",
  "reth-rpc-types",
+ "reth-tracing",
  "serde",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "custom-node-components"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "reth",
+ "reth-node-ethereum",
+ "reth-tracing",
+ "reth-transaction-pool",
 ]
 
 [[package]]
