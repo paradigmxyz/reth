@@ -73,11 +73,15 @@ type RethFullAdapter<DB, N> =
 /// [EvmConfig](reth_node_api::evm::EvmConfig), the database [Database] and finally all the
 /// components of the node that are downstream of those types, these include:
 ///
-///  - The transaction pool: [PoolBuilder](crate::components::PoolBuilder)
+///  - The transaction pool: [PoolBuilder]
 ///  - The network: [NetworkBuilder](crate::components::NetworkBuilder)
 ///  - The payload builder: [PayloadBuilder](crate::components::PayloadServiceBuilder)
 ///
 /// Finally, the node is ready to launch [NodeBuilder::launch]
+///
+/// On launch the builder returns a fully type aware [NodeHandle] that has access to all the
+/// configured components and can interact with the node.
+///
 ///
 /// [builder]: https://doc.rust-lang.org/1.0.0/style/ownership/builders.html
 pub struct NodeBuilder<DB, State> {
@@ -126,12 +130,14 @@ impl NodeBuilder<(), InitState> {
 }
 
 impl<DB> NodeBuilder<DB, InitState> {
-    /// Configures the additional external context, e.g. additional context captured via CLI args.
+    /// Configures the underlying database that the node will use.
     pub fn with_database<D>(self, database: D) -> NodeBuilder<D, InitState> {
         NodeBuilder { config: self.config, state: self.state, database }
     }
 
     /// Preconfigure the builder with the context to launch the node.
+    ///
+    /// This provides the task executor and the data directory for the node.
     pub fn with_launch_context(
         self,
         task_executor: TaskExecutor,
@@ -172,6 +178,8 @@ where
     }
 
     /// Preconfigures the node with a specific node implementation.
+    ///
+    /// This is a convenience method that sets the node's types and components in one call.
     pub fn node<N>(
         self,
         node: N,
@@ -274,40 +282,6 @@ where
                 components_builder: f(self.state.components_builder),
                 hooks: self.state.hooks,
                 rpc: self.state.rpc,
-            },
-        }
-    }
-
-    /// Resets the setup process to the components stage.
-    ///
-    /// CAUTION: All previously configured hooks will be lost.
-    pub fn fuse_components<C>(
-        self,
-        components_builder: C,
-    ) -> NodeBuilder<
-        DB,
-        ComponentsState<
-            Types,
-            C,
-            FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-                C::Pool,
-            >,
-        >,
-    >
-    where
-        C: NodeComponentsBuilder<
-            FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-        >,
-    {
-        NodeBuilder {
-            config: self.config,
-            database: self.database,
-            state: ComponentsState {
-                types: self.state.types,
-                components_builder,
-                hooks: NodeHooks::new(),
-                rpc: RpcHooks::new(),
             },
         }
     }
@@ -877,35 +851,6 @@ where
     pub fn map_components(self, f: impl FnOnce(Components) -> Components) -> Self {
         Self {
             builder: self.builder.map_components(f),
-            task_executor: self.task_executor,
-            data_dir: self.data_dir,
-        }
-    }
-
-    /// Resets the setup process to the components stage.
-    ///
-    /// CAUTION: All previously configured hooks will be lost.
-    pub fn fuse_components<C>(
-        self,
-        components_builder: C,
-    ) -> WithLaunchContext<
-        DB,
-        ComponentsState<
-            Types,
-            C,
-            FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-                C::Pool,
-            >,
-        >,
-    >
-    where
-        C: NodeComponentsBuilder<
-            FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-        >,
-    {
-        WithLaunchContext {
-            builder: self.builder.fuse_components(components_builder),
             task_executor: self.task_executor,
             data_dir: self.data_dir,
         }
