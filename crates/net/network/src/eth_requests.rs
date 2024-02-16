@@ -128,6 +128,9 @@ where
 
                 headers.push(header);
 
+                if headers.len() >= MAX_HEADERS_SERVE {
+                    break
+                }
                 match headers.encode_max(APPROX_HEADER_SIZE, SOFT_RESPONSE_LIMIT) {
                     Ok(_) => {
                         // If encode_max succeeds, continue accumulating headers
@@ -136,10 +139,6 @@ where
                         // If encode_max fails,stop the loop
                         break;
                     }
-                }
-
-                if headers.len() >= MAX_HEADERS_SERVE {
-                    break
                 }
             } else {
                 break
@@ -178,6 +177,9 @@ where
                 };
 
                 bodies.push(body);
+                if bodies.len() >= MAX_BODIES_SERVE {
+                    break
+                }
                 match bodies.encode_max(APPROX_BODY_SIZE, SOFT_RESPONSE_LIMIT) {
                     Ok(_) => {
                         // If encode_max succeeds, continue accumulating bodies
@@ -209,7 +211,9 @@ where
                     .map(|receipt| receipt.with_bloom())
                     .collect::<Vec<_>>();
                 receipts.push(receipt);
-
+                if receipts.len() >= MAX_RECEIPTS_SERVE {
+                    break
+                }
                 match receipts.encode_max(APPROX_RECEIPT_SIZE, SOFT_RESPONSE_LIMIT) {
                     Ok(_) => {
                         // If encode_max succeeds, continue accumulating receipts
