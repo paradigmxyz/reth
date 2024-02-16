@@ -3,7 +3,6 @@
 use crate::events::cl::ConsensusLayerHealthEvent;
 use futures::Stream;
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, ForkchoiceStatus};
-
 use reth_db::{database::Database, database_metrics::DatabaseMetadata};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
@@ -15,7 +14,6 @@ use reth_primitives::{
 };
 use reth_prune::PrunerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
-
 use std::{
     fmt::{Display, Formatter},
     future::Future,
