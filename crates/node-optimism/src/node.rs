@@ -17,7 +17,7 @@ use reth_transaction_pool::{
 };
 
 /// Type configuration for a regular Optimism node.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct OptimismNode {
     /// Additional Optimism args
@@ -26,14 +26,14 @@ pub struct OptimismNode {
 
 impl OptimismNode {
     /// Creates a new instance of the Optimism node type.
-    pub fn new(args: RollupArgs) -> Self {
+    pub const fn new(args: RollupArgs) -> Self {
         Self { args }
     }
 
     /// Returns the components for the given [RollUpArgs].
     pub fn components<Node>(
         args: RollupArgs,
-    ) -> ComponentsBuilder<Node, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder>
+    ) -> ComponentsBuilder<Node, OptimismPoolBuilder, OptimismPayloadBuilder, OptimismNetworkBuilder>
     where
         Node: FullNodeTypes<Engine = OptimismEngineTypes>,
     {

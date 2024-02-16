@@ -4,12 +4,13 @@
 
 use crate::{
     components::{
-        FullNodeComponents, FullNodeComponentsAdapter, NodeComponents, NodeComponentsBuilder,
+        ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, NodeComponents,
+        NodeComponentsBuilder, PoolBuilder,
     },
     hooks::NodeHooks,
     node::{FullNode, FullNodeTypes, FullNodeTypesAdapter, NodeTypes},
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
-    NodeHandle,
+    Node, NodeHandle,
 };
 use eyre::Context;
 use futures::{future::Either, stream, stream_select, StreamExt};
@@ -55,6 +56,9 @@ use tokio::sync::{mpsc::unbounded_channel, oneshot};
 // Note: we need to hardcode this because custom components might depend on it in associated types.
 type RethFullProviderType<DB, Evm> =
     BlockchainProvider<DB, ShareableBlockchainTree<DB, EvmProcessorFactory<Evm>>>;
+
+type RethFullAdapter<DB, N> =
+    FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>;
 
 /// Declaratively construct a node.
 ///
@@ -153,7 +157,7 @@ impl<DB> NodeBuilder<DB, InitState> {
 
 impl<DB> NodeBuilder<DB, InitState>
 where
-    DB: Database + Clone + 'static,
+    DB: Database + Unpin + Clone + 'static,
 {
     /// Configures the types of the node.
     pub fn with_types<T>(self, types: T) -> NodeBuilder<DB, TypesState<T, DB>>
@@ -165,6 +169,41 @@ where
             state: TypesState { adapter: FullNodeTypesAdapter::new(types) },
             database: self.database,
         }
+    }
+
+    /// Preconfigures the node with a specific node implementation.
+    pub fn node<N>(
+        self,
+        node: N,
+    ) -> NodeBuilder<
+        DB,
+        ComponentsState<
+            N,
+            ComponentsBuilder<
+                RethFullAdapter<DB, N>,
+                N::PoolBuilder,
+                N::PayloadBuilder,
+                N::NetworkBuilder,
+            >,
+            FullNodeComponentsAdapter<
+                RethFullAdapter<DB, N>,
+                <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+            >,
+        >,
+    >
+    where
+        N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>>,
+        N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
+        N::NetworkBuilder: crate::components::NetworkBuilder<
+            RethFullAdapter<DB, N>,
+            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+        >,
+        N::PayloadBuilder: crate::components::PayloadServiceBuilder<
+            RethFullAdapter<DB, N>,
+            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+        >,
+    {
+        self.with_types(node.clone()).with_components(node.components())
     }
 }
 
@@ -700,7 +739,7 @@ impl<DB, State> WithLaunchContext<DB, State> {
 
 impl<DB> WithLaunchContext<DB, InitState>
 where
-    DB: Database + Clone + 'static,
+    DB: Database + Clone + Unpin + 'static,
 {
     /// Configures the types of the node.
     pub fn with_types<T>(self, types: T) -> WithLaunchContext<DB, TypesState<T, DB>>
@@ -712,6 +751,73 @@ where
             task_executor: self.task_executor,
             data_dir: self.data_dir,
         }
+    }
+
+    /// Preconfigures the node with a specific node implementation.
+    pub fn node<N>(
+        self,
+        node: N,
+    ) -> WithLaunchContext<
+        DB,
+        ComponentsState<
+            N,
+            ComponentsBuilder<
+                RethFullAdapter<DB, N>,
+                N::PoolBuilder,
+                N::PayloadBuilder,
+                N::NetworkBuilder,
+            >,
+            FullNodeComponentsAdapter<
+                RethFullAdapter<DB, N>,
+                <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+            >,
+        >,
+    >
+    where
+        N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>>,
+        N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
+        N::NetworkBuilder: crate::components::NetworkBuilder<
+            RethFullAdapter<DB, N>,
+            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+        >,
+        N::PayloadBuilder: crate::components::PayloadServiceBuilder<
+            RethFullAdapter<DB, N>,
+            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+        >,
+    {
+        self.with_types(node.clone()).with_components(node.components())
+    }
+}
+
+impl<DB> WithLaunchContext<DB, InitState>
+where
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+{
+    /// Launches a preconfigured [Node]
+    pub async fn launch_node<N>(
+        self,
+        node: N,
+    ) -> eyre::Result<
+        NodeHandle<
+            FullNodeComponentsAdapter<
+                RethFullAdapter<DB, N>,
+                <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+            >,
+        >,
+    >
+    where
+        N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>>,
+        N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
+        N::NetworkBuilder: crate::components::NetworkBuilder<
+            RethFullAdapter<DB, N>,
+            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+        >,
+        N::PayloadBuilder: crate::components::PayloadServiceBuilder<
+            RethFullAdapter<DB, N>,
+            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+        >,
+    {
+        self.node(node).launch().await
     }
 }
 

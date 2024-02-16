@@ -29,8 +29,7 @@ async fn main() -> eyre::Result<()> {
 
     let NodeHandle { mut node, node_exit_future } = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
-        .with_types(EthereumNode::default())
-        .with_components(EthereumNode::components())
+        .node(EthereumNode::default())
         .launch()
         .await?;
 

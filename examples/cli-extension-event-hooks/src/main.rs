@@ -22,8 +22,7 @@ fn main() {
     Cli::parse_args()
         .run(|builder, _| async move {
             let handle = builder
-                .with_types(EthereumNode::default())
-                .with_components(EthereumNode::components())
+                .node(EthereumNode::default())
                 .on_node_started(|_ctx| {
                     println!("Node started");
                     Ok(())

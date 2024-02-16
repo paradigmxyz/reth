@@ -96,12 +96,13 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
     ///
     /// ```no_run
     /// use reth::cli::Cli;
+    /// use reth_node_ethereum::EthereumNode;
     ///
     /// Cli::parse_args()
     ///     .run(|builder, _| async move {
-    ///         // launch the node
+    ///         let handle = builder.launch_node(EthereumNode::default()).await?;
     ///
-    ///         Ok(())
+    ///         handle.wait_for_node_exit().await
     ///     })
     ///     .unwrap();
     /// ```

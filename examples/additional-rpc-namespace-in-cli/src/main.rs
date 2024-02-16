@@ -22,8 +22,7 @@ fn main() {
     Cli::<RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             let handle = builder
-                .with_types(EthereumNode::default())
-                .with_components(EthereumNode::components())
+                .node(EthereumNode::default())
                 .extend_rpc_modules(move |ctx| {
                     if !args.enable_ext {
                         return Ok(())

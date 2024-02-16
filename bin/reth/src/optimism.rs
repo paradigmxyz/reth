@@ -22,11 +22,8 @@ fn main() {
     }
 
     if let Err(err) = Cli::<RollupArgs>::parse().run(|builder, rollup_args| async move {
-        let NodeHandle { node, node_exit_future } = builder
-            .with_types(OptimismNode::default())
-            .with_components(OptimismNode::components(rollup_args.clone()))
-            .launch()
-            .await?;
+        let NodeHandle { node, node_exit_future } =
+            builder.launch_node(OptimismNode::new(rollup_args.clone())).await?;
 
         // If `enable_genesis_walkback` is set to true, the rollup client will need to
         // perform the derivation pipeline from genesis, validating the data dir.

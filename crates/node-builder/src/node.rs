@@ -19,7 +19,7 @@ use std::{marker::PhantomData, sync::Arc};
 /// A [Node] is a [NodeTypes] that comes with preconfigured components.
 ///
 /// This can be used to configure the builder with a preset of components.
-pub trait Node<N>: NodeTypes {
+pub trait Node<N>: NodeTypes + Clone {
     /// The type that builds the node's pool.
     type PoolBuilder;
     /// The type that builds the node's network.

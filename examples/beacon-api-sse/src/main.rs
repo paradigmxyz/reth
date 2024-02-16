@@ -28,11 +28,7 @@ use tracing::{info, warn};
 fn main() {
     Cli::<BeaconEventsConfig>::parse()
         .run(|builder, args| async move {
-            let handle = builder
-                .with_types(EthereumNode::default())
-                .with_components(EthereumNode::components())
-                .launch()
-                .await?;
+            let handle = builder.node(EthereumNode::default()).launch().await?;
 
             handle.node.task_executor.spawn(Box::pin(args.run()));
 

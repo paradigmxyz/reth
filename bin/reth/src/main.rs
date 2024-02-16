@@ -19,11 +19,7 @@ fn main() {
     }
 
     if let Err(err) = Cli::parse_args().run(|builder, _| async {
-        let handle = builder
-            .with_types(EthereumNode::default())
-            .with_components(EthereumNode::components())
-            .launch()
-            .await?;
+        let handle = builder.launch_node(EthereumNode::default()).await?;
         handle.node_exit_future.await
     }) {
         eprintln!("Error: {err:?}");

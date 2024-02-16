@@ -29,11 +29,8 @@ fn main() {
     Cli::<RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             // launch the node
-            let NodeHandle { mut node, node_exit_future } = builder
-                .with_types(EthereumNode::default())
-                .with_components(EthereumNode::components())
-                .launch()
-                .await?;
+            let NodeHandle { mut node, node_exit_future } =
+                builder.node(EthereumNode::default()).launch().await?;
 
             let recipients = args.recipients.iter().copied().collect::<HashSet<_>>();
 
