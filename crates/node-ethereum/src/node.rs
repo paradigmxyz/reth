@@ -24,7 +24,7 @@ pub struct EthereumNode;
 impl EthereumNode {
     /// Returns a [ComponentsBuilder] configured for a regular Ethereum node.
     pub fn components<Node>(
-    ) -> ComponentsBuilder<Node, EthereumPoolBuilder, EthereumPayloadBuilder, EthereumNetwork>
+    ) -> ComponentsBuilder<Node, EthereumPoolBuilder, EthereumPayloadBuilder, EthereumNetworkBuilder>
     where
         Node: FullNodeTypes<Engine = EthEngineTypes>,
     {
@@ -32,7 +32,7 @@ impl EthereumNode {
             .node_types::<Node>()
             .pool(EthereumPoolBuilder::default())
             .payload(EthereumPayloadBuilder::default())
-            .network(EthereumNetwork::default())
+            .network(EthereumNetworkBuilder::default())
     }
 }
 
@@ -51,7 +51,7 @@ where
     N: FullNodeTypes<Engine = EthEngineTypes>,
 {
     type PoolBuilder = EthereumPoolBuilder;
-    type NetworkBuilder = EthereumNetwork;
+    type NetworkBuilder = EthereumNetworkBuilder;
     type PayloadBuilder = EthereumPayloadBuilder;
 
     fn components(
@@ -61,7 +61,7 @@ where
             .node_types::<N>()
             .pool(EthereumPoolBuilder::default())
             .payload(EthereumPayloadBuilder::default())
-            .network(EthereumNetwork::default())
+            .network(EthereumNetworkBuilder::default())
     }
 }
 
@@ -180,11 +180,11 @@ where
 
 /// A basic ethereum payload service.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct EthereumNetwork {
+pub struct EthereumNetworkBuilder {
     // TODO add closure to modify network
 }
 
-impl<Node, Pool> NetworkBuilder<Node, Pool> for EthereumNetwork
+impl<Node, Pool> NetworkBuilder<Node, Pool> for EthereumNetworkBuilder
 where
     Node: FullNodeTypes,
     Pool: TransactionPool + Unpin + 'static,
