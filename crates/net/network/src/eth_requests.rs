@@ -40,6 +40,16 @@ const MAX_BODIES_SERVE: usize = 1024;
 /// Maximum size of replies to data retrievals.
 const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 
+/// Estimated size in bytes of an RLP encoded header.
+const APPROX_HEADER_SIZE: usize = 500;
+
+/// Estimated size in bytes of an RLP encoded body.
+// TODO: check 24kb blocksize assumption
+const APPROX_BODY_SIZE: usize = 24 * 1024;
+
+/// Estimated size in bytes of an RLP encoded receipt.
+const APPROX_RECEIPT_SIZE: usize = 24 * 1024;
+
 /// Manages eth related requests on top of the p2p network.
 ///
 /// This can be spawned to another task and is supposed to be run as background service.
@@ -118,7 +128,7 @@ where
 
                 headers.push(header);
 
-                match headers.encode_max(SOFT_RESPONSE_LIMIT) {
+                match headers.encode_max(APPROX_HEADER_SIZE, SOFT_RESPONSE_LIMIT) {
                     Ok(_) => {
                         // If encode_max succeeds, continue accumulating headers
                     }
@@ -168,7 +178,7 @@ where
                 };
 
                 bodies.push(body);
-                match bodies.encode_max(SOFT_RESPONSE_LIMIT) {
+                match bodies.encode_max(APPROX_BODY_SIZE, SOFT_RESPONSE_LIMIT) {
                     Ok(_) => {
                         // If encode_max succeeds, continue accumulating bodies
                     }
@@ -200,7 +210,7 @@ where
                     .collect::<Vec<_>>();
                 receipts.push(receipt);
 
-                match receipts.encode_max(SOFT_RESPONSE_LIMIT) {
+                match receipts.encode_max(APPROX_RECEIPT_SIZE, SOFT_RESPONSE_LIMIT) {
                     Ok(_) => {
                         // If encode_max succeeds, continue accumulating receipts
                     }

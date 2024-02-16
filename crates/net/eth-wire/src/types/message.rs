@@ -254,13 +254,18 @@ pub trait EncodableExt {
     ///
     /// # Arguments
     ///
+    /// * `approx` - The approximate size to allocate in memory
     /// * `size` - The maximum allowed size of the data.
     ///
     /// # Returns
     ///
     /// * `Ok(Vec<u8>)` - A vector containing the encoded data if it is within the size limit.
     /// * `Err(alloy_rlp::Error)` - An error if the encoded data exceeds the size limit.
-    fn encode_max(&self, size: usize) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error>;
+    fn encode_max(
+        &self,
+        approx: usize,
+        size: usize,
+    ) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error>;
 
     /// Encodes the data, truncating the encoded message if it exceeds the specified size limit.
     /// The resulting data will fit within the limit but may be incomplete if truncation occurs.
@@ -273,6 +278,7 @@ pub trait EncodableExt {
     ///
     /// # Arguments
     ///
+    /// * `approx` - The approximate size to allocate in memory
     /// * `limit` - The maximum allowed size of the encoded data.
     ///
     /// # Returns
@@ -280,12 +286,16 @@ pub trait EncodableExt {
     /// A vector containing the encoded data, truncated to fit within the size limit if necessary.
     /// Users of this method should be aware that the truncated data may not represent the complete
     /// original dataset.
-    fn encode_truncate(&self, limit: usize) -> Vec<u8>;
+    fn encode_truncate(&self, approx: usize, limit: usize) -> Vec<u8>;
 }
 
 impl<T: Encodable> EncodableExt for Vec<T> {
-    fn encode_max(&self, limit: usize) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error> {
-        let mut buffer = Vec::with_capacity(limit);
+    fn encode_max(
+        &self,
+        approx: usize,
+        limit: usize,
+    ) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error> {
+        let mut buffer = Vec::with_capacity(approx);
         let mut header = Header { list: true, payload_length: 0 };
         for item in self {
             header.payload_length += item.length();
@@ -301,8 +311,8 @@ impl<T: Encodable> EncodableExt for Vec<T> {
         Ok(buffer)
     }
 
-    fn encode_truncate(&self, limit: usize) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(limit);
+    fn encode_truncate(&self, approx: usize, limit: usize) -> Vec<u8> {
+        let mut buffer = Vec::with_capacity(approx);
         let mut header = Header { list: true, payload_length: 0 };
         for item in self {
             header.payload_length += item.length();
