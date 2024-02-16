@@ -12,6 +12,10 @@ use tracing::{debug, trace};
 pub const DEFAULT_MAX_CACHED_BLOBS: u32 = 100;
 
 /// A blob store that stores blob data on disk.
+///
+/// The type uses deferred deletion, meaning that blobs are not immediately deleted from disk, but
+/// it's expected that the maintenance task will call [BlobStore::cleanup] to remove the deleted
+/// blobs from disk.
 #[derive(Clone, Debug)]
 pub struct DiskFileBlobStore {
     inner: Arc<DiskFileBlobStoreInner>,
@@ -58,28 +62,34 @@ impl BlobStore for DiskFileBlobStore {
     }
 
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError> {
-        let mut txs_to_delete = self.inner.txs_to_delete.write();
-        txs_to_delete.insert(tx);
+        self.inner.txs_to_delete.write().insert(tx);
         Ok(())
     }
 
     fn delete_all(&self, txs: Vec<B256>) -> Result<(), BlobStoreError> {
-        let mut txs_to_delete = self.inner.txs_to_delete.write();
+        self.inner.txs_to_delete.write().extend(txs);
         Ok(())
     }
 
-    fn cleanup(&self) -> Result<(), BlobStoreError> {
+    fn cleanup(&self) {
         let txs_to_delete = {
             let mut txs_to_delete = self.inner.txs_to_delete.write();
             std::mem::take(&mut *txs_to_delete)
         };
+        self.inner.size_tracker.sub_len(txs_to_delete.len());
+        let mut subsize = 0;
+        debug!(target:"txpool::blob", num_blobs=%txs_to_delete.len(), "Removing blobs from disk");
         for tx in txs_to_delete {
-            let file_path = self.inner.blob_disk_file(tx);
-            if let Err(e) = std::fs::remove_file(&file_path) {
-                debug!("Failed to delete file {}: {:?}", file_path.display(), e);
-            }
+            let path = self.inner.blob_disk_file(tx);
+            let _ = fs::metadata(&path).map(|meta| {
+                subsize += meta.len();
+            });
+            let _ = fs::remove_file(&path).map_err(|e| {
+                let err = DiskFileBlobStoreError::DeleteFile(tx, path, e);
+                debug!(target:"txpool::blob", ?err);
+            });
         }
-        Ok(())
+        self.inner.size_tracker.sub_size(subsize as usize);
     }
 
     fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
@@ -286,44 +296,11 @@ impl DiskFileBlobStoreInner {
     fn write_one_encoded(&self, tx: B256, data: &[u8]) -> Result<usize, DiskFileBlobStoreError> {
         trace!( target:"txpool::blob", "[{:?}] writing blob file", tx);
         let path = self.blob_disk_file(tx);
-        let _lock = self.file_lock.write();
-
-        fs::write(&path, data).map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
-        Ok(data.len())
-    }
-
-    /// Retries the blob data for the given transaction hash.
-    #[inline]
-    #[allow(dead_code)]
-    fn delete_one(&self, tx: B256) -> Result<(), DiskFileBlobStoreError> {
-        trace!( target:"txpool::blob", "[{:?}] deleting blob file", tx);
-        let path = self.blob_disk_file(tx);
-
-        let _lock = self.file_lock.write();
-        fs::remove_file(&path).map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
-
-        Ok(())
-    }
-
-    /// Retries the blob data for the given transaction hash.
-    #[inline]
-    #[allow(dead_code)]
-    fn delete_many(
-        &self,
-        txs: impl IntoIterator<Item = TxHash>,
-    ) -> Result<(), DiskFileBlobStoreError> {
-        let _lock = self.file_lock.write();
-        for tx in txs.into_iter() {
-            trace!( target:"txpool::blob", "[{:?}] deleting blob file", tx);
-            let path = self.blob_disk_file(tx);
-
-            let _ = fs::remove_file(&path).map_err(|e| {
-                let err = DiskFileBlobStoreError::WriteFile(tx, path, e);
-                debug!( target:"txpool::blob", ?err);
-            });
+        {
+            let _lock = self.file_lock.write();
+            fs::write(&path, data).map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
         }
-
-        Ok(())
+        Ok(data.len())
     }
 
     #[inline]
@@ -376,6 +353,7 @@ impl fmt::Debug for DiskFileBlobStoreInner {
         f.debug_struct("DiskFileBlobStoreInner")
             .field("blob_dir", &self.blob_dir)
             .field("cached_blobs", &self.blob_cache.try_lock().map(|lock| lock.len()))
+            .field("txs_to_delete", &self.txs_to_delete.try_read())
             .finish()
     }
 }
@@ -440,6 +418,7 @@ mod tests {
         strategy::{Strategy, ValueTree},
         test_runner::TestRunner,
     };
+    use std::sync::atomic::Ordering;
 
     fn tmp_store() -> (DiskFileBlobStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -474,7 +453,9 @@ mod tests {
 
         assert!(store.contains(all_hashes[0]).unwrap());
         store.delete_all(all_hashes.clone()).unwrap();
+        assert!(store.inner.txs_to_delete.read().contains(&all_hashes[0]));
         store.clear_cache();
+        store.cleanup();
 
         assert!(store.get(blobs[0].0).unwrap().is_none());
 
@@ -483,5 +464,8 @@ mod tests {
 
         assert!(!store.contains(all_hashes[0]).unwrap());
         assert!(store.get_exact(all_hashes).is_err());
+
+        assert_eq!(store.data_size_hint(), Some(0));
+        assert_eq!(store.inner.size_tracker.num_blobs.load(Ordering::Relaxed), 0);
     }
 }
