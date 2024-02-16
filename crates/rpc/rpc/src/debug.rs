@@ -10,6 +10,7 @@ use crate::{
     result::{internal_rpc_err, ToRpcResult},
     BlockingTaskGuard, EthApiSpec,
 };
+use alloy_primitives::U256;
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -396,7 +397,7 @@ where
         let transaction_index = transaction_index.unwrap_or_default();
 
         let target_block = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let ((cfg, block_env, _), block) = futures::try_join!(
+        let ((cfg, mut block_env, _), block) = futures::try_join!(
             self.inner.eth_api.evm_env_at(target_block),
             self.inner.eth_api.block_by_id_with_senders(target_block),
         )?;
@@ -479,6 +480,8 @@ where
                         }
                         results.push(trace);
                     }
+                    block_env.number += U256::from(1);
+                    block_env.timestamp += U256::from(12);
 
                     all_bundles.push(results);
                 }
