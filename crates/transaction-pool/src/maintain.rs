@@ -194,6 +194,12 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     pool.delete_blobs(blobs);
                 }
             }
+            // also do periodic cleanup of the blob store
+            let pool = pool.clone();
+            task_spawner.spawn_blocking(Box::pin(async move {
+                debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
+                pool.cleanup_blobs();
+            }));
         }
 
         // outcomes of the futures we are waiting on

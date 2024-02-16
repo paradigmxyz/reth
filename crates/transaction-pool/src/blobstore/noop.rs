@@ -23,6 +23,8 @@ impl BlobStore for NoopBlobStore {
         Ok(())
     }
 
+    fn cleanup(&self) {}
+
     fn get(&self, _tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
         Ok(None)
     }
