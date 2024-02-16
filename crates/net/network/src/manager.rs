@@ -16,10 +16,7 @@
 //! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the RLPx session.
 
 use crate::{
-    budget::{
-        DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL,
-        DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-    },
+    budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_STREAM},
     config::NetworkConfig,
     discovery::Discovery,
     error::{NetworkError, ServiceKind},

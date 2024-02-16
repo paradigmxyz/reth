@@ -43,6 +43,7 @@ pin-project.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
+futures-test = "0.3.30"
 
 # io
 serde = { workspace = true, optional = true }
@@ -95,9 +96,6 @@ enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
 # misc
 serial_test.workspace = true
 tempfile.workspace = true
-
-# async
-futures-test = "0.3.30"
 
 ## Benchmarks
 pprof = { workspace = true, features = ["criterion", "flamegraph"] }
