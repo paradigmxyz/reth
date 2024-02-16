@@ -548,6 +548,10 @@ where
     fn delete_blobs(&self, txs: Vec<TxHash>) {
         self.pool.delete_blobs(txs)
     }
+
+    fn cleanup_blobs(&self) {
+        self.pool.cleanup_blobs()
+    }
 }
 
 impl<V, T: TransactionOrdering, S> Clone for Pool<V, T, S> {

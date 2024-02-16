@@ -786,6 +786,12 @@ where
         self.update_blob_store_metrics();
     }
 
+    /// Cleans up the blob store
+    pub(crate) fn cleanup_blobs(&self) {
+        self.blob_store.cleanup();
+        self.update_blob_store_metrics();
+    }
+
     fn update_blob_store_metrics(&self) {
         if let Some(data_size) = self.blob_store.data_size_hint() {
             self.blob_store_metrics.blobstore_byte_size.set(data_size as f64);
