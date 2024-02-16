@@ -2167,7 +2167,7 @@ dependencies = [
  "aes-gcm",
  "arrayvec",
  "delay_map",
- "enr",
+ "enr 0.9.1",
  "fnv",
  "futures",
  "hashlink",
@@ -2366,6 +2366,24 @@ dependencies = [
  "base64 0.21.7",
  "bytes",
  "ed25519-dalek",
+ "hex",
+ "k256",
+ "log",
+ "rand 0.8.5",
+ "rlp",
+ "serde",
+ "sha3",
+ "zeroize",
+]
+
+[[package]]
+name = "enr"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a3d8dc56e02f954cac8eb489772c552c473346fc34f67412bb6244fd647f7e4"
+dependencies = [
+ "base64 0.21.7",
+ "bytes",
  "hex",
  "k256",
  "log",
@@ -2658,7 +2676,7 @@ dependencies = [
  "base64 0.21.7",
  "bytes",
  "const-hex",
- "enr",
+ "enr 0.9.1",
  "ethers-core",
  "futures-channel",
  "futures-core",
@@ -5982,7 +6000,7 @@ version = "0.1.0-alpha.18"
 dependencies = [
  "alloy-rlp",
  "discv5",
- "enr",
+ "enr 0.10.0",
  "generic-array",
  "parking_lot 0.12.1",
  "rand 0.8.5",
@@ -6007,7 +6025,7 @@ dependencies = [
  "alloy-rlp",
  "async-trait",
  "data-encoding",
- "enr",
+ "enr 0.10.0",
  "linked_hash_set",
  "parking_lot 0.12.1",
  "reth-net-common",
@@ -6277,7 +6295,7 @@ dependencies = [
  "auto_impl",
  "criterion",
  "derive_more",
- "enr",
+ "enr 0.10.0",
  "ethers-core",
  "ethers-middleware",
  "ethers-providers",
