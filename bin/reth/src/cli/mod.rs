@@ -80,7 +80,7 @@ impl<Ext: RethCliExt> Cli<Ext> {
         match self.command {
             Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Import(command) => runner.run_command_until_exit(|_| command.execute()),
+            Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
