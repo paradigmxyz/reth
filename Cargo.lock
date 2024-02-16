@@ -6603,7 +6603,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "smallvec",
  "strum 0.26.1",
  "sucds 0.6.0",
  "tempfile",
