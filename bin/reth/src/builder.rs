@@ -439,6 +439,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             .await?;
         }
 
+        // Construct job scheduler for importing blocks
         let import = ImportCommand::new(
             Some(self.config_path()),
             self.data_dir.clone().data_dir_path().into(),

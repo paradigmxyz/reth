@@ -11,7 +11,6 @@ use crate::{
 use clap::Parser;
 use eyre::Context;
 use futures::{Stream, StreamExt};
-use lightspeed_scheduler::{job::Job, scheduler::Scheduler};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::database_metrics::DatabaseMetadata;
@@ -30,7 +29,7 @@ use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage, TotalDifficultyStage},
 };
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, info};
 
@@ -109,32 +108,7 @@ impl ImportCommand {
 
         let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone());
 
-        let interval = Duration::from_secs(self.bitfinity.import_interval);
-        println!("interval {}", interval.as_secs());
-
-        let job_executor = lightspeed_scheduler::JobExecutor::new_with_local_tz();
-
-        // Schedule the import job
-        {
-            job_executor
-                .add_job_with_scheduler(
-                    Scheduler::Interval { interval_duration: interval, execute_at_startup: true },
-                    Job::new("import", "block importer", None, move || {
-                        let import = self.clone();
-                        let config = config.clone();
-                        let provider_factory = provider_factory.clone();
-                        let db = db.clone();
-                        Box::pin(async move {
-                            import.import(config, provider_factory, db.into()).await?;
-
-                            Ok(())
-                        })
-                    }),
-                )
-                .await;
-        }
-
-        let job_executor_handler = job_executor.run().await?;
+        self.import(config, provider_factory, db.into()).await?;
 
         match tokio::signal::ctrl_c().await {
             Ok(_) => {
@@ -144,8 +118,6 @@ impl ImportCommand {
                 info!(target: "reth::cli", "Error while waiting for SIGINT: {:?}", e);
             }
         }
-
-        job_executor_handler.await?;
 
         Ok(())
     }
