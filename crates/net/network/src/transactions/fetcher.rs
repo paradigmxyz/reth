@@ -68,6 +68,10 @@ pub(crate) struct TransactionFetcher {
 
 impl TransactionFetcher {
     pub(super) fn try_drain_inflight_requests(&mut self) {
+        self.advance_inflight_requests(DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS)
+    }
+
+    fn advance_inflight_requests(&mut self, steps: u32) {
         // `FuturesUnordered` doesn't close when `None` is returned. so just return if empty.
         // <https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=815be2b6c8003303757c3ced135f363e>
         if self.inflight_requests.is_empty() {
@@ -79,7 +83,7 @@ impl TransactionFetcher {
         let _ = poll_nested_stream_with_yield_points!(
             "net::tx",
             "Inflight requests stream",
-            DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
+            steps,
             self.inflight_requests.poll_next_unpin(&mut noop_context()),
             |resp| self.on_resolved_get_pooled_transactions_request_fut(resp),
         );
@@ -872,6 +876,8 @@ impl Stream for TransactionFetcher {
 
     /// Advances all inflight requests and returns the next event.
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.advance_inflight_requests(1);
+        
         let mut this = self.as_mut().project();
 
         // dequeue next fetch event
