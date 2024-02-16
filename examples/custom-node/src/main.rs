@@ -24,7 +24,11 @@ use reth_node_api::{
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
-use reth_primitives::{Address, ChainSpec, Genesis, Withdrawals, B256, U256};
+use reth_primitives::{
+    revm::config::revm_spec_by_timestamp_after_merge,
+    revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
+    Address, ChainSpec, Genesis, Header, Withdrawals, B256, U256,
+};
 use reth_rpc_api::{EngineApiClient, EthApiClient};
 use reth_rpc_types::{
     engine::{ForkchoiceState, PayloadAttributes as EthPayloadAttributes, PayloadId},
@@ -118,6 +122,51 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
 
     fn withdrawals(&self) -> &Withdrawals {
         &self.0.withdrawals
+    }
+    fn cfg_and_block_env(
+        &self,
+        chain_spec: &ChainSpec,
+        parent: &Header,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        // configure evm env based on parent block
+        let mut cfg = CfgEnv::default();
+        cfg.chain_id = chain_spec.chain().id();
+
+        // ensure we're not missing any timestamp based hardforks
+        let spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp());
+
+        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
+        // cancun now, we need to set the excess blob gas to the default value
+        let blob_excess_gas_and_price = parent
+            .next_block_excess_blob_gas()
+            .or_else(|| {
+                if spec_id == SpecId::CANCUN {
+                    // default excess blob gas is zero
+                    Some(0)
+                } else {
+                    None
+                }
+            })
+            .map(BlobExcessGasAndPrice::new);
+
+        let block_env = BlockEnv {
+            number: U256::from(parent.number + 1),
+            coinbase: self.suggested_fee_recipient(),
+            timestamp: U256::from(self.timestamp()),
+            difficulty: U256::ZERO,
+            prevrandao: Some(self.prev_randao()),
+            gas_limit: U256::from(parent.gas_limit),
+            // calculate basefee based on parent block's gas usage
+            basefee: U256::from(
+                parent
+                    .next_block_base_fee(chain_spec.base_fee_params(self.timestamp()))
+                    .unwrap_or_default(),
+            ),
+            // calculate excess gas based on parent block's blob gas usage
+            blob_excess_gas_and_price,
+        };
+
+        (CfgEnvWithHandlerCfg::new(cfg, spec_id), block_env)
     }
 }
 

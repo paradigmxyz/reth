@@ -101,5 +101,4 @@ optimism = [
     "reth-network/optimism",
     "reth-provider/optimism",
     "reth-transaction-pool/optimism",
-    "reth-node-api/optimism",
 ]
