@@ -916,6 +916,11 @@ impl Peer {
         Self { kind: PeerKind::Trusted, ..Self::new(addr) }
     }
 
+    /// Returns the reputation of the peer
+    pub fn reputation(&self) -> i32 {
+        self.reputation
+    }
+
     fn with_state(addr: SocketAddr, state: PeerConnectionState) -> Self {
         Self {
             addr,
