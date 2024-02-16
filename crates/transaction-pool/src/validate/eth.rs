@@ -31,10 +31,7 @@ use reth_revm::optimism::RethL1BlockInfo;
 
 /// Validator for Ethereum transactions.
 #[derive(Debug, Clone)]
-pub struct EthTransactionValidator<Client, T>
-where
-    Client: BlockReaderIdExt,
-{
+pub struct EthTransactionValidator<Client, T> {
     /// The type that performs the actual validation.
     inner: Arc<EthTransactionValidatorInner<Client, T>>,
 }
@@ -98,10 +95,7 @@ where
 
 /// A [TransactionValidator] implementation that validates ethereum transaction.
 #[derive(Debug)]
-pub(crate) struct EthTransactionValidatorInner<Client, T>
-where
-    Client: BlockReaderIdExt,
-{
+pub(crate) struct EthTransactionValidatorInner<Client, T> {
     /// Spec of the chain
     chain_spec: Arc<ChainSpec>,
     /// This type fetches account info from the db
@@ -130,10 +124,7 @@ where
 
 // === impl EthTransactionValidatorInner ===
 
-impl<Client, Tx> EthTransactionValidatorInner<Client, Tx>
-where
-    Client: BlockReaderIdExt,
-{
+impl<Client, Tx> EthTransactionValidatorInner<Client, Tx> {
     /// Returns the configured chain id
     pub(crate) fn chain_id(&self) -> u64 {
         self.chain_spec.chain().id()
@@ -152,7 +143,7 @@ where
         mut transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         #[cfg(feature = "optimism")]
-        if transaction.is_deposit() {
+        if transaction.is_deposit() || transaction.is_eip4844() {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TxTypeNotSupported.into(),
@@ -351,7 +342,7 @@ where
                 info.l1_tx_data_fee(
                     &self.chain_spec,
                     block.timestamp,
-                    &encoded.freeze().into(),
+                    &encoded,
                     transaction.is_deposit(),
                 )
             }) {
@@ -605,7 +596,6 @@ impl EthTransactionValidatorBuilder {
         blob_store: S,
     ) -> EthTransactionValidator<Client, Tx>
     where
-        Client: BlockReaderIdExt,
         S: BlobStore,
     {
         let Self {
@@ -656,7 +646,6 @@ impl EthTransactionValidatorBuilder {
         blob_store: S,
     ) -> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>>
     where
-        Client: BlockReaderIdExt,
         T: TaskSpawner,
         S: BlobStore,
     {

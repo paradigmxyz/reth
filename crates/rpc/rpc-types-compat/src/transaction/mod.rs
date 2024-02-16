@@ -1,13 +1,17 @@
 //! Compatibility functions for rpc `Transaction` type.
 mod signature;
 mod typed;
+use alloy_rpc_types::{
+    other::OtherFields,
+    request::{TransactionInput, TransactionRequest},
+};
 use reth_primitives::{
     BlockNumber, Transaction as PrimitiveTransaction, TransactionKind as PrimitiveTransactionKind,
     TransactionSignedEcRecovered, TxType, B256, U128, U256, U64,
 };
 #[cfg(feature = "optimism")]
 use reth_rpc_types::optimism::OptimismTransactionFields;
-use reth_rpc_types::{AccessListItem, CallInput, CallRequest, Transaction};
+use reth_rpc_types::{AccessListItem, Transaction};
 use signature::from_primitive_signature;
 pub use typed::*;
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
@@ -167,8 +171,8 @@ pub fn from_primitive_access_list(
     )
 }
 
-/// Convert [TransactionSignedEcRecovered] to [CallRequest]
-pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> CallRequest {
+/// Convert [TransactionSignedEcRecovered] to [TransactionRequest]
+pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> TransactionRequest {
     let from = tx.signer();
     let to = tx.transaction.to();
     let gas = tx.transaction.gas_limit();
@@ -189,7 +193,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> CallRequ
     };
     let max_priority_fee_per_gas = tx.transaction.max_priority_fee_per_gas();
 
-    CallRequest {
+    TransactionRequest {
         from: Some(from),
         to,
         gas_price: gas_price.map(U256::from),
@@ -197,12 +201,14 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> CallRequ
         max_priority_fee_per_gas: max_priority_fee_per_gas.map(U256::from),
         gas: Some(U256::from(gas)),
         value: Some(value.into()),
-        input: CallInput::new(input),
+        input: TransactionInput::new(input),
         nonce: Some(U64::from(nonce)),
         chain_id: chain_id.map(U64::from),
         access_list,
         max_fee_per_blob_gas: max_fee_per_blob_gas.map(U256::from),
         blob_versioned_hashes,
         transaction_type: Some(tx_type.into()),
+        sidecar: None,
+        other: OtherFields::default(),
     }
 }

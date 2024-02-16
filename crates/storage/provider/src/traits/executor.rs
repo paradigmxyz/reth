@@ -2,7 +2,7 @@
 
 use crate::{bundle_state::BundleStateWithReceipts, StateProvider};
 use reth_interfaces::executor::BlockExecutionError;
-use reth_primitives::{BlockNumber, BlockWithSenders, ChainSpec, PruneModes, Receipt, U256};
+use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt, U256};
 use std::time::Duration;
 use tracing::debug;
 
@@ -15,9 +15,6 @@ pub trait ExecutorFactory: Send + Sync + 'static {
         &'a self,
         _sp: SP,
     ) -> Box<dyn PrunableBlockExecutor + 'a>;
-
-    /// Return internal chainspec
-    fn chain_spec(&self) -> &ChainSpec;
 }
 
 /// An executor capable of executing a block.

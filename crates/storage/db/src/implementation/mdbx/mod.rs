@@ -3,6 +3,7 @@
 use crate::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    metrics::DatabaseEnvMetrics,
     tables::{TableType, Tables},
     utils::default_page_size,
     DatabaseError,
@@ -16,7 +17,7 @@ use reth_libmdbx::{
     PageSize, SyncMode, RO, RW,
 };
 use reth_tracing::tracing::error;
-use std::{ops::Deref, path::Path};
+use std::{ops::Deref, path::Path, sync::Arc};
 use tx::Tx;
 
 pub mod cursor;
@@ -86,8 +87,8 @@ impl DatabaseArguments {
 pub struct DatabaseEnv {
     /// Libmdbx-sys environment.
     inner: Environment,
-    /// Whether to record metrics or not.
-    with_metrics: bool,
+    /// Cache for metric handles. If `None`, metrics are not recorded.
+    metrics: Option<Arc<DatabaseEnvMetrics>>,
 }
 
 impl Database for DatabaseEnv {
@@ -97,14 +98,14 @@ impl Database for DatabaseEnv {
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         Ok(Tx::new_with_metrics(
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
-            self.with_metrics,
+            self.metrics.as_ref().cloned(),
         ))
     }
 
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         Ok(Tx::new_with_metrics(
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
-            self.with_metrics,
+            self.metrics.as_ref().cloned(),
         ))
     }
 }
@@ -121,7 +122,7 @@ impl DatabaseMetrics for DatabaseEnv {
 
         let _ = self
             .view(|tx| {
-                for table in Tables::ALL.iter().map(|table| table.name()) {
+                for table in Tables::ALL.iter().map(Tables::name) {
                     let table_db = tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
 
                     let stats = tx
@@ -309,7 +310,7 @@ impl DatabaseEnv {
 
         let env = DatabaseEnv {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
-            with_metrics: false,
+            metrics: None,
         };
 
         Ok(env)
@@ -317,7 +318,7 @@ impl DatabaseEnv {
 
     /// Enables metrics on the database.
     pub fn with_metrics(mut self) -> Self {
-        self.with_metrics = true;
+        self.metrics = Some(DatabaseEnvMetrics::new().into());
         self
     }
 

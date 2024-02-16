@@ -74,10 +74,7 @@ impl TransportReceiverT for Receiver {
 
     /// Returns a Future resolving when the server sent us something back.
     async fn receive(&mut self) -> Result<ReceivedMessage, Self::Error> {
-        match self.inner.next().await {
-            None => Err(IpcError::Closed),
-            Some(val) => Ok(ReceivedMessage::Text(val?)),
-        }
+        self.inner.next().await.map_or(Err(IpcError::Closed), |val| Ok(ReceivedMessage::Text(val?)))
     }
 }
 

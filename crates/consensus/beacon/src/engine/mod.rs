@@ -83,7 +83,7 @@ pub(crate) mod sync;
 /// [consensus engine][`crate::engine::BeaconConsensusEngine`].
 pub mod hooks;
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(test)]
 pub mod test_utils;
 
 /// The maximum number of invalid headers that can be tracked by the engine.
@@ -335,7 +335,7 @@ where
     fn forkchoice_updated(
         &mut self,
         state: ForkchoiceState,
-        attrs: Option<EngineT::PayloadAttributes>,
+        mut attrs: Option<EngineT::PayloadAttributes>,
     ) -> RethResult<OnForkChoiceUpdated> {
         trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
         if state.head_block_hash.is_zero() {
@@ -376,39 +376,14 @@ where
             Ok(outcome) => {
                 match &outcome {
                     CanonicalOutcome::AlreadyCanonical { header } => {
-                        // On Optimism, the proposers are allowed to reorg their own chain at will.
-                        cfg_if::cfg_if! {
-                            if #[cfg(feature = "optimism")] {
-                                if self.blockchain.chain_spec().is_optimism() {
-                                    debug!(
-                                        target: "consensus::engine",
-                                        fcu_head_num=?header.number,
-                                        current_head_num=?self.blockchain.canonical_tip().number,
-                                        "[Optimism] Allowing beacon reorg to old head"
-                                    );
-                                    let _ = self.update_head(header.clone());
-                                    self.listeners.notify(
-                                        BeaconConsensusEngineEvent::CanonicalChainCommitted(
-                                            Box::new(header.clone()),
-                                            elapsed,
-                                        ),
-                                    );
-                                } else {
-                                    debug!(
-                                        target: "consensus::engine",
-                                        fcu_head_num=?header.number,
-                                        current_head_num=?self.blockchain.canonical_tip().number,
-                                        "Ignoring beacon update to old head"
-                                    );
-                                }
-                            } else {
-                                debug!(
-                                    target: "consensus::engine",
-                                    fcu_head_num=?header.number,
-                                    current_head_num=?self.blockchain.canonical_tip().number,
-                                    "Ignoring beacon update to old head"
-                                );
-                            }
+                        if self.on_head_already_canonical(header, &mut attrs) {
+                            let _ = self.update_head(header.clone());
+                            self.listeners.notify(
+                                BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                                    Box::new(header.clone()),
+                                    elapsed,
+                                ),
+                            );
                         }
                     }
                     CanonicalOutcome::Committed { head } => {
@@ -471,6 +446,45 @@ where
 
         trace!(target: "consensus::engine", ?status, ?state, "Returning forkchoice status");
         Ok(OnForkChoiceUpdated::valid(status))
+    }
+
+    /// Invoked when head hash references a `VALID` block that is already canonical.
+    ///
+    /// Returns `true` if the head needs to be updated.
+    fn on_head_already_canonical(
+        &mut self,
+        header: &SealedHeader,
+        attrs: &mut Option<EngineT::PayloadAttributes>,
+    ) -> bool {
+        // On Optimism, the proposers are allowed to reorg their own chain at will.
+        #[cfg(feature = "optimism")]
+        if self.blockchain.chain_spec().is_optimism() {
+            debug!(
+                target: "consensus::engine",
+                fcu_head_num=?header.number,
+                current_head_num=?self.blockchain.canonical_tip().number,
+                "[Optimism] Allowing beacon reorg to old head"
+            );
+            return true
+        }
+
+        // 2. Client software MAY skip an update of the forkchoice state and MUST NOT begin a
+        //    payload build process if `forkchoiceState.headBlockHash` references a `VALID` ancestor
+        //    of the head of canonical chain, i.e. the ancestor passed payload validation process
+        //    and deemed `VALID`. In the case of such an event, client software MUST return
+        //    `{payloadStatus: {status: VALID, latestValidHash: forkchoiceState.headBlockHash,
+        //    validationError: null}, payloadId: null}`
+        if self.blockchain.canonical_tip() != header.num_hash() {
+            attrs.take();
+        }
+
+        debug!(
+            target: "consensus::engine",
+            fcu_head_num=?header.number,
+            current_head_num=?self.blockchain.canonical_tip().number,
+            "Ignoring beacon update to old head"
+        );
+        false
     }
 
     /// Invoked when we receive a new forkchoice update message.
@@ -892,7 +906,7 @@ where
     fn update_head(&self, head: SealedHeader) -> RethResult<()> {
         let mut head_block = Head {
             number: head.number,
-            hash: head.hash,
+            hash: head.hash(),
             difficulty: head.difficulty,
             timestamp: head.timestamp,
             // NOTE: this will be set later
@@ -1077,14 +1091,14 @@ where
         let block_hash = block.hash();
         let block_num_hash = block.num_hash();
 
-        let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block.hash);
-        if lowest_buffered_ancestor == block.hash {
+        let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block.hash());
+        if lowest_buffered_ancestor == block.hash() {
             lowest_buffered_ancestor = block.parent_hash;
         }
 
         // now check the block itself
         if let Some(status) =
-            self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, block.hash)
+            self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, block.hash())
         {
             return Ok(status)
         }
@@ -1256,17 +1270,19 @@ where
     ) -> Result<PayloadStatus, InsertBlockError> {
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
-        let block_hash = block.hash;
+        let block_hash = block.hash();
+        let start = Instant::now();
         let status = self
             .blockchain
             .insert_block_without_senders(block.clone(), BlockValidationKind::Exhaustive)?;
+        let elapsed = start.elapsed();
         let mut latest_valid_hash = None;
         let block = Arc::new(block);
         let status = match status {
             InsertPayloadOk::Inserted(BlockStatus::Valid(attachment)) => {
                 latest_valid_hash = Some(block_hash);
                 let event = if attachment.is_canonical() {
-                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block)
+                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed)
                 } else {
                     BeaconConsensusEngineEvent::ForkBlockAdded(block)
                 };
@@ -1281,7 +1297,7 @@ where
             InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
                 // check if the block's parent is already marked as invalid
                 if let Some(status) =
-                    self.check_invalid_ancestor_with_head(block.parent_hash, block.hash)
+                    self.check_invalid_ancestor_with_head(block.parent_hash, block.hash())
                 {
                     return Ok(status)
                 }
@@ -1307,7 +1323,7 @@ where
         let (block, error) = err.split();
 
         if error.is_invalid_block() {
-            warn!(target: "consensus::engine", invalid_hash=?block.hash, invalid_number=?block.number, ?error, "Invalid block error on new payload");
+            warn!(target: "consensus::engine", invalid_hash=?block.hash(), invalid_number=?block.number, ?error, "Invalid block error on new payload");
 
             // all of these occurred if the payload is invalid
             let parent_hash = block.parent_hash;
@@ -1367,9 +1383,9 @@ where
     /// stop because there's nothing to do here and the engine needs to wait for another FCU.
     fn on_downloaded_block(&mut self, block: SealedBlock) {
         let downloaded_num_hash = block.num_hash();
-        trace!(target: "consensus::engine", hash=?block.hash, number=%block.number, "Downloaded full block");
+        trace!(target: "consensus::engine", hash=?block.hash(), number=%block.number, "Downloaded full block");
         // check if the block's parent is already marked as invalid
-        if self.check_invalid_ancestor_with_head(block.parent_hash, block.hash).is_some() {
+        if self.check_invalid_ancestor_with_head(block.parent_hash, block.hash()).is_some() {
             // can skip this invalid block
             return
         }
@@ -1400,7 +1416,7 @@ where
                 warn!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
                 if err.kind().is_invalid_block() {
                     let (block, err) = err.split();
-                    warn!(target: "consensus::engine", invalid_number=?block.number, invalid_hash=?block.hash, ?err, "Marking block as invalid");
+                    warn!(target: "consensus::engine", invalid_number=?block.number, invalid_hash=?block.hash(), ?err, "Marking block as invalid");
 
                     self.invalid_headers.insert(block.header);
                 }
@@ -1484,7 +1500,7 @@ where
                     }
 
                     let new_head = outcome.into_header();
-                    debug!(target: "consensus::engine", hash=?new_head.hash, number=new_head.number, "Canonicalized new head");
+                    debug!(target: "consensus::engine", hash=?new_head.hash(), number=new_head.number, "Canonicalized new head");
 
                     // we can update the FCU blocks
                     let _ = self.update_canon_chain(new_head, &target);
@@ -1572,7 +1588,7 @@ where
                 }
 
                 if let ControlFlow::Unwind { bad_block, .. } = ctrl {
-                    warn!(target: "consensus::engine", invalid_hash=?bad_block.hash, invalid_number=?bad_block.number, "Bad block detected in unwind");
+                    warn!(target: "consensus::engine", invalid_hash=?bad_block.hash(), invalid_number=?bad_block.number, "Bad block detected in unwind");
 
                     // update the `invalid_headers` cache with the new invalid headers
                     self.invalid_headers.insert(*bad_block);
@@ -2123,7 +2139,7 @@ mod tests {
                 .build();
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
-            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
             env.db
                 .update(|tx| {
@@ -2138,15 +2154,15 @@ mod tests {
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
             let forkchoice = ForkchoiceState {
-                head_block_hash: block1.hash,
-                finalized_block_hash: block1.hash,
+                head_block_hash: block1.hash(),
+                finalized_block_hash: block1.hash(),
                 ..Default::default()
             };
 
             let result = env.send_forkchoice_updated(forkchoice).await.unwrap();
             let expected_result = ForkchoiceUpdated::new(PayloadStatus::new(
                 PayloadStatusEnum::Valid,
-                Some(block1.hash),
+                Some(block1.hash()),
             ));
             assert_eq!(result, expected_result);
             assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));
@@ -2173,15 +2189,15 @@ mod tests {
                 .build();
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
-            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
-            let next_head = random_block(&mut rng, 2, Some(block1.hash), None, Some(0));
+            let next_head = random_block(&mut rng, 2, Some(block1.hash()), None, Some(0));
             let next_forkchoice_state = ForkchoiceState {
-                head_block_hash: next_head.hash,
-                finalized_block_hash: block1.hash,
+                head_block_hash: next_head.hash(),
+                finalized_block_hash: block1.hash(),
                 ..Default::default()
             };
 
@@ -2197,7 +2213,7 @@ mod tests {
 
             let result = env.send_forkchoice_retry_on_syncing(next_forkchoice_state).await.unwrap();
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Valid)
-                .with_latest_valid_hash(next_head.hash);
+                .with_latest_valid_hash(next_head.hash());
             assert_eq!(result, expected_result);
 
             assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));
@@ -2223,7 +2239,7 @@ mod tests {
                 .build();
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
-            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
 
             let engine = spawn_consensus_engine(consensus_engine);
@@ -2231,7 +2247,7 @@ mod tests {
             let res = env
                 .send_forkchoice_updated(ForkchoiceState {
                     head_block_hash: rng.gen(),
-                    finalized_block_hash: block1.hash,
+                    finalized_block_hash: block1.hash(),
                     ..Default::default()
                 })
                 .await;
@@ -2260,16 +2276,16 @@ mod tests {
                 .build();
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
-            let mut block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
-            block1.header.difficulty = U256::from(1);
+            let mut block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
+            block1.header.set_difficulty(U256::from(1));
 
             // a second pre-merge block
-            let mut block2 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
-            block2.header.difficulty = U256::from(1);
+            let mut block2 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
+            block2.header.set_difficulty(U256::from(1));
 
             // a transition block
-            let mut block3 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
-            block3.header.difficulty = U256::from(1);
+            let mut block3 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
+            block3.header.set_difficulty(U256::from(1));
 
             insert_blocks(
                 env.db.as_ref(),
@@ -2281,8 +2297,8 @@ mod tests {
 
             let res = env
                 .send_forkchoice_updated(ForkchoiceState {
-                    head_block_hash: block1.hash,
-                    finalized_block_hash: block1.hash,
+                    head_block_hash: block1.hash(),
+                    finalized_block_hash: block1.hash(),
                     ..Default::default()
                 })
                 .await;
@@ -2313,7 +2329,7 @@ mod tests {
                 .build();
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
-            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
 
             insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
 
@@ -2321,13 +2337,13 @@ mod tests {
 
             let res = env
                 .send_forkchoice_updated(ForkchoiceState {
-                    head_block_hash: block1.hash,
-                    finalized_block_hash: block1.hash,
+                    head_block_hash: block1.hash(),
+                    finalized_block_hash: block1.hash(),
                     ..Default::default()
                 })
                 .await;
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
-                validation_error: BlockValidationError::BlockPreMerge { hash: block1.hash }
+                validation_error: BlockValidationError::BlockPreMerge { hash: block1.hash() }
                     .to_string(),
             })
             .with_latest_valid_hash(B256::ZERO);
@@ -2408,8 +2424,8 @@ mod tests {
                 .build();
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
-            let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
-            let block2 = random_block(&mut rng, 2, Some(block1.hash), None, Some(0));
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
+            let block2 = random_block(&mut rng, 2, Some(block1.hash()), None, Some(0));
             insert_blocks(
                 env.db.as_ref(),
                 chain_spec.clone(),
@@ -2421,13 +2437,13 @@ mod tests {
             // Send forkchoice
             let res = env
                 .send_forkchoice_updated(ForkchoiceState {
-                    head_block_hash: block1.hash,
-                    finalized_block_hash: block1.hash,
+                    head_block_hash: block1.hash(),
+                    finalized_block_hash: block1.hash(),
                     ..Default::default()
                 })
                 .await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
-                .with_latest_valid_hash(block1.hash);
+                .with_latest_valid_hash(block1.hash());
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
@@ -2437,7 +2453,7 @@ mod tests {
                 .unwrap();
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
-                .with_latest_valid_hash(block2.hash);
+                .with_latest_valid_hash(block2.hash());
             assert_eq!(result, expected_result);
             assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));
         }
@@ -2484,13 +2500,13 @@ mod tests {
             // Send forkchoice
             let res = env
                 .send_forkchoice_updated(ForkchoiceState {
-                    head_block_hash: block1.hash,
-                    finalized_block_hash: block1.hash,
+                    head_block_hash: block1.hash(),
+                    finalized_block_hash: block1.hash(),
                     ..Default::default()
                 })
                 .await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
-                .with_latest_valid_hash(block1.hash);
+                .with_latest_valid_hash(block1.hash());
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
             assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));
         }
@@ -2522,13 +2538,13 @@ mod tests {
             // Send forkchoice
             let res = env
                 .send_forkchoice_updated(ForkchoiceState {
-                    head_block_hash: genesis.hash,
-                    finalized_block_hash: genesis.hash,
+                    head_block_hash: genesis.hash(),
+                    finalized_block_hash: genesis.hash(),
                     ..Default::default()
                 })
                 .await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Valid)
-                .with_latest_valid_hash(genesis.hash);
+                .with_latest_valid_hash(genesis.hash());
             assert_matches!(res, Ok(ForkchoiceUpdated { payload_status, .. }) => assert_eq!(payload_status, expected_result));
 
             // Send new payload
@@ -2545,15 +2561,17 @@ mod tests {
         async fn payload_pre_merge() {
             let data = BlockChainTestData::default();
             let mut block1 = data.blocks[0].0.block.clone();
-            block1.header.difficulty = MAINNET.fork(Hardfork::Paris).ttd().unwrap() - U256::from(1);
+            block1
+                .header
+                .set_difficulty(MAINNET.fork(Hardfork::Paris).ttd().unwrap() - U256::from(1));
             block1 = block1.unseal().seal_slow();
             let (block2, exec_result2) = data.blocks[1].clone();
-            let mut block2 = block2.block;
+            let mut block2 = block2.unseal().block;
             block2.withdrawals = None;
-            block2.header.parent_hash = block1.hash;
+            block2.header.parent_hash = block1.hash();
             block2.header.base_fee_per_gas = Some(100);
             block2.header.difficulty = U256::ZERO;
-            block2 = block2.unseal().seal_slow();
+            let block2 = block2.clone().seal_slow();
 
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
@@ -2582,14 +2600,14 @@ mod tests {
             // Send forkchoice
             let res = env
                 .send_forkchoice_updated(ForkchoiceState {
-                    head_block_hash: block1.hash,
-                    finalized_block_hash: block1.hash,
+                    head_block_hash: block1.hash(),
+                    finalized_block_hash: block1.hash(),
                     ..Default::default()
                 })
                 .await;
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: BlockValidationError::BlockPreMerge { hash: block1.hash }
+                validation_error: BlockValidationError::BlockPreMerge { hash: block1.hash() }
                     .to_string(),
             })
             .with_latest_valid_hash(B256::ZERO);
@@ -2602,7 +2620,7 @@ mod tests {
                 .unwrap();
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: BlockValidationError::BlockPreMerge { hash: block2.hash }
+                validation_error: BlockValidationError::BlockPreMerge { hash: block2.hash() }
                     .to_string(),
             })
             .with_latest_valid_hash(B256::ZERO);

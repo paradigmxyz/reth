@@ -268,6 +268,11 @@ where
     pub fn is_empty(&self) -> bool {
         self.pool.is_empty()
     }
+
+    /// Returns whether or not the pool is over its configured size and transaction count limits.
+    pub fn is_exceeded(&self) -> bool {
+        self.pool.is_exceeded()
+    }
 }
 
 impl<Client, S> EthTransactionPool<Client, S>
@@ -354,7 +359,7 @@ where
         transactions: Vec<Self::Transaction>,
     ) -> Vec<PoolResult<TxHash>> {
         if transactions.is_empty() {
-            return Vec::new();
+            return Vec::new()
         }
         let validated = self.validate_all(origin, transactions).await;
 
@@ -421,7 +426,7 @@ where
         &self,
         base_fee: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
-        self.pool.best_transactions_with_base_fee(base_fee)
+        self.pool.best_transactions_with_attributes(BestTransactionsAttributes::base_fee(base_fee))
     }
 
     fn best_transactions_with_attributes(
@@ -450,7 +455,7 @@ where
         self.pool.remove_transactions(hashes)
     }
 
-    fn retain_unknown<A>(&self, announcement: &mut A)
+    fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
     where
         A: HandleAnnouncement,
     {

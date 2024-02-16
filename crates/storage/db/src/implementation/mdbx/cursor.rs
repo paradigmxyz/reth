@@ -6,14 +6,14 @@ use crate::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
     },
-    metrics::{Operation, OperationMetrics},
+    metrics::{DatabaseEnvMetrics, Operation},
     table::{Compress, Decode, Decompress, DupSort, Encode, Table},
     tables::utils::*,
     DatabaseError,
 };
 use reth_interfaces::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{self, Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
-use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds};
+use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds, sync::Arc};
 
 /// Read only Cursor.
 pub type CursorRO<T> = Cursor<RO, T>;
@@ -27,18 +27,22 @@ pub struct Cursor<K: TransactionKind, T: Table> {
     pub(crate) inner: reth_libmdbx::Cursor<K>,
     /// Cache buffer that receives compressed values.
     buf: Vec<u8>,
-    /// Whether to record metrics or not.
-    with_metrics: bool,
+    /// Reference to metric handles in the DB environment. If `None`, metrics are not recorded.
+    metrics: Option<Arc<DatabaseEnvMetrics>>,
     /// Phantom data to enforce encoding/decoding.
     _dbi: PhantomData<T>,
 }
 
 impl<K: TransactionKind, T: Table> Cursor<K, T> {
-    pub(crate) fn new_with_metrics(inner: reth_libmdbx::Cursor<K>, with_metrics: bool) -> Self {
-        Self { inner, buf: Vec::new(), with_metrics, _dbi: PhantomData }
+    pub(crate) fn new_with_metrics(
+        inner: reth_libmdbx::Cursor<K>,
+        metrics: Option<Arc<DatabaseEnvMetrics>>,
+    ) -> Self {
+        Self { inner, buf: Vec::new(), metrics, _dbi: PhantomData }
     }
 
-    /// If `self.with_metrics == true`, record a metric with the provided operation and value size.
+    /// If `self.metrics` is `Some(...)`, record a metric with the provided operation and value
+    /// size.
     ///
     /// Otherwise, just execute the closure.
     fn execute_with_operation_metric<R>(
@@ -47,8 +51,8 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         value_size: Option<usize>,
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        if self.with_metrics {
-            OperationMetrics::record(T::NAME, operation, value_size, || f(self))
+        if let Some(metrics) = self.metrics.as_ref().cloned() {
+            metrics.record_operation(T::TABLE, operation, value_size, || f(self))
         } else {
             f(self)
         }

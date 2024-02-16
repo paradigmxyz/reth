@@ -428,7 +428,7 @@ impl Decodable for PooledTransactionsElement {
             let remaining_len = buf.len();
 
             if tx_type == EIP4844_TX_TYPE_ID {
-                // Recall that the blob transaction response `TranactionPayload` is encoded like
+                // Recall that the blob transaction response `TransactionPayload` is encoded like
                 // this: `rlp([tx_payload_body, blobs, commitments, proofs])`
                 //
                 // Note that `tx_payload_body` is a list:

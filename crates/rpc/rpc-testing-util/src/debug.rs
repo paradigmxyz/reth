@@ -6,7 +6,7 @@ use reth_primitives::{BlockId, TxHash, B256};
 use reth_rpc_api::{clients::DebugApiClient, EthApiClient};
 use reth_rpc_types::{
     trace::geth::{GethDebugTracerType, GethDebugTracingOptions},
-    CallRequest,
+    TransactionRequest,
 };
 use std::{
     pin::Pin,
@@ -42,7 +42,7 @@ pub trait DebugApiExt {
     ///  method  for debug_traceCall
     async fn debug_trace_call_json(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         opts: GethDebugTracingOptions,
     ) -> Result<serde_json::Value, jsonrpsee::core::Error>;
 
@@ -98,7 +98,7 @@ where
     }
     async fn debug_trace_call_json(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         opts: GethDebugTracingOptions,
     ) -> Result<serde_json::Value, jsonrpsee::core::Error> {
         let mut params = jsonrpsee::core::params::ArrayParams::new();
@@ -112,7 +112,7 @@ where
         request_json: String,
         opts_json: String,
     ) -> Result<serde_json::Value, RpcError> {
-        let request = serde_json::from_str::<CallRequest>(&request_json)
+        let request = serde_json::from_str::<TransactionRequest>(&request_json)
             .map_err(|e| RpcError::Custom(e.to_string()))?;
         let opts = serde_json::from_str::<GethDebugTracingOptions>(&opts_json)
             .map_err(|e| RpcError::Custom(e.to_string()))?;

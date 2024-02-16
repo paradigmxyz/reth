@@ -220,7 +220,7 @@ where
         loop {
             let best = self.best.next()?;
             if (self.predicate)(&best) {
-                return Some(best);
+                return Some(best)
             } else {
                 self.best.mark_invalid(&best);
             }

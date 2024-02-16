@@ -4,6 +4,7 @@ use crate::{
     builder::ETH_REQUEST_CHANNEL_CAPACITY,
     error::NetworkError,
     eth_requests::EthRequestHandler,
+    peers::PeersHandle,
     protocol::IntoRlpxSubProtocol,
     transactions::{TransactionsHandle, TransactionsManager},
     NetworkConfig, NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkHandle,
@@ -20,7 +21,7 @@ use reth_provider::{
 use reth_tasks::TokioTaskExecutor;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore,
-    test_utils::{testing_pool, TestPool},
+    test_utils::{TestPool, TestPoolBuilder},
     EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
 };
 use secp256k1::SecretKey;
@@ -423,9 +424,9 @@ impl<C> Peer<C>
 where
     C: BlockReader + HeaderProvider + Clone,
 {
-    /// Installs a new [testing_pool]
+    /// Installs a new [TestPool]
     pub fn install_test_pool(&mut self) {
-        self.install_transactions_manager(testing_pool())
+        self.install_transactions_manager(TestPoolBuilder::default().into())
     }
 }
 
@@ -473,6 +474,10 @@ impl<Pool> PeerHandle<Pool> {
     /// Returns the [`PeerId`] used in the network.
     pub fn peer_id(&self) -> &PeerId {
         self.network.peer_id()
+    }
+
+    pub fn peer_handle(&self) -> &PeersHandle {
+        self.network.peers_handle()
     }
 
     pub fn local_addr(&self) -> SocketAddr {

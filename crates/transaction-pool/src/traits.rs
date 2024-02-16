@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use crate::{
     blobstore::BlobStoreError,
     error::PoolResult,
@@ -228,6 +230,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// given base fee.
     ///
     /// Consumer: Block production
+    #[deprecated(note = "Use best_transactions_with_attributes instead.")]
     fn best_transactions_with_base_fee(
         &self,
         base_fee: u64,
@@ -276,10 +279,10 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Retains only those hashes that are unknown to the pool.
     /// In other words, removes all transactions from the given set that are currently present in
-    /// the pool.
+    /// the pool. Returns hashes already known to the pool.
     ///
     /// Consumer: P2P
-    fn retain_unknown<A>(&self, announcement: &mut A)
+    fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
     where
         A: HandleAnnouncement;
 
@@ -368,11 +371,21 @@ pub trait TransactionPoolExt: TransactionPool {
     /// Sets the current block info for the pool.
     fn set_block_info(&self, info: BlockInfo);
 
-    /// Event listener for when the pool needs to be updated
+    /// Event listener for when the pool needs to be updated.
     ///
-    /// Implementers need to update the pool accordingly.
-    /// For example the base fee of the pending block is determined after a block is mined which
+    /// Implementers need to update the pool accordingly:
+    ///
+    /// ## Fee changes
+    ///
+    /// The [CanonicalStateUpdate] includes the base and blob fee of the pending block, which
     /// affects the dynamic fee requirement of pending transactions in the pool.
+    ///
+    /// ## EIP-4844 Blob transactions
+    ///
+    /// Mined blob transactions need to be removed from the pool, but from the pool only. The blob
+    /// sidecar must not be removed from the blob store. Only after a blob transaction is
+    /// finalized, its sidecar is removed from the blob store. This ensures that in case of a reorg,
+    /// the sidecar is still available.
     fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>);
 
     /// Updates the accounts in the pool
@@ -490,7 +503,7 @@ impl<T: PoolTransaction> Clone for NewTransactionEvent<T> {
 }
 
 /// This type represents a new blob sidecar that has been stored in the transaction pool's
-/// blobstore; it includes the TransasctionHash of the blob transaction along with the assoc.
+/// blobstore; it includes the TransactionHash of the blob transaction along with the assoc.
 /// sidecar (blobs, commitments, proofs)
 #[derive(Debug, Clone)]
 pub struct NewBlobSidecar {
@@ -571,8 +584,8 @@ impl<'a> CanonicalStateUpdate<'a> {
     }
 
     /// Returns the hash of the tip block.
-    pub fn hash(&self) -> B256 {
-        self.new_tip.hash
+    pub const fn hash(&self) -> B256 {
+        self.new_tip.hash()
     }
 
     /// Timestamp of the latest chain update
@@ -1127,7 +1140,7 @@ impl PoolSize {
 }
 
 /// Represents the current status of the pool.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
 pub struct BlockInfo {
     /// Hash for the currently tracked block.
     pub last_seen_block_hash: B256,

@@ -25,9 +25,9 @@ pub fn test_payload_service<Engine>() -> (
 )
 where
     Engine: EngineTypes<
-        PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-        BuiltPayload = EthBuiltPayload,
-    >,
+            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+            BuiltPayload = EthBuiltPayload,
+        > + 'static,
 {
     PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
 }

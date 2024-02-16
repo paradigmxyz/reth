@@ -285,10 +285,10 @@ impl BundleStateWithReceipts {
         std::mem::swap(&mut self.bundle, &mut other)
     }
 
-    /// Write bundle state to database.
+    /// Write the [BundleStateWithReceipts] to the database.
     ///
-    /// `omit_changed_check` should be set to true of bundle has some of it data
-    /// detached, This would make some original values not known.
+    /// `is_value_known` should be set to `Not` if the [BundleStateWithReceipts] has some of its
+    /// state detached, This would make some original values not known.
     pub fn write_to_db<TX: DbTxMut + DbTx>(
         self,
         tx: &TX,

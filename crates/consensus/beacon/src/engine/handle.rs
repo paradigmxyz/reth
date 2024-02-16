@@ -16,7 +16,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// A _shareable_ beacon consensus frontend type. Used to interact with the spawned beacon consensus
 /// engine task.
 ///
-/// See also [`BeaconConsensusEngine`](crate::engine::BeaconConsensusEngine).
+/// See also `BeaconConsensusEngine`
 #[derive(Debug)]
 pub struct BeaconConsensusEngineHandle<Engine>
 where
@@ -89,7 +89,7 @@ where
         rx
     }
 
-    /// Sends a transition configuration exchagne message to the beacon consensus engine.
+    /// Sends a transition configuration exchange message to the beacon consensus engine.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
     pub async fn transition_configuration_exchanged(&self) {

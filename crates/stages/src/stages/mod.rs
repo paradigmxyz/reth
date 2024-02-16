@@ -82,11 +82,11 @@ mod tests {
         provider_rw.insert_block(block.clone().try_seal_with_senders().unwrap(), None).unwrap();
 
         // Fill with bogus blocks to respect PruneMode distance.
-        let mut head = block.hash;
+        let mut head = block.hash();
         let mut rng = generators::rng();
         for block_number in 2..=tip {
             let nblock = random_block(&mut rng, block_number, Some(head), Some(0), Some(0));
-            head = nblock.hash;
+            head = nblock.hash();
             provider_rw.insert_block(nblock.try_seal_with_senders().unwrap(), None).unwrap();
         }
         provider_rw.commit().unwrap();

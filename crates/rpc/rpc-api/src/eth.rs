@@ -4,7 +4,7 @@ use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
 };
 use reth_rpc_types::{
-    state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle, CallRequest,
+    state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle,
     EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, RichBlock, StateContext,
     SyncStatus, Transaction, TransactionReceipt, TransactionRequest, Work,
 };
@@ -146,7 +146,7 @@ pub trait EthApi {
     #[method(name = "call")]
     async fn call(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
@@ -179,7 +179,7 @@ pub trait EthApi {
     #[method(name = "createAccessList")]
     async fn create_access_list(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         block_number: Option<BlockId>,
     ) -> RpcResult<AccessListWithGasUsed>;
 
@@ -188,7 +188,7 @@ pub trait EthApi {
     #[method(name = "estimateGas")]
     async fn estimate_gas(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<U256>;
@@ -262,7 +262,7 @@ pub trait EthApi {
     /// Signs a transaction that can be submitted to the network at a later time using with
     /// `sendRawTransaction.`
     #[method(name = "signTransaction")]
-    async fn sign_transaction(&self, transaction: CallRequest) -> RpcResult<Bytes>;
+    async fn sign_transaction(&self, transaction: TransactionRequest) -> RpcResult<Bytes>;
 
     /// Signs data via [EIP-712](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md).
     #[method(name = "signTypedData")]
