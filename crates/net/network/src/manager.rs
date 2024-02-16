@@ -56,8 +56,8 @@ use std::{
         Arc,
     },
     task::{Context, Poll},
+    time::Instant,
 };
-use std::time::Instant;
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, trace, warn};
@@ -933,7 +933,10 @@ where
             }
         }
 
-        println!("NetworkManager::poll took {:?}; iterations {}", now.elapsed(), 1024 - budget);
+        let elapsed = now.elapsed();
+        if elapsed.as_micros() > 50 {
+            println!("NetworkManager::poll took {:?}; iterations {}", now.elapsed(), 1024 - budget);
+        }
 
         Poll::Pending
     }
