@@ -57,6 +57,7 @@ use std::{
     },
     task::{Context, Poll},
 };
+use std::time::Instant;
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, trace, warn};
@@ -675,6 +676,7 @@ where
         // And tokio's docs on cooperative scheduling <https://docs.rs/tokio/latest/tokio/task/#cooperative-scheduling>
         let mut budget = 1024;
 
+        let now = Instant::now();
         loop {
             // advance the swarm
             match this.swarm.poll_next_unpin(cx) {
@@ -924,11 +926,14 @@ where
             // ensure we still have enough budget for another iteration
             budget -= 1;
             if budget == 0 {
+                println!("yieldin manually::poll took {:?}", now.elapsed());
                 // make sure we're woken up again
                 cx.waker().wake_by_ref();
                 break
             }
         }
+
+        println!("NetworkManager::poll took {:?}; iterations {}", now.elapsed(), 1024 - budget);
 
         Poll::Pending
     }
