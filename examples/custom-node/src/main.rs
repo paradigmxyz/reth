@@ -183,8 +183,8 @@ impl NodeTypes for MyCustomNode {
 ///
 /// This provides a preset configuration for the node
 impl<N> Node<N> for MyCustomNode
-where
-    N: FullNodeTypes<Engine = CustomEngineTypes>,
+    where
+        N: FullNodeTypes<Engine = CustomEngineTypes>,
 {
     type PoolBuilder = EthereumPoolBuilder;
     type NetworkBuilder = EthereumNetwork;
@@ -207,9 +207,9 @@ where
 pub struct CustomPayloadServiceBuilder;
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadServiceBuilder
-where
-    Node: FullNodeTypes<Engine = CustomEngineTypes>,
-    Pool: TransactionPool + Unpin + 'static,
+    where
+        Node: FullNodeTypes<Engine = CustomEngineTypes>,
+        Pool: TransactionPool + Unpin + 'static,
 {
     async fn spawn_payload_service(
         self,
@@ -249,9 +249,9 @@ where
 pub struct CustomPayloadBuilder;
 
 impl<Pool, Client> PayloadBuilder<Pool, Client> for CustomPayloadBuilder
-where
-    Client: StateProviderFactory,
-    Pool: TransactionPool,
+    where
+        Client: StateProviderFactory,
+        Pool: TransactionPool,
 {
     type Attributes = CustomPayloadBuilderAttributes;
     type BuiltPayload = EthBuiltPayload;
@@ -302,7 +302,7 @@ where
             chain_spec,
         } = config;
         <reth_ethereum_payload_builder::EthereumPayloadBuilder  as PayloadBuilder<Pool,Client>>  ::build_empty_payload(client,
-            PayloadConfig { initialized_block_env, initialized_cfg, parent_block, extra_data, attributes: attributes.0, chain_spec }
+                                                                                                                       PayloadConfig { initialized_block_env, initialized_cfg, parent_block, extra_data, attributes: attributes.0, chain_spec }
         )
     }
 }

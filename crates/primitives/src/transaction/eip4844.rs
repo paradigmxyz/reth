@@ -139,14 +139,14 @@ impl TxEip4844 {
             // convert to KzgCommitment
             let commitment = KzgCommitment::from(*commitment.deref());
 
-            // Calculate the versioned hash
-            //
-            // TODO: should this method distinguish the type of validation failure? For example
-            // whether a certain versioned hash does not match, or whether the blob proof
-            // validation failed?
+            // calculate & verify the versioned hash
+            // https://eips.ethereum.org/EIPS/eip-4844#execution-layer-validation
             let calculated_versioned_hash = kzg_to_versioned_hash(commitment);
             if *versioned_hash != calculated_versioned_hash {
-                return Err(BlobTransactionValidationError::InvalidProof)
+                return Err(BlobTransactionValidationError::WrongVersionedHash {
+                    have: *versioned_hash,
+                    expected: calculated_versioned_hash,
+                })
             }
         }
 

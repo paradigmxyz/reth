@@ -34,6 +34,12 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// Deletes multiple blob sidecars from the store
     fn delete_all(&self, txs: Vec<B256>) -> Result<(), BlobStoreError>;
 
+    /// A maintenance function that can be called periodically to clean up the blob store.
+    ///
+    /// This is intended to be called in the background to clean up any old or unused data, in case
+    /// the store uses deferred cleanup: [DiskFileBlobStore]
+    fn cleanup(&self);
+
     /// Retrieves the decoded blob data for the given transaction hash.
     fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
 
@@ -104,6 +110,11 @@ impl BlobStoreSize {
     #[inline]
     pub(crate) fn inc_len(&self, add: usize) {
         self.num_blobs.fetch_add(add, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub(crate) fn sub_len(&self, sub: usize) {
+        self.num_blobs.fetch_sub(sub, Ordering::Relaxed);
     }
 
     #[inline]

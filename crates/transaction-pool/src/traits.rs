@@ -396,6 +396,9 @@ pub trait TransactionPoolExt: TransactionPool {
 
     /// Deletes multiple blob sidecars from the blob store
     fn delete_blobs(&self, txs: Vec<B256>);
+
+    /// Maintenance function to cleanup blobs that are no longer needed.
+    fn cleanup_blobs(&self);
 }
 
 /// Determines what kind of new transactions should be emitted by a stream of transactions.
