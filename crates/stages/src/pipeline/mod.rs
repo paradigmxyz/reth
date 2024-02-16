@@ -196,7 +196,7 @@ where
                 }
                 ControlFlow::Continue { block_number } => self.progress.update(block_number),
                 ControlFlow::Unwind { target, bad_block } => {
-                    self.unwind(target, Some(bad_block.number))?;
+                    self.unwind(target, bad_block.as_ref().map(|block| block.number))?;
                     return Ok(ControlFlow::Unwind { target, bad_block })
                 }
             }
@@ -309,6 +309,13 @@ where
         loop {
             let prev_checkpoint = self.provider_factory.get_stage_checkpoint(stage_id)?;
 
+            if let Some((previous_stage, previous_checkpoint)) = previous_stage.zip(prev_checkpoint)
+            {
+                if previous_checkpoint.block_number > previous_stage {
+                    return Ok(ControlFlow::Unwind { target: previous_stage, bad_block: None })
+                }
+            }
+
             let stage_reached_max_block = prev_checkpoint
                 .zip(self.max_block)
                 .map_or(false, |(prev_progress, target)| prev_progress.block_number >= target);
@@ -409,7 +416,7 @@ fn on_stage_error<DB: Database>(
         // We unwind because of a detached head.
         let unwind_to =
             local_head.number.saturating_sub(BEACON_CONSENSUS_REORG_UNWIND_DEPTH).max(1);
-        Ok(Some(ControlFlow::Unwind { target: unwind_to, bad_block: local_head }))
+        Ok(Some(ControlFlow::Unwind { target: unwind_to, bad_block: Some(local_head) }))
     } else if let StageError::Block { block, error } = err {
         match error {
             BlockErrorKind::Validation(validation_error) => {
@@ -437,7 +444,7 @@ fn on_stage_error<DB: Database>(
                 // beginning.
                 Ok(Some(ControlFlow::Unwind {
                     target: prev_checkpoint.unwrap_or_default().block_number,
-                    bad_block: block,
+                    bad_block: Some(block),
                 }))
             }
             BlockErrorKind::Execution(execution_error) => {
@@ -454,7 +461,7 @@ fn on_stage_error<DB: Database>(
                 // the execution loop from the beginning.
                 Ok(Some(ControlFlow::Unwind {
                     target: prev_checkpoint.unwrap_or_default().block_number,
-                    bad_block: block,
+                    bad_block: Some(block),
                 }))
             }
         }

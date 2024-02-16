@@ -1587,7 +1587,7 @@ where
                     return Some(Ok(()))
                 }
 
-                if let ControlFlow::Unwind { bad_block, .. } = ctrl {
+                if let ControlFlow::Unwind { bad_block: Some(bad_block), .. } = ctrl {
                     warn!(target: "consensus::engine", invalid_hash=?bad_block.hash(), invalid_number=?bad_block.number, "Bad block detected in unwind");
 
                     // update the `invalid_headers` cache with the new invalid headers
