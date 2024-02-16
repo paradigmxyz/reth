@@ -104,7 +104,8 @@ where
                     let gas_price = tx
                         .effective_tip_per_gas(basefee)
                         .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)?;
-                    tx.try_fill_tx_env(evm.tx_mut())?;
+                    tx.try_fill_tx_env(evm.tx_mut())
+                        .map_err(|_| EthApiError::InvalidTransactionSignature)?;
                     let ResultAndState { result, state } = evm.transact()?;
 
                     let gas_used = result.gas_used();

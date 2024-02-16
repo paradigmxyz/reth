@@ -267,7 +267,7 @@ mod builder {
                 .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
                     initialized_cfg.clone(),
                     initialized_block_env.clone(),
-                    tx.new_filled_tx_env(),
+                    tx.tx_env(),
                 ))
                 .build();
 

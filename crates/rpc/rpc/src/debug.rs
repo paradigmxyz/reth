@@ -14,8 +14,7 @@ use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
-    revm::env::FillableTransaction,
-    Address, Block, BlockId, BlockNumberOrTag, Bytes,
+    revm::env::FillableTransaction, Address, Block, BlockId, BlockNumberOrTag, Bytes,
     TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use reth_provider::{
@@ -90,9 +89,8 @@ where
                 let mut transactions = transactions.into_iter().enumerate().peekable();
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
-                    let tx = tx.new_filled_tx_env();
                     let env = EnvWithHandlerCfg {
-                        env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
+                        env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx.tx_env()),
                         handler_cfg: cfg.handler_cfg,
                     };
                     let (result, state_changes) = this
@@ -239,7 +237,7 @@ where
                 )?;
 
                 let env = EnvWithHandlerCfg {
-                    env: Env::boxed(cfg.cfg_env.clone(), block_env, tx.new_filled_tx_env()),
+                    env: Env::boxed(cfg.cfg_env.clone(), block_env, tx.tx_env()),
                     handler_cfg: cfg.handler_cfg,
                 };
 
@@ -438,7 +436,7 @@ where
                     // Execute all transactions until index
                     for tx in transactions {
                         let env = EnvWithHandlerCfg {
-                            env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
+                            env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx.tx_env()),
                             handler_cfg: cfg.handler_cfg,
                         };
                         let (res, _) = transact(&mut db, env)?;

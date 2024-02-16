@@ -4,7 +4,7 @@ use crate::eth::error::{EthApiError, EthResult};
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs,
-    revm::{compat::into_reth_log, env::FillableTransaction},
+    revm::env::FillableTransaction,
     revm_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
     },
@@ -131,8 +131,7 @@ impl PendingBlockEnv {
             }
 
             // Configure the environment for the block.
-            let env =
-                Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx.tx_env());
+            let env = Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx.tx_env());
 
             let mut evm = revm::Evm::builder().with_env(env).with_db(&mut db).build();
 

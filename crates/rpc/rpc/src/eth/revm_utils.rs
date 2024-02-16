@@ -1,10 +1,7 @@
 //! utilities for working with revm
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
-use reth_primitives::{
-    revm::env::TryFillableTransaction, Address,
-    B256, U256,
-};
+use reth_primitives::{revm::env::TryFillableTransaction, Address, B256, U256};
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
     BlockOverrides, TransactionRequest,

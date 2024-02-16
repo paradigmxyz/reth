@@ -11,8 +11,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
 use reth_primitives::{
-    revm::env::FillableTransaction, revm_primitives::db::DatabaseCommit, BlockId, BlockNumberOrTag,
-    Bytes, SealedHeader, B256, U256,
+    revm::env::FillableTransaction, BlockId, BlockNumberOrTag, Bytes, SealedHeader, B256, U256,
 };
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{

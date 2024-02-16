@@ -2,8 +2,8 @@ use crate::{
     constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
     recover_signer_unchecked,
     revm_primitives::{BlockEnv, Env, TransactTo, TxEnv},
-    Address, Bytes, Chain, ChainSpec, Header, Transaction, TransactionKind,
-    TransactionSignedEcRecovered, B256, U256, TransactionSigned,
+    Address, Bytes, Chain, ChainSpec, Header, Transaction, TransactionKind, TransactionSigned,
+    TransactionSignedEcRecovered, B256, U256,
 };
 use alloy_primitives::TxHash;
 #[cfg(feature = "optimism")]
