@@ -24,6 +24,7 @@ use reth::{
         node::NodeTypes,
         BuilderContext, FullNodeTypes, Node, NodeBuilder, PayloadBuilderConfig,
     },
+    primitives::revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     providers::{CanonStateSubscriptions, StateProviderFactory},
     tasks::TaskManager,
     transaction_pool::TransactionPool,
@@ -38,14 +39,14 @@ use reth_node_api::{
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
-    node::{EthereumNetworkBuilder, EthereumPoolBuilder},
+    node::{EthereumNetworkBuilder, EthereumPayloadBuilder, EthereumPoolBuilder},
     EthEvmConfig,
 };
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
     PayloadBuilderService,
 };
-use reth_primitives::{Address, ChainSpec, Genesis, Withdrawals, B256};
+use reth_primitives::{Address, ChainSpec, Genesis, Header, Withdrawals, B256};
 use reth_rpc_types::{
     engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
     withdrawal::Withdrawal,
@@ -101,7 +102,7 @@ impl PayloadAttributes for CustomPayloadAttributes {
     }
 }
 
-/// Newtype around the payload builder attributes type
+/// New type around the payload builder attributes type
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CustomPayloadBuilderAttributes(EthPayloadBuilderAttributes);
 
@@ -139,6 +140,14 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
 
     fn withdrawals(&self) -> &Withdrawals {
         &self.0.withdrawals
+    }
+
+    fn cfg_and_block_env(
+        &self,
+        chain_spec: &ChainSpec,
+        parent: &Header,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        EthereumPayloadBuilder::default().cfg_and_block_env(chain_spec, parent)
     }
 }
 
