@@ -17,7 +17,7 @@ use reth_db::DatabaseEnv;
 use reth_node_builder::{InitState, WithLaunchContext};
 use reth_primitives::ChainSpec;
 use reth_tracing::FileWorkerGuard;
-use std::{fmt, future::Future, sync::Arc};
+use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 
 /// Re-export of the `reth_node_core` types specifically in the `cli` module.
 ///
@@ -72,7 +72,16 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
 impl Cli {
     /// Parsers only the default CLI arguments
     pub fn parse_args() -> Self {
-        Cli::parse()
+        Self::parse()
+    }
+
+    /// Parsers only the default CLI arguments from the given iterator
+    pub fn try_parse_args_from<I, T>(itr: I) -> Result<Self, clap::error::Error>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<OsString> + Clone,
+    {
+        Cli::try_parse_from(itr)
     }
 }
 
@@ -81,6 +90,43 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
     ///
     /// This accepts a closure that is used to launch the node via the
     /// [NodeCommand](node::NodeCommand).
+    ///
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use reth::cli::Cli;
+    ///
+    /// Cli::parse_args()
+    ///     .run(|builder, _| async move {
+    ///         // launch the node
+    ///
+    ///         Ok(())
+    ///     })
+    ///     .unwrap();
+    /// ```
+    ///
+    /// # Example
+    ///
+    /// Parse additional CLI arguments for the node command and use it to configure the node.
+    ///
+    /// ```no_run
+    /// use clap::Parser;
+    /// use reth::cli::Cli;
+    ///
+    /// #[derive(Debug, Parser)]
+    /// pub struct MyArgs {
+    ///     pub enable: bool,
+    /// }
+    ///
+    /// Cli::parse()
+    ///     .run(|builder, my_args: MyArgs| async move {
+    ///         // launch the node
+    ///
+    ///         Ok(())
+    ///     })
+    ///     .unwrap();
+    /// ````
     pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
     where
         L: FnOnce(WithLaunchContext<Arc<DatabaseEnv>, InitState>, Ext) -> Fut,
@@ -162,7 +208,7 @@ mod tests {
 
     #[test]
     fn parse_color_mode() {
-        let reth = Cli::<NoArgs>::try_parse_from(["reth", "node", "--color", "always"]).unwrap();
+        let reth = Cli::try_parse_args_from(["reth", "node", "--color", "always"]).unwrap();
         assert_eq!(reth.logs.color, ColorMode::Always);
     }
 
@@ -173,7 +219,7 @@ mod tests {
     fn test_parse_help_all_subcommands() {
         let reth = Cli::<NoArgs>::command();
         for sub_command in reth.get_subcommands() {
-            let err = Cli::<NoArgs>::try_parse_from(["reth", sub_command.get_name(), "--help"])
+            let err = Cli::try_parse_args_from(["reth", sub_command.get_name(), "--help"])
                 .err()
                 .unwrap_or_else(|| {
                     panic!("Failed to parse help message {}", sub_command.get_name())
@@ -189,7 +235,7 @@ mod tests {
     /// name
     #[test]
     fn parse_logs_path() {
-        let mut reth = Cli::<NoArgs>::try_parse_from(["reth", "node"]).unwrap();
+        let mut reth = Cli::try_parse_args_from(["reth", "node"]).unwrap();
         reth.logs.log_file_directory =
             reth.logs.log_file_directory.join(reth.chain.chain.to_string());
         let log_dir = reth.logs.log_file_directory;
@@ -199,8 +245,7 @@ mod tests {
         let mut iter = SUPPORTED_CHAINS.iter();
         iter.next();
         for chain in iter {
-            let mut reth =
-                Cli::<NoArgs>::try_parse_from(["reth", "node", "--chain", chain]).unwrap();
+            let mut reth = Cli::try_parse_args_from(["reth", "node", "--chain", chain]).unwrap();
             reth.logs.log_file_directory =
                 reth.logs.log_file_directory.join(reth.chain.chain.to_string());
             let log_dir = reth.logs.log_file_directory;
@@ -214,7 +259,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
 
         std::env::set_var("RUST_LOG", "info,evm=debug");
-        let reth = Cli::<NoArgs>::try_parse_from([
+        let reth = Cli::try_parse_args_from([
             "reth",
             "init",
             "--datadir",

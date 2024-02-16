@@ -14,7 +14,7 @@ use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_node_builder::{InitState, NodeBuilder, WithLaunchContext};
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::ChainSpec;
-use std::{fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
 
 /// Start the node
 #[derive(Debug, Parser)]
@@ -118,6 +118,22 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
     pub ext: Ext,
 }
 
+impl NodeCommand {
+    /// Parsers only the default CLI arguments
+    pub fn parse_args() -> Self {
+        Self::parse()
+    }
+
+    /// Parsers only the default [NodeCommand] arguments from the given iterator
+    pub fn try_parse_args_from<I, T>(itr: I) -> Result<Self, clap::error::Error>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<OsString> + Clone,
+    {
+        Self::try_parse_from(itr)
+    }
+}
+
 impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
     /// Launches the node
     ///
@@ -202,7 +218,7 @@ mod tests {
 
     #[test]
     fn parse_help_node_command() {
-        let err = NodeCommand::<NoArgs>::try_parse_from(["reth", "--help"]).unwrap_err();
+        let err = NodeCommand::try_parse_args_from(["reth", "--help"]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
     }
 
@@ -216,14 +232,14 @@ mod tests {
 
     #[test]
     fn parse_discovery_addr() {
-        let cmd = NodeCommand::<NoArgs>::try_parse_from(["reth", "--discovery.addr", "127.0.0.1"])
-            .unwrap();
+        let cmd =
+            NodeCommand::try_parse_args_from(["reth", "--discovery.addr", "127.0.0.1"]).unwrap();
         assert_eq!(cmd.network.discovery.addr, Ipv4Addr::LOCALHOST);
     }
 
     #[test]
     fn parse_addr() {
-        let cmd = NodeCommand::<NoArgs>::try_parse_from([
+        let cmd = NodeCommand::try_parse_args_from([
             "reth",
             "--discovery.addr",
             "127.0.0.1",
@@ -237,49 +253,42 @@ mod tests {
 
     #[test]
     fn parse_discovery_port() {
-        let cmd =
-            NodeCommand::<NoArgs>::try_parse_from(["reth", "--discovery.port", "300"]).unwrap();
+        let cmd = NodeCommand::try_parse_args_from(["reth", "--discovery.port", "300"]).unwrap();
         assert_eq!(cmd.network.discovery.port, 300);
     }
 
     #[test]
     fn parse_port() {
-        let cmd = NodeCommand::<NoArgs>::try_parse_from([
-            "reth",
-            "--discovery.port",
-            "300",
-            "--port",
-            "99",
-        ])
-        .unwrap();
+        let cmd =
+            NodeCommand::try_parse_args_from(["reth", "--discovery.port", "300", "--port", "99"])
+                .unwrap();
         assert_eq!(cmd.network.discovery.port, 300);
         assert_eq!(cmd.network.port, 99);
     }
 
     #[test]
     fn parse_metrics_port() {
-        let cmd = NodeCommand::<NoArgs>::try_parse_from(["reth", "--metrics", "9001"]).unwrap();
+        let cmd = NodeCommand::try_parse_args_from(["reth", "--metrics", "9001"]).unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
 
-        let cmd = NodeCommand::<NoArgs>::try_parse_from(["reth", "--metrics", ":9001"]).unwrap();
+        let cmd = NodeCommand::try_parse_args_from(["reth", "--metrics", ":9001"]).unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
 
         let cmd =
-            NodeCommand::<NoArgs>::try_parse_from(["reth", "--metrics", "localhost:9001"]).unwrap();
+            NodeCommand::try_parse_args_from(["reth", "--metrics", "localhost:9001"]).unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
     }
 
     #[test]
     fn parse_config_path() {
         let cmd =
-            NodeCommand::<NoArgs>::try_parse_from(["reth", "--config", "my/path/to/reth.toml"])
-                .unwrap();
+            NodeCommand::try_parse_args_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let config_path = cmd.config.unwrap_or(data_dir.config_path());
         assert_eq!(config_path, Path::new("my/path/to/reth.toml"));
 
-        let cmd = NodeCommand::<NoArgs>::try_parse_from(["reth"]).unwrap();
+        let cmd = NodeCommand::try_parse_args_from(["reth"]).unwrap();
 
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
@@ -290,14 +299,14 @@ mod tests {
 
     #[test]
     fn parse_db_path() {
-        let cmd = NodeCommand::<NoArgs>::try_parse_from(["reth"]).unwrap();
+        let cmd = NodeCommand::try_parse_args_from(["reth"]).unwrap();
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let db_path = data_dir.db_path();
         let end = format!("reth/{}/db", SUPPORTED_CHAINS[0]);
         assert!(db_path.ends_with(end), "{:?}", cmd.config);
 
         let cmd =
-            NodeCommand::<NoArgs>::try_parse_from(["reth", "--datadir", "my/custom/path"]).unwrap();
+            NodeCommand::try_parse_args_from(["reth", "--datadir", "my/custom/path"]).unwrap();
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let db_path = data_dir.db_path();
         assert_eq!(db_path, Path::new("my/custom/path/db"));
@@ -363,13 +372,9 @@ mod tests {
 
     #[test]
     fn with_unused_ports_conflicts_with_instance() {
-        let err = NodeCommand::<NoArgs>::try_parse_from([
-            "reth",
-            "--with-unused-ports",
-            "--instance",
-            "2",
-        ])
-        .unwrap_err();
+        let err =
+            NodeCommand::try_parse_args_from(["reth", "--with-unused-ports", "--instance", "2"])
+                .unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
     }
 

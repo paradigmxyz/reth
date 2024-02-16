@@ -1,5 +1,5 @@
 use crate::{
-    components::FullNodeComponents,
+    components::{ComponentsBuilder, FullNodeComponents},
     provider::FullProvider,
     rpc::{RethRpcServerHandles, RpcRegistry},
 };
@@ -15,6 +15,23 @@ use reth_primitives::ChainSpec;
 use reth_provider::ChainSpecProvider;
 use reth_tasks::TaskExecutor;
 use std::{marker::PhantomData, sync::Arc};
+
+/// A [Node] is a [NodeTypes] that comes with preconfigured components.
+///
+/// This can be used to configure the builder with a preset of components.
+pub trait Node<N>: NodeTypes {
+    /// The type that builds the node's pool.
+    type PoolBuilder;
+    /// The type that builds the node's network.
+    type NetworkBuilder;
+    /// The type that builds the node's payload service.
+    type PayloadBuilder;
+
+    /// Returns the [ComponentsBuilder] for the node.
+    fn components(
+        self,
+    ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder>;
+}
 
 /// The type that configures stateless node types, the node's primitive types.
 pub trait NodeTypes: Send + Sync + 'static {

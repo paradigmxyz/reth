@@ -6,7 +6,7 @@ use reth_network::{NetworkHandle, NetworkManager};
 use reth_node_builder::{
     components::{ComponentsBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder},
     node::{FullNodeTypes, NodeTypes},
-    BuilderContext, PayloadBuilderConfig,
+    BuilderContext, Node, PayloadBuilderConfig,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
@@ -19,13 +19,21 @@ use reth_transaction_pool::{
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-pub struct OptimismNode;
+pub struct OptimismNode {
+    /// Additional Optimism args
+    pub args: RollupArgs,
+}
 
 impl OptimismNode {
-    /// Returns a [`ComponentsBuilder`] configured for a regular Optimism node from the given args.
+    /// Creates a new instance of the Optimism node type.
+    pub fn new(args: RollupArgs) -> Self {
+        Self { args }
+    }
+
+    /// Returns the components for the given [RollUpArgs].
     pub fn components<Node>(
         args: RollupArgs,
-    ) -> ComponentsBuilder<Node, OptimismPoolBuilder, OptimismPayloadBuilder, OptimismNetwork>
+    ) -> ComponentsBuilder<Node, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder>
     where
         Node: FullNodeTypes<Engine = OptimismEngineTypes>,
     {
@@ -34,7 +42,23 @@ impl OptimismNode {
             .node_types::<Node>()
             .pool(OptimismPoolBuilder::default())
             .payload(OptimismPayloadBuilder::new(compute_pending_block))
-            .network(OptimismNetwork { sequencer_http, disable_txpool_gossip })
+            .network(OptimismNetworkBuilder { sequencer_http, disable_txpool_gossip })
+    }
+}
+
+impl<N> Node<N> for OptimismNode
+where
+    N: FullNodeTypes<Engine = OptimismEngineTypes>,
+{
+    type PoolBuilder = OptimismPoolBuilder;
+    type NetworkBuilder = OptimismNetworkBuilder;
+    type PayloadBuilder = OptimismPayloadBuilder;
+
+    fn components(
+        self,
+    ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder> {
+        let Self { args } = self;
+        Self::components(args)
     }
 }
 
@@ -117,7 +141,7 @@ where
     }
 }
 
-/// A basic optimism payload service.
+/// A basic optimism payload service builder
 #[derive(Debug, Default, Clone)]
 pub struct OptimismPayloadBuilder {
     /// By default the pending block equals the latest block
@@ -177,16 +201,16 @@ where
     }
 }
 
-/// A basic ethereum payload service.
+/// A basic optimism network builder.
 #[derive(Debug, Default, Clone)]
-pub struct OptimismNetwork {
+pub struct OptimismNetworkBuilder {
     /// HTTP endpoint for the sequencer mempool
     pub sequencer_http: Option<String>,
     /// Disable transaction pool gossip
     pub disable_txpool_gossip: bool,
 }
 
-impl<Node, Pool> NetworkBuilder<Node, Pool> for OptimismNetwork
+impl<Node, Pool> NetworkBuilder<Node, Pool> for OptimismNetworkBuilder
 where
     Node: FullNodeTypes,
     Pool: TransactionPool + Unpin + 'static,

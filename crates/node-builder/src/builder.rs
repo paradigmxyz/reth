@@ -671,11 +671,31 @@ where
     }
 }
 
-/// A [NodeBuilder] with it's launch context already configured
+/// A [NodeBuilder] with it's launch context already configured.
+///
+/// This exposes the same methods as [NodeBuilder] but with the launch context already configured,
+/// See [WithLaunchContext::launch]
 pub struct WithLaunchContext<DB, State> {
     builder: NodeBuilder<DB, State>,
     task_executor: TaskExecutor,
     data_dir: ChainPath<DataDirPath>,
+}
+
+impl<DB, State> WithLaunchContext<DB, State> {
+    /// Returns a reference to the node builder's config.
+    pub fn config(&self) -> &NodeConfig {
+        self.builder.config()
+    }
+
+    /// Returns a reference to the task executor.
+    pub fn task_executor(&self) -> &TaskExecutor {
+        &self.task_executor
+    }
+
+    /// Returns a reference to the data directory.
+    pub fn data_dir(&self) -> &ChainPath<DataDirPath> {
+        &self.data_dir
+    }
 }
 
 impl<DB> WithLaunchContext<DB, InitState>
