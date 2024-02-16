@@ -129,6 +129,18 @@ Networking:
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound requests. default: 30
 
+      --pooled-tx-response-soft-limit <BYTES>
+          Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on assembling a [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request. Spec'd at 2 MiB.
+
+          <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
+
+          [default: 2097152]
+
+      --pooled-tx-pack-soft-limit <BYTES>
+          Default soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on assembling a [`GetPooledTransactions`](reth_eth_wire::PooledTransactions) request. This defaults to less than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when assembling a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response. Default is 128 KiB
+
+          [default: 131072]
+
 RPC:
       --http
           Enable the HTTP-RPC server
