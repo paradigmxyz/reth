@@ -9,6 +9,7 @@ use reth_node_api::{evm::EvmConfig, primitives::NodePrimitives, EngineTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
+    rpc::builder::{auth::AuthServerHandle, RpcServerHandle},
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::ChainSpec;
@@ -95,6 +96,8 @@ where
 }
 
 /// The launched node with all components including RPC handlers.
+///
+/// This can be used to interact with the launched node.
 #[derive(Debug)]
 pub struct FullNode<Node: FullNodeComponents> {
     /// The evm configuration.
@@ -123,6 +126,16 @@ impl<Node: FullNodeComponents> FullNode<Node> {
     /// Returns the [ChainSpec] of the node.
     pub fn chain_spec(&self) -> Arc<ChainSpec> {
         self.provider.chain_spec()
+    }
+
+    /// Returns the [RpcServerHandle] to the started rpc server.
+    pub fn rpc_server_handle(&self) -> &RpcServerHandle {
+        &self.rpc_server_handles.rpc
+    }
+
+    /// Returns the [AuthServerHandle] to the started authenticated engine API server.
+    pub fn auth_server_handle(&self) -> &AuthServerHandle {
+        &self.rpc_server_handles.auth
     }
 }
 

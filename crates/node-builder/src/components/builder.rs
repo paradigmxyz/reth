@@ -87,6 +87,9 @@ where
     Node: FullNodeTypes,
 {
     /// Configures the pool builder.
+    ///
+    /// This accepts a [PoolBuilder] instance that will be used to create the node's transaction
+    /// pool.
     pub fn pool<PB>(self, pool_builder: PB) -> ComponentsBuilder<Node, PB, PayloadB, NetworkB>
     where
         PB: PoolBuilder<Node>,
@@ -102,6 +105,9 @@ where
     PoolB: PoolBuilder<Node>,
 {
     /// Configures the network builder.
+    ///
+    /// This accepts a [NetworkBuilder] instance that will be used to create the node's network
+    /// stack.
     pub fn network<NB>(self, network_builder: NB) -> ComponentsBuilder<Node, PoolB, PayloadB, NB>
     where
         NB: NetworkBuilder<Node, PoolB::Pool>,
@@ -111,6 +117,9 @@ where
     }
 
     /// Configures the payload builder.
+    ///
+    /// This accepts a [PayloadServiceBuilder] instance that will be used to create the node's
+    /// payload builder service.
     pub fn payload<PB>(self, payload_builder: PB) -> ComponentsBuilder<Node, PoolB, PB, NetworkB>
     where
         PB: PayloadServiceBuilder<Node, PoolB::Pool>,

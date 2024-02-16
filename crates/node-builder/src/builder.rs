@@ -77,11 +77,15 @@ type RethFullAdapter<DB, N> =
 ///  - The network: [NetworkBuilder](crate::components::NetworkBuilder)
 ///  - The payload builder: [PayloadBuilder](crate::components::PayloadServiceBuilder)
 ///
-/// Finally, the node is ready to launch [NodeBuilder::launch]
+/// Once all the components are configured, the node is ready to be launched.
 ///
 /// On launch the builder returns a fully type aware [NodeHandle] that has access to all the
 /// configured components and can interact with the node.
 ///
+/// There are convenience functions for networks that come with a preset of types and components via
+/// the [Node] trait, see `reth_node_ethereum::EthereumNode` or `reth_node_optimism::OptimismNode`.
+///
+/// The [NodeBuilder::node] function configures the node's types and components in one step.
 ///
 /// [builder]: https://doc.rust-lang.org/1.0.0/style/ownership/builders.html
 pub struct NodeBuilder<DB, State> {
@@ -360,6 +364,11 @@ where
     }
 
     /// Launches the node and returns a handle to it.
+    ///
+    /// This bootstraps the node internals, creates all the components with the provider
+    /// [NodeComponentsBuilder] and launches the node.
+    ///
+    /// Returns a [NodeHandle] that can be used to interact with the node.
     pub async fn launch(
         self,
         executor: TaskExecutor,
@@ -768,6 +777,11 @@ where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
     /// Launches a preconfigured [Node]
+    ///
+    /// This bootstraps the node internals, creates all the components with the given [Node] type
+    /// and launches the node.
+    ///
+    /// Returns a [NodeHandle] that can be used to interact with the node.
     pub async fn launch_node<N>(
         self,
         node: N,
@@ -801,6 +815,9 @@ where
     DB: Database + Clone + Unpin + 'static,
 {
     /// Configures the node's components.
+    ///
+    /// The given components builder is used to create the components of the node when it is
+    /// launched.
     pub fn with_components<Components>(
         self,
         components_builder: Components,
@@ -1051,12 +1068,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             .await
     }
 
-    /// Creates the [NetworkBuilder] for the node and blocks until it is ready.
-    pub fn network_builder_blocking(&self) -> eyre::Result<NetworkBuilder<Node::Provider, (), ()>> {
-        // TODO this shouldn't be required
-        futures::executor::block_on(self.network_builder())
-    }
-
+    /// Convenience function to start the network.
+    ///
     /// Spawns the configured network and associated tasks and returns the [NetworkHandle] connected
     /// to that network.
     pub fn start_network<Pool>(
