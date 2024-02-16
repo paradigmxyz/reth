@@ -4,10 +4,8 @@ use crate::{
     poll_nested_stream_with_yield_points,
 };
 use derive_more::Constructor;
-use futures::{
-    stream::FuturesUnordered, Future, FutureExt, Stream,
-    StreamExt,
-};
+use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
+use futures_test::task::noop_context;
 use pin_project::pin_project;
 use reth_eth_wire::{
     GetPooledTransactions, HandleAnnouncement, RequestTxHashes, ValidAnnouncementData,
@@ -80,18 +78,20 @@ impl TransactionFetcher {
         self
     }
     
-    pub(super) fn try_drain_inflight_requests(&mut self, cx: &mut Context<'_>) {
+    pub(super) fn try_drain_inflight_requests(&mut self) {
         // `FuturesUnordered` doesn't close when `None` is returned. so just return if empty.
         // <https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=815be2b6c8003303757c3ced135f363e>
         if self.inflight_requests.is_empty() {
             return
         }
 
+        // noop context is used since we don't need the inflight requests futures unordered to
+        // schedule for wake up here when it's pending
         let _ = poll_nested_stream_with_yield_points!(
             "net::tx",
             "Fetch events stream",
             DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
-            self.inflight_requests.poll_next_unpin(cx),
+            self.inflight_requests.poll_next_unpin(&mut noop_context()),
             |resp| self.on_resolved_get_pooled_transactions_request_fut(resp),
         );
     }
@@ -377,10 +377,9 @@ impl TransactionFetcher {
         peers: &HashMap<PeerId, Peer>,
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
         metrics_increment_egress_peer_channel_full: impl FnOnce(),
-        cx: &mut Context<'_>,
     ) {
         // try free active peers
-        self.try_drain_inflight_requests(cx);
+        self.try_drain_inflight_requests();
 
         let mut hashes_to_request = RequestTxHashes::with_capacity(32);
         let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
@@ -1054,7 +1053,6 @@ impl Default for TransactionFetcherInfo {
 mod test {
     use std::collections::HashSet;
 
-    use futures_test::task::noop_context;
     use reth_eth_wire::EthVersion;
     use reth_primitives::B256;
 
@@ -1205,7 +1203,7 @@ mod test {
 
         // TEST
 
-        tx_fetcher.on_fetch_pending_hashes(&peers, |_| true, || (), &mut noop_context());
+        tx_fetcher.on_fetch_pending_hashes(&peers, |_| true, || ());
 
         // mock session of peer_1 receives request
         let req = peer_1_mock_session_rx
