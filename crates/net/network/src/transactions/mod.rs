@@ -1982,7 +1982,6 @@ mod tests {
         response
             .send(Err(RequestError::BadResponse))
             .expect("should send peer_1 response to tx manager");
-        tx_fetcher.try_drain_inflight_requests();
         let Some(FetchEvent::FetchError { peer_id, .. }) = tx_fetcher.next().await else {
             unreachable!()
         };
@@ -2018,7 +2017,6 @@ mod tests {
         response
             .send(Err(RequestError::BadResponse))
             .expect("should send peer_2 response to tx manager");
-        tx_fetcher.try_drain_inflight_requests();
         let Some(FetchEvent::FetchError { .. }) = tx_fetcher.next().await else { unreachable!() };
 
         // `MAX_REQUEST_RETRIES_PER_TX_HASH`, 2, for hashes reached so this time won't be buffered
