@@ -1,8 +1,9 @@
 //! Builder support for configuring the entire setup.
 
 use crate::{
-    eth_requests::EthRequestHandler, transactions::TransactionsManager, NetworkHandle,
-    NetworkManager,
+    eth_requests::EthRequestHandler,
+    transactions::{TransactionsManager, TransactionsManagerConfig},
+    NetworkHandle, NetworkManager,
 };
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::mpsc;
@@ -54,12 +55,13 @@ impl<C, Tx, Eth> NetworkBuilder<C, Tx, Eth> {
     pub fn transactions<Pool: TransactionPool>(
         self,
         pool: Pool,
+        transactions_manager_config: TransactionsManagerConfig,
     ) -> NetworkBuilder<C, TransactionsManager<Pool>, Eth> {
         let NetworkBuilder { mut network, request_handler, .. } = self;
         let (tx, rx) = mpsc::unbounded_channel();
         network.set_transactions(tx);
         let handle = network.handle().clone();
-        let transactions = TransactionsManager::new(handle, pool, rx);
+        let transactions = TransactionsManager::new(handle, pool, rx, transactions_manager_config);
         NetworkBuilder { network, request_handler, transactions }
     }
 
