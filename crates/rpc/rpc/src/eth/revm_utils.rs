@@ -232,7 +232,6 @@ where
 ///  - `disable_block_gas_limit` is set to `true`
 ///  - `disable_eip3607` is set to `true`
 ///  - `disable_base_fee` is set to `true`
-///  - `disable_base_fee` is set to `true`
 ///  - `nonce` is set to `None`
 pub(crate) fn prepare_call_env<DB>(
     mut cfg: CfgEnvWithHandlerCfg,
