@@ -11,7 +11,7 @@ use core::fmt;
 
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{IntoRecoveredTransaction, TxHash};
+use reth_primitives::{BlockHashOrNumber, IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log, PendingTransactionFilterKind, BlockNumHash};
@@ -428,12 +428,13 @@ impl<Provider, Pool> EthFilterInner<Provider, Pool>
 
         if (to_block == from_block) && (from_block == self.provider.last_block_number()?) {
             let mut all_logs = Vec::new();
-            let block_hash = self.provider.block_hash(to_block);
+            let block_hash = self.provider.block_hash(to_block)?
+                .ok_or_else(|| ProviderError::BlockNotFound(BlockHashOrNumber::from(to_block)))?;
             if let Some((_block, receipts)) =
-                self.eth_cache.get_block_and_receipts( block_hash.as_ref().unwrap().unwrap()).await?
+                self.eth_cache.get_block_and_receipts(block_hash).await?
             {
                 let b: BlockNumHash = <BlockNumHash as From<(u64, revm_primitives::FixedBytes<32>)>>
-                ::from((to_block, block_hash.as_ref().unwrap().unwrap()));
+                ::from((to_block, block_hash));
                 logs_utils::append_matching_block_logs(
                     &mut all_logs,
                     &self.provider,
