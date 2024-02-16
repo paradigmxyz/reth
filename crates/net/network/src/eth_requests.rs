@@ -89,7 +89,6 @@ where
 
         let skip = skip as u64;
 
-
         for _ in 0..limit {
             if let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
                 match direction {
@@ -130,7 +129,6 @@ where
                 }
 
                 if headers.len() >= MAX_HEADERS_SERVE {
-
                     break
                 }
             } else {
@@ -178,18 +176,9 @@ where
                         // If encode_max fails,stop the loop
                         break;
                     }
-
                 }
-
-                total_bytes += APPROX_BODY_SIZE;
-                if total_bytes > SOFT_RESPONSE_LIMIT {
-                    break
-                }
-            } else {
-                break
             }
         }
-
         let _ = response.send(Ok(BlockBodies(bodies)));
     }
 
@@ -201,17 +190,15 @@ where
     ) {
         let mut receipts = Vec::new();
 
-
         for hash in request.0 {
             if let Some(receipts_by_block) =
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
             {
-                receipts.push(
-                    receipts_by_block
-                        .into_iter()
-                        .map(|receipt| receipt.with_bloom())
-                        .collect::<Vec<_>>(),
-                );
+                let receipt = receipts_by_block
+                    .into_iter()
+                    .map(|receipt| receipt.with_bloom())
+                    .collect::<Vec<_>>();
+                receipts.push(receipt);
 
                 match receipts.encode_max(SOFT_RESPONSE_LIMIT) {
                     Ok(_) => {
@@ -221,22 +208,12 @@ where
                         // If encode_max fails,stop the loop
                         break;
                     }
-
                 }
-
-                total_bytes += APPROX_RECEIPT_SIZE;
-                if total_bytes > SOFT_RESPONSE_LIMIT {
-                    break
-                }
-            } else {
-                break
             }
         }
-
         let _ = response.send(Ok(Receipts(receipts)));
     }
 }
-
 /// An endless future.
 ///
 /// This should be spawned or used as part of `tokio::select!`.
