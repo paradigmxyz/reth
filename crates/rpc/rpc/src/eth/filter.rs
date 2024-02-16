@@ -437,11 +437,11 @@ impl<Provider, Pool> EthFilterInner<Provider, Pool>
                 ::from((to_block, block.hash));
                 logs_utils::append_matching_block_logs(
                     &mut all_logs,
+                    &self.provider,
                     &filter_params,
-                    b,
-                    block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
+                    b, &**receipts,
                     false,
-                );
+                )?;
             }
             return Ok(all_logs);
         }
