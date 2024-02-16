@@ -43,9 +43,12 @@ tempfile = { workspace = true, optional = true }
 itertools.workspace = true
 
 # Bitfinity deps
-rlp.workspace = true
-ethereum-json-rpc-client.workspace = true
 did.workspace = true
+ethereum-json-rpc-client.workspace = true
+jsonrpc-core.workspace = true
+serde_json.workspace = true
+rlp.workspace = true
+
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }

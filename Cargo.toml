@@ -272,10 +272,11 @@ similar-asserts = "1.5.0"
 # Bitfinity Deps
 lightspeed_scheduler = { version = "0.57.0", features = ["tracing"] }
 rlp = "0.5"
-ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.10.x", features = [
+ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.12.x", features = [
     "reqwest",
 ] }
-did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", tag = "v0.10.x" }
+jsonrpc-core = "18.0"
+did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", tag = "v0.12.x" }
 
 
 [workspace.metadata.cargo-udeps.ignore]

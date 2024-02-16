@@ -1,6 +1,9 @@
 use super::file_codec::BlockFileCodec;
+use did::certified::CertifiedResult;
+use ethereum_json_rpc_client::{reqwest::{reqwest::Response, ReqwestClient}, Client};
 use futures_util::StreamExt;
 use itertools::Either;
+use jsonrpc_core::{Id, MethodCall, Output, Request};
 use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 use reth_interfaces::p2p::{
     bodies::client::{BodiesClient, BodiesFut},
@@ -232,6 +235,36 @@ impl FileClient {
             self.hash_to_number.insert(header.hash_slow(), *number);
         }
         self
+    }
+}
+
+struct BlockCertificateChecker {
+    certified_data: CertifiedResult<did::Block<did::H256>>,
+}
+impl BlockCertificateChecker {
+    async fn get_certificate_checker(reqwest_client: &ReqwestClient) -> Result<Self, FileClientError> {
+        let request = Request::Single(
+            jsonrpc_core::Call::MethodCall(
+                MethodCall{
+                    jsonrpc: Some(jsonrpc_core::Version::V2),
+                    method: "ic_getLastCertifiedBlock".to_string(),
+                    params: jsonrpc_core::Params::Array(vec![]),
+                    id: Id::Null,
+                }
+            )
+        );
+    
+        let jsonrpc_core::Response::Single(output) =  reqwest_client.send_rpc_request(request).await.map_err(|err| FileClientError::ProviderError(format!("JSON RPC call failed: {err:?}")))? else {
+            return Err(FileClientError::ProviderError("invalid response, expected single".to_string()))
+        };
+
+        match output {
+            Output::Success(succ) => {
+                let certified_data: CertifiedResult<did::Block<did::H256>> = serde_json::from_value(succ.result).map_err(|err| FileClientError::ProviderError(format!("failed to deserialize certified block data: {err:?}")))?;
+                Ok(Self{certified_data})
+            },
+            Output::Failure(fail) => Err(FileClientError::ProviderError(format!("JSON RPC call returned error: {fail:?}"))),
+        }
     }
 }
 
