@@ -46,6 +46,7 @@ reth-blockchain-tree.workspace = true
 revm-inspectors.workspace = true
 reth-snapshot.workspace = true
 reth-optimism-payload-builder = { workspace = true, optional = true }
+reth-eth-wire.workspace = true
 
 # async
 tokio.workspace = true

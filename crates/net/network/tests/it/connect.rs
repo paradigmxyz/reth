@@ -260,12 +260,13 @@ async fn test_connect_to_trusted_peer() {
 
     let client = NoopProvider::default();
     let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
+    let transactions_manager_config = config.transactions_manager_config.clone();
     let (handle, network, transactions, requests) = NetworkManager::new(config)
         .await
         .unwrap()
         .into_builder()
         .request_handler(client)
-        .transactions(testing_pool())
+        .transactions(testing_pool(), transactions_manager_config)
         .split_with_handle();
 
     let mut events = handle.event_listener();
