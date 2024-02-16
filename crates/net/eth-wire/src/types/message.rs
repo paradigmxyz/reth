@@ -285,12 +285,14 @@ pub trait EncodableExt {
 
 impl<T: Encodable> EncodableExt for Vec<T> {
     fn encode_max(&self, limit: usize) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error> {
-        let mut buffer = Vec::new();
+        let mut buffer = Vec::with_capacity(limit);
+        let mut header = Header { list: true, payload_length: 0 };
+        for item in self {
+            header.payload_length += item.length();
+        }
+        header.encode(&mut buffer);
 
         for item in self {
-            let mut header = Header { list: true, payload_length: 0 };
-            header.payload_length += item.length();
-            header.encode(&mut buffer);
             item.encode(&mut buffer);
             if buffer.len() > limit {
                 return Err(alloy_rlp::Error::Custom("Size limit exceeded"));
@@ -300,12 +302,14 @@ impl<T: Encodable> EncodableExt for Vec<T> {
     }
 
     fn encode_truncate(&self, limit: usize) -> Vec<u8> {
-        let mut buffer = Vec::new();
+        let mut buffer = Vec::with_capacity(limit);
+        let mut header = Header { list: true, payload_length: 0 };
+        for item in self {
+            header.payload_length += item.length();
+        }
+        header.encode(&mut buffer);
         for item in self {
             let current_len = buffer.len();
-            let mut header = Header { list: true, payload_length: 0 };
-            header.payload_length += item.length();
-            header.encode(&mut buffer);
             item.encode(&mut buffer);
             if buffer.len() > limit {
                 buffer.truncate(current_len);
