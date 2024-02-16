@@ -22,13 +22,12 @@ mod builder {
     use reth_primitives::{
         constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
         proofs,
-        revm::{compat::into_reth_log, env::FillableTransaction},
+        revm::env::FillableTransaction,
         Block, Hardfork, Header, IntoRecoveredTransaction, Receipt, Receipts, TxType,
         EMPTY_OMMER_ROOT_HASH, U256,
     };
     use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
     use reth_revm::database::StateProviderDatabase;
-    use reth_rpc::eth::revm_utils::FillableTransaction;
     use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
     use revm::{
         db::states::bundle_state::BundleRetention,
@@ -307,7 +306,7 @@ mod builder {
                 .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
                     initialized_cfg.clone(),
                     initialized_block_env.clone(),
-                    sequencer_tx.new_filled_tx_env(),
+                    sequencer_tx.tx_env(),
                 ))
                 .build();
 
@@ -379,18 +378,12 @@ mod builder {
                 let tx = pool_tx.to_recovered_transaction();
 
                 // Configure the environment for the block.
-                let env = Env {
-                    cfg: initialized_cfg.clone(),
-                    block: initialized_block_env.clone(),
-                    tx: tx.new_filled_tx_env(),
-                };
-
                 let mut evm = revm::Evm::builder()
                     .with_db(&mut db)
                     .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
                         initialized_cfg.clone(),
                         initialized_block_env.clone(),
-                        tx_env_with_recovered(&tx),
+                        tx.tx_env(),
                     ))
                     .build();
 
