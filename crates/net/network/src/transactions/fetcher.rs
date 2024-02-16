@@ -885,12 +885,13 @@ impl Stream for TransactionFetcher {
 
     /// Advances all inflight requests and returns the next event.
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.advance_inflight_requests(1);
-
-        let mut this = self.as_mut().project();
-
         // dequeue next fetch event
-        this.fetch_events_head.poll_next_unpin(cx)
+        let res = self.as_mut().project().fetch_events_head.poll_next_unpin(cx);
+        if res.is_pending() {
+            self.advance_inflight_requests(1);
+            return self.as_mut().project().fetch_events_head.poll_next_unpin(cx)
+        }
+        res
     }
 }
 
