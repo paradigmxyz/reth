@@ -16,8 +16,9 @@ use reth_config::Config;
 use reth_db::database_metrics::DatabaseMetadata;
 
 use reth_db::{database::Database, init_db, mdbx::DatabaseArguments};
+use reth_downloaders::remote_client::RemoteClient;
 use reth_downloaders::{
-    bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
+    bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::consensus::Consensus;
@@ -143,11 +144,12 @@ impl ImportCommand {
 
         info!(target: "reth::cli", "Starting block: {}", start_block);
 
-        let file_client = Arc::new(
-            FileClient::from_rpc_url(
+        let remote_client = Arc::new(
+            RemoteClient::from_rpc_url(
                 &self.bitfinity.rpc_url,
                 start_block,
                 self.bitfinity.end_block,
+                self.bitfinity.batch_size,
                 self.bitfinity.evmc_principal,
                 self.bitfinity.ic_root_key,
             )
@@ -155,12 +157,15 @@ impl ImportCommand {
         );
 
         // override the tip
-        let tip = file_client.remote_tip().expect("file client has no tip");
+        let tip = remote_client.tip().expect("file client has no tip");
         info!(target: "reth::cli", "Chain file imported");
 
-        let (mut pipeline, events) = self
-            .build_import_pipeline(config, provider_factory.clone(), &consensus, file_client)
-            .await?;
+        let (mut pipeline, events) = self.build_import_pipeline(
+            config,
+            provider_factory.clone(),
+            &consensus,
+            remote_client,
+        )?;
 
         // override the tip
         pipeline.set_tip(tip);
@@ -186,34 +191,34 @@ impl ImportCommand {
         Ok(())
     }
 
-    async fn build_import_pipeline<DB, C>(
+    fn build_import_pipeline<DB, C>(
         &self,
         config: Config,
         provider_factory: ProviderFactory<DB>,
         consensus: &Arc<C>,
-        file_client: Arc<FileClient>,
+        remote_client: Arc<RemoteClient>,
     ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
     where
         DB: Database + Clone + Unpin + 'static,
         C: Consensus + 'static,
     {
-        if !file_client.has_canonical_blocks() {
+        if !remote_client.has_canonical_blocks() {
             eyre::bail!("unable to import non canonical blocks");
         }
 
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
-            .build(file_client.clone(), consensus.clone())
+            .build(remote_client.clone(), consensus.clone())
             .into_task();
 
         let body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
-            .build(file_client.clone(), consensus.clone(), provider_factory.clone())
+            .build(remote_client.clone(), consensus.clone(), provider_factory.clone())
             .into_task();
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let factory =
             reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
 
-        let max_block = file_client.max_block().unwrap_or(0);
+        let max_block = remote_client.max_block().unwrap_or(0);
         let mut pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
             // we want to sync all blocks the file client provides or 0 if empty

@@ -19,11 +19,17 @@ pub struct BitfinityArgs {
     #[arg(long, short = 'i', value_name = "IMPORT_INTERVAL", default_value = "30")]
     pub import_interval: u64,
 
+    /// Batch size for importing blocks
+    /// Default: 500
+    #[arg(long, short = 'b', value_name = "BATCH_SIZE", default_value = "500")]
+    pub batch_size: usize,
+
     /// Canister principal
     /// Default value corresponds to testnet
     #[arg(long, value_name = "EVMC_PRINCIPAL", default_value = "4fe7g-7iaaa-aaaak-aegcq-cai")]
     pub evmc_principal: String,
 
+    /// Root key for the IC network
     #[arg(long, value_name = "IC_ROOT_KEY", default_value = IC_MAINNET_KEY)]
     pub ic_root_key: String,
 }

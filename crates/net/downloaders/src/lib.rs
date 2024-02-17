@@ -33,3 +33,9 @@ pub mod file_codec;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
+
+/// Module managing remote data retrieval and buffering.
+///
+/// Contains [RemoteClient](remote_client::RemoteClient) to read block data from remote sources,
+/// efficiently buffering headers and bodies for retrieval.
+pub mod remote_client;
