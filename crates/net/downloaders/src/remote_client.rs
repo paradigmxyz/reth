@@ -1,4 +1,11 @@
+use candid::Principal;
+use did::certified::CertifiedResult;
+use ethereum_json_rpc_client::{reqwest::ReqwestClient, Client};
+use ic_cbor::{CertificateToCbor, HashTreeToCbor};
+use ic_certificate_verification::VerifyCertificate;
+use ic_certification::{Certificate, HashTree, LookupResult};
 use itertools::Either;
+use jsonrpc_core::{Id, MethodCall, Output, Request};
 use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 use reth_interfaces::p2p::{
     bodies::client::{BodiesClient, BodiesFut},
@@ -14,10 +21,11 @@ use reth_primitives::{
 };
 use rlp::Encodable;
 
-use std::{self, collections::HashMap};
+use std::{self, cmp::min, collections::HashMap};
 use thiserror::Error;
 
 use tracing::{debug, error, info, trace, warn};
+
 
 /// Front-end API for fetching chain data from remote sources.
 ///
@@ -46,6 +54,19 @@ pub enum RemoteClientError {
     /// An error occurred when fetching blocks, headers, or rlp headers from the remote provider.
     #[error("provider error occurred: {0}")]
     ProviderError(String),
+
+    /// Certificate check error
+    #[error("certification check error: {0}")]
+    CertificateError(String),
+}
+
+/// Setting for checking last certified block
+#[derive(Debug)]
+pub struct CertificateCheckSettings {
+    /// Principal of the EVM canister
+    pub evmc_principal: String,
+    /// Root key of the IC network
+    pub ic_root_key: String,
 }
 
 impl RemoteClient {
@@ -55,26 +76,30 @@ impl RemoteClient {
         start_block: u64,
         end_block: Option<u64>,
         batch_size: usize,
+        certificate_settings: Option<CertificateCheckSettings>,
     ) -> Result<Self, RemoteClientError> {
         let mut headers = HashMap::new();
         let mut hash_to_number = HashMap::new();
         let mut bodies = HashMap::new();
 
         let reqwest_client = ethereum_json_rpc_client::reqwest::ReqwestClient::new(rpc.to_string());
-
+        let block_checker = match certificate_settings {
+            None => None,
+            Some(settings) => Some(BlockCertificateChecker::create_certificate_checker(&reqwest_client, settings).await?),
+        };
         let provider = ethereum_json_rpc_client::EthJsonRcpClient::new(reqwest_client);
 
-        const MAX_BLOCKS: usize = 10_000;
+        const MAX_BLOCKS: u64 = 10_000;
 
-        let latest_block = provider
+        let last_block = provider
             .get_block_number()
             .await
             .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
 
-        debug!(target: "downloaders::file", latest_block, "Latest block from rpc");
-
-        let end_block =
-            std::cmp::min(end_block.unwrap_or(latest_block), start_block + MAX_BLOCKS as u64);
+        let mut end_block = min(end_block.unwrap_or(last_block), start_block + MAX_BLOCKS);
+        if let Some(block_checker) = &block_checker {
+            end_block = min(end_block, block_checker.get_block_number());
+        }
 
         debug!(target: "downloaders::file", start_block, end_block, "Fetching blocks");
 
@@ -104,6 +129,9 @@ impl RemoteClient {
             trace!(target: "downloaders::file", blocks = full_blocks.len(), "Fetched blocks");
 
             for block in full_blocks {
+                if let Some(block_checker) = &block_checker {
+                    block_checker.check_block(&block)?;
+                }
                 let header =
                     reth_primitives::Block::decode(&mut block.rlp_bytes().to_vec().as_slice())?;
 
@@ -172,6 +200,94 @@ impl RemoteClient {
             self.hash_to_number.insert(header.hash_slow(), *number);
         }
         self
+    }
+}
+
+struct BlockCertificateChecker {
+    certified_data: CertifiedResult<did::Block<did::H256>>,
+    evmc_principal: Principal,
+    ic_root_key: Vec<u8>
+}
+
+impl BlockCertificateChecker {
+    async fn create_certificate_checker(reqwest_client: &ReqwestClient, certificate_settings: CertificateCheckSettings) -> Result<Self, RemoteClientError> {
+        let evmc_principal = Principal::from_text(certificate_settings.evmc_principal).map_err(|e| RemoteClientError::CertificateError(format!("failed to parse principal: {e}")))?;
+        let ic_root_key = hex::decode(&certificate_settings.ic_root_key).map_err(|e| RemoteClientError::CertificateError(format!("failed to parse IC root key: {e}")))?;
+
+        let request = Request::Single(
+            jsonrpc_core::Call::MethodCall(
+                MethodCall{
+                    jsonrpc: Some(jsonrpc_core::Version::V2),
+                    method: "ic_getLastCertifiedBlock".to_string(),
+                    params: jsonrpc_core::Params::Array(vec![]),
+                    id: Id::Null,
+                }
+            )
+        );
+
+        let jsonrpc_core::Response::Single(output) =  reqwest_client.send_rpc_request(request).await.map_err(|err| RemoteClientError::ProviderError(format!("JSON RPC call failed: {err:?}")))? else {
+            return Err(RemoteClientError::CertificateError("invalid response, expected single".to_string()))
+        };
+
+        match output {
+            Output::Success(succ) => {
+                let certified_data: CertifiedResult<did::Block<did::H256>> = serde_json::from_value(succ.result).map_err(|err| RemoteClientError::ProviderError(format!("failed to deserialize certified block data: {err:?}")))?;
+                Ok(Self{certified_data, evmc_principal, ic_root_key})
+            },
+            Output::Failure(fail) => Err(RemoteClientError::CertificateError(format!("JSON RPC call returned error: {fail:?}"))),
+        }
+    }
+
+    fn get_block_number(&self) -> u64 {
+        self.certified_data.data.number.0.as_u64()
+    }
+
+    fn check_block(&self, block: &did::Block<did::Transaction>) -> Result<(), RemoteClientError> {
+        if block.number < self.certified_data.data.number {
+            return Ok(());
+        }
+
+        if block.number > self.certified_data.data.number {
+            return Err(RemoteClientError::CertificateError(format!("cannot execute block {} after the latest certified", block.number)));
+        }
+
+        if block.hash != self.certified_data.data.hash {
+            return Err(RemoteClientError::CertificateError(format!("state hash doesn't correspond to certified block, have {}, want {}",
+                block.hash, self.certified_data.data.hash)));
+        }
+
+        let certificate = Certificate::from_cbor(&self.certified_data.certificate)
+            .map_err(|e| RemoteClientError::CertificateError(format!("failed to parse certificate: {e}")))?;
+        certificate.verify(self.evmc_principal.as_ref(), &self.ic_root_key)
+            .map_err(|e| RemoteClientError::CertificateError(format!("certificate validation error: {e}")))?;
+
+        let tree = HashTree::from_cbor(&self.certified_data.witness)
+            .map_err(|e| RemoteClientError::CertificateError(format!("failed to parse witness: {e}")))?;
+        Self::validate_tree(self.evmc_principal.as_ref(), &certificate, &tree);
+
+        Ok(())
+    }
+
+    fn validate_tree(canister_id: &[u8], certificate: &Certificate, tree: &HashTree) -> bool {
+        let certified_data_path = [
+            "canister".as_bytes(),
+            canister_id,
+            "certified_data".as_bytes(),
+        ];
+
+        let witness = match certificate.tree.lookup_path(&certified_data_path) {
+            LookupResult::Found(witness) => witness,
+            _ => {
+                return false;
+            }
+        };
+
+        let digest = tree.digest();
+        if witness != digest {
+            return false;
+        }
+
+        true
     }
 }
 
@@ -268,14 +384,14 @@ mod tests {
     #[tokio::test]
     async fn remote_client_from_rpc_url() {
         let client =
-            RemoteClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5).await.unwrap();
+            RemoteClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None).await.unwrap();
         assert!(client.max_block().is_some());
     }
 
     #[tokio::test]
     async fn test_headers_client() {
         let client =
-            RemoteClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5).await.unwrap();
+            RemoteClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None).await.unwrap();
         let headers = client
             .get_headers_with_priority(
                 HeadersRequest {
@@ -293,7 +409,7 @@ mod tests {
     #[tokio::test]
     async fn test_bodies_client() {
         let client =
-            RemoteClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5).await.unwrap();
+            RemoteClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None).await.unwrap();
         let headers = client
             .get_headers_with_priority(
                 HeadersRequest {

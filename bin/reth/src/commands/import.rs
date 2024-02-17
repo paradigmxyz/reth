@@ -16,7 +16,7 @@ use reth_config::Config;
 use reth_db::database_metrics::DatabaseMetadata;
 
 use reth_db::{database::Database, init_db, mdbx::DatabaseArguments};
-use reth_downloaders::remote_client::RemoteClient;
+use reth_downloaders::remote_client::{CertificateCheckSettings, RemoteClient};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -150,8 +150,10 @@ impl ImportCommand {
                 start_block,
                 self.bitfinity.end_block,
                 self.bitfinity.batch_size,
-                self.bitfinity.evmc_principal,
-                self.bitfinity.ic_root_key,
+                Some(CertificateCheckSettings{
+                    evmc_principal: self.bitfinity.evmc_principal.clone(),
+                    ic_root_key: self.bitfinity.ic_root_key.clone(),
+                }),
             )
             .await?,
         );
