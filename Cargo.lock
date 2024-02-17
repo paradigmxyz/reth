@@ -2174,7 +2174,7 @@ dependencies = [
  "hex",
  "hkdf",
  "lazy_static",
- "lru 0.12.2",
+ "lru",
  "more-asserts",
  "parking_lot 0.11.2",
  "rand 0.8.5",
@@ -4191,15 +4191,6 @@ checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
 name = "lru"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4a83fb7698b3643a0e34f9ae6f2e8f0178c0fd42f8b59d493aa271ff3a5bf21"
-dependencies = [
- "hashbrown 0.14.3",
-]
-
-[[package]]
-name = "lru"
 version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db2c024b41519440580066ba82aab04092b333e09066a5eb86c7c4890df31f22"
@@ -5522,7 +5513,7 @@ dependencies = [
  "crossterm",
  "indoc",
  "itertools 0.12.1",
- "lru 0.12.2",
+ "lru",
  "paste",
  "stability",
  "strum 0.25.0",
@@ -5877,7 +5868,7 @@ dependencies = [
  "aquamarine",
  "assert_matches",
  "linked_hash_set",
- "lru 0.11.1",
+ "lru",
  "metrics",
  "parking_lot 0.12.1",
  "reth-db",
