@@ -44,7 +44,17 @@ use reth_primitives::{
     hex, ForkId, PeerId, B256,
 };
 use secp256k1::SecretKey;
-use std::{cell::RefCell, collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque}, fmt, io, net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4}, pin::Pin, rc::Rc, sync::Arc, task::{ready, Context, Poll}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::{
+    cell::RefCell,
+    collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque},
+    fmt, io,
+    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
+    pin::Pin,
+    rc::Rc,
+    sync::Arc,
+    task::{ready, Context, Poll},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 use tokio::{
     net::UdpSocket,
     sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::Sender as OneshotSender},
@@ -446,7 +456,7 @@ pub struct Discv4Service {
     commands_rx: mpsc::UnboundedReceiver<Discv4Command>,
     /// All subscribers for table updates
     update_listeners: Vec<mpsc::Sender<DiscoveryUpdate>>,
-    /// The interval when to trigger lookups
+    /// The interval when to trigger random lookups
     lookup_interval: Interval,
     /// Used to rotate targets to lookup
     lookup_rotator: LookupTargetRotator,
@@ -1538,29 +1548,18 @@ impl Discv4Service {
     /// query participates in the discovery protocol. The sender of a packet is considered verified
     /// if it has sent a valid Pong response with matching ping hash within the last 12 hours.
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Discv4Event> {
-        let now = Instant::now();
-        let mut iter = 0;
         loop {
-            iter+= 1;
             // drain buffered events first
             if let Some(event) = self.queued_events.pop_front() {
-                let elapsed = now.elapsed();
-                if iter > 1  && elapsed.as_micros() > 50 {
-                    println!("Discv4::poll: took {elapsed:?} and {iter} iterations events: {}, queued pings: {} pending pings: {}, pending lookups: {}",
-                    self.queued_events.len(),
-                    self.queued_pings.len(),
-                    self.pending_pings.len(),
-                    self.pending_lookup.len(),
-                    );
-                }
                 return Poll::Ready(event)
             }
 
             // trigger self lookup
-            if self.config.enable_lookup && self.lookup_interval.poll_tick(cx).is_ready() {
-                let _ = self.lookup_interval.poll_tick(cx);
-                let target = self.lookup_rotator.next(&self.local_node_record.id);
-                self.lookup_with(target, None);
+            if self.config.enable_lookup {
+                while self.lookup_interval.poll_tick(cx).is_ready() {
+                    let target = self.lookup_rotator.next(&self.local_node_record.id);
+                    self.lookup_with(target, None);
+                }
             }
 
             // re-ping some peers
@@ -1575,7 +1574,7 @@ impl Discv4Service {
                 self.set_external_ip_addr(ip);
             }
 
-            // process all incoming commands, this channel can never close
+            // drain all incoming [Discv4] commands, this channel can never close
             while let Poll::Ready(Some(cmd)) = self.commands_rx.poll_recv(cx) {
                 match cmd {
                     Discv4Command::Add(enr) => {
@@ -1625,6 +1624,10 @@ impl Discv4Service {
                 }
             }
 
+            // this will act as a manual yield point when draining the socket messages
+            // most CPU expensive part is handling outgoing messages (encoding+packet hash)
+            let mut udp_message_budget = 4;
+
             // process all incoming datagrams
             while let Poll::Ready(Some(event)) = self.ingress.poll_recv(cx) {
                 match event {
@@ -1666,6 +1669,16 @@ impl Discv4Service {
                         self.queued_events.push_back(event);
                     }
                 }
+
+                udp_message_budget -= 1;
+                if udp_message_budget < 0 {
+                    if self.queued_events.is_empty() {
+                        // we've exceeded the message budget and have no events to process
+                        // this will make sure we're woken up again
+                        cx.waker().wake_by_ref();
+                    }
+                    break
+                }
             }
 
             // try resending buffered pings
@@ -1673,19 +1686,15 @@ impl Discv4Service {
 
             // evict expired nodes
             while self.evict_expired_requests_interval.poll_tick(cx).is_ready() {
-                self.evict_expired_requests(Instant::now())
+                self.evict_expired_requests(Instant::now());
             }
 
             // evict expired nodes
             while self.expire_interval.poll_tick(cx).is_ready() {
-                self.received_pongs.evict_expired(Instant::now(), EXPIRE_DURATION)
+                self.received_pongs.evict_expired(Instant::now(), EXPIRE_DURATION);
             }
 
             if self.queued_events.is_empty() {
-                let elapsed = now.elapsed();
-                if iter > 1  && elapsed.as_micros() > 50 {
-                    println!("Discv4::poll: took {elapsed:?} and {iter} iterations");
-                }
                 return Poll::Pending
             }
         }
@@ -1814,6 +1823,7 @@ enum Discv4Command {
 }
 
 /// Event type receiver produces
+#[derive(Debug)]
 pub(crate) enum IngressEvent {
     /// Encountered an error when reading a datagram message.
     RecvError(io::Error),
@@ -1990,7 +2000,8 @@ struct LookupContextInner {
     closest_nodes: RefCell<BTreeMap<Distance, QueryNode>>,
     /// A listener for all the nodes retrieved in this lookup
     ///
-    /// This is present if the lookup was triggered manually via [Discv4] and we want to return all the nodes once the lookup finishes.
+    /// This is present if the lookup was triggered manually via [Discv4] and we want to return all
+    /// the nodes once the lookup finishes.
     listener: Option<NodeRecordSender>,
 }
 
@@ -2254,7 +2265,7 @@ mod tests {
     }
 
     // Bootstraps with mainnet boot nodes
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn test_mainnet_lookup() {
         reth_tracing::init_test_tracing();
