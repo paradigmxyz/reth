@@ -382,7 +382,8 @@ where
     }
 
     /// The debug_traceCallMany method lets you run an `eth_callMany` within the context of the
-    /// given block execution using the first n transactions in the given block as base
+    /// given block execution using the first n transactions in the given block as base.
+    /// Each following bundle increments block number by 1 and block timestamp by 12 seconds
     pub async fn debug_trace_call_many(
         &self,
         bundles: Vec<Bundle>,
@@ -480,6 +481,7 @@ where
                         }
                         results.push(trace);
                     }
+                    // Increment block_env number and timestamp for the next bundle
                     block_env.number += U256::from(1);
                     block_env.timestamp += U256::from(12);
 
