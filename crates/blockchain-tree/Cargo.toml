@@ -27,7 +27,7 @@ reth-trie.workspace = true
 
 # common
 parking_lot.workspace = true
-lru = "0.11"
+lru = "0.12"
 tracing.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
 

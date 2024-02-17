@@ -179,6 +179,7 @@ where
             tx_gossip_disabled,
             #[cfg(feature = "optimism")]
                 optimism_network_config: crate::config::OptimismNetworkConfig { sequencer_endpoint },
+            ..
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -274,12 +275,13 @@ where
     ///
     ///     let config =
     ///         NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
+    ///     let transactions_manager_config = config.transactions_manager_config.clone();
     ///
     ///     // create the network instance
     ///     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
     ///         .await
     ///         .unwrap()
-    ///         .transactions(pool)
+    ///         .transactions(pool, transactions_manager_config)
     ///         .request_handler(client)
     ///         .split_with_handle();
     /// }

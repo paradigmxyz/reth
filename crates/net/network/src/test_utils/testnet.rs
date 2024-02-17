@@ -6,7 +6,7 @@ use crate::{
     eth_requests::EthRequestHandler,
     peers::PeersHandle,
     protocol::IntoRlpxSubProtocol,
-    transactions::{TransactionsHandle, TransactionsManager},
+    transactions::{TransactionsHandle, TransactionsManager, TransactionsManagerConfig},
     NetworkConfig, NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkHandle,
     NetworkManager,
 };
@@ -394,7 +394,12 @@ where
     pub fn install_transactions_manager(&mut self, pool: Pool) {
         let (tx, rx) = unbounded_channel();
         self.network.set_transactions(tx);
-        let transactions_manager = TransactionsManager::new(self.handle(), pool.clone(), rx);
+        let transactions_manager = TransactionsManager::new(
+            self.handle(),
+            pool.clone(),
+            rx,
+            TransactionsManagerConfig::default(),
+        );
         self.transactions_manager = Some(transactions_manager);
         self.pool = Some(pool);
     }
@@ -407,8 +412,12 @@ where
         let Self { mut network, request_handler, client, secret_key, .. } = self;
         let (tx, rx) = unbounded_channel();
         network.set_transactions(tx);
-        let transactions_manager =
-            TransactionsManager::new(network.handle().clone(), pool.clone(), rx);
+        let transactions_manager = TransactionsManager::new(
+            network.handle().clone(),
+            pool.clone(),
+            rx,
+            TransactionsManagerConfig::default(),
+        );
         Peer {
             network,
             request_handler,

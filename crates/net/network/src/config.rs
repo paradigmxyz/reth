@@ -5,6 +5,7 @@ use crate::{
     import::{BlockImport, ProofOfStakeBlockImport},
     peers::PeersConfig,
     session::SessionsConfig,
+    transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
@@ -74,6 +75,8 @@ pub struct NetworkConfig<C> {
     pub extra_protocols: RlpxSubProtocols,
     /// Whether to disable transaction gossip
     pub tx_gossip_disabled: bool,
+    /// How to instantiate transactions manager.
+    pub transactions_manager_config: TransactionsManagerConfig,
     /// Optimism Network Config
     #[cfg(feature = "optimism")]
     pub optimism_network_config: OptimismNetworkConfig,
@@ -171,6 +174,8 @@ pub struct NetworkConfigBuilder {
     /// The block importer type
     #[serde(skip)]
     block_import: Option<Box<dyn BlockImport>>,
+    /// How to instantiate transactions manager.
+    transactions_manager_config: TransactionsManagerConfig,
     /// Optimism Network Config Builder
     #[cfg(feature = "optimism")]
     optimism_network_config: OptimismNetworkConfigBuilder,
@@ -209,6 +214,7 @@ impl NetworkConfigBuilder {
             block_import: None,
             #[cfg(feature = "optimism")]
             optimism_network_config: OptimismNetworkConfigBuilder::default(),
+            transactions_manager_config: Default::default(),
         }
     }
 
@@ -271,6 +277,11 @@ impl NetworkConfigBuilder {
     /// Sets a custom config for how sessions are handled.
     pub fn sessions_config(mut self, config: SessionsConfig) -> Self {
         self.sessions_config = Some(config);
+        self
+    }
+
+    pub fn transactions_manager_config(mut self, config: TransactionsManagerConfig) -> Self {
+        self.transactions_manager_config = config;
         self
     }
 
@@ -447,6 +458,7 @@ impl NetworkConfigBuilder {
             block_import,
             #[cfg(feature = "optimism")]
                 optimism_network_config: OptimismNetworkConfigBuilder { sequencer_endpoint },
+            transactions_manager_config,
         } = self;
 
         let listener_addr = listener_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS);
@@ -501,6 +513,7 @@ impl NetworkConfigBuilder {
             tx_gossip_disabled,
             #[cfg(feature = "optimism")]
             optimism_network_config: OptimismNetworkConfig { sequencer_endpoint },
+            transactions_manager_config,
         }
     }
 }
