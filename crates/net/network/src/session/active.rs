@@ -490,6 +490,8 @@ impl Future for ActiveSession {
         // And tokio's docs on cooperative scheduling <https://docs.rs/tokio/latest/tokio/task/#cooperative-scheduling>
         let mut budget = 4;
 
+        let now = Instant::now();
+
         // The main poll loop that drives the session
         'main: loop {
             let mut progress = false;
@@ -500,7 +502,7 @@ impl Future for ActiveSession {
                     Poll::Pending => break,
                     Poll::Ready(None) => {
                         // this is only possible when the manager was dropped, in which case we also
-                        // terminate this session
+                        // terminate this session right away before sending the termination message
                         return Poll::Ready(())
                     }
                     Poll::Ready(Some(cmd)) => {
@@ -649,6 +651,15 @@ impl Future for ActiveSession {
         }
 
         this.shrink_to_fit();
+
+        let elapsed = now.elapsed();
+        if elapsed.as_micros() > 100 {
+            println!(
+                "ActiveSession elapsed {:?}, out buffer {}",
+                now.elapsed(),
+                this.queued_outgoing.len()
+            );
+        }
 
         Poll::Pending
     }
