@@ -678,7 +678,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         tx: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         match pool {
-            SubPool::Pending => self.pending_pool.prune_transaction(tx),
+            SubPool::Pending => self.pending_pool.remove_transaction(tx),
             SubPool::Queued => self.queued_pool.remove_transaction(tx),
             SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
             SubPool::Blob => self.blob_pool.remove_transaction(tx),
@@ -2817,5 +2817,30 @@ mod tests {
             pool.assert_invariants();
             assert!(pool.size().blob <= blob_limit.max_txs);
         }
+    }
+
+    #[test]
+    fn test_transaction_removal() {
+        let on_chain_balance = U256::from(10_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
+        let tx_1 = tx_0.next();
+
+        // Create 2 transactions
+        let v0 = f.validated(tx_0.clone());
+        let v1 = f.validated(tx_1);
+
+        // Add them to the pool
+        let _res = pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v1.clone(), on_chain_balance, on_chain_nonce).unwrap();
+
+        assert_eq!(0, pool.queued_transactions().len());
+        assert_eq!(2, pool.pending_transactions().len());
+
+        // Remove first (nonce 0) - simulating that it was taken to be a part of the block.
+        pool.remove_transactions(vec![*v0.hash()]);
     }
 }
