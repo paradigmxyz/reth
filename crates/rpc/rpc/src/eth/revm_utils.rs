@@ -232,6 +232,7 @@ where
 ///  - `disable_block_gas_limit` is set to `true`
 ///  - `disable_eip3607` is set to `true`
 ///  - `disable_base_fee` is set to `true`
+///  - `nonce` is set to `None`
 pub(crate) fn prepare_call_env<DB>(
     mut cfg: CfgEnvWithHandlerCfg,
     block: BlockEnv,
@@ -260,6 +261,7 @@ where
     let request_gas = request.gas;
 
     let mut env = build_call_evm_env(cfg, block, request)?;
+    env.tx.nonce = None;
 
     // apply state overrides
     if let Some(state_overrides) = overrides.state {
