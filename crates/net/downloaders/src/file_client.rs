@@ -1,7 +1,11 @@
 use super::file_codec::BlockFileCodec;
+use candid::Principal;
 use did::certified::CertifiedResult;
-use ethereum_json_rpc_client::{reqwest::{reqwest::Response, ReqwestClient}, Client};
+use ethereum_json_rpc_client::{reqwest::ReqwestClient, Client};
 use futures_util::StreamExt;
+use ic_cbor::{CertificateToCbor, HashTreeToCbor};
+use ic_certificate_verification::VerifyCertificate;
+use ic_certification::{Certificate, HashTree, LookupResult};
 use itertools::Either;
 use jsonrpc_core::{Id, MethodCall, Output, Request};
 use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
@@ -15,11 +19,11 @@ use reth_interfaces::p2p::{
 
 use alloy_rlp::Decodable;
 use reth_primitives::{
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, B256,
+    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, B256
 };
 use rlp::Encodable;
 
-use std::{self, collections::HashMap, path::Path};
+use std::{self, cmp::min, collections::HashMap, path::Path};
 use thiserror::Error;
 
 use tokio::{fs::File, io::AsyncReadExt};
@@ -78,6 +82,8 @@ impl FileClient {
         rpc: &str,
         start_block: u64,
         end_block: Option<u64>,
+        evmc_principal: String,
+        ic_root_key: String,
     ) -> Result<Self, FileClientError> {
         let mut headers = HashMap::new();
         let mut hash_to_number = HashMap::new();
@@ -85,17 +91,17 @@ impl FileClient {
 
         let reqwest_client = ethereum_json_rpc_client::reqwest::ReqwestClient::new(rpc.to_string());
 
+        let block_checker = BlockCertificateChecker::create_certificate_checker(&reqwest_client, evmc_principal, ic_root_key).await?;
         let provider = ethereum_json_rpc_client::EthJsonRcpClient::new(reqwest_client);
 
         const BATCH_SIZE: usize = 500;
 
-        let latest_block = provider
-            .get_block_number()
-            .await
-            .map_err(|e| FileClientError::ProviderError(e.to_string()))?;
-        let end_block = end_block.unwrap_or(latest_block);
+        let end_block = match end_block {
+            Some(block) => min(block, block_checker.get_block_number()),
+            None => block_checker.get_block_number(),
+        };
 
-        debug!(target: "downloaders::file", latest_block, "Latest block from rpc");
+        debug!(target: "downloaders::file", end_block, "Latest block from rpc");
 
         for begin_block in (start_block..=end_block).step_by(BATCH_SIZE) {
             let count = std::cmp::min(BATCH_SIZE as u64, end_block - begin_block);
@@ -123,6 +129,8 @@ impl FileClient {
             trace!(target: "downloaders::file", blocks = full_blocks.len(), "Fetched blocks");
 
             for block in full_blocks {
+                block_checker.check_block(&block)?;
+
                 let header =
                     reth_primitives::Block::decode(&mut block.rlp_bytes().to_vec().as_slice())?;
 
@@ -240,9 +248,15 @@ impl FileClient {
 
 struct BlockCertificateChecker {
     certified_data: CertifiedResult<did::Block<did::H256>>,
+    evmc_principal: Principal,
+    ic_root_key: Vec<u8>
 }
+
 impl BlockCertificateChecker {
-    async fn get_certificate_checker(reqwest_client: &ReqwestClient) -> Result<Self, FileClientError> {
+    async fn create_certificate_checker(reqwest_client: &ReqwestClient, evcm_principal: String, ic_root_key: String) -> Result<Self, FileClientError> {
+        let evmc_principal = Principal::from_text(evcm_principal).map_err(|e| FileClientError::ProviderError(format!("failed to parse principal: {e}")))?;
+        let ic_root_key = hex::decode(&ic_root_key).map_err(|e| FileClientError::ProviderError(format!("failed to parse IC root key: {e}")))?;
+
         let request = Request::Single(
             jsonrpc_core::Call::MethodCall(
                 MethodCall{
@@ -253,7 +267,7 @@ impl BlockCertificateChecker {
                 }
             )
         );
-    
+
         let jsonrpc_core::Response::Single(output) =  reqwest_client.send_rpc_request(request).await.map_err(|err| FileClientError::ProviderError(format!("JSON RPC call failed: {err:?}")))? else {
             return Err(FileClientError::ProviderError("invalid response, expected single".to_string()))
         };
@@ -261,10 +275,62 @@ impl BlockCertificateChecker {
         match output {
             Output::Success(succ) => {
                 let certified_data: CertifiedResult<did::Block<did::H256>> = serde_json::from_value(succ.result).map_err(|err| FileClientError::ProviderError(format!("failed to deserialize certified block data: {err:?}")))?;
-                Ok(Self{certified_data})
+                Ok(Self{certified_data, evmc_principal, ic_root_key})
             },
             Output::Failure(fail) => Err(FileClientError::ProviderError(format!("JSON RPC call returned error: {fail:?}"))),
         }
+    }
+
+    fn get_block_number(&self) -> u64 {
+        self.certified_data.data.number.0.as_u64()
+    }
+
+    fn check_block(&self, block: &did::Block<did::Transaction>) -> Result<(), FileClientError> {
+        if block.number < self.certified_data.data.number {
+            return Ok(());
+        }
+
+        if block.number > self.certified_data.data.number {
+            return Err(FileClientError::ProviderError(format!("cannot execute block {} after the latest certified", block.number)));
+        }
+
+        if block.hash != self.certified_data.data.hash {
+            return Err(FileClientError::ProviderError(format!("state hash doesn't correspond to certified block, have {}, want {}",
+                block.hash, self.certified_data.data.hash)));
+        }
+
+        let certificate = Certificate::from_cbor(&self.certified_data.certificate)
+            .map_err(|e| FileClientError::ProviderError(format!("failed to parse certificate: {e}")))?;
+        certificate.verify(self.evmc_principal.as_ref(), &self.ic_root_key)
+            .map_err(|e| FileClientError::ProviderError(format!("certificate validation error: {e}")))?;
+
+        let tree = HashTree::from_cbor(&self.certified_data.witness)
+            .map_err(|e| FileClientError::ProviderError(format!("failed to parse witness: {e}")))?;
+        Self::validate_tree(self.evmc_principal.as_ref(), &certificate, &tree);
+
+        Ok(())
+    }
+
+    fn validate_tree(canister_id: &[u8], certificate: &Certificate, tree: &HashTree) -> bool {
+        let certified_data_path = [
+            "canister".as_bytes(),
+            canister_id,
+            "certified_data".as_bytes(),
+        ];
+    
+        let witness = match certificate.tree.lookup_path(&certified_data_path) {
+            LookupResult::Found(witness) => witness,
+            _ => {
+                return false;
+            }
+        };
+    
+        let digest = tree.digest();
+        if witness != digest {
+            return false;
+        }
+    
+        true
     }
 }
 

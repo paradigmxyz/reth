@@ -148,6 +148,8 @@ impl ImportCommand {
                 &self.bitfinity.rpc_url,
                 start_block,
                 self.bitfinity.end_block,
+                self.bitfinity.evmc_principal,
+                self.bitfinity.ic_root_key,
             )
             .await?,
         );
