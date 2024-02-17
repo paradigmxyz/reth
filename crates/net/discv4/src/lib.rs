@@ -130,6 +130,12 @@ const ENDPOINT_PROOF_EXPIRATION: Duration = Duration::from_secs(24 * 60 * 60);
 /// Duration used to expire nodes from the routing table 1hr
 const EXPIRE_DURATION: Duration = Duration::from_secs(60 * 60);
 
+// Restricts how many udp messages can be processed in a single [Discv4Service::poll] call.
+//
+// This will act as a manual yield point when draining the socket messages where the most CPU
+// expensive part is handling outgoing messages: encoding and hashing the packet
+const UDP_MESSAGE_POLL_LOOP_BUDGET: i32 = 4;
+
 type EgressSender = mpsc::Sender<(Bytes, SocketAddr)>;
 type EgressReceiver = mpsc::Receiver<(Bytes, SocketAddr)>;
 
@@ -1624,9 +1630,8 @@ impl Discv4Service {
                 }
             }
 
-            // this will act as a manual yield point when draining the socket messages
-            // most CPU expensive part is handling outgoing messages (encoding+packet hash)
-            let mut udp_message_budget = 4;
+            // restricts how many messages we process in a single poll before yielding back control
+            let mut udp_message_budget = UDP_MESSAGE_POLL_LOOP_BUDGET;
 
             // process all incoming datagrams
             while let Poll::Ready(Some(event)) = self.ingress.poll_recv(cx) {
