@@ -178,7 +178,7 @@ where
         self.db_mut().set_state_clear_flag(state_clear_flag);
 
         let mut cfg: CfgEnvWithHandlerCfg =
-            CfgEnvWithHandlerCfg::new(self.evm.cfg().clone(), self.evm.spec_id());
+            CfgEnvWithHandlerCfg::new_with_spec_id(self.evm.cfg().clone(), self.evm.spec_id());
         EvmConfig::fill_cfg_and_block_env(
             &mut cfg,
             self.evm.block_mut(),

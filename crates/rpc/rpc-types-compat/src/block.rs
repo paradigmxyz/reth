@@ -91,6 +91,8 @@ pub fn from_block_full(
 }
 
 /// Converts from a [reth_primitives::SealedHeader] to a [reth_rpc_types::BlockNumberOrTag]
+///
+/// Note: This does not set the `totalDifficulty` field.
 pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader) -> Header {
     let (header, hash) = primitive_header.split();
     let PrimitiveHeader {
@@ -138,6 +140,7 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
         blob_gas_used: blob_gas_used.map(U64::from),
         excess_blob_gas: excess_blob_gas.map(U64::from),
         parent_beacon_block_root,
+        total_difficulty: None,
     }
 }
 
@@ -161,7 +164,9 @@ fn from_block_with_transactions(
     transactions: BlockTransactions,
 ) -> Block {
     let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
-    let header = from_primitive_with_hash(block.header.seal(block_hash));
+    let mut header = from_primitive_with_hash(block.header.seal(block_hash));
+    header.total_difficulty = Some(total_difficulty);
+
     let withdrawals = if header.withdrawals_root.is_some() {
         block
             .withdrawals
@@ -169,11 +174,11 @@ fn from_block_with_transactions(
     } else {
         None
     };
+
     Block {
         header,
         uncles,
         transactions,
-        total_difficulty: Some(total_difficulty),
         size: Some(U256::from(block_length)),
         withdrawals,
         other: Default::default(),
@@ -193,7 +198,6 @@ pub fn uncle_block_from_header(header: PrimitiveHeader) -> Block {
         transactions: BlockTransactions::Uncle,
         withdrawals: Some(vec![]),
         size,
-        total_difficulty: None,
         other: Default::default(),
     }
 }
