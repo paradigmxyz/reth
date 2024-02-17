@@ -1574,7 +1574,7 @@ impl Discv4Service {
                 self.set_external_ip_addr(ip);
             }
 
-            // drain all incoming [Discv4] commands, this channel can never close
+            // drain all incoming `Discv4` commands, this channel can never close
             while let Poll::Ready(Some(cmd)) = self.commands_rx.poll_recv(cx) {
                 match cmd {
                     Discv4Command::Add(enr) => {
