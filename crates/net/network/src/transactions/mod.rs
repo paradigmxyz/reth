@@ -36,7 +36,7 @@ use crate::{
 };
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    EthVersion, GetPooledTransactions, HandleAnnouncement, NewPooledTransactionHashes,
+    EthVersion, GetPooledTransactions, HandlePayload, NewPooledTransactionHashes,
     NewPooledTransactionHashes66, NewPooledTransactionHashes68, PooledTransactions,
     RequestTxHashes, Transactions,
 };
@@ -577,7 +577,7 @@ where
     fn on_new_pooled_transaction_hashes(
         &mut self,
         peer_id: PeerId,
-        mut msg: NewPooledTransactionHashes,
+        msg: NewPooledTransactionHashes,
     ) {
         // If the node is initially syncing, ignore transactions
         if self.network.is_initially_syncing() {
@@ -599,64 +599,73 @@ where
         };
         let client_version = peer.client_version.clone();
 
-        // 1. filter out known hashes
+        // 1. filter out spam
+        let (validation_outcome, mut partially_valid_msg) =
+            self.transaction_fetcher.filter_valid_message.partially_filter(msg);
+
+        // 2. filter out known hashes
         //
         // known txns have already been successfully fetched.
         //
         // most hashes will be filtered out here since this the mempool protocol is a gossip
         // protocol, healthy peers will send many of the same hashes.
         //
-        let already_known_by_pool = self.pool.retain_unknown(&mut msg);
+        let already_known_by_pool = self.pool.retain_unknown(&mut partially_valid_msg);
 
         // keep track of the transactions the peer knows
         let mut num_already_seen = 0;
         if let Some(pools_intersection) = already_known_by_pool {
-            for tx in pools_intersection.into_hashes() {
-                if peer.seen_transactions.has_seen_transaction(&tx) {
+            for tx in pools_intersection.keys() {
+                if peer.seen_transactions.has_seen_transaction(tx) {
                     num_already_seen += 1;
                 }
-                peer.seen_transactions.seen_by_peer_and_in_pool(tx);
+                peer.seen_transactions.seen_by_peer_and_in_pool(*tx);
             }
         }
-        for tx in msg.iter_hashes().copied() {
-            if peer.seen_transactions.has_seen_transaction(&tx) {
+        for tx in partially_valid_msg.keys() {
+            if peer.seen_transactions.has_seen_transaction(tx) {
                 num_already_seen += 1;
             }
-            peer.seen_transactions.seen_in_announcement(tx);
+            peer.seen_transactions.seen_in_announcement(*tx);
         }
 
-        if msg.is_empty() {
+        if partially_valid_msg.is_empty() {
             // nothing to request
             return
         }
 
-        // 2. filter out invalid entries
+        // 3. filter out invalid entries
         //
         // validates messages with respect to the given network, e.g. allowed tx types
         //
-        let mut valid_announcement_data = match msg {
-            NewPooledTransactionHashes::Eth68(eth68_msg) => {
-                // validate eth68 announcement data
-                let (outcome, valid_data) =
-                    self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_68(eth68_msg);
+        let mut valid_announcement_data = if partially_valid_msg
+            .msg_version()
+            .expect("partially valid announcement should have version")
+            .is_eth68()
+        {
+            // validate eth68 announcement data
+            let (outcome, valid_data) = self
+                .transaction_fetcher
+                .filter_valid_message
+                .filter_valid_entries_68(partially_valid_msg);
 
-                if let FilterOutcome::ReportPeer = outcome {
-                    self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
-                }
-
-                valid_data
+            if let FilterOutcome::ReportPeer = outcome {
+                self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
             }
-            NewPooledTransactionHashes::Eth66(eth66_msg) => {
-                // validate eth66 announcement data
-                let (outcome, valid_data) =
-                    self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_66(eth66_msg);
 
-                if let FilterOutcome::ReportPeer = outcome {
-                    self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
-                }
+            valid_data
+        } else {
+            // validate eth66 announcement data
+            let (outcome, valid_data) = self
+                .transaction_fetcher
+                .filter_valid_message
+                .filter_valid_entries_66(partially_valid_msg);
 
-                valid_data
+            if let FilterOutcome::ReportPeer = outcome {
+                self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
             }
+
+            valid_data
         };
 
         if valid_announcement_data.is_empty() {
@@ -664,7 +673,7 @@ where
             return
         }
 
-        // 3. filter out already seen unknown hashes
+        // 4. filter out already seen unknown hashes
         //
         // seen hashes are already in the tx fetcher, pending fetch.
         //
@@ -786,7 +795,7 @@ where
                     .into_iter()
                     .map(PooledTransactionsElement::try_from_broadcast)
                     .filter_map(Result::ok)
-                    .collect::<Vec<_>>();
+                    .collect::<PooledTransactions>();
 
                 // mark the transactions as received
                 self.transaction_fetcher.remove_hashes_from_transaction_fetcher(
@@ -898,7 +907,7 @@ where
     fn import_transactions(
         &mut self,
         peer_id: PeerId,
-        transactions: Vec<PooledTransactionsElement>,
+        transactions: PooledTransactions,
         source: TransactionSource,
     ) {
         // If the node is pipeline syncing, ignore transactions
@@ -908,6 +917,8 @@ where
         if self.network.tx_gossip_disabled() {
             return
         }
+
+        let transactions = transactions.0;
 
         // tracks the quality of the given transactions
         let mut has_bad_transactions = false;
