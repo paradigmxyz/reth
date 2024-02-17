@@ -677,7 +677,9 @@ where
         // And tokio's docs on cooperative scheduling <https://docs.rs/tokio/latest/tokio/task/#cooperative-scheduling>
         //
         // Testing has shown that this loop naturally reaches the pending state within 1-5
-        // iterations in << 100µs in most cases.
+        // iterations in << 100µs in most cases. On average it requires ~50µs, which is inside
+        // the range of what's recommended as rule of thumb.
+        // <https://ryhl.io/blog/async-what-is-blocking/>
         let mut budget = 10;
 
         loop {
