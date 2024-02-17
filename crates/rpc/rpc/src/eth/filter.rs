@@ -439,7 +439,7 @@ impl<Provider, Pool> EthFilterInner<Provider, Pool>
                     &mut all_logs,
                     &self.provider,
                     &filter_params,
-                    b, &**receipts,
+                    b, &receipts,
                     false,
                 )?;
             }
