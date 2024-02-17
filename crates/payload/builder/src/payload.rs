@@ -208,12 +208,12 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
         Ok(Self::new(parent, attributes))
     }
 
-    fn parent(&self) -> B256 {
-        self.parent
-    }
-
     fn payload_id(&self) -> PayloadId {
         self.id
+    }
+
+    fn parent(&self) -> B256 {
+        self.parent
     }
 
     fn timestamp(&self) -> u64 {
@@ -279,7 +279,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
             blob_excess_gas_and_price,
         };
 
-        (CfgEnvWithHandlerCfg::new(cfg, spec_id), block_env)
+        (CfgEnvWithHandlerCfg::new_with_spec_id(cfg, spec_id), block_env)
     }
 }
 
