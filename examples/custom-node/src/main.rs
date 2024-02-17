@@ -166,7 +166,7 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
             blob_excess_gas_and_price,
         };
 
-        (CfgEnvWithHandlerCfg::new(cfg, spec_id), block_env)
+        (CfgEnvWithHandlerCfg::new_with_spec_id(cfg, spec_id), block_env)
     }
 }
 
