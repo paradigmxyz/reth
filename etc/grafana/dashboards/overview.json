@@ -4781,6 +4781,132 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "uid": "PBFA97CFB590B2093",
+        "type": "prometheus"
+      },
+      "type": "timeseries",
+      "title": "Transaction Fetcher Hashes",
+      "gridPos": {
+        "x": 0,
+        "y": 154,
+        "w": 12,
+        "h": 8
+      },
+      "id": 199,
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "reth_network_hashes_pending_fetch{instance=~\"$instance\"}",
+          "range": true,
+          "instant": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "builder",
+          "legendFormat": "Hashes in Pending Fetch Cache",
+          "useBackend": false,
+          "disableTextWrap": false,
+          "fullMetaSearch": false,
+          "includeNullMetadata": true
+        },
+        {
+          "refId": "B",
+          "expr": "reth_network_hashes_inflight_transaction_requests{instance=~\"$instance\"}",
+          "range": true,
+          "instant": false,
+          "datasource": {
+            "uid": "PBFA97CFB590B2093",
+            "type": "prometheus"
+          },
+          "hide": false,
+          "editorMode": "builder",
+          "legendFormat": "Hashes in Inflight Requests",
+          "useBackend": false,
+          "disableTextWrap": false,
+          "fullMetaSearch": false,
+          "includeNullMetadata": true
+        },
+        {
+          "refId": "Total Hashes in Transaction Fetcher",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__",
+            "name": "Expression"
+          },
+          "type": "math",
+          "hide": false,
+          "expression": "$A + $B"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "barAlignment": 0,
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "spanNulls": false,
+            "insertNulls": false,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "axisColorMode": "text",
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "axisCenteredZero": false,
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 80,
+                "color": "red"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
