@@ -428,8 +428,8 @@ impl<Provider, Pool> EthFilterInner<Provider, Pool>
 
         if (to_block == from_block) && (from_block == self.provider.last_block_number()?) {
             let mut all_logs = Vec::new();
-            let block_hash = self.provider.block_hash(to_block)?
-                .ok_or_else(|| ProviderError::BlockNotFound(BlockHashOrNumber::from(to_block)))?;
+            let header = self.provider.header_by_number(to_block)?.ok_or(ProviderError::HeaderNotFound(to_block.into()))?;
+            let block_hash = self.provider.block_hash(header.clone().number)?.ok_or(ProviderError::BlockNotFound(header.number.into()))?;
             if let Some((_block, receipts)) =
                 self.eth_cache.get_block_and_receipts(block_hash).await?
             {
