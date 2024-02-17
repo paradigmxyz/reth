@@ -44,9 +44,9 @@ pub struct EthFilter<Provider, Pool> {
 }
 
 impl<Provider, Pool> EthFilter<Provider, Pool>
-where
-    Provider: Send + Sync + 'static,
-    Pool: Send + Sync + 'static,
+    where
+        Provider: Send + Sync + 'static,
+        Pool: Send + Sync + 'static,
 {
     /// Creates a new, shareable instance.
     ///
@@ -124,10 +124,10 @@ where
 }
 
 impl<Provider, Pool> EthFilter<Provider, Pool>
-where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
-    Pool: TransactionPool + 'static,
-    <Pool as TransactionPool>::Transaction: 'static,
+    where
+        Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+        Pool: TransactionPool + 'static,
+        <Pool as TransactionPool>::Transaction: 'static,
 {
     /// Returns all the filter changes for the given id, if any
     pub async fn filter_changes(&self, id: FilterId) -> Result<FilterChanges, FilterError> {
@@ -223,9 +223,9 @@ where
 
 #[async_trait]
 impl<Provider, Pool> EthFilterApiServer for EthFilter<Provider, Pool>
-where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
-    Pool: TransactionPool + 'static,
+    where
+        Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+        Pool: TransactionPool + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -342,9 +342,9 @@ struct EthFilterInner<Provider, Pool> {
 }
 
 impl<Provider, Pool> EthFilterInner<Provider, Pool>
-where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
-    Pool: TransactionPool + 'static,
+    where
+        Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+        Pool: TransactionPool + 'static,
 {
     /// Returns logs matching given filter object.
     async fn logs_for_filter(&self, filter: Filter) -> Result<Vec<Log>, FilterError> {
@@ -418,7 +418,7 @@ where
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
 
         if to_block - from_block > self.max_blocks_per_filter {
-            return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter));
+            Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter))
         }
 
         let mut all_logs = Vec::new();
@@ -454,13 +454,13 @@ where
                     false,
                 )?;
             }
-            return Ok(all_logs);
+            Ok(all_logs)
         }
 
         // loop over the range of new blocks and check logs if the filter matches the log's bloom
         // filter
         for (from, to) in
-            BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range)
+        BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range)
         {
             let headers = self.provider.headers_range(from..=to)?;
 
@@ -605,8 +605,8 @@ struct FullTransactionsReceiver<T: PoolTransaction> {
 }
 
 impl<T> FullTransactionsReceiver<T>
-where
-    T: PoolTransaction + 'static,
+    where
+        T: PoolTransaction + 'static,
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
     fn new(stream: NewSubpoolTransactionStream<T>) -> Self {
@@ -635,8 +635,8 @@ trait FullTransactionsFilter: fmt::Debug + Send + Sync + Unpin + 'static {
 
 #[async_trait]
 impl<T> FullTransactionsFilter for FullTransactionsReceiver<T>
-where
-    T: PoolTransaction + 'static,
+    where
+        T: PoolTransaction + 'static,
 {
     async fn drain(&self) -> FilterChanges {
         FullTransactionsReceiver::drain(self).await
