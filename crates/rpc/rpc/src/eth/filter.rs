@@ -14,7 +14,10 @@ use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_primitives::{BlockHashOrNumber, IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_api::EthFilterApiServer;
-use reth_rpc_types::{Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log, PendingTransactionFilterKind, BlockNumHash};
+use reth_rpc_types::{
+    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
+    PendingTransactionFilterKind,
+};
 
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
@@ -41,9 +44,9 @@ pub struct EthFilter<Provider, Pool> {
 }
 
 impl<Provider, Pool> EthFilter<Provider, Pool>
-    where
-        Provider: Send + Sync + 'static,
-        Pool: Send + Sync + 'static,
+where
+    Provider: Send + Sync + 'static,
+    Pool: Send + Sync + 'static,
 {
     /// Creates a new, shareable instance.
     ///
@@ -121,10 +124,10 @@ impl<Provider, Pool> EthFilter<Provider, Pool>
 }
 
 impl<Provider, Pool> EthFilter<Provider, Pool>
-    where
-        Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
-        Pool: TransactionPool + 'static,
-        <Pool as TransactionPool>::Transaction: 'static,
+where
+    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+    Pool: TransactionPool + 'static,
+    <Pool as TransactionPool>::Transaction: 'static,
 {
     /// Returns all the filter changes for the given id, if any
     pub async fn filter_changes(&self, id: FilterId) -> Result<FilterChanges, FilterError> {
@@ -220,9 +223,9 @@ impl<Provider, Pool> EthFilter<Provider, Pool>
 
 #[async_trait]
 impl<Provider, Pool> EthFilterApiServer for EthFilter<Provider, Pool>
-    where
-        Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
-        Pool: TransactionPool + 'static,
+where
+    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+    Pool: TransactionPool + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -339,9 +342,9 @@ struct EthFilterInner<Provider, Pool> {
 }
 
 impl<Provider, Pool> EthFilterInner<Provider, Pool>
-    where
-        Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
-        Pool: TransactionPool + 'static,
+where
+    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+    Pool: TransactionPool + 'static,
 {
     /// Returns logs matching given filter object.
     async fn logs_for_filter(&self, filter: Filter) -> Result<Vec<Log>, FilterError> {
@@ -418,7 +421,6 @@ impl<Provider, Pool> EthFilterInner<Provider, Pool>
             return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter));
         }
 
-
         let mut all_logs = Vec::new();
         let filter_params = FilteredParams::new(Some(filter.clone()));
 
@@ -428,18 +430,27 @@ impl<Provider, Pool> EthFilterInner<Provider, Pool>
 
         if (to_block == from_block) && (from_block == self.provider.last_block_number()?) {
             let mut all_logs = Vec::new();
-            let header = self.provider.header_by_number(to_block)?.ok_or(ProviderError::HeaderNotFound(to_block.into()))?;
-            let block_hash = self.provider.block_hash(header.clone().number)?.ok_or(ProviderError::BlockNotFound(header.number.into()))?;
+            let header = self
+                .provider
+                .header_by_number(to_block)?
+                .ok_or(ProviderError::HeaderNotFound(to_block.into()))?;
+            let block_hash = self
+                .provider
+                .block_hash(header.clone().number)?
+                .ok_or(ProviderError::BlockNotFound(header.number.into()))?;
             if let Some((_block, receipts)) =
                 self.eth_cache.get_block_and_receipts(block_hash).await?
             {
-                let b: BlockNumHash = <BlockNumHash as From<(u64, revm_primitives::FixedBytes<32>)>>
-                ::from((to_block, block_hash));
+                let b: BlockNumHash = <BlockNumHash as From<(
+                    u64,
+                    revm_primitives::FixedBytes<32>,
+                )>>::from((to_block, block_hash));
                 logs_utils::append_matching_block_logs(
                     &mut all_logs,
                     &self.provider,
                     &filter_params,
-                    b, &receipts,
+                    b,
+                    &receipts,
                     false,
                 )?;
             }
@@ -449,7 +460,7 @@ impl<Provider, Pool> EthFilterInner<Provider, Pool>
         // loop over the range of new blocks and check logs if the filter matches the log's bloom
         // filter
         for (from, to) in
-        BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range)
+            BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range)
         {
             let headers = self.provider.headers_range(from..=to)?;
 
@@ -594,8 +605,8 @@ struct FullTransactionsReceiver<T: PoolTransaction> {
 }
 
 impl<T> FullTransactionsReceiver<T>
-    where
-        T: PoolTransaction + 'static,
+where
+    T: PoolTransaction + 'static,
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
     fn new(stream: NewSubpoolTransactionStream<T>) -> Self {
@@ -624,8 +635,8 @@ trait FullTransactionsFilter: fmt::Debug + Send + Sync + Unpin + 'static {
 
 #[async_trait]
 impl<T> FullTransactionsFilter for FullTransactionsReceiver<T>
-    where
-        T: PoolTransaction + 'static,
+where
+    T: PoolTransaction + 'static,
 {
     async fn drain(&self) -> FilterChanges {
         FullTransactionsReceiver::drain(self).await
