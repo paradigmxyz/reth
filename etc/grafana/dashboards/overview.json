@@ -4349,52 +4349,53 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "PBFA97CFB590B2093",
+        "type": "prometheus"
       },
       "description": "Tracks the number of transactions inserted and removed from the transaction pool, as well as the number of invalid transactions",
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
           "custom": {
-            "axisCenteredZero": true,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
             "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "barAlignment": 0,
+            "lineWidth": 1,
             "fillOpacity": 0,
             "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
+            "spanNulls": false,
             "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
+            "showPoints": "auto",
             "pointSize": 5,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "axisColorMode": "text",
             "scaleDistribution": {
               "type": "linear"
             },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
+            "axisCenteredZero": true,
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
             },
             "thresholdsStyle": {
               "mode": "off"
             }
+          },
+          "color": {
+            "mode": "palette-classic"
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4402,34 +4403,30 @@
               }
             ]
           },
-          "unit": "ops"
+          "unit": "opm"
         },
         "overrides": [
           {
+            "__systemRef": "hideSeriesFrom",
             "matcher": {
-              "id": "byFrameRefID",
-              "options": "B"
-            },
-            "properties": [
-              {
-                "id": "custom.transform",
-                "value": "negative-Y"
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "Removed transactions"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
               }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byFrameRefID",
-              "options": "C"
             },
             "properties": [
               {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "unit",
-                "value": "cps"
+                "id": "custom.hideFrom",
+                "value": {
+                  "viz": true,
+                  "legend": false,
+                  "tooltip": false
+                }
               }
             ]
           }
@@ -4439,60 +4436,79 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 146
+        "y": 154
       },
       "id": 93,
       "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
         "tooltip": {
           "mode": "multi",
           "sort": "none"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
         }
       },
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "Prometheus"
           },
           "editorMode": "builder",
-          "expr": "increase(reth_transaction_pool_inserted_transactions{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "increase(reth_transaction_pool_inserted_transactions{instance=~\"$instance\"}[1m])",
           "legendFormat": "Inserted transactions",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "useBackend": false,
+          "disableTextWrap": false,
+          "fullMetaSearch": false,
+          "includeNullMetadata": true
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "Prometheus"
           },
           "editorMode": "builder",
-          "expr": "increase(reth_transaction_pool_removed_transactions{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "increase(reth_transaction_pool_removed_transactions{instance=~\"$instance\"}[1m])",
           "hide": false,
           "legendFormat": "Removed transactions",
           "range": true,
-          "refId": "B"
+          "refId": "B",
+          "useBackend": false,
+          "disableTextWrap": false,
+          "fullMetaSearch": false,
+          "includeNullMetadata": true
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "Prometheus"
           },
           "editorMode": "builder",
-          "expr": "increase(reth_transaction_pool_invalid_transactions{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "increase(reth_transaction_pool_invalid_transactions{instance=~\"$instance\"}[1m])",
           "hide": false,
           "legendFormat": "Invalid transactions",
           "range": true,
-          "refId": "C"
+          "refId": "C",
+          "useBackend": false,
+          "disableTextWrap": false,
+          "fullMetaSearch": false,
+          "includeNullMetadata": true
         }
       ],
       "title": "Inserted transactions",
-      "type": "timeseries"
+      "type": "timeseries",
+      "scopedVars": {
+        "instance": {
+          "text": "localhost:9005",
+          "value": "localhost:9005",
+          "selected": true
+        }
+      }
     },
     {
       "datasource": {
