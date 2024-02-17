@@ -2842,5 +2842,8 @@ mod tests {
 
         // Remove first (nonce 0) - simulating that it was taken to be a part of the block.
         pool.remove_transactions(vec![*v0.hash()]);
+        // assert the second transaction is really at the top of the queue
+        let pool_txs = pool.best_transactions().map(|x| x.id().nonce).collect::<Vec<_>>();
+        assert_eq!(vec![v1.nonce()], pool_txs);
     }
 }
