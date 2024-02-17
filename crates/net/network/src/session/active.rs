@@ -492,8 +492,11 @@ impl Future for ActiveSession {
 
         let now = Instant::now();
 
+        let mut main_iter = 0;
+
         // The main poll loop that drives the session
         'main: loop {
+            main_iter +=1;
             let mut progress = false;
 
             // we prioritize incoming commands sent from the session manager
@@ -530,6 +533,8 @@ impl Future for ActiveSession {
 
             let deadline = this.request_deadline();
 
+            let emit = Instant::now();
+
             while let Poll::Ready(Some(req)) = this.internal_request_tx.poll_next_unpin(cx) {
                 progress = true;
                 this.on_internal_peer_request(req, deadline);
@@ -550,9 +555,11 @@ impl Future for ActiveSession {
                 }
             }
 
+            let mut num_msgs = 0;
             // Send messages by advancing the sink and queuing in buffered messages
             while this.conn.poll_ready_unpin(cx).is_ready() {
                 if let Some(msg) = this.queued_outgoing.pop_front() {
+                    num_msgs += 1;
                     progress = true;
                     let res = match msg {
                         OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
@@ -569,11 +576,19 @@ impl Future for ActiveSession {
                 }
             }
 
+            let emit_elapsed = emit.elapsed();
+            if emit_elapsed.as_micros() > 100 {
+                println!("emit took: {:?} buffer: {} iterations {}", emit.elapsed(), this.queued_outgoing.len(),num_msgs );
+            }
+
+            let receive = Instant::now();
+
             // read incoming messages from the wire
             'receive: loop {
                 // ensure we still have enough budget for another iteration
                 budget -= 1;
                 if budget == 0 {
+                    println!("Exceeded receive budget: {:?}", receive.elapsed());
                     // make sure we're woken up again
                     cx.waker().wake_by_ref();
                     break 'main
@@ -635,6 +650,8 @@ impl Future for ActiveSession {
                 }
             }
 
+            println!("receive loop: {:?}", receive.elapsed());
+
             if !progress {
                 break 'main
             }
@@ -653,11 +670,12 @@ impl Future for ActiveSession {
         this.shrink_to_fit();
 
         let elapsed = now.elapsed();
-        if elapsed.as_micros() > 100 {
+        if elapsed.as_micros() > 300 {
             println!(
-                "ActiveSession elapsed {:?}, out buffer {}",
+                "ActiveSession elapsed {:?}, out buffer {} main iter: {}",
                 now.elapsed(),
-                this.queued_outgoing.len()
+                this.queued_outgoing.len(),
+                main_iter
             );
         }
 
