@@ -20,25 +20,28 @@ use std::{
 /// A type alias that represents the result of a raw transaction trace stream.
 type RawTransactionTraceResult<'a> =
     Pin<Box<dyn Stream<Item = Result<(TraceResults, Bytes), (RpcError, Bytes)>> + 'a>>;
+
 /// A result type for the `trace_block` method that also captures the requested block.
 pub type TraceBlockResult = Result<(Vec<LocalizedTransactionTrace>, BlockId), (RpcError, BlockId)>;
-/// Type alias representing the result of replaying a transaction.
 
+/// Type alias representing the result of replaying a transaction.
 pub type ReplayTransactionResult = Result<(TraceResults, TxHash), (RpcError, TxHash)>;
 
 /// A type representing the result of calling `trace_call_many` method.
-
 pub type CallManyTraceResult = Result<
     (Vec<TraceResults>, Vec<(TransactionRequest, HashSet<TraceType>)>),
     (RpcError, Vec<(TransactionRequest, HashSet<TraceType>)>),
 >;
+
 /// Result type for the `trace_get` method that also captures the requested transaction hash and
 /// index.
 pub type TraceGetResult =
     Result<(Option<LocalizedTransactionTrace>, B256, Vec<Index>), (RpcError, B256, Vec<Index>)>;
+
 /// Represents a result type for the `trace_filter` stream extension.
 pub type TraceFilterResult =
     Result<(Vec<LocalizedTransactionTrace>, TraceFilter), (RpcError, TraceFilter)>;
+
 /// Represents the result of a single trace call.
 pub type TraceCallResult = Result<TraceResults, (RpcError, TraceCallRequest)>;
 
@@ -82,9 +85,9 @@ pub trait TraceApiExt {
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> RawTransactionTraceStream<'_>;
+
     /// Creates a stream of results for multiple dependent transaction calls on top of the same
     /// block.
-
     fn trace_call_many_stream<I>(
         &self,
         calls: I,
@@ -92,6 +95,7 @@ pub trait TraceApiExt {
     ) -> CallManyTraceStream<'_>
     where
         I: IntoIterator<Item = (TransactionRequest, HashSet<TraceType>)>;
+
     /// Returns a new stream that yields the traces for the given transaction hash and indices.
     fn trace_get_stream<I>(&self, hash: B256, indices: I) -> TraceGetStream<'_>
     where
@@ -101,15 +105,16 @@ pub trait TraceApiExt {
     fn trace_filter_stream<I>(&self, filters: I) -> TraceFilterStream<'_>
     where
         I: IntoIterator<Item = TraceFilter>;
+
     /// Returns a new stream that yields the trace results for the given call requests.
     fn trace_call_stream(&self, request: TraceCallRequest) -> TraceCallStream<'_>;
 }
 /// `TraceCallStream` provides an asynchronous stream of tracing results.
-
 #[must_use = "streams do nothing unless polled"]
 pub struct TraceCallStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceCallResult> + 'a>>,
 }
+
 impl<'a> Stream for TraceCallStream<'a> {
     type Item = TraceCallResult;
 
@@ -145,14 +150,17 @@ impl<'a> std::fmt::Debug for TraceFilterStream<'a> {
         f.debug_struct("TraceFilterStream").finish_non_exhaustive()
     }
 }
+
 /// A stream that asynchronously yields the results of the `trace_get` method for a given
 /// transaction hash and a series of indices.
 #[must_use = "streams do nothing unless polled"]
 pub struct TraceGetStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceGetResult> + 'a>>,
 }
+
 impl<'a> Stream for TraceGetStream<'a> {
     type Item = TraceGetResult;
+
     /// Attempts to pull out the next item of the stream
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.stream.as_mut().poll_next(cx)
@@ -175,8 +183,8 @@ pub struct CallManyTraceStream<'a> {
 
 impl<'a> Stream for CallManyTraceStream<'a> {
     type Item = CallManyTraceResult;
-    /// Polls for the next item from the stream.
 
+    /// Polls for the next item from the stream.
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.stream.as_mut().poll_next(cx)
     }
@@ -189,7 +197,6 @@ impl<'a> std::fmt::Debug for CallManyTraceStream<'a> {
 }
 
 /// A stream that traces the provided raw transaction data.
-
 #[must_use = "streams do nothing unless polled"]
 pub struct RawTransactionTraceStream<'a> {
     stream: RawTransactionTraceResult<'a>,
@@ -214,6 +221,7 @@ impl<'a> std::fmt::Debug for RawTransactionTraceStream<'a> {
 pub struct ReplayTransactionStream<'a> {
     stream: Pin<Box<dyn Stream<Item = ReplayTransactionResult> + 'a>>,
 }
+
 impl<'a> Stream for ReplayTransactionStream<'a> {
     type Item = ReplayTransactionResult;
 
@@ -285,6 +293,7 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
         .buffered(10);
         ReplayTransactionStream { stream: Box::pin(stream) }
     }
+
     fn trace_raw_transaction_stream(
         &self,
         data: Bytes,
