@@ -650,7 +650,11 @@ impl Future for ActiveSession {
                 }
             }
 
-            println!("receive loop: {:?}", receive.elapsed());
+            let receive_elapsed = receive.elapsed();
+            if receive_elapsed.as_micros() > 70 {
+                println!("receive loop: {:?}", receive.elapsed());
+            }
+
 
             if !progress {
                 break 'main
