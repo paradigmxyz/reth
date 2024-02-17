@@ -1677,6 +1677,7 @@ impl Discv4Service {
 
                 udp_message_budget -= 1;
                 if udp_message_budget < 0 {
+                    trace!(target: "discv4", budget=UDP_MESSAGE_POLL_LOOP_BUDGET, "exhausted message poll budget");
                     if self.queued_events.is_empty() {
                         // we've exceeded the message budget and have no events to process
                         // this will make sure we're woken up again
