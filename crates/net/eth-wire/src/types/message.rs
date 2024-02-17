@@ -326,6 +326,7 @@ impl<T: Encodable> EncodableExt for Vec<T> {
                 break;
             }
         }
+        buffer.shrink_to_fit();
         buffer
     }
 }
