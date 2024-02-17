@@ -931,7 +931,7 @@ where
             // ensure we still have enough budget for another iteration
             budget -= 1;
             if budget == 0 {
-                trace!(target: "net", "exhausted network manager budget");
+                trace!(target: "net", budget=10, "exhausted network manager budget");
                 // make sure we're woken up again
                 cx.waker().wake_by_ref();
                 break
