@@ -315,7 +315,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Removes the transaction from the pool.
     ///
-    /// Note: this only removes the given transaction.
+    /// Note: If the transaction has a descendant transaction
+    /// it will advance it to the best queue.
     pub(crate) fn remove_transaction(
         &mut self,
         id: &TransactionId,
