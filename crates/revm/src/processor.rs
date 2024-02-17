@@ -282,10 +282,15 @@ where
             self.evm.handler.pop_handle_register();
             output
         } else {
-            // main execution.
+            // Main execution without needing the hash
             self.evm.transact()
         };
-        out.map_err(move |e| BlockValidationError::EVM { hash, error: e.into() }.into())
+
+        out.map_err(move |e| {
+            // Ensure hash is calculated for error log, if not already done
+            BlockValidationError::EVM { hash: transaction.recalculate_hash(), error: e.into() }
+                .into()
+        })
     }
 
     /// Execute the block, verify gas usage and apply post-block state changes.
@@ -586,10 +591,11 @@ mod tests {
     use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         bytes,
-        constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
+        constants::{BEACON_ROOTS_ADDRESS, EIP1559_INITIAL_BASE_FEE, SYSTEM_ADDRESS},
         keccak256,
         trie::AccountProof,
-        Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
+        Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, Signature, StorageKey,
+        Transaction, TransactionKind, TxEip1559, MAINNET,
     };
     use reth_provider::{
         AccountReader, BlockHashReader, BundleStateWithReceipts, StateRootProvider,
@@ -1073,5 +1079,50 @@ mod tests {
             .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
             .unwrap();
         assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
+    }
+
+    #[test]
+    fn test_transact_error_includes_correct_hash() {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .build(),
+        );
+
+        let db = StateProviderTest::default();
+        let chain_id = chain_spec.chain.id();
+
+        // execute header
+        let mut executor = EVMProcessor::new_with_db(
+            chain_spec,
+            StateProviderDatabase::new(db),
+            EthEvmConfig::default(),
+        );
+
+        // Create a test transaction that gonna fail
+        let transaction = TransactionSigned::from_transaction_and_signature(
+            Transaction::Eip1559(TxEip1559 {
+                chain_id,
+                nonce: 1,
+                gas_limit: 21_000,
+                to: TransactionKind::Call(Address::ZERO),
+                max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
+                ..Default::default()
+            }),
+            Signature::default(),
+        );
+
+        let result = executor.transact(&transaction, Address::random());
+
+        let expected_hash = transaction.recalculate_hash();
+
+        // Check the error
+        match result {
+            Err(BlockExecutionError::Validation(BlockValidationError::EVM { hash, error: _ })) => {
+                    assert_eq!(hash, expected_hash, "The EVM error does not include the correct transaction hash.");
+            },
+            _ => panic!("Expected a BlockExecutionError::Validation error, but transaction did not fail as expected."),
+        }
     }
 }
