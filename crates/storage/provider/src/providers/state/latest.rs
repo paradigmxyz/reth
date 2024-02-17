@@ -13,7 +13,6 @@ use reth_primitives::{
     StorageValue, B256,
 };
 use reth_trie::{proof::Proof, updates::TrieUpdates};
-use std::sync::Arc;
 
 /// State provider over latest state that takes tx reference.
 #[derive(Debug)]
@@ -21,12 +20,12 @@ pub struct LatestStateProviderRef<'b, TX: DbTx> {
     /// database transaction
     db: &'b TX,
     /// Snapshot provider
-    snapshot_provider: Arc<SnapshotProvider>,
+    snapshot_provider: SnapshotProvider,
 }
 
 impl<'b, TX: DbTx> LatestStateProviderRef<'b, TX> {
     /// Create new state provider
-    pub fn new(db: &'b TX, snapshot_provider: Arc<SnapshotProvider>) -> Self {
+    pub fn new(db: &'b TX, snapshot_provider: SnapshotProvider) -> Self {
         Self { db, snapshot_provider }
     }
 }
@@ -127,12 +126,12 @@ pub struct LatestStateProvider<TX: DbTx> {
     /// database transaction
     db: TX,
     /// Snapshot provider
-    snapshot_provider: Arc<SnapshotProvider>,
+    snapshot_provider: SnapshotProvider,
 }
 
 impl<TX: DbTx> LatestStateProvider<TX> {
     /// Create new state provider
-    pub fn new(db: TX, snapshot_provider: Arc<SnapshotProvider>) -> Self {
+    pub fn new(db: TX, snapshot_provider: SnapshotProvider) -> Self {
         Self { db, snapshot_provider }
     }
 

@@ -12,7 +12,6 @@ use reth_primitives::{
 use std::{
     ops::Deref,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
 /// Mutable reference to a dashmap element of [`SnapshotProviderRW`].
@@ -21,7 +20,7 @@ pub type SnapshotProviderRWRefMut<'a> = RefMut<'a, SnapshotSegment, SnapshotProv
 #[derive(Debug)]
 /// Extends `SnapshotProvider` with writing capabilities
 pub struct SnapshotProviderRW<'a> {
-    reader: Arc<SnapshotProvider>,
+    reader: SnapshotProvider,
     writer: NippyJarWriter<'a, SegmentHeader>,
     data_path: PathBuf,
     buf: Vec<u8>,
@@ -32,7 +31,7 @@ impl<'a> SnapshotProviderRW<'a> {
     pub fn new(
         segment: SnapshotSegment,
         block: BlockNumber,
-        reader: Arc<SnapshotProvider>,
+        reader: SnapshotProvider,
     ) -> ProviderResult<Self> {
         let (writer, data_path) = Self::open(segment, block, reader.clone())?;
         Ok(Self { writer, data_path, buf: Vec::with_capacity(100), reader })
@@ -41,7 +40,7 @@ impl<'a> SnapshotProviderRW<'a> {
     fn open(
         segment: SnapshotSegment,
         block: u64,
-        reader: Arc<SnapshotProvider>,
+        reader: SnapshotProvider,
     ) -> ProviderResult<(NippyJarWriter<'a, SegmentHeader>, PathBuf)> {
         let block_range = find_fixed_range(block);
         let (jar, path) =

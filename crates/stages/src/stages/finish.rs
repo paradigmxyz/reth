@@ -21,6 +21,7 @@ impl<DB: Database> Stage<DB> for FinishStage {
         _provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        std::process::exit(1);
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
     }
 

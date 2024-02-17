@@ -9,7 +9,7 @@ use reth_provider::{
     providers::{SnapshotProvider, SnapshotWriter},
     DatabaseProviderRO,
 };
-use std::{ops::RangeInclusive, path::Path, sync::Arc};
+use std::{ops::RangeInclusive, path::Path};
 
 /// Snapshot segment responsible for [SnapshotSegment::Headers] part of data.
 #[derive(Debug, Default)]
@@ -23,7 +23,7 @@ impl<DB: Database> Segment<DB> for Headers {
     fn snapshot(
         &self,
         provider: DatabaseProviderRO<DB>,
-        snapshot_provider: Arc<SnapshotProvider>,
+        snapshot_provider: SnapshotProvider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
         let mut snapshot_writer =

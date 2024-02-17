@@ -209,7 +209,7 @@ pub fn insert_genesis_history<DB: Database>(
 /// Inserts header for the genesis state.
 pub fn insert_genesis_header<DB: Database>(
     tx: &<DB as Database>::TXMut,
-    snapshot_provider: Arc<SnapshotProvider>,
+    snapshot_provider: SnapshotProvider,
     chain: Arc<ChainSpec>,
 ) -> ProviderResult<()> {
     let (header, block_hash) = chain.sealed_genesis_header().split();

@@ -29,7 +29,7 @@ use reth_primitives::{
 };
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
-    ops::{Range, RangeBounds, RangeInclusive},
+    ops::{Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -39,8 +39,29 @@ use std::{
 type SegmentRanges = HashMap<SnapshotSegment, BTreeMap<TxNumber, SegmentRangeInclusive>>;
 
 /// [`SnapshotProvider`] manages all existing [`SnapshotJarProvider`].
+#[derive(Debug, Default, Clone)]
+pub struct SnapshotProvider(Arc<SnapshotProviderInner>);
+
+impl SnapshotProvider {
+    /// Creates a new [`SnapshotProvider`].
+    pub fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
+        let provider = Self(Arc::new(SnapshotProviderInner::new(path)?));
+        provider.initialize_index()?;
+        Ok(provider)
+    }
+}
+
+impl Deref for SnapshotProvider {
+    type Target = SnapshotProviderInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// [`SnapshotProviderInner`] manages all existing [`SnapshotJarProvider`].
 #[derive(Debug, Default)]
-pub struct SnapshotProvider {
+pub struct SnapshotProviderInner {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
     map: DashMap<(BlockNumber, SnapshotSegment), LoadedJar>,
@@ -57,9 +78,9 @@ pub struct SnapshotProvider {
     writers: DashMap<SnapshotSegment, SnapshotProviderRW<'static>>,
 }
 
-impl SnapshotProvider {
-    /// Creates a new [`SnapshotProvider`].
-    pub fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
+impl SnapshotProviderInner {
+    /// Creates a new [`SnapshotProviderInner`].
+    fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
         let provider = Self {
             map: Default::default(),
             writers: Default::default(),
@@ -69,14 +90,16 @@ impl SnapshotProvider {
             load_filters: false,
         };
 
-        provider.initialize_index()?;
         Ok(provider)
     }
-
+}
+impl SnapshotProvider {
     /// Loads filters into memory when creating a [`SnapshotJarProvider`].
-    pub fn with_filters(mut self) -> Self {
-        self.load_filters = true;
-        self
+    pub fn with_filters(self) -> Self {
+        let mut provider =
+            Arc::try_unwrap(self.0).expect("should be called when initializing only.");
+        provider.load_filters = true;
+        Self(Arc::new(provider))
     }
 
     /// Gets the [`SnapshotJarProvider`] of the requested segment and block.
@@ -599,7 +622,7 @@ pub trait SnapshotWriter {
     fn commit(&self) -> ProviderResult<()>;
 }
 
-impl SnapshotWriter for Arc<SnapshotProvider> {
+impl SnapshotWriter for SnapshotProvider {
     fn get_writer(
         &self,
         block: BlockNumber,

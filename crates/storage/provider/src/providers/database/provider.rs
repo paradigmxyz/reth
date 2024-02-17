@@ -104,23 +104,19 @@ pub struct DatabaseProvider<TX> {
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Snapshot provider
-    snapshot_provider: Arc<SnapshotProvider>,
+    snapshot_provider: SnapshotProvider,
 }
 
 impl<TX> DatabaseProvider<TX> {
     /// Returns a snapshot provider
-    pub fn snapshot_provider(&self) -> &Arc<SnapshotProvider> {
+    pub fn snapshot_provider(&self) -> &SnapshotProvider {
         &self.snapshot_provider
     }
 }
 
 impl<TX: DbTxMut> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-write transaction.
-    pub fn new_rw(
-        tx: TX,
-        chain_spec: Arc<ChainSpec>,
-        snapshot_provider: Arc<SnapshotProvider>,
-    ) -> Self {
+    pub fn new_rw(tx: TX, chain_spec: Arc<ChainSpec>, snapshot_provider: SnapshotProvider) -> Self {
         Self { tx, chain_spec, snapshot_provider }
     }
 }
@@ -246,11 +242,7 @@ where
 
 impl<TX: DbTx> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-only transaction.
-    pub fn new(
-        tx: TX,
-        chain_spec: Arc<ChainSpec>,
-        snapshot_provider: Arc<SnapshotProvider>,
-    ) -> Self {
+    pub fn new(tx: TX, chain_spec: Arc<ChainSpec>, snapshot_provider: SnapshotProvider) -> Self {
         Self { tx, chain_spec, snapshot_provider }
     }
 

@@ -99,7 +99,7 @@ where
     fn write_headers<DB: Database>(
         &mut self,
         tx: &<DB as Database>::TXMut,
-        snapshot_provider: Arc<SnapshotProvider>,
+        snapshot_provider: SnapshotProvider,
     ) -> Result<BlockNumber, StageError> {
         let total_headers = self.header_collector.len();
 

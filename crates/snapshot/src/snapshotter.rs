@@ -10,7 +10,7 @@ use reth_provider::{
     ProviderFactory,
 };
 use reth_tokio_util::EventListeners;
-use std::{ops::RangeInclusive, sync::Arc, time::Instant};
+use std::{ops::RangeInclusive, time::Instant};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, trace};
 
@@ -26,7 +26,7 @@ pub struct Snapshotter<DB> {
     /// Provider factory
     provider_factory: ProviderFactory<DB>,
     /// Snapshot provider
-    snapshot_provider: Arc<SnapshotProvider>,
+    snapshot_provider: SnapshotProvider,
     /// Pruning configuration for every part of the data that can be pruned. Set by user, and
     /// needed in [Snapshotter] to prevent snapshotting the prunable data.
     /// See [Snapshotter::get_snapshot_targets].
@@ -71,7 +71,7 @@ impl<DB: Database> Snapshotter<DB> {
     /// Creates a new [Snapshotter].
     pub fn new(
         provider_factory: ProviderFactory<DB>,
-        snapshot_provider: Arc<SnapshotProvider>,
+        snapshot_provider: SnapshotProvider,
         prune_modes: PruneModes,
     ) -> Self {
         Self { provider_factory, snapshot_provider, prune_modes, listeners: Default::default() }
