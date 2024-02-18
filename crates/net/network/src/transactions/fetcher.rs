@@ -838,7 +838,7 @@ impl Stream for TransactionFetcher {
                             peer_id=format!("{peer_id:#}"),
                             unverified_len=unverified_len,
                             verified_payload_len=verified_payload.len(),
-                            "received transactions that were not requested in `PooledTransactions` response from peer, filtered out transactions"
+                            "received `PooledTransactions` response from peer with entries that didn't verify against request, filtered out transactions"
                         );
                     }
 
