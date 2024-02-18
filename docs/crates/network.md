@@ -530,7 +530,7 @@ In handling this request, the ETH requests task attempts, starting with `start_b
 
 [File: crates/net/network/src/eth_requests.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/eth_requests.rs)
 ```rust,ignore
- fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
+  fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
         let GetBlockHeaders { start_block, limit, skip, direction } = request;
 
         let mut headers = Vec::new();
@@ -576,7 +576,10 @@ In handling this request, the ETH requests task attempts, starting with `start_b
 
                 headers.push(header);
 
-                match headers.encode_max(SOFT_RESPONSE_LIMIT) {
+                if headers.len() >= MAX_HEADERS_SERVE {
+                    break
+                }
+                match headers.encode_max(APPROX_HEADER_SIZE, SOFT_RESPONSE_LIMIT) {
                     Ok(_) => {
                         // If encode_max succeeds, continue accumulating headers
                     }
@@ -584,10 +587,6 @@ In handling this request, the ETH requests task attempts, starting with `start_b
                         // If encode_max fails,stop the loop
                         break;
                     }
-                }
-
-                if headers.len() >= MAX_HEADERS_SERVE {
-                    break
                 }
             } else {
                 break
@@ -612,7 +611,7 @@ In handling this request, similarly, the ETH requests task attempts, for each ha
 
 [File: crates/net/network/src/eth_requests.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/eth_requests.rs)
 ```rust,ignore
-fn on_bodies_request(
+ fn on_bodies_request(
         &mut self,
         _peer_id: PeerId,
         request: GetBlockBodies,
@@ -620,6 +619,7 @@ fn on_bodies_request(
     ) {
         self.metrics.received_bodies_requests.increment(1);
         let mut bodies = Vec::new();
+
         for hash in request.0 {
             if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
                 let body = BlockBody {
@@ -629,7 +629,10 @@ fn on_bodies_request(
                 };
 
                 bodies.push(body);
-                match bodies.encode_max(SOFT_RESPONSE_LIMIT) {
+                if bodies.len() >= MAX_BODIES_SERVE {
+                    break
+                }
+                match bodies.encode_max(APPROX_BODY_SIZE, SOFT_RESPONSE_LIMIT) {
                     Ok(_) => {
                         // If encode_max succeeds, continue accumulating bodies
                     }
@@ -638,15 +641,8 @@ fn on_bodies_request(
                         break;
                     }
                 }
-
-                if bodies.len() >= MAX_BODIES_SERVE {
-                    break
-                }
-            } else {
-                break
             }
         }
-
         let _ = response.send(Ok(BlockBodies(bodies)));
     }
 ```
