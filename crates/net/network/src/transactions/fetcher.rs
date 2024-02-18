@@ -898,12 +898,24 @@ impl Hash for TxSizeMetadata {
     }
 }
 
+impl TxSizeMetadata {
+    fn get_size(&self) -> Option<usize> {
+        if self.tx_encoded_len == 0 {
+            None
+        } else {
+            Some(self.tx_encoded_len)
+        }
+    }
+}
+
+
 /// Metadata of a transaction hash that is yet to be fetched.
 #[derive(Debug, Constructor)]
 pub(super) struct TxFetchMetadata {
     /// The number of times a request attempt has been made for the hash.
     retries: u8,
     /// Peers that have announced the hash, but to which a request attempt has not yet been made.
+
     fallback_peers: LruCache<PeerId>,
     /// Size metadata of the transaction if it has been seen in an eth68 announcement.
     // todo: store all seen sizes as a `(size, peer_id)` tuple to catch peers that respond with
