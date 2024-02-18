@@ -923,7 +923,7 @@ where
                     Ok(tx) => tx,
                     Err(badtx) => {
                         trace!(target: "net::tx",
-                            %peer_id,
+                            peer_id=format!("{peer_id:#}"),
                             hash=%badtx.hash(),
                             client_version=%peer.client_version,
                             "failed ecrecovery for transaction"
