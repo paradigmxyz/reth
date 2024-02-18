@@ -4,7 +4,7 @@ use crate::{
 };
 use derive_more::Constructor;
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
-use futures_test::task::noop_context;
+
 use pin_project::pin_project;
 use reth_eth_wire::{
     GetPooledTransactions, HandleAnnouncement, RequestTxHashes, ValidAnnouncementData,
@@ -79,15 +79,16 @@ impl TransactionFetcher {
     }
 
     /// Drains any resolved [`GetPooledTransactions`] requests and queues them as [`FetchEvent`]s
-    /// in the [`TransactionFetcher`].
-    pub fn try_drain_inflight_requests(&mut self) {
-        self.advance_inflight_requests(DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS)
+    /// in the [`TransactionFetcher`]. This should be called every time before assembling more
+    /// [`GetPooledTransactions`] requests.
+    pub fn try_drain_inflight_requests(&mut self, cx: &mut Context<'_>) {
+        self.advance_inflight_requests(DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS, cx)
     }
 
     /// Advances inflight requests by at most the given number of [`GetPooledTransactions`]
     /// requests. The [`PooledTransactions`] responses are queued as [`FetchEvent`]s in the
     /// [`TransactionFetcher`].
-    pub fn advance_inflight_requests(&mut self, steps: u32) {
+    pub fn advance_inflight_requests(&mut self, steps: u32, cx: &mut Context<'_>) {
         // `FuturesUnordered` doesn't close when `None` is returned. so just return if empty.
         // <https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=815be2b6c8003303757c3ced135f363e>
         if self.inflight_requests.is_empty() {
@@ -98,9 +99,7 @@ impl TransactionFetcher {
 
         // noop context is used since we don't need the inflight requests futures unordered to
         // schedule for wake up here when it's pending
-        while let Poll::Ready(Some(resp)) =
-            self.inflight_requests.poll_next_unpin(&mut noop_context())
-        {
+        while let Poll::Ready(Some(resp)) = self.inflight_requests.poll_next_unpin(cx) {
             self.on_resolved_get_pooled_transactions_request_fut(resp);
 
             budget = budget.saturating_sub(1);
@@ -391,9 +390,10 @@ impl TransactionFetcher {
         peers: &HashMap<PeerId, PeerMetadata>,
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
         metrics_increment_egress_peer_channel_full: impl FnOnce(),
+        cx: &mut Context<'_>,
     ) {
         // try free active peers
-        self.try_drain_inflight_requests();
+        self.try_drain_inflight_requests(cx);
 
         let mut hashes_to_request = RequestTxHashes::with_capacity(32);
         let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
@@ -907,7 +907,7 @@ impl Stream for TransactionFetcher {
         // dequeue next fetch event
         let res = self.as_mut().project().fetch_events_head.poll_next_unpin(cx);
         if res.is_pending() {
-            self.advance_inflight_requests(1);
+            self.advance_inflight_requests(1, cx);
             return self.as_mut().project().fetch_events_head.poll_next_unpin(cx)
         }
         res
@@ -1086,6 +1086,7 @@ impl Default for TransactionFetcherInfo {
 mod test {
     use std::collections::HashSet;
 
+    use futures_test::task::noop_context;
     use reth_eth_wire::EthVersion;
     use reth_primitives::B256;
 
@@ -1236,7 +1237,7 @@ mod test {
 
         // TEST
 
-        tx_fetcher.on_fetch_pending_hashes(&peers, |_| true, || ());
+        tx_fetcher.on_fetch_pending_hashes(&peers, |_| true, || (), &mut noop_context());
 
         // mock session of peer_1 receives request
         let req = peer_1_mock_session_rx

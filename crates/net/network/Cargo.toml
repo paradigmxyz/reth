@@ -43,7 +43,6 @@ pin-project.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
-futures-test = "0.3.30"
 
 # io
 serde = { workspace = true, optional = true }
@@ -92,6 +91,9 @@ ethers-signers = { workspace = true, default-features = false }
 ethers-middleware = { workspace = true, default-features = false }
 
 enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
+
+# async
+futures-test = "0.3.30"
 
 # misc
 serial_test.workspace = true
