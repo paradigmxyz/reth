@@ -781,7 +781,7 @@ impl TransactionsProviderExt for SnapshotProvider {
         let chunk_size = 100;
 
         let chunks = (tx_range.start..tx_range.end)
-            .step_by(chunk_size as usize)
+            .step_by(chunk_size)
             .map(|start| start..std::cmp::min(start + chunk_size as u64, tx_range.end))
             .collect::<Vec<Range<u64>>>();
         let mut channels = Vec::with_capacity(chunk_size);
