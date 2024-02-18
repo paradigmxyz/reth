@@ -789,12 +789,26 @@ where
                     .filter_map(Result::ok)
                     .collect::<Vec<_>>();
 
+                let now = Instant::now();
+
                 // mark the transactions as received
                 self.transaction_fetcher.remove_hashes_from_transaction_fetcher(
                     non_blob_txs.iter().map(|tx| *tx.hash()),
                 );
 
+                let elapsed = now.elapsed();
+                if elapsed.as_micros() > 100 {
+                    println!("remove_hashes_from_transaction_fetcher: {:?}", elapsed);
+                }
+
+                let now = Instant::now();
+
                 self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
+
+                let elapsed = now.elapsed();
+                if elapsed.as_millis() > 1 {
+                    println!("import_transactions: {:?}", elapsed);
+                }
 
                 if has_blob_txs {
                     debug!(target: "net::tx", ?peer_id, "received bad full blob transaction broadcast");
@@ -1138,7 +1152,7 @@ where
             }
 
             let elapsed = now.elapsed();
-            if elapsed.as_micros() > 50 {
+            if elapsed.as_millis() > 10 {
                 println!("on_network_tx_event: {:?}", elapsed);
             }
 
@@ -1192,7 +1206,7 @@ where
             }
 
             let elapsed = now.elapsed();
-            if elapsed.as_micros() > 100 {
+            if elapsed.as_millis() > 2 {
                 println!("pool_imports: {:?}", elapsed);
             }
 
