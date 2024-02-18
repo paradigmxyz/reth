@@ -200,12 +200,13 @@ impl TestStageDB {
         I: Iterator<Item = &'a SealedBlock>,
     {
         let provider = self.factory.snapshot_provider();
-        let mut writer = provider.latest_writer(reth_primitives::SnapshotSegment::Headers)?;
+        let mut txs_writer = provider.latest_writer(reth_primitives::SnapshotSegment::Transactions)?;
+        let mut headers_writer = provider.latest_writer(reth_primitives::SnapshotSegment::Headers)?;
         let tx = self.factory.provider_rw().unwrap().into_tx();
 
         let mut next_tx_num = tx_offset.unwrap_or_default();
         blocks.into_iter().try_for_each(|block| {
-            Self::insert_header(Some(&mut writer), &tx, &block.header, U256::ZERO)?;
+            Self::insert_header(Some(&mut headers_writer), &tx, &block.header, U256::ZERO)?;
 
             // Insert into body tables.
             let block_body_indices = StoredBlockBodyIndices {
@@ -220,13 +221,15 @@ impl TestStageDB {
 
             block.body.iter().try_for_each(|body_tx| {
                 tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?;
+                txs_writer.append_transaction(next_tx_num, body_tx.clone().into())?;
                 next_tx_num += 1;
                 Ok::<(), ProviderError>(())
             })
         })?;
 
         tx.commit()?;
-        writer.commit()
+        headers_writer.commit()?;
+        txs_writer.commit()
     }
 
     pub fn insert_tx_hash_numbers<I>(&self, tx_hash_numbers: I) -> ProviderResult<()>

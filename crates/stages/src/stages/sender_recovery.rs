@@ -120,7 +120,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                         {
                             rlp_buf.clear();
                             let _ = recovered_senders_tx
-                                .send(recover_sender((cursor.number(), tx), &mut rlp_buf));
+                                .send(recover_sender((number, tx), &mut rlp_buf));
                         }
                         Ok(Some(()))
                     },
@@ -330,7 +330,7 @@ mod tests {
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..4); // set tx count range high enough to hit the threshold
         runner.db.insert_blocks(seed.iter(), None).expect("failed to seed execution");
 
-        let total_transactions = runner.db.table::<tables::Transactions>().unwrap().len() as u64;
+        let total_transactions = runner.db.factory.snapshot_provider().count_entries::<tables::Transactions>().unwrap() as u64;
 
         let first_input = ExecInput {
             target: Some(previous_stage),

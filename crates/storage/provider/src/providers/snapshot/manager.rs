@@ -816,7 +816,7 @@ impl TransactionsProviderExt for SnapshotProvider {
                             .map(|transaction| {
                                 rlp_buf.clear();
                                 let _ = channel_tx.send(calculate_hash(
-                                    (cursor.number(), transaction),
+                                    (number, transaction),
                                     &mut rlp_buf,
                                 ));
                             }))
