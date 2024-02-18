@@ -58,7 +58,8 @@ pub struct TransactionFetcher {
     pub filter_valid_hashes: AnnouncementFilter,
     /// Info on capacity of the transaction fetcher.
     pub info: TransactionFetcherInfo,
-    /// [`FetchEvent`]s as a result of advancing inflight requests
+    /// [`FetchEvent`]s as a result of advancing inflight requests. This is an intermediary ¨
+    /// storage, before [`TransactionsManager`](super::TransactionsManager) streams them.
     #[pin]
     pub fetch_events_head: UnboundedMeteredReceiver<FetchEvent>,
     /// Handle for queueing [`FetchEvent`]s as a result of advancing inflight requests.
