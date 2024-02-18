@@ -458,10 +458,10 @@ pub trait DedupPayload {
 }
 
 /// Value in [`PartiallyValidData`] map obtained from an announcement.
-pub type Eth68TxMetadata = Option<(u8, usize)>;
+pub type Eth68Eth68TxMetadata = Option<(u8, usize)>;
 
 impl DedupPayload for NewPooledTransactionHashes {
-    type Value = TxMetadata;
+    type Value = Eth68TxMetadata;
 
     fn is_empty(&self) -> bool {
         self.is_empty()
@@ -480,7 +480,7 @@ impl DedupPayload for NewPooledTransactionHashes {
 }
 
 impl DedupPayload for NewPooledTransactionHashes68 {
-    type Value = TxMetadata;
+    type Value = Eth68TxMetadata;
 
     fn is_empty(&self) -> bool {
         self.hashes.is_empty()
@@ -506,7 +506,7 @@ impl DedupPayload for NewPooledTransactionHashes68 {
 }
 
 impl DedupPayload for NewPooledTransactionHashes66 {
-    type Value = TxMetadata;
+    type Value = Eth68TxMetadata;
 
     fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -521,7 +521,7 @@ impl DedupPayload for NewPooledTransactionHashes66 {
 
         let mut deduped_data = HashMap::with_capacity(hashes.len());
 
-        let noop_value: TxMetadata = None;
+        let noop_value: Eth68TxMetadata = None;
 
         for hash in hashes.into_iter().rev() {
             deduped_data.insert(hash, noop_value);
@@ -624,12 +624,12 @@ impl<V> PartiallyValidData<V> {
 
 /// Validated data from an announcement that
 #[derive(Debug, Deref, DerefMut, IntoIterator, From)]
-#[from(PartiallyValidData<TxMetadata>)]
+#[from(PartiallyValidData<Eth68TxMetadata>)]
 pub struct ValidAnnouncementData {
     #[deref]
     #[deref_mut]
     #[into_iterator]
-    data: HashMap<TxHash, TxMetadata>,
+    data: HashMap<TxHash, Eth68TxMetadata>,
     version: EthVersion,
 }
 
@@ -648,7 +648,7 @@ impl ValidAnnouncementData {
     /// Conversion from [`PartiallyValidData`] from an announcement. Note! [`PartiallyValidData`]
     /// from an announcement, should have some [`EthVersion`]. Panics if [`PartiallyValidData`] has
     /// version set to `None`.
-    pub fn from_partially_valid_data(data: PartiallyValidData<TxMetadata>) -> Self {
+    pub fn from_partially_valid_data(data: PartiallyValidData<Eth68TxMetadata>) -> Self {
         let PartiallyValidData { data, version } = data;
 
         let version = version.expect("should have eth version for conversion");
@@ -663,7 +663,7 @@ impl ValidAnnouncementData {
     }
 
     /// Destructs returning the validated data.
-    pub fn into_data(self) -> HashMap<TxHash, TxMetadata> {
+    pub fn into_data(self) -> HashMap<TxHash, Eth68TxMetadata> {
         self.data
     }
 }
@@ -687,8 +687,8 @@ impl RequestTxHashes {
     }
 }
 
-impl FromIterator<(TxHash, TxMetadata)> for RequestTxHashes {
-    fn from_iter<I: IntoIterator<Item = (TxHash, TxMetadata)>>(iter: I) -> Self {
+impl FromIterator<(TxHash, Eth68TxMetadata)> for RequestTxHashes {
+    fn from_iter<I: IntoIterator<Item = (TxHash, Eth68TxMetadata)>>(iter: I) -> Self {
         let mut hashes = Vec::with_capacity(32);
 
         for (hash, _) in iter {

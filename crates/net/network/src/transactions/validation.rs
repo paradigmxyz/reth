@@ -6,7 +6,7 @@ use std::{fmt, mem};
 
 use derive_more::{Deref, DerefMut, Display};
 use reth_eth_wire::{
-    DedupPayload, HandlePayload, PartiallyValidData, TxMetadata, ValidAnnouncementData,
+    DedupPayload, Eth68TxMetadata, HandlePayload, PartiallyValidData, ValidAnnouncementData,
     MAX_MESSAGE_SIZE,
 };
 use reth_primitives::{Signature, TxHash, TxType};
@@ -103,7 +103,7 @@ pub trait FilterAnnouncement {
     /// [`FilterOutcome::Ok`].
     fn filter_valid_entries_68(
         &self,
-        msg: PartiallyValidData<TxMetadata>,
+        msg: PartiallyValidData<Eth68TxMetadata>,
     ) -> (FilterOutcome, ValidAnnouncementData)
     where
         Self: ValidateTx68;
@@ -114,7 +114,7 @@ pub trait FilterAnnouncement {
     /// [`FilterOutcome::Ok`].
     fn filter_valid_entries_66(
         &self,
-        msg: PartiallyValidData<TxMetadata>,
+        msg: PartiallyValidData<Eth68TxMetadata>,
     ) -> (FilterOutcome, ValidAnnouncementData);
 }
 
@@ -250,7 +250,7 @@ impl ValidateTx68 for EthMessageFilter {
 impl FilterAnnouncement for EthMessageFilter {
     fn filter_valid_entries_68(
         &self,
-        mut msg: PartiallyValidData<TxMetadata>,
+        mut msg: PartiallyValidData<Eth68TxMetadata>,
     ) -> (FilterOutcome, ValidAnnouncementData)
     where
         Self: ValidateTx68,
