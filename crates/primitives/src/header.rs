@@ -1080,7 +1080,6 @@ mod tests {
         HeaderValidationError, HeadersDirection, SealedHeader, U256,
     };
     use std::str::FromStr;
-
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]
     fn test_encode_block_header() {

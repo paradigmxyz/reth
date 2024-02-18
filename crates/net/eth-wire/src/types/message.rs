@@ -301,13 +301,13 @@ impl<T: Encodable> EncodableExt for Vec<T> {
             header.payload_length += item.length();
         }
         header.encode(&mut buffer);
-
         for item in self {
             item.encode(&mut buffer);
             if buffer.len() > limit {
                 return Err(alloy_rlp::Error::Custom("Size limit exceeded"));
             }
         }
+        buffer.shrink_to_fit();
         Ok(buffer)
     }
 
@@ -571,11 +571,12 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        errors::EthStreamError, types::message::RequestPair, EthMessage, EthMessageID, GetNodeData,
-        NodeData, ProtocolMessage,
+        errors::EthStreamError, message::EncodableExt, types::message::RequestPair, EthMessage,
+        EthMessageID, GetNodeData, NodeData, ProtocolMessage,
     };
     use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives::hex;
+    use reth_primitives::{hex, Bytes, Header, B256, U256};
+    use std::str::FromStr;
 
     fn encode<T: Encodable>(value: T) -> Vec<u8> {
         let mut buf = vec![];
@@ -626,5 +627,36 @@ mod tests {
         let got = RequestPair::<Vec<u8>>::decode(&mut &*raw_pair).unwrap();
         assert_eq!(expected.length(), raw_pair.len());
         assert_eq!(expected, got);
+    }
+
+    //Test vector for header from: https://eips.ethereum.org/EIPS/eip-2481
+    #[test]
+    fn encode_max_header_decode() {
+        let mut headers: Vec<Header> = Vec::new();
+        // list header : f901fc
+        let expected = hex!("f901fcf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000");
+
+        headers.push(Header {
+            difficulty: U256::from(0x8ae_u64),
+            number: 0xd05_u64,
+            gas_limit: 0x115c_u64,
+            gas_used: 0x15b3_u64,
+            timestamp: 0x1a0a_u64,
+            extra_data: Bytes::from_str("7788").unwrap(),
+            ommers_hash: B256::ZERO,
+            state_root: B256::ZERO,
+            transactions_root: B256::ZERO,
+            receipts_root: B256::ZERO,
+            ..Default::default()
+        });
+
+        let res = headers.encode_max(300, 511).unwrap();
+        assert_eq!(res, expected);
+
+        let fail_res = headers.encode_max(300, 510);
+        assert!(
+            matches!(fail_res, Err(alloy_rlp::Error::Custom(msg)) if msg.contains("Size limit exceeded")),
+            "Expected 'Size limit exceeded' error"
+        );
     }
 }
