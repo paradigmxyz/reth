@@ -1,9 +1,9 @@
 use crate::{
     cache::{LruCache, LruMap},
     message::PeerRequest,
-    transactions::PartiallyFilterMessage,
+    transactions::{validation, PartiallyFilterMessage},
 };
-use derive_more::Constructor;
+use derive_more::{Constructor, Deref};
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{
@@ -13,6 +13,7 @@ use reth_eth_wire::{
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
 use schnellru::{ByLength, Unlimited};
+use smallvec::{smallvec, SmallVec};
 use std::{
     collections::HashMap,
     num::NonZeroUsize,
@@ -21,6 +22,7 @@ use std::{
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tracing::{debug, trace};
+use validation::FilterOutcome;
 
 use super::{
     config::TransactionFetcherConfig,
@@ -826,13 +828,34 @@ impl Stream for TransactionFetcher {
                 Ok(Ok(transactions)) => {
                     let payload = UnverifiedPooledTransactions::new(transactions);
 
-                    // todo: report peer for sending hashes that weren't requested
+                    let unverified_len = payload.len();
                     let (verification_outcome, verified_payload) =
-                        payload.verify(&requested_hashes);
+                        payload.verify(&requested_hashes, &peer_id);
+
+                    if let VerificationOutcome::ReportPeer = verification_outcome {
+                        // todo: report peer for sending hashes that weren't requested
+                        trace!(target: "net::tx",
+                            peer_id=format!("{peer_id:#}"),
+                            unverified_len=unverified_len,
+                            verified_payload_len=verified_payload.len(),
+                            "received transactions that were not requested in `PooledTransactions` response from peer, filtered out transactions"
+                        );
+                    }
+
+                    let unvalidated_payload_len = verified_payload.len();
 
                     // todo: report peer for sending invalid response
                     let (validation_outcome, valid_payload) =
-                        self.filter_valid_message.partially_filter(verified_payload);
+                        self.filter_valid_message.partially_filter_valid_entries(verified_payload);
+
+                    if let FilterOutcome::ReportPeer = validation_outcome {
+                        trace!(target: "net::tx",
+                            peer_id=format!("{peer_id:#}"),
+                            unvalidated_payload_len=unvalidated_payload_len,
+                            valid_payload_len=valid_payload.len(),
+                            "received invalid `PooledTransactions` response from peer, filtered out invalid entries"
+                        );
+                    }
 
                     // clear received hashes
                     let mut fetched = Vec::with_capacity(valid_payload.len());
@@ -985,7 +1008,7 @@ impl Future for GetPooledTxRequestFut {
     }
 }
 
-#[derive(Debug, Constructor)]
+#[derive(Debug, Constructor, Deref)]
 pub struct UnverifiedPooledTransactions {
     txns: PooledTransactions,
 }
@@ -1013,7 +1036,7 @@ impl DedupPayload for VerifiedPooledTransactions {
             .map(|tx| (*tx.hash(), tx))
             .collect::<HashMap<TxHash, PooledTransactionsElement>>();
 
-        PartiallyValidData::new(unique_fetched, None)
+        PartiallyValidData::from_raw_data(unique_fetched, None)
     }
 }
 
@@ -1021,6 +1044,7 @@ trait VerifyPooledTransactionsResponse {
     fn verify(
         self,
         requested_hashes: &[TxHash],
+        peer_id: &PeerId,
     ) -> (VerificationOutcome, VerifiedPooledTransactions);
 }
 
@@ -1028,18 +1052,33 @@ impl VerifyPooledTransactionsResponse for UnverifiedPooledTransactions {
     fn verify(
         self,
         requested_hashes: &[TxHash],
+        peer_id: &PeerId,
     ) -> (VerificationOutcome, VerifiedPooledTransactions) {
         let mut verification_outcome = VerificationOutcome::Ok;
 
         let Self { mut txns } = self;
 
+        #[cfg(debug_assertions)]
+        let mut tx_hashes_not_requested: SmallVec<[TxHash; 16]> = smallvec!();
+
         txns.0.retain(|tx| {
             if !requested_hashes.contains(tx.hash()) {
                 verification_outcome = VerificationOutcome::ReportPeer;
+
+                #[cfg(debug_assertions)]
+                tx_hashes_not_requested.push(*tx.hash());
+
                 return false
             }
             true
         });
+
+        #[cfg(debug_assertions)]
+        trace!(target: "net::tx",
+            peer_id=format!("{peer_id:#}"),
+            tx_hashes_not_requested=?tx_hashes_not_requested,
+            "transactions in `PooledTransactions` response from peer were not requested"
+        );
 
         (verification_outcome, VerifiedPooledTransactions::new(txns))
     }
@@ -1145,7 +1184,8 @@ mod test {
             [possible_outcome_1, possible_outcome_2, possible_outcome_3, possible_outcome_4];
 
         let mut eth68_hashes_to_request = RequestTxHashes::with_capacity(3);
-        let mut valid_announcement_data = ValidAnnouncementData::empty_eth68();
+        let mut valid_announcement_data =
+            ValidAnnouncementData::from_partially_valid_data(PartiallyValidData::empty_eth68());
         for i in 0..eth68_hashes.len() {
             valid_announcement_data.insert(eth68_hashes[i], Some((0, eth68_hashes_sizes[i])));
         }
