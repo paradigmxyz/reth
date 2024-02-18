@@ -305,8 +305,7 @@ pub trait EncodableExt {
     /// * The encoded data as `Vec<u8>`.
     /// * The length of the data at the point just before reaching the limit, or 0 if the limit was
     ///   not exceeded.
-    /// * A boolean flag that is `true` if the size limit was exceeded and `false` otherwise.
-    fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize, bool);
+    fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize);
 }
 
 impl<T: Encodable> EncodableExt for Vec<T> {
@@ -315,9 +314,9 @@ impl<T: Encodable> EncodableExt for Vec<T> {
         approx: usize,
         limit: usize,
     ) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error> {
-        let (mut buf, _current_len, limit_exceeded) = self.encode_until_limit(approx, limit);
+        let (mut buf, current_len) = self.encode_until_limit(approx, limit);
 
-        if limit_exceeded {
+        if current_len != 0 {
             // Don't shrink if limit_exceeded since we return Error anyway
             return Err(alloy_rlp::Error::Custom("Size limit exceeded"));
         }
@@ -325,7 +324,7 @@ impl<T: Encodable> EncodableExt for Vec<T> {
         Ok(buf)
     }
 
-    fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize, bool) {
+    fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize) {
         let mut buffer = Vec::with_capacity(approx);
         let mut header = Header { list: true, payload_length: 0 };
         for item in self {
@@ -336,18 +335,18 @@ impl<T: Encodable> EncodableExt for Vec<T> {
             let current_len = buffer.len();
             item.encode(&mut buffer);
             if buffer.len() > limit {
-                return (buffer, current_len, true);
+                return (buffer, current_len);
             }
         }
-        // Return current_len = 0 as placeholder
-        (buffer, 0, false)
+        // Return current_len as 0
+        (buffer, 0)
     }
 
     fn encode_truncate(&self, approx: usize, limit: usize) -> Vec<u8> {
-        let (mut buf, _current_len, limit_exceeded) = self.encode_until_limit(approx, limit);
+        let (mut buf, current_len) = self.encode_until_limit(approx, limit);
 
-        if limit_exceeded {
-            buf.truncate(_current_len);
+        if current_len != 0 {
+            buf.truncate(current_len);
             buf.shrink_to_fit(); // shrink buffer to catch cases where approx > limit
             return buf;
         }
