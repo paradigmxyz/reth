@@ -200,8 +200,10 @@ impl TestStageDB {
         I: Iterator<Item = &'a SealedBlock>,
     {
         let provider = self.factory.snapshot_provider();
-        let mut txs_writer = provider.latest_writer(reth_primitives::SnapshotSegment::Transactions)?;
-        let mut headers_writer = provider.latest_writer(reth_primitives::SnapshotSegment::Headers)?;
+        let mut txs_writer =
+            provider.latest_writer(reth_primitives::SnapshotSegment::Transactions)?;
+        let mut headers_writer =
+            provider.latest_writer(reth_primitives::SnapshotSegment::Headers)?;
         let tx = self.factory.provider_rw().unwrap().into_tx();
 
         let mut next_tx_num = tx_offset.unwrap_or_default();
@@ -220,7 +222,6 @@ impl TestStageDB {
             tx.put::<tables::BlockBodyIndices>(block.number, block_body_indices)?;
 
             block.body.iter().try_for_each(|body_tx| {
-                tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?;
                 txs_writer.append_transaction(next_tx_num, body_tx.clone().into())?;
                 next_tx_num += 1;
                 Ok::<(), ProviderError>(())

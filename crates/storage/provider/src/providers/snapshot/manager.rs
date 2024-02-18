@@ -815,10 +815,8 @@ impl TransactionsProviderExt for SnapshotProvider {
                             .get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())?
                             .map(|transaction| {
                                 rlp_buf.clear();
-                                let _ = channel_tx.send(calculate_hash(
-                                    (number, transaction),
-                                    &mut rlp_buf,
-                                ));
+                                let _ = channel_tx
+                                    .send(calculate_hash((number, transaction), &mut rlp_buf));
                             }))
                     },
                     |_| true,
