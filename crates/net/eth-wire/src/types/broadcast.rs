@@ -458,7 +458,7 @@ pub trait DedupPayload {
 }
 
 /// Value in [`PartiallyValidData`] map obtained from an announcement.
-pub type TxMetadata = Option<(u8, usize)>;
+pub type Eth68TxMetadata = Option<(u8, usize)>;
 
 impl DedupPayload for NewPooledTransactionHashes {
     type Value = TxMetadata;
