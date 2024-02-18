@@ -291,9 +291,7 @@ pub trait EncodableExt {
     fn encode_truncate(&self, approx: usize, limit: usize) -> Vec<u8>;
 
     /// Encodes the data up to the specified size limit, returning the encoded data along with
-    /// a flag indicating whether the limit was exceeded. This method is useful for partial
-    /// encoding scenarios where it is necessary to encode as much as possible without going
-    /// over the limit.
+    /// a flag indicating whether the limit was exceeded.
     ///
     /// # Arguments
     ///
