@@ -1,14 +1,12 @@
 use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use itertools::Itertools;
 use reth_db::{
     cursor::DbCursorRW,
     database::Database,
     snapshot::TransactionMask,
     tables,
     transaction::{DbTx, DbTxMut},
-    RawValue,
 };
-use reth_interfaces::{consensus, RethError};
+use reth_interfaces::consensus;
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
@@ -16,7 +14,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
-    StatsReader, TransactionsProvider,
+    StatsReader,
 };
 use std::{fmt::Debug, ops::Range, sync::mpsc};
 use thiserror::Error;
