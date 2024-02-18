@@ -96,18 +96,16 @@ impl TransactionFetcher {
 
         let mut budget = steps;
 
-        loop {
-            // noop context is used since we don't need the inflight requests futures unordered to
-            // schedule for wake up here when it's pending
-            while let Poll::Ready(Some(resp)) =
-                self.inflight_requests.poll_next_unpin(&mut noop_context())
-            {
-                self.on_resolved_get_pooled_transactions_request_fut(resp);
+        // noop context is used since we don't need the inflight requests futures unordered to
+        // schedule for wake up here when it's pending
+        while let Poll::Ready(Some(resp)) =
+            self.inflight_requests.poll_next_unpin(&mut noop_context())
+        {
+            self.on_resolved_get_pooled_transactions_request_fut(resp);
 
-                budget = budget.saturating_sub(1);
-                if budget == 0 {
-                    break
-                }
+            budget = budget.saturating_sub(1);
+            if budget == 0 {
+                break
             }
         }
     }
