@@ -90,7 +90,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Spawn recovery jobs onto the default rayon threadpool and send the result through the
         // channel.
         //
-        // Transactions are different size, so chunks will not all take the processing time. If
+        // Transactions are different size, so chunks will not all take the same processing time. If
         // chunks are too big, there will be idle threads waiting for work. Choosing an
         // arbitrary smaller value to make sure it doesn't happen.
         let chunk_size = 100;

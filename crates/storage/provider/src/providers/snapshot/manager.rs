@@ -774,7 +774,11 @@ impl TransactionsProviderExt for SnapshotProvider {
         tx_range: Range<TxNumber>,
     ) -> ProviderResult<Vec<(TxHash, TxNumber)>> {
         let tx_range_size = (tx_range.end - tx_range.start) as usize;
-        let chunk_size = (tx_range_size / rayon::current_num_threads()).max(1);
+
+        // Transactions are different size, so chunks will not all take the same processing time. If
+        // chunks are too big, there will be idle threads waiting for work. Choosing an
+        // arbitrary smaller value to make sure it doesn't happen.
+        let chunk_size = 100;
 
         let chunks = (tx_range.start..tx_range.end)
             .step_by(chunk_size as usize)
