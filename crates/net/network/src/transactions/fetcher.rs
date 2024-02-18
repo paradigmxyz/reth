@@ -879,6 +879,25 @@ impl Default for TransactionFetcher {
     }
 }
 
+struct TxSizeMetadata {
+    peer_id: PeerId,
+    tx_encoded_len: usize,
+}
+
+impl PartialEq for TxSizeMetadata {
+    fn eq(&self, other: &Self) -> bool {
+        self.peer_id == other.peer_id
+    }
+}
+
+impl Eq for TxSizeMetadata {}
+
+impl Hash for TxSizeMetadata {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.peer_id.hash(state);
+    }
+}
+
 /// Metadata of a transaction hash that is yet to be fetched.
 #[derive(Debug, Constructor)]
 pub(super) struct TxFetchMetadata {
