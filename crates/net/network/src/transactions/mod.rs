@@ -65,6 +65,7 @@ use std::{
     },
     task::{Context, Poll},
 };
+use std::time::Instant;
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
@@ -1097,6 +1098,8 @@ where
                 some_ready = true;
             }
 
+            let now = Instant::now();
+
             if this.has_capacity_for_fetching_pending_hashes() {
                 // try drain buffered transactions.
                 let info = &this.pending_pool_imports_info;
@@ -1114,16 +1117,29 @@ where
                     metrics_increment_egress_peer_channel_full,
                 );
             }
+
+            let elapsed = now.elapsed();
+            if elapsed.as_micros() > 100 {
+               println!("has_capacity_for_fetching_pending_hashes: {:?}", elapsed);
+            }
+
             // drain commands
             if let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
                 this.on_command(cmd);
                 some_ready = true;
             }
 
+            let now = Instant::now();
+
             // drain incoming transaction events
             if let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
                 this.on_network_tx_event(event);
                 some_ready = true;
+            }
+
+            let elapsed = now.elapsed();
+            if elapsed.as_micros() > 50 {
+                println!("on_network_tx_event: {:?}", elapsed);
             }
 
             this.update_fetch_metrics();
@@ -1148,6 +1164,7 @@ where
 
             this.update_fetch_metrics();
 
+            let now = Instant::now();
             // Advance all imports
             if let Poll::Ready(Some(batch_import_res)) = this.pool_imports.poll_next_unpin(cx) {
                 for res in batch_import_res {
@@ -1172,6 +1189,11 @@ where
                 }
 
                 some_ready = true;
+            }
+
+            let elapsed = now.elapsed();
+            if elapsed.as_micros() > 100 {
+                println!("pool_imports: {:?}", elapsed);
             }
 
             // handle and propagate new transactions.
