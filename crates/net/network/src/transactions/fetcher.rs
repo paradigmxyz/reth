@@ -916,7 +916,7 @@ pub(super) struct TxFetchMetadata {
     retries: u8,
     /// Peers that have announced the hash, but to which a request attempt has not yet been made.
 
-    fallback_peers: LruCache<PeerId>,
+    fallback_peers: LruMap<PeerId, PackedOption<usize>>,
     /// Size metadata of the transaction if it has been seen in an eth68 announcement.
     // todo: store all seen sizes as a `(size, peer_id)` tuple to catch peers that respond with
     // another size tx than they announced. alt enter in request (won't catch peers announcing
