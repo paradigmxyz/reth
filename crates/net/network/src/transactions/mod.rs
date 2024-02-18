@@ -224,8 +224,8 @@ pub struct TransactionsManager<Pool> {
     command_tx: mpsc::UnboundedSender<TransactionsCommand>,
     /// Incoming commands from [`TransactionsHandle`].
     command_rx: UnboundedReceiverStream<TransactionsCommand>,
-    /// Incoming commands from [`TransactionsHandle`].
-    pending_transactions: ReceiverStream<TxHash>,
+    /// Streams hashes of transactions that have successfully been imported into the pool.
+    imported_transactions: ReceiverStream<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
     /// TransactionsManager metrics
@@ -278,7 +278,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
-            pending_transactions: ReceiverStream::new(pending),
+            imported_transactions: ReceiverStream::new(pending),
             transaction_events: UnboundedMeteredReceiver::new(
                 from_network,
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
@@ -1119,15 +1119,16 @@ where
             // manager and queue for import to pool/fetch txns)
             //
             // can potentially queue around 1,5 k txns for import to pool if txns are valid. each
-            // message could contain up to soft limit byte size for response / small legacy tx
-            // size: 128 KiB / 100 bytes < 1,5k transactions.
+            // `Transactions` message could contain at least up to soft limit byte size for
+            // broadcast message / avg small legacy tx byte size: 128 KiB / 100 bytes < 1,5k
+            // transactions.
             //
             // if txns however are invalid, and just 1 byte, since this isn't validated until
             // import to pool, this can potentially queue around > 130 k txns. more if the
             // message size is bigger than 128 KiB.
             //
-            // this will potentially remove hashes from hashes pending fetch (if same hashes are
-            // announced that didn't fit into a previous request)
+            // this will potentially remove hashes from hashes pending fetch, it the event is an
+            // announcement (if same hashes are announced that didn't fit into a previous request)
             if let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
                 this.on_network_tx_event(event);
                 some_ready = true;
@@ -1139,8 +1140,8 @@ where
             // import to pool)
             //
             // can potentially queue around 20 k txns for import to pool if txns are valid. each
-            // message could contain up to soft limit byte size for response / small legacy tx
-            // size: 2 MiB / 100 bytes < 21 k transactions.
+            // message could contain at least up to soft limit byte size for response / avg small
+            // legacy tx byte size: 2 MiB / 100 bytes < 21 k transactions.
             //
             // if txns however are invalid, and just 1 byte, since this isn't validated until
             // import to pool, this can potentially queue > 2 million txns. more if the message
@@ -1164,8 +1165,21 @@ where
 
             this.update_fetch_metrics();
 
-            // advance successfully imported transactions to propagate (inform peers which txns
-            // we have seen, broadcast txns)
+            // advance pool imports (flush txns to pool).
+            //
+            // note, this is done in batches. batches can potentially contain 20 k txns. a batch
+            // is filled from one `Transactions` broadcast messages or one `PooledTransactions`
+            // response at a time. each `PooledTransactions` responses could contain at least up
+            // to spec'd soft limit byte size for response / avg small legacy tx byte size: 2
+            // MiB / 100 bytes < 21 k transactions. the default soft limit byte size for
+            // `Transactions` broadcast messages is smaller, 128 KiB.
+            //
+            // the minimum batch size is 1 transaction. this is likely to occur since peers
+            // default to sending one blob per response (< 128 KiB).
+            //
+            // if txns however are invalid, and just 1 byte, since this isn't validated until
+            // import to pool, this can potentially queue > 2 million txns. more if the message
+            // size is bigger than 2 MiB.
             if let Poll::Ready(Some(batch_import_res)) = this.pool_imports.poll_next_unpin(cx) {
                 for res in batch_import_res {
                     match res {
@@ -1191,10 +1205,10 @@ where
                 some_ready = true;
             }
 
-            // drain successfully imported transactions to propagate (inform peers which txns
+            // drain successfully imported transactions and propagate (inform peers which txns
             // we have seen)
             let mut new_txs = Vec::new();
-            while let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
+            while let Poll::Ready(Some(hash)) = this.imported_transactions.poll_next_unpin(cx) {
                 new_txs.push(hash);
             }
             if !new_txs.is_empty() {
