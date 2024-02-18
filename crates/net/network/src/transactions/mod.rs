@@ -1082,7 +1082,7 @@ where
         loop {
             let mut some_ready = false;
 
-            // advance network/peer related events
+            // advance network/peer related events (update peers)
             if let Poll::Ready(Some(event)) = this.network_events.poll_next_unpin(cx) {
                 this.on_network_event(event);
                 some_ready = true;
@@ -1118,14 +1118,12 @@ where
             // advance incoming transaction events (stream new txns/announcements from network
             // manager and queue for import to pool/fetch txns)
             //
-            // can potentially queue around 1,5k txns *
-            // `DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS` = 1,5k * 1024 txns for import
-            // to pool if txns are valid. each message could contain up to soft limit
-            // byte size for response / small legacy tx size: 128 KiB / 100 bytes < 1,5k
-            // transactions.
+            // can potentially queue around 1,5 k txns for import to pool if txns are valid. each
+            // message could contain up to soft limit byte size for response / small legacy tx
+            // size: 128 KiB / 100 bytes < 1,5k transactions.
             //
             // if txns however are invalid, and just 1 byte, since this isn't validated until
-            // import to pool, this can potentially queue around 0,5 billion txns. more if the
+            // import to pool, this can potentially queue around > 130 k txns. more if the
             // message size is bigger than 128 KiB.
             //
             // this will potentially remove hashes from hashes pending fetch (if same hashes are
@@ -1140,13 +1138,12 @@ where
             // advance fetching transaction events (flush transaction fetcher and queue for
             // import to pool)
             //
-            // can potentially queue around 20k txns * `DEFAULT_BUDGET_TRY_DRAIN_STREAM` = 20k *
-            // 1024 txns for import to pool if txns are valid. each message could
-            // contain up to soft limit byte size for response / small legacy tx size: 2
-            // MiB / 100 bytes < 21k transactions.
+            // can potentially queue around 20 k txns for import to pool if txns are valid. each
+            // message could contain up to soft limit byte size for response / small legacy tx
+            // size: 2 MiB / 100 bytes < 21 k transactions.
             //
             // if txns however are invalid, and just 1 byte, since this isn't validated until
-            // import to pool, this can potentially queue 2,2 billion txns. more if the message
+            // import to pool, this can potentially queue > 2 million txns. more if the message
             // size is bigger than 2 MiB.
             if let Poll::Ready(Some(fetch_event)) = this.transaction_fetcher.poll_next_unpin(cx) {
                 match fetch_event {
@@ -1167,7 +1164,8 @@ where
 
             this.update_fetch_metrics();
 
-            // Advance all imports
+            // advance successfully imported transactions to propagate (inform peers which txns
+            // we have seen, broadcast txns)
             if let Poll::Ready(Some(batch_import_res)) = this.pool_imports.poll_next_unpin(cx) {
                 for res in batch_import_res {
                     match res {
