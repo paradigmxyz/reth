@@ -1,11 +1,14 @@
 //! Testing gossiping of transactions.
 
+use futures::StreamExt;
 use rand::thread_rng;
-use reth_network::test_utils::Testnet;
-use reth_primitives::{TransactionSigned, U256};
+use reth_network::{test_utils::Testnet, NetworkEvent, NetworkEvents};
+use reth_network_api::PeersInfo;
+use reth_primitives::{TransactionSigned, TxLegacy, U256};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tx_gossip() {
     reth_tracing::init_test_tracing();
@@ -111,17 +114,44 @@ async fn test_sending_invalid_transactions() {
     // connect all the peers
     handle.connect_peers().await;
 
-    let mut peer1_tx_listener = peer1.pool().unwrap().pending_transactions_listener();
+    assert_eq!(peer0.network().num_connected_peers(), 1);
+    let mut peer1_events = peer1.network().event_listener();
+    let mut tx_listener = peer1.pool().unwrap().new_transactions_listener();
 
-    let invalid_txs: Vec<Arc<TransactionSigned>> = vec![Arc::new(TransactionSigned::default())];
+    for idx in 0..10 {
+        // send invalid txs to peer1
+        let tx = TxLegacy {
+            chain_id: None,
+            nonce: idx,
+            gas_price: 0,
+            gas_limit: 0,
+            to: Default::default(),
+            value: Default::default(),
+            input: Default::default(),
+        };
+        let tx = TransactionSigned::from_transaction_and_signature(tx.into(), Default::default());
+        peer0.network().send_transactions(peer1.peer_id().clone(), vec![Arc::new(tx)]);
+    }
 
-    let network_handle = peer0.network();
+    // await disconnect for bad tx spam
+    while let Some(ev) = peer1_events.next().await {
+        match ev {
+            NetworkEvent::SessionClosed { peer_id, .. } => {
+                assert_eq!(peer_id, *peer0.peer_id());
+                break
+            }
+            NetworkEvent::SessionEstablished { .. } => {
+                panic!("unexpected event")
+            }
+            NetworkEvent::PeerAdded(_) => {
+                panic!("unexpected event")
+            }
+            NetworkEvent::PeerRemoved(_) => {
+                panic!("unexpected event")
+            }
+        }
+    }
 
-    // sends txs directly to peer1
-    network_handle.send_transactions(peer1.peer_id().clone(), invalid_txs);
-
-    tokio::time::sleep(Duration::from_secs(1)).await;
-
-    // this will return an [`Empty`] error because bad txs are disallowed to be broadcasted
-    assert!(peer1_tx_listener.try_recv().is_err());
+    // ensure txs never made it to the pool
+    assert!(tx_listener.try_recv().is_err());
 }
