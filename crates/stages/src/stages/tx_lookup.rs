@@ -1,7 +1,5 @@
-use std::sync::Arc;
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use num_traits::Zero;
-use rayon::prelude::*;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -19,6 +17,7 @@ use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter, StatsReader,
     TransactionsProviderExt,
 };
+use std::sync::Arc;
 use tempfile::TempDir;
 use tracing::*;
 
