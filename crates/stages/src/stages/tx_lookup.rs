@@ -118,10 +118,9 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             );
 
             if is_final_range {
-                let tx = provider.tx_ref();
                 let append_only = provider.count_entries::<tables::TxHashNumber>()?.is_zero();
                 let mut txhash_cursor =
-                    tx.cursor_write::<tables::RawTable<tables::TxHashNumber>>()?;
+                    provider.tx_ref().cursor_write::<tables::RawTable<tables::TxHashNumber>>()?;
 
                 let total_hashes = hash_collector.len();
                 let interval = (total_hashes / 10).max(1);
