@@ -7501,11 +7501,7 @@
   "templating": {
     "list": [
       {
-        "current": {
-          "selected": false,
-          "text": "localhost:9005",
-          "value": "localhost:9005"
-        },
+        "current": {},
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
@@ -7527,11 +7523,7 @@
         "type": "query"
       },
       {
-        "current": {
-          "selected": false,
-          "text": "clone old blocks",
-          "value": "clone old blocks"
-        },
+        "current": {},
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
@@ -7554,11 +7546,7 @@
         "type": "query"
       },
       {
-        "current": {
-          "selected": false,
-          "text": "get next tx num",
-          "value": "get next tx num"
-        },
+        "current": {},
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
