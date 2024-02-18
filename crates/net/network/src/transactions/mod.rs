@@ -1124,8 +1124,8 @@ where
             // byte size for response / small legacy tx size: 128 KiB / 100 bytes < 1,5k
             // transactions.
             //
-            // if txns however are invalid, and just 1 byte, since this isn't validated until 
-            // import to pool, this can potentially queue around 0,5 billion txns. more if the 
+            // if txns however are invalid, and just 1 byte, since this isn't validated until
+            // import to pool, this can potentially queue around 0,5 billion txns. more if the
             // message size is bigger than 128 KiB.
             //
             // this will potentially remove hashes from hashes pending fetch (if same hashes are
@@ -1145,8 +1145,8 @@ where
             // contain up to soft limit byte size for response / small legacy tx size: 2
             // MiB / 100 bytes < 21k transactions.
             //
-            // if txns however are invalid, and just 1 byte, since this isn't validated until 
-            // import to pool, this can potentially queue 2,2 billion txns. more if the message 
+            // if txns however are invalid, and just 1 byte, since this isn't validated until
+            // import to pool, this can potentially queue 2,2 billion txns. more if the message
             // size is bigger than 2 MiB.
             if let Poll::Ready(Some(fetch_event)) = this.transaction_fetcher.poll_next_unpin(cx) {
                 match fetch_event {
