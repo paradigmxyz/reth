@@ -23,6 +23,7 @@ use std::{
     sync::Arc,
 };
 
+use rayon::prelude::*;
 use reth_db::table::{Compress, Encode, Key, Value};
 use tempfile::{NamedTempFile, TempDir};
 
@@ -99,7 +100,7 @@ where
 
     fn flush(&mut self) {
         self.buffer_size_bytes = 0;
-        self.buffer.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        self.buffer.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
         let mut buf = Vec::with_capacity(self.buffer.len());
         std::mem::swap(&mut buf, &mut self.buffer);
         self.files.push(EtlFile::new(self.dir.path(), buf).expect("could not flush data to disk"))

@@ -1,20 +1,25 @@
+use std::sync::Arc;
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use num_traits::Zero;
 use rayon::prelude::*;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
+    RawKey, RawValue,
 };
+use reth_etl::Collector;
 use reth_interfaces::provider::ProviderError;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment,
+    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, TxHash, TxNumber,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter, StatsReader,
     TransactionsProviderExt,
 };
+use tempfile::TempDir;
 use tracing::*;
 
 /// The transaction lookup stage.
@@ -92,43 +97,61 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
-        let (tx_range, block_range, is_final_range) =
-            input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
-        let end_block = *block_range.end();
+        // 500MB temporary files
+        let mut hash_collector: Collector<TxHash, TxNumber> =
+            Collector::new(Arc::new(TempDir::new()?), 500 * (1024 * 1024));
 
-        debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Updating transaction lookup");
+        loop {
+            let (tx_range, block_range, is_final_range) = input
+                .next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
 
-        let mut tx_list = provider.transaction_hashes_by_range(tx_range)?;
+            let end_block = *block_range.end();
 
-        // Sort before inserting the reverse lookup for hash -> tx_id.
-        tx_list.par_sort_unstable_by(|txa, txb| txa.0.cmp(&txb.0));
+            debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Updating transaction lookup");
 
-        let tx = provider.tx_ref();
-        let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
+            for (key, value) in provider.transaction_hashes_by_range(tx_range)? {
+                hash_collector.insert(key, value);
+            }
 
-        // If the last inserted element in the database is equal or bigger than the first
-        // in our set, then we need to insert inside the DB. If it is smaller then last
-        // element in the DB, we can append to the DB.
-        // Append probably only ever happens during sync, on the first table insertion.
-        let insert = tx_list
-            .first()
-            .zip(txhash_cursor.last()?)
-            .map(|((first, _), (last, _))| first <= &last)
-            .unwrap_or_default();
-        // if txhash_cursor.last() is None we will do insert. `zip` would return none if any item is
-        // none. if it is some and if first is smaller than last, we will do append.
-        for (tx_hash, id) in tx_list {
-            if insert {
-                txhash_cursor.insert(tx_hash, id)?;
-            } else {
-                txhash_cursor.append(tx_hash, id)?;
+            input.checkpoint = Some(
+                StageCheckpoint::new(end_block)
+                    .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
+            );
+
+            if is_final_range {
+                let tx = provider.tx_ref();
+                let append_only = provider.count_entries::<tables::TxHashNumber>()?.is_zero();
+                let mut txhash_cursor =
+                    tx.cursor_write::<tables::RawTable<tables::TxHashNumber>>()?;
+
+                let total_hashes = hash_collector.len();
+                let interval = (total_hashes / 10).max(1);
+                for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
+                    let (hash, number) = hash_to_number?;
+                    if index > 0 && index % interval == 0 {
+                        info!(target: "sync::stages::transaction_lookup", ?append_only, progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0), "Writing transaction hash index");
+                    }
+
+                    if append_only {
+                        txhash_cursor.append(
+                            RawKey::<TxHash>::from_vec(hash),
+                            RawValue::<TxNumber>::from_vec(number),
+                        )?;
+                    } else {
+                        txhash_cursor.insert(
+                            RawKey::<TxHash>::from_vec(hash),
+                            RawValue::<TxNumber>::from_vec(number),
+                        )?;
+                    }
+                }
+                break
             }
         }
 
         Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new(end_block)
+            checkpoint: StageCheckpoint::new(input.target())
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
-            done: is_final_range,
+            done: true,
         })
     }
 

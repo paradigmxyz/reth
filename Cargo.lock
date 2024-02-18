@@ -6144,6 +6144,7 @@ dependencies = [
 name = "reth-etl"
 version = "0.1.0-alpha.18"
 dependencies = [
+ "rayon",
  "reth-db",
  "reth-primitives",
  "tempfile",
