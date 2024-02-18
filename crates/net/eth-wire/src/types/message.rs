@@ -344,7 +344,6 @@ impl<T: Encodable> EncodableExt for Vec<T> {
 
     fn encode_truncate(&self, approx: usize, limit: usize) -> Vec<u8> {
         let (mut buf, current_len) = self.encode_until_limit(approx, limit);
-
         if current_len != 0 {
             buf.truncate(current_len);
             buf.shrink_to_fit(); // shrink buffer to catch cases where approx > limit
@@ -683,5 +682,37 @@ mod tests {
             matches!(fail_res, Err(alloy_rlp::Error::Custom(msg)) if msg.contains("Size limit exceeded")),
             "Expected 'Size limit exceeded' error"
         );
+    }
+
+    //Test vector for header from: https://eips.ethereum.org/EIPS/eip-2481
+    #[test]
+    fn test_encode_truncate() {
+        let mut headers: Vec<Header> = Vec::new();
+        // list header : f901fc
+        let expected = hex!("f901fcf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000");
+
+        // buffer will be truncated back to last item , i.e list header in our case. Since we had
+        // list_header + 1 Header in the vec in our test
+        let truncated_expected = hex!("f901fc");
+
+        headers.push(Header {
+            difficulty: U256::from(0x8ae_u64),
+            number: 0xd05_u64,
+            gas_limit: 0x115c_u64,
+            gas_used: 0x15b3_u64,
+            timestamp: 0x1a0a_u64,
+            extra_data: Bytes::from_str("7788").unwrap(),
+            ommers_hash: B256::ZERO,
+            state_root: B256::ZERO,
+            transactions_root: B256::ZERO,
+            receipts_root: B256::ZERO,
+            ..Default::default()
+        });
+
+        let res = headers.encode_truncate(300, 511);
+        assert_eq!(res, expected);
+
+        let truncated_res = headers.encode_truncate(300, 509);
+        assert_eq!(truncated_res, truncated_expected);
     }
 }
