@@ -3,10 +3,7 @@ use crate::{
     message::PeerRequest,
 };
 use derive_more::Constructor;
-use futures::{
-    stream::FuturesUnordered, Future, FutureExt, Stream,
-    StreamExt,
-};
+use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use futures_test::task::noop_context;
 use pin_project::pin_project;
 use reth_eth_wire::{
@@ -30,7 +27,7 @@ use tracing::{debug, error, trace};
 use super::{
     config::TransactionFetcherConfig,
     constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
-    AnnouncementFilter, Peer, PooledTransactions,
+    AnnouncementFilter, PeerMetadata, PooledTransactions,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 
@@ -40,32 +37,32 @@ use super::{
 /// new requests on announced hashes.
 #[derive(Debug)]
 #[pin_project]
-pub(crate) struct TransactionFetcher {
+pub struct TransactionFetcher {
     /// All peers with to which a [`GetPooledTransactions`] request is inflight.
-    pub(super) active_peers: LruMap<PeerId, u8, ByLength>,
+    pub active_peers: LruMap<PeerId, u8, ByLength>,
     /// All currently active [`GetPooledTransactions`] requests.
     ///
     /// The set of hashes encompassed by these requests are a subset of all hashes in the fetcher.
     /// It's disjoint from the set of hashes which are awaiting an idle fallback peer in order to
     /// be fetched.
     #[pin]
-    pub(super) inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
+    pub inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
     /// Hashes that are awaiting an idle fallback peer so they can be fetched.
     ///
     /// This is a subset of all hashes in the fetcher, and is disjoint from the set of hashes for
     /// which a [`GetPooledTransactions`] request is inflight.
-    pub(super) hashes_pending_fetch: LruCache<TxHash>,
+    pub hashes_pending_fetch: LruCache<TxHash>,
     /// Tracks all hashes in the transaction fetcher.
-    pub(super) hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, Unlimited>,
+    pub hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, Unlimited>,
     /// Filter for valid eth68 announcements.
-    pub(super) filter_valid_hashes: AnnouncementFilter,
+    pub filter_valid_hashes: AnnouncementFilter,
     /// Info on capacity of the transaction fetcher.
-    pub(super) info: TransactionFetcherInfo,
+    pub info: TransactionFetcherInfo,
     /// [`FetchEvent`]s as a result of advancing inflight requests
     #[pin]
-    pub(super) fetch_events_head: UnboundedMeteredReceiver<FetchEvent>,
+    pub fetch_events_head: UnboundedMeteredReceiver<FetchEvent>,
     /// Handle for queueing [`FetchEvent`]s as a result of advancing inflight requests.
-    pub(super) fetch_events_tail: UnboundedMeteredSender<FetchEvent>,
+    pub fetch_events_tail: UnboundedMeteredSender<FetchEvent>,
 }
 
 // === impl TransactionFetcher ===
@@ -80,32 +77,36 @@ impl TransactionFetcher {
         self
     }
 
-    pub(super) fn try_drain_inflight_requests(&mut self) {
+    /// Drains any resolved [`GetPooledTransactions`] requests and queues them as [`FetchEvent`]s
+    /// in the [`TransactionFetcher`].
+    pub fn try_drain_inflight_requests(&mut self) {
         self.advance_inflight_requests(DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS)
     }
 
-    fn advance_inflight_requests(&mut self, steps: u32) {
+    /// Advances inflight requests by at most the given number of [`GetPooledTransactions`]
+    /// requests. The [`PooledTransactions`] responses are queued as [`FetchEvent`]s in the
+    /// [`TransactionFetcher`].
+    pub fn advance_inflight_requests(&mut self, steps: u32) {
         // `FuturesUnordered` doesn't close when `None` is returned. so just return if empty.
         // <https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=815be2b6c8003303757c3ced135f363e>
         if self.inflight_requests.is_empty() {
             return
         }
 
-        // noop context is used since we don't need the inflight requests futures unordered to
-        // schedule for wake up here when it's pending
-        let mut budget = steps;        
+        let mut budget = steps;
 
         loop {
-            match self.inflight_requests.poll_next_unpin(&mut noop_context()) {
-                Poll::Ready(Some(resp)) => {
-                    self.on_resolved_get_pooled_transactions_request_fut(resp);
+            // noop context is used since we don't need the inflight requests futures unordered to
+            // schedule for wake up here when it's pending
+            while let Poll::Ready(Some(resp)) =
+                self.inflight_requests.poll_next_unpin(&mut noop_context())
+            {
+                self.on_resolved_get_pooled_transactions_request_fut(resp);
 
-                    budget = budget.saturating_sub(1);
-                    if budget == 0 {
-                        break
-                    }
-                },
-                Poll::Ready(None) | Poll::Pending => break,
+                budget = budget.saturating_sub(1);
+                if budget == 0 {
+                    break
+                }
             }
         }
     }
@@ -140,7 +141,7 @@ impl TransactionFetcher {
     }
 
     /// Returns `true` if peer is idle with respect to `self.inflight_requests`.
-    pub(super) fn is_idle(&self, peer_id: &PeerId) -> bool {
+    pub fn is_idle(&self, peer_id: &PeerId) -> bool {
         let Some(inflight_count) = self.active_peers.peek(peer_id) else { return true };
         if *inflight_count < DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
             return true
@@ -149,7 +150,7 @@ impl TransactionFetcher {
     }
 
     /// Returns any idle peer for the given hash.
-    pub(super) fn get_idle_peer_for(
+    pub fn get_idle_peer_for(
         &self,
         hash: TxHash,
         is_session_active: impl Fn(&PeerId) -> bool,
@@ -171,7 +172,7 @@ impl TransactionFetcher {
     ///
     /// Loops through the hashes pending fetch in lru order until one is found with an idle
     /// fallback peer, or the budget passed as parameter is depleted, whatever happens first.
-    pub(super) fn find_any_idle_fallback_peer_for_any_pending_hash(
+    pub fn find_any_idle_fallback_peer_for_any_pending_hash(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         is_session_active: impl Fn(&PeerId) -> bool,
@@ -209,7 +210,7 @@ impl TransactionFetcher {
     /// a [`RequestTxHashes`] buffer as parameter for filling with hashes to request.
     ///
     /// Returns left over hashes.
-    pub(super) fn pack_request(
+    pub fn pack_request(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: ValidAnnouncementData,
@@ -230,7 +231,7 @@ impl TransactionFetcher {
     /// Loops through hashes passed as parameter and checks if a hash fits in the expected
     /// response. If no, it's added to surplus hashes. If yes, it's added to hashes to the request
     /// and expected response size is accumulated.
-    pub(super) fn pack_request_eth68(
+    pub fn pack_request_eth68(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: ValidAnnouncementData,
@@ -296,7 +297,7 @@ impl TransactionFetcher {
     /// hashes to request.
     ///
     /// Returns left over hashes.
-    pub(super) fn pack_request_eth66(
+    pub fn pack_request_eth66(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: ValidAnnouncementData,
@@ -317,7 +318,7 @@ impl TransactionFetcher {
     }
 
     /// Tries to buffer hashes for retry.
-    pub(super) fn buffer_hashes_for_retry(
+    pub fn try_buffer_hashes_for_retry(
         &mut self,
         mut hashes: RequestTxHashes,
         peer_failed_to_serve: &PeerId,
@@ -338,9 +339,9 @@ impl TransactionFetcher {
 
     /// Buffers hashes. Note: Only peers that haven't yet tried to request the hashes should be
     /// passed as `fallback_peer` parameter! For re-buffering hashes on failed request, use
-    /// [`TransactionFetcher::buffer_hashes_for_retry`]. Hashes that have been re-requested
+    /// [`TransactionFetcher::try_buffer_hashes_for_retry`]. Hashes that have been re-requested
     /// [`DEFAULT_MAX_RETRIES`], are dropped.
-    pub(super) fn buffer_hashes(&mut self, hashes: RequestTxHashes, fallback_peer: Option<PeerId>) {
+    pub fn buffer_hashes(&mut self, hashes: RequestTxHashes, fallback_peer: Option<PeerId>) {
         let mut max_retried_and_evicted_hashes = vec![];
 
         for hash in hashes.into_iter() {
@@ -386,9 +387,9 @@ impl TransactionFetcher {
     ///
     /// Finds the first buffered hash with a fallback peer that is idle, if any. Fills the rest of
     /// the request by checking the transactions seen by the peer against the buffer.
-    pub(super) fn on_fetch_pending_hashes(
+    pub fn on_fetch_pending_hashes(
         &mut self,
-        peers: &HashMap<PeerId, Peer>,
+        peers: &HashMap<PeerId, PeerMetadata>,
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
         metrics_increment_egress_peer_channel_full: impl FnOnce(),
     ) {
@@ -458,7 +459,7 @@ impl TransactionFetcher {
 
     /// Filters out hashes that have been seen before. For hashes that have already been seen, the
     /// peer is added as fallback peer.
-    pub(super) fn filter_unseen_and_pending_hashes(
+    pub fn filter_unseen_and_pending_hashes(
         &mut self,
         new_announced_hashes: &mut ValidAnnouncementData,
         is_tx_bad_import: impl Fn(&TxHash) -> bool,
@@ -579,10 +580,10 @@ impl TransactionFetcher {
     /// This filters all announced hashes that are already in flight, and requests the missing,
     /// while marking the given peer as an alternative peer for the hashes that are already in
     /// flight.
-    pub(super) fn request_transactions_from_peer(
+    pub fn request_transactions_from_peer(
         &mut self,
         new_announced_hashes: RequestTxHashes,
-        peer: &Peer,
+        peer: &PeerMetadata,
         metrics_increment_egress_peer_channel_full: impl FnOnce(),
     ) -> Option<RequestTxHashes> {
         let peer_id: PeerId = peer.request_tx.peer_id;
@@ -686,7 +687,7 @@ impl TransactionFetcher {
     /// 3. Accumulate expected total response size.
     /// 4. Check if acc size and hashes count is at limit, if so stop looping.
     /// 5. Remove hashes to request from cache of hashes pending fetch.
-    pub(super) fn fill_request_from_hashes_pending_fetch(
+    pub fn fill_request_from_hashes_pending_fetch(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
         seen_hashes: &LruCache<TxHash>,
@@ -754,7 +755,7 @@ impl TransactionFetcher {
 
     /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes. Returns  
     /// `false` if [`TransactionFetcher`] is operating close to full capacity.
-    pub(super) fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
+    pub fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
         let info = &self.info;
 
         self.has_capacity(info.max_inflight_requests)
@@ -770,7 +771,7 @@ impl TransactionFetcher {
     /// Returns `Some(limit)` if [`TransactionFetcher`] and the
     /// [`TransactionPool`](reth_transaction_pool::TransactionPool) are operating close to full
     /// capacity. Returns `None`, unlimited, if they are not that busy.
-    pub(super) fn search_breadth_budget_find_idle_fallback_peer(
+    pub fn search_breadth_budget_find_idle_fallback_peer(
         &self,
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
     ) -> Option<usize> {
@@ -809,7 +810,7 @@ impl TransactionFetcher {
     /// Returns `Some(limit)` if [`TransactionFetcher`] and the
     /// [`TransactionPool`](reth_transaction_pool::TransactionPool) are operating close to full
     /// capacity. Returns `None`, unlimited, if they are not that busy.
-    pub(super) fn search_breadth_budget_find_intersection_pending_hashes_and_hashes_seen_by_peer(
+    pub fn search_breadth_budget_find_intersection_pending_hashes_and_hashes_seen_by_peer(
         &self,
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
     ) -> Option<usize> {
@@ -842,7 +843,13 @@ impl TransactionFetcher {
         }
     }
 
-    fn on_resolved_get_pooled_transactions_request_fut(&mut self, response: GetPooledTxResponse) {
+    /// Processes a resolved [`GetPooledTransactions`] request. Queues the outcome as a
+    /// [`FetchEvent`], which will then be streamed by
+    /// [`TransactionsManager`](super::TransactionsManager).
+    pub fn on_resolved_get_pooled_transactions_request_fut(
+        &mut self,
+        response: GetPooledTxResponse,
+    ) {
         // update peer activity, requests for buffered hashes can only be made to idle
         // fallback peers
         let GetPooledTxResponse { peer_id, mut requested_hashes, result } = response;
@@ -872,16 +879,16 @@ impl TransactionFetcher {
 
                 self.remove_hashes_from_transaction_fetcher(fetched);
                 // buffer left over hashes
-                self.buffer_hashes_for_retry(requested_hashes, &peer_id);
+                self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
 
                 FetchEvent::TransactionsFetched { peer_id, transactions: transactions.0 }
             }
             Ok(Err(req_err)) => {
-                self.buffer_hashes_for_retry(requested_hashes, &peer_id);
+                self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
                 FetchEvent::FetchError { peer_id, error: req_err }
             }
             Err(_) => {
-                self.buffer_hashes_for_retry(requested_hashes, &peer_id);
+                self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
                 // request channel closed/dropped
                 FetchEvent::FetchError { peer_id, error: RequestError::ChannelClosed }
             }
@@ -930,7 +937,7 @@ impl Default for TransactionFetcher {
 
 /// Metadata of a transaction hash that is yet to be fetched.
 #[derive(Debug, Constructor)]
-pub(super) struct TxFetchMetadata {
+pub struct TxFetchMetadata {
     /// The number of times a request attempt has been made for the hash.
     retries: u8,
     /// Peers that have announced the hash, but to which a request attempt has not yet been made.
@@ -943,10 +950,15 @@ pub(super) struct TxFetchMetadata {
 }
 
 impl TxFetchMetadata {
+    /// Returns a mutable reference to the fallback peers cache for this transaction hash.
     pub fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId> {
         &mut self.fallback_peers
     }
 
+    /// Returns the size of the transaction, if its hash has been received in any
+    /// [`Eth68`](reth_eth_wire::EthVersion::Eth68) announcement. If the transaction hash has only
+    /// been seen in [`Eth66`](reth_eth_wire::EthVersion::Eth66) announcements so far, this will
+    /// return `None`.
     pub fn tx_encoded_len(&self) -> Option<usize> {
         self.tx_encoded_length
     }
@@ -954,7 +966,7 @@ impl TxFetchMetadata {
 
 /// Represents possible events from fetching transactions.
 #[derive(Debug)]
-pub(crate) enum FetchEvent {
+pub enum FetchEvent {
     /// Triggered when transactions are successfully fetched.
     TransactionsFetched {
         /// The ID of the peer from which transactions were fetched.
@@ -971,15 +983,19 @@ pub(crate) enum FetchEvent {
     },
 }
 
-/// An inflight request for [`PooledTransactions`] from a peer
-pub(super) struct GetPooledTxRequest {
+/// An inflight request for [`PooledTransactions`] from a peer.
+#[derive(Debug)]
+pub struct GetPooledTxRequest {
     peer_id: PeerId,
     /// Transaction hashes that were requested, for cleanup purposes
     requested_hashes: RequestTxHashes,
     response: oneshot::Receiver<RequestResult<PooledTransactions>>,
 }
 
-pub(super) struct GetPooledTxResponse {
+/// Upon reception of a response, a [`GetPooledTxRequest`] is deconstructed to form a
+/// [`GetPooledTxResponse`].
+#[derive(Debug)]
+pub struct GetPooledTxResponse {
     peer_id: PeerId,
     /// Transaction hashes that were requested, for cleanup purposes, since peer may only return a
     /// subset of requested hashes.
@@ -987,9 +1003,12 @@ pub(super) struct GetPooledTxResponse {
     result: Result<RequestResult<PooledTransactions>, RecvError>,
 }
 
+/// Stores the response receiver made by sending a [`GetPooledTransactions`] request to a peer's
+/// session.
 #[must_use = "futures do nothing unless polled"]
 #[pin_project::pin_project]
-pub(super) struct GetPooledTxRequestFut {
+#[derive(Debug)]
+pub struct GetPooledTxRequestFut {
     #[pin]
     inner: Option<GetPooledTxRequest>,
 }
@@ -1028,7 +1047,7 @@ impl Future for GetPooledTxRequestFut {
 #[derive(Debug)]
 pub struct TransactionFetcherInfo {
     /// Currently active outgoing [`GetPooledTransactions`] requests.
-    pub(super) max_inflight_requests: usize,
+    pub max_inflight_requests: usize,
     /// Soft limit for the byte size of the expected
     /// [`PooledTransactions`] response on packing a
     /// [`GetPooledTransactions`] request with hashes.
@@ -1036,10 +1055,11 @@ pub struct TransactionFetcherInfo {
     /// Soft limit for the byte size of a [`PooledTransactions`]
     /// response on assembling a [`GetPooledTransactions`]
     /// request. Spec'd at 2 MiB.
-    pub(super) soft_limit_byte_size_pooled_transactions_response: usize,
+    pub soft_limit_byte_size_pooled_transactions_response: usize,
 }
 
 impl TransactionFetcherInfo {
+    /// Creates a new max
     pub fn new(
         max_inflight_transaction_requests: usize,
         soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,

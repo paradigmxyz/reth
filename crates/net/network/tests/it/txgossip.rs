@@ -82,15 +82,15 @@ async fn test_4844_tx_gossip_penalization() {
     let network_handle = peer0.network();
 
     let peer0_reputation_before =
-        peer1.peer_handle().peer_by_id(peer0.peer_id().clone()).await.unwrap().reputation();
+        peer1.peer_handle().peer_by_id(*peer0.peer_id()).await.unwrap().reputation();
 
     // sends txs directly to peer1
-    network_handle.send_transactions(peer1.peer_id().clone(), signed_txs);
+    network_handle.send_transactions(*peer1.peer_id(), signed_txs);
 
     let received = peer1_tx_listener.recv().await.unwrap();
 
     let peer0_reputation_after =
-        peer1.peer_handle().peer_by_id(peer0.peer_id().clone()).await.unwrap().reputation();
+        peer1.peer_handle().peer_by_id(*peer0.peer_id()).await.unwrap().reputation();
     assert_ne!(peer0_reputation_before, peer0_reputation_after);
     assert_eq!(received, txs[1].transaction().hash);
 
@@ -130,7 +130,7 @@ async fn test_sending_invalid_transactions() {
             input: Default::default(),
         };
         let tx = TransactionSigned::from_transaction_and_signature(tx.into(), Default::default());
-        peer0.network().send_transactions(peer1.peer_id().clone(), vec![Arc::new(tx)]);
+        peer0.network().send_transactions(*peer1.peer_id(), vec![Arc::new(tx)]);
     }
 
     // await disconnect for bad tx spam

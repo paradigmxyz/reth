@@ -87,7 +87,7 @@ pub mod tx_fetcher {
 
     /// Default marginal on fallback peers. This is the case, since a transaction is only requested
     /// once from each individual peer. Default is 1 peer.
-    const DEFAULT_MARGINAL_COUNT_FALLBACK_PEERS: u8 = 1;
+    pub const DEFAULT_MARGINAL_COUNT_FALLBACK_PEERS: u8 = 1;
 
     /* ==================== CONCURRENCY ==================== */
 

@@ -69,11 +69,13 @@ use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
 
+/// Aggregation on configurable parameters for [`TransactionsManager`].
+pub mod config;
 /// Default and spec'd bounds.
 pub mod constants;
-mod config;
-mod fetcher;
-mod validation;
+/// Component responsible for fetching transactions from [`NewPooledTransactionHashes`].
+pub mod fetcher;
+pub mod validation;
 pub use config::{TransactionFetcherConfig, TransactionsManagerConfig};
 
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
@@ -220,7 +222,7 @@ pub struct TransactionsManager<Pool> {
     /// Bad imports.
     bad_imports: LruCache<TxHash>,
     /// All the connected peers.
-    peers: HashMap<PeerId, Peer>,
+    peers: HashMap<PeerId, PeerMetadata>,
     /// Send half for the command channel.
     command_tx: mpsc::UnboundedSender<TransactionsCommand>,
     /// Incoming commands from [`TransactionsHandle`].
@@ -864,7 +866,7 @@ where
                 peer_id, client_version, messages, version, ..
             } => {
                 // insert a new peer into the peerset
-                self.peers.insert(peer_id, Peer::new(messages, version, client_version));
+                self.peers.insert(peer_id, PeerMetadata::new(messages, version, client_version));
 
                 // Send a `NewPooledTransactionHashes` to the peer with up to
                 // `NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT` transactions in the
@@ -1394,9 +1396,9 @@ impl Default for TransactionsSeenByPeer {
     }
 }
 
-/// Tracks a single peer
+/// Tracks a single peer in the context of [`TransactionsManager`].
 #[derive(Debug)]
-struct Peer {
+pub struct PeerMetadata {
     /// Keeps track of transactions that we know the peer has seen.
     seen_transactions: TransactionsSeenByPeer,
     /// A communication channel directly to the peer's session task.
@@ -1407,7 +1409,8 @@ struct Peer {
     client_version: Arc<str>,
 }
 
-impl Peer {
+impl PeerMetadata {
+    /// Returns a new instance of [`PeerMetadata`].
     fn new(request_tx: PeerRequestSender, version: EthVersion, client_version: Arc<str>) -> Self {
         Self {
             seen_transactions: TransactionsSeenByPeer::default(),
@@ -1473,7 +1476,7 @@ pub enum NetworkTransactionEvent {
 
 /// Tracks stats about the [`TransactionsManager`].
 #[derive(Debug)]
-struct PendingPoolImportsInfo {
+pub struct PendingPoolImportsInfo {
     /// Number of transactions about to be imported into the pool.
     pending_pool_imports: Arc<AtomicUsize>,
     /// Max number of transactions about to be imported into the pool.
@@ -1481,6 +1484,7 @@ struct PendingPoolImportsInfo {
 }
 
 impl PendingPoolImportsInfo {
+    /// Returns a new [`PendingPoolImportsInfo`].
     pub fn new(max_pending_pool_imports: usize) -> Self {
         Self { pending_pool_imports: Arc::new(AtomicUsize::default()), max_pending_pool_imports }
     }
@@ -1545,11 +1549,15 @@ mod tests {
     pub(super) fn new_mock_session(
         peer_id: PeerId,
         version: EthVersion,
-    ) -> (Peer, mpsc::Receiver<PeerRequest>) {
+    ) -> (PeerMetadata, mpsc::Receiver<PeerRequest>) {
         let (to_mock_session_tx, to_mock_session_rx) = mpsc::channel(1);
 
         (
-            Peer::new(PeerRequestSender::new(peer_id, to_mock_session_tx), version, Arc::from("")),
+            PeerMetadata::new(
+                PeerRequestSender::new(peer_id, to_mock_session_tx),
+                version,
+                Arc::from(""),
+            ),
             to_mock_session_rx,
         )
     }
