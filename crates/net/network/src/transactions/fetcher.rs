@@ -17,6 +17,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+use std::time::Instant;
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tracing::{debug, trace};
 
@@ -350,13 +351,19 @@ impl TransactionFetcher {
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
         metrics_increment_egress_peer_channel_full: impl FnOnce(),
     ) {
+        let now = Instant::now();
         let mut hashes_to_request = RequestTxHashes::with_capacity(32);
         let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
 
         // budget to look for an idle peer before giving up
         let budget_find_idle_fallback_peer = self
             .search_breadth_budget_find_idle_fallback_peer(&has_capacity_wrt_pending_pool_imports);
+        let elapsed = now.elapsed();
+        if elapsed.as_millis() > 1 {
+            println!("search_breadth_budget_find_idle_fallback_peer: {:?}", elapsed);
+        }
 
+        let now = Instant::now();
         let Some(peer_id) = self.find_any_idle_fallback_peer_for_any_pending_hash(
             &mut hashes_to_request,
             is_session_active,
@@ -369,6 +376,12 @@ impl TransactionFetcher {
         let Some(peer) = peers.get(&peer_id) else { return };
         let conn_eth_version = peer.version;
 
+        let elapsed = now.elapsed();
+        if elapsed.as_millis() > 1 {
+            println!("find_any_idle_fallback_peer_for_any_pending_hash: {:?}", elapsed);
+        }
+
+        let now = Instant::now();
         // fill the request with more hashes pending fetch that have been announced by the peer.
         // the search for more hashes is done with respect to the given budget, which determines
         // how many hashes to loop through before giving up. if no more hashes are found wrt to
@@ -377,6 +390,11 @@ impl TransactionFetcher {
             .search_breadth_budget_find_intersection_pending_hashes_and_hashes_seen_by_peer(
                 &has_capacity_wrt_pending_pool_imports,
             );
+
+        let elapsed = now.elapsed();
+        if elapsed.as_millis() > 1 {
+            println!("find_any_idle_fallback_peer_for_any_pending_hash: {:?}", elapsed);
+        }
 
         self.fill_request_from_hashes_pending_fetch(
             &mut hashes_to_request,
