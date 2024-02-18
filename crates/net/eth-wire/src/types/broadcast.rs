@@ -458,7 +458,7 @@ pub trait DedupPayload {
 }
 
 /// Value in [`PartiallyValidData`] map obtained from an announcement.
-pub type Eth68Eth68TxMetadata = Option<(u8, usize)>;
+pub type Eth68TxMetadata = Option<(u8, usize)>;
 
 impl DedupPayload for NewPooledTransactionHashes {
     type Value = Eth68TxMetadata;
@@ -622,7 +622,8 @@ impl<V> PartiallyValidData<V> {
     }
 }
 
-/// Validated data from an announcement that
+/// Partially validated data from an announcement or a
+/// [`PooledTransactions`](crate::PooledTransactions) response.
 #[derive(Debug, Deref, DerefMut, IntoIterator, From)]
 #[from(PartiallyValidData<Eth68TxMetadata>)]
 pub struct ValidAnnouncementData {
