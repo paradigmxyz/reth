@@ -1119,8 +1119,8 @@ where
             }
 
             let elapsed = now.elapsed();
-            if elapsed.as_micros() > 100 {
-               println!("has_capacity_for_fetching_pending_hashes: {:?}", elapsed);
+            if elapsed.as_millis() > 1 {
+               println!("on_fetch_pending_hashes: {:?}", elapsed);
             }
 
             // drain commands
