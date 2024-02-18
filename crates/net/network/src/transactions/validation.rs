@@ -45,7 +45,7 @@ pub trait ValidateTx68 {
 }
 
 /// Outcomes from validating a `(ty, hash, size)` entry from a
-/// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68).. Signals to the
+/// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68). Signals to the
 /// caller how to deal with an announcement entry and the peer who sent the announcement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationOutcome {
