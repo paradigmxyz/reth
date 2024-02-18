@@ -29,6 +29,6 @@ impl Metrics {
 pub(crate) struct PrunerSegmentMetrics {
     /// Pruning duration for this segment
     pub(crate) duration_seconds: Histogram,
-    #[metric(rename = "highest_pruned_block", describe = "A gauge with metric attribute description.")]
+    #[metric(rename = "highest_pruned_block", describe = "Highest pruned block per segment")]
     pub(crate) highest_pruned_block: Gauge,
 }
