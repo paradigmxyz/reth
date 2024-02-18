@@ -67,15 +67,7 @@ impl From<Vec<TransactionSigned>> for PooledTransactions {
 
 impl FromIterator<PooledTransactionsElement> for PooledTransactions {
     fn from_iter<I: IntoIterator<Item = PooledTransactionsElement>>(iter: I) -> Self {
-        let mut txns = Vec::with_capacity(32);
-
-        for tx in iter {
-            txns.push(tx);
-        }
-
-        txns.shrink_to_fit();
-
-        PooledTransactions::new(txns)
+        PooledTransactions(iter.into_iter().collect())
     }
 }
 
