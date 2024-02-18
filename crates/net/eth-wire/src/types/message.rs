@@ -303,7 +303,7 @@ pub trait EncodableExt {
     ///
     /// A tuple containing:
     /// * The encoded data as `Vec<u8>`.
-    /// * The length of the data at the point of reaching the limit, or the 0 length if the limit
+    /// * The length of the data at the point just before reaching the limit, or 0 if the limit
     ///   was not exceeded.
     /// * A boolean flag that is `true` if the size limit was exceeded and `false` otherwise.
     fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize, bool);
