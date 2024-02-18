@@ -1063,6 +1063,9 @@ where
 /// [`crate::NetworkManager`] for more context on the design pattern.
 ///
 /// This should be spawned or used as part of `tokio::select!`.
+//
+// spawned in `NodeConfig::start_network`(reth_node_core::NodeConfig) and
+// `NetworkConfig::start_network`(reth_network::NetworkConfig)
 impl<Pool> Future for TransactionsManager<Pool>
 where
     Pool: TransactionPool + Unpin + 'static,
@@ -1079,12 +1082,15 @@ where
         loop {
             let mut some_ready = false;
 
-            // drain network/peer related events
+            // advance network/peer related events
             if let Poll::Ready(Some(event)) = this.network_events.poll_next_unpin(cx) {
                 this.on_network_event(event);
                 some_ready = true;
             }
 
+            // try drain hashes pending fetch if there is capacity (fetch txns)
+            //
+            // sends at most one request
             if this.has_capacity_for_fetching_pending_hashes() {
                 // try drain buffered transactions.
                 let info = &this.pending_pool_imports_info;
@@ -1102,13 +1108,28 @@ where
                     metrics_increment_egress_peer_channel_full,
                 );
             }
-            // drain commands
+
+            // advance commands (propagate/fetch/serve txns)
             if let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
                 this.on_command(cmd);
                 some_ready = true;
             }
 
-            // drain incoming transaction events
+            // advance incoming transaction events (stream new txns/announcements from network
+            // manager and queue for import to pool/fetch txns)
+            //
+            // can potentially queue around 1,5k txns *
+            // `DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS` = 1,5k * 1024 txns for import
+            // to pool if txns are valid. each message could contain up to soft limit
+            // byte size for response / small legacy tx size: 128 KiB / 100 bytes < 1,5k
+            // transactions.
+            //
+            // if txns however are invalid, and just 1 byte, since this isn't validated until 
+            // import to pool, this can potentially queue around 0,5 billion txns. more if the 
+            // message size is bigger than 128 KiB.
+            //
+            // this will potentially remove hashes from hashes pending fetch (if same hashes are
+            // announced that didn't fit into a previous request)
             if let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
                 this.on_network_tx_event(event);
                 some_ready = true;
@@ -1116,7 +1137,17 @@ where
 
             this.update_fetch_metrics();
 
-            // drain fetching transaction events
+            // advance fetching transaction events (flush transaction fetcher and queue for
+            // import to pool)
+            //
+            // can potentially queue around 20k txns * `DEFAULT_BUDGET_TRY_DRAIN_STREAM` = 20k *
+            // 1024 txns for import to pool if txns are valid. each message could
+            // contain up to soft limit byte size for response / small legacy tx size: 2
+            // MiB / 100 bytes < 21k transactions.
+            //
+            // if txns however are invalid, and just 1 byte, since this isn't validated until 
+            // import to pool, this can potentially queue 2,2 billion txns. more if the message 
+            // size is bigger than 2 MiB.
             if let Poll::Ready(Some(fetch_event)) = this.transaction_fetcher.poll_next_unpin(cx) {
                 match fetch_event {
                     FetchEvent::TransactionsFetched { peer_id, transactions } => {
@@ -1162,10 +1193,8 @@ where
                 some_ready = true;
             }
 
-            // handle and propagate new transactions.
-            //
-            // higher priority! stream is drained
-            //
+            // drain successfully imported transactions to propagate (inform peers which txns
+            // we have seen)
             let mut new_txs = Vec::new();
             while let Poll::Ready(Some(hash)) = this.pending_transactions.poll_next_unpin(cx) {
                 new_txs.push(hash);
