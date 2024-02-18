@@ -77,8 +77,13 @@ pub async fn launch_from_config<E: RethCliExt>(
 ) -> eyre::Result<NodeHandle> {
     info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
+    // Register the prometheus recorder before creating the database,
+    // because database init needs it to register metrics.
+    config.install_prometheus_recorder()?;
+
     let database = std::mem::take(&mut config.database);
     let db_instance = database.init_db(config.db.log_level, config.chain.chain)?;
+    info!(target: "reth::cli", "Database opened");
 
     match db_instance {
         DatabaseInstance::Real { db, data_dir } => {
@@ -121,7 +126,6 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         let config = self.load_config()?;
 
         let prometheus_handle = self.config.install_prometheus_recorder()?;
-        info!(target: "reth::cli", "Database opened");
 
         let mut provider_factory =
             ProviderFactory::new(Arc::clone(&self.db), Arc::clone(&self.config.chain));
