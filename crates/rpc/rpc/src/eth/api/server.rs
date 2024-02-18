@@ -24,8 +24,8 @@ use reth_provider::{
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle,
-    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, RichBlock, StateContext,
-    SyncStatus, TransactionReceipt, TransactionRequest, Work,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock,
+    StateContext, SyncStatus, TransactionReceipt, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
@@ -224,6 +224,18 @@ where
         Ok(self
             .on_blocking_task(|this| async move { this.get_code(address, block_number) })
             .await?)
+    }
+
+    /// Handler for: `eth_getHeaderByNumber`
+    async fn header_by_number(&self, block_number: BlockNumberOrTag) -> Result<Option<Header>> {
+        trace!(target: "rpc::eth", ?block_number, "Serving eth_getHeaderByNumber");
+        Ok(EthApi::block_header(self, block_number).await?)
+    }
+
+    /// Handler for: `eth_getHeaderByHash`
+    async fn header_by_hash(&self, hash: B256) -> Result<Option<Header>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getHeaderByHash");
+        Ok(EthApi::block_header(self, hash).await?)
     }
 
     /// Handler for: `eth_call`

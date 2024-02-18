@@ -11,7 +11,7 @@ use reth_network_api::NetworkInfo;
 use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{BlockId, TransactionMeta};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
-use reth_rpc_types::{Index, RichBlock, TransactionReceipt};
+use reth_rpc_types::{Header, Index, RichBlock, TransactionReceipt};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
@@ -199,5 +199,14 @@ where
             .ok_or(EthApiError::UnknownBlockNumber)?;
         let block = from_block(block.unseal(), total_difficulty, full.into(), Some(block_hash))?;
         Ok(Some(block.into()))
+    }
+
+    /// Returns the block header for the given block id.
+    pub(crate) async fn block_header(
+        &self,
+        block_id: impl Into<BlockId>,
+    ) -> EthResult<Option<Header>> {
+        let header = self.rpc_block(block_id, false).await?.map(|block| block.inner.header);
+        Ok(header)
     }
 }
