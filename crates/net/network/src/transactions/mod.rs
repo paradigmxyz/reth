@@ -587,8 +587,8 @@ where
             return
         }
 
-        // get handle to peer's session, if the session is still active
-        let Some(peer) = self.peers.get_mut(&peer_id) else {
+        // check if peer's session is still active
+        if !self.peers.contains_key(&peer_id) {
             debug!(
                 peer_id=format!("{peer_id:#}"),
                 msg=?msg,
@@ -596,12 +596,15 @@ where
             );
 
             return
-        };
-        let client_version = peer.client_version.clone();
+        }
 
         // 1. filter out spam
         let (validation_outcome, mut partially_valid_msg) =
-            self.transaction_fetcher.filter_valid_message.partially_filter(msg);
+            self.transaction_fetcher.filter_valid_message.partially_filter_valid_entries(msg);
+
+        if let FilterOutcome::ReportPeer = validation_outcome {
+            self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
+        }
 
         // 2. filter out known hashes
         //
@@ -611,6 +614,10 @@ where
         // protocol, healthy peers will send many of the same hashes.
         //
         let already_known_by_pool = self.pool.retain_unknown(&mut partially_valid_msg);
+
+        // get handle to peer's session again, at this point we know it exists
+        let Some(peer) = self.peers.get_mut(&peer_id) else { return };
+        let client_version = peer.client_version.clone();
 
         // keep track of the transactions the peer knows
         let mut num_already_seen = 0;
@@ -634,39 +641,29 @@ where
             return
         }
 
-        // 3. filter out invalid entries
+        // 3. filter out invalid entries (spam)
         //
         // validates messages with respect to the given network, e.g. allowed tx types
         //
-        let mut valid_announcement_data = if partially_valid_msg
+        let (validation_outcome, mut valid_announcement_data) = if partially_valid_msg
             .msg_version()
             .expect("partially valid announcement should have version")
             .is_eth68()
         {
             // validate eth68 announcement data
-            let (outcome, valid_data) = self
-                .transaction_fetcher
+            self.transaction_fetcher
                 .filter_valid_message
-                .filter_valid_entries_68(partially_valid_msg);
-
-            if let FilterOutcome::ReportPeer = outcome {
-                self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
-            }
-
-            valid_data
+                .filter_valid_entries_68(partially_valid_msg)
         } else {
             // validate eth66 announcement data
-            let (outcome, valid_data) = self
-                .transaction_fetcher
+            self.transaction_fetcher
                 .filter_valid_message
-                .filter_valid_entries_66(partially_valid_msg);
-
-            if let FilterOutcome::ReportPeer = outcome {
-                self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
-            }
-
-            valid_data
+                .filter_valid_entries_66(partially_valid_msg)
         };
+
+        if let FilterOutcome::ReportPeer = validation_outcome {
+            self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
+        }
 
         if valid_announcement_data.is_empty() {
             // no valid announcement data

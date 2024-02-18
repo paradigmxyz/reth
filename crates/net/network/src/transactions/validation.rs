@@ -1,4 +1,5 @@
-//! Validation of [`NewPooledTransactionHashes66`] and [`NewPooledTransactionHashes68`]
+//! Validation of [`NewPooledTransactionHashes66`](reth_eth_wire::NewPooledTransactionHashes66)
+//! and [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68)
 //! announcements. Validation and filtering of announcements is network dependent.
 
 use std::{fmt, mem};
@@ -14,11 +15,13 @@ use tracing::{debug, trace};
 /// The size of a decoded signature in bytes.
 pub const SIGNATURE_DECODED_SIZE_BYTES: usize = mem::size_of::<Signature>();
 
-/// Interface for validating a `(ty, size, hash)` tuple from a [`NewPooledTransactionHashes68`].
+/// Interface for validating a `(ty, size, hash)` tuple from a
+/// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68)..
 pub trait ValidateTx68 {
-    /// Validates a [`NewPooledTransactionHashes68`] entry. Returns [`ValidationOutcome`] which
-    /// signals to the caller wether to fetch the transaction or wether to drop it, and wether the
-    /// sender of the announcement should be penalized.
+    /// Validates a [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68)
+    /// entry. Returns [`ValidationOutcome`] which signals to the caller wether to fetch the
+    /// transaction or wether to drop it, and wether the sender of the announcement should be
+    /// penalized.
     fn should_fetch(&self, ty: u8, hash: &TxHash, size: usize) -> ValidationOutcome;
 
     /// Returns the reasonable maximum encoded transaction length configured for this network, if
@@ -41,9 +44,9 @@ pub trait ValidateTx68 {
     fn strict_min_encoded_tx_length(&self, ty: TxType) -> Option<usize>;
 }
 
-/// Outcomes from validating a `(ty, hash, size)` entry from a [`NewPooledTransactionHashes68`].
-/// Signals to the caller how to deal with an announcement entry and the peer who sent the
-/// announcement.
+/// Outcomes from validating a `(ty, hash, size)` entry from a
+/// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68).. Signals to the
+/// caller how to deal with an announcement entry and the peer who sent the announcement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationOutcome {
     /// Tells the caller to keep the entry in the announcement for fetch.
@@ -58,10 +61,9 @@ pub enum ValidationOutcome {
 /// Generic filter for announcements and responses. Checks for empty message and unique hashes/
 /// transactions in message.
 pub trait PartiallyFilterMessage {
-    /// Removes duplicate entries from a [`NewPooledTransactionHashes68`] announcement. Returns
-    /// [`FilterOutcome::ReportPeer`] if the caller should penalize the peer, otherwise
-    /// [`FilterOutcome::Ok`].
-    fn partially_filter<V>(
+    /// Removes duplicate entries from a mempool message. Returns [`FilterOutcome::ReportPeer`] if
+    /// the caller should penalize the peer, otherwise [`FilterOutcome::Ok`].
+    fn partially_filter_valid_entries<V>(
         &self,
         msg: impl DedupPayload<Value = V> + fmt::Debug,
     ) -> (FilterOutcome, PartiallyValidData<V>) {
@@ -90,11 +92,14 @@ pub trait PartiallyFilterMessage {
     }
 }
 
-/// Filters valid entries in [`NewPooledTransactionHashes68`] and [`NewPooledTransactionHashes66`]
-/// in place, and flags misbehaving peers.
+/// Filters valid entries in
+/// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68) and
+/// [`NewPooledTransactionHashes66`](reth_eth_wire::NewPooledTransactionHashes66) in place, and
+/// flags misbehaving peers.
 pub trait FilterAnnouncement {
-    /// Removes invalid entries from a [`NewPooledTransactionHashes68`] announcement. Returns
-    /// [`FilterOutcome::ReportPeer`] if the caller should penalize the peer, otherwise
+    /// Removes invalid entries from a
+    /// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68) announcement.
+    /// Returns [`FilterOutcome::ReportPeer`] if the caller should penalize the peer, otherwise
     /// [`FilterOutcome::Ok`].
     fn filter_valid_entries_68(
         &self,
@@ -103,8 +108,9 @@ pub trait FilterAnnouncement {
     where
         Self: ValidateTx68;
 
-    /// Removes invalid entries from a [`NewPooledTransactionHashes66`] announcement. Returns
-    /// [`FilterOutcome::ReportPeer`] if the caller should penalize the peer, otherwise
+    /// Removes invalid entries from a
+    /// [`NewPooledTransactionHashes66`](reth_eth_wire::NewPooledTransactionHashes66) announcement.
+    /// Returns [`FilterOutcome::ReportPeer`] if the caller should penalize the peer, otherwise
     /// [`FilterOutcome::Ok`].
     fn filter_valid_entries_66(
         &self,
@@ -112,8 +118,9 @@ pub trait FilterAnnouncement {
     ) -> (FilterOutcome, ValidAnnouncementData);
 }
 
-/// Outcome from filtering [`NewPooledTransactionHashes68`]. Signals to caller whether to penalize
-/// the sender of the announcement or not.
+/// Outcome from filtering
+/// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68). Signals to caller
+/// whether to penalize the sender of the announcement or not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterOutcome {
     /// Peer behaves appropriately.
@@ -124,9 +131,9 @@ pub enum FilterOutcome {
 }
 
 /// Wrapper for types that implement [`FilterAnnouncement`]. The definition of a valid
-/// announcement is network dependent. For example, different networks support different [`TxType`]
-/// s, and different [`TxType`]s have different transaction size constraints. Defaults to
-/// [`EthAnnouncementFilter`].
+/// announcement is network dependent. For example, different networks support different
+/// [`TxType`]s, and different [`TxType`]s have different transaction size constraints. Defaults to
+/// [`EthMessageFilter`].
 #[derive(Debug, Default, Deref, DerefMut)]
 pub struct MessageFilter<N = EthMessageFilter>(N);
 
@@ -304,9 +311,11 @@ impl FilterAnnouncement for EthMessageFilter {
 #[cfg(test)]
 mod test {
     use super::*;
-    use reth_eth_wire::MAX_MESSAGE_SIZE;
+    use reth_eth_wire::{
+        NewPooledTransactionHashes66, NewPooledTransactionHashes68, MAX_MESSAGE_SIZE,
+    };
     use reth_primitives::B256;
-    use std::str::FromStr;
+    use std::{collections::HashMap, str::FromStr};
 
     #[test]
     fn eth68_empty_announcement() {
@@ -318,7 +327,7 @@ mod test {
 
         let filter = EthMessageFilter;
 
-        let (outcome, _data) = filter.filter_valid_entries_68(announcement);
+        let (outcome, _partially_valid_data) = filter.partially_filter_valid_entries(announcement);
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
     }
@@ -345,14 +354,18 @@ mod test {
 
         let filter = EthMessageFilter;
 
-        let (outcome, data) = filter.filter_valid_entries_68(announcement);
+        let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
+
+        assert_eq!(outcome, FilterOutcome::Ok);
+
+        let (outcome, valid_data) = filter.filter_valid_entries_68(partially_valid_data);
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
 
         let mut expected_data = HashMap::new();
         expected_data.insert(hashes[1], Some((types[1], sizes[1])));
 
-        assert_eq!(expected_data, data.into_data())
+        assert_eq!(expected_data, valid_data.into_data())
     }
 
     #[test]
@@ -381,14 +394,18 @@ mod test {
 
         let filter = EthMessageFilter;
 
-        let (outcome, data) = filter.filter_valid_entries_68(announcement);
+        let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
+
+        assert_eq!(outcome, FilterOutcome::Ok);
+
+        let (outcome, valid_data) = filter.filter_valid_entries_68(partially_valid_data);
 
         assert_eq!(outcome, FilterOutcome::Ok);
 
         let mut expected_data = HashMap::new();
         expected_data.insert(hashes[2], Some((types[2], sizes[2])));
 
-        assert_eq!(expected_data, data.into_data())
+        assert_eq!(expected_data, valid_data.into_data())
     }
 
     #[test]
@@ -420,7 +437,7 @@ mod test {
 
         let filter = EthMessageFilter;
 
-        let (outcome, data) = filter.filter_valid_entries_68(announcement);
+        let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
 
@@ -428,7 +445,7 @@ mod test {
         expected_data.insert(hashes[3], Some((types[3], sizes[3])));
         expected_data.insert(hashes[0], Some((types[0], sizes[0])));
 
-        assert_eq!(expected_data, data.into_data())
+        assert_eq!(expected_data, partially_valid_data.into_data())
     }
 
     #[test]
@@ -439,7 +456,7 @@ mod test {
 
         let filter: MessageFilter = MessageFilter::default();
 
-        let (outcome, _data) = filter.filter_valid_entries_66(announcement);
+        let (outcome, _partially_valid_data) = filter.partially_filter_valid_entries(announcement);
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
     }
@@ -464,7 +481,7 @@ mod test {
 
         let filter: MessageFilter = MessageFilter::default();
 
-        let (outcome, data) = filter.filter_valid_entries_66(announcement);
+        let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
 
@@ -472,12 +489,12 @@ mod test {
         expected_data.insert(hashes[1], None);
         expected_data.insert(hashes[0], None);
 
-        assert_eq!(expected_data, data.into_data())
+        assert_eq!(expected_data, partially_valid_data.into_data())
     }
 
     #[test]
     fn test_derive_more_display_for_zst() {
         let filter = EthMessageFilter;
-        assert_eq!("EthAnnouncementFilter", &filter.to_string());
+        assert_eq!("EthMessageFilter", &filter.to_string());
     }
 }
