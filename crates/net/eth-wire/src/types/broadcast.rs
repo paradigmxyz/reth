@@ -442,7 +442,9 @@ impl Decodable for NewPooledTransactionHashes68 {
     }
 }
 
+/// Validation pass that checks for unique transaction hashes.
 pub trait DedupPayload {
+    /// Value type in [`PartiallyValidData`] map.
     type Value;
 
     /// The payload contains no entries.
@@ -455,6 +457,7 @@ pub trait DedupPayload {
     fn dedup(self) -> PartiallyValidData<Self::Value>;
 }
 
+/// Value in [`PartiallyValidData`] map obtained from an announcement.
 pub type TxMetadata = Option<(u8, usize)>;
 
 impl DedupPayload for NewPooledTransactionHashes {
@@ -498,7 +501,7 @@ impl DedupPayload for NewPooledTransactionHashes68 {
             }
         }
 
-        PartiallyValidData::new_eth68(deduped_data)
+        PartiallyValidData::from_raw_data_eth68(deduped_data)
     }
 }
 
@@ -524,7 +527,7 @@ impl DedupPayload for NewPooledTransactionHashes66 {
             deduped_data.insert(hash, noop_value);
         }
 
-        PartiallyValidData::new_eth66(deduped_data)
+        PartiallyValidData::from_raw_data_eth66(deduped_data)
     }
 }
 
@@ -561,13 +564,15 @@ macro_rules! hash_map_handle_payload_impl {
 
                 self.data = keep;
 
-                <$data_ty>::new(rest, self.version)
+                Self { data: rest, version: self.version }
             }
         }
     };
 }
 
-#[derive(Debug, Deref, DerefMut, IntoIterator, Constructor)]
+/// Data that has passed an initial validation pass that is not specific to any mempool message
+/// type.
+#[derive(Debug, Deref, DerefMut, IntoIterator)]
 pub struct PartiallyValidData<V> {
     #[deref]
     #[deref_mut]
@@ -579,28 +584,30 @@ pub struct PartiallyValidData<V> {
 hash_map_handle_payload_impl!(PartiallyValidData<V>, <V>);
 
 impl<V> PartiallyValidData<V> {
-    /// Returns a new [`ValidAnnouncementData`] wrapper around validated
-    /// [`Eth68`](EthVersion::Eth68) announcement data.
-    pub fn new_eth68(data: HashMap<TxHash, V>) -> Self {
-        Self::new(data, Some(EthVersion::Eth68))
+    /// Wraps raw data.
+    pub fn from_raw_data(data: HashMap<TxHash, V>, version: Option<EthVersion>) -> Self {
+        Self { data, version }
+    }
+    /// Wraps raw data with version [`EthVersion::Eth68`].
+    pub fn from_raw_data_eth68(data: HashMap<TxHash, V>) -> Self {
+        Self::from_raw_data(data, Some(EthVersion::Eth68))
     }
 
-    /// Returns a new [`ValidAnnouncementData`] wrapper around validated
-    /// [`Eth68`](EthVersion::Eth68) announcement data.
-    pub fn new_eth66(data: HashMap<TxHash, V>) -> Self {
-        Self::new(data, Some(EthVersion::Eth66))
+    /// Wraps raw data with version [`EthVersion::Eth66`].
+    pub fn from_raw_data_eth66(data: HashMap<TxHash, V>) -> Self {
+        Self::from_raw_data(data, Some(EthVersion::Eth66))
     }
 
-    /// Returns a new [`ValidAnnouncementData`] with empty data from an [`Eth68`](EthVersion::Eth68)
+    /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth68`](EthVersion::Eth68)
     /// announcement.
     pub fn empty_eth68() -> Self {
-        Self::new_eth68(HashMap::new())
+        Self::from_raw_data_eth68(HashMap::new())
     }
 
-    /// Returns a new [`ValidAnnouncementData`] with empty data from an [`Eth66`](EthVersion::Eth66)
+    /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth66`](EthVersion::Eth66)
     /// announcement.
     pub fn empty_eth66() -> Self {
-        Self::new_eth66(HashMap::new())
+        Self::from_raw_data_eth66(HashMap::new())
     }
 
     /// Returns the version of the message this data was received in if different versions of the
@@ -615,7 +622,8 @@ impl<V> PartiallyValidData<V> {
     }
 }
 
-#[derive(Debug, Deref, DerefMut, IntoIterator, Constructor, From)]
+/// Validated data from an announcement that
+#[derive(Debug, Deref, DerefMut, IntoIterator, From)]
 #[from(PartiallyValidData<TxMetadata>)]
 pub struct ValidAnnouncementData {
     #[deref]
@@ -637,6 +645,9 @@ impl ValidAnnouncementData {
         (RequestTxHashes::new(hashes), self.version)
     }
 
+    /// Conversion from [`PartiallyValidData`] from an announcement. Note! [`PartiallyValidData`]
+    /// from an announcement, should have some [`EthVersion`]. Panics if [`PartiallyValidData`] has
+    /// version set to `None`.
     pub fn from_partially_valid_data(data: PartiallyValidData<TxMetadata>) -> Self {
         let PartiallyValidData { data, version } = data;
 
