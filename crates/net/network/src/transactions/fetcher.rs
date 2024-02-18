@@ -393,7 +393,7 @@ impl TransactionFetcher {
 
         let elapsed = now.elapsed();
         if elapsed.as_millis() > 1 {
-            println!("find_any_idle_fallback_peer_for_any_pending_hash: {:?}", elapsed);
+            println!("search_breadth_budget_find_intersection_pending_hashes_and_hashes_seen_by_peer: {:?}", elapsed);
         }
 
         self.fill_request_from_hashes_pending_fetch(

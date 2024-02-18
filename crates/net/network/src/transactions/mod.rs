@@ -802,12 +802,13 @@ where
                 }
 
                 let now = Instant::now();
+                let len = non_blob_txs.len();
 
                 self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
 
                 let elapsed = now.elapsed();
                 if elapsed.as_millis() > 1 {
-                    println!("import_transactions: {:?}", elapsed);
+                    println!("import_transactions broadcast {}: {:?}", len, elapsed);
                 }
 
                 if has_blob_txs {
@@ -1143,17 +1144,12 @@ where
                 some_ready = true;
             }
 
-            let now = Instant::now();
+
 
             // drain incoming transaction events
             if let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
                 this.on_network_tx_event(event);
                 some_ready = true;
-            }
-
-            let elapsed = now.elapsed();
-            if elapsed.as_millis() > 10 {
-                println!("on_network_tx_event: {:?}", elapsed);
             }
 
             this.update_fetch_metrics();
@@ -1162,11 +1158,17 @@ where
             if let Poll::Ready(Some(fetch_event)) = this.transaction_fetcher.poll_next_unpin(cx) {
                 match fetch_event {
                     FetchEvent::TransactionsFetched { peer_id, transactions } => {
+                        let now = Instant::now();
+                        let len = transactions.len();
                         this.import_transactions(
                             peer_id,
                             transactions,
                             TransactionSource::Response,
                         );
+                        let elapsed = now.elapsed();
+                        if elapsed.as_millis() > 10 {
+                            println!("import_transactions request {}: {:?}", len, elapsed);
+                        }
                     }
                     FetchEvent::FetchError { peer_id, error } => {
                         trace!(target: "net::tx", ?peer_id, ?error, "requesting transactions from peer failed");
