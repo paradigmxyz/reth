@@ -28,7 +28,7 @@ use reth_stages::{
     },
     ExecInput, Stage, StageExt, UnwindInput,
 };
-use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
 use tracing::*;
 
 /// `reth stage` command
@@ -269,6 +269,8 @@ impl Command {
             checkpoint: Some(checkpoint.with_block_number(self.from)),
         };
 
+        let start = Instant::now();
+        info!(target: "reth::cli", stage= ?self.stage, "Executing stage.", );
         loop {
             exec_stage.execute_ready(input).await?;
             let output = exec_stage.execute(&provider_rw, input)?;
@@ -284,6 +286,7 @@ impl Command {
                 break
             }
         }
+        info!(target: "reth::cli", stage= ?self.stage, time = ?start.elapsed().as_secs(), "Finished stage.");
 
         Ok(())
     }
