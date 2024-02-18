@@ -4527,7 +4527,7 @@
         "type": "prometheus",
         "uid": "PBFA97CFB590B2093"
       },
-      "description": "Tracks the number of transactions inserted and removed from the transaction pool, as well as the number of invalid transactions",
+      "description": "Tracks the number of transactions per second that are inserted and removed from the transaction pool, as well as the number of invalid transactions per second.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -4621,7 +4621,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "increase(reth_transaction_pool_inserted_transactions{instance=~\"$instance\"}[1m])",
+          "expr": "rate(reth_transaction_pool_inserted_transactions{instance=~\"$instance\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "legendFormat": "Inserted transactions",
@@ -4636,7 +4636,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "increase(reth_transaction_pool_removed_transactions{instance=~\"$instance\"}[1m])",
+          "expr": "rate(reth_transaction_pool_removed_transactions{instance=~\"$instance\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -4652,7 +4652,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "increase(reth_transaction_pool_invalid_transactions{instance=~\"$instance\"}[1m])",
+          "expr": "rate(reth_transaction_pool_invalid_transactions{instance=~\"$instance\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
