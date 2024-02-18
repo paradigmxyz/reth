@@ -134,11 +134,10 @@ async fn test_sending_invalid_transactions() {
     }
 
     // await disconnect for bad tx spam
-    while let Some(ev) = peer1_events.next().await {
+    if let Some(ev) = peer1_events.next().await {
         match ev {
             NetworkEvent::SessionClosed { peer_id, .. } => {
                 assert_eq!(peer_id, *peer0.peer_id());
-                break
             }
             NetworkEvent::SessionEstablished { .. } => {
                 panic!("unexpected event")
