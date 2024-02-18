@@ -1612,7 +1612,7 @@ impl Display for DisplayFork {
 // - ArrowGlacier                     @13773000
 // - GrayGlacier                      @15050000
 // Merge hard forks:
-// - Paris                            @58750000000000000000000 (network is not known to be merged)
+// - Paris                            @58750000000000000000000 (network is known to be merged)
 //
 // Post-merge hard forks (timestamp based):
 // - Shanghai                         @1681338455
@@ -1766,7 +1766,7 @@ mod tests {
 - ArrowGlacier                     @13773000
 - GrayGlacier                      @15050000
 Merge hard forks:
-- Paris                            @58750000000000000000000 (network is not known to be merged)
+- Paris                            @58750000000000000000000 (network is known to be merged)
 
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
