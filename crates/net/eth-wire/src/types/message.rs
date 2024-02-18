@@ -254,8 +254,9 @@ pub trait EncodableExt {
     ///
     /// # Arguments
     ///
-    /// * `approx` - The approximate size to allocate in memory
-    /// * `size` - The maximum allowed size of the data.
+    /// * `approx` - The approximate size to allocate in memory for the encoding process. This is
+    ///   used to pre-allocate memory for efficiency.
+    /// * `limit` - The maximum allowed size of the encoded data.
     ///
     /// # Returns
     ///
@@ -278,7 +279,8 @@ pub trait EncodableExt {
     ///
     /// # Arguments
     ///
-    /// * `approx` - The approximate size to allocate in memory
+    /// * `approx` - The approximate size to allocate in memory for the encoding process. This is
+    ///   used to pre-allocate memory for efficiency.
     /// * `limit` - The maximum allowed size of the encoded data.
     ///
     /// # Returns
@@ -287,6 +289,26 @@ pub trait EncodableExt {
     /// Users of this method should be aware that the truncated data may not represent the complete
     /// original dataset.
     fn encode_truncate(&self, approx: usize, limit: usize) -> Vec<u8>;
+
+    /// Encodes the data up to the specified size limit, returning the encoded data along with
+    /// a flag indicating whether the limit was exceeded. This method is useful for partial
+    /// encoding scenarios where it is necessary to encode as much as possible without going
+    /// over the limit.
+    ///
+    /// # Arguments
+    ///
+    /// * `approx` - The approximate size to allocate in memory for the encoding process. This is
+    ///   used to pre-allocate memory for efficiency.
+    /// * `limit` - The maximum allowed size of the encoded data.
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing:
+    /// * The encoded data as `Vec<u8>`.
+    /// * The length of the data at the point of reaching the limit, or the 0 length if the limit
+    ///   was not exceeded.
+    /// * A boolean flag that is `true` if the size limit was exceeded and `false` otherwise.
+    fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize, bool);
 }
 
 impl<T: Encodable> EncodableExt for Vec<T> {
@@ -295,23 +317,17 @@ impl<T: Encodable> EncodableExt for Vec<T> {
         approx: usize,
         limit: usize,
     ) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error> {
-        let mut buffer = Vec::with_capacity(approx);
-        let mut header = Header { list: true, payload_length: 0 };
-        for item in self {
-            header.payload_length += item.length();
+        let (mut buf, _current_len, limit_exceeded) = self.encode_until_limit(approx, limit);
+
+        if limit_exceeded {
+            // Don't shrink if limit_exceeded since we return Error anyway
+            return Err(alloy_rlp::Error::Custom("Size limit exceeded"));
         }
-        header.encode(&mut buffer);
-        for item in self {
-            item.encode(&mut buffer);
-            if buffer.len() > limit {
-                return Err(alloy_rlp::Error::Custom("Size limit exceeded"));
-            }
-        }
-        buffer.shrink_to_fit();
-        Ok(buffer)
+        buf.shrink_to_fit();
+        Ok(buf)
     }
 
-    fn encode_truncate(&self, approx: usize, limit: usize) -> Vec<u8> {
+    fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize, bool) {
         let mut buffer = Vec::with_capacity(approx);
         let mut header = Header { list: true, payload_length: 0 };
         for item in self {
@@ -322,12 +338,24 @@ impl<T: Encodable> EncodableExt for Vec<T> {
             let current_len = buffer.len();
             item.encode(&mut buffer);
             if buffer.len() > limit {
-                buffer.truncate(current_len);
-                break;
+                return (buffer, current_len, true);
             }
         }
-        buffer.shrink_to_fit();
-        buffer
+        // Return current_len = 0 as placeholder
+        (buffer, 0, false)
+    }
+
+    fn encode_truncate(&self, approx: usize, limit: usize) -> Vec<u8> {
+        let (mut buf, _current_len, limit_exceeded) = self.encode_until_limit(approx, limit);
+
+        if limit_exceeded {
+            buf.truncate(_current_len);
+            buf.shrink_to_fit(); // shrink buffer to catch cases where approx > limit
+            return buf;
+        }
+
+        buf.shrink_to_fit();
+        buf
     }
 }
 
