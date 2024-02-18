@@ -71,6 +71,7 @@ use tracing::{debug, trace};
 
 /// Default and spec'd bounds.
 pub mod constants;
+mod config;
 mod fetcher;
 mod validation;
 pub use config::{TransactionFetcherConfig, TransactionsManagerConfig};
@@ -1201,8 +1202,6 @@ where
                 return Poll::Pending
             }
         }
-
-        Poll::Pending
     }
 }
 

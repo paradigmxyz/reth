@@ -1,10 +1,12 @@
 use crate::{
     cache::{LruCache, LruMap},
     message::PeerRequest,
-    poll_nested_stream_with_yield_points,
 };
 use derive_more::Constructor;
-use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
+use futures::{
+    stream::FuturesUnordered, Future, FutureExt, Stream,
+    StreamExt,
+};
 use futures_test::task::noop_context;
 use pin_project::pin_project;
 use reth_eth_wire::{
@@ -77,8 +79,12 @@ impl TransactionFetcher {
             config.soft_limit_byte_size_pooled_transactions_response_on_pack_request;
         self
     }
-    
+
     pub(super) fn try_drain_inflight_requests(&mut self) {
+        self.advance_inflight_requests(DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS)
+    }
+
+    fn advance_inflight_requests(&mut self, steps: u32) {
         // `FuturesUnordered` doesn't close when `None` is returned. so just return if empty.
         // <https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=815be2b6c8003303757c3ced135f363e>
         if self.inflight_requests.is_empty() {
@@ -87,13 +93,21 @@ impl TransactionFetcher {
 
         // noop context is used since we don't need the inflight requests futures unordered to
         // schedule for wake up here when it's pending
-        let _ = poll_nested_stream_with_yield_points!(
-            "net::tx",
-            "Fetch events stream",
-            DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
-            self.inflight_requests.poll_next_unpin(&mut noop_context()),
-            |resp| self.on_resolved_get_pooled_transactions_request_fut(resp),
-        );
+        let mut budget = steps;        
+
+        loop {
+            match self.inflight_requests.poll_next_unpin(&mut noop_context()) {
+                Poll::Ready(Some(resp)) => {
+                    self.on_resolved_get_pooled_transactions_request_fut(resp);
+
+                    budget = budget.saturating_sub(1);
+                    if budget == 0 {
+                        break
+                    }
+                },
+                Poll::Ready(None) | Poll::Pending => break,
+            }
+        }
     }
 
     /// Removes the specified hashes from inflight tracking.
@@ -856,7 +870,7 @@ impl TransactionFetcher {
                     true
                 });
 
-                self.remove_from_unknown_hashes(fetched);
+                self.remove_hashes_from_transaction_fetcher(fetched);
                 // buffer left over hashes
                 self.buffer_hashes_for_retry(requested_hashes, &peer_id);
 
