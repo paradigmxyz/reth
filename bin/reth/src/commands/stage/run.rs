@@ -270,7 +270,7 @@ impl Command {
         };
 
         let start = Instant::now();
-        info!(target: "reth::cli", stage= ?self.stage, "Executing stage.", );
+        info!(target: "reth::cli", stage= ?self.stage, "Executing stage.");
         loop {
             exec_stage.execute_ready(input).await?;
             let output = exec_stage.execute(&provider_rw, input)?;
