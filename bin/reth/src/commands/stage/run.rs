@@ -286,7 +286,7 @@ impl Command {
                 break
             }
         }
-        info!(target: "reth::cli", stage= ?self.stage, time = ?start.elapsed().as_secs(), "Finished stage.");
+        info!(target: "reth::cli", stage= ?self.stage, time = ?start.elapsed(), "Finished stage.");
 
         Ok(())
     }
