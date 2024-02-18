@@ -24,8 +24,8 @@ use reth_provider::{
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle,
-    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, RichBlock, StateContext,
-    SyncStatus, TransactionReceipt, TransactionRequest, Work,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock,
+    StateContext, SyncStatus, TransactionReceipt, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
@@ -226,6 +226,32 @@ where
             .await?)
     }
 
+    /// Handler for: `eth_getHeaderByNumber`
+    async fn header_by_number(&self, block_number: BlockNumberOrTag) -> Result<Option<Header>> {
+        trace!(target: "rpc::eth", ?block_number, "Serving eth_getHeaderByNumber");
+        let block = EthApi::rpc_block(self, block_number, false).await?;
+
+        let header = match block {
+            Some(block) => block.inner.header,
+            None => return Ok(None),
+        };
+
+        Ok(Some(header))
+    }
+
+    /// Handler for: `eth_getHeaderByHash`
+    async fn header_by_hash(&self, hash: B256) -> Result<Option<Header>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getHeaderByHash");
+        let block = EthApi::rpc_block(self, hash, false).await?;
+
+        let header = match block {
+            Some(block) => block.inner.header,
+            None => return Ok(None),
+        };
+
+        Ok(Some(header))
+    }
+
     /// Handler for: `eth_call`
     async fn call(
         &self,
@@ -283,19 +309,19 @@ where
     /// Handler for: `eth_gasPrice`
     async fn gas_price(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_gasPrice");
-        return Ok(EthApi::gas_price(self).await?)
+        return Ok(EthApi::gas_price(self).await?);
     }
 
     /// Handler for: `eth_blobGasPrice`
     async fn blob_gas_price(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_blobGasPrice");
-        return Ok(EthApi::blob_gas_price(self).await?)
+        return Ok(EthApi::blob_gas_price(self).await?);
     }
 
     /// Handler for: `eth_maxPriorityFeePerGas`
     async fn max_priority_fee_per_gas(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_maxPriorityFeePerGas");
-        return Ok(EthApi::suggested_priority_fee(self).await?)
+        return Ok(EthApi::suggested_priority_fee(self).await?);
     }
 
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
@@ -316,7 +342,7 @@ where
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
         return Ok(
             EthApi::fee_history(self, block_count.to(), newest_block, reward_percentiles).await?
-        )
+        );
     }
 
     /// Handler for: `eth_mining`
