@@ -1,7 +1,6 @@
 use crate::{validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion};
 use reth_primitives::{
-    revm::config::revm_spec_by_timestamp_after_merge,
-    revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
+    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Address, ChainSpec, Header, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::{
@@ -87,64 +86,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
         &self,
         chain_spec: &ChainSpec,
         parent: &Header,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
-        // configure evm env based on parent block
-        let mut cfg = CfgEnv::default();
-        cfg.chain_id = chain_spec.chain().id();
-
-        // ensure we're not missing any timestamp based hardforks
-        let spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp());
-
-        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
-        // cancun now, we need to set the excess blob gas to the default value
-        let blob_excess_gas_and_price = parent
-            .next_block_excess_blob_gas()
-            .or_else(|| {
-                if spec_id == SpecId::CANCUN {
-                    // default excess blob gas is zero
-                    Some(0)
-                } else {
-                    None
-                }
-            })
-            .map(BlobExcessGasAndPrice::new);
-
-        let block_env = BlockEnv {
-            number: U256::from(parent.number + 1),
-            coinbase: self.suggested_fee_recipient(),
-            timestamp: U256::from(self.timestamp()),
-            difficulty: U256::ZERO,
-            prevrandao: Some(self.prev_randao()),
-            gas_limit: U256::from(parent.gas_limit),
-            // calculate basefee based on parent block's gas usage
-            basefee: U256::from(
-                parent
-                    .next_block_base_fee(chain_spec.base_fee_params(self.timestamp()))
-                    .unwrap_or_default(),
-            ),
-            // calculate excess gas based on parent block's blob gas usage
-            blob_excess_gas_and_price,
-        };
-
-        let cfg_with_handler_cfg;
-        #[cfg(feature = "optimism")]
-        {
-            cfg_with_handler_cfg = CfgEnvWithHandlerCfg {
-                cfg_env: cfg,
-                handler_cfg: revm_primitives::HandlerCfg {
-                    spec_id,
-                    is_optimism: chain_spec.is_optimism(),
-                },
-            };
-        }
-
-        #[cfg(not(feature = "optimism"))]
-        {
-            cfg_with_handler_cfg = CfgEnvWithHandlerCfg::new(cfg, spec_id);
-        }
-
-        (cfg_with_handler_cfg, block_env)
-    }
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv);
 }
 
 /// The execution payload attribute type the CL node emits via the engine API.

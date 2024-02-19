@@ -55,5 +55,4 @@ optimism = [
   "reth-rpc-types-compat/optimism",
   "reth-interfaces/optimism",
   "reth-transaction-pool/optimism",
-  "reth-node-api/optimism",
 ]

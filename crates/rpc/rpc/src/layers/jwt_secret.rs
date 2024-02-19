@@ -220,14 +220,8 @@ impl Claims {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layers::jwt_secret::JWT_MAX_IAT_DIFF;
     use assert_matches::assert_matches;
-    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-    use reth_primitives::fs::FsPathError;
-    use std::{
-        path::Path,
-        time::{Duration, SystemTime, UNIX_EPOCH},
-    };
+    use jsonwebtoken::{encode, EncodingKey, Header};
     use tempfile::tempdir;
 
     #[test]

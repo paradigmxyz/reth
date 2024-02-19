@@ -137,10 +137,9 @@ impl<DB: Database> ProviderFactory<DB> {
     /// Storage provider for state at that given block
     fn state_provider_by_block_number(
         &self,
+        provider: DatabaseProviderRO<DB>,
         mut block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        let provider = self.provider()?;
-
         if block_number == provider.best_block_number().unwrap_or_default() &&
             block_number == provider.last_block_number().unwrap_or_default()
         {
@@ -182,19 +181,21 @@ impl<DB: Database> ProviderFactory<DB> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        let state_provider = self.state_provider_by_block_number(block_number)?;
+        let provider = self.provider()?;
+        let state_provider = self.state_provider_by_block_number(provider, block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
         Ok(state_provider)
     }
 
     /// Storage provider for state at that given block hash
     pub fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
-        let block_number = self
-            .provider()?
+        let provider = self.provider()?;
+
+        let block_number = provider
             .block_number(block_hash)?
             .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
 
-        let state_provider = self.state_provider_by_block_number(block_number)?;
+        let state_provider = self.state_provider_by_block_number(provider, block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block hash");
         Ok(state_provider)
     }

@@ -14,6 +14,9 @@ const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 
 /// Caches metric handles for database environment to make sure handles are not re-created
 /// on every operation.
+///
+/// Requires a metric recorder to be registered before creating an instance of this struct.
+/// Otherwise, metric recording will no-op.
 #[derive(Debug)]
 pub struct DatabaseEnvMetrics {
     /// Caches OperationMetrics handles for each table and operation tuple.

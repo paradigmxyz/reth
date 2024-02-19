@@ -34,7 +34,7 @@ pub struct Discv4Config {
     pub ping_interval: Duration,
     /// The duration of we consider a ping timed out.
     pub ping_expiration: Duration,
-    /// The rate at which lookups should be triggered.
+    /// The rate at which new random lookups should be triggered.
     pub lookup_interval: Duration,
     /// The duration of we consider a FindNode request timed out.
     pub request_timeout: Duration,

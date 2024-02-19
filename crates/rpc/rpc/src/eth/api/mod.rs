@@ -301,12 +301,7 @@ where
             PendingBlockEnvOrigin::DerivedFromLatest(latest)
         };
 
-        let mut cfg = CfgEnvWithHandlerCfg::new(CfgEnv::default(), SpecId::LATEST);
-
-        #[cfg(feature = "optimism")]
-        {
-            cfg.handler_cfg.is_optimism = self.provider().chain_spec().is_optimism();
-        }
+        let mut cfg = CfgEnvWithHandlerCfg::new_with_spec_id(CfgEnv::default(), SpecId::LATEST);
 
         let mut block_env = BlockEnv::default();
         // Note: for the PENDING block we assume it is past the known merge block and thus this will
