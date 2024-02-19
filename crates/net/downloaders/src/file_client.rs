@@ -1,7 +1,5 @@
 use super::file_codec::BlockFileCodec;
-use futures_util::StreamExt;
 use itertools::Either;
-use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 use reth_interfaces::p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
@@ -9,20 +7,15 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersFut, HeadersRequest},
     priority::Priority,
 };
-
-use alloy_rlp::Decodable;
 use reth_primitives::{
     BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, B256,
 };
-use rlp::Encodable;
-
 use std::{self, collections::HashMap, path::Path};
 use thiserror::Error;
-
 use tokio::{fs::File, io::AsyncReadExt};
-
+use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{trace, warn};
 
 /// Front-end API for fetching chain data from a file.
 ///
@@ -57,10 +50,6 @@ pub enum FileClientError {
     /// An error occurred when decoding blocks, headers, or rlp headers from the file.
     #[error(transparent)]
     Rlp(#[from] alloy_rlp::Error),
-
-    /// An error occurred when fetching blocks, headers, or rlp headers from the remote provider.
-    #[error("provider error occurred: {0}")]
-    ProviderError(String),
 }
 
 impl FileClient {
@@ -68,79 +57,6 @@ impl FileClient {
     pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self, FileClientError> {
         let file = File::open(path).await?;
         FileClient::from_file(file).await
-    }
-
-    /// FileClient from rpc url
-    pub async fn from_rpc_url(
-        rpc: &str,
-        start_block: u64,
-        end_block: Option<u64>,
-    ) -> Result<Self, FileClientError> {
-        let mut headers = HashMap::new();
-        let mut hash_to_number = HashMap::new();
-        let mut bodies = HashMap::new();
-
-        let reqwest_client = ethereum_json_rpc_client::reqwest::ReqwestClient::new(rpc.to_string());
-
-        let provider = ethereum_json_rpc_client::EthJsonRcpClient::new(reqwest_client);
-
-        const BATCH_SIZE: usize = 500;
-
-        let latest_block = provider
-            .get_block_number()
-            .await
-            .map_err(|e| FileClientError::ProviderError(e.to_string()))?;
-        let end_block = end_block.unwrap_or(latest_block);
-
-        debug!(target: "downloaders::file", latest_block, "Latest block from rpc");
-
-        for begin_block in (start_block..=end_block).step_by(BATCH_SIZE) {
-            let count = std::cmp::min(BATCH_SIZE as u64, end_block - begin_block);
-
-            debug!(target: "downloaders::file", begin_block, count, "Fetching blocks");
-
-            let blocks_to_fetch =
-                (begin_block..(begin_block + count)).map(Into::into).collect::<Vec<_>>();
-
-            let full_blocks = provider
-                .get_full_blocks_by_number(blocks_to_fetch, BATCH_SIZE)
-                .await
-                .map_err(|e| {
-                    error!(target: "downloaders::file", begin_block, "Error fetching block: {}", e);
-                    FileClientError::ProviderError(format!(
-                        "Error fetching block {}: {}",
-                        begin_block, e
-                    ))
-                })?
-                .into_par_iter()
-                .clone()
-                .map(did::Block::<did::Transaction>::from)
-                .collect::<Vec<_>>();
-
-            trace!(target: "downloaders::file", blocks = full_blocks.len(), "Fetched blocks");
-
-            for block in full_blocks {
-                let header =
-                    reth_primitives::Block::decode(&mut block.rlp_bytes().to_vec().as_slice())?;
-
-                let block_hash = header.hash_slow();
-
-                headers.insert(header.number, header.header.clone());
-                hash_to_number.insert(block_hash, header.number);
-                bodies.insert(
-                    block_hash,
-                    BlockBody {
-                        transactions: header.body,
-                        ommers: header.ommers,
-                        withdrawals: header.withdrawals,
-                    },
-                );
-            }
-        }
-
-        info!(blocks = headers.len(), "Initialized file client");
-
-        Ok(Self { headers, hash_to_number, bodies })
     }
 
     /// Initialize the [`FileClient`] with a file directly.
@@ -185,15 +101,6 @@ impl FileClient {
     /// Get the tip hash of the chain.
     pub fn tip(&self) -> Option<B256> {
         self.headers.get(&(self.headers.len() as u64)).map(|h| h.hash_slow())
-    }
-
-    /// Get the remote tip hash of the chain.
-    pub fn remote_tip(&self) -> Option<B256> {
-        self.headers
-            .keys()
-            .max()
-            .and_then(|max_key| self.headers.get(max_key))
-            .map(|h| h.hash_slow())
     }
 
     /// Returns the highest block number of this client has or `None` if empty

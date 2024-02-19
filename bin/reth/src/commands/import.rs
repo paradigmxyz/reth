@@ -111,15 +111,6 @@ impl ImportCommand {
 
         self.import(config, provider_factory, db.into()).await?;
 
-        match tokio::signal::ctrl_c().await {
-            Ok(_) => {
-                info!(target: "reth::cli", "Received SIGINT, shutting down");
-            }
-            Err(e) => {
-                info!(target: "reth::cli", "Error while waiting for SIGINT: {:?}", e);
-            }
-        }
-
         Ok(())
     }
 
@@ -183,7 +174,10 @@ impl ImportCommand {
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
 
-        pipeline.run().await?;
+        tokio::select! {
+            res = pipeline.run() => res?,
+            _ = tokio::signal::ctrl_c() => {},
+        };
 
         info!(target: "reth::cli", "Finishing up");
         Ok(())
