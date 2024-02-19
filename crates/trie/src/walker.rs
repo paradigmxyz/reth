@@ -120,18 +120,14 @@ impl<C: TrieCursor> TrieWalker<C> {
 
     /// Retrieves the current root node from the DB, seeking either the exact node or the next one.
     fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let key = self.key().expect("key must exist");
-        let entry = if exact {
-            self.cursor.seek_exact(key.to_vec().into())?
-        } else {
-            self.cursor.seek(key.to_vec().into())?
-        };
+        let key = self.key().expect("key must exist").clone();
+        let entry = if exact { self.cursor.seek_exact(key)? } else { self.cursor.seek(key)? };
 
         if let Some((_, node)) = &entry {
             assert!(!node.state_mask.is_empty());
         }
 
-        Ok(entry.map(|(k, v)| (Nibbles::from_nibbles_unchecked(k), v)))
+        Ok(entry)
     }
 
     /// Consumes the next node in the trie, updating the stack.
@@ -235,11 +231,10 @@ impl<C: TrieCursor> TrieWalker<C> {
 
     /// Updates the skip node flag based on the walker's current state.
     fn update_skip_node(&mut self) {
-        self.can_skip_current_node = if let Some(node) = self.stack.last() {
-            !self.changes.contains(node.full_key()) && node.hash_flag()
-        } else {
-            false
-        };
+        self.can_skip_current_node = self
+            .stack
+            .last()
+            .map_or(false, |node| !self.changes.contains(node.full_key()) && node.hash_flag());
     }
 }
 

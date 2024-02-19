@@ -182,22 +182,46 @@ impl CanonicalOutcome {
 
 /// From Engine API spec, block inclusion can be valid, accepted or invalid.
 /// Invalid case is already covered by error, but we need to make distinction
-/// between if it is valid (extends canonical chain) or just accepted (is side chain).
-/// If we don't know the block parent we are returning Disconnected status
-/// as we can't make a claim if block is valid or not.
+/// between valid blocks that extend canonical chain and the ones that fork off
+/// into side chains (see [BlockAttachment]). If we don't know the block
+/// parent we are returning Disconnected status as we can't make a claim if
+/// block is valid or not.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BlockStatus {
-    /// If block validation is valid and block extends canonical chain.
-    /// In BlockchainTree sense it forks on canonical tip.
-    Valid,
-    /// If the block is valid, but it does not extend canonical chain.
-    /// (It is side chain) or hasn't been fully validated but ancestors of a payload are known.
-    Accepted,
+    /// If block is valid and block extends canonical chain.
+    /// In BlockchainTree terms, it forks off canonical tip.
+    Valid(BlockAttachment),
+    /// If block is valid and block forks off canonical chain.
     /// If blocks is not connected to canonical chain.
     Disconnected {
         /// The lowest ancestor block that is not connected to the canonical chain.
         missing_ancestor: BlockNumHash,
     },
+}
+
+/// Represents what kind of block is being executed and validated.
+///
+/// This is required to:
+/// - differentiate whether trie state updates should be cached.
+/// - inform other
+/// This is required because the state root check can only be performed if the targeted block can be
+/// traced back to the canonical __head__.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockAttachment {
+    /// The `block` is canonical or a descendant of the canonical head.
+    /// ([`head..(block.parent)*,block`])
+    Canonical,
+    /// The block can be traced back to an ancestor of the canonical head: a historical block, but
+    /// this chain does __not__ include the canonical head.
+    HistoricalFork,
+}
+
+impl BlockAttachment {
+    /// Returns `true` if the block is canonical or a descendant of the canonical head.
+    #[inline]
+    pub const fn is_canonical(&self) -> bool {
+        matches!(self, BlockAttachment::Canonical)
+    }
 }
 
 /// How a payload was inserted if it was valid.

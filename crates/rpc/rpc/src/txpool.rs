@@ -36,11 +36,10 @@ where
             tx: &T,
             content: &mut BTreeMap<Address, BTreeMap<String, Transaction>>,
         ) {
-            let entry = content.entry(tx.sender()).or_default();
-            let key = tx.nonce().to_string();
-            let tx = tx.to_recovered_transaction();
-            let tx = reth_rpc_types_compat::transaction::from_recovered(tx);
-            entry.insert(key, tx);
+            content.entry(tx.sender()).or_default().insert(
+                tx.nonce().to_string(),
+                reth_rpc_types_compat::transaction::from_recovered(tx.to_recovered_transaction()),
+            );
         }
 
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();
@@ -93,17 +92,15 @@ where
             let entry = inspect.entry(tx.sender()).or_default();
             let key = tx.nonce().to_string();
             let tx = tx.to_recovered_transaction();
-            let to = tx.to();
-            let gas_price = tx.transaction.max_fee_per_gas();
-            let value = tx.value();
-            let gas = tx.gas_limit();
-            let summary = TxpoolInspectSummary {
-                to,
-                value: value.into(),
-                gas: U256::from(gas),
-                gas_price: U256::from(gas_price),
-            };
-            entry.insert(key, summary);
+            entry.insert(
+                key,
+                TxpoolInspectSummary {
+                    to: tx.to(),
+                    value: tx.value().into(),
+                    gas: U256::from(tx.gas_limit()),
+                    gas_price: U256::from(tx.transaction.max_fee_per_gas()),
+                },
+            );
         }
 
         let mut inspect = TxpoolInspect::default();

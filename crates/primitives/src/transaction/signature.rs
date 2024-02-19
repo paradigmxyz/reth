@@ -101,18 +101,18 @@ impl Signature {
         let v = u64::decode(buf)?;
         let r = Decodable::decode(buf)?;
         let s = Decodable::decode(buf)?;
-        if v >= 35 {
-            // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
-            let odd_y_parity = ((v - 35) % 2) != 0;
-            let chain_id = (v - 35) >> 1;
-            Ok((Signature { r, s, odd_y_parity }, Some(chain_id)))
-        } else {
+        if v < 35 {
             // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
             if v != 27 && v != 28 {
                 return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
             }
             let odd_y_parity = v == 28;
             Ok((Signature { r, s, odd_y_parity }, None))
+        } else {
+            // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
+            let odd_y_parity = ((v - 35) % 2) != 0;
+            let chain_id = (v - 35) >> 1;
+            Ok((Signature { r, s, odd_y_parity }, Some(chain_id)))
         }
     }
 
@@ -181,7 +181,7 @@ impl Signature {
 
     /// Turn this signature into its hex-encoded representation.
     pub fn to_hex_bytes(&self) -> Bytes {
-        crate::hex::encode(self.to_bytes()).into()
+        self.to_bytes().into()
     }
 
     /// Calculates a heuristic for the in-memory size of the [Signature].
@@ -194,7 +194,7 @@ impl Signature {
 #[cfg(test)]
 mod tests {
     use crate::{transaction::signature::SECP256K1N_HALF, Address, Signature, B256, U256};
-    use alloy_primitives::hex;
+    use alloy_primitives::{hex, hex::FromHex, Bytes};
     use bytes::BytesMut;
     use std::str::FromStr;
 
@@ -313,6 +313,24 @@ mod tests {
         };
 
         assert!(signature.size() >= 65);
+    }
+
+    #[test]
+    fn test_to_hex_bytes() {
+        let signature = Signature {
+            r: U256::from_str(
+                "18515461264373351373200002665853028612451056578545711640558177340181847433846",
+            )
+            .unwrap(),
+            s: U256::from_str(
+                "46948507304638947509940763649030358759909902576025900602547168820602576006531",
+            )
+            .unwrap(),
+            odd_y_parity: false,
+        };
+
+        let expected = Bytes::from_hex("0x28ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa63627667cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d831b").unwrap();
+        assert_eq!(signature.to_hex_bytes(), expected);
     }
 
     #[test]

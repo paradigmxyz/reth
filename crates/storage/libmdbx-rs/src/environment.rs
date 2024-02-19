@@ -2,11 +2,11 @@ use crate::{
     database::Database,
     error::{mdbx_result, Error, Result},
     flags::EnvironmentFlags,
-    transaction::{CommitLatency, RO, RW},
-    Mode, Transaction, TransactionKind,
+    transaction::{RO, RW},
+    txn_manager::{TxnManager, TxnManagerMessage, TxnPtr},
+    Transaction, TransactionKind,
 };
 use byteorder::{ByteOrder, NativeEndian};
-use ffi::{mdbx_pid_t, mdbx_tid_t, MDBX_env, MDBX_hsr_func, MDBX_txn};
 use mem::size_of;
 use std::{
     ffi::CString,
@@ -16,13 +16,14 @@ use std::{
     ops::{Bound, RangeBounds},
     path::Path,
     ptr,
-    sync::{
-        mpsc::{sync_channel, SyncSender},
-        Arc,
-    },
+    sync::{mpsc::sync_channel, Arc},
     thread::sleep,
     time::Duration,
 };
+
+/// The default maximum duration of a read transaction.
+#[cfg(feature = "read-tx-timeouts")]
+const DEFAULT_MAX_READ_TRANSACTION_DURATION: Duration = Duration::from_secs(5 * 60);
 
 /// An environment supports multiple databases, all residing in the same shared-memory map.
 ///
@@ -49,7 +50,10 @@ impl Environment {
             geometry: None,
             log_level: None,
             kind: Default::default(),
+            #[cfg(not(windows))]
             handle_slow_readers: None,
+            #[cfg(feature = "read-tx-timeouts")]
+            max_read_transaction_duration: None,
         }
     }
 
@@ -65,32 +69,22 @@ impl Environment {
         self.inner.env_kind
     }
 
-    /// Returns true if the environment was opened in [Mode::ReadWrite] mode.
+    /// Returns true if the environment was opened in [crate::Mode::ReadWrite] mode.
     #[inline]
     pub fn is_read_write(&self) -> bool {
-        self.inner.txn_manager.is_some()
+        self.inner.env_kind.is_write_map()
     }
 
-    /// Returns true if the environment was opened in [Mode::ReadOnly] mode.
+    /// Returns true if the environment was opened in [crate::Mode::ReadOnly] mode.
     #[inline]
     pub fn is_read_only(&self) -> bool {
-        self.inner.txn_manager.is_none()
+        !self.inner.env_kind.is_write_map()
     }
 
-    /// Returns the manager that handles transaction messages.
-    ///
-    /// Requires [Mode::ReadWrite] and returns None otherwise.
+    /// Returns the transaction manager.
     #[inline]
-    pub(crate) fn txn_manager(&self) -> Option<&SyncSender<TxnManagerMessage>> {
-        self.inner.txn_manager.as_ref()
-    }
-
-    /// Returns the manager that handles transaction messages.
-    ///
-    /// Requires [Mode::ReadWrite] and returns None otherwise.
-    #[inline]
-    pub(crate) fn ensure_txn_manager(&self) -> Result<&SyncSender<TxnManagerMessage>> {
-        self.txn_manager().ok_or(Error::WriteTransactionUnsupportedInReadOnlyMode)
+    pub(crate) fn txn_manager(&self) -> &TxnManager {
+        &self.inner.txn_manager
     }
 
     /// Create a read-only transaction for use with the environment.
@@ -102,16 +96,13 @@ impl Environment {
     /// Create a read-write transaction for use with the environment. This method will block while
     /// there are any other read-write transactions open on the environment.
     pub fn begin_rw_txn(&self) -> Result<Transaction<RW>> {
-        let sender = self.ensure_txn_manager()?;
         let txn = loop {
             let (tx, rx) = sync_channel(0);
-            sender
-                .send(TxnManagerMessage::Begin {
-                    parent: TxnPtr(ptr::null_mut()),
-                    flags: RW::OPEN_FLAGS,
-                    sender: tx,
-                })
-                .unwrap();
+            self.txn_manager().send_message(TxnManagerMessage::Begin {
+                parent: TxnPtr(ptr::null_mut()),
+                flags: RW::OPEN_FLAGS,
+                sender: tx,
+            });
             let res = rx.recv().unwrap();
             if let Err(Error::Busy) = &res {
                 sleep(Duration::from_millis(250));
@@ -235,10 +226,8 @@ struct EnvironmentInner {
     env: *mut ffi::MDBX_env,
     /// Whether the environment was opened as WRITEMAP.
     env_kind: EnvironmentKind,
-    /// the sender half of the transaction manager channel
-    ///
-    /// Only set if the environment was opened in [Mode::ReadWrite] mode.
-    txn_manager: Option<SyncSender<TxnManagerMessage>>,
+    /// Transaction manager
+    txn_manager: TxnManager,
 }
 
 impl Drop for EnvironmentInner {
@@ -265,12 +254,12 @@ pub enum EnvironmentKind {
     Default,
     /// Open the environment as mdbx-WRITEMAP.
     /// Use a writeable memory map unless the environment is opened as MDBX_RDONLY
-    /// ([Mode::ReadOnly]).
+    /// ([crate::Mode::ReadOnly]).
     ///
-    /// All data will be mapped into memory in the read-write mode [Mode::ReadWrite]. This offers a
-    /// significant performance benefit, since the data will be modified directly in mapped
-    /// memory and then flushed to disk by single system call, without any memory management
-    /// nor copying.
+    /// All data will be mapped into memory in the read-write mode [crate::Mode::ReadWrite]. This
+    /// offers a significant performance benefit, since the data will be modified directly in
+    /// mapped memory and then flushed to disk by single system call, without any memory
+    /// management nor copying.
     ///
     /// This mode is incompatible with nested transactions.
     WriteMap,
@@ -293,20 +282,9 @@ impl EnvironmentKind {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct TxnPtr(pub(crate) *mut ffi::MDBX_txn);
-unsafe impl Send for TxnPtr {}
-unsafe impl Sync for TxnPtr {}
-
-#[derive(Copy, Clone, Debug)]
 pub(crate) struct EnvPtr(pub(crate) *mut ffi::MDBX_env);
 unsafe impl Send for EnvPtr {}
 unsafe impl Sync for EnvPtr {}
-
-pub(crate) enum TxnManagerMessage {
-    Begin { parent: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<TxnPtr>> },
-    Abort { tx: TxnPtr, sender: SyncSender<Result<bool>> },
-    Commit { tx: TxnPtr, sender: SyncSender<Result<(bool, CommitLatency)>> },
-}
 
 /// Environment statistics.
 ///
@@ -595,7 +573,12 @@ pub struct EnvironmentBuilder {
     geometry: Option<Geometry<(Option<usize>, Option<usize>)>>,
     log_level: Option<ffi::MDBX_log_level_t>,
     kind: EnvironmentKind,
+    #[cfg(not(windows))]
     handle_slow_readers: Option<HandleSlowReadersCallback>,
+    #[cfg(feature = "read-tx-timeouts")]
+    /// The maximum duration of a read transaction. If [None], but the `read-tx-timeout` feature is
+    /// enabled, the default value of [DEFAULT_MAX_READ_TRANSACTION_DURATION] is used.
+    max_read_transaction_duration: Option<read_transactions::MaxReadTransactionDuration>,
 }
 
 impl EnvironmentBuilder {
@@ -676,6 +659,7 @@ impl EnvironmentBuilder {
                     ))?;
                 }
 
+                #[cfg(not(windows))]
                 if let Some(handle_slow_readers) = self.handle_slow_readers {
                     mdbx_result(ffi::mdbx_env_set_hsr(
                         env,
@@ -716,54 +700,24 @@ impl EnvironmentBuilder {
             }
         }
 
-        let mut env = EnvironmentInner { env, txn_manager: None, env_kind: self.kind };
+        #[cfg(not(feature = "read-tx-timeouts"))]
+        let txn_manager = TxnManager::new(EnvPtr(env));
 
-        if let Mode::ReadWrite { .. } = self.flags.mode {
-            let (tx, rx) = std::sync::mpsc::sync_channel(0);
-            let e = EnvPtr(env.env);
-            std::thread::spawn(move || loop {
-                match rx.recv() {
-                    Ok(msg) => match msg {
-                        TxnManagerMessage::Begin { parent, flags, sender } => {
-                            #[allow(clippy::redundant_locals)]
-                            let e = e;
-                            let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
-                            sender
-                                .send(
-                                    mdbx_result(unsafe {
-                                        ffi::mdbx_txn_begin_ex(
-                                            e.0,
-                                            parent.0,
-                                            flags,
-                                            &mut txn,
-                                            ptr::null_mut(),
-                                        )
-                                    })
-                                    .map(|_| TxnPtr(txn)),
-                                )
-                                .unwrap()
-                        }
-                        TxnManagerMessage::Abort { tx, sender } => {
-                            sender.send(mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })).unwrap();
-                        }
-                        TxnManagerMessage::Commit { tx, sender } => {
-                            sender
-                                .send({
-                                    let mut latency = CommitLatency::new();
-                                    mdbx_result(unsafe {
-                                        ffi::mdbx_txn_commit_ex(tx.0, latency.mdb_commit_latency())
-                                    })
-                                    .map(|v| (v, latency))
-                                })
-                                .unwrap();
-                        }
-                    },
-                    Err(_) => return,
-                }
-            });
+        #[cfg(feature = "read-tx-timeouts")]
+        let txn_manager = {
+            let mut txn_manager = TxnManager::new(EnvPtr(env));
+            if let crate::MaxReadTransactionDuration::Set(duration) = self
+                .max_read_transaction_duration
+                .unwrap_or(read_transactions::MaxReadTransactionDuration::Set(
+                    DEFAULT_MAX_READ_TRANSACTION_DURATION,
+                ))
+            {
+                txn_manager = txn_manager.with_max_read_transaction_duration(duration);
+            };
+            txn_manager
+        };
 
-            env.txn_manager = Some(tx);
-        }
+        let env = EnvironmentInner { env, txn_manager, env_kind: self.kind };
 
         Ok(Environment { inner: Arc::new(env) })
     }
@@ -859,15 +813,53 @@ impl EnvironmentBuilder {
         self
     }
 
+    pub fn set_log_level(&mut self, log_level: ffi::MDBX_log_level_t) -> &mut Self {
+        self.log_level = Some(log_level);
+        self
+    }
+
     /// Set the Handle-Slow-Readers callback. See [HandleSlowReadersCallback] for more information.
+    #[cfg(not(windows))]
     pub fn set_handle_slow_readers(&mut self, hsr: HandleSlowReadersCallback) -> &mut Self {
         self.handle_slow_readers = Some(hsr);
         self
     }
+}
 
-    pub fn set_log_level(&mut self, log_level: ffi::MDBX_log_level_t) -> &mut Self {
-        self.log_level = Some(log_level);
-        self
+#[cfg(feature = "read-tx-timeouts")]
+pub(crate) mod read_transactions {
+    use crate::EnvironmentBuilder;
+    use std::time::Duration;
+
+    /// The maximum duration of a read transaction.
+    #[derive(Debug, Clone, Copy)]
+    #[cfg(feature = "read-tx-timeouts")]
+    pub enum MaxReadTransactionDuration {
+        /// The maximum duration of a read transaction is unbounded.
+        Unbounded,
+        /// The maximum duration of a read transaction is set to the given duration.
+        Set(Duration),
+    }
+
+    #[cfg(feature = "read-tx-timeouts")]
+    impl MaxReadTransactionDuration {
+        pub fn as_duration(&self) -> Option<Duration> {
+            match self {
+                MaxReadTransactionDuration::Unbounded => None,
+                MaxReadTransactionDuration::Set(duration) => Some(*duration),
+            }
+        }
+    }
+
+    impl EnvironmentBuilder {
+        /// Set the maximum time a read-only transaction can be open.
+        pub fn set_max_read_transaction_duration(
+            &mut self,
+            max_read_transaction_duration: MaxReadTransactionDuration,
+        ) -> &mut Self {
+            self.max_read_transaction_duration = Some(max_read_transaction_duration);
+            self
+        }
     }
 }
 
@@ -875,7 +867,8 @@ impl EnvironmentBuilder {
 ///
 /// Caution: this leaks the memory for callbacks, so they're alive throughout the program. It's
 /// fine, because we also expect the database environment to be alive during this whole time.
-unsafe fn handle_slow_readers_callback(callback: HandleSlowReadersCallback) -> MDBX_hsr_func {
+#[cfg(not(windows))]
+unsafe fn handle_slow_readers_callback(callback: HandleSlowReadersCallback) -> ffi::MDBX_hsr_func {
     // Move the callback function to heap and intentionally leak it, so it's not dropped and the
     // MDBX env can use it throughout the whole program.
     let callback = Box::leak(Box::new(callback));
@@ -884,10 +877,10 @@ unsafe fn handle_slow_readers_callback(callback: HandleSlowReadersCallback) -> M
     // and without `env` and `txn` arguments that we don't want to expose to the user. Again,
     // move the closure to heap and leak.
     let hsr = Box::leak(Box::new(
-        |_env: *const MDBX_env,
-         _txn: *const MDBX_txn,
-         pid: mdbx_pid_t,
-         tid: mdbx_tid_t,
+        |_env: *const ffi::MDBX_env,
+         _txn: *const ffi::MDBX_txn,
+         pid: ffi::mdbx_pid_t,
+         tid: ffi::mdbx_tid_t,
          laggard: u64,
          gap: ::libc::c_uint,
          space: usize,
@@ -915,6 +908,7 @@ mod tests {
         sync::atomic::{AtomicBool, Ordering},
     };
 
+    #[cfg(not(windows))]
     #[test]
     fn test_handle_slow_readers_callback() {
         static CALLED: AtomicBool = AtomicBool::new(false);

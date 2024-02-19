@@ -23,7 +23,7 @@ pub mod state_change;
 pub use factory::EvmProcessorFactory;
 
 /// reexport for convenience
-pub use reth_revm_inspectors::*;
+pub use revm_inspectors::*;
 
 /// Re-export everything
 pub use revm::{self, *};

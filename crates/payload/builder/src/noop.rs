@@ -2,6 +2,7 @@
 
 use crate::{service::PayloadServiceCommand, PayloadBuilderHandle};
 use futures_util::{ready, StreamExt};
+use reth_node_api::{EngineTypes, PayloadBuilderAttributes};
 use std::{
     future::Future,
     pin::Pin,
@@ -12,21 +13,29 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A service task that does not build any payloads.
 #[derive(Debug)]
-pub struct NoopPayloadBuilderService {
+pub struct NoopPayloadBuilderService<Engine: EngineTypes> {
     /// Receiver half of the command channel.
-    command_rx: UnboundedReceiverStream<PayloadServiceCommand>,
+    command_rx: UnboundedReceiverStream<PayloadServiceCommand<Engine>>,
 }
 
-impl NoopPayloadBuilderService {
+impl<Engine> NoopPayloadBuilderService<Engine>
+where
+    Engine: EngineTypes + 'static,
+{
     /// Creates a new [NoopPayloadBuilderService].
-    pub fn new() -> (Self, PayloadBuilderHandle) {
+    pub fn new() -> (Self, PayloadBuilderHandle<Engine>) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
-        let handle = PayloadBuilderHandle::new(service_tx);
-        (Self { command_rx: UnboundedReceiverStream::new(command_rx) }, handle)
+        (
+            Self { command_rx: UnboundedReceiverStream::new(command_rx) },
+            PayloadBuilderHandle::new(service_tx),
+        )
     }
 }
 
-impl Future for NoopPayloadBuilderService {
+impl<Engine> Future for NoopPayloadBuilderService<Engine>
+where
+    Engine: EngineTypes,
+{
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -43,6 +52,7 @@ impl Future for NoopPayloadBuilderService {
                 PayloadServiceCommand::BestPayload(_, tx) => tx.send(None).ok(),
                 PayloadServiceCommand::PayloadAttributes(_, tx) => tx.send(None).ok(),
                 PayloadServiceCommand::Resolve(_, tx) => tx.send(None).ok(),
+                PayloadServiceCommand::Subscribe(_) => None,
             };
         }
     }

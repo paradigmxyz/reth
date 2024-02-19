@@ -2,7 +2,11 @@ use clap::{builder::RangedU64ValueParser, Parser};
 use human_bytes::human_bytes;
 use itertools::Itertools;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use reth_db::{database::Database, open_db_read_only, DatabaseEnv};
+use reth_db::{
+    database::Database,
+    mdbx::{DatabaseArguments, MaxReadTransactionDuration},
+    open_db_read_only, DatabaseEnv,
+};
 use reth_interfaces::db::LogLevel;
 use reth_nippy_jar::{NippyJar, NippyJarCursor};
 use reth_primitives::{
@@ -89,7 +93,11 @@ impl Command {
             );
 
         {
-            let db = open_db_read_only(db_path, None)?;
+            let db = open_db_read_only(
+                db_path,
+                DatabaseArguments::default()
+                    .max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
+            )?;
             let factory = Arc::new(ProviderFactory::new(db, chain.clone()));
 
             if !self.only_bench {
@@ -174,7 +182,7 @@ impl Command {
         segment: impl Segment + Send + Sync,
     ) -> eyre::Result<()> {
         let dir = PathBuf::default();
-        let ranges = self.block_ranges(factory.last_block_number()?);
+        let ranges = self.block_ranges(factory.best_block_number()?);
 
         let mut created_snapshots = vec![];
 

@@ -1,5 +1,6 @@
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_network_api::noop::NoopNetwork;
+use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::MAINNET;
 use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
@@ -11,7 +12,7 @@ use reth_rpc_builder::{
 };
 use reth_rpc_engine_api::EngineApi;
 use reth_tasks::TokioTaskExecutor;
-use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+use reth_transaction_pool::test_utils::{TestPool, TestPoolBuilder};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -24,7 +25,7 @@ pub fn test_address() -> SocketAddr {
 pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
     let config = AuthServerConfig::builder(secret).socket_addr(test_address()).build();
     let (tx, _rx) = unbounded_channel();
-    let beacon_engine_handle = BeaconConsensusEngineHandle::new(tx);
+    let beacon_engine_handle = BeaconConsensusEngineHandle::<EthEngineTypes>::new(tx);
     let engine_api = EngineApi::new(
         NoopProvider::default(),
         MAINNET.clone(),
@@ -98,11 +99,13 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
     NoopNetwork,
     TokioTaskExecutor,
     TestCanonStateSubscriptions,
+    EthEvmConfig,
 > {
     RpcModuleBuilder::default()
         .with_provider(NoopProvider::default())
-        .with_pool(testing_pool())
+        .with_pool(TestPoolBuilder::default().into())
         .with_network(NoopNetwork::default())
         .with_executor(TokioTaskExecutor::default())
         .with_events(TestCanonStateSubscriptions::default())
+        .with_evm_config(EthEvmConfig::default())
 }

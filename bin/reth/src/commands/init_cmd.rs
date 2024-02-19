@@ -6,10 +6,10 @@ use crate::{
         DatabaseArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
-    init::init_genesis,
 };
 use clap::Parser;
-use reth_db::init_db;
+use reth_db::{init_db, mdbx::DatabaseArguments};
+use reth_node_core::init::init_genesis;
 use reth_primitives::ChainSpec;
 use std::sync::Arc;
 use tracing::info;
@@ -52,7 +52,8 @@ impl InitCommand {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(&db_path, self.db.log_level)?);
+        let db =
+            Arc::new(init_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         info!(target: "reth::cli", "Database opened");
 
         info!(target: "reth::cli", "Writing genesis block");

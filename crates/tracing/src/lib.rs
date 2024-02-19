@@ -19,8 +19,8 @@
 //!  fn main() -> eyre::Result<()> {
 //!      let tracer = RethTracer::new().with_stdout(LayerInfo::new(
 //!          LogFormat::Json,
+//!          LevelFilter::INFO.to_string(),
 //!          "debug".to_string(),
-//!          LevelFilter::INFO.into(),
 //!          None,
 //!      ));
 //!
@@ -42,8 +42,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use tracing_subscriber::{filter::Directive, EnvFilter};
-
 // Re-export tracing crates
 pub use tracing;
 pub use tracing_subscriber;
@@ -52,8 +50,11 @@ pub use tracing_subscriber;
 pub use formatter::LogFormat;
 pub use layers::{FileInfo, FileWorkerGuard};
 
+pub use test_tracer::TestTracer;
+
 mod formatter;
 mod layers;
+mod test_tracer;
 
 use crate::layers::Layers;
 use tracing::level_filters::LevelFilter;
@@ -122,8 +123,8 @@ impl Default for RethTracer {
 #[derive(Debug, Clone)]
 pub struct LayerInfo {
     format: LogFormat,
+    default_directive: String,
     filters: String,
-    directive: Directive,
     color: Option<String>,
 }
 
@@ -135,16 +136,16 @@ impl LayerInfo {
     ///      - `LogFormat::Json` for JSON formatting.
     ///      - `LogFormat::LogFmt` for logfmt (key=value) formatting.
     ///      - `LogFormat::Terminal` for human-readable, terminal-friendly formatting.
+    ///  * `default_directive` - Directive for filtering log messages.
     ///  * `filters` - Additional filtering parameters as a string.
-    ///  * `directive` - Directive for filtering log messages.
     ///  * `color` - Optional color configuration for the log messages.
     pub fn new(
         format: LogFormat,
+        default_directive: String,
         filters: String,
-        directive: Directive,
         color: Option<String>,
     ) -> Self {
-        Self { format, directive, filters, color }
+        Self { format, default_directive, filters, color }
     }
 }
 
@@ -156,8 +157,8 @@ impl Default for LayerInfo {
     fn default() -> Self {
         Self {
             format: LogFormat::Terminal,
-            directive: LevelFilter::INFO.into(),
-            filters: "debug".to_string(),
+            default_directive: LevelFilter::INFO.to_string(),
+            filters: "".to_string(),
             color: Some("always".to_string()),
         }
     }
@@ -193,7 +194,7 @@ impl Tracer for RethTracer {
 
         layers.stdout(
             self.stdout.format,
-            self.stdout.directive,
+            self.stdout.default_directive.parse()?,
             &self.stdout.filters,
             self.stdout.color,
         )?;
@@ -208,7 +209,9 @@ impl Tracer for RethTracer {
             None
         };
 
-        tracing_subscriber::registry().with(layers.into_inner()).init();
+        // The error is returned if the global default subscriber is already set,
+        // so it's safe to ignore it
+        let _ = tracing_subscriber::registry().with(layers.into_inner()).try_init();
         Ok(file_guard)
     }
 }
@@ -221,8 +224,5 @@ impl Tracer for RethTracer {
 ///
 ///  The subscriber will silently fail if it could not be installed.
 pub fn init_test_tracing() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_writer(std::io::stderr)
-        .try_init();
+    let _ = TestTracer::default().init();
 }

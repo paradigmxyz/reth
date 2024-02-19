@@ -1,8 +1,23 @@
-use reth_primitives::trie::Nibbles;
-use std::rc::Rc;
+use reth_primitives::{trie::Nibbles, B256};
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 
 mod loader;
-pub use loader::{LoadedPrefixSets, PrefixSetLoader};
+pub use loader::PrefixSetLoader;
+
+/// Collection of trie prefix sets.
+#[derive(Default, Debug)]
+pub struct TriePrefixSets {
+    /// A set of account prefixes that have changed.
+    pub account_prefix_set: PrefixSet,
+    /// A map containing storage changes with the hashed address as key and a set of storage key
+    /// prefixes as the value.
+    pub storage_prefix_sets: HashMap<B256, PrefixSet>,
+    /// A set of hashed addresses of destroyed accounts.
+    pub destroyed_accounts: HashSet<B256>,
+}
 
 /// A container for efficiently storing and checking for the presence of key prefixes.
 ///
@@ -12,7 +27,7 @@ pub use loader::{LoadedPrefixSets, PrefixSetLoader};
 /// Internally, this implementation uses a `Vec` and aims to act like a `BTreeSet` in being both
 /// sorted and deduplicated. It does this by keeping a `sorted` flag. The `sorted` flag represents
 /// whether or not the `Vec` is definitely sorted. When a new element is added, it is set to
-/// `false.`. The `Vec` is sorted and deduplicated when `sorted` is `false` and:
+/// `false.`. The `Vec` is sorted and deduplicated when `sorted` is `true` and:
 ///  * An element is being checked for inclusion (`contains`), or
 ///  * The set is being converted into an immutable `PrefixSet` (`freeze`)
 ///
@@ -48,6 +63,11 @@ where
 }
 
 impl PrefixSetMut {
+    /// Create [PrefixSetMut] with pre-allocated capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self { keys: Vec::with_capacity(capacity), ..Default::default() }
+    }
+
     /// Returns `true` if any of the keys in the set has the given prefix or
     /// if the given prefix is a prefix of any key in the set.
     pub fn contains(&mut self, prefix: &[u8]) -> bool {

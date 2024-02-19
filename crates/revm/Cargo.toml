@@ -16,17 +16,20 @@ workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
-reth-revm-inspectors.workspace = true
 reth-consensus-common.workspace = true
+reth-node-api.workspace = true
 
 # revm
 revm.workspace = true
+revm-inspectors.workspace = true
 
 # common
 tracing.workspace = true
 
 [dev-dependencies]
 reth-trie.workspace = true
+reth-node-ethereum.workspace = true
+reth-node-optimism.workspace = true
 
 [features]
 optimism = [
@@ -35,3 +38,4 @@ optimism = [
   "reth-consensus-common/optimism",
   "reth-interfaces/optimism",
 ]
+js-tracer = ["revm-inspectors/js-tracer"]

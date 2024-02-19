@@ -14,9 +14,6 @@ mod engine_api;
 /// The Engine API message type.
 mod message;
 
-/// An type representing either an execution payload or payload attributes.
-mod payload;
-
 /// Engine API error.
 mod error;
 

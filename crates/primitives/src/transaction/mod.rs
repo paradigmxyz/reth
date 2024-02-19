@@ -23,8 +23,11 @@ pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
 #[cfg(feature = "c-kzg")]
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
+#[cfg(all(feature = "c-kzg", feature = "arbitrary"))]
+pub use sidecar::generate_blob_sidecar;
 #[cfg(feature = "c-kzg")]
 pub use sidecar::{BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError};
+
 pub use signature::Signature;
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
@@ -55,6 +58,9 @@ mod optimism;
 pub use optimism::TxDeposit;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
+
+/// Either a transaction hash or number.
+pub type TxHashOrNumber = BlockHashOrNumber;
 
 // Expected number of transactions where we can expect a speed-up by recovering the senders in
 // parallel.
@@ -500,7 +506,7 @@ impl Transaction {
 
     /// Calculates a heuristic for the in-memory size of the [Transaction].
     #[inline]
-    fn size(&self) -> usize {
+    pub fn size(&self) -> usize {
         match self {
             Transaction::Legacy(tx) => tx.size(),
             Transaction::Eip2930(tx) => tx.size(),
@@ -513,25 +519,25 @@ impl Transaction {
 
     /// Returns true if the transaction is a legacy transaction.
     #[inline]
-    pub fn is_legacy(&self) -> bool {
+    pub const fn is_legacy(&self) -> bool {
         matches!(self, Transaction::Legacy(_))
     }
 
     /// Returns true if the transaction is an EIP-2930 transaction.
     #[inline]
-    pub fn is_eip2930(&self) -> bool {
+    pub const fn is_eip2930(&self) -> bool {
         matches!(self, Transaction::Eip2930(_))
     }
 
     /// Returns true if the transaction is an EIP-1559 transaction.
     #[inline]
-    pub fn is_eip1559(&self) -> bool {
+    pub const fn is_eip1559(&self) -> bool {
         matches!(self, Transaction::Eip1559(_))
     }
 
     /// Returns true if the transaction is an EIP-4844 transaction.
     #[inline]
-    pub fn is_eip4844(&self) -> bool {
+    pub const fn is_eip4844(&self) -> bool {
         matches!(self, Transaction::Eip4844(_))
     }
 
@@ -1570,9 +1576,6 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     }
 }
 
-/// Either a transaction hash or number.
-pub type TxHashOrNumber = BlockHashOrNumber;
-
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -1583,7 +1586,7 @@ mod tests {
         },
         Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, B256, U256,
     };
-    use alloy_primitives::{b256, bytes};
+    use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use bytes::BytesMut;
     use secp256k1::{KeyPair, Secp256k1};
@@ -1632,6 +1635,37 @@ mod tests {
         assert_eq!(
             decoded.recover_signer(),
             Some(Address::from_str("0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5").unwrap())
+        );
+    }
+
+    #[test]
+    // Test vector from https://sepolia.etherscan.io/tx/0x9a22ccb0029bc8b0ddd073be1a1d923b7ae2b2ea52100bae0db4424f9107e9c0
+    // Blobscan: https://sepolia.blobscan.com/tx/0x9a22ccb0029bc8b0ddd073be1a1d923b7ae2b2ea52100bae0db4424f9107e9c0
+    fn test_decode_recover_sepolia_4844_tx() {
+        use crate::TxType;
+        use alloy_primitives::{address, b256};
+
+        // https://sepolia.etherscan.io/getRawTx?tx=0x9a22ccb0029bc8b0ddd073be1a1d923b7ae2b2ea52100bae0db4424f9107e9c0
+        let raw_tx = alloy_primitives::hex::decode("0x03f9011d83aa36a7820fa28477359400852e90edd0008252089411e9ca82a3a762b4b5bd264d4173a242e7a770648080c08504a817c800f8a5a0012ec3d6f66766bedb002a190126b3549fce0047de0d4c25cffce0dc1c57921aa00152d8e24762ff22b1cfd9f8c0683786a7ca63ba49973818b3d1e9512cd2cec4a0013b98c6c83e066d5b14af2b85199e3d4fc7d1e778dd53130d180f5077e2d1c7a001148b495d6e859114e670ca54fb6e2657f0cbae5b08063605093a4b3dc9f8f1a0011ac212f13c5dff2b2c6b600a79635103d6f580a4221079951181b25c7e654901a0c8de4cced43169f9aa3d36506363b2d2c44f6c49fc1fd91ea114c86f3757077ea01e11fdd0d1934eda0492606ee0bb80a7bf8f35cc5f86ec60fe5031ba48bfd544").unwrap();
+        let decoded = TransactionSigned::decode_enveloped(&mut raw_tx.as_slice()).unwrap();
+        assert_eq!(decoded.tx_type(), TxType::EIP4844);
+
+        let from = decoded.recover_signer();
+        assert_eq!(from, Some(address!("A83C816D4f9b2783761a22BA6FADB0eB0606D7B2")));
+
+        let tx = decoded.transaction;
+
+        assert_eq!(tx.to(), Some(address!("11E9CA82A3a762b4B5bd264d4173a242e7a77064")));
+
+        assert_eq!(
+            tx.blob_versioned_hashes(),
+            Some(vec![
+                b256!("012ec3d6f66766bedb002a190126b3549fce0047de0d4c25cffce0dc1c57921a"),
+                b256!("0152d8e24762ff22b1cfd9f8c0683786a7ca63ba49973818b3d1e9512cd2cec4"),
+                b256!("013b98c6c83e066d5b14af2b85199e3d4fc7d1e778dd53130d180f5077e2d1c7"),
+                b256!("01148b495d6e859114e670ca54fb6e2657f0cbae5b08063605093a4b3dc9f8f1"),
+                b256!("011ac212f13c5dff2b2c6b600a79635103d6f580a4221079951181b25c7e6549")
+            ])
         );
     }
 
@@ -1831,17 +1865,17 @@ mod tests {
     #[test]
     fn test_decode_tx() {
         // some random transactions pulled from hive tests
-        let s = "b86f02f86c0705843b9aca008506fc23ac00830124f89400000000000000000000000000000000000003160180c001a00293c713e2f1eab91c366621ff2f867e05ad7e99d4aa5d069aafeb9e1e8c9b6aa05ec6c0605ff20b57c90a6484ec3b0509e5923733d06f9b69bee9a2dabe4f1352";
-        let tx = TransactionSigned::decode(&mut &hex::decode(s).unwrap()[..]).unwrap();
+        let data = hex!("b86f02f86c0705843b9aca008506fc23ac00830124f89400000000000000000000000000000000000003160180c001a00293c713e2f1eab91c366621ff2f867e05ad7e99d4aa5d069aafeb9e1e8c9b6aa05ec6c0605ff20b57c90a6484ec3b0509e5923733d06f9b69bee9a2dabe4f1352");
+        let tx = TransactionSigned::decode(&mut data.as_slice()).unwrap();
         let mut b = Vec::new();
         tx.encode(&mut b);
-        assert_eq!(s, hex::encode(&b));
+        assert_eq!(data.as_slice(), b.as_slice());
 
-        let s = "f865048506fc23ac00830124f8940000000000000000000000000000000000000316018032a06b8fdfdcb84790816b7af85b19305f493665fe8b4e7c51ffdd7cc144cd776a60a028a09ab55def7b8d6602ba1c97a0ebbafe64ffc9c8e89520cec97a8edfb2ebe9";
-        let tx = TransactionSigned::decode(&mut &hex::decode(s).unwrap()[..]).unwrap();
+        let data = hex!("f865048506fc23ac00830124f8940000000000000000000000000000000000000316018032a06b8fdfdcb84790816b7af85b19305f493665fe8b4e7c51ffdd7cc144cd776a60a028a09ab55def7b8d6602ba1c97a0ebbafe64ffc9c8e89520cec97a8edfb2ebe9");
+        let tx = TransactionSigned::decode(&mut data.as_slice()).unwrap();
         let mut b = Vec::new();
         tx.encode(&mut b);
-        assert_eq!(s, hex::encode(&b));
+        assert_eq!(data.as_slice(), b.as_slice());
     }
 
     proptest::proptest! {
@@ -1870,5 +1904,29 @@ mod tests {
 
             assert_eq!(parallel_senders, seq_senders);
         }
+    }
+
+    // <https://etherscan.io/tx/0x280cde7cdefe4b188750e76c888f13bd05ce9a4d7767730feefe8a0e50ca6fc4>
+    #[test]
+    fn recover_legacy_singer() {
+        let data = hex!("f9015482078b8505d21dba0083022ef1947a250d5630b4cf539739df2c5dacb4c659f2488d880c46549a521b13d8b8e47ff36ab50000000000000000000000000000000000000000000066ab5a608bd00a23f2fe000000000000000000000000000000000000000000000000000000000000008000000000000000000000000048c04ed5691981c42154c6167398f95e8f38a7ff00000000000000000000000000000000000000000000000000000000632ceac70000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000006c6ee5e31d828de241282b9606c8e98ea48526e225a0c9077369501641a92ef7399ff81c21639ed4fd8fc69cb793cfa1dbfab342e10aa0615facb2f1bcf3274a354cfe384a38d0cc008a11c2dd23a69111bc6930ba27a8");
+        let tx = TransactionSigned::decode_rlp_legacy_transaction(&mut data.as_slice()).unwrap();
+        assert!(tx.is_legacy());
+        let sender = tx.recover_signer().unwrap();
+        assert_eq!(sender, address!("a12e1462d0ceD572f396F58B6E2D03894cD7C8a4"));
+    }
+
+    // <https://github.com/alloy-rs/alloy/issues/141>
+    // <https://etherscan.io/tx/0xce4dc6d7a7549a98ee3b071b67e970879ff51b5b95d1c340bacd80fa1e1aab31>
+    #[test]
+    fn recover_enveloped() {
+        let data = hex!("02f86f0102843b9aca0085029e7822d68298f094d9e1459a7a482635700cbc20bbaf52d495ab9c9680841b55ba3ac080a0c199674fcb29f353693dd779c017823b954b3c69dffa3cd6b2a6ff7888798039a028ca912de909e7e6cdef9cdcaf24c54dd8c1032946dfa1d85c206b32a9064fe8");
+        let tx = TransactionSigned::decode_enveloped(&mut data.as_slice()).unwrap();
+        let sender = tx.recover_signer().unwrap();
+        assert_eq!(sender, address!("001e2b7dE757bA469a57bF6b23d982458a07eFcE"));
+        assert_eq!(tx.to(), Some(address!("D9e1459A7A482635700cBc20BBAF52D495Ab9C96")));
+        assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
+        let encoded = tx.envelope_encoded();
+        assert_eq!(encoded.as_ref(), data.as_slice());
     }
 }

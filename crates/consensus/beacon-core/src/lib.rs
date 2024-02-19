@@ -12,11 +12,10 @@
 use reth_consensus_common::validation;
 use reth_interfaces::consensus::{Consensus, ConsensusError};
 use reth_primitives::{
-    constants::{ALLOWED_FUTURE_BLOCK_TIME_SECONDS, MAXIMUM_EXTRA_DATA_SIZE},
-    Chain, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
+    constants::MAXIMUM_EXTRA_DATA_SIZE, Chain, ChainSpec, Hardfork, Header, SealedBlock,
+    SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use std::{sync::Arc, time::SystemTime};
-
 /// Ethereum beacon consensus
 ///
 /// This consensus engine does basic checks as outlined in the execution specs.
@@ -44,7 +43,7 @@ impl Consensus for BeaconConsensus {
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
-        validation::validate_header_regarding_parent(parent, header, &self.chain_spec)?;
+        header.validate_against_parent(parent, &self.chain_spec).map_err(ConsensusError::from)?;
         Ok(())
     }
 
@@ -89,7 +88,7 @@ impl Consensus for BeaconConsensus {
             let present_timestamp =
                 SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
 
-            if header.timestamp > present_timestamp + ALLOWED_FUTURE_BLOCK_TIME_SECONDS {
+            if header.exceeds_allowed_future_timestamp(present_timestamp) {
                 return Err(ConsensusError::TimestampIsInFuture {
                     timestamp: header.timestamp,
                     present_timestamp,

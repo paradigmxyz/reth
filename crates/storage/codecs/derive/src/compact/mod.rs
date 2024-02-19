@@ -1,4 +1,4 @@
-use proc_macro::{self, TokenStream};
+use proc_macro::TokenStream;
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{parse_macro_input, Data, DeriveInput};
@@ -182,7 +182,7 @@ pub fn is_flag_type(ftype: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pretty_assertions::assert_eq;
+    use similar_asserts::assert_eq;
     use syn::parse2;
 
     #[test]

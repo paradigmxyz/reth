@@ -1,8 +1,8 @@
 #![allow(unreachable_pub)]
 //! Helper struct for working with a clique geth instance.
 
+use alloy_node_bindings::{Geth, GethInstance};
 use enr::k256::ecdsa::SigningKey;
-use ethers_core::utils::{Geth, GethInstance};
 use ethers_middleware::SignerMiddleware;
 use ethers_providers::{Provider, Ws};
 use ethers_signers::{LocalWallet, Wallet};
@@ -11,15 +11,15 @@ use std::{
     net::SocketAddr,
 };
 
-/// A [`Geth`](ethers_core::utils::Geth) instance configured with Clique and a custom
-/// [`Genesis`](ethers_core::utils::Genesis).
+/// A [`Geth`](alloy_node_bindings::Geth) instance configured with Clique and a custom
+/// [`Genesis`](reth_primitives::Genesis).
 ///
 /// This holds a [`SignerMiddleware`](ethers_middleware::SignerMiddleware) for
 /// enabling block production and creating transactions.
 ///
 /// # Example
 /// ```no_run
-/// # use ethers_core::utils::Geth;
+/// # use alloy_node_bindings::Geth;
 /// # use reth_staged_sync::test_utils::CliqueGethInstance;
 /// # let clique = async {
 ///
@@ -34,7 +34,7 @@ use std::{
 /// # };
 /// ```
 pub struct CliqueGethInstance {
-    /// The spawned [`GethInstance`](ethers_core::utils::GethInstance).
+    /// The spawned [`GethInstance`](alloy_node_bindings::GethInstance).
     pub instance: GethInstance,
     /// The provider who can talk to this instance
     pub provider: SignerMiddleware<Provider<Ws>, Wallet<SigningKey>>,
@@ -42,7 +42,7 @@ pub struct CliqueGethInstance {
 
 impl CliqueGethInstance {
     /// Sets up a new [`SignerMiddleware`](ethers_middleware::SignerMiddleware)
-    /// for the [`Geth`](ethers_core::utils::Geth) instance and returns the
+    /// for the [`Geth`](alloy_node_bindings::Geth) instance and returns the
     /// [`CliqueGethInstance`](crate::test_utils::CliqueGethInstance).
     ///
     /// The signer is assumed to be the clique signer and the signer for any transactions sent for
@@ -69,7 +69,7 @@ impl CliqueGethInstance {
         Self { instance, provider }
     }
 
-    /// Prints the logs of the [`Geth`](ethers_core::utils::Geth) instance in a new
+    /// Prints the logs of the [`Geth`](alloy_node_bindings::Geth) instance in a new
     /// [`task`](tokio::task).
     #[allow(dead_code)]
     pub async fn print_logs(&mut self) {
@@ -96,7 +96,7 @@ impl CliqueGethInstance {
         });
     }
 
-    /// Prevents the [`Geth`](ethers_core::utils::Geth) instance from blocking due to the `stderr`
+    /// Prevents the [`Geth`](alloy_node_bindings::Geth) instance from blocking due to the `stderr`
     /// filling up.
     pub async fn prevent_blocking(&mut self) {
         // take the stderr of the geth instance and print it

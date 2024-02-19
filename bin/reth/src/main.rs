@@ -1,5 +1,6 @@
 // We use jemalloc for performance reasons
 #![allow(missing_docs)]
+
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;

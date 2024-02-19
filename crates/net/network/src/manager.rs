@@ -29,7 +29,7 @@ use crate::{
     protocol::IntoRlpxSubProtocol,
     session::SessionManager,
     state::NetworkState,
-    swarm::{NetworkConnectionState, Swarm, SwarmEvent},
+    swarm::{Swarm, SwarmEvent},
     transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
@@ -179,6 +179,7 @@ where
             tx_gossip_disabled,
             #[cfg(feature = "optimism")]
                 optimism_network_config: crate::config::OptimismNetworkConfig { sequencer_endpoint },
+            ..
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -224,7 +225,7 @@ where
             Arc::clone(&num_active_peers),
         );
 
-        let swarm = Swarm::new(incoming, sessions, state, NetworkConnectionState::default());
+        let swarm = Swarm::new(incoming, sessions, state);
 
         let (to_manager_tx, from_handle_rx) = mpsc::unbounded_channel();
 
@@ -274,12 +275,13 @@ where
     ///
     ///     let config =
     ///         NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
+    ///     let transactions_manager_config = config.transactions_manager_config.clone();
     ///
     ///     // create the network instance
     ///     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
     ///         .await
     ///         .unwrap()
-    ///         .transactions(pool)
+    ///         .transactions(pool, transactions_manager_config)
     ///         .request_handler(client)
     ///         .split_with_handle();
     /// }
@@ -524,7 +526,7 @@ where
                 if self.handle.mode().is_stake() {
                     // See [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
                     warn!(target: "net", "Peer performed block propagation, but it is not supported in proof of stake (EIP-3675)");
-                    return;
+                    return
                 }
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
                 self.swarm.state_mut().announce_new_block(msg);
@@ -551,6 +553,14 @@ where
             NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
                 self.swarm.sessions_mut().disconnect(peer_id, reason);
             }
+            NetworkHandleMessage::SetNetworkState(net_state) => {
+                // Sets network connection state between Active and Hibernate.
+                // If hibernate stops the node to fill new outbound
+                // connections, this is beneficial for sync stages that do not require a network
+                // connection.
+                self.swarm.on_network_state_change(net_state);
+            }
+
             NetworkHandleMessage::Shutdown(tx) => {
                 // Set connection status to `Shutdown`. Stops node to accept
                 // new incoming connections as well as sending connection requests to newly
@@ -647,7 +657,7 @@ where
                     // This is only possible if the channel was deliberately closed since we always
                     // have an instance of `NetworkHandle`
                     error!("Network message channel closed.");
-                    return Poll::Ready(());
+                    return Poll::Ready(())
                 }
                 Poll::Ready(Some(msg)) => this.on_handle_message(msg),
             };
@@ -665,7 +675,12 @@ where
         // If the budget is exhausted we manually yield back control to the (coop) scheduler. This
         // manual yield point should prevent situations where polling appears to be frozen. See also <https://tokio.rs/blog/2020-04-preemption>
         // And tokio's docs on cooperative scheduling <https://docs.rs/tokio/latest/tokio/task/#cooperative-scheduling>
-        let mut budget = 1024;
+        //
+        // Testing has shown that this loop naturally reaches the pending state within 1-5
+        // iterations in << 100µs in most cases. On average it requires ~50µs, which is inside
+        // the range of what's recommended as rule of thumb.
+        // <https://ryhl.io/blog/async-what-is-blocking/>
+        let mut budget = 10;
 
         loop {
             // advance the swarm
@@ -916,9 +931,10 @@ where
             // ensure we still have enough budget for another iteration
             budget -= 1;
             if budget == 0 {
+                trace!(target: "net", budget=10, "exhausted network manager budget");
                 // make sure we're woken up again
                 cx.waker().wake_by_ref();
-                break;
+                break
             }
         }
 

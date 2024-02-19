@@ -2,6 +2,7 @@ use super::setup;
 use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
+use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageCheckpoint, BlockNumber, ChainSpec, PruneModes};
 use reth_provider::ProviderFactory;
 use reth_stages::{
@@ -68,11 +69,12 @@ async fn unwind_and_copy<DB: Database>(
 
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage = ExecutionStage::new(
-        reth_revm::EvmProcessorFactory::new(db_tool.chain.clone()),
+        reth_revm::EvmProcessorFactory::new(db_tool.chain.clone(), EthEvmConfig::default()),
         ExecutionStageThresholds {
             max_blocks: Some(u64::MAX),
             max_changes: None,
             max_cumulative_gas: None,
+            max_duration: None,
         },
         MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
         PruneModes::all(),

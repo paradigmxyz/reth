@@ -18,9 +18,18 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
-use reth_db::{init_db, DatabaseEnv};
+use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_interfaces::{consensus::Consensus, RethResult};
-use reth_payload_builder::{database::CachedReads, PayloadBuilderAttributes};
+use reth_node_api::PayloadBuilderAttributes;
+#[cfg(not(feature = "optimism"))]
+use reth_node_ethereum::EthEvmConfig;
+#[cfg(feature = "optimism")]
+use reth_node_optimism::OptimismEvmConfig;
+use reth_payload_builder::database::CachedReads;
+#[cfg(not(feature = "optimism"))]
+use reth_payload_builder::EthPayloadBuilderAttributes;
+#[cfg(feature = "optimism")]
+use reth_payload_builder::OptimismPayloadBuilderAttributes;
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     fs,
@@ -34,6 +43,8 @@ use reth_provider::{
     ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
 use reth_revm::EvmProcessorFactory;
+#[cfg(feature = "optimism")]
+use reth_rpc_types::engine::OptimismPayloadAttributes;
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
@@ -142,16 +153,23 @@ impl Command {
         fs::create_dir_all(&db_path)?;
 
         // initialize the database
-        let db = Arc::new(init_db(db_path, self.db.log_level)?);
+        let db =
+            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         let provider_factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
 
         let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
+
+        #[cfg(feature = "optimism")]
+        let evm_config = OptimismEvmConfig::default();
+
+        #[cfg(not(feature = "optimism"))]
+        let evm_config = EthEvmConfig::default();
 
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
             provider_factory.clone(),
             Arc::clone(&consensus),
-            EvmProcessorFactory::new(self.chain.clone()),
+            EvmProcessorFactory::new(self.chain.clone(), evm_config),
         );
         let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
         let blockchain_tree = ShareableBlockchainTree::new(tree);
@@ -235,16 +253,31 @@ impl Command {
             suggested_fee_recipient: self.suggested_fee_recipient,
             // TODO: add support for withdrawals
             withdrawals: None,
-            #[cfg(feature = "optimism")]
-            optimism_payload_attributes: reth_rpc_types::engine::OptimismPayloadAttributes::default(
-            ),
         };
+        #[cfg(feature = "optimism")]
         let payload_config = PayloadConfig::new(
             Arc::clone(&best_block),
             Bytes::default(),
-            PayloadBuilderAttributes::try_new(best_block.hash, payload_attrs)?,
+            OptimismPayloadBuilderAttributes::try_new(
+                best_block.hash(),
+                OptimismPayloadAttributes {
+                    payload_attributes: payload_attrs,
+                    transactions: None,
+                    no_tx_pool: None,
+                    gas_limit: None,
+                },
+            )?,
             self.chain.clone(),
         );
+
+        #[cfg(not(feature = "optimism"))]
+        let payload_config = PayloadConfig::new(
+            Arc::clone(&best_block),
+            Bytes::default(),
+            EthPayloadBuilderAttributes::try_new(best_block.hash(), payload_attrs)?,
+            self.chain.clone(),
+        );
+
         let args = BuildArguments::new(
             blockchain_db.clone(),
             transaction_pool,
@@ -274,7 +307,7 @@ impl Command {
                 let block_with_senders =
                     SealedBlockWithSenders::new(block.clone(), senders).unwrap();
 
-                let executor_factory = EvmProcessorFactory::new(self.chain.clone());
+                let executor_factory = EvmProcessorFactory::new(self.chain.clone(), evm_config);
                 let mut executor = executor_factory.with_state(blockchain_db.latest()?);
                 executor
                     .execute_and_verify_receipt(&block_with_senders.clone().unseal(), U256::MAX)?;
@@ -283,8 +316,8 @@ impl Command {
 
                 let hashed_state = state.hash_state_slow();
                 let (state_root, trie_updates) = state
-                    .state_root_calculator(provider_factory.provider()?.tx_ref(), &hashed_state)
-                    .root_with_updates()?;
+                    .hash_state_slow()
+                    .state_root_with_updates(provider_factory.provider()?.tx_ref())?;
 
                 if state_root != block_with_senders.state_root {
                     eyre::bail!(

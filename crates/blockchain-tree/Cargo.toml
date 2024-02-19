@@ -27,7 +27,7 @@ reth-trie.workspace = true
 
 # common
 parking_lot.workspace = true
-lru = "0.11"
+lru = "0.12"
 tracing.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
 
@@ -45,6 +45,8 @@ reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true , features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm.workspace = true
+reth-node-ethereum.workspace = true
+reth-node-optimism.workspace = true
 parking_lot.workspace = true
 assert_matches.workspace = true
 

@@ -122,7 +122,7 @@ mod tests {
         generators,
         generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
-    use reth_primitives::{address, Address, BlockNumber, PruneMode, B256};
+    use reth_primitives::{address, Address, BlockNumber, B256};
     use std::collections::BTreeMap;
 
     const ADDRESS: Address = address!("0000000000000000000000000000000000000001");

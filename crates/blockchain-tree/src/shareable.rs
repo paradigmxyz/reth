@@ -51,7 +51,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTreeEngine for ShareableBlockc
         block: SealedBlockWithSenders,
         validation_kind: BlockValidationKind,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
-        trace!(target: "blockchain_tree", hash=?block.hash, number=block.number, parent_hash=?block.parent_hash, "Inserting block");
+        trace!(target: "blockchain_tree", hash=?block.hash(), number=block.number, parent_hash=?block.parent_hash, "Inserting block");
         let mut tree = self.tree.write();
         let res = tree.insert_block(block, validation_kind);
         tree.update_chains_metrics();
@@ -185,7 +185,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTreeViewer for ShareableBlockc
         let tree = self.tree.read();
         let pending_block = tree.pending_block()?.clone();
         let receipts =
-            tree.receipts_by_block_hash(pending_block.hash)?.into_iter().cloned().collect();
+            tree.receipts_by_block_hash(pending_block.hash())?.into_iter().cloned().collect();
         Some((pending_block, receipts))
     }
 

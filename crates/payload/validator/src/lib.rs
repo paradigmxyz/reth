@@ -109,7 +109,7 @@ impl ExecutionPayloadValidator {
 
         if !cancun_active && block.has_blob_transactions() {
             // cancun not active but blob transactions present
-            return Err(PayloadError::PreCancunBlockWithBlobTransactions);
+            return Err(PayloadError::PreCancunBlockWithBlobTransactions)
         }
 
         // Ensure the hash included in the payload matches the block hash

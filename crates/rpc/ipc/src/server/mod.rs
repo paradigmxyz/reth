@@ -94,7 +94,6 @@ where
         Ok(ServerHandle::new(stop_tx))
     }
 
-    #[allow(clippy::let_unit_value)]
     async fn start_inner(
         self,
         methods: Methods,

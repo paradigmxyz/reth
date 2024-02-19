@@ -20,15 +20,20 @@ byteorder = "1"
 derive_more = "0.99"
 indexmap = "2"
 libc = "0.2"
-libffi = "3.2.0"
 parking_lot.workspace = true
 thiserror.workspace = true
+dashmap = { version = "5.5.3", features = ["inline"], optional = true }
+tracing = { workspace = true, optional = true }
 
 ffi = { package = "reth-mdbx-sys", path = "./mdbx-sys" }
+
+[target.'cfg(not(windows))'.dependencies]
+libffi = "3.2.0"
 
 [features]
 default = []
 return-borrowed = []
+read-tx-timeouts = ["dashmap", "dashmap/inline", "tracing"]
 
 [dev-dependencies]
 pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }

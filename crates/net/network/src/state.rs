@@ -12,6 +12,8 @@ use crate::{
     peers::{PeerAction, PeersManager},
     FetchClient,
 };
+use rand::seq::SliceRandom;
+
 use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
 };
@@ -176,7 +178,12 @@ where
 
         let number = msg.block.block.header.number;
         let mut count = 0;
-        for (peer_id, peer) in self.active_peers.iter_mut() {
+
+        // Shuffle to propagate to a random sample of peers on every block announcement
+        let mut peers: Vec<_> = self.active_peers.iter_mut().collect();
+        peers.shuffle(&mut rand::thread_rng());
+
+        for (peer_id, peer) in peers.into_iter() {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
                 continue

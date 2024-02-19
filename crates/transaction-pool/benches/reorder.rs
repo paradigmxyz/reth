@@ -1,20 +1,17 @@
+#![allow(missing_docs)]
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
-use proptest::{
-    prelude::*,
-    strategy::{Strategy, ValueTree},
-    test_runner::TestRunner,
-};
+use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_transaction_pool::test_utils::MockTransaction;
 
 /// Transaction Pool trait for benching.
-pub trait BenchTxPool: Default {
+trait BenchTxPool: Default {
     fn add_transaction(&mut self, tx: MockTransaction);
     fn reorder(&mut self, base_fee: u64);
 }
 
-pub fn txpool_reordering(c: &mut Criterion) {
+fn txpool_reordering(c: &mut Criterion) {
     let mut group = c.benchmark_group("Transaction Pool Reordering");
 
     for seed_size in [1_000, 10_000, 50_000, 100_000] {
@@ -54,7 +51,7 @@ pub fn txpool_reordering(c: &mut Criterion) {
 }
 
 fn txpool_reordering_bench<T: BenchTxPool>(
-    group: &mut BenchmarkGroup<WallTime>,
+    group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
     seed: Vec<MockTransaction>,
     new_txs: Vec<MockTransaction>,
@@ -170,7 +167,7 @@ mod implementations {
 
     impl PartialEq for MockTransactionWithPriority {
         fn eq(&self, other: &Self) -> bool {
-            self.priority.eq(&other.priority)
+            self.priority == other.priority
         }
     }
 

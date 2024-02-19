@@ -59,7 +59,7 @@ The third and optional parameter is a block number, block hash, or a block tag (
 ### Example
 
 ```js
-// > {"jsonrpc":"2.0","id":1,"method":"trace_call","params":[{},["trace"]}
+// > {"jsonrpc":"2.0","id":1,"method":"trace_call","params":[{},["trace"]]}
 {
     "id": 1,
     "jsonrpc": "2.0",

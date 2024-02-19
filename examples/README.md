@@ -10,7 +10,7 @@ cargo run --example $name
 ```
 
 A good starting point for the examples would be [`db-access`](db-access.rs)
-and [`rpc-db`](rpc-db.rs).
+and [`rpc-db`](rpc-db).
 
 If you've got an example you'd like to see here, please feel free to open an
 issue. Otherwise if you've got an example you'd like to add, please feel free

@@ -5,9 +5,11 @@ use clap::{Parser, Subcommand};
 use crate::runner::CliContext;
 
 mod build_block;
+pub mod engine_api_store;
 mod execution;
 mod in_memory_merkle;
 mod merkle;
+mod replay_engine;
 
 /// `reth debug` command
 #[derive(Debug, Parser)]
@@ -27,6 +29,8 @@ pub enum Subcommands {
     InMemoryMerkle(in_memory_merkle::Command),
     /// Debug block building.
     BuildBlock(build_block::Command),
+    /// Debug engine API by replaying stored messages.
+    ReplayEngine(replay_engine::Command),
 }
 
 impl Command {
@@ -37,6 +41,7 @@ impl Command {
             Subcommands::Merkle(command) => command.execute(ctx).await,
             Subcommands::InMemoryMerkle(command) => command.execute(ctx).await,
             Subcommands::BuildBlock(command) => command.execute(ctx).await,
+            Subcommands::ReplayEngine(command) => command.execute(ctx).await,
         }
     }
 }

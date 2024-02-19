@@ -3,6 +3,7 @@
 use crate::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    metrics::DatabaseEnvMetrics,
     tables::{TableType, Tables},
     utils::default_page_size,
     DatabaseError,
@@ -12,11 +13,11 @@ use metrics::{gauge, Label};
 use once_cell::sync::Lazy;
 use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
-    DatabaseFlags, Environment, EnvironmentFlags, Geometry, HandleSlowReadersReturnCode, Mode,
+    DatabaseFlags, Environment, EnvironmentFlags, Geometry, MaxReadTransactionDuration, Mode,
     PageSize, SyncMode, RO, RW,
 };
-use reth_tracing::tracing::{error, warn};
-use std::{ops::Deref, path::Path};
+use reth_tracing::tracing::error;
+use std::{ops::Deref, path::Path, sync::Arc};
 use tx::Tx;
 
 pub mod cursor;
@@ -30,10 +31,21 @@ const DEFAULT_MAX_READERS: u64 = 32_000;
 
 /// Space that a read-only transaction can occupy until the warning is emitted.
 /// See [reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers] for more information.
+#[cfg(not(windows))]
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 
-static PROCESS_ID: Lazy<u32> =
-    Lazy::new(|| if cfg!(unix) { std::os::unix::process::parent_id() } else { std::process::id() });
+#[cfg(not(windows))]
+static PROCESS_ID: Lazy<u32> = Lazy::new(|| {
+    #[cfg(unix)]
+    {
+        std::os::unix::process::parent_id()
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::process::id()
+    }
+});
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
@@ -44,13 +56,39 @@ pub enum DatabaseEnvKind {
     RW,
 }
 
+/// Arguments for database initialization.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DatabaseArguments {
+    /// Database log level. If [None], the default value is used.
+    log_level: Option<LogLevel>,
+    /// Maximum duration of a read transaction. If [None], the default value is used.
+    max_read_transaction_duration: Option<MaxReadTransactionDuration>,
+}
+
+impl DatabaseArguments {
+    /// Set the log level.
+    pub fn log_level(mut self, log_level: Option<LogLevel>) -> Self {
+        self.log_level = log_level;
+        self
+    }
+
+    /// Set the maximum duration of a read transaction.
+    pub fn max_read_transaction_duration(
+        mut self,
+        max_read_transaction_duration: Option<MaxReadTransactionDuration>,
+    ) -> Self {
+        self.max_read_transaction_duration = max_read_transaction_duration;
+        self
+    }
+}
+
 /// Wrapper for the libmdbx environment: [Environment]
 #[derive(Debug)]
 pub struct DatabaseEnv {
     /// Libmdbx-sys environment.
     inner: Environment,
-    /// Whether to record metrics or not.
-    with_metrics: bool,
+    /// Cache for metric handles. If `None`, metrics are not recorded.
+    metrics: Option<Arc<DatabaseEnvMetrics>>,
 }
 
 impl Database for DatabaseEnv {
@@ -60,14 +98,14 @@ impl Database for DatabaseEnv {
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         Ok(Tx::new_with_metrics(
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
-            self.with_metrics,
+            self.metrics.as_ref().cloned(),
         ))
     }
 
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         Ok(Tx::new_with_metrics(
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
-            self.with_metrics,
+            self.metrics.as_ref().cloned(),
         ))
     }
 }
@@ -84,7 +122,7 @@ impl DatabaseMetrics for DatabaseEnv {
 
         let _ = self
             .view(|tx| {
-                for table in Tables::ALL.iter().map(|table| table.name()) {
+                for table in Tables::ALL.iter().map(Tables::name) {
                     let table_db = tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
 
                     let stats = tx
@@ -154,7 +192,7 @@ impl DatabaseEnv {
     pub fn open(
         path: &Path,
         kind: DatabaseEnvKind,
-        log_level: Option<LogLevel>,
+        args: DatabaseArguments,
     ) -> Result<DatabaseEnv, DatabaseError> {
         let mut inner_env = Environment::builder();
 
@@ -180,29 +218,32 @@ impl DatabaseEnv {
             shrink_threshold: None,
             page_size: Some(PageSize::Set(default_page_size())),
         });
-        let _ = *PROCESS_ID; // Initialize the process ID at the time of environment opening
-        inner_env.set_handle_slow_readers(
-            |process_id: u32, thread_id: u32, read_txn_id: u64, gap: usize, space: usize, retry: isize| {
-            if space > MAX_SAFE_READER_SPACE {
-                let message = if process_id == *PROCESS_ID {
-                    "Current process has a long-lived database transaction that grows the database file."
-                } else {
-                    "External process has a long-lived database transaction that grows the database file. Use shorter-lived read transactions or shut down the node."
-                };
-                warn!(
-                    target: "storage::db::mdbx",
-                    ?process_id,
-                    ?thread_id,
-                    ?read_txn_id,
-                    ?gap,
-                    ?space,
-                    ?retry,
-                    message
-                )
-            }
+        #[cfg(not(windows))]
+        {
+            let _ = *PROCESS_ID; // Initialize the process ID at the time of environment opening
+            inner_env.set_handle_slow_readers(
+                |process_id: u32, thread_id: u32, read_txn_id: u64, gap: usize, space: usize, retry: isize| {
+                    if space > MAX_SAFE_READER_SPACE {
+                        let message = if process_id == *PROCESS_ID {
+                            "Current process has a long-lived database transaction that grows the database file."
+                        } else {
+                            "External process has a long-lived database transaction that grows the database file. Use shorter-lived read transactions or shut down the node."
+                        };
+                        reth_tracing::tracing::warn!(
+                            target: "storage::db::mdbx",
+                            ?process_id,
+                            ?thread_id,
+                            ?read_txn_id,
+                            ?gap,
+                            ?space,
+                            ?retry,
+                            message
+                        )
+                    }
 
-            HandleSlowReadersReturnCode::ProceedWithoutKillingReader
-        });
+                    reth_libmdbx::HandleSlowReadersReturnCode::ProceedWithoutKillingReader
+                });
+        }
         inner_env.set_flags(EnvironmentFlags {
             mode,
             // We disable readahead because it improves performance for linear scans, but
@@ -240,7 +281,7 @@ impl DatabaseEnv {
         // https://github.com/paradigmxyz/reth/blob/fa2b9b685ed9787636d962f4366caf34a9186e66/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L16017.
         inner_env.set_rp_augment_limit(256 * 1024);
 
-        if let Some(log_level) = log_level {
+        if let Some(log_level) = args.log_level {
             // Levels higher than [LogLevel::Notice] require libmdbx built with `MDBX_DEBUG` option.
             let is_log_level_available = if cfg!(debug_assertions) {
                 true
@@ -262,13 +303,17 @@ impl DatabaseEnv {
                     LogLevel::Extra => 7,
                 });
             } else {
-                return Err(DatabaseError::LogLevelUnavailable(log_level));
+                return Err(DatabaseError::LogLevelUnavailable(log_level))
             }
+        }
+
+        if let Some(max_read_transaction_duration) = args.max_read_transaction_duration {
+            inner_env.set_max_read_transaction_duration(max_read_transaction_duration);
         }
 
         let env = DatabaseEnv {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
-            with_metrics: false,
+            metrics: None,
         };
 
         Ok(env)
@@ -276,7 +321,7 @@ impl DatabaseEnv {
 
     /// Enables metrics on the database.
     pub fn with_metrics(mut self) -> Self {
-        self.with_metrics = true;
+        self.metrics = Some(DatabaseEnvMetrics::new().into());
         self
     }
 
@@ -314,7 +359,6 @@ mod tests {
     use crate::{
         abstraction::table::{Encode, Table},
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
-        database::Database,
         models::{AccountBeforeTx, ShardedKey},
         tables::{AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState},
         test_utils::*,
@@ -322,8 +366,9 @@ mod tests {
         AccountChangeSet,
     };
     use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
+    use reth_libmdbx::Error;
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};
-    use std::{path::Path, str::FromStr, sync::Arc};
+    use std::str::FromStr;
     use tempfile::TempDir;
 
     /// Create database for testing
@@ -336,7 +381,8 @@ mod tests {
 
     /// Create database for testing with specified path
     fn create_test_db_with_path(kind: DatabaseEnvKind, path: &Path) -> DatabaseEnv {
-        let env = DatabaseEnv::open(path, kind, None).expect(ERROR_DB_CREATION);
+        let env =
+            DatabaseEnv::open(path, kind, DatabaseArguments::default()).expect(ERROR_DB_CREATION);
         env.create_tables().expect(ERROR_TABLE_CREATION);
         env
     }
@@ -683,7 +729,7 @@ mod tests {
         assert_eq!(
             cursor.insert(key_to_insert, B256::ZERO),
             Err(DatabaseWriteError {
-                code: -30799,
+                info: Error::KeyExist.into(),
                 operation: DatabaseWriteOperation::CursorInsert,
                 table_name: CanonicalHeaders::NAME,
                 key: key_to_insert.encode().into(),
@@ -827,7 +873,7 @@ mod tests {
         assert_eq!(
             cursor.append(key_to_append, B256::ZERO),
             Err(DatabaseWriteError {
-                code: -30418,
+                info: Error::KeyMismatch.into(),
                 operation: DatabaseWriteOperation::CursorAppend,
                 table_name: CanonicalHeaders::NAME,
                 key: key_to_append.encode().into(),
@@ -909,7 +955,7 @@ mod tests {
                 AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
             ),
             Err(DatabaseWriteError {
-                code: -30418,
+                info: Error::KeyMismatch.into(),
                 operation: DatabaseWriteOperation::CursorAppendDup,
                 table_name: AccountChangeSet::NAME,
                 key: transition_id.encode().into(),
@@ -922,7 +968,7 @@ mod tests {
                 AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
             ),
             Err(DatabaseWriteError {
-                code: -30418,
+                info: Error::KeyMismatch.into(),
                 operation: DatabaseWriteOperation::CursorAppend,
                 table_name: AccountChangeSet::NAME,
                 key: (transition_id - 1).encode().into(),
@@ -961,7 +1007,8 @@ mod tests {
             assert_eq!(result.expect(ERROR_RETURN_VALUE), 200);
         }
 
-        let env = DatabaseEnv::open(&path, DatabaseEnvKind::RO, None).expect(ERROR_DB_CREATION);
+        let env = DatabaseEnv::open(&path, DatabaseEnvKind::RO, Default::default())
+            .expect(ERROR_DB_CREATION);
 
         // GET
         let result =

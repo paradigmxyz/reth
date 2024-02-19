@@ -5,9 +5,7 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs,
     },
-    commands::node::events::{handle_events, NodeEvent},
     dirs::{DataDirPath, MaybePlatformPath},
-    init::init_genesis,
     version::SHORT_VERSION,
 };
 use clap::Parser;
@@ -15,12 +13,14 @@ use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
-use reth_db::{database::Database, init_db};
+use reth_db::{database::Database, init_db, mdbx::DatabaseArguments};
 use reth_downloaders::{
-    bodies::bodies::BodiesDownloaderBuilder,
-    headers::reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::FileClient,
+    bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
+    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::consensus::Consensus;
+use reth_node_core::{events::node::NodeEvent, init::init_genesis};
+use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageId, ChainSpec, B256};
 use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
@@ -86,7 +86,8 @@ impl ImportCommand {
         let db_path = data_dir.db_path();
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(db_path, self.db.log_level)?);
+        let db =
+            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         info!(target: "reth::cli", "Database opened");
         let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone());
 
@@ -117,7 +118,12 @@ impl ImportCommand {
 
         let latest_block_number =
             provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
-        tokio::spawn(handle_events(None, latest_block_number, events, db.clone()));
+        tokio::spawn(reth_node_core::events::node::handle_events(
+            None,
+            latest_block_number,
+            events,
+            db.clone(),
+        ));
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
@@ -154,7 +160,8 @@ impl ImportCommand {
             .into_task();
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
+        let factory =
+            reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
 
         let max_block = file_client.max_block().unwrap_or(0);
         let mut pipeline = Pipeline::builder()
@@ -183,6 +190,7 @@ impl ImportCommand {
                         max_blocks: config.stages.execution.max_blocks,
                         max_changes: config.stages.execution.max_changes,
                         max_cumulative_gas: config.stages.execution.max_cumulative_gas,
+                        max_duration: config.stages.execution.max_duration,
                     },
                     config
                         .stages
@@ -215,7 +223,11 @@ mod tests {
     fn parse_common_import_command_chain_args() {
         for chain in SUPPORTED_CHAINS {
             let args: ImportCommand = ImportCommand::parse_from(["reth", "--chain", chain, "."]);
-            assert_eq!(args.chain.chain, chain.parse().unwrap());
+            assert_eq!(
+                Ok(args.chain.chain),
+                chain.parse::<reth_primitives::Chain>(),
+                "failed to parse chain {chain}"
+            );
         }
     }
 }

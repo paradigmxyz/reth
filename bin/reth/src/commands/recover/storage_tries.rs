@@ -1,7 +1,6 @@
 use crate::{
     args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
     dirs::{DataDirPath, MaybePlatformPath},
-    init::init_genesis,
     runner::CliContext,
 };
 use clap::Parser;
@@ -10,6 +9,7 @@ use reth_db::{
     init_db, tables,
     transaction::DbTx,
 };
+use reth_node_core::init::init_genesis;
 use reth_primitives::ChainSpec;
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFactory};
 use reth_trie::StateRoot;
@@ -48,7 +48,7 @@ impl Command {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
-        let db = Arc::new(init_db(db_path, None)?);
+        let db = Arc::new(init_db(db_path, Default::default())?);
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(db.clone(), self.chain.clone())?;
