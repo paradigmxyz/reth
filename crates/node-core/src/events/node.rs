@@ -513,7 +513,6 @@ impl Display for Eta {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
 
     #[test]
     fn eta_display_no_milliseconds() {

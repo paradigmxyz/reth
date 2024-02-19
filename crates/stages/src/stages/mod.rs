@@ -39,12 +39,7 @@ pub use tx_lookup::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        stage::Stage,
-        stages::{ExecutionStage, IndexAccountHistoryStage, IndexStorageHistoryStage},
-        test_utils::TestStageDB,
-        ExecInput,
-    };
+    use crate::{stage::Stage, test_utils::TestStageDB, ExecInput};
     use alloy_rlp::Decodable;
     use reth_db::{
         cursor::DbCursorRO,
