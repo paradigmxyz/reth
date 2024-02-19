@@ -377,9 +377,7 @@ mod tests {
             generators, generators::random_header_range, TestConsensus, TestHeaderDownloader,
             TestHeadersClient,
         };
-        use reth_provider::{BlockHashReader, BlockNumReader, HeaderProvider};
-        use std::sync::Arc;
-        use tempfile::TempDir;
+        use reth_provider::BlockNumReader;
         use tokio::sync::watch;
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
