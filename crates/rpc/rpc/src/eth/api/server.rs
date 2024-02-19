@@ -229,13 +229,13 @@ where
     /// Handler for: `eth_getHeaderByNumber`
     async fn header_by_number(&self, block_number: BlockNumberOrTag) -> Result<Option<Header>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_getHeaderByNumber");
-        Ok(EthApi::block_header(self, block_number).await?)
+        Ok(EthApi::rpc_block_header(self, block_number).await?)
     }
 
     /// Handler for: `eth_getHeaderByHash`
     async fn header_by_hash(&self, hash: B256) -> Result<Option<Header>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getHeaderByHash");
-        Ok(EthApi::block_header(self, hash).await?)
+        Ok(EthApi::rpc_block_header(self, hash).await?)
     }
 
     /// Handler for: `eth_call`

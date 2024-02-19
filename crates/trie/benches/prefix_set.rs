@@ -4,7 +4,7 @@ use criterion::{
 };
 use proptest::{
     prelude::*,
-    strategy::{Strategy, ValueTree},
+    strategy::ValueTree,
     test_runner::{basic_result_cache, TestRunner},
 };
 use reth_primitives::trie::Nibbles;

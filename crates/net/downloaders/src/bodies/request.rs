@@ -252,12 +252,7 @@ mod tests {
         bodies::test_utils::zip_blocks,
         test_utils::{generate_bodies, TestBodiesClient},
     };
-    use reth_interfaces::{
-        p2p::bodies::response::BlockResponse,
-        test_utils::{generators, generators::random_header_range, TestConsensus},
-    };
-    use reth_primitives::B256;
-    use std::sync::Arc;
+    use reth_interfaces::test_utils::{generators, generators::random_header_range, TestConsensus};
 
     /// Check if future returns empty bodies without dispathing any requests.
     #[tokio::test]
