@@ -252,6 +252,7 @@ where
                 // define task
                 this.insert_task = Some(Box::pin(async move {
                     let network_id = network.peer_id();
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
                     match client.latest_header().ok() {
                         Some(header) => {
                             if let Some(header) = header {
