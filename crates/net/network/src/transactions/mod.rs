@@ -35,6 +35,7 @@ use crate::{
     NetworkEvents, NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, Future, StreamExt};
+use rand::Rng;
 use reth_eth_wire::{
     EthVersion, GetPooledTransactions, HandleAnnouncement, NewPooledTransactionHashes,
     NewPooledTransactionHashes66, NewPooledTransactionHashes68, PooledTransactions,
@@ -55,7 +56,7 @@ use reth_transaction_pool::{
     PropagatedTransactions, TransactionPool, ValidPoolTransaction,
 };
 use std::{
-    cmp::max,
+    cmp::{max, min},
     collections::{hash_map::Entry, HashMap, HashSet},
     num::NonZeroUsize,
     pin::Pin,
@@ -393,11 +394,13 @@ where
             return propagated
         }
 
-        // send full transactions to a fraction fo the connected peers (square root of the total
-        // number of connected peers)
-        let max_num_full = (self.peers.len() as f64).sqrt() as usize + 1;
+        // send full transactions to a random fraction of the connected peers (square root of the
+        // total number of connected peers)
+        let max_num_full = min((self.peers.len() as f64).sqrt() as usize + 1, self.peers.len());
+        let mut rng = rand::thread_rng();
+        let full_transaction_peer_sample =
+            RangeSampler::new(self.peers.len(), max_num_full, &mut rng);
 
-        // Note: Assuming ~random~ order due to random state of the peers map hasher
         for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
             // filter all transactions unknown to the peer
             let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
@@ -430,7 +433,8 @@ where
             if !new_pooled_hashes.is_empty() {
                 // determine whether to send full tx objects or hashes. If there are no full
                 // transactions, try to send hashes.
-                if peer_idx > max_num_full || full_transactions.is_empty() {
+                if !full_transaction_peer_sample.in_sample(peer_idx) || full_transactions.is_empty()
+                {
                     // enforce tx soft limit per message for the (unlikely) event the number of
                     // hashes exceeds it
                     new_pooled_hashes.truncate(
@@ -1493,6 +1497,59 @@ impl Default for PendingPoolImportsInfo {
     }
 }
 
+/// Uniformly sample a random subset of consecutive elements in range `0..population_count`.
+#[derive(Debug, Default)]
+struct RangeSampler {
+    /// The total number elements in the range.
+    population_count: usize,
+    /// The starting index of the sample range.
+    sample_start: usize,
+    /// The end index of the sample range.
+    sample_end: usize,
+}
+
+impl RangeSampler {
+    pub fn new<R: Rng + ?Sized>(population_count: usize, sample_count: usize, rng: &mut R) -> Self {
+        debug_assert!(
+            sample_count <= population_count,
+            "sample_count should be no greater than population_count"
+        );
+        debug_assert!(
+            population_count <= usize::MAX - sample_count,
+            "sample_count + population_count should not overflow"
+        );
+        if population_count == 0 {
+            return Self { population_count: 0, sample_start: 0, sample_end: 0 };
+        }
+
+        let sample_start = rng.gen_range(0..population_count);
+        let sample_end = sample_start.wrapping_add(sample_count);
+        Self { population_count, sample_start, sample_end }
+    }
+
+    /// Check whether the given `index` is in the sample.
+    ///
+    /// Check whether the `index` falls within the range of samples, which starts from
+    /// `sample_start` inclusive and ends at `sample_start + sample_count` exclusive.
+    pub fn in_sample(&self, index: usize) -> bool {
+        if self.population_count == 0 {
+            return false;
+        }
+        if index >= self.population_count {
+            return false;
+        }
+
+        if self.sample_end <= self.population_count {
+            // check if in range [sample_start, sample_end)
+            index >= self.sample_start && index < self.sample_end
+        } else {
+            // check if in range [sample_start, population_count) or [0, sample_end %
+            // population_count)
+            index >= self.sample_start || index < self.sample_end % self.population_count
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2001,5 +2058,29 @@ mod tests {
         // `MAX_REQUEST_RETRIES_PER_TX_HASH`, 2, for hashes reached so this time won't be buffered
         // for retry
         assert!(tx_fetcher.hashes_pending_fetch.is_empty());
+    }
+
+    #[test]
+    fn test_range_sampler() {
+        let mut rng = rand::thread_rng();
+        let sampler = RangeSampler::new(5, 5, &mut rng);
+        for i in 0..5 {
+            assert!(sampler.in_sample(i))
+        }
+
+        let sampler = RangeSampler::new(5, 0, &mut rng);
+        for i in 0..5 {
+            assert!(!sampler.in_sample(i))
+        }
+
+        let sampler = RangeSampler::new(0, 0, &mut rng);
+        for i in 0..5 {
+            assert!(!sampler.in_sample(i))
+        }
+
+        for _ in 0..10 {
+            let sampler = RangeSampler::new(5, 3, &mut rng);
+            assert_eq!((0..5).filter(|i| sampler.in_sample(*i)).count(), 3)
+        }
     }
 }
