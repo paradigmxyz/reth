@@ -191,7 +191,8 @@ impl TransactionFetcher {
     pub(super) fn pack_request_eth68(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
-        hashes_from_announcement: ValidAnnouncementData,
+        hashes_from_announcement: impl HandleAnnouncement
+            + IntoIterator<Item = (TxHash, Option<(u8, usize)>)>,
     ) -> RequestTxHashes {
         let mut acc_size_response = 0;
         let hashes_from_announcement_len = hashes_from_announcement.len();
@@ -1018,6 +1019,7 @@ impl Default for TransactionFetcherInfo {
 mod test {
     use std::collections::HashSet;
 
+    use derive_more::IntoIterator;
     use reth_eth_wire::EthVersion;
     use reth_primitives::B256;
 
@@ -1025,9 +1027,46 @@ mod test {
 
     use super::*;
 
+    #[derive(IntoIterator)]
+    struct TestValidAnnouncementData(Vec<(TxHash, Option<(u8, usize)>)>);
+
+    impl HandleAnnouncement for TestValidAnnouncementData {
+        fn is_empty(&self) -> bool {
+            self.0.is_empty()
+        }
+
+        fn len(&self) -> usize {
+            self.0.len()
+        }
+
+        fn msg_version(&self) -> EthVersion {
+            EthVersion::Eth68
+        }
+
+        fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
+            let mut indices_to_remove = vec![];
+            for (i, (hash, _)) in self.0.iter().enumerate() {
+                if !f(hash) {
+                    indices_to_remove.push(i);
+                }
+            }
+
+            let mut removed_hashes = Vec::with_capacity(indices_to_remove.len());
+
+            for index in indices_to_remove.into_iter().rev() {
+                let entry = self.0.remove(index);
+                removed_hashes.push(entry);
+            }
+
+            TestValidAnnouncementData(removed_hashes)
+        }
+    }
+
     #[test]
     fn pack_eth68_request() {
         reth_tracing::init_test_tracing();
+
+        // RIG TEST
 
         let tx_fetcher = &mut TransactionFetcher::default();
 
@@ -1038,78 +1077,37 @@ mod test {
             B256::from_slice(&[4; 32]),
             B256::from_slice(&[5; 32]),
         ];
-        let eth68_hashes_sizes = [
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST - MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED - 1,
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST,
-            2,
+        let eth68_sizes = [
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST - MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED - 1, // first will fit
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST, // second won't
+            2, // free space > `MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED`, third will fit, no more after this
             9,
-            MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED,
+            0,
         ];
 
-        // possible included index combinations are
-        // (i) 0 and 4
-        // (ii) 0, 2 and 3
-        // (iii) 1
-        // (iv) 2, 3 and 4
-        // (v) 0, 2, 3 and 4 (if median byte size small legacy tx is inserted last)
+        let expected_request_hashes = [eth68_hashes[0], eth68_hashes[2]];
 
-        let possible_outcome_1 =
-            [eth68_hashes[0], eth68_hashes[4]].into_iter().collect::<HashSet<_>>();
-        let possible_outcome_2 =
-            [eth68_hashes[0], eth68_hashes[2], eth68_hashes[3]].into_iter().collect::<HashSet<_>>();
-        let possible_outcome_3 = [eth68_hashes[1]].into_iter().collect::<HashSet<_>>();
-        let possible_outcome_4 =
-            [eth68_hashes[2], eth68_hashes[3], eth68_hashes[4]].into_iter().collect::<HashSet<_>>();
-        let possible_outcome_5 =
-            [eth68_hashes[0], eth68_hashes[2], eth68_hashes[3], eth68_hashes[4]]
-                .into_iter()
-                .collect::<HashSet<_>>();
-
-        let possible_outcomes = [
-            possible_outcome_1,
-            possible_outcome_2,
-            possible_outcome_3,
-            possible_outcome_4,
-            possible_outcome_5,
-        ];
-
-        // possible outcomes included index combinations for surplus hashes are
-        // (i) 0, 2, 3 and 4
-        // (ii) 1
-        // (iii) 2 and 3
-
-        let possible_outcome_surplus_1 =
-            [eth68_hashes[0], eth68_hashes[4]].into_iter().collect::<HashSet<_>>();
-        let possible_outcome_surplus_2 =
-            [eth68_hashes[0], eth68_hashes[2], eth68_hashes[3]].into_iter().collect::<HashSet<_>>();
-        let possible_outcome_surplus_3 = [eth68_hashes[1]].into_iter().collect::<HashSet<_>>();
-
-        let possible_outcomes_surplus_hashes =
-            [possible_outcome_surplus_1, possible_outcome_surplus_2, possible_outcome_surplus_3];
+        let expected_surplus_hashes = [eth68_hashes[1], eth68_hashes[3], eth68_hashes[4]];
 
         let mut eth68_hashes_to_request = RequestTxHashes::with_capacity(3);
-        let mut valid_announcement_data = ValidAnnouncementData::empty_eth68();
-        for i in 0..eth68_hashes.len() {
-            valid_announcement_data.insert(eth68_hashes[i], Some((0, eth68_hashes_sizes[i])));
-        }
+        let valid_announcement_data = TestValidAnnouncementData(
+            eth68_hashes
+                .into_iter()
+                .zip(eth68_sizes)
+                .map(|(hash, size)| (hash, Some((0u8, size))))
+                .collect::<Vec<_>>(),
+        );
+
+        // TEST
+
         let surplus_eth68_hashes =
             tx_fetcher.pack_request_eth68(&mut eth68_hashes_to_request, valid_announcement_data);
 
-        let combo_surplus_hashes = surplus_eth68_hashes.into_iter().collect::<HashSet<_>>();
-        for combo in possible_outcomes_surplus_hashes {
-            assert_ne!(combo, combo_surplus_hashes)
-        }
+        let eth68_hashes_to_request = eth68_hashes_to_request.into_iter().collect::<Vec<_>>();
+        let surplus_eth68_hashes = surplus_eth68_hashes.into_iter().collect::<Vec<_>>();
 
-        let combo_hashes_to_request = eth68_hashes_to_request.into_iter().collect::<HashSet<_>>();
-
-        let mut combo_match = false;
-        for combo in possible_outcomes {
-            if combo == combo_hashes_to_request {
-                combo_match = true;
-            }
-        }
-
-        assert!(combo_match)
+        assert_eq!(expected_request_hashes.to_vec(), eth68_hashes_to_request);
+        assert_eq!(expected_surplus_hashes.to_vec(), surplus_eth68_hashes);
     }
 
     #[tokio::test]
