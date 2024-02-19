@@ -472,9 +472,7 @@ pub enum ChainSplit {
 mod tests {
     use super::*;
     use reth_primitives::{Receipts, B256};
-    use revm::{
-        primitives::{AccountInfo, HashMap},
-    };
+    use revm::primitives::{AccountInfo, HashMap};
 
     #[test]
     fn chain_append() {

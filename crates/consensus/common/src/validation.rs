@@ -321,8 +321,8 @@ mod tests {
     };
     use reth_primitives::{
         hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber, Bytes,
-        ChainSpecBuilder, Signature, TransactionKind, TransactionSigned, Withdrawal,
-        Withdrawals, MAINNET, U256,
+        ChainSpecBuilder, Signature, TransactionKind, TransactionSigned, Withdrawal, Withdrawals,
+        MAINNET, U256,
     };
     use std::ops::RangeBounds;
 

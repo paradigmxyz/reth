@@ -164,9 +164,9 @@ impl<Ext: RethCliExt> Commands<Ext> {
 
 #[cfg(test)]
 mod tests {
-    use clap::CommandFactory;
-    use crate::args::{ColorMode};
     use super::*;
+    use crate::args::ColorMode;
+    use clap::CommandFactory;
 
     #[test]
     fn parse_color_mode() {

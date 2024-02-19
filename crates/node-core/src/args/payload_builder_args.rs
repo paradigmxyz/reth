@@ -119,7 +119,7 @@ impl TypedValueParser for ExtradataValueParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::{Parser};
+    use clap::Parser;
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]

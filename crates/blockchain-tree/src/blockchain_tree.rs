@@ -1266,9 +1266,7 @@ mod tests {
     };
     use reth_revm::EvmProcessorFactory;
     use reth_trie::StateRoot;
-    use std::{
-        collections::{HashMap},
-    };
+    use std::collections::HashMap;
 
     fn setup_externals(
         exec_res: Vec<BundleStateWithReceipts>,

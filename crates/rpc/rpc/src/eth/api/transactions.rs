@@ -1424,7 +1424,7 @@ mod tests {
     use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex};
     use reth_provider::test_utils::NoopProvider;
-    use reth_transaction_pool::{test_utils::testing_pool};
+    use reth_transaction_pool::test_utils::testing_pool;
 
     #[tokio::test]
     async fn send_raw_transaction() {

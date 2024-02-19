@@ -365,7 +365,7 @@ mod tests {
     use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
     use reth_libmdbx::Error;
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};
-    use std::{str::FromStr};
+    use std::str::FromStr;
     use tempfile::TempDir;
 
     /// Create database for testing
