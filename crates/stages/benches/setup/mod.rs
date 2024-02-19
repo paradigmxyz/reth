@@ -11,7 +11,7 @@ use reth_interfaces::test_utils::{
     generators,
     generators::{
         random_block_range, random_changeset_range, random_contract_account_range,
-        random_eoa_account_range,
+        random_eoa_accounts,
     },
 };
 use reth_primitives::{fs, Account, Address, SealedBlock, B256, U256};
@@ -108,7 +108,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         let db = TestStageDB::new(&path);
 
         let accounts: BTreeMap<Address, Account> = concat([
-            random_eoa_account_range(&mut rng, 0..n_eoa),
+            random_eoa_accounts(&mut rng, n_eoa),
             random_contract_account_range(&mut rng, &mut (0..n_contract)),
         ])
         .into_iter()

@@ -49,11 +49,11 @@ rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10.7"
-sucds = "~0.6"
 tempfile.workspace = true
 thiserror.workspace = true
 zstd = { version = "0.12", features = ["experimental"] }
 ahash.workspace = true
+roaring = "0.10.2"
 
 # `test-utils` feature
 hash-db = { version = "~0.15", optional = true }
@@ -81,6 +81,9 @@ triehash = "0.8"
 
 hash-db = "~0.15"
 plain_hasher = "0.2"
+
+sucds = "0.8.1"
+anyhow = "1.0.75"
 
 # necessary so we don't hit a "undeclared 'std'":
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
@@ -121,4 +124,8 @@ harness = false
 
 [[bench]]
 name = "nibbles"
+harness = false
+
+[[bench]]
+name = "integer_list"
 harness = false
