@@ -320,7 +320,7 @@ impl TransactionFetcher {
                 fallback_peers.insert(peer_id);
             } else {
                 if *retries >= DEFAULT_MAX_RETRIES {
-                    debug!(target: "net::tx",
+                    trace!(target: "net::tx",
                         hash=%hash,
                         retries=retries,
                         "retry limit for `GetPooledTransactions` requests reached for hash, dropping hash"
@@ -544,7 +544,7 @@ impl TransactionFetcher {
         let conn_eth_version = peer.version;
 
         if self.active_peers.len() >= self.info.max_inflight_requests {
-            debug!(target: "net::tx",
+            trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 new_announced_hashes=?*new_announced_hashes,
                 conn_eth_version=%conn_eth_version,
@@ -565,7 +565,7 @@ impl TransactionFetcher {
         };
 
         if *inflight_count >= DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
-            debug!(target: "net::tx",
+            trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 new_announced_hashes=?*new_announced_hashes,
                 conn_eth_version=%conn_eth_version,
