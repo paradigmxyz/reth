@@ -239,7 +239,6 @@ mod tests {
         cursor::DbCursorRO,
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         table::{Table, TableRow},
-        transaction::DbTx,
         DatabaseEnv,
     };
     use reth_primitives::{
@@ -247,7 +246,6 @@ mod tests {
         GOERLI_GENESIS_HASH, MAINNET, MAINNET_GENESIS_HASH, SEPOLIA, SEPOLIA_GENESIS_HASH,
     };
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
-    use std::collections::HashMap;
 
     fn collect_table_entries<DB, T>(
         tx: &<DB as Database>::TX,
