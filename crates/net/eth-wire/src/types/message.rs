@@ -327,9 +327,7 @@ impl<T: Encodable> EncodableExt for Vec<T> {
         // Ensure the encoded header does not exceed the placeholder size
         assert!(header_buffer.len() <= 3); // header placeholder size is 3
                                            // Replace the placeholder with the real header
-        for i in 0..header_buffer.len() {
-            buf[i] = header_buffer[i];
-        }
+        buf[..header_buffer.len()].copy_from_slice(&header_buffer[..]);
         // If the real header is smaller than the placeholder, remove the excess
         if header_buffer.len() < 3 {
             let excess = 3 - header_buffer.len();
@@ -371,9 +369,7 @@ impl<T: Encodable> EncodableExt for Vec<T> {
         // Ensure the encoded header does not exceed the placeholder size
         assert!(header_buffer.len() <= 3); // header placeholder size is 3
                                            // Replace the placeholder with the real header
-        for i in 0..header_buffer.len() {
-            buf[i] = header_buffer[i];
-        }
+        buf[..header_buffer.len()].copy_from_slice(&header_buffer[..]);
         // If the real header is smaller than the placeholder, remove the excess
         if header_buffer.len() < 3 {
             let excess = 3 - header_buffer.len();
