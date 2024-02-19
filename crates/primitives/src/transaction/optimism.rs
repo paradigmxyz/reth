@@ -145,8 +145,7 @@ impl TxDeposit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{revm_primitives::hex_literal::hex, Bytes, TransactionSigned};
-    use alloy_rlp::Decodable;
+    use crate::{revm_primitives::hex_literal::hex, TransactionSigned};
     use bytes::BytesMut;
 
     #[test]

@@ -261,12 +261,9 @@ pub mod triehash {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(feature = "optimism"))]
-    use crate::proofs::calculate_receipt_root;
     use crate::{
-        bloom, constants::EMPTY_ROOT_HASH, hex_literal::hex, proofs::calculate_transaction_root,
-        Address, Block, GenesisAccount, Log, Receipt, ReceiptWithBloom, TxType, B256, GOERLI,
-        HOLESKY, MAINNET, SEPOLIA, U256,
+        bloom, constants::EMPTY_ROOT_HASH, hex_literal::hex, Block, GenesisAccount, Log, TxType,
+        GOERLI, HOLESKY, MAINNET, SEPOLIA,
     };
     use alloy_primitives::b256;
     use alloy_rlp::Decodable;

@@ -21,6 +21,7 @@ use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
 use std::{collections::HashSet, net::SocketAddr, time::Duration};
 use tokio::task;
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_establish_connections() {
     reth_tracing::init_test_tracing();
@@ -582,4 +583,22 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
     assert_eq!(handle.num_connected_peers(), 0);
 
     net_handle.terminate().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connect_many() {
+    reth_tracing::init_test_tracing();
+
+    let net = Testnet::create_with(5, NoopProvider::default()).await;
+
+    // install request handlers
+    let net = net.with_eth_pool();
+    let handle = net.spawn();
+    // connect all the peers
+    handle.connect_peers().await;
+
+    // check that all the peers are connected
+    for peer in handle.peers() {
+        assert_eq!(peer.network().num_connected_peers(), 4);
+    }
 }

@@ -1079,18 +1079,27 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
             let mut cumulative_cost = tx.next_cumulative_cost();
 
+            // the next expected nonce after this transaction: nonce + 1
+            let mut next_nonce_in_line = tx.transaction.nonce().saturating_add(1);
+
             // Update all consecutive transaction of this sender
             while let Some((peek, ref mut tx)) = iter.peek_mut() {
                 if peek.sender != id.sender {
-                    // Found the next sender
+                    // Found the next sender we need to check
                     continue 'transactions
                 }
 
-                // can short circuit
-                if tx.state.has_nonce_gap() {
+                if tx.transaction.nonce() == next_nonce_in_line {
+                    // no longer nonce gapped
+                    tx.state.insert(TxState::NO_NONCE_GAPS);
+                } else {
+                    // can short circuit if there's still a nonce gap
                     next_sender!(iter);
                     continue 'transactions
                 }
+
+                // update for next iteration of this sender's loop
+                next_nonce_in_line = next_nonce_in_line.saturating_add(1);
 
                 // update cumulative cost
                 tx.cumulative_cost = cumulative_cost;
@@ -2848,7 +2857,7 @@ mod tests {
     }
 
     #[test]
-    fn wrong_best_order_of_transactions() {
+    fn account_updates_nonce_gap() {
         let on_chain_balance = U256::from(10_000);
         let mut on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
@@ -2857,23 +2866,21 @@ mod tests {
         let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
         let tx_1 = tx_0.next();
         let tx_2 = tx_1.next();
-        let tx_3 = tx_2.next();
 
         // Create 4 transactions
         let v0 = f.validated(tx_0.clone());
         let v1 = f.validated(tx_1);
         let v2 = f.validated(tx_2);
-        let v3 = f.validated(tx_3);
 
         // Add first 2 to the pool
         let _res = pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce).unwrap();
         let _res = pool.add_transaction(v1.clone(), on_chain_balance, on_chain_nonce).unwrap();
 
-        assert_eq!(0, pool.queued_transactions().len());
+        assert!(pool.queued_transactions().is_empty());
         assert_eq!(2, pool.pending_transactions().len());
 
         // Remove first (nonce 0) - simulating that it was taken to be a part of the block.
-        pool.remove_transaction(v0.id());
+        pool.prune_transaction_by_hash(v0.hash());
 
         // Now add transaction with nonce 2
         let _res = pool.add_transaction(v2.clone(), on_chain_balance, on_chain_nonce).unwrap();
@@ -2891,21 +2898,8 @@ mod tests {
         );
         pool.update_accounts(updated_accounts);
 
-        // Transactions are not changed (IMHO - this is a bug, as transaction v2 should be in the
         // 'pending' now).
-        assert_eq!(1, pool.queued_transactions().len());
-        assert_eq!(1, pool.pending_transactions().len());
-
-        // Add transaction v3 - it 'unclogs' everything.
-        let _res = pool.add_transaction(v3.clone(), on_chain_balance, on_chain_nonce).unwrap();
-        assert_eq!(0, pool.queued_transactions().len());
-        assert_eq!(3, pool.pending_transactions().len());
-
-        // It should have returned transactions in order (v1, v2, v3 - as there is nothing blocking
-        // them).
-        assert_eq!(
-            pool.best_transactions().map(|x| x.id().nonce).collect::<Vec<_>>(),
-            vec![1, 2, 3]
-        );
+        assert!(pool.queued_transactions().is_empty());
+        assert_eq!(2, pool.pending_transactions().len());
     }
 }

@@ -1660,13 +1660,7 @@ impl DepositContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "optimism")]
-    use crate::OP_GOERLI;
-    use crate::{
-        b256, hex, trie::TrieAccount, ChainConfig, GenesisAccount, B256, DEV, GOERLI, HOLESKY,
-        MAINNET, SEPOLIA, U256,
-    };
-    use alloy_chains::NamedChain;
+    use crate::{b256, hex, trie::TrieAccount, ChainConfig, GenesisAccount};
     use alloy_rlp::Encodable;
     use bytes::BytesMut;
     use std::{collections::HashMap, str::FromStr};

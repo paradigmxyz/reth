@@ -232,15 +232,13 @@ mod tests {
     use rand::Rng;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},
-        models::{BlockNumberAddress, StoredBlockBodyIndices},
+        models::StoredBlockBodyIndices,
     };
     use reth_interfaces::test_utils::{
         generators,
         generators::{random_block_range, random_contract_account_range},
     };
-    use reth_primitives::{
-        stage::StageUnitCheckpoint, Address, SealedBlock, StorageEntry, B256, U256,
-    };
+    use reth_primitives::{stage::StageUnitCheckpoint, Address, SealedBlock, B256, U256};
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
 

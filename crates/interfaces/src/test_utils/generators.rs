@@ -387,10 +387,7 @@ pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: O
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{
-        hex, public_key_to_address, AccessList, Signature, TransactionKind, TxEip1559,
-    };
-    use secp256k1::KeyPair;
+    use reth_primitives::{hex, public_key_to_address, AccessList, Signature, TxEip1559};
     use std::str::FromStr;
 
     #[test]

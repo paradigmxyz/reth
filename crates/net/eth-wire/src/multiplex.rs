@@ -643,7 +643,7 @@ mod tests {
             connect_passthrough, eth_handshake, eth_hello,
             proto::{test_hello, TestProtoMessage},
         },
-        UnauthedEthStream, UnauthedP2PStream,
+        UnauthedP2PStream,
     };
     use tokio::{net::TcpListener, sync::oneshot};
     use tokio_util::codec::Decoder;
