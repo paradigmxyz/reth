@@ -306,7 +306,10 @@ impl<T: TransactionOrdering> TxPool<T> {
             }
             Ordering::Greater => {
                 // base fee increased, we only need to enforce this on the pending pool
-                Box::new(self.pending_pool.best_with_basefee(best_transactions_attributes.basefee))
+                Box::new(self.pending_pool.best_with_basefee_and_blobfee(
+                    best_transactions_attributes.basefee,
+                    best_transactions_attributes.blob_fee.unwrap_or_default(),
+                ))
             }
             Ordering::Less => {
                 // base fee decreased, we need to move transactions from the basefee pool to the
