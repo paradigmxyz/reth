@@ -2,7 +2,7 @@
 use crate::{
     eth::{
         api::pending_block::PendingBlockEnv,
-        error::{EthApiError, EthResult, SignError},
+        error::{EthApiError, EthResult, RpcInvalidTransactionError, SignError},
         revm_utils::{
             inspect, inspect_and_return_db, prepare_call_env, replay_transactions_until, transact,
             EvmOverrides,
@@ -566,32 +566,9 @@ where
         }
 
         let chain_id = self.chain_id();
-        // TODO: we need an oracle to fetch the gas price of the current chain
-        let gas_price = request.gas_price.unwrap_or_default();
-        let max_fee_per_gas = request.max_fee_per_gas.unwrap_or_default();
 
         let estimated_gas = self
-            .estimate_gas_at(
-                TransactionRequest {
-                    from: Some(from),
-                    to: request.to,
-                    gas: request.gas,
-                    gas_price: Some(gas_price),
-                    max_fee_per_gas: Some(max_fee_per_gas),
-                    value: request.value,
-                    input: request.input.clone(),
-                    nonce: request.nonce,
-                    chain_id: Some(chain_id),
-                    access_list: request.access_list.clone(),
-                    max_priority_fee_per_gas: Some(max_fee_per_gas),
-                    transaction_type: None,
-                    blob_versioned_hashes: None,
-                    max_fee_per_blob_gas: None,
-                    ..Default::default()
-                },
-                BlockId::Number(BlockNumberOrTag::Pending),
-                None,
-            )
+            .estimate_gas_at(request.clone(), BlockId::Number(BlockNumberOrTag::Pending), None)
             .await?;
         let gas_limit = estimated_gas;
 
@@ -710,33 +687,43 @@ where
         };
 
         let transaction = match transaction {
-            Some(TypedTransactionRequest::Legacy(mut m)) => {
-                m.chain_id = Some(chain_id.to());
-                m.gas_limit = gas_limit;
-                m.gas_price = gas_price.unwrap_or_default();
+            Some(TypedTransactionRequest::Legacy(mut req)) => {
+                req.chain_id = Some(chain_id.to());
+                req.gas_limit = gas_limit;
+                req.gas_price = self.legacy_gas_price(gas_price).await?;
 
-                TypedTransactionRequest::Legacy(m)
+                TypedTransactionRequest::Legacy(req)
             }
-            Some(TypedTransactionRequest::EIP2930(mut m)) => {
-                m.chain_id = chain_id.to();
-                m.gas_limit = gas_limit;
-                m.gas_price = gas_price.unwrap_or_default();
+            Some(TypedTransactionRequest::EIP2930(mut req)) => {
+                req.chain_id = chain_id.to();
+                req.gas_limit = gas_limit;
+                req.gas_price = self.legacy_gas_price(gas_price).await?;
 
-                TypedTransactionRequest::EIP2930(m)
+                TypedTransactionRequest::EIP2930(req)
             }
-            Some(TypedTransactionRequest::EIP1559(mut m)) => {
-                m.chain_id = chain_id.to();
-                m.gas_limit = gas_limit;
-                m.max_fee_per_gas = max_fee_per_gas.unwrap_or_default();
+            Some(TypedTransactionRequest::EIP1559(mut req)) => {
+                let (max_fee_per_gas, max_priority_fee_per_gas) =
+                    self.eip1559_fees(max_fee_per_gas, max_priority_fee_per_gas).await?;
 
-                TypedTransactionRequest::EIP1559(m)
+                req.chain_id = chain_id.to();
+                req.gas_limit = gas_limit;
+                req.max_fee_per_gas = max_fee_per_gas;
+                req.max_priority_fee_per_gas = max_priority_fee_per_gas;
+
+                TypedTransactionRequest::EIP1559(req)
             }
-            Some(TypedTransactionRequest::EIP4844(mut m)) => {
-                m.chain_id = chain_id.to();
-                m.gas_limit = gas_limit;
-                m.max_fee_per_gas = max_fee_per_gas.unwrap_or_default();
+            Some(TypedTransactionRequest::EIP4844(mut req)) => {
+                let (max_fee_per_gas, max_priority_fee_per_gas) =
+                    self.eip1559_fees(max_fee_per_gas, max_priority_fee_per_gas).await?;
 
-                TypedTransactionRequest::EIP4844(m)
+                req.max_fee_per_gas = max_fee_per_gas;
+                req.max_priority_fee_per_gas = max_priority_fee_per_gas;
+                req.max_fee_per_blob_gas = self.eip4844_blob_fee(max_fee_per_blob_gas).await?;
+
+                req.chain_id = chain_id.to();
+                req.gas_limit = gas_limit;
+
+                TypedTransactionRequest::EIP4844(req)
             }
             None => return Err(EthApiError::ConflictingFeeFieldsInRequest),
         };
@@ -1041,6 +1028,69 @@ where
             .spawn(move || f(this))
             .await
             .map_err(|_| EthApiError::InternalBlockingTaskError)?
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Pool: TransactionPool + Clone + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Network: NetworkInfo + Send + Sync + 'static,
+    EvmConfig: ConfigureEvmEnv + 'static,
+{
+    /// Returns the gas price if it is set, otherwise fetches a suggested gas price for legacy
+    /// transactions.
+    pub(crate) async fn legacy_gas_price(&self, gas_price: Option<U256>) -> EthResult<U256> {
+        match gas_price {
+            Some(gas_price) => Ok(gas_price),
+            None => {
+                // fetch a suggested gas price
+                self.gas_price().await
+            }
+        }
+    }
+
+    /// Returns the EIP-1559 fees if they are set, otherwise fetches a suggested gas price for
+    /// EIP-1559 transactions.
+    ///
+    /// Returns (max_fee, priority_fee)
+    pub(crate) async fn eip1559_fees(
+        &self,
+        max_fee_per_gas: Option<U256>,
+        max_priority_fee_per_gas: Option<U256>,
+    ) -> EthResult<(U256, U256)> {
+        let max_fee_per_gas = match max_fee_per_gas {
+            Some(max_fee_per_gas) => max_fee_per_gas,
+            None => {
+                // fetch pending base fee
+                let base_fee = self
+                    .block(BlockNumberOrTag::Pending)
+                    .await?
+                    .ok_or(EthApiError::UnknownBlockNumber)?
+                    .base_fee_per_gas
+                    .ok_or_else(|| {
+                        EthApiError::InvalidTransaction(
+                            RpcInvalidTransactionError::TxTypeNotSupported,
+                        )
+                    })?;
+                U256::from(base_fee)
+            }
+        };
+
+        let max_priority_fee_per_gas = match max_priority_fee_per_gas {
+            Some(max_priority_fee_per_gas) => max_priority_fee_per_gas,
+            None => self.suggested_priority_fee().await?,
+        };
+        Ok((max_fee_per_gas, max_priority_fee_per_gas))
+    }
+
+    /// Returns the EIP-4844 blob fee if it is set, otherwise fetches a blob fee.
+    pub(crate) async fn eip4844_blob_fee(&self, blob_fee: Option<U256>) -> EthResult<U256> {
+        match blob_fee {
+            Some(blob_fee) => Ok(blob_fee),
+            None => self.blob_gas_price().await,
+        }
     }
 }
 

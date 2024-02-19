@@ -202,7 +202,7 @@ where
     }
 
     /// Returns the block header for the given block id.
-    pub(crate) async fn block_header(
+    pub(crate) async fn rpc_block_header(
         &self,
         block_id: impl Into<BlockId>,
     ) -> EthResult<Option<Header>> {
