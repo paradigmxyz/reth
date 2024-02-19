@@ -5,8 +5,8 @@ use crate::{
     },
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, ConsensusNumberReader,
-    ConsensusNumberWriter, EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
-    HeaderSyncMode, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
+    EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{

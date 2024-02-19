@@ -1,13 +1,9 @@
-use crate::{
-    error::{PrettyReqwestError, RpcError},
-    ClStorage,
-};
+use crate::error::{PrettyReqwestError, RpcError};
 use alloy_primitives::{B256, U256};
-use chrono::format;
+
 use reqwest::StatusCode;
-use reth_provider::BlockReaderIdExt;
+
 use reth_rpc_types::{
-    beacon::payload,
     engine::{
         ExecutionPayloadInputV2, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadId,
         PayloadStatus,
@@ -15,17 +11,16 @@ use reth_rpc_types::{
     ExecutionPayloadV2,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, net::IpAddr, sync::Arc, time::Duration};
-use url::Url;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use self::{http::HttpJsonRpc, http_blocking::HttpJsonRpcSync};
+use self::http_blocking::HttpJsonRpcSync;
 
 pub mod auth;
 pub mod http;
 pub mod http_blocking;
 pub mod json_structures;
 
-pub const LATEST_TAG: &str = "latest";
+// pub const LATEST_TAG: &str = "latest";
 
 pub const STATIC_ID: u32 = 1;
 pub const JSONRPC_VERSION: &str = "2.0";
@@ -57,7 +52,7 @@ pub const ENGINE_FORKCHOICE_UPDATED_TIMEOUT: Duration = Duration::from_secs(8);
 
 pub const ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V1: &str = "engine_getPayloadBodiesByHashV1";
 pub const ENGINE_GET_PAYLOAD_BODIES_BY_RANGE_V1: &str = "engine_getPayloadBodiesByRangeV1";
-pub const ENGINE_GET_PAYLOAD_BODIES_TIMEOUT: Duration = Duration::from_secs(10);
+// pub const ENGINE_GET_PAYLOAD_BODIES_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub const ENGINE_EXCHANGE_CAPABILITIES: &str = "engine_exchangeCapabilities";
 pub const ENGINE_EXCHANGE_CAPABILITIES_TIMEOUT: Duration = Duration::from_secs(1);
@@ -433,7 +428,7 @@ impl ApiService {
     /// Update the block that should be committed
     pub fn commit_block(&mut self, block_id: B256) -> Result<(), ApiServiceError> {
         tracing::info!(target:"consensus::cl","ApiService::commit_block");
-        let (payload_id, execution_payload) = match self.proposing_payload_pairs.get(&block_id) {
+        let (_, execution_payload) = match self.proposing_payload_pairs.get(&block_id) {
             Some(payload) => payload.clone(),
             None => {
                 return Err(ApiServiceError::BlockNotReady);
@@ -449,7 +444,7 @@ impl ApiService {
         };
 
         if payload_status.status.is_valid() {
-            if let Some(latest_valid_hash) = &payload_status.latest_valid_hash {
+            if let Some(_) = &payload_status.latest_valid_hash {
                 return Ok(());
             } else {
                 tracing::error!(target:"consensus::cl","ApiService::commit_block::new_payload latest_valid_hash is None");
@@ -463,6 +458,7 @@ impl ApiService {
 
     /// Mark this block as invalid from the perspective of consensus
     pub fn fail_block(&mut self, block_id: B256) -> Result<(), ApiServiceError> {
+        tracing::info!(target:"consensus::cl","ApiService::fail_block {}",block_id);
         Ok(())
     }
 

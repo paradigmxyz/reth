@@ -1,14 +1,13 @@
 use super::{config::PbftConfig, pbft_error::PbftError, validators::Validators};
 use crate::timing::Timeout;
-use alloy_primitives::{Address, Bytes, B256};
 use reth_ecies::util::pk2id;
 use reth_network::config::SecretKey;
-use reth_primitives::public_key_to_address;
+use reth_primitives::B256;
 use reth_rpc_types::PeerId;
-use secp256k1::{KeyPair, PublicKey, SECP256K1};
+use secp256k1::{KeyPair, SECP256K1};
 use serde_derive::{Deserialize, Serialize};
 use std::{fmt, time::Duration};
-use tracing::{debug, info};
+use tracing::debug;
 
 /// Phases of the PBFT algorithm, in `Normal` mode
 #[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Serialize, Deserialize)]

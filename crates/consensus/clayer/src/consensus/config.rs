@@ -5,8 +5,11 @@ use std::{str::FromStr, time::Duration};
 
 #[derive(Debug, Clone)]
 pub struct PbftConfig {
-    // Members of the PBFT network
+    /// Members of the PBFT network
     pub members: Vec<PeerId>,
+
+    /// Minimum time between publishing blocks
+    pub block_publishing_min_interval: Duration,
 
     /// How long to wait in between trying to publish blocks
     pub block_publishing_delay: Duration,
@@ -47,6 +50,7 @@ impl Default for PbftConfig {
     fn default() -> Self {
         PbftConfig {
             members: Vec::new(),
+            block_publishing_min_interval: Duration::from_millis(10000),
             block_publishing_delay: Duration::from_millis(1000),
             update_recv_timeout: Duration::from_millis(10),
             exponential_retry_base: Duration::from_millis(100),

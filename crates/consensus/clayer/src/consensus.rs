@@ -1,6 +1,5 @@
 mod config;
-use alloy_primitives::{keccak256, B64};
-use chrono::format;
+// use alloy_primitives::{keccak256, B64};
 pub use config::*;
 mod logs;
 pub use logs::*;
@@ -9,26 +8,22 @@ pub use message::*;
 mod pbft_error;
 pub use pbft_error::*;
 mod state;
-use reqwest::header;
 use reth_db::models::consensus::ConsensusBytes;
 use reth_provider::{ConsensusNumberReader, ConsensusNumberWriter};
 use reth_rpc_types::{engine::PayloadId, ExecutionPayloadV1, ExecutionPayloadV2, PeerId};
 pub use state::*;
-mod test_helpers;
 mod validators;
 
 use alloy_rlp::{Decodable, Encodable};
 use itertools::Itertools;
-use parking_lot::RwLock;
 use reth_ecies::util::id2pk;
 use reth_eth_wire::{
-    BlockHeaders, ClayerBlock, ClayerConsensusMessage, ClayerConsensusMessageHeader,
-    ClayerExecutionPayload, ClayerSignature, PbftMessage, PbftMessageInfo, PbftMessageType,
-    PbftNewView, PbftSeal, PbftSignedVote,
+    ClayerBlock, ClayerConsensusMessage, ClayerConsensusMessageHeader, ClayerExecutionPayload,
+    ClayerSignature, PbftMessage, PbftMessageInfo, PbftMessageType, PbftNewView, PbftSeal,
+    PbftSignedVote,
 };
 use reth_interfaces::clayer::{ClayerConsensusEvent, ClayerConsensusMessageAgentTrait};
-use reth_primitives::{public_key_to_address, sign_message, SealedHeader, B256};
-use secp256k1::{PublicKey, SecretKey, SECP256K1};
+use reth_primitives::{keccak256, public_key_to_address, sign_message, SealedHeader, B256, B64};
 use std::{
     collections::{HashSet, VecDeque},
     sync::Arc,
@@ -221,29 +216,8 @@ where
         }
     }
 
-    fn service(&mut self) -> &ApiService {
-        &self.service
-    }
-
     fn service_mut(&mut self) -> &mut ApiService {
         &mut self.service
-    }
-
-    fn parse_massage(
-        &mut self,
-        data: reth_primitives::Bytes,
-    ) -> Result<ClayerConsensusMessage, PbftError> {
-        let msg: ClayerConsensusMessage =
-            match ClayerConsensusMessage::decode(&mut data.to_vec().as_slice()) {
-                Ok(msg) => msg,
-                Err(err) => {
-                    return Err(PbftError::SerializationError(
-                        "ClayerConsensusMessage decode error".into(),
-                        err.to_string(),
-                    ));
-                }
-            };
-        Ok(msg)
     }
 
     // ---------- Methods for handling Updates from the Validator ----------
@@ -585,7 +559,7 @@ where
         if state.is_primary_at_view(msg_view)
             && messages_from_other_nodes.len() as u64 >= 2 * state.f
         {
-            let mut new_view = PbftNewView {
+            let new_view = PbftNewView {
                 info: PbftMessageInfo {
                     ptype: PbftMessageType::NewView as u8,
                     view: msg_view,
@@ -1139,17 +1113,7 @@ where
     /// + If the `sawtooth.consensus.pbft.members` setting is unset or invalid
     /// + If the network this node is on does not have enough nodes to be Byzantine fault tolernant
     fn update_membership(&mut self, block_id: B256, state: &mut PbftState) {
-        // Get list of members from settings (retry until a valid result is received)
-        trace!(target: "consensus::cl","Getting on-chain list of members to check for membership updates");
-
-        // let settings =
-        //     retry_until_ok(state.exponential_retry_base, state.exponential_retry_max, || {
-        //         self.service.get_settings(
-        //             block_id.clone(),
-        //             vec![String::from("sawtooth.consensus.pbft.members")],
-        //         )
-        //     });
-        // let on_chain_members = get_members_from_settings(&settings);
+        trace!(target: "consensus::cl","Updating membership for block {}",block_id);
 
         let on_chain_members = state.validators.member_ids().clone();
 
@@ -1309,7 +1273,7 @@ where
     fn signed_votes_from_messages(msgs: &[&ParsedMessage]) -> Vec<PbftSignedVote> {
         msgs.iter()
             .map(|m| {
-                let mut vote = PbftSignedVote {
+                let vote = PbftSignedVote {
                     header_bytes: m.header_bytes.clone(),
                     header_signature: ClayerSignature(m.header_signature.clone()),
                     message_bytes: m.get_message_bytes(),
@@ -1434,8 +1398,15 @@ where
         let signature_hash = keccak256(&vote.header_bytes);
         let recovered = signature
             .recover_signer(signature_hash)
-            .ok_or(PbftError::SigningError("Couldn't recover signer from signature".into()));
+            .ok_or(PbftError::SigningError("Couldn't recover signer from signature".into()))?;
         let expected = public_key_to_address(pk);
+
+        if recovered != expected {
+            return Err(PbftError::SigningError(format!(
+                "Signature verification failed - Recovered: `{:?}`, Expected: `{:?}`",
+                recovered, expected
+            )));
+        }
 
         // Verify message_bytes
         if header.content_hash != keccak256(vote.message_bytes.clone()) {
@@ -1624,16 +1595,7 @@ where
         // received are from a subset of "members - seal creator". Use the list of members from the
         // block previous to the one this seal verifies, since that represents the state of the
         // network at the time this block was voted on.
-        trace!(target: "consensus::cl","Getting on-chain list of members to verify seal");
-        // let settings =
-        //     retry_until_ok(state.exponential_retry_base, state.exponential_retry_max, || {
-        //         self.service.get_settings(
-        //             previous_id.clone(),
-        //             vec![String::from("sawtooth.consensus.pbft.members")],
-        //         )
-        //     });
-        // let members = get_members_from_settings(&settings);
-
+        trace!(target: "consensus::cl","Getting members for block {} to verify seal",previous_id);
         // get previous_id setting
         let members = state.validators.member_ids();
 

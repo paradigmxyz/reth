@@ -1,4 +1,5 @@
-use reth_codecs::{derive_arbitrary, main_codec, Compact};
+//! ConsensusBytes related models and types.
+use reth_codecs::{derive_arbitrary, Compact};
 use reth_interfaces::db::DatabaseError;
 use serde::Serialize;
 
@@ -28,7 +29,7 @@ impl Compact for ConsensusBytes {
         self.content.to_compact(buf)
     }
 
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         let (content, buf) = Vec::<u8>::from_compact(buf, len);
         (Self { content }, buf)
     }

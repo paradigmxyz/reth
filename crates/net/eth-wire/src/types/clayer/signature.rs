@@ -1,11 +1,8 @@
 //! Implementation of consensus layer messages[ClayerSignature]
 use alloy_rlp::{Decodable, Encodable};
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{sign_message, Address, Signature, B256};
-use secp256k1::SecretKey;
+use reth_primitives::Signature;
 use serde::{Deserialize, Serialize};
-
-// use super::message::ClayerConsensusMessageError;
 
 /// Consensus layer signature
 #[derive_arbitrary(rlp)]

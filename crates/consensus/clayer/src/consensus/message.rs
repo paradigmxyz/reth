@@ -1,11 +1,10 @@
 use super::pbft_error::PbftError;
 use alloy_rlp::{Decodable, Encodable};
 use reth_eth_wire::{
-    ClayerBlock, ClayerConsensusMessage, ClayerConsensusMessageHeader, ClayerExecutionPayload,
-    PbftMessage, PbftMessageInfo, PbftMessageType, PbftNewView, PbftSeal, PbftSignedVote,
+    ClayerBlock, ClayerConsensusMessage, ClayerConsensusMessageHeader, PbftMessage,
+    PbftMessageInfo, PbftMessageType, PbftNewView, PbftSeal, PbftSignedVote,
 };
 use reth_primitives::{Bytes, Signature, B256};
-use reth_rpc_types::PeerId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PbftMessageWrapper {
@@ -258,7 +257,7 @@ impl ParsedMessage {
             PbftMessageWrapper::NewView(_) => {
                 panic!("ParsedPeerMessage.get_seal found a new view message!")
             }
-            PbftMessageWrapper::Seal(s) => {
+            PbftMessageWrapper::Seal(_) => {
                 panic!("ParsedPeerMessage.get_seal found a seal message!")
             }
             PbftMessageWrapper::BlockNew(b) => b,

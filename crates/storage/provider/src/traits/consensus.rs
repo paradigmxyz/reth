@@ -1,7 +1,6 @@
-use auto_impl::auto_impl;
 use reth_db::models::consensus::ConsensusBytes;
-use reth_interfaces::provider::{ProviderError, ProviderResult};
-use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, ChainInfo, B256};
+use reth_interfaces::provider::ProviderResult;
+use reth_primitives::{BlockNumber, B256};
 
 /// Client trait for getting important block numbers (such as the latest block number), converting
 /// block hashes to numbers, and fetching a block hash from its block number.
