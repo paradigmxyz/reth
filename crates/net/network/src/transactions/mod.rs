@@ -55,7 +55,6 @@ use reth_transaction_pool::{
     PropagatedTransactions, TransactionPool, ValidPoolTransaction,
 };
 use std::{
-    cmp::max,
     collections::{hash_map::Entry, HashMap, HashSet},
     num::NonZeroUsize,
     pin::Pin,
@@ -713,14 +712,18 @@ where
             return
         }
 
-        // load message version before announcement data is destructed in packing
+        // load message version before announcement data type is destructed in packing
         let msg_version = valid_announcement_data.msg_version();
+        //
         // demand recommended soft limit on response, however the peer may enforce an arbitrary
         // limit on the response (2MB)
-        let mut hashes_to_request = RequestTxHashes::with_capacity(valid_announcement_data.len());
+        //
+        // request buffer is shrunk via call to pack request!
+        let init_capacity_req =
+            self.transaction_fetcher.approx_capacity_get_pooled_transactions_req(msg_version);
+        let mut hashes_to_request = RequestTxHashes::with_capacity(init_capacity_req);
         let surplus_hashes =
             self.transaction_fetcher.pack_request(&mut hashes_to_request, valid_announcement_data);
-        hashes_to_request.shrink_to_fit();
 
         if !surplus_hashes.is_empty() {
             trace!(target: "net::tx",
@@ -914,9 +917,8 @@ where
         let mut num_already_seen = 0;
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
-            // pre-size to avoid reallocations, assuming ~50% of the transactions are new
-            let mut new_txs = Vec::with_capacity(max(1, transactions.len() / 2));
-
+            // pre-size to avoid reallocations
+            let mut new_txs = Vec::with_capacity(transactions.len());
             for tx in transactions {
                 // recover transaction
                 let tx = match tx.try_into_ecrecovered() {
@@ -971,6 +973,7 @@ where
                     }
                 }
             }
+            new_txs.shrink_to_fit();
 
             // import new transactions as a batch to minimize lock contention on the underlying pool
             if !new_txs.is_empty() {
@@ -1332,59 +1335,53 @@ impl TransactionSource {
 /// Tracks transactions a peer has seen.
 #[derive(Debug)]
 struct TransactionsSeenByPeer {
-    /// Keeps track of transactions that we know the peer has seen because they were announced by
-    /// the peer. It's possible that these transactions are pending fetch.
-    transactions_received_as_hash: LruCache<B256>,
-    /// Keeps track of transactions that we know the peer has seen because they were received in
-    /// full from the peer or sent to the peer.
-    transactions_received_in_full_or_sent: LruCache<B256>,
+    /// Keeps track of transactions that we know the peer has seen.
+    transactions: LruCache<B256>,
 }
 
 impl TransactionsSeenByPeer {
     /// Returns `true` if peer has seen transaction.
     fn has_seen_transaction(&self, hash: &TxHash) -> bool {
-        self.transactions_received_in_full_or_sent.contains(hash) ||
-            self.transactions_received_as_hash.contains(hash)
+        self.transactions.contains(hash)
     }
 
     /// Inserts a transaction hash that has been seen in an announcement.
     fn seen_in_announcement(&mut self, hash: TxHash) {
-        _ = self.transactions_received_as_hash.insert(hash);
+        // todo: add metrics
+        _ = self.transactions.insert(hash);
     }
 
     /// Inserts a hash of a transaction that has either been sent to the peer, or has been
     /// received in full from the peer over broadcast.
     fn seen_by_peer_and_in_pool(&mut self, hash: TxHash) {
-        _ = self.transactions_received_in_full_or_sent.insert(hash);
+        // todo: add metrics
+        _ = self.transactions.insert(hash);
     }
 
     /// Inserts a list of transactions that have either been sent to the peer, or have been
     /// received in full from the peer over broadcast.
     fn extend_seen_by_peer_and_in_pool(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
-        self.transactions_received_in_full_or_sent.extend(hashes)
+        // todo: add metrics
+        self.transactions.extend(hashes)
     }
 
     /// Returns an iterator over all transactions that the peer has seen.
     fn iter_transaction_hashes(&self) -> impl Iterator<Item = &TxHash> {
-        self.transactions_received_as_hash
-            .iter()
-            .chain(self.transactions_received_in_full_or_sent.iter())
+        // todo: add metrics
+        self.transactions.iter().chain(self.transactions.iter())
     }
 
     /// Returns an iterator over all transaction hashes that the peer has sent in an announcement.
     fn maybe_pending_transaction_hashes(&self) -> &LruCache<TxHash> {
-        &self.transactions_received_as_hash
+        &self.transactions
     }
 }
 
 impl Default for TransactionsSeenByPeer {
     fn default() -> Self {
         Self {
-            transactions_received_as_hash: LruCache::new(
-                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_SENT_BY_PEER_AND_MAYBE_IN_POOL).unwrap(),
-            ),
-            transactions_received_in_full_or_sent: LruCache::new(
-                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER_AND_IN_POOL).unwrap(),
+            transactions: LruCache::new(
+                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER).unwrap(),
             ),
         }
     }
