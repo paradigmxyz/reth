@@ -9,8 +9,7 @@ use reth_snapshot::Snapshotter;
 
 /// The snapshot stage _copies_ all data from database to static files using [Snapshotter]. The
 /// block range for copying is determined by the current highest blocks contained in static files
-/// and [BlockNumReader::best_block_number],
-/// i.e. the range is `highest_snapshotted_block_number..=best_block_number`.
+/// and stage checkpoints for each segment individually.
 #[derive(Debug)]
 pub struct SnapshotStage<DB: Database> {
     snapshotter: Snapshotter<DB>,
