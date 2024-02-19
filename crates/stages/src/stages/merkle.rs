@@ -344,11 +344,7 @@ mod tests {
         TestStageDB, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_db::{
-        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-        tables,
-        transaction::{DbTx, DbTxMut},
-    };
+    use reth_db::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
     use reth_interfaces::test_utils::{
         generators,
         generators::{

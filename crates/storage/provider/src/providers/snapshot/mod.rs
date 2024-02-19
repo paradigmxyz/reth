@@ -47,7 +47,7 @@ impl Deref for LoadedJar {
 mod tests {
     use super::*;
     use crate::{test_utils::create_test_provider_factory, HeaderProvider};
-    use rand::{self, seq::SliceRandom};
+    use rand::seq::SliceRandom;
     use reth_db::{
         cursor::DbCursorRO,
         snapshot::create_snapshot_T1_T2_T3,

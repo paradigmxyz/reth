@@ -601,7 +601,7 @@ mod tests {
     use reth_interfaces::test_utils::{generators, generators::random_block_range, TestConsensus};
     use reth_primitives::{BlockBody, B256, MAINNET};
     use reth_provider::ProviderFactory;
-    use std::{collections::HashMap, sync::Arc};
+    use std::collections::HashMap;
 
     // Check that the blocks are emitted in order of block number, not in order of
     // first-downloaded

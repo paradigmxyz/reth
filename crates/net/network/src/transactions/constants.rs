@@ -28,10 +28,7 @@ pub const SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST: usize = 25
 pub const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE: usize = 2 * 1024 * 1024;
 
 pub mod tx_manager {
-    use super::{
-        tx_fetcher::DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
-        SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST,
-    };
+    use super::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 
     /// Default limit for number of transactions to keep track of for a single peer, for
     /// transactions that the peer's pool and local pool have in common. Default is 10 KiB.
@@ -41,13 +38,11 @@ pub mod tx_manager {
     /// transactions that are in the peer's pool but maybe not in the local pool yet.
     pub const DEFAULT_CAPACITY_CACHE_SENT_BY_PEER_AND_MAYBE_IN_POOL: usize = 10 * 1024;
 
-    /// Default maximum pending pool imports to tolerate. Default is
-    /// [`SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST`], which is spec'd at 256
-    /// hashes, multiplied by [`DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS `], which defaults to 130
-    /// requests, so 33 280 imports.
+    /// Default maximum pending pool imports to tolerate. Default is equivalent to the number of
+    /// hashes in one full announcement, which is spec'd at 4096 hashes, so 4096 pending pool
+    /// imports.
     pub const DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS: usize =
-        SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST *
-            DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS as usize;
+        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 
     /// Default limit for number of bad imports to keep track of. Default is 10 KiB.
     pub const DEFAULT_CAPACITY_CACHE_BAD_IMPORTS: usize = 100 * 1024;
