@@ -148,7 +148,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
 
         let genesis_hash = init_genesis(Arc::clone(&self.db), self.config.chain.clone())?;
 
-        info!(target: "reth::cli", "{}", DisplayHardforks::new(self.config.chain.hardforks()));
+        info!(target: "reth::cli", "{}", self.config.chain.display_hardforks());
 
         let consensus = self.config.consensus();
 
