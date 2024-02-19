@@ -173,11 +173,7 @@ impl ImportCommand {
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
-
-        tokio::select! {
-            res = pipeline.run() => res?,
-            _ = tokio::signal::ctrl_c() => {},
-        };
+        pipeline.run().await?;
 
         info!(target: "reth::cli", "Finishing up");
         Ok(())
