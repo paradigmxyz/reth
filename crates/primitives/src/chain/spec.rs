@@ -31,7 +31,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         // <https://etherscan.io/block/15537394>
         paris_block_and_final_difficulty: Some((
             15537394,
-            U256::from(58_750_003_716_598_352_816_469_u128),
+            U256::from(58_750_003_716_598_352_816_469u128),
         )),
         fork_timestamps: ForkTimestamps::default().shanghai(1681338455).cancun(1710338135),
         hardforks: BTreeMap::from([
@@ -54,7 +54,6 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 ForkCondition::TTD {
                     fork_block: None,
                     total_difficulty: U256::from(58_750_000_000_000_000_000_000_u128),
-                    terminal_total_difficulty_passed: true,
                 },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1681338455)),
@@ -99,11 +98,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::London, ForkCondition::Block(5062605)),
             (
                 Hardfork::Paris,
-                ForkCondition::TTD {
-                    fork_block: None,
-                    total_difficulty: U256::from(10_790_000),
-                    terminal_total_difficulty_passed: true,
-                },
+                ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(10_790_000) },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1678832736)),
             (Hardfork::Cancun, ForkCondition::Timestamp(1705473120)),
@@ -151,7 +146,6 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 ForkCondition::TTD {
                     fork_block: Some(1735371),
                     total_difficulty: U256::from(17_000_000_000_000_000u64),
-                    terminal_total_difficulty_passed: true,
                 },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1677557088)),
@@ -196,11 +190,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::London, ForkCondition::Block(0)),
             (
                 Hardfork::Paris,
-                ForkCondition::TTD {
-                    fork_block: Some(0),
-                    total_difficulty: U256::ZERO,
-                    terminal_total_difficulty_passed: true,
-                },
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1696000704)),
             (Hardfork::Cancun, ForkCondition::Timestamp(1707305664)),
@@ -246,11 +236,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::London, ForkCondition::Block(0)),
             (
                 Hardfork::Paris,
-                ForkCondition::TTD {
-                    fork_block: Some(0),
-                    total_difficulty: U256::from(0),
-                    terminal_total_difficulty_passed: true,
-                },
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
         ]),
@@ -293,11 +279,7 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::GrayGlacier, ForkCondition::Block(0)),
             (
                 Hardfork::Paris,
-                ForkCondition::TTD {
-                    fork_block: Some(0),
-                    total_difficulty: U256::from(0),
-                    terminal_total_difficulty_passed: true,
-                },
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
             ),
             (Hardfork::Bedrock, ForkCondition::Block(4061224)),
             (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
@@ -352,11 +334,7 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::GrayGlacier, ForkCondition::Block(0)),
             (
                 Hardfork::Paris,
-                ForkCondition::TTD {
-                    fork_block: Some(0),
-                    total_difficulty: U256::from(0),
-                    terminal_total_difficulty_passed: true,
-                },
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
             ),
             (Hardfork::Bedrock, ForkCondition::Block(0)),
             (Hardfork::Regolith, ForkCondition::Timestamp(1683219600)),
@@ -411,11 +389,7 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::GrayGlacier, ForkCondition::Block(0)),
             (
                 Hardfork::Paris,
-                ForkCondition::TTD {
-                    fork_block: Some(0),
-                    total_difficulty: U256::from(0),
-                    terminal_total_difficulty_passed: true,
-                },
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
             ),
             (Hardfork::Bedrock, ForkCondition::Block(0)),
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
@@ -466,11 +440,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::GrayGlacier, ForkCondition::Block(0)),
             (
                 Hardfork::Paris,
-                ForkCondition::TTD {
-                    fork_block: Some(0),
-                    total_difficulty: U256::from(0),
-                    terminal_total_difficulty_passed: true,
-                },
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
             ),
             (Hardfork::Bedrock, ForkCondition::Block(0)),
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
@@ -1057,9 +1027,6 @@ impl From<Genesis> for ChainSpec {
                 ForkCondition::TTD {
                     total_difficulty: ttd,
                     fork_block: genesis.config.merge_netsplit_block,
-                    terminal_total_difficulty_passed: genesis
-                        .config
-                        .terminal_total_difficulty_passed,
                 },
             );
         }
@@ -1254,11 +1221,7 @@ impl ChainSpecBuilder {
     pub fn paris_at_ttd(self, ttd: U256) -> Self {
         self.with_fork(
             Hardfork::Paris,
-            ForkCondition::TTD {
-                total_difficulty: ttd,
-                fork_block: None,
-                terminal_total_difficulty_passed: true,
-            },
+            ForkCondition::TTD { total_difficulty: ttd, fork_block: None },
         )
     }
 
@@ -1336,11 +1299,7 @@ impl ChainSpecBuilder {
         self = self.london_activated();
         self.hardforks.insert(
             Hardfork::Paris,
-            ForkCondition::TTD {
-                fork_block: Some(0),
-                total_difficulty: U256::ZERO,
-                terminal_total_difficulty_passed: true,
-            },
+            ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
         );
         self
     }
@@ -1440,8 +1399,6 @@ pub enum ForkCondition {
         fork_block: Option<BlockNumber>,
         /// The total difficulty after which the fork is activated.
         total_difficulty: U256,
-        /// Whether the fork is activated after the terminal total difficulty has been passed.
-        terminal_total_difficulty_passed: bool,
     },
     /// The fork is activated after a specific timestamp.
     Timestamp(u64),
@@ -1559,17 +1516,13 @@ impl Display for DisplayFork {
             ForkCondition::Block(at) | ForkCondition::Timestamp(at) => {
                 write!(f, "{:32} @{}", name_with_eip, at)?;
             }
-            ForkCondition::TTD {
-                fork_block: _,
-                total_difficulty,
-                terminal_total_difficulty_passed,
-            } => {
+            ForkCondition::TTD { fork_block, total_difficulty } => {
                 writeln!(
                     f,
                     "{:32} @{} ({})",
                     name_with_eip,
                     total_difficulty,
-                    if terminal_total_difficulty_passed {
+                    if fork_block.is_some() {
                         "network is known to be merged"
                     } else {
                         "network is not known to be merged"
@@ -1934,7 +1887,6 @@ Post-merge hard forks (timestamp based):
                 ForkCondition::TTD {
                     fork_block: Some(101),
                     total_difficulty: U256::from(10_790_000),
-                    terminal_total_difficulty_passed: true,
                 },
             )
             .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(11313123))
@@ -1970,7 +1922,6 @@ Post-merge hard forks (timestamp based):
         let fork_cond_ttd_no_new_spec = fork_cond_block_only_case.satisfy(ForkCondition::TTD {
             fork_block: None,
             total_difficulty: U256::from(10_790_000),
-            terminal_total_difficulty_passed: false,
         });
         let fork_cond_ttd_no_new_spec_expected =
             Head { total_difficulty: U256::from(10_790_000), ..Default::default() };
