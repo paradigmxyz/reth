@@ -716,8 +716,7 @@ mod tests {
 
         let fail_res = headers.encode_max(300, 510);
         assert!(
-            matches!(fail_res, Err(alloy_rlp::Error::Custom(msg)) if msg.contains("Size limit
-    exceeded")),
+            matches!(fail_res, Err(alloy_rlp::Error::Custom(msg)) if msg.contains("Size limit exceeded")),
             "Expected 'Size limit exceeded' error"
         );
     }
