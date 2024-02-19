@@ -1550,7 +1550,7 @@ impl Display for DisplayFork {
 ///
 /// ```
 /// # use reth_primitives::MAINNET;
-/// println!("{}", MAINNET.display_hardforks()));
+/// println!("{}", MAINNET.display_hardforks());
 /// ```
 ///
 /// An example of the output:
