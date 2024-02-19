@@ -4,6 +4,7 @@ use crate::{
     eth::error::{EthApiError, EthResult, RpcInvalidTransactionError},
     EthApi,
 };
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     serde_helper::JsonStorageKey, Address, BlockId, BlockNumberOrTag, Bytes, B256, U256,
 };
@@ -14,23 +15,27 @@ use reth_rpc_types::EIP1186AccountProofResponse;
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
-impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: Send + Sync + 'static,
+    EvmConfig: ConfigureEvmEnv + 'static,
 {
     pub(crate) fn get_code(&self, address: Address, block_id: Option<BlockId>) -> EthResult<Bytes> {
-        let state = self.state_at_block_id_or_latest(block_id)?;
-        let code = state.account_code(address)?.unwrap_or_default();
-        Ok(code.original_bytes())
+        Ok(self
+            .state_at_block_id_or_latest(block_id)?
+            .account_code(address)?
+            .unwrap_or_default()
+            .original_bytes())
     }
 
     pub(crate) fn balance(&self, address: Address, block_id: Option<BlockId>) -> EthResult<U256> {
-        let state = self.state_at_block_id_or_latest(block_id)?;
-        let balance = state.account_balance(address)?.unwrap_or_default();
-        Ok(balance)
+        Ok(self
+            .state_at_block_id_or_latest(block_id)?
+            .account_balance(address)?
+            .unwrap_or_default())
     }
 
     /// Returns the number of transactions sent from an address at the given block identifier.
@@ -78,9 +83,12 @@ where
         index: JsonStorageKey,
         block_id: Option<BlockId>,
     ) -> EthResult<B256> {
-        let state = self.state_at_block_id_or_latest(block_id)?;
-        let value = state.storage(address, index.0)?.unwrap_or_default();
-        Ok(B256::new(value.to_be_bytes()))
+        Ok(B256::new(
+            self.state_at_block_id_or_latest(block_id)?
+                .storage(address, index.0)?
+                .unwrap_or_default()
+                .to_be_bytes(),
+        ))
     }
 
     pub(crate) async fn get_proof(
@@ -131,6 +139,7 @@ mod tests {
         },
         BlockingTaskPool,
     };
+    use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, StorageKey, StorageValue};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
     use reth_transaction_pool::test_utils::testing_pool;
@@ -140,8 +149,9 @@ mod tests {
     async fn test_storage() {
         // === Noop ===
         let pool = testing_pool();
+        let evm_config = EthEvmConfig::default();
 
-        let cache = EthStateCache::spawn(NoopProvider::default(), Default::default());
+        let cache = EthStateCache::spawn(NoopProvider::default(), Default::default(), evm_config);
         let eth_api = EthApi::new(
             NoopProvider::default(),
             pool.clone(),
@@ -151,6 +161,7 @@ mod tests {
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default()),
+            evm_config,
         );
         let address = Address::random();
         let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
@@ -164,7 +175,7 @@ mod tests {
         let account = ExtendedAccount::new(0, U256::ZERO).extend_storage(storage);
         mock_provider.add_account(address, account);
 
-        let cache = EthStateCache::spawn(mock_provider.clone(), Default::default());
+        let cache = EthStateCache::spawn(mock_provider.clone(), Default::default(), evm_config);
         let eth_api = EthApi::new(
             mock_provider.clone(),
             pool,
@@ -174,6 +185,7 @@ mod tests {
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default()),
+            evm_config,
         );
 
         let storage_key: U256 = storage_key.into();

@@ -84,12 +84,13 @@
 //!
 //!     let config =
 //!         NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
+//!     let transactions_manager_config = config.transactions_manager_config.clone();
 //!
 //!     // create the network instance
 //!     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
 //!         .await
 //!         .unwrap()
-//!         .transactions(pool)
+//!         .transactions(pool, transactions_manager_config)
 //!         .request_handler(client)
 //!         .split_with_handle();
 //! }
@@ -106,8 +107,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, rustdoc::all)] // TODO(danipopes): unreachable_pub
-#![deny(unused_must_use, rust_2018_idioms)]
+#![allow(unreachable_pub)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -122,10 +122,10 @@ pub mod error;
 pub mod eth_requests;
 mod fetch;
 mod flattened_response;
-mod import;
+pub mod import;
 mod listener;
 mod manager;
-mod message;
+pub mod message;
 mod metrics;
 mod network;
 pub mod peers;
@@ -148,5 +148,6 @@ pub use session::{
     PendingSessionHandle, PendingSessionHandshakeError, SessionCommand, SessionEvent, SessionId,
     SessionLimits, SessionManager, SessionsConfig,
 };
+pub use transactions::{AnnouncementFilter, FilterAnnouncement, ValidateTx68};
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};

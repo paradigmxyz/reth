@@ -1,4 +1,5 @@
 //! Decoding tests for [`NewPooledTransactions`]
+
 use alloy_rlp::Decodable;
 use reth_eth_wire::NewPooledTransactionHashes66;
 use reth_primitives::hex;

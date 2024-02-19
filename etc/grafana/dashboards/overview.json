@@ -1,5 +1,5 @@
 {
-"__inputs": [
+  "__inputs": [
     {
       "name": "DS_PROMETHEUS",
       "label": "Prometheus",
@@ -27,7 +27,7 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "10.1.0"
+      "version": "10.1.1"
     },
     {
       "type": "panel",
@@ -85,7 +85,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": null,
+  "id": 18,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -103,6 +103,396 @@
       "repeatDirection": "h",
       "title": "Overview",
       "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 0,
+        "y": 1
+      },
+      "id": 22,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name"
+      },
+      "pluginVersion": "10.1.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{version}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Version",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 6,
+        "x": 3,
+        "y": 1
+      },
+      "id": 192,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name"
+      },
+      "pluginVersion": "10.1.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{build_timestamp}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Build Timestamp",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 9,
+        "y": 1
+      },
+      "id": 193,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name"
+      },
+      "pluginVersion": "10.1.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{git_sha}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Git SHA",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 2,
+        "x": 12,
+        "y": 1
+      },
+      "id": 195,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name"
+      },
+      "pluginVersion": "10.1.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{build_profile}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Build Profile",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 5,
+        "x": 14,
+        "y": 1
+      },
+      "id": 196,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name"
+      },
+      "pluginVersion": "10.1.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{target_triple}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Target Triple",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 5,
+        "x": 19,
+        "y": 1
+      },
+      "id": 197,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name"
+      },
+      "pluginVersion": "10.1.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{cargo_features}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Cargo Features",
+      "transparent": true,
+      "type": "stat"
     },
     {
       "datasource": {
@@ -145,22 +535,20 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 1
+        "y": 4
       },
-      "id": 22,
+      "id": 194,
       "options": {
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
         "showThresholdLabels": false,
         "showThresholdMarkers": true
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -209,7 +597,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 1
+        "y": 4
       },
       "id": 20,
       "options": {
@@ -225,7 +613,7 @@
         "showUnfilled": true,
         "valueMode": "color"
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -242,6 +630,35 @@
         }
       ],
       "title": "Stage checkpoints",
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "AccountHashing": 6,
+              "Bodies": 2,
+              "Execution": 4,
+              "Finish": 12,
+              "Headers": 0,
+              "IndexAccountHistory": 11,
+              "IndexStorageHistory": 10,
+              "MerkleExecute": 8,
+              "MerkleUnwind": 5,
+              "SenderRecovery": 3,
+              "StorageHashing": 7,
+              "TotalDifficulty": 1,
+              "TransactionLookup": 9
+            }
+          }
+        }
+      ],
       "transparent": true,
       "type": "bargauge"
     },
@@ -306,7 +723,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 9
+        "y": 12
       },
       "id": 69,
       "options": {
@@ -399,7 +816,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 9
+        "y": 12
       },
       "id": 12,
       "options": {
@@ -436,7 +853,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 17
+        "y": 20
       },
       "id": 38,
       "panels": [],
@@ -506,7 +923,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 18
+        "y": 21
       },
       "id": 40,
       "options": {
@@ -566,7 +983,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 18
+        "y": 21
       },
       "id": 42,
       "maxDataPoints": 25,
@@ -610,7 +1027,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -678,8 +1095,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -691,7 +1107,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 26
+        "y": 29
       },
       "id": 117,
       "options": {
@@ -773,8 +1189,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -786,7 +1201,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 26
+        "y": 29
       },
       "id": 116,
       "options": {
@@ -868,8 +1283,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -885,7 +1299,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 34
+        "y": 37
       },
       "id": 119,
       "options": {
@@ -967,8 +1381,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -984,7 +1397,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 34
+        "y": 37
       },
       "id": 118,
       "options": {
@@ -1046,26 +1459,20 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 42
+        "y": 45
       },
       "id": 48,
       "options": {
-        "displayLabels": [
-          "name"
-        ],
+        "displayLabels": ["name"],
         "legend": {
           "displayMode": "table",
           "placement": "right",
           "showLegend": true,
-          "values": [
-            "value"
-          ]
+          "values": ["value"]
         },
         "pieType": "pie",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -1139,8 +1546,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1156,7 +1562,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 42
+        "y": 45
       },
       "id": 52,
       "options": {
@@ -1214,7 +1620,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 50
+        "y": 53
       },
       "id": 50,
       "options": {
@@ -1222,15 +1628,11 @@
           "displayMode": "table",
           "placement": "right",
           "showLegend": true,
-          "values": [
-            "value"
-          ]
+          "values": ["value"]
         },
         "pieType": "pie",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -1277,8 +1679,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1382,7 +1783,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 50
+        "y": 53
       },
       "id": 58,
       "options": {
@@ -1390,14 +1791,12 @@
         "footer": {
           "countRows": false,
           "fields": "",
-          "reducer": [
-            "sum"
-          ],
+          "reducer": ["sum"],
           "show": false
         },
         "showHeader": true
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -1464,8 +1863,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1481,7 +1879,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 58
+        "y": 61
       },
       "id": 113,
       "options": {
@@ -1513,12 +1911,134 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 61
+      },
+      "id": 189,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"$database_action\", quantile=\"0.5\"}",
+          "instant": false,
+          "legendFormat": "{{quantile}} percentile",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"$database_action\", quantile=\"0.95\"} ",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "{{quantile}} percentile",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"$database_action\", quantile=\"1\"} ",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "{{quantile}} percentile",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Database duration per action",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 66
+        "y": 69
       },
       "id": 46,
       "panels": [],
@@ -1574,8 +2094,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -1587,7 +2106,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 67
+        "y": 70
       },
       "id": 56,
       "options": {
@@ -1660,7 +2179,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 75
+        "y": 78
       },
       "id": 6,
       "panels": [],
@@ -1716,8 +2235,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1732,7 +2250,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 76
+        "y": 79
       },
       "id": 18,
       "options": {
@@ -1810,8 +2328,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1826,7 +2343,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 76
+        "y": 79
       },
       "id": 16,
       "options": {
@@ -1929,8 +2446,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1946,7 +2462,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 76
+        "y": 79
       },
       "id": 8,
       "options": {
@@ -1955,9 +2471,7 @@
           "displayMode": "table",
           "placement": "right",
           "showLegend": true,
-          "values": [
-            "value"
-          ]
+          "values": ["value"]
         },
         "tooltip": {
           "mode": "multi",
@@ -2029,7 +2543,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 84
+        "y": 87
       },
       "id": 54,
       "options": {
@@ -2040,9 +2554,7 @@
         },
         "pieType": "pie",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -2234,8 +2746,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2250,7 +2761,7 @@
         "h": 8,
         "w": 14,
         "x": 8,
-        "y": 84
+        "y": 87
       },
       "id": 103,
       "options": {
@@ -2287,7 +2798,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 92
+        "y": 95
       },
       "id": 24,
       "panels": [],
@@ -2342,8 +2853,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2383,7 +2893,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 93
+        "y": 96
       },
       "id": 26,
       "options": {
@@ -2498,8 +3008,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2515,7 +3024,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 93
+        "y": 96
       },
       "id": 33,
       "options": {
@@ -2617,8 +3126,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2633,7 +3141,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 101
+        "y": 104
       },
       "id": 36,
       "options": {
@@ -2682,7 +3190,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 109
+        "y": 112
       },
       "id": 32,
       "panels": [],
@@ -2738,8 +3246,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2788,7 +3295,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 110
+        "y": 113
       },
       "id": 30,
       "options": {
@@ -2939,8 +3446,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -2952,7 +3458,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 110
+        "y": 113
       },
       "id": 28,
       "options": {
@@ -3054,8 +3560,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3070,7 +3575,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 118
+        "y": 121
       },
       "id": 35,
       "options": {
@@ -3160,8 +3665,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3194,7 +3698,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 118
+        "y": 121
       },
       "id": 73,
       "options": {
@@ -3244,7 +3748,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 126
+        "y": 129
       },
       "id": 89,
       "panels": [],
@@ -3300,8 +3804,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3317,7 +3820,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 127
+        "y": 130
       },
       "id": 91,
       "options": {
@@ -3367,6 +3870,17 @@
           "legendFormat": "Queued pool size",
           "range": true,
           "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blob_pool_size_bytes{instance=~\"$instance\"}",
+          "legendFormat": "Blob pool size",
+          "range": true,
+          "refId": "D"
         }
       ],
       "title": "Subpool sizes in bytes",
@@ -3419,8 +3933,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3435,7 +3948,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 127
+        "y": 130
       },
       "id": 92,
       "options": {
@@ -3485,6 +3998,17 @@
           "legendFormat": "Queued pool transactions",
           "range": true,
           "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blob_pool_transactions{instance=~\"$instance\"}",
+          "legendFormat": "Blob pool transactions",
+          "range": true,
+          "refId": "D"
         }
       ],
       "title": "Subpool transaction count",
@@ -3537,8 +4061,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3571,7 +4094,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 135
+        "y": 138
       },
       "id": 102,
       "options": {
@@ -3675,8 +4198,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3691,7 +4213,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 135
+        "y": 138
       },
       "id": 94,
       "options": {
@@ -3770,8 +4292,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3786,7 +4307,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 143
+        "y": 146
       },
       "id": 104,
       "options": {
@@ -3865,8 +4386,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3911,7 +4431,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 143
+        "y": 146
       },
       "id": 93,
       "options": {
@@ -4013,8 +4533,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4022,7 +4541,7 @@
               }
             ]
           },
-          "unit": "cps"
+          "unit": "reqps"
         },
         "overrides": [
           {
@@ -4036,18 +4555,6 @@
                 "value": "negative-Y"
               }
             ]
-          },
-          {
-            "matcher": {
-              "id": "byFrameRefID",
-              "options": "C"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "events"
-              }
-            ]
           }
         ]
       },
@@ -4055,7 +4562,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 151
+        "y": 154
       },
       "id": 95,
       "options": {
@@ -4077,7 +4584,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "increase(reth_network_pool_transactions_messages_sent{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_network_pool_transactions_messages_sent{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "instant": false,
           "legendFormat": "Tx",
@@ -4090,23 +4597,11 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "increase(reth_network_pool_transactions_messages_received{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_network_pool_transactions_messages_received{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Rx",
           "range": true,
           "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_network_pool_transactions_messages_sent{instance=~\"$instance\"} - reth_network_pool_transactions_messages_received{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "Messages in channel",
-          "range": true,
-          "refId": "C"
         }
       ],
       "title": "Network transaction channel",
@@ -4159,8 +4654,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4175,7 +4669,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 151
+        "y": 154
       },
       "id": 115,
       "options": {
@@ -4268,7 +4762,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 159
+        "y": 162
       },
       "id": 79,
       "panels": [],
@@ -4324,8 +4818,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4340,7 +4833,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 160
+        "y": 163
       },
       "id": 74,
       "options": {
@@ -4419,8 +4912,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4435,7 +4927,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 160
+        "y": 163
       },
       "id": 80,
       "options": {
@@ -4514,8 +5006,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4530,7 +5021,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 168
+        "y": 171
       },
       "id": 81,
       "options": {
@@ -4608,8 +5099,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4625,7 +5115,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 168
+        "y": 171
       },
       "id": 114,
       "options": {
@@ -4658,12 +5148,228 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 179
+      },
+      "id": 158,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=~\"$blockchain_tree_action\", quantile=\"0.5\"} ",
+          "instant": false,
+          "legendFormat": "${blockchain_tree_action} {{quantile}} percentile",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=~\"$blockchain_tree_action\", quantile=\"0.95\"} ",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "${blockchain_tree_action} {{quantile}} percentile",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=~\"$blockchain_tree_action\", quantile=\"1\"} ",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "${blockchain_tree_action} {{quantile}} percentile",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Canonicalization duration per action",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 179
+      },
+      "id": 190,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_blockchain_tree_latest_reorg_depth{instance=~\"$instance\"}",
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Latest Reorg Depth",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 176
+        "y": 187
       },
       "id": 87,
       "panels": [],
@@ -4719,8 +5425,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4735,7 +5440,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 177
+        "y": 188
       },
       "id": 83,
       "options": {
@@ -4813,8 +5518,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4829,7 +5533,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 177
+        "y": 188
       },
       "id": 84,
       "options": {
@@ -4919,8 +5623,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4935,7 +5638,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 185
+        "y": 196
       },
       "id": 85,
       "options": {
@@ -4972,7 +5675,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 193
+        "y": 204
       },
       "id": 68,
       "panels": [],
@@ -5028,8 +5731,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5044,7 +5746,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 194
+        "y": 205
       },
       "id": 60,
       "options": {
@@ -5122,8 +5824,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5138,7 +5839,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 194
+        "y": 205
       },
       "id": 62,
       "options": {
@@ -5216,8 +5917,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5232,7 +5932,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 202
+        "y": 213
       },
       "id": 64,
       "options": {
@@ -5269,7 +5969,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 210
+        "y": 221
       },
       "id": 97,
       "panels": [],
@@ -5322,8 +6022,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5339,7 +6038,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 211
+        "y": 222
       },
       "id": 98,
       "options": {
@@ -5441,7 +6140,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-"description": "",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -5483,8 +6182,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5500,7 +6198,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 211
+        "y": 222
       },
       "id": 101,
       "options": {
@@ -5527,7 +6225,7 @@
           "legendFormat": "Resident",
           "range": true,
           "refId": "A"
-                }
+        }
       ],
       "title": "Memory",
       "type": "timeseries"
@@ -5579,8 +6277,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5596,7 +6293,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 219
+        "y": 230
       },
       "id": 99,
       "options": {
@@ -5675,8 +6372,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5692,9 +6388,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 219
+        "y": 230
       },
-            "id": 100,
+      "id": 100,
       "options": {
         "legend": {
           "calcs": [],
@@ -5730,7 +6426,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 227
+        "y": 238
       },
       "id": 105,
       "panels": [],
@@ -5784,8 +6480,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5801,7 +6496,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 228
+        "y": 239
       },
       "id": 106,
       "options": {
@@ -5880,8 +6575,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5897,7 +6591,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 228
+        "y": 239
       },
       "id": 107,
       "options": {
@@ -5935,7 +6629,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 236
+        "y": 247
       },
       "id": 108,
       "panels": [],
@@ -5989,8 +6683,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6031,7 +6724,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 237
+        "y": 248
       },
       "id": 109,
       "options": {
@@ -6093,7 +6786,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 237
+        "y": 248
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -6137,7 +6830,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -6203,8 +6896,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6220,7 +6912,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 245
+        "y": 256
       },
       "id": 120,
       "options": {
@@ -6278,7 +6970,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 245
+        "y": 256
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -6322,7 +7014,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -6343,32 +7035,17 @@
       "type": "heatmap"
     },
     {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 253
-      },
-      "id": 123,
-      "panels": [],
-      "repeat": "instance",
-      "repeatDirection": "h",
-      "title": "Database - Canonicalization Metrics",
-      "type": "row"
-    },
-    {
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -6412,18 +7089,42 @@
                 "value": 80
               }
             ]
-          },
-          "unit": "ms"
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/.*cached items.*/"
+            },
+            "properties": [
+              {
+                "id": "custom.axisLabel",
+                "value": "Items"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/.*consumers.*/"
+            },
+            "properties": [
+              {
+                "id": "custom.axisLabel",
+                "value": "Queued consumers"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 254
+        "y": 264
       },
-      "id": 167,
+      "id": 198,
       "options": {
         "legend": {
           "calcs": [],
@@ -6442,4553 +7143,104 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert storage hashing\", quantile=\"0.5\"}",
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_cached_count{cache=\"evm_env\"}",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "{{quantile}} percentile",
+          "legendFormat": "EVM environment cache cached items",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "useBackend": false
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert storage hashing\", quantile=\"0.9\"} ",
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_queued_consumers_count{cache=\"receipts\"}",
+          "fullMetaSearch": false,
           "hide": false,
+          "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "{{quantile}} percentile",
+          "legendFormat": "Receipts cache queued consumers",
           "range": true,
-          "refId": "B"
+          "refId": "B",
+          "useBackend": false
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert storage hashing\", quantile=\"0.95\"} ",
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_queued_consumers_count{cache=\"evm_env\"}",
+          "fullMetaSearch": false,
           "hide": false,
+          "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "{{quantile}} percentile",
+          "legendFormat": "EVM environment cache queued consumers",
           "range": true,
-          "refId": "C"
+          "refId": "C",
+          "useBackend": false
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert storage hashing\", quantile=\"0.99\"} ",
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_queued_consumers_count{cache=\"blocks\"}",
+          "fullMetaSearch": false,
           "hide": false,
+          "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "{{quantile}} percentile",
+          "legendFormat": "Block cache queued consumers",
           "range": true,
-          "refId": "D"
+          "refId": "D",
+          "useBackend": false
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert storage hashing\", quantile=\"0.999\"} ",
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_cached_count{cache=\"blocks\"}",
+          "fullMetaSearch": false,
           "hide": false,
+          "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "{{quantile}} percentile",
+          "legendFormat": "Block cache cached items",
           "range": true,
-          "refId": "E"
+          "refId": "E",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_cached_count{cache=\"receipts\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Receipts cache cached items",
+          "range": true,
+          "refId": "F",
+          "useBackend": false
         }
       ],
-      "title": "Insert Storage Hashing",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 254
-      },
-      "id": 168,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert account hashing\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert account hashing\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert account hashing\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert account hashing\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert account hashing\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert Account Hashing",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 262
-      },
-      "id": 169,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert merkle tree\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert merkle tree\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert merkle tree\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert merkle tree\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert merkle tree\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert Merkle Tree",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 262
-      },
-      "id": 170,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert block\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert Block",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 270
-      },
-      "id": 171,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert state\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert state\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert state\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert state\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert state\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert State",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 270
-      },
-      "id": 172,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert hashes\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert hashes\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert hashes\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert hashes\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert hashes\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert Hashes",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 278
-      },
-      "id": 173,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert history indices\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert history indices\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert history indices\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert history indices\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert history indices\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert History Indices",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 278
-      },
-      "id": 174,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"update pipeline stages\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"update pipeline stages\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"update pipeline stages\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"update pipeline stages\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"update pipeline stages\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Update Pipeline Stages",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 286
-      },
-      "id": 175,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert canonical headers\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert canonical headers\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert canonical headers\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert canonical headers\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert canonical headers\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert Canonical Headers",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 286
-      },
-      "id": 176,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert headers\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert headers\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert headers\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert headers\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert headers\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert Headers",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 294
-      },
-      "id": 177,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert header numbers\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert header numbers\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert header numbers\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert header numbers\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert header numbers\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert Header Numbers",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 294
-      },
-      "id": 178,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert header TD\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert headers numbers\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert header TD\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert header TD\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert header TD\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert Header TD",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 302
-      },
-      "id": 179,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block ommers\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block ommers\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block ommers\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block ommers\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert block ommers\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert Block Ommers",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 302
-      },
-      "id": 180,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx senders\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx senders\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx senders\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx senders\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx senders\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert Tx Senders",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 310
-      },
-      "id": 181,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert transactions\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert transactions\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert transactions\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert transactions\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert transactions\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert Transactions",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 310
-      },
-      "id": 182,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx hash numbers\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx hash numbers\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx hash numbers\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx hash numbers\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx hash numbers\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert Tx Hash Numbers",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 318
-      },
-      "id": 183,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block withdrawals\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block withdrawals\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block withdrawals\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block withdrawals\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert block withdrawals\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert Block Withdrawals",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 318
-      },
-      "id": 184,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block body indices\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block body indices\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block body indices\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block body indices\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert block body indices\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert Block Body Indices",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 326
-      },
-      "id": 185,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert transaction block\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert transaction block\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert transaction block\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert transaction block\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert transaction block\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert Transaction Block",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 326
-      },
-      "id": 186,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"recover signers\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"recover signers\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"recover signers\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"recover signers\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"recover signers\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Recover Signers",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 334
-      },
-      "id": 187,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"get next tx num\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"get next tx num\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"get next tx num\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"get next tx num\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"get next tx num\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Get Next Tx Num",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 334
-      },
-      "id": 188,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"get parent TD\", quantile=\"0.5\"}",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"get parent TD\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"get parent TD\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"get parent TD\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"get parent TD\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Get Parent TD",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 342
-      },
-      "id": 133,
-      "panels": [],
-      "repeat": "instance",
-      "repeatDirection": "h",
-      "title": "Blockchain Tree - Canonicalization Metrics",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 343
-      },
-      "id": 158,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"clone old blocks\", quantile=\"0.5\"} ",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"clone old blocks\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"clone old blocks\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"clone old blocks\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"clone old blocks\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Clone Old Blocks",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 343
-      },
-      "id": 159,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"find canonical header\", quantile=\"0.5\"} ",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"find canonical header\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"find canonical header\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"find canonical header\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"find canonical header\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Find Canonical Header",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 351
-      },
-      "id": 160,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain\", quantile=\"0.5\"} ",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Split Chain",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 351
-      },
-      "id": 162,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain forks\", quantile=\"0.5\"} ",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain forks\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain forks\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain forks\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain forks\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Split Chain Forks",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 359
-      },
-      "id": 163,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"merge all chains\", quantile=\"0.5\"} ",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"merge all chains\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"merge all chains\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"merge all chains\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"merge all chains\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Merge All Chains",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 359
-      },
-      "id": 164,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"update canonical index\", quantile=\"0.5\"} ",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"update canonical index\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"update canonical index\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"update canonical index\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"update canonical index\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Update Canonical Index",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 367
-      },
-      "id": 165,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"commit canonical chain to database\", quantile=\"0.5\"} ",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"commit canonical chain to database\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"commit canonical chain to database\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"commit canonical chain to database\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"commit canonical chain to database\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Commit Canonical Chain to Database",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 367
-      },
-      "id": 166,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"revert canonical chain from database\", quantile=\"0.5\"} ",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"revert canonical chain from database\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"revert canonical chain from database\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"revert canonical chain from database\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"revert canonical chain from database\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Revert Canonical Chain From Database",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 375
-      },
-      "id": 161,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"insert old canonical chain\", quantile=\"0.5\"} ",
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"insert old canonical chain\", quantile=\"0.9\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"insert old canonical chain\", quantile=\"0.95\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"insert old canonical chain\", quantile=\"0.99\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"insert old canonical chain\", quantile=\"0.999\"} ",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{quantile}} percentile",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Insert Old Canonical Chain",
+      "title": "RPC Cache Metrics",
       "type": "timeseries"
     }
   ],
@@ -11005,18 +7257,64 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "query_result(up)",
+        "definition": "query_result(reth_info)",
         "hide": 0,
         "includeAll": false,
         "multi": false,
         "name": "instance",
         "options": [],
         "query": {
-          "query": "query_result(up)",
+          "query": "query_result(reth_info)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
         "regex": "/.*instance=\\\"([^\\\"]*).*/",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "label_values(reth_blockchain_tree_make_canonical_duration{instance=\"$instance\"},action)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Blockchain Tree Canonicalization Action",
+        "multi": false,
+        "name": "blockchain_tree_action",
+        "options": [],
+        "query": {
+          "query": "label_values(reth_blockchain_tree_make_canonical_duration{instance=\"$instance\"},action)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "label_values(reth_storage_providers_database_duration{instance=\"$instance\"},action)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Database Storage Providers Action",
+        "multi": false,
+        "name": "database_action",
+        "options": [],
+        "query": {
+          "query": "label_values(reth_storage_providers_database_duration{instance=\"$instance\"},action)",
+          "refId": "PrometheusVariableQueryEditor-DatabaseQuery"
+        },
+        "refresh": 1,
+        "regex": "",
         "skipUrlSync": false,
         "sort": 0,
         "type": "query"
@@ -11031,6 +7329,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 12,
+  "version": 14,
   "weekStart": ""
 }

@@ -11,8 +11,6 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod admin;
@@ -29,6 +27,7 @@ mod reth;
 mod rpc;
 mod trace;
 mod txpool;
+mod validation;
 mod web3;
 
 /// re-export of all server traits
@@ -51,6 +50,7 @@ pub mod servers {
         rpc::RpcApiServer,
         trace::TraceApiServer,
         txpool::TxPoolApiServer,
+        validation::BlockSubmissionValidationApiServer,
         web3::Web3ApiServer,
     };
 }
@@ -75,6 +75,7 @@ pub mod clients {
         rpc::RpcApiServer,
         trace::TraceApiClient,
         txpool::TxPoolApiClient,
+        validation::BlockSubmissionValidationApiClient,
         web3::Web3ApiClient,
     };
 }

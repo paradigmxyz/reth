@@ -1,4 +1,5 @@
 //! The ECIES Stream implementation which wraps over [`AsyncRead`] and [`AsyncWrite`].
+
 use crate::{
     codec::ECIESCodec, error::ECIESErrorImpl, ECIESError, EgressECIESValue, IngressECIESValue,
 };
@@ -148,7 +149,7 @@ where
 mod tests {
     use super::*;
     use crate::util::pk2id;
-    use secp256k1::{rand, SECP256K1};
+    use secp256k1::SECP256K1;
     use tokio::net::{TcpListener, TcpStream};
 
     #[tokio::test]

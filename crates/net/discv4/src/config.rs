@@ -10,13 +10,12 @@ use reth_primitives::{
     bytes::{Bytes, BytesMut},
     NodeRecord,
 };
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     time::Duration,
 };
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 /// Configuration parameters that define the performance of the discovery network.
 #[derive(Clone, Debug)]
@@ -35,13 +34,13 @@ pub struct Discv4Config {
     pub ping_interval: Duration,
     /// The duration of we consider a ping timed out.
     pub ping_expiration: Duration,
-    /// The rate at which lookups should be triggered.
+    /// The rate at which new random lookups should be triggered.
     pub lookup_interval: Duration,
     /// The duration of we consider a FindNode request timed out.
     pub request_timeout: Duration,
     /// The duration after which we consider an enr request timed out.
     pub enr_expiration: Duration,
-    /// The duration we set for neighbours responses
+    /// The duration we set for neighbours responses.
     pub neighbours_expiration: Duration,
     /// Provides a way to ban peers and ips.
     #[cfg_attr(feature = "serde", serde(skip))]
@@ -58,9 +57,9 @@ pub struct Discv4Config {
     pub enable_dht_random_walk: bool,
     /// Whether to automatically lookup peers.
     pub enable_lookup: bool,
-    /// Whether to enforce EIP-868 extension
+    /// Whether to enforce EIP-868 extension.
     pub enable_eip868: bool,
-    /// Whether to respect expiration timestamps in messages
+    /// Whether to respect expiration timestamps in messages.
     pub enforce_expiration_timestamps: bool,
     /// Additional pairs to include in The [`Enr`](enr::Enr) if EIP-868 extension is enabled <https://eips.ethereum.org/EIPS/eip-868>
     pub additional_eip868_rlp_pairs: HashMap<Vec<u8>, Bytes>,
@@ -80,22 +79,22 @@ impl Discv4Config {
     }
 
     /// Add another key value pair to include in the ENR
-    pub fn add_eip868_pair(&mut self, key: impl AsRef<[u8]>, value: impl Encodable) -> &mut Self {
+    pub fn add_eip868_pair(&mut self, key: impl Into<Vec<u8>>, value: impl Encodable) -> &mut Self {
         let mut buf = BytesMut::new();
         value.encode(&mut buf);
         self.add_eip868_rlp_pair(key, buf.freeze())
     }
 
     /// Add another key value pair to include in the ENR
-    pub fn add_eip868_rlp_pair(&mut self, key: impl AsRef<[u8]>, rlp: Bytes) -> &mut Self {
-        self.additional_eip868_rlp_pairs.insert(key.as_ref().to_vec(), rlp);
+    pub fn add_eip868_rlp_pair(&mut self, key: impl Into<Vec<u8>>, rlp: Bytes) -> &mut Self {
+        self.additional_eip868_rlp_pairs.insert(key.into(), rlp);
         self
     }
 
     /// Extend additional key value pairs to include in the ENR
     pub fn extend_eip868_rlp_pairs(
         &mut self,
-        pairs: impl IntoIterator<Item = (impl AsRef<[u8]>, Bytes)>,
+        pairs: impl IntoIterator<Item = (impl Into<Vec<u8>>, Bytes)>,
     ) -> &mut Self {
         for (k, v) in pairs.into_iter() {
             self.add_eip868_rlp_pair(k, v);
@@ -237,22 +236,22 @@ impl Discv4ConfigBuilder {
     }
 
     /// Add another key value pair to include in the ENR
-    pub fn add_eip868_pair(&mut self, key: impl AsRef<[u8]>, value: impl Encodable) -> &mut Self {
+    pub fn add_eip868_pair(&mut self, key: impl Into<Vec<u8>>, value: impl Encodable) -> &mut Self {
         let mut buf = BytesMut::new();
         value.encode(&mut buf);
         self.add_eip868_rlp_pair(key, buf.freeze())
     }
 
     /// Add another key value pair to include in the ENR
-    pub fn add_eip868_rlp_pair(&mut self, key: impl AsRef<[u8]>, rlp: Bytes) -> &mut Self {
-        self.config.additional_eip868_rlp_pairs.insert(key.as_ref().to_vec(), rlp);
+    pub fn add_eip868_rlp_pair(&mut self, key: impl Into<Vec<u8>>, rlp: Bytes) -> &mut Self {
+        self.config.additional_eip868_rlp_pairs.insert(key.into(), rlp);
         self
     }
 
     /// Extend additional key value pairs to include in the ENR
     pub fn extend_eip868_rlp_pairs(
         &mut self,
-        pairs: impl IntoIterator<Item = (impl AsRef<[u8]>, Bytes)>,
+        pairs: impl IntoIterator<Item = (impl Into<Vec<u8>>, Bytes)>,
     ) -> &mut Self {
         for (k, v) in pairs.into_iter() {
             self.add_eip868_rlp_pair(k, v);

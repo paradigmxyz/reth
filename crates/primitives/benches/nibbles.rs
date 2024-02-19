@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use criterion::{criterion_group, criterion_main, Criterion};
 use proptest::{prelude::*, strategy::ValueTree};
 use reth_primitives::trie::Nibbles;

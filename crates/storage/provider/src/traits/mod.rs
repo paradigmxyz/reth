@@ -50,8 +50,8 @@ pub use executor::{BlockExecutor, BlockExecutorStats, ExecutorFactory, PrunableB
 
 mod chain;
 pub use chain::{
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    CanonStateSubscriptions,
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
+    CanonStateNotifications, CanonStateSubscriptions,
 };
 
 mod spec;
@@ -68,3 +68,6 @@ pub use history::HistoryWriter;
 
 mod prune_checkpoint;
 pub use prune_checkpoint::{PruneCheckpointReader, PruneCheckpointWriter};
+
+mod database_provider;
+pub use database_provider::DatabaseProviderFactory;

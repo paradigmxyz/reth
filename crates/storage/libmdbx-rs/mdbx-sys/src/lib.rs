@@ -1,4 +1,4 @@
-//! [`libmbdx`](https://github.com/erthink/libmdbx) bindings.
+//! [`libmdbx`](https://github.com/erthink/libmdbx) bindings.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",

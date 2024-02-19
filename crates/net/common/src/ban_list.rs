@@ -1,4 +1,5 @@
 //! Support for banning peers.
+
 use reth_primitives::PeerId;
 use std::{collections::HashMap, net::IpAddr, time::Instant};
 

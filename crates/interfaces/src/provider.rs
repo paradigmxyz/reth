@@ -1,6 +1,6 @@
 use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, SnapshotSegment,
-    TxHashOrNumber, TxNumber, B256,
+    TxHashOrNumber, TxNumber, B256, U256,
 };
 use std::path::PathBuf;
 use thiserror::Error;
@@ -14,6 +14,9 @@ pub enum ProviderError {
     /// Database error.
     #[error(transparent)]
     Database(#[from] crate::db::DatabaseError),
+    /// Filesystem path error.
+    #[error("{0}")]
+    FsPathError(String),
     /// Nippy jar error.
     #[error("nippy jar error: {0}")]
     NippyJar(String),
@@ -119,11 +122,20 @@ pub enum ProviderError {
     /// Snapshot file is not found for requested transaction.
     #[error("not able to find {0} snapshot file for transaction id {1}")]
     MissingSnapshotTx(SnapshotSegment, TxNumber),
+    /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
+    #[error("failed to convert block number U256 to u64: {0}")]
+    BlockNumberOverflow(U256),
 }
 
 impl From<reth_nippy_jar::NippyJarError> for ProviderError {
     fn from(err: reth_nippy_jar::NippyJarError) -> Self {
         ProviderError::NippyJar(err.to_string())
+    }
+}
+
+impl From<reth_primitives::fs::FsPathError> for ProviderError {
+    fn from(err: reth_primitives::fs::FsPathError) -> Self {
+        ProviderError::FsPathError(err.to_string())
     }
 }
 

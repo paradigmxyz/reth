@@ -1,0 +1,21 @@
+flowchart BT
+    subgraph canonical chain
+        CanonState:::state
+        block0canon:::canon -->block1canon:::canon -->block2canon:::canon -->block3canon:::canon -->
+        block4canon:::canon --> block5canon:::canon
+    end
+        block5canon --> block6pending1:::pending
+        block5canon --> block6pending2:::pending
+    subgraph sidechain2
+        S2State:::state
+        block3canon --> block4s2:::sidechain --> block5s2:::sidechain
+    end
+    subgraph sidechain1
+        S1State:::state
+        block2canon --> block3s1:::sidechain --> block4s1:::sidechain --> block5s1:::sidechain -->
+        block6s1:::sidechain
+    end
+    classDef state fill:#1882C4
+    classDef canon fill:#8AC926
+    classDef pending fill:#FFCA3A
+    classDef sidechain fill:#FF595E

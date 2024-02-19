@@ -2,10 +2,11 @@ use crate::{
     error::{BackoffKind, SessionError},
     peers::{
         reputation::{is_banned_reputation, DEFAULT_REPUTATION},
-        ReputationChangeWeights, DEFAULT_MAX_CONCURRENT_DIALS, DEFAULT_MAX_PEERS_INBOUND,
-        DEFAULT_MAX_PEERS_OUTBOUND,
+        ReputationChangeWeights, DEFAULT_MAX_COUNT_CONCURRENT_DIALS,
+        DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND,
     },
     session::{Direction, PendingSessionHandshakeError},
+    swarm::NetworkConnectionState,
 };
 use futures::StreamExt;
 use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
@@ -114,6 +115,8 @@ pub struct PeersManager {
     last_tick: Instant,
     /// Maximum number of backoff attempts before we give up on a peer and dropping.
     max_backoff_count: u32,
+    /// Tracks the connection state of the node
+    net_connection_state: NetworkConnectionState,
 }
 
 impl PeersManager {
@@ -166,6 +169,7 @@ impl PeersManager {
             connect_trusted_nodes_only,
             last_tick: Instant::now(),
             max_backoff_count,
+            net_connection_state: NetworkConnectionState::default(),
         }
     }
 
@@ -688,7 +692,12 @@ impl PeersManager {
     fn fill_outbound_slots(&mut self) {
         self.tick();
 
-        // as long as there a slots available try to fill them with the best peers
+        if !self.net_connection_state.is_active() {
+            // nothing to fill
+            return
+        }
+
+        // as long as there a slots available fill them with the best peers
         let mut new_outbound_dials = 1;
         while self.connection_info.has_out_capacity() {
             let action = {
@@ -717,6 +726,21 @@ impl PeersManager {
                 break
             }
         }
+    }
+
+    /// Keeps track of network state changes.
+    pub fn on_network_state_change(&mut self, state: NetworkConnectionState) {
+        self.net_connection_state = state;
+    }
+
+    /// Returns the current network connection state.
+    pub fn connection_state(&self) -> &NetworkConnectionState {
+        &self.net_connection_state
+    }
+
+    /// Sets net_connection_state to ShuttingDown.
+    pub fn on_shutdown(&mut self) {
+        self.net_connection_state = NetworkConnectionState::ShuttingDown;
     }
 
     /// Advances the state.
@@ -853,9 +877,9 @@ impl Default for ConnectionInfo {
         ConnectionInfo {
             num_outbound: 0,
             num_inbound: 0,
-            max_outbound: DEFAULT_MAX_PEERS_OUTBOUND,
-            max_inbound: DEFAULT_MAX_PEERS_INBOUND,
-            max_concurrent_outbound_dials: DEFAULT_MAX_CONCURRENT_DIALS,
+            max_outbound: DEFAULT_MAX_COUNT_PEERS_OUTBOUND as usize,
+            max_inbound: DEFAULT_MAX_COUNT_PEERS_INBOUND as usize,
+            max_concurrent_outbound_dials: DEFAULT_MAX_COUNT_CONCURRENT_DIALS,
         }
     }
 }
@@ -890,6 +914,11 @@ impl Peer {
 
     fn trusted(addr: SocketAddr) -> Self {
         Self { kind: PeerKind::Trusted, ..Self::new(addr) }
+    }
+
+    /// Returns the reputation of the peer
+    pub fn reputation(&self) -> i32 {
+        self.reputation
     }
 
     fn with_state(addr: SocketAddr, state: PeerConnectionState) -> Self {
@@ -1335,7 +1364,7 @@ impl Display for InboundConnectionError {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::PeersManager;
     use crate::{
         error::BackoffKind,

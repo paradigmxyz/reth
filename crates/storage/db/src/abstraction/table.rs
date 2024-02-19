@@ -5,15 +5,18 @@ use crate::{
 };
 
 use serde::{Deserialize, Serialize};
-use std::{
-    fmt::Debug,
-    marker::{Send, Sync},
-};
+use std::fmt::Debug;
 
 /// Trait that will transform the data to be saved in the DB in a (ideally) compressed format
 pub trait Compress: Send + Sync + Sized + Debug {
     /// Compressed type.
-    type Compressed: bytes::BufMut + AsMut<[u8]> + Default + AsRef<[u8]> + Send + Sync;
+    type Compressed: bytes::BufMut
+        + AsRef<[u8]>
+        + AsMut<[u8]>
+        + Into<Vec<u8>>
+        + Default
+        + Send
+        + Sync;
 
     /// If the type cannot be compressed, return its inner reference as `Some(self.as_ref())`
     fn uncompressable_ref(&self) -> Option<&[u8]> {
@@ -76,12 +79,17 @@ impl<T> Value for T where T: Compress + Decompress + Serialize {}
 /// It allows for the use of codecs. See [`crate::models::ShardedKey`] for a custom
 /// implementation.
 pub trait Table: Send + Sync + Debug + 'static {
-    /// Return table name as it is present inside the MDBX.
-    const NAME: &'static str;
+    /// The dynamic type of the table.
+    const TABLE: crate::Tables;
+
+    /// The table's name.
+    const NAME: &'static str = Self::TABLE.name();
+
     /// Key element of `Table`.
     ///
     /// Sorting should be taken into account when encoding this.
     type Key: Key;
+
     /// Value element of `Table`.
     type Value: Value;
 }

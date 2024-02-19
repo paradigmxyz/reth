@@ -3,6 +3,8 @@
 
 use std::str::FromStr;
 
+use derive_more::Display;
+
 /// Error thrown when failed to parse a valid [`EthVersion`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("Unknown eth protocol version: {0}")]
@@ -10,7 +12,7 @@ pub struct ParseVersionError(String);
 
 /// The `eth` protocol version.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Display)]
 pub enum EthVersion {
     /// The `eth` protocol version 66.
     Eth66 = 66,
@@ -35,6 +37,21 @@ impl EthVersion {
                 13
             }
         }
+    }
+
+    /// Returns true if the version is eth/66
+    pub const fn is_eth66(&self) -> bool {
+        matches!(self, EthVersion::Eth66)
+    }
+
+    /// Returns true if the version is eth/67
+    pub const fn is_eth67(&self) -> bool {
+        matches!(self, EthVersion::Eth67)
+    }
+
+    /// Returns true if the version is eth/68
+    pub const fn is_eth68(&self) -> bool {
+        matches!(self, EthVersion::Eth68)
     }
 }
 
@@ -112,9 +129,8 @@ impl From<EthVersion> for &'static str {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::{EthVersion, ParseVersionError};
-    use std::{convert::TryFrom, string::ToString};
 
     #[test]
     fn test_eth_version_try_from_str() {

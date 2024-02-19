@@ -1,5 +1,8 @@
-use super::{super::TrieMask, HashBuilderValue};
+use super::StoredHashBuilderValue;
+use crate::trie::{StoredTrieMask, TrieMask};
+use alloy_trie::{hash_builder::HashBuilderValue, HashBuilder};
 use bytes::Buf;
+use nybbles::Nibbles;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +29,37 @@ pub struct HashBuilderState {
     pub stored_in_database: bool,
 }
 
+impl From<HashBuilderState> for HashBuilder {
+    fn from(state: HashBuilderState) -> Self {
+        Self {
+            key: Nibbles::from_nibbles_unchecked(state.key),
+            stack: state.stack,
+            value: state.value,
+            groups: state.groups,
+            tree_masks: state.tree_masks,
+            hash_masks: state.hash_masks,
+            stored_in_database: state.stored_in_database,
+            updated_branch_nodes: None,
+            proof_retainer: None,
+            rlp_buf: Vec::with_capacity(32),
+        }
+    }
+}
+
+impl From<HashBuilder> for HashBuilderState {
+    fn from(state: HashBuilder) -> Self {
+        Self {
+            key: state.key.into(),
+            stack: state.stack,
+            value: state.value,
+            groups: state.groups,
+            tree_masks: state.tree_masks,
+            hash_masks: state.hash_masks,
+            stored_in_database: state.stored_in_database,
+        }
+    }
+}
+
 impl Compact for HashBuilderState {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
@@ -43,24 +77,24 @@ impl Compact for HashBuilderState {
             len += 2 + item.len();
         }
 
-        len += self.value.to_compact(buf);
+        len += StoredHashBuilderValue(self.value).to_compact(buf);
 
         buf.put_u16(self.groups.len() as u16);
         len += 2;
-        for item in self.groups.iter() {
-            len += item.to_compact(buf);
+        for item in &self.groups {
+            len += StoredTrieMask(*item).to_compact(buf);
         }
 
         buf.put_u16(self.tree_masks.len() as u16);
         len += 2;
-        for item in self.tree_masks.iter() {
-            len += item.to_compact(buf);
+        for item in &self.tree_masks {
+            len += StoredTrieMask(*item).to_compact(buf);
         }
 
         buf.put_u16(self.hash_masks.len() as u16);
         len += 2;
-        for item in self.hash_masks.iter() {
-            len += item.to_compact(buf);
+        for item in &self.hash_masks {
+            len += StoredTrieMask(*item).to_compact(buf);
         }
 
         buf.put_u8(self.stored_in_database as u8);
@@ -79,12 +113,12 @@ impl Compact for HashBuilderState {
             buf.advance(item_len);
         }
 
-        let (value, mut buf) = HashBuilderValue::from_compact(buf, 0);
+        let (StoredHashBuilderValue(value), mut buf) = StoredHashBuilderValue::from_compact(buf, 0);
 
         let groups_len = buf.get_u16() as usize;
         let mut groups = Vec::with_capacity(groups_len);
         for _ in 0..groups_len {
-            let (item, rest) = TrieMask::from_compact(buf, 0);
+            let (StoredTrieMask(item), rest) = StoredTrieMask::from_compact(buf, 0);
             groups.push(item);
             buf = rest;
         }
@@ -92,7 +126,7 @@ impl Compact for HashBuilderState {
         let tree_masks_len = buf.get_u16() as usize;
         let mut tree_masks = Vec::with_capacity(tree_masks_len);
         for _ in 0..tree_masks_len {
-            let (item, rest) = TrieMask::from_compact(buf, 0);
+            let (StoredTrieMask(item), rest) = StoredTrieMask::from_compact(buf, 0);
             tree_masks.push(item);
             buf = rest;
         }
@@ -100,7 +134,7 @@ impl Compact for HashBuilderState {
         let hash_masks_len = buf.get_u16() as usize;
         let mut hash_masks = Vec::with_capacity(hash_masks_len);
         for _ in 0..hash_masks_len {
-            let (item, rest) = TrieMask::from_compact(buf, 0);
+            let (StoredTrieMask(item), rest) = StoredTrieMask::from_compact(buf, 0);
             hash_masks.push(item);
             buf = rest;
         }

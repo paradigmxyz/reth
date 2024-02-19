@@ -1,6 +1,6 @@
 //! Connection tests
 
-use ethers_core::utils::Geth;
+use alloy_node_bindings::Geth;
 use ethers_providers::{Http, Middleware, Provider};
 use futures::StreamExt;
 use reth_discv4::Discv4Config;
@@ -261,12 +261,13 @@ async fn test_connect_to_trusted_peer() {
 
     let client = NoopProvider::default();
     let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
+    let transactions_manager_config = config.transactions_manager_config.clone();
     let (handle, network, transactions, requests) = NetworkManager::new(config)
         .await
         .unwrap()
         .into_builder()
         .request_handler(client)
-        .transactions(testing_pool())
+        .transactions(testing_pool(), transactions_manager_config)
         .split_with_handle();
 
     let mut events = handle.event_listener();
@@ -582,4 +583,22 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
     assert_eq!(handle.num_connected_peers(), 0);
 
     net_handle.terminate().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connect_many() {
+    reth_tracing::init_test_tracing();
+
+    let net = Testnet::create_with(5, NoopProvider::default()).await;
+
+    // install request handlers
+    let net = net.with_eth_pool();
+    let handle = net.spawn();
+    // connect all the peers
+    handle.connect_peers().await;
+
+    // check that all the peers are connected
+    for peer in handle.peers() {
+        assert_eq!(peer.network().num_connected_peers(), 4);
+    }
 }

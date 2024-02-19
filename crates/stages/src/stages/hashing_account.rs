@@ -95,7 +95,7 @@ impl AccountHashingStage {
         let blocks = random_block_range(&mut rng, opts.blocks.clone(), B256::ZERO, opts.txs);
 
         for block in blocks {
-            provider.insert_block(block, None, None).unwrap();
+            provider.insert_block(block.try_seal_with_senders().unwrap(), None).unwrap();
         }
         let mut accounts = random_eoa_account_range(&mut rng, opts.accounts);
         {
@@ -435,12 +435,7 @@ mod tests {
 
     mod test_utils {
         use super::*;
-        use crate::{
-            stages::hashing_account::AccountHashingStage,
-            test_utils::{StageTestRunner, TestStageDB},
-            ExecInput, ExecOutput, UnwindInput,
-        };
-        use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
+        use crate::test_utils::{StageTestRunner, TestStageDB};
         use reth_primitives::Address;
 
         pub(crate) struct AccountHashingTestRunner {

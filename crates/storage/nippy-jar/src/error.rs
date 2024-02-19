@@ -37,8 +37,12 @@ pub enum NippyJarError {
     UnsupportedFilterQuery,
     #[error("compression or decompression requires a bigger destination output")]
     OutputTooSmall,
-    #[error("Dictionary is not loaded.")]
+    #[error("dictionary is not loaded.")]
     DictionaryNotLoaded,
-    #[error("It's not possible to generate a compressor after loading a dictionary.")]
+    #[error("it's not possible to generate a compressor after loading a dictionary.")]
     CompressorNotAllowed,
+    #[error("number of offsets ({0}) is smaller than prune request ({1}).")]
+    InvalidPruning(u64, u64),
+    #[error("jar has been frozen and cannot be modified.")]
+    FrozenJar,
 }

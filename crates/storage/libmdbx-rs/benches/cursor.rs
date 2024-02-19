@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 mod utils;
 
 use ::ffi::*;

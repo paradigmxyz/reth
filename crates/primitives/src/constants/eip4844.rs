@@ -2,35 +2,11 @@
 #[cfg(feature = "c-kzg")]
 pub use trusted_setup::*;
 
-/// Size a single field element in bytes.
-pub const FIELD_ELEMENT_BYTES: u64 = 32;
-
-/// How many field elements are stored in a single data blob.
-pub const FIELD_ELEMENTS_PER_BLOB: u64 = 4096;
-
-/// Gas consumption of a single data blob.
-pub const DATA_GAS_PER_BLOB: u64 = 131_072u64; // 32*4096 = 131072 == 2^17 == 0x20000
-
-/// Maximum data gas for data blobs in a single block.
-pub const MAX_DATA_GAS_PER_BLOCK: u64 = 786_432u64; // 0xC0000
-
-/// Target data gas for data blobs in a single block.
-pub const TARGET_DATA_GAS_PER_BLOCK: u64 = 393_216u64; // 0x60000
-
-/// Maximum number of data blobs in a single block.
-pub const MAX_BLOBS_PER_BLOCK: usize = (MAX_DATA_GAS_PER_BLOCK / DATA_GAS_PER_BLOB) as usize; // 786432 / 131072  = 6
-
-/// Target number of data blobs in a single block.
-pub const TARGET_BLOBS_PER_BLOCK: u64 = TARGET_DATA_GAS_PER_BLOCK / DATA_GAS_PER_BLOB; // 393216 / 131072 = 3
-
-/// Determines the maximum rate of change for blob fee
-pub const BLOB_GASPRICE_UPDATE_FRACTION: u64 = 3_338_477u64; // 3338477
-
-/// Minimum gas price for a data blob
-pub const BLOB_TX_MIN_BLOB_GASPRICE: u128 = 1u128;
-
-/// Commitment version of a KZG commitment
-pub const VERSIONED_HASH_VERSION_KZG: u8 = 0x01;
+pub use alloy_eips::eip4844::{
+    BLOB_GASPRICE_UPDATE_FRACTION, BLOB_TX_MIN_BLOB_GASPRICE, DATA_GAS_PER_BLOB,
+    FIELD_ELEMENTS_PER_BLOB, FIELD_ELEMENT_BYTES, MAX_BLOBS_PER_BLOCK, MAX_DATA_GAS_PER_BLOCK,
+    TARGET_BLOBS_PER_BLOCK, TARGET_DATA_GAS_PER_BLOCK, VERSIONED_HASH_VERSION_KZG,
+};
 
 #[cfg(feature = "c-kzg")]
 mod trusted_setup {
@@ -76,7 +52,6 @@ mod trusted_setup {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use std::sync::Arc;
 
         #[test]
         fn ensure_load_kzg_settings() {

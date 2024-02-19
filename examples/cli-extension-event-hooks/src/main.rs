@@ -14,6 +14,7 @@
 //!
 //! > "Node started"
 //! once the node has been started.
+
 use clap::Parser;
 use reth::cli::{
     components::RethNodeComponents,

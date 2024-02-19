@@ -2,6 +2,7 @@ use super::queue::BodiesRequestQueue;
 use crate::{bodies::task::TaskDownloader, metrics::BodyDownloaderMetrics};
 use futures::Stream;
 use futures_util::StreamExt;
+use reth_config::BodiesConfig;
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
@@ -312,12 +313,12 @@ where
         }
 
         // Check if the provided range is the next expected range.
+        let count = *range.end() - *range.start() + 1; // range is inclusive
         let is_next_consecutive_range = *range.start() == *self.download_range.end() + 1;
-        let distance = *range.end() - *range.start();
         if is_next_consecutive_range {
             // New range received.
             tracing::trace!(target: "downloaders::bodies", ?range, "New download range set");
-            info!(target: "downloaders::bodies", distance, "Downloading bodies {range:?}");
+            info!(target: "downloaders::bodies", count, ?range, "Downloading bodies");
             self.download_range = range;
             return Ok(())
         }
@@ -325,7 +326,7 @@ where
         // The block range is reset. This can happen either after unwind or after the bodies were
         // written by external services (e.g. BlockchainTree).
         tracing::trace!(target: "downloaders::bodies", ?range, prev_range = ?self.download_range, "Download range reset");
-        info!(target: "downloaders::bodies", distance, "Downloading bodies {range:?}");
+        info!(target: "downloaders::bodies", count, ?range, "Downloading bodies");
         self.clear();
         self.download_range = range;
         Ok(())
@@ -492,6 +493,21 @@ pub struct BodiesDownloaderBuilder {
     pub concurrent_requests_range: RangeInclusive<usize>,
 }
 
+impl BodiesDownloaderBuilder {
+    /// Creates a new [BodiesDownloaderBuilder] with configurations based on the provided
+    /// [BodiesConfig].
+    pub fn new(config: BodiesConfig) -> Self {
+        BodiesDownloaderBuilder::default()
+            .with_stream_batch_size(config.downloader_stream_batch_size)
+            .with_request_limit(config.downloader_request_limit)
+            .with_max_buffered_blocks_size_bytes(config.downloader_max_buffered_blocks_size_bytes)
+            .with_concurrent_requests_range(
+                config.downloader_min_concurrent_requests..=
+                    config.downloader_max_concurrent_requests,
+            )
+    }
+}
+
 impl Default for BodiesDownloaderBuilder {
     fn default() -> Self {
         Self {
@@ -580,12 +596,11 @@ mod tests {
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use assert_matches::assert_matches;
-    use futures_util::stream::StreamExt;
     use reth_db::test_utils::create_test_rw_db;
     use reth_interfaces::test_utils::{generators, generators::random_block_range, TestConsensus};
     use reth_primitives::{BlockBody, B256, MAINNET};
     use reth_provider::ProviderFactory;
-    use std::{collections::HashMap, sync::Arc};
+    use std::collections::HashMap;
 
     // Check that the blocks are emitted in order of block number, not in order of
     // first-downloaded

@@ -54,11 +54,13 @@ pub enum MerkleStage {
     },
     /// The unwind portion of the merkle stage.
     Unwind,
-
     /// Able to execute and unwind. Used for tests
     #[cfg(any(test, feature = "test-utils"))]
-    #[allow(missing_docs)]
-    Both { clean_threshold: u64 },
+    Both {
+        /// The threshold (in number of blocks) for switching from incremental trie building
+        /// of changes to whole rebuild.
+        clean_threshold: u64,
+    },
 }
 
 impl MerkleStage {
@@ -191,7 +193,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             });
 
             let tx = provider.tx_ref();
-            let progress = StateRoot::new(tx)
+            let progress = StateRoot::from_tx(tx)
                 .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
                 .root_with_progress()
                 .map_err(|e| StageError::Fatal(Box::new(e)))?;
@@ -341,20 +343,14 @@ mod tests {
         TestStageDB, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_db::{
-        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-        tables,
-        transaction::{DbTx, DbTxMut},
-    };
+    use reth_db::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
     use reth_interfaces::test_utils::{
         generators,
         generators::{
             random_block, random_block_range, random_changeset_range, random_contract_account_range,
         },
     };
-    use reth_primitives::{
-        keccak256, stage::StageUnitCheckpoint, SealedBlock, StorageEntry, B256, U256,
-    };
+    use reth_primitives::{keccak256, stage::StageUnitCheckpoint, SealedBlock, StorageEntry, U256};
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;
 

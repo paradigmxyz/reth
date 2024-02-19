@@ -1,6 +1,5 @@
-use alloy_primitives::Address;
-
 use crate::Withdrawal;
+use alloy_primitives::Address;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::{serde_as, DeserializeAs, DisplayFromStr, SerializeAs};
 
@@ -40,7 +39,6 @@ impl<'de> DeserializeAs<'de, Withdrawal> for BeaconWithdrawal {
 /// big-endian hex.
 pub mod beacon_withdrawals {
     use super::*;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     /// Serialize the payload attributes for the beacon API.
     pub fn serialize<S>(payload_attributes: &Withdrawal, serializer: S) -> Result<S::Ok, S::Error>

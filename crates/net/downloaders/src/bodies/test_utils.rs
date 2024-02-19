@@ -1,5 +1,7 @@
-#![allow(unused)]
 //! Test helper impls for generating bodies
+
+#![allow(dead_code)]
+
 use reth_db::{database::Database, tables, transaction::DbTxMut, DatabaseEnv};
 use reth_interfaces::{db, p2p::bodies::response::BlockResponse};
 use reth_primitives::{Block, BlockBody, SealedBlock, SealedHeader, B256};

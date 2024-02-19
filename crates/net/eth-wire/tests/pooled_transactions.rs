@@ -1,4 +1,5 @@
 //! Decoding tests for [`PooledTransactions`]
+
 use alloy_rlp::{Decodable, Encodable};
 use reth_eth_wire::{EthVersion, PooledTransactions, ProtocolMessage};
 use reth_primitives::{hex, Bytes, PooledTransactionsElement};

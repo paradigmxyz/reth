@@ -1,5 +1,6 @@
 //! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message
 //! types.
+
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, B256};
@@ -27,7 +28,7 @@ pub struct GetBlockHeaders {
     pub limit: u64,
 
     /// The number of blocks that the node should skip while traversing and returning headers.
-    /// A skip value of zero denotes that the peer should return contiguous heaaders, starting from
+    /// A skip value of zero denotes that the peer should return contiguous headers, starting from
     /// [`start_block`](#structfield.start_block) and returning at most
     /// [`limit`](#structfield.limit) headers.
     pub skip: u32,
@@ -89,7 +90,7 @@ impl From<Vec<BlockBody>> for BlockBodies {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::types::{
         message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
     };

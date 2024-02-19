@@ -12,7 +12,6 @@ use crate::{
 use core::sync::atomic::Ordering;
 use fnv::FnvHashMap;
 use futures::{stream::Fuse, SinkExt, StreamExt};
-
 use reth_eth_wire::{
     capability::Capabilities,
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
@@ -60,7 +59,7 @@ const TIMEOUT_SCALING: u32 = 3;
 ///    - incoming _internal_ requests/broadcasts via the request/command channel
 ///    - incoming requests/broadcasts _from remote_ via the connection
 ///    - responses for handled ETH requests received from the remote peer.
-#[allow(unused)]
+#[allow(dead_code)]
 pub(crate) struct ActiveSession {
     /// Keeps track of request ids.
     pub(crate) next_id: u64,
@@ -161,7 +160,7 @@ impl ActiveSession {
                             // request was already timed out internally
                             self.update_request_timeout(req.timestamp, Instant::now());
                         }
-                    };
+                    }
                 } else {
                     // we received a response to a request we never sent
                     self.on_bad_message();
@@ -662,7 +661,7 @@ pub(crate) struct ReceivedRequest {
     /// Receiver half of the channel that's supposed to receive the proper response.
     rx: PeerResponse,
     /// Timestamp when we read this msg from the wire.
-    #[allow(unused)]
+    #[allow(dead_code)]
     received: Instant,
 }
 
@@ -762,8 +761,7 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 mod tests {
     use super::*;
     use crate::session::{
-        config::{INITIAL_REQUEST_TIMEOUT, PROTOCOL_BREACH_REQUEST_TIMEOUT},
-        handle::PendingSessionEvent,
+        config::PROTOCOL_BREACH_REQUEST_TIMEOUT, handle::PendingSessionEvent,
         start_pending_incoming_session,
     };
     use reth_ecies::{stream::ECIESStream, util::pk2id};
@@ -774,7 +772,6 @@ mod tests {
     use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
     use secp256k1::{SecretKey, SECP256K1};
-    use std::time::Duration;
     use tokio::{
         net::{TcpListener, TcpStream},
         sync::mpsc,

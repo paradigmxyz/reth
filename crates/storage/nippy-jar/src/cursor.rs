@@ -1,9 +1,9 @@
 use crate::{
     compression::{Compression, Compressors, Zstd},
-    InclusionFilter, MmapHandle, NippyJar, NippyJarError, PerfectHashingFunction, RefRow,
+    DataReader, InclusionFilter, NippyJar, NippyJarError, NippyJarHeader, PerfectHashingFunction,
+    RefRow,
 };
-use serde::{de::Deserialize, ser::Serialize};
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 use sucds::int_vectors::Access;
 use zstd::bulk::Decompressor;
 
@@ -12,46 +12,40 @@ use zstd::bulk::Decompressor;
 pub struct NippyJarCursor<'a, H = ()> {
     /// [`NippyJar`] which holds most of the required configuration to read from the file.
     jar: &'a NippyJar<H>,
-    /// Data file.
-    mmap_handle: MmapHandle,
+    /// Data and offset reader.
+    reader: Arc<DataReader>,
     /// Internal buffer to unload data to without reallocating memory on each retrieval.
     internal_buffer: Vec<u8>,
     /// Cursor row position.
     row: u64,
 }
 
-impl<'a, H: std::fmt::Debug> std::fmt::Debug for NippyJarCursor<'a, H>
-where
-    H: Send + Sync + Serialize + for<'b> Deserialize<'b> + core::fmt::Debug,
-{
+impl<'a, H: NippyJarHeader> std::fmt::Debug for NippyJarCursor<'a, H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NippyJarCursor").field("config", &self.jar).finish_non_exhaustive()
     }
 }
 
-impl<'a, H> NippyJarCursor<'a, H>
-where
-    H: Send + Sync + Serialize + for<'b> Deserialize<'b> + std::fmt::Debug + 'static,
-{
+impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     pub fn new(jar: &'a NippyJar<H>) -> Result<Self, NippyJarError> {
         let max_row_size = jar.max_row_size;
         Ok(NippyJarCursor {
             jar,
-            mmap_handle: jar.open_data()?,
+            reader: Arc::new(jar.open_data_reader()?),
             // Makes sure that we have enough buffer capacity to decompress any row of data.
             internal_buffer: Vec::with_capacity(max_row_size),
             row: 0,
         })
     }
 
-    pub fn with_handle(
+    pub fn with_reader(
         jar: &'a NippyJar<H>,
-        mmap_handle: MmapHandle,
+        reader: Arc<DataReader>,
     ) -> Result<Self, NippyJarError> {
         let max_row_size = jar.max_row_size;
         Ok(NippyJarCursor {
             jar,
-            mmap_handle,
+            reader,
             // Makes sure that we have enough buffer capacity to decompress any row of data.
             internal_buffer: Vec::with_capacity(max_row_size),
             row: 0,
@@ -112,7 +106,7 @@ where
     pub fn next_row(&mut self) -> Result<Option<RefRow<'_>>, NippyJarError> {
         self.internal_buffer.clear();
 
-        if self.row as usize * self.jar.columns >= self.jar.offsets.len() {
+        if self.row as usize >= self.jar.rows {
             // Has reached the end
             return Ok(None)
         }
@@ -129,7 +123,7 @@ where
         Ok(Some(
             row.into_iter()
                 .map(|v| match v {
-                    ValueRange::Mmap(range) => &self.mmap_handle[range],
+                    ValueRange::Mmap(range) => self.reader.data(range),
                     ValueRange::Internal(range) => &self.internal_buffer[range],
                 })
                 .collect(),
@@ -186,7 +180,7 @@ where
     pub fn next_row_with_cols(&mut self, mask: usize) -> Result<Option<RefRow<'_>>, NippyJarError> {
         self.internal_buffer.clear();
 
-        if self.row as usize * self.jar.columns >= self.jar.offsets.len() {
+        if self.row as usize >= self.jar.rows {
             // Has reached the end
             return Ok(None)
         }
@@ -204,7 +198,7 @@ where
         Ok(Some(
             row.into_iter()
                 .map(|v| match v {
-                    ValueRange::Mmap(range) => &self.mmap_handle[range],
+                    ValueRange::Mmap(range) => self.reader.data(range),
                     ValueRange::Internal(range) => &self.internal_buffer[range],
                 })
                 .collect(),
@@ -219,13 +213,13 @@ where
     ) -> Result<(), NippyJarError> {
         // Find out the offset of the column value
         let offset_pos = self.row as usize * self.jar.columns + column;
-        let value_offset = self.jar.offsets.select(offset_pos).expect("should exist");
+        let value_offset = self.reader.offset(offset_pos) as usize;
 
-        let column_offset_range = if self.jar.offsets.len() == (offset_pos + 1) {
+        let column_offset_range = if self.jar.rows * self.jar.columns == offset_pos + 1 {
             // It's the last column of the last row
-            value_offset..self.mmap_handle.len()
+            value_offset..self.reader.size()
         } else {
-            let next_value_offset = self.jar.offsets.select(offset_pos + 1).expect("should exist");
+            let next_value_offset = self.reader.offset(offset_pos + 1) as usize;
             value_offset..next_value_offset
         };
 
@@ -242,7 +236,7 @@ where
                         .expect("dictionary to be loaded");
                     let mut decompressor = Decompressor::with_prepared_dictionary(dictionaries)?;
                     Zstd::decompress_with_dictionary(
-                        &self.mmap_handle[column_offset_range],
+                        self.reader.data(column_offset_range),
                         &mut self.internal_buffer,
                         &mut decompressor,
                     )?;
@@ -250,7 +244,7 @@ where
                 _ => {
                     // Uses the chosen default decompressor
                     compression.decompress_to(
-                        &self.mmap_handle[column_offset_range],
+                        self.reader.data(column_offset_range),
                         &mut self.internal_buffer,
                     )?;
                 }

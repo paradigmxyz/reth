@@ -1,5 +1,7 @@
-#![allow(unused)]
 //! Test helper impls for generating bodies
+
+#![allow(dead_code)]
+
 use reth_primitives::SealedHeader;
 
 /// Returns a new [SealedHeader] that's the child header of the given `parent`.

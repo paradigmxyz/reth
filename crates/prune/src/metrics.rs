@@ -1,4 +1,4 @@
-use reth_metrics::{metrics, metrics::Histogram, Metrics, metrics::Gauge};
+use reth_metrics::{metrics::Histogram, metrics::Gauge, Metrics};
 use reth_primitives::PruneSegment;
 use std::collections::HashMap;
 

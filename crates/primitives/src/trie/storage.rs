@@ -1,4 +1,4 @@
-use super::{BranchNodeCompact, StoredNibblesSubKey};
+use super::{BranchNodeCompact, StoredBranchNode, StoredNibblesSubKey};
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
@@ -20,14 +20,14 @@ impl Compact for StorageTrieEntry {
         B: bytes::BufMut + AsMut<[u8]>,
     {
         let nibbles_len = self.nibbles.to_compact(buf);
-        let node_len = self.node.to_compact(buf);
+        let node_len = StoredBranchNode(self.node).to_compact(buf);
         nibbles_len + node_len
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         let (nibbles, buf) = StoredNibblesSubKey::from_compact(buf, 33);
-        let (node, buf) = BranchNodeCompact::from_compact(buf, len - 33);
-        let this = Self { nibbles, node };
+        let (node, buf) = StoredBranchNode::from_compact(buf, len - 33);
+        let this = Self { nibbles, node: node.0 };
         (this, buf)
     }
 }

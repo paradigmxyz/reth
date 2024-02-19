@@ -1,4 +1,5 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
+
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{ReceiptWithBloom, B256};
@@ -32,7 +33,7 @@ pub struct Receipts(
 );
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::{
         types::{message::RequestPair, GetReceipts},
         Receipts,

@@ -1,7 +1,10 @@
 use crate::{constants::GWEI_TO_WEI, serde_helper::u64_hex, Address};
-use alloy_rlp::{RlpDecodable, RlpEncodable};
+use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::{main_codec, Compact};
-use std::mem;
+use std::{
+    mem,
+    ops::{Deref, DerefMut},
+};
 
 /// Withdrawal represents a validator withdrawal from the consensus layer.
 #[main_codec]
@@ -30,6 +33,74 @@ impl Withdrawal {
     #[inline]
     pub fn size(&self) -> usize {
         mem::size_of::<Self>()
+    }
+}
+
+/// Represents a collection of Withdrawals.
+#[main_codec]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodableWrapper, RlpDecodableWrapper)]
+pub struct Withdrawals(Vec<Withdrawal>);
+
+impl Withdrawals {
+    /// Create a new Withdrawals instance.
+    pub fn new(withdrawals: Vec<Withdrawal>) -> Self {
+        Self(withdrawals)
+    }
+
+    /// Calculate the total size, including capacity, of the Withdrawals.
+    #[inline]
+    pub fn total_size(&self) -> usize {
+        self.size() + self.capacity() * std::mem::size_of::<Withdrawal>()
+    }
+
+    /// Calculate a heuristic for the in-memory size of the [Withdrawals].
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.iter().map(Withdrawal::size).sum()
+    }
+
+    /// Get an iterator over the Withdrawals.
+    pub fn iter(&self) -> std::slice::Iter<'_, Withdrawal> {
+        self.0.iter()
+    }
+
+    /// Get a mutable iterator over the Withdrawals.
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Withdrawal> {
+        self.0.iter_mut()
+    }
+
+    /// Convert [Self] into raw vec of withdrawals.
+    pub fn into_inner(self) -> Vec<Withdrawal> {
+        self.0
+    }
+}
+
+impl IntoIterator for Withdrawals {
+    type Item = Withdrawal;
+    type IntoIter = std::vec::IntoIter<Withdrawal>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl AsRef<[Withdrawal]> for Withdrawals {
+    fn as_ref(&self) -> &[Withdrawal] {
+        &self.0
+    }
+}
+
+impl Deref for Withdrawals {
+    type Target = Vec<Withdrawal>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Withdrawals {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

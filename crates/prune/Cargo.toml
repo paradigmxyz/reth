@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "Pruning implementation"
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-primitives.workspace = true
@@ -16,6 +19,7 @@ reth-provider.workspace = true
 reth-interfaces.workspace = true
 reth-snapshot.workspace = true
 reth-tokio-util.workspace = true
+reth-config.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }

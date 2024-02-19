@@ -37,9 +37,9 @@ pub enum StageError {
          downloaded header #{header_number} ({header_hash}) is detached from \
          local head #{head_number} ({head_hash}): {error}",
         header_number = header.number,
-        header_hash = header.hash,
+        header_hash = header.hash(),
         head_number = local_head.number,
-        head_hash = local_head.hash,
+        head_hash = local_head.hash(),
     )]
     DetachedHead {
         /// The local head we attempted to attach to.
@@ -123,7 +123,7 @@ pub enum PipelineError {
     Provider(#[from] ProviderError),
     /// The pipeline encountered an error while trying to send an event.
     #[error("pipeline encountered an error while trying to send an event")]
-    Channel(#[from] SendError<PipelineEvent>),
+    Channel(#[from] Box<SendError<PipelineEvent>>),
     /// The stage encountered an internal error.
     #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),

@@ -153,7 +153,7 @@ where
     }
 }
 
-impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> std::iter::Iterator for Walker<'cursor, T, CURSOR> {
+impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> Iterator for Walker<'cursor, T, CURSOR> {
     type Item = Result<TableRow<T>, DatabaseError>;
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
@@ -227,9 +227,7 @@ impl<'cursor, T: Table, CURSOR: DbCursorRW<T> + DbCursorRO<T>> ReverseWalker<'cu
     }
 }
 
-impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> std::iter::Iterator
-    for ReverseWalker<'cursor, T, CURSOR>
-{
+impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> Iterator for ReverseWalker<'cursor, T, CURSOR> {
     type Item = Result<TableRow<T>, DatabaseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -270,10 +268,9 @@ where
     }
 }
 
-impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> std::iter::Iterator
-    for RangeWalker<'cursor, T, CURSOR>
-{
+impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> Iterator for RangeWalker<'cursor, T, CURSOR> {
     type Item = Result<TableRow<T>, DatabaseError>;
+
     fn next(&mut self) -> Option<Self::Item> {
         if self.is_done {
             return None
@@ -292,11 +289,10 @@ impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> std::iter::Iterator
                 }
             },
             Some(res @ Err(_)) => Some(res),
-            None if matches!(self.end_key, Bound::Unbounded) => {
-                self.is_done = true;
+            None => {
+                self.is_done = matches!(self.end_key, Bound::Unbounded);
                 None
             }
-            _ => None,
         }
     }
 }
@@ -361,9 +357,7 @@ impl<'cursor, T: DupSort, CURSOR: DbCursorRW<T> + DbDupCursorRO<T>> DupWalker<'c
     }
 }
 
-impl<'cursor, T: DupSort, CURSOR: DbDupCursorRO<T>> std::iter::Iterator
-    for DupWalker<'cursor, T, CURSOR>
-{
+impl<'cursor, T: DupSort, CURSOR: DbDupCursorRO<T>> Iterator for DupWalker<'cursor, T, CURSOR> {
     type Item = Result<TableRow<T>, DatabaseError>;
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();

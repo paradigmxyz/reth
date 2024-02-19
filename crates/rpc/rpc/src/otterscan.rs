@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_variables)]
 use crate::result::internal_rpc_err;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -11,7 +10,7 @@ use reth_rpc_types::{
 
 const API_LEVEL: u64 = 8;
 
-/// Otterscan Api
+/// Otterscan API.
 #[derive(Debug)]
 pub struct OtterscanApi<Eth> {
     eth: Eth,
@@ -40,17 +39,17 @@ where
     }
 
     /// Handler for `ots_getInternalOperations`
-    async fn get_internal_operations(&self, tx_hash: TxHash) -> RpcResult<Vec<InternalOperation>> {
+    async fn get_internal_operations(&self, _tx_hash: TxHash) -> RpcResult<Vec<InternalOperation>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for `ots_getTransactionError`
-    async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<String> {
+    async fn get_transaction_error(&self, _tx_hash: TxHash) -> RpcResult<String> {
         Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for `ots_traceTransaction`
-    async fn trace_transaction(&self, tx_hash: TxHash) -> RpcResult<TraceEntry> {
+    async fn trace_transaction(&self, _tx_hash: TxHash) -> RpcResult<TraceEntry> {
         Err(internal_rpc_err("unimplemented"))
     }
 
@@ -72,9 +71,9 @@ where
     /// Handler for `getBlockTransactions`
     async fn get_block_transactions(
         &self,
-        block_number: BlockNumberOrTag,
-        page_number: usize,
-        page_size: usize,
+        _block_number: BlockNumberOrTag,
+        _page_number: usize,
+        _page_size: usize,
     ) -> RpcResult<OtsBlockTransactions> {
         Err(internal_rpc_err("unimplemented"))
     }
@@ -82,9 +81,9 @@ where
     /// Handler for `searchTransactionsBefore`
     async fn search_transactions_before(
         &self,
-        address: Address,
-        block_number: BlockNumberOrTag,
-        page_size: usize,
+        _address: Address,
+        _block_number: BlockNumberOrTag,
+        _page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts> {
         Err(internal_rpc_err("unimplemented"))
     }
@@ -92,9 +91,9 @@ where
     /// Handler for `searchTransactionsAfter`
     async fn search_transactions_after(
         &self,
-        address: Address,
-        block_number: BlockNumberOrTag,
-        page_size: usize,
+        _address: Address,
+        _block_number: BlockNumberOrTag,
+        _page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts> {
         Err(internal_rpc_err("unimplemented"))
     }
@@ -102,14 +101,14 @@ where
     /// Handler for `getTransactionBySenderAndNonce`
     async fn get_transaction_by_sender_and_nonce(
         &self,
-        sender: Address,
-        nonce: u64,
+        _sender: Address,
+        _nonce: u64,
     ) -> RpcResult<Option<Transaction>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for `getContractCreator`
-    async fn get_contract_creator(&self, address: Address) -> RpcResult<Option<ContractCreator>> {
+    async fn get_contract_creator(&self, _address: Address) -> RpcResult<Option<ContractCreator>> {
         Err(internal_rpc_err("unimplemented"))
     }
 }

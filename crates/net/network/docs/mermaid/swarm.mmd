@@ -1,0 +1,15 @@
+graph TB
+   connections(TCP Listener)
+   Discovery[(Discovery)]
+   fetchRequest(Client Interfaces)
+   Sessions[(SessionManager)]
+   SessionTask[(Peer Session)]
+   State[(State)]
+   StateFetch[(State Fetcher)]
+ connections --> |incoming| Sessions
+ State --> |initiate outgoing| Sessions
+ Discovery --> |update peers| State
+ Sessions --> |spawns| SessionTask
+ SessionTask <--> |handle state requests| State
+ fetchRequest --> |request Headers, Bodies| StateFetch
+ State --> |poll pending requests| StateFetch

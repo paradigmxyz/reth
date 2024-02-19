@@ -1,63 +1,43 @@
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{AccountNode, AccountNodeIter, StorageNode, StorageNodeIter},
-    prefix_set::{PrefixSet, PrefixSetLoader, PrefixSetMut},
+    prefix_set::{PrefixSet, PrefixSetLoader, PrefixSetMut, TriePrefixSets},
     progress::{IntermediateStateRootState, StateRootProgress},
-    trie_cursor::{AccountTrieCursor, StorageTrieCursor},
+    trie_cursor::TrieCursorFactory,
     updates::{TrieKey, TrieOp, TrieUpdates},
     walker::TrieWalker,
     StateRootError, StorageRootError,
 };
 use alloy_rlp::{BufMut, Encodable};
-use reth_db::{tables, transaction::DbTx};
+use reth_db::transaction::DbTx;
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
     keccak256,
     trie::{HashBuilder, Nibbles, TrieAccount},
     Address, BlockNumber, B256,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    ops::RangeInclusive,
-};
+use std::ops::RangeInclusive;
 use tracing::{debug, trace};
 
 /// StateRoot is used to compute the root node of a state trie.
 #[derive(Debug)]
-pub struct StateRoot<'a, TX, H> {
-    /// A reference to the database transaction.
-    pub tx: &'a TX,
+pub struct StateRoot<T, H> {
+    /// The factory for trie cursors.
+    pub trie_cursor_factory: T,
     /// The factory for hashed cursors.
     pub hashed_cursor_factory: H,
-    /// A set of account prefixes that have changed.
-    pub changed_account_prefixes: PrefixSet,
-    /// A map containing storage changes with the hashed address as key and a set of storage key
-    /// prefixes as the value.
-    pub changed_storage_prefixes: HashMap<B256, PrefixSet>,
-    /// A map containing keys of accounts that were destroyed.
-    pub destroyed_accounts: HashSet<B256>,
+    /// A set of prefix sets that have changes.
+    pub prefix_sets: TriePrefixSets,
     /// Previous intermediate state.
     previous_state: Option<IntermediateStateRootState>,
     /// The number of updates after which the intermediate progress should be returned.
     threshold: u64,
 }
 
-impl<'a, TX, H> StateRoot<'a, TX, H> {
-    /// Set the changed account prefixes.
-    pub fn with_changed_account_prefixes(mut self, prefixes: PrefixSet) -> Self {
-        self.changed_account_prefixes = prefixes;
-        self
-    }
-
-    /// Set the changed storage prefixes.
-    pub fn with_changed_storage_prefixes(mut self, prefixes: HashMap<B256, PrefixSet>) -> Self {
-        self.changed_storage_prefixes = prefixes;
-        self
-    }
-
-    /// Set the destroyed accounts.
-    pub fn with_destroyed_accounts(mut self, accounts: HashSet<B256>) -> Self {
-        self.destroyed_accounts = accounts;
+impl<T, H> StateRoot<T, H> {
+    /// Set the prefix sets.
+    pub fn with_prefix_sets(mut self, prefix_sets: TriePrefixSets) -> Self {
+        self.prefix_sets = prefix_sets;
         self
     }
 
@@ -80,33 +60,37 @@ impl<'a, TX, H> StateRoot<'a, TX, H> {
     }
 
     /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(
-        self,
-        hashed_cursor_factory: HF,
-    ) -> StateRoot<'a, TX, HF> {
+    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> StateRoot<T, HF> {
         StateRoot {
-            tx: self.tx,
-            changed_account_prefixes: self.changed_account_prefixes,
-            changed_storage_prefixes: self.changed_storage_prefixes,
-            destroyed_accounts: self.destroyed_accounts,
+            trie_cursor_factory: self.trie_cursor_factory,
+            hashed_cursor_factory,
+            prefix_sets: self.prefix_sets,
             threshold: self.threshold,
             previous_state: self.previous_state,
-            hashed_cursor_factory,
+        }
+    }
+
+    /// Set the trie cursor factory.
+    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> StateRoot<TF, H> {
+        StateRoot {
+            trie_cursor_factory,
+            hashed_cursor_factory: self.hashed_cursor_factory,
+            prefix_sets: self.prefix_sets,
+            threshold: self.threshold,
+            previous_state: self.previous_state,
         }
     }
 }
 
-impl<'a, TX: DbTx> StateRoot<'a, TX, &'a TX> {
+impl<'a, TX: DbTx> StateRoot<&'a TX, &'a TX> {
     /// Create a new [StateRoot] instance.
-    pub fn new(tx: &'a TX) -> Self {
+    pub fn from_tx(tx: &'a TX) -> Self {
         Self {
-            tx,
-            changed_account_prefixes: PrefixSetMut::default().freeze(),
-            changed_storage_prefixes: HashMap::default(),
-            destroyed_accounts: HashSet::default(),
+            trie_cursor_factory: tx,
+            hashed_cursor_factory: tx,
+            prefix_sets: TriePrefixSets::default(),
             previous_state: None,
             threshold: 100_000,
-            hashed_cursor_factory: tx,
         }
     }
 
@@ -121,16 +105,7 @@ impl<'a, TX: DbTx> StateRoot<'a, TX, &'a TX> {
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
         let loaded_prefix_sets = PrefixSetLoader::new(tx).load(range)?;
-        Ok(Self::new(tx)
-            .with_changed_account_prefixes(loaded_prefix_sets.account_prefix_set.freeze())
-            .with_changed_storage_prefixes(
-                loaded_prefix_sets
-                    .storage_prefix_sets
-                    .into_iter()
-                    .map(|(k, v)| (k, v.freeze()))
-                    .collect(),
-            )
-            .with_destroyed_accounts(loaded_prefix_sets.destroyed_accounts))
+        Ok(Self::from_tx(tx).with_prefix_sets(loaded_prefix_sets))
     }
 
     /// Computes the state root of the trie with the changed account and storage prefixes and
@@ -178,9 +153,9 @@ impl<'a, TX: DbTx> StateRoot<'a, TX, &'a TX> {
     }
 }
 
-impl<'a, TX, H> StateRoot<'a, TX, H>
+impl<T, H> StateRoot<T, H>
 where
-    TX: DbTx,
+    T: TrieCursorFactory + Clone,
     H: HashedCursorFactory + Clone,
 {
     /// Walks the intermediate nodes of existing state trie (if any) and hashed entries. Feeds the
@@ -226,14 +201,14 @@ where
         let mut trie_updates = TrieUpdates::default();
 
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
-        let trie_cursor = AccountTrieCursor::new(self.tx.cursor_read::<tables::AccountsTrie>()?);
+        let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
 
         let (mut hash_builder, mut account_node_iter) = match self.previous_state {
             Some(state) => {
                 let walker = TrieWalker::from_stack(
                     trie_cursor,
                     state.walker_stack,
-                    self.changed_account_prefixes,
+                    self.prefix_sets.account_prefix_set,
                 );
                 (
                     state.hash_builder,
@@ -242,7 +217,7 @@ where
                 )
             }
             None => {
-                let walker = TrieWalker::new(trie_cursor, self.changed_account_prefixes);
+                let walker = TrieWalker::new(trie_cursor, self.prefix_sets.account_prefix_set);
                 (HashBuilder::default(), AccountNodeIter::new(walker, hashed_account_cursor))
             }
         };
@@ -267,14 +242,18 @@ where
                     // progress.
                     // TODO: We can consider introducing the TrieProgress::Progress/Complete
                     // abstraction inside StorageRoot, but let's give it a try as-is for now.
-                    let storage_root_calculator = StorageRoot::new_hashed(self.tx, hashed_address)
-                        .with_hashed_cursor_factory(self.hashed_cursor_factory.clone())
-                        .with_changed_prefixes(
-                            self.changed_storage_prefixes
-                                .get(&hashed_address)
-                                .cloned()
-                                .unwrap_or_default(),
-                        );
+                    let storage_root_calculator = StorageRoot::new_hashed(
+                        self.trie_cursor_factory.clone(),
+                        self.hashed_cursor_factory.clone(),
+                        hashed_address,
+                    )
+                    .with_prefix_set(
+                        self.prefix_sets
+                            .storage_prefix_sets
+                            .get(&hashed_address)
+                            .cloned()
+                            .unwrap_or_default(),
+                    );
 
                     let storage_root = if retain_updates {
                         let (root, storage_slots_walked, updates) =
@@ -327,8 +306,9 @@ where
 
         trie_updates.extend(walker_updates.into_iter());
         trie_updates.extend_with_account_updates(hash_builder_updates);
-        trie_updates
-            .extend_with_deletes(self.destroyed_accounts.into_iter().map(TrieKey::StorageTrie));
+        trie_updates.extend_with_deletes(
+            self.prefix_sets.destroyed_accounts.into_iter().map(TrieKey::StorageTrie),
+        );
 
         Ok(StateRootProgress::Complete(root, hashed_entries_walked, trie_updates))
     }
@@ -336,77 +316,79 @@ where
 
 /// StorageRoot is used to compute the root node of an account storage trie.
 #[derive(Debug)]
-pub struct StorageRoot<'a, TX, H> {
+pub struct StorageRoot<T, H> {
     /// A reference to the database transaction.
-    pub tx: &'a TX,
+    pub trie_cursor_factory: T,
     /// The factory for hashed cursors.
     pub hashed_cursor_factory: H,
     /// The hashed address of an account.
     pub hashed_address: B256,
     /// The set of storage slot prefixes that have changed.
-    pub changed_prefixes: PrefixSet,
+    pub prefix_set: PrefixSet,
 }
 
-impl<'a, TX: DbTx> StorageRoot<'a, TX, &'a TX> {
-    /// Creates a new storage root calculator given an raw address.
-    pub fn new(tx: &'a TX, address: Address) -> Self {
-        Self::new_hashed(tx, keccak256(address))
+impl<T, H> StorageRoot<T, H> {
+    /// Creates a new storage root calculator given a raw address.
+    pub fn new(trie_cursor_factory: T, hashed_cursor_factory: H, address: Address) -> Self {
+        Self::new_hashed(trie_cursor_factory, hashed_cursor_factory, keccak256(address))
     }
 
     /// Creates a new storage root calculator given a hashed address.
-    pub fn new_hashed(tx: &'a TX, hashed_address: B256) -> Self {
-        Self {
-            tx,
-            hashed_address,
-            changed_prefixes: PrefixSetMut::default().freeze(),
-            hashed_cursor_factory: tx,
-        }
-    }
-}
-
-impl<'a, TX, H> StorageRoot<'a, TX, H> {
-    /// Creates a new storage root calculator given an raw address.
-    pub fn new_with_factory(tx: &'a TX, hashed_cursor_factory: H, address: Address) -> Self {
-        Self::new_hashed_with_factory(tx, hashed_cursor_factory, keccak256(address))
-    }
-
-    /// Creates a new storage root calculator given a hashed address.
-    pub fn new_hashed_with_factory(
-        tx: &'a TX,
+    pub fn new_hashed(
+        trie_cursor_factory: T,
         hashed_cursor_factory: H,
         hashed_address: B256,
     ) -> Self {
         Self {
-            tx,
-            hashed_address,
-            changed_prefixes: PrefixSetMut::default().freeze(),
+            trie_cursor_factory,
             hashed_cursor_factory,
+            hashed_address,
+            prefix_set: PrefixSetMut::default().freeze(),
         }
     }
 
     /// Set the changed prefixes.
-    pub fn with_changed_prefixes(mut self, prefixes: PrefixSet) -> Self {
-        self.changed_prefixes = prefixes;
+    pub fn with_prefix_set(mut self, prefix_set: PrefixSet) -> Self {
+        self.prefix_set = prefix_set;
         self
     }
 
     /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(
-        self,
-        hashed_cursor_factory: HF,
-    ) -> StorageRoot<'a, TX, HF> {
+    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> StorageRoot<T, HF> {
         StorageRoot {
-            tx: self.tx,
-            hashed_address: self.hashed_address,
-            changed_prefixes: self.changed_prefixes,
+            trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
+            hashed_address: self.hashed_address,
+            prefix_set: self.prefix_set,
+        }
+    }
+
+    /// Set the trie cursor factory.
+    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> StorageRoot<TF, H> {
+        StorageRoot {
+            trie_cursor_factory,
+            hashed_cursor_factory: self.hashed_cursor_factory,
+            hashed_address: self.hashed_address,
+            prefix_set: self.prefix_set,
         }
     }
 }
 
-impl<'a, TX, H> StorageRoot<'a, TX, H>
+impl<'a, TX: DbTx> StorageRoot<&'a TX, &'a TX> {
+    /// Create a new storage root calculator from database transaction and raw address.
+    pub fn from_tx(tx: &'a TX, address: Address) -> Self {
+        Self::new(tx, tx, address)
+    }
+
+    /// Create a new storage root calculator from database transaction and hashed address.
+    pub fn from_tx_hashed(tx: &'a TX, hashed_address: B256) -> Self {
+        Self::new_hashed(tx, tx, hashed_address)
+    }
+}
+
+impl<T, H> StorageRoot<T, H>
 where
-    TX: DbTx,
+    T: TrieCursorFactory,
     H: HashedCursorFactory,
 {
     /// Walks the hashed storage table entries for a given address and calculates the storage root.
@@ -414,7 +396,7 @@ where
     /// # Returns
     ///
     /// The storage root and storage trie updates for a given address.
-    pub fn root_with_updates(&self) -> Result<(B256, usize, TrieUpdates), StorageRootError> {
+    pub fn root_with_updates(self) -> Result<(B256, usize, TrieUpdates), StorageRootError> {
         self.calculate(true)
     }
 
@@ -423,13 +405,13 @@ where
     /// # Returns
     ///
     /// The storage root.
-    pub fn root(&self) -> Result<B256, StorageRootError> {
+    pub fn root(self) -> Result<B256, StorageRootError> {
         let (root, _, _) = self.calculate(false)?;
         Ok(root)
     }
 
     fn calculate(
-        &self,
+        self,
         retain_updates: bool,
     ) -> Result<(B256, usize, TrieUpdates), StorageRootError> {
         trace!(target: "trie::storage_root", hashed_address = ?self.hashed_address, "calculating storage root");
@@ -444,12 +426,8 @@ where
             ))
         }
 
-        let trie_cursor = StorageTrieCursor::new(
-            self.tx.cursor_dup_read::<tables::StoragesTrie>()?,
-            self.hashed_address,
-        );
-        let walker = TrieWalker::new(trie_cursor, self.changed_prefixes.clone())
-            .with_updates(retain_updates);
+        let trie_cursor = self.trie_cursor_factory.storage_tries_cursor(self.hashed_address)?;
+        let walker = TrieWalker::new(trie_cursor, self.prefix_set).with_updates(retain_updates);
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
 
@@ -501,13 +479,17 @@ mod tests {
     };
     use reth_primitives::{
         hex_literal::hex,
-        keccak256,
         proofs::triehash::KeccakHasher,
         trie::{BranchNodeCompact, TrieMask},
-        Account, Address, StorageEntry, B256, U256,
+        Account, StorageEntry, U256,
     };
     use reth_provider::{test_utils::create_test_provider_factory, DatabaseProviderRW};
-    use std::{collections::BTreeMap, ops::Mul, str::FromStr, sync::Arc};
+    use std::{
+        collections::{BTreeMap, HashMap},
+        ops::Mul,
+        str::FromStr,
+        sync::Arc,
+    };
 
     fn insert_account(
         tx: &impl DbTxMut,
@@ -545,7 +527,7 @@ mod tests {
 
         // Generate the intermediate nodes on the receiving end of the channel
         let (_, _, trie_updates) =
-            StorageRoot::new_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
+            StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
 
         // 1. Some state transition happens, update the hashed storage to the new value
         let modified_key = B256::from_str(modified).unwrap();
@@ -559,7 +541,7 @@ mod tests {
             .unwrap();
 
         // 2. Calculate full merkle root
-        let loader = StorageRoot::new_hashed(tx.tx_ref(), hashed_address);
+        let loader = StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address);
         let modified_root = loader.root().unwrap();
 
         // Update the intermediate roots table so that we can run the incremental verification
@@ -568,8 +550,8 @@ mod tests {
         // 3. Calculate the incremental root
         let mut storage_changes = PrefixSetMut::default();
         storage_changes.insert(Nibbles::unpack(modified_key));
-        let loader = StorageRoot::new_hashed(tx.tx_ref(), hashed_address)
-            .with_changed_prefixes(storage_changes.freeze());
+        let loader = StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address)
+            .with_prefix_set(storage_changes.freeze());
         let incremental_root = loader.root().unwrap();
 
         assert_eq!(modified_root, incremental_root);
@@ -608,7 +590,7 @@ mod tests {
             tx.commit().unwrap();
 
             let tx =  factory.provider_rw().unwrap();
-            let got = StorageRoot::new(tx.tx_ref(), address).root().unwrap();
+            let got = StorageRoot::from_tx(tx.tx_ref(), address).root().unwrap();
             let expected = storage_root(storage.into_iter());
             assert_eq!(expected, got);
         });
@@ -667,7 +649,7 @@ mod tests {
         tx.commit().unwrap();
 
         let tx = factory.provider_rw().unwrap();
-        let got = StorageRoot::new(tx.tx_ref(), address).root().unwrap();
+        let got = StorageRoot::from_tx(tx.tx_ref(), address).root().unwrap();
         assert_eq!(got, EMPTY_ROOT_HASH);
     }
 
@@ -692,7 +674,7 @@ mod tests {
         tx.commit().unwrap();
 
         let tx = factory.provider_rw().unwrap();
-        let got = StorageRoot::new(tx.tx_ref(), address).root().unwrap();
+        let got = StorageRoot::from_tx(tx.tx_ref(), address).root().unwrap();
 
         assert_eq!(storage_root(storage.into_iter()), got);
     }
@@ -732,7 +714,7 @@ mod tests {
 
                 let mut intermediate_state: Option<Box<IntermediateStateRootState>> = None;
                 while got.is_none() {
-                    let calculator = StateRoot::new(tx.tx_ref())
+                    let calculator = StateRoot::from_tx(tx.tx_ref())
                         .with_threshold(threshold)
                         .with_intermediate_state(intermediate_state.take().map(|state| *state));
                     match calculator.root_with_progress().unwrap() {
@@ -763,7 +745,7 @@ mod tests {
         let expected = state_root(state.into_iter());
 
         let tx = factory.provider_rw().unwrap();
-        let got = StateRoot::new(tx.tx_ref()).root().unwrap();
+        let got = StateRoot::from_tx(tx.tx_ref()).root().unwrap();
         assert_eq!(expected, got);
     }
 
@@ -802,7 +784,7 @@ mod tests {
         tx.commit().unwrap();
         let tx = factory.provider_rw().unwrap();
 
-        let account3_storage_root = StorageRoot::new(tx.tx_ref(), address3).root().unwrap();
+        let account3_storage_root = StorageRoot::from_tx(tx.tx_ref(), address3).root().unwrap();
         let expected_root = storage_root_prehashed(storage.into_iter());
         assert_eq!(expected_root, account3_storage_root);
     }
@@ -869,7 +851,7 @@ mod tests {
             }
             hashed_storage_cursor.upsert(key3, StorageEntry { key: hashed_slot, value }).unwrap();
         }
-        let account3_storage_root = StorageRoot::new(tx.tx_ref(), address3).root().unwrap();
+        let account3_storage_root = StorageRoot::from_tx(tx.tx_ref(), address3).root().unwrap();
         hash_builder.add_leaf(
             Nibbles::unpack(key3),
             &encode_account(account3, Some(account3_storage_root)),
@@ -918,7 +900,7 @@ mod tests {
         assert_eq!(hash_builder.root(), computed_expected_root);
 
         // Check state root calculation from scratch
-        let (root, trie_updates) = StateRoot::new(tx.tx_ref()).root_with_updates().unwrap();
+        let (root, trie_updates) = StateRoot::from_tx(tx.tx_ref()).root_with_updates().unwrap();
         assert_eq!(root, computed_expected_root);
 
         // Check account trie
@@ -983,8 +965,11 @@ mod tests {
             B256::from_str("8e263cd4eefb0c3cbbb14e5541a66a755cad25bcfab1e10dd9d706263e811b28")
                 .unwrap();
 
-        let (root, trie_updates) = StateRoot::new(tx.tx_ref())
-            .with_changed_account_prefixes(prefix_set.freeze())
+        let (root, trie_updates) = StateRoot::from_tx(tx.tx_ref())
+            .with_prefix_sets(TriePrefixSets {
+                account_prefix_set: prefix_set.freeze(),
+                ..Default::default()
+            })
             .root_with_updates()
             .unwrap();
         assert_eq!(root, expected_state_root);
@@ -1035,8 +1020,11 @@ mod tests {
                 (key6, encode_account(account6, None)),
             ]);
 
-            let (root, trie_updates) = StateRoot::new(tx.tx_ref())
-                .with_changed_account_prefixes(account_prefix_set.freeze())
+            let (root, trie_updates) = StateRoot::from_tx(tx.tx_ref())
+                .with_prefix_sets(TriePrefixSets {
+                    account_prefix_set: account_prefix_set.freeze(),
+                    ..Default::default()
+                })
                 .root_with_updates()
                 .unwrap();
             assert_eq!(root, computed_expected_root);
@@ -1092,8 +1080,11 @@ mod tests {
                 (key6, encode_account(account6, None)),
             ]);
 
-            let (root, trie_updates) = StateRoot::new(tx.tx_ref())
-                .with_changed_account_prefixes(account_prefix_set.freeze())
+            let (root, trie_updates) = StateRoot::from_tx(tx.tx_ref())
+                .with_prefix_sets(TriePrefixSets {
+                    account_prefix_set: account_prefix_set.freeze(),
+                    ..Default::default()
+                })
                 .root_with_updates()
                 .unwrap();
             assert_eq!(root, computed_expected_root);
@@ -1131,7 +1122,7 @@ mod tests {
 
         let expected = extension_node_trie(&tx);
 
-        let (got, updates) = StateRoot::new(tx.tx_ref()).root_with_updates().unwrap();
+        let (got, updates) = StateRoot::from_tx(tx.tx_ref()).root_with_updates().unwrap();
         assert_eq!(expected, got);
 
         // Check account trie
@@ -1139,7 +1130,7 @@ mod tests {
             .iter()
             .filter_map(|entry| match entry {
                 (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => {
-                    Some((nibbles.clone(), node.clone()))
+                    Some((nibbles.0.clone(), node.clone()))
                 }
                 _ => None,
             })
@@ -1149,26 +1140,26 @@ mod tests {
     }
 
     #[test]
-
     fn account_trie_around_extension_node_with_dbtrie() {
         let factory = create_test_provider_factory();
         let tx = factory.provider_rw().unwrap();
 
         let expected = extension_node_trie(&tx);
 
-        let (got, updates) = StateRoot::new(tx.tx_ref()).root_with_updates().unwrap();
+        let (got, updates) = StateRoot::from_tx(tx.tx_ref()).root_with_updates().unwrap();
         assert_eq!(expected, got);
         updates.flush(tx.tx_ref()).unwrap();
 
         // read the account updates from the db
         let mut accounts_trie = tx.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
         let walker = accounts_trie.walk(None).unwrap();
-        let mut account_updates = HashMap::new();
-        for item in walker {
-            let (key, node) = item.unwrap();
-            account_updates.insert(key, node);
-        }
-
+        let account_updates = walker
+            .into_iter()
+            .map(|item| {
+                let (key, node) = item.unwrap();
+                (key.0, node.0)
+            })
+            .collect();
         assert_trie_updates(&account_updates);
     }
 
@@ -1188,14 +1179,14 @@ mod tests {
                     let should_generate_changeset = !state.is_empty();
                     let mut changes = PrefixSetMut::default();
                     for (hashed_address, balance) in accounts.clone() {
-                        hashed_account_cursor.upsert(hashed_address, Account { balance,..Default::default() }).unwrap();
+                        hashed_account_cursor.upsert(hashed_address, Account { balance, ..Default::default() }).unwrap();
                         if should_generate_changeset {
                             changes.insert(Nibbles::unpack(hashed_address));
                         }
                     }
 
-                    let (state_root, trie_updates) = StateRoot::new(tx.tx_ref())
-                        .with_changed_account_prefixes(changes.freeze())
+                    let (state_root, trie_updates) = StateRoot::from_tx(tx.tx_ref())
+                        .with_prefix_sets(TriePrefixSets { account_prefix_set: changes.freeze(), ..Default::default() })
                         .root_with_updates()
                         .unwrap();
 
@@ -1219,7 +1210,7 @@ mod tests {
         let (expected_root, expected_updates) = extension_node_storage_trie(&tx, hashed_address);
 
         let (got, _, updates) =
-            StorageRoot::new_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
+            StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
         assert_eq!(expected_root, got);
 
         // Check account trie
@@ -1227,7 +1218,7 @@ mod tests {
             .iter()
             .filter_map(|entry| match entry {
                 (TrieKey::StorageNode(_, nibbles), TrieOp::Update(node)) => {
-                    Some((nibbles.clone().into(), node.clone()))
+                    Some((nibbles.0.clone(), node.clone()))
                 }
                 _ => None,
             })

@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+
 use crate::{
     error::ECIESErrorImpl,
     mac::{HeaderBytes, MAC},
@@ -22,7 +23,6 @@ use secp256k1::{
 };
 use sha2::Sha256;
 use sha3::Keccak256;
-use std::convert::TryFrom;
 
 const PROTOCOL_VERSION: usize = 4;
 

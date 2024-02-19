@@ -102,7 +102,7 @@ impl Headers {
             |_| false,
             |row| last_pruned_block = row.0,
         )?;
-        trace!(target: "pruner", %pruned, %done, table = %T::NAME, "Pruned headers");
+        trace!(target: "pruner", %pruned, %done, table = %T::TABLE, "Pruned headers");
 
         Ok((done, pruned, last_pruned_block))
     }

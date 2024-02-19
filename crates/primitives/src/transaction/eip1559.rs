@@ -10,7 +10,7 @@ use std::mem;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxEip1559 {
     /// Added as EIP-pub 155: Simple replay attack protection
-    pub chain_id: u64,
+    pub chain_id: ChainId,
     /// A scalar value equal to the number of transactions sent by the sender; formally Tn.
     pub nonce: u64,
     /// A scalar value equal to the maximum
@@ -110,17 +110,15 @@ impl TxEip1559 {
 
     /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
     pub(crate) fn fields_len(&self) -> usize {
-        let mut len = 0;
-        len += self.chain_id.length();
-        len += self.nonce.length();
-        len += self.max_priority_fee_per_gas.length();
-        len += self.max_fee_per_gas.length();
-        len += self.gas_limit.length();
-        len += self.to.length();
-        len += self.value.length();
-        len += self.input.0.length();
-        len += self.access_list.length();
-        len
+        self.chain_id.length() +
+            self.nonce.length() +
+            self.max_priority_fee_per_gas.length() +
+            self.max_fee_per_gas.length() +
+            self.gas_limit.length() +
+            self.to.length() +
+            self.value.length() +
+            self.input.0.length() +
+            self.access_list.length()
     }
 
     /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
@@ -138,6 +136,10 @@ impl TxEip1559 {
 
     /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
     /// hash that for eip2718 does not require rlp header
+    ///
+    /// This encodes the transaction as:
+    /// `rlp(chain_id, nonce, max_priority_fee_per_gas, max_fee_per_gas, gas_limit to, value, input,
+    /// access_list, y_parity, r, s)`
     pub(crate) fn encode_with_signature(
         &self,
         signature: &Signature,
@@ -192,6 +194,12 @@ impl TxEip1559 {
     }
 
     /// Encodes the legacy transaction in RLP for signing.
+    ///
+    /// This encodes the transaction as:
+    /// `tx_type || rlp(chain_id, nonce, max_priority_fee_per_gas, max_fee_per_gas, gas_limit, to,
+    /// value, input, access_list)`
+    ///
+    /// Note that there is no rlp header before the transaction type byte.
     pub(crate) fn encode_for_signing(&self, out: &mut dyn bytes::BufMut) {
         out.put_u8(self.tx_type() as u8);
         Header { list: true, payload_length: self.fields_len() }.encode(out);

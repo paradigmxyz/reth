@@ -1,4 +1,5 @@
 //! This includes download client implementations for auto sealing miners.
+
 use crate::Storage;
 use reth_interfaces::p2p::{
     bodies::client::{BodiesClient, BodiesFut},

@@ -1,6 +1,5 @@
 use crate::{
-    error::*, BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage,
-    StageError, StageExt, UnwindInput,
+    error::*, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageExt, UnwindInput,
 };
 use futures_util::Future;
 use reth_db::database::Database;
@@ -49,39 +48,7 @@ pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineErr
 /// After the entire pipeline has been run, it will run again unless asked to stop (see
 /// [Pipeline::set_max_block]).
 ///
-/// ```mermaid
-/// graph TB
-///   Start[Start]
-///   Done[Done]
-///   Error[Error]
-///   subgraph Unwind
-///     StartUnwind(Unwind in reverse order of execution)
-///     UnwindStage(Unwind stage)
-///     NextStageToUnwind(Next stage)
-///   end
-///   subgraph Single loop
-///     RunLoop(Run loop)
-///     NextStage(Next stage)
-///     LoopDone(Loop done)
-///     subgraph Stage Execution
-///       Execute(Execute stage)
-///     end
-///   end
-///   Start --> RunLoop --> NextStage
-///   NextStage --> |No stages left| LoopDone
-///   NextStage --> |Next stage| Execute
-///   Execute --> |Not done| Execute
-///   Execute --> |Unwind requested| StartUnwind
-///   Execute --> |Done| NextStage
-///   Execute --> |Error| Error
-///   StartUnwind --> NextStageToUnwind
-///   NextStageToUnwind --> |Next stage| UnwindStage
-///   NextStageToUnwind --> |No stages left| RunLoop
-///   UnwindStage --> |Error| Error
-///   UnwindStage --> |Unwound| NextStageToUnwind
-///   LoopDone --> |Target block reached| Done
-///   LoopDone --> |Target block not reached| RunLoop
-/// ```
+/// include_mmd!("docs/mermaid/pipeline.mmd")
 ///
 /// # Unwinding
 ///
@@ -525,7 +492,6 @@ mod tests {
         provider::ProviderError,
         test_utils::{generators, generators::random_header},
     };
-    use reth_primitives::stage::StageCheckpoint;
     use reth_provider::test_utils::create_test_provider_factory;
     use tokio_stream::StreamExt;
 

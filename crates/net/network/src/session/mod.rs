@@ -1,4 +1,5 @@
 //! Support for handling peer sessions.
+
 use crate::{
     message::PeerMessage,
     metrics::SessionManagerMetrics,
@@ -51,6 +52,9 @@ pub use handle::{
 };
 use reth_eth_wire::multiplex::RlpxProtocolMultiplexer;
 pub use reth_network_api::{Direction, PeerInfo};
+
+/// Maximum allowed graceful disconnects at a time.
+const MAX_GRACEFUL_DISCONNECTS: usize = 15;
 
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
@@ -109,6 +113,8 @@ pub struct SessionManager {
     bandwidth_meter: BandwidthMeter,
     /// Metrics for the session manager.
     metrics: SessionManagerMetrics,
+    /// Tracks the number of active graceful disconnects for incoming connections.
+    graceful_disconnects_counter: GracefulDisconnects,
 }
 
 // === impl SessionManager ===
@@ -150,6 +156,7 @@ impl SessionManager {
             bandwidth_meter,
             extra_protocols,
             metrics: Default::default(),
+            graceful_disconnects_counter: Default::default(),
         }
     }
 
@@ -169,6 +176,11 @@ impl SessionManager {
     /// Returns the current status of the session.
     pub fn status(&self) -> Status {
         self.status
+    }
+
+    /// Returns the secret key used for authenticating sessions.
+    pub fn secret_key(&self) -> SecretKey {
+        self.secret_key
     }
 
     /// Returns the session hello message.
@@ -304,12 +316,18 @@ impl SessionManager {
         stream: TcpStream,
         reason: DisconnectReason,
     ) {
+        let counter = self.graceful_disconnects_counter.clone();
+        if counter.exceeds_limit() {
+            // simply drop the connection if there are too many active disconnects already
+            return
+        }
         let secret_key = self.secret_key;
 
         self.spawn(async move {
             if let Ok(stream) = get_eciess_stream(stream, secret_key, Direction::Incoming).await {
                 let _ = UnauthedP2PStream::new(stream).send_disconnect(reason).await;
             }
+            drop(counter)
         });
     }
 
@@ -615,6 +633,18 @@ impl SessionManager {
             }
         }
         infos
+    }
+}
+
+/// Keep track of graceful disconnects for incoming connections.
+#[derive(Debug, Clone, Default)]
+struct GracefulDisconnects(Arc<()>);
+
+impl GracefulDisconnects {
+    /// Returns true if the number of graceful disconnects exceeds the limit
+    /// [MAX_GRACEFUL_DISCONNECTS]
+    fn exceeds_limit(&self) -> bool {
+        Arc::strong_count(&self.0) > MAX_GRACEFUL_DISCONNECTS
     }
 }
 

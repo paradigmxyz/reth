@@ -11,6 +11,7 @@
 //! ```sh
 //! cast rpc myrpcExt_customMethod
 //! ```
+
 use reth::{
     primitives::ChainSpecBuilder,
     providers::{providers::BlockchainProvider, ProviderFactory},
@@ -26,6 +27,7 @@ use reth::{
     blockchain_tree::noop::NoopBlockchainTree, providers::test_utils::TestCanonStateSubscriptions,
     tasks::TokioTaskExecutor,
 };
+use reth_node_ethereum::EthEvmConfig;
 use std::{path::Path, sync::Arc};
 
 // Custom rpc extension
@@ -34,7 +36,10 @@ pub mod myrpc_ext;
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     // 1. Setup the DB
-    let db = Arc::new(open_db_read_only(Path::new(&std::env::var("RETH_DB_PATH")?), None)?);
+    let db = Arc::new(open_db_read_only(
+        Path::new(&std::env::var("RETH_DB_PATH")?),
+        Default::default(),
+    )?);
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
     let factory = ProviderFactory::new(db.clone(), spec.clone());
 
@@ -49,6 +54,7 @@ async fn main() -> eyre::Result<()> {
         .with_noop_pool()
         .with_noop_network()
         .with_executor(TokioTaskExecutor::default())
+        .with_evm_config(EthEvmConfig::default())
         .with_events(TestCanonStateSubscriptions::default());
 
     // Pick which namespaces to expose.

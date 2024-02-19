@@ -14,7 +14,6 @@ reth-network.workspace = true
 reth-discv4.workspace = true
 reth-eth-wire.workspace = true
 reth-ecies.workspace = true
-
 futures.workspace = true
 secp256k1.workspace = true
 tokio.workspace = true

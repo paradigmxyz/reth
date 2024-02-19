@@ -2,8 +2,9 @@ use super::mask::{ColumnSelectorOne, ColumnSelectorThree, ColumnSelectorTwo};
 use crate::table::Decompress;
 use derive_more::{Deref, DerefMut};
 use reth_interfaces::provider::ProviderResult;
-use reth_nippy_jar::{MmapHandle, NippyJar, NippyJarCursor};
+use reth_nippy_jar::{DataReader, NippyJar, NippyJarCursor};
 use reth_primitives::{snapshot::SegmentHeader, B256};
+use std::sync::Arc;
 
 /// Cursor of a snapshot segment.
 #[derive(Debug, Deref, DerefMut)]
@@ -11,8 +12,8 @@ pub struct SnapshotCursor<'a>(NippyJarCursor<'a, SegmentHeader>);
 
 impl<'a> SnapshotCursor<'a> {
     /// Returns a new [`SnapshotCursor`].
-    pub fn new(jar: &'a NippyJar<SegmentHeader>, mmap_handle: MmapHandle) -> ProviderResult<Self> {
-        Ok(Self(NippyJarCursor::with_handle(jar, mmap_handle)?))
+    pub fn new(jar: &'a NippyJar<SegmentHeader>, reader: Arc<DataReader>) -> ProviderResult<Self> {
+        Ok(Self(NippyJarCursor::with_reader(jar, reader)?))
     }
 
     /// Returns the current `BlockNumber` or `TxNumber` of the cursor depending on the kind of

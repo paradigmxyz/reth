@@ -1,5 +1,9 @@
-use crate::segments::Segment;
+use crate::segments::{
+    AccountHistory, Receipts, ReceiptsByLogs, Segment, SenderRecovery, StorageHistory,
+    TransactionLookup,
+};
 use reth_db::database::Database;
+use reth_primitives::PruneModes;
 use std::sync::Arc;
 
 /// Collection of [Segment]. Thread-safe, allocated on the heap.
@@ -31,6 +35,35 @@ impl<DB: Database> SegmentSet<DB> {
     /// Consumes [SegmentSet] and returns a [Vec].
     pub fn into_vec(self) -> Vec<Arc<dyn Segment<DB>>> {
         self.inner
+    }
+
+    /// Creates a [SegmentSet] from an existing [PruneModes].
+    pub fn from_prune_modes(prune_modes: PruneModes) -> Self {
+        let PruneModes {
+            sender_recovery,
+            transaction_lookup,
+            receipts,
+            account_history,
+            storage_history,
+            receipts_log_filter,
+        } = prune_modes;
+
+        SegmentSet::default()
+            // Receipts
+            .segment_opt(receipts.map(Receipts::new))
+            // Receipts by logs
+            .segment_opt(
+                (!receipts_log_filter.is_empty())
+                    .then(|| ReceiptsByLogs::new(receipts_log_filter.clone())),
+            )
+            // Transaction lookup
+            .segment_opt(transaction_lookup.map(TransactionLookup::new))
+            // Sender recovery
+            .segment_opt(sender_recovery.map(SenderRecovery::new))
+            // Account history
+            .segment_opt(account_history.map(AccountHistory::new))
+            // Storage history
+            .segment_opt(storage_history.map(StorageHistory::new))
     }
 }
 

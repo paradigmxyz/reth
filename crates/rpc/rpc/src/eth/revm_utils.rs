@@ -1,23 +1,29 @@
 //! utilities for working with revm
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
+#[cfg(feature = "optimism")]
+use reth_primitives::revm::env::fill_op_tx_env;
+#[cfg(not(feature = "optimism"))]
+use reth_primitives::revm::env::fill_tx_env;
 use reth_primitives::{
-    revm::env::{fill_tx_env, fill_tx_env_with_recovered},
-    Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256, U256,
+    revm::env::fill_tx_env_with_recovered, Address, TransactionSigned,
+    TransactionSignedEcRecovered, TxHash, B256, U256,
 };
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
-    BlockOverrides, CallRequest,
+    BlockOverrides, TransactionRequest,
 };
+#[cfg(feature = "optimism")]
+use revm::primitives::{Bytes, OptimismFields};
 use revm::{
-    db::{CacheDB, EmptyDB},
-    precompile::{Precompiles, SpecId as PrecompilesSpecId},
-    primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId, TransactTo, TxEnv},
-    Database, Inspector,
-};
-use revm_primitives::{
-    db::{DatabaseCommit, DatabaseRef},
-    Bytecode,
+    db::CacheDB,
+    inspector_handle_register,
+    precompile::{PrecompileSpecId, Precompiles},
+    primitives::{
+        db::DatabaseRef, BlockEnv, Bytecode, CfgEnvWithHandlerCfg, EnvWithHandlerCfg,
+        ResultAndState, SpecId, TransactTo, TxEnv,
+    },
+    Database, GetInspector,
 };
 use tracing::trace;
 
@@ -101,7 +107,7 @@ impl FillableTransaction for TransactionSigned {
         {
             let mut envelope_buf = Vec::with_capacity(self.length_without_header());
             self.encode_enveloped(&mut envelope_buf);
-            fill_tx_env(tx_env, self, signer, envelope_buf.into());
+            fill_op_tx_env(tx_env, self, signer, envelope_buf.into());
         }
         Ok(())
     }
@@ -110,33 +116,45 @@ impl FillableTransaction for TransactionSigned {
 /// Returns the addresses of the precompiles corresponding to the SpecId.
 #[inline]
 pub(crate) fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Address> {
-    let spec = PrecompilesSpecId::from_spec_id(spec_id);
-    Precompiles::new(spec).addresses().into_iter().copied().map(Address::from)
+    let spec = PrecompileSpecId::from_spec_id(spec_id);
+    Precompiles::new(spec).addresses().copied().map(Address::from)
 }
 
-/// Executes the [Env] against the given [Database] without committing state changes.
-pub(crate) fn transact<DB>(db: DB, env: Env) -> EthResult<(ResultAndState, Env)>
+/// Executes the [EnvWithHandlerCfg] against the given [Database] without committing state changes.
+pub(crate) fn transact<DB>(
+    db: DB,
+    env: EnvWithHandlerCfg,
+) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
 where
     DB: Database,
     <DB as Database>::Error: Into<EthApiError>,
 {
-    let mut evm = revm::EVM::with_env(env);
-    evm.database(db);
+    let mut evm = revm::Evm::builder().with_db(db).with_env_with_handler_cfg(env).build();
     let res = evm.transact()?;
-    Ok((res, evm.env))
+    let (_, env) = evm.into_db_and_env_with_handler_cfg();
+    Ok((res, env))
 }
 
-/// Executes the [Env] against the given [Database] without committing state changes.
-pub(crate) fn inspect<DB, I>(db: DB, env: Env, inspector: I) -> EthResult<(ResultAndState, Env)>
+/// Executes the [EnvWithHandlerCfg] against the given [Database] without committing state changes.
+pub(crate) fn inspect<DB, I>(
+    db: DB,
+    env: EnvWithHandlerCfg,
+    inspector: I,
+) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
 where
     DB: Database,
     <DB as Database>::Error: Into<EthApiError>,
-    I: Inspector<DB>,
+    I: GetInspector<DB>,
 {
-    let mut evm = revm::EVM::with_env(env);
-    evm.database(db);
-    let res = evm.inspect(inspector)?;
-    Ok((res, evm.env))
+    let mut evm = revm::Evm::builder()
+        .with_db(db)
+        .with_external_context(inspector)
+        .with_env_with_handler_cfg(env)
+        .append_handler_register(inspector_handle_register)
+        .build();
+    let res = evm.transact()?;
+    let (_, env) = evm.into_db_and_env_with_handler_cfg();
+    Ok((res, env))
 }
 
 /// Same as [inspect] but also returns the database again.
@@ -145,19 +163,23 @@ where
 /// this is still useful if there are certain trait bounds on the Inspector's database generic type
 pub(crate) fn inspect_and_return_db<DB, I>(
     db: DB,
-    env: Env,
+    env: EnvWithHandlerCfg,
     inspector: I,
-) -> EthResult<(ResultAndState, Env, DB)>
+) -> EthResult<(ResultAndState, EnvWithHandlerCfg, DB)>
 where
     DB: Database,
     <DB as Database>::Error: Into<EthApiError>,
-    I: Inspector<DB>,
+    I: GetInspector<DB>,
 {
-    let mut evm = revm::EVM::with_env(env);
-    evm.database(db);
-    let res = evm.inspect(inspector)?;
-    let db = evm.take_db();
-    Ok((res, evm.env, db))
+    let mut evm = revm::Evm::builder()
+        .with_external_context(inspector)
+        .with_db(db)
+        .with_env_with_handler_cfg(env)
+        .append_handler_register(inspector_handle_register)
+        .build();
+    let res = evm.transact()?;
+    let (db, env) = evm.into_db_and_env_with_handler_cfg();
+    Ok((res, env, db))
 }
 
 /// Replays all the transactions until the target transaction is found.
@@ -166,46 +188,59 @@ where
 /// _runtime_ db ([CacheDB]).
 ///
 /// Note: This assumes the target transaction is in the given iterator.
+/// Returns the index of the target transaction in the given iterator.
 pub(crate) fn replay_transactions_until<DB, I, Tx>(
     db: &mut CacheDB<DB>,
-    cfg: CfgEnv,
+    cfg: CfgEnvWithHandlerCfg,
     block_env: BlockEnv,
     transactions: I,
     target_tx_hash: B256,
-) -> EthResult<()>
+) -> Result<usize, EthApiError>
 where
     DB: DatabaseRef,
     EthApiError: From<<DB as DatabaseRef>::Error>,
     I: IntoIterator<Item = Tx>,
     Tx: FillableTransaction,
 {
-    let env = Env { cfg, block: block_env, tx: TxEnv::default() };
-    let mut evm = revm::EVM::with_env(env);
-    evm.database(db);
+    let mut evm = revm::Evm::builder()
+        .with_db(db)
+        .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
+            cfg,
+            block_env,
+            Default::default(),
+        ))
+        .build();
+    let mut index = 0;
     for tx in transactions.into_iter() {
         if tx.hash() == target_tx_hash {
             // reached the target transaction
             break
         }
 
-        tx.try_fill_tx_env(&mut evm.env.tx)?;
-        let res = evm.transact()?;
-        evm.db.as_mut().expect("is set").commit(res.state)
+        tx.try_fill_tx_env(evm.tx_mut())?;
+        evm.transact_commit()?;
+        index += 1;
     }
-    Ok(())
+    Ok(index)
 }
 
-/// Prepares the [Env] for execution.
+/// Prepares the [EnvWithHandlerCfg] for execution.
 ///
 /// Does not commit any changes to the underlying database.
+///
+/// EVM settings:
+///  - `disable_block_gas_limit` is set to `true`
+///  - `disable_eip3607` is set to `true`
+///  - `disable_base_fee` is set to `true`
+///  - `nonce` is set to `None`
 pub(crate) fn prepare_call_env<DB>(
-    mut cfg: CfgEnv,
+    mut cfg: CfgEnvWithHandlerCfg,
     block: BlockEnv,
-    request: CallRequest,
+    request: TransactionRequest,
     gas_limit: u64,
     db: &mut CacheDB<DB>,
     overrides: EvmOverrides,
-) -> EthResult<Env>
+) -> EthResult<EnvWithHandlerCfg>
 where
     DB: DatabaseRef,
     EthApiError: From<<DB as DatabaseRef>::Error>,
@@ -226,6 +261,7 @@ where
     let request_gas = request.gas;
 
     let mut env = build_call_evm_env(cfg, block, request)?;
+    env.tx.nonce = None;
 
     // apply state overrides
     if let Some(state_overrides) = overrides.state {
@@ -239,7 +275,7 @@ where
             db.block_hashes
                 .extend(block_hashes.into_iter().map(|(num, hash)| (U256::from(num), hash)))
         }
-        apply_block_overrides(*block_overrides, &mut env.block);
+        apply_block_overrides(*block_overrides, &mut env.env.block);
     }
 
     if request_gas.is_none() {
@@ -262,29 +298,33 @@ where
     Ok(env)
 }
 
-/// Creates a new [Env] to be used for executing the [CallRequest] in `eth_call`.
+/// Creates a new [EnvWithHandlerCfg] to be used for executing the [TransactionRequest] in
+/// `eth_call`.
 ///
 /// Note: this does _not_ access the Database to check the sender.
 pub(crate) fn build_call_evm_env(
-    cfg: CfgEnv,
+    cfg: CfgEnvWithHandlerCfg,
     block: BlockEnv,
-    request: CallRequest,
-) -> EthResult<Env> {
+    request: TransactionRequest,
+) -> EthResult<EnvWithHandlerCfg> {
     let tx = create_txn_env(&block, request)?;
-    Ok(Env { cfg, block, tx })
+    Ok(EnvWithHandlerCfg::new_with_cfg_env(cfg, block, tx))
 }
 
-/// Configures a new [TxEnv]  for the [CallRequest]
+/// Configures a new [TxEnv]  for the [TransactionRequest]
 ///
-/// All [TxEnv] fields are derived from the given [CallRequest], if fields are `None`, they fall
-/// back to the [BlockEnv]'s settings.
-pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthResult<TxEnv> {
+/// All [TxEnv] fields are derived from the given [TransactionRequest], if fields are `None`, they
+/// fall back to the [BlockEnv]'s settings.
+pub(crate) fn create_txn_env(
+    block_env: &BlockEnv,
+    request: TransactionRequest,
+) -> EthResult<TxEnv> {
     // Ensure that if versioned hashes are set, they're not empty
     if request.has_empty_blob_hashes() {
         return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
     }
 
-    let CallRequest {
+    let TransactionRequest {
         from,
         to,
         gas_price,
@@ -332,7 +372,7 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         blob_hashes: blob_versioned_hashes.unwrap_or_default(),
         max_fee_per_blob_gas,
         #[cfg(feature = "optimism")]
-        optimism: Default::default(),
+        optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
     };
 
     Ok(env)
@@ -378,7 +418,7 @@ where
         .unwrap_or_default())
 }
 
-/// Helper type for representing the fees of a [CallRequest]
+/// Helper type for representing the fees of a [TransactionRequest]
 pub(crate) struct CallFees {
     /// EIP-1559 priority fee
     max_priority_fee_per_gas: Option<U256>,
@@ -396,7 +436,7 @@ pub(crate) struct CallFees {
 // === impl CallFees ===
 
 impl CallFees {
-    /// Ensures the fields of a [CallRequest] are not conflicting.
+    /// Ensures the fields of a [TransactionRequest] are not conflicting.
     ///
     /// If no `gasPrice` or `maxFeePerGas` is set, then the `gas_price` in the returned `gas_price`
     /// will be `0`. See: <https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/internal/ethapi/transaction_args.go#L242-L255>
@@ -585,22 +625,6 @@ where
     };
 
     Ok(())
-}
-
-/// This clones and transforms the given [CacheDB] with an arbitrary [DatabaseRef] into a new
-/// [CacheDB] with [EmptyDB] as the database type
-#[inline]
-pub(crate) fn clone_into_empty_db<DB>(db: &CacheDB<DB>) -> CacheDB<EmptyDB>
-where
-    DB: DatabaseRef,
-{
-    CacheDB {
-        accounts: db.accounts.clone(),
-        contracts: db.contracts.clone(),
-        logs: db.logs.clone(),
-        block_hashes: db.block_hashes.clone(),
-        db: Default::default(),
-    }
 }
 
 #[cfg(test)]

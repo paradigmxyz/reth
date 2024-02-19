@@ -18,44 +18,13 @@ use std::sync::{
 };
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
+#[cfg_attr(doc, aquamarine::aquamarine)]
 /// Front-end API for fetching data from the network.
 ///
 /// Following diagram illustrates how a request, See [`HeadersClient::get_headers`] and
 /// [`BodiesClient::get_block_bodies`] is handled internally.
-#[cfg_attr(doc, aquamarine::aquamarine)]
-/// ```mermaid
-/// sequenceDiagram
-//     participant Client as FetchClient
-//     participant Fetcher as StateFetcher
-//     participant State as NetworkState
-//     participant Session as Active Peer Session
-//     participant Peers as PeerManager
-//     loop Send Request, retry if retriable and remaining retries
-//         Client->>Fetcher: DownloadRequest{GetHeaders, GetBodies}
-//         Note over Client,Fetcher: Request and oneshot Sender sent via `request_tx` channel
-//         loop Process buffered requests
-//             State->>Fetcher: poll action
-//             Fetcher->>Fetcher: Select Available Peer
-//             Note over Fetcher: Peer is available if it's currently idle, no inflight requests
-//             Fetcher->>State: FetchAction::BlockDownloadRequest
-//             State->>Session: Delegate Request
-//             Note over State,Session: Request and oneshot Sender sent via `to_session_tx` channel
-//         end
-//         Session->>Session: Send Request to remote
-//         Session->>Session: Enforce Request timeout
-//         Session-->>State: Send Response Result via channel
-//         State->>Fetcher: Delegate Response
-//         Fetcher-->>Client: Send Response via channel
-//         opt Bad Response
-//             Client->>Peers: Penalize Peer
-//         end
-//         Peers->>Peers: Apply Reputation Change
-//         opt reputation dropped below threshold
-//             Peers->>State: Disconnect Session
-//             State->>Session: Delegate Disconnect
-//         end
-//     end
-/// ```
+///
+/// include_mmd!("docs/mermaid/fetch-client.mmd")
 #[derive(Debug, Clone)]
 pub struct FetchClient {
     /// Sender half of the request channel.

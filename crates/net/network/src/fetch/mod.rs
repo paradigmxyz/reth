@@ -355,8 +355,8 @@ impl PeerState {
 #[derive(Debug)]
 struct Request<Req, Resp> {
     /// The issued request object
-    /// TODO: this can be attached to the response in error case
-    #[allow(unused)]
+    // TODO: this can be attached to the response in error case
+    #[allow(dead_code)]
     request: Req,
     response: oneshot::Sender<Resp>,
 }
@@ -429,7 +429,7 @@ pub(crate) enum BlockResponseOutcome {
 mod tests {
     use super::*;
     use crate::{peers::PeersManager, PeersConfig};
-    use reth_primitives::{SealedHeader, B256, B512};
+    use reth_primitives::{SealedHeader, B512};
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]

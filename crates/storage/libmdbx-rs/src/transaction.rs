@@ -1,8 +1,9 @@
 use crate::{
     database::Database,
-    environment::{Environment, TxnManagerMessage, TxnPtr},
-    error::{mdbx_result, Result},
+    environment::Environment,
+    error::{mdbx_result, mdbx_result_with_tx_kind, Result},
     flags::{DatabaseFlags, WriteFlags},
+    txn_manager::{TxnManagerMessage, TxnPtr},
     Cursor, Error, Stat, TableObject,
 };
 use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
@@ -15,6 +16,7 @@ use std::{
     mem::size_of,
     ptr, slice,
     sync::{atomic::AtomicBool, mpsc::sync_channel, Arc},
+    time::Duration,
 };
 
 mod private {
@@ -28,11 +30,9 @@ mod private {
 
 pub trait TransactionKind: private::Sealed + Send + Sync + Debug + 'static {
     #[doc(hidden)]
-    const ONLY_CLEAN: bool;
-
-    #[doc(hidden)]
     const OPEN_FLAGS: MDBX_txn_flags_t;
 
+    /// Convenience flag for distinguishing between read-only and read-write transactions.
     #[doc(hidden)]
     const IS_READ_ONLY: bool;
 }
@@ -46,12 +46,10 @@ pub struct RO;
 pub struct RW;
 
 impl TransactionKind for RO {
-    const ONLY_CLEAN: bool = true;
     const OPEN_FLAGS: MDBX_txn_flags_t = MDBX_TXN_RDONLY;
     const IS_READ_ONLY: bool = true;
 }
 impl TransactionKind for RW {
-    const ONLY_CLEAN: bool = false;
     const OPEN_FLAGS: MDBX_txn_flags_t = MDBX_TXN_READWRITE;
     const IS_READ_ONLY: bool = false;
 }
@@ -73,18 +71,27 @@ where
     pub(crate) fn new(env: Environment) -> Result<Self> {
         let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
         unsafe {
-            mdbx_result(ffi::mdbx_txn_begin_ex(
-                env.env_ptr(),
-                ptr::null_mut(),
-                K::OPEN_FLAGS,
-                &mut txn,
-                ptr::null_mut(),
-            ))?;
+            mdbx_result_with_tx_kind::<K>(
+                ffi::mdbx_txn_begin_ex(
+                    env.env_ptr(),
+                    ptr::null_mut(),
+                    K::OPEN_FLAGS,
+                    &mut txn,
+                    ptr::null_mut(),
+                ),
+                txn,
+                env.txn_manager(),
+            )?;
             Ok(Self::new_from_ptr(env, txn))
         }
     }
 
     pub(crate) fn new_from_ptr(env: Environment, txn: *mut ffi::MDBX_txn) -> Self {
+        #[cfg(feature = "read-tx-timeouts")]
+        if K::IS_READ_ONLY {
+            env.txn_manager().add_active_read_transaction(txn)
+        }
+
         let inner = TransactionInner {
             txn: TransactionPtr::new(txn),
             primed_dbis: Mutex::new(IndexSet::new()),
@@ -92,6 +99,7 @@ where
             env,
             _marker: Default::default(),
         };
+
         Self { inner: Arc::new(inner) }
     }
 
@@ -166,8 +174,8 @@ where
     /// Commits the transaction.
     ///
     /// Any pending operations will be saved.
-    pub fn commit(self) -> Result<bool> {
-        self.commit_and_rebind_open_dbs().map(|v| v.0)
+    pub fn commit(self) -> Result<(bool, CommitLatency)> {
+        self.commit_and_rebind_open_dbs().map(|v| (v.0, v.1))
     }
 
     pub fn prime_for_permaopen(&self, db: Database) {
@@ -175,27 +183,36 @@ where
     }
 
     /// Commits the transaction and returns table handles permanently open until dropped.
-    pub fn commit_and_rebind_open_dbs(self) -> Result<(bool, Vec<Database>)> {
+    pub fn commit_and_rebind_open_dbs(self) -> Result<(bool, CommitLatency, Vec<Database>)> {
         let result = {
             let result = self.txn_execute(|txn| {
-                if K::ONLY_CLEAN {
-                    mdbx_result(unsafe { ffi::mdbx_txn_commit_ex(txn, ptr::null_mut()) })
+                if K::IS_READ_ONLY {
+                    #[cfg(feature = "read-tx-timeouts")]
+                    self.env().txn_manager().remove_active_read_transaction(txn);
+
+                    let mut latency = CommitLatency::new();
+                    mdbx_result_with_tx_kind::<K>(
+                        unsafe { ffi::mdbx_txn_commit_ex(txn, latency.mdb_commit_latency()) },
+                        txn,
+                        self.env().txn_manager(),
+                    )
+                    .map(|v| (v, latency))
                 } else {
                     let (sender, rx) = sync_channel(0);
                     self.env()
-                        .ensure_txn_manager()
-                        .unwrap()
-                        .send(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender })
-                        .unwrap();
+                        .txn_manager()
+                        .send_message(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender });
                     rx.recv().unwrap()
                 }
             });
+
             self.inner.set_committed();
             result
         };
-        result.map(|v| {
+        result.map(|(v, latency)| {
             (
                 v,
+                latency,
                 self.inner
                     .primed_dbis
                     .lock()
@@ -225,9 +242,13 @@ where
     pub fn db_flags(&self, db: &Database) -> Result<DatabaseFlags> {
         let mut flags: c_uint = 0;
         unsafe {
-            mdbx_result(self.txn_execute(|txn| {
-                ffi::mdbx_dbi_flags_ex(txn, db.dbi(), &mut flags, ptr::null_mut())
-            }))?;
+            self.txn_execute(|txn| {
+                mdbx_result_with_tx_kind::<K>(
+                    ffi::mdbx_dbi_flags_ex(txn, db.dbi(), &mut flags, ptr::null_mut()),
+                    txn,
+                    self.env().txn_manager(),
+                )
+            })?;
         }
 
         // The types are not the same on Windows. Great!
@@ -244,9 +265,13 @@ where
     pub fn db_stat_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Stat> {
         unsafe {
             let mut stat = Stat::new();
-            mdbx_result(self.txn_execute(|txn| {
-                ffi::mdbx_dbi_stat(txn, dbi, stat.mdb_stat(), size_of::<Stat>())
-            }))?;
+            self.txn_execute(|txn| {
+                mdbx_result_with_tx_kind::<K>(
+                    ffi::mdbx_dbi_stat(txn, dbi, stat.mdb_stat(), size_of::<Stat>()),
+                    txn,
+                    self.env().txn_manager(),
+                )
+            })?;
             Ok(stat)
         }
     }
@@ -259,6 +284,14 @@ where
     /// Open a new cursor on the given dbi.
     pub fn cursor_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<K>> {
         Cursor::new(self.clone(), dbi)
+    }
+
+    /// Disables a timeout for this read transaction.
+    #[cfg(feature = "read-tx-timeouts")]
+    pub fn disable_timeout(&self) {
+        if K::IS_READ_ONLY {
+            self.env().txn_manager().remove_active_read_transaction(self.txn());
+        }
     }
 }
 
@@ -324,17 +357,18 @@ where
     fn drop(&mut self) {
         self.txn_execute(|txn| {
             if !self.has_committed() {
-                if K::ONLY_CLEAN {
+                if K::IS_READ_ONLY {
+                    #[cfg(feature = "read-tx-timeouts")]
+                    self.env.txn_manager().remove_active_read_transaction(txn);
+
                     unsafe {
                         ffi::mdbx_txn_abort(txn);
                     }
                 } else {
                     let (sender, rx) = sync_channel(0);
                     self.env
-                        .ensure_txn_manager()
-                        .unwrap()
-                        .send(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender })
-                        .unwrap();
+                        .txn_manager()
+                        .send_message(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender });
                     rx.recv().unwrap().unwrap();
                 }
             }
@@ -483,7 +517,11 @@ impl Transaction<RO> {
     /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
     pub unsafe fn close_db(&self, db: Database) -> Result<()> {
-        mdbx_result(ffi::mdbx_dbi_close(self.env().env_ptr(), db.dbi()))?;
+        mdbx_result_with_tx_kind::<RO>(
+            ffi::mdbx_dbi_close(self.env().env_ptr(), db.dbi()),
+            self.txn(),
+            self.env().txn_manager(),
+        )?;
 
         Ok(())
     }
@@ -497,15 +535,11 @@ impl Transaction<RW> {
         }
         self.txn_execute(|txn| {
             let (tx, rx) = sync_channel(0);
-            self.env()
-                .ensure_txn_manager()
-                .unwrap()
-                .send(TxnManagerMessage::Begin {
-                    parent: TxnPtr(txn),
-                    flags: RW::OPEN_FLAGS,
-                    sender: tx,
-                })
-                .unwrap();
+            self.env().txn_manager().send_message(TxnManagerMessage::Begin {
+                parent: TxnPtr(txn),
+                flags: RW::OPEN_FLAGS,
+                sender: tx,
+            });
 
             rx.recv().unwrap().map(|ptr| Transaction::new_from_ptr(self.env().clone(), ptr.0))
         })
@@ -532,6 +566,84 @@ impl TransactionPtr {
     {
         let _lck = self.lock.lock();
         (f)(self.txn)
+    }
+}
+
+/// Commit latencies info.
+///
+/// Contains information about latency of commit stages.
+/// Inner struct stores this info in 1/65536 of seconds units.
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct CommitLatency(ffi::MDBX_commit_latency);
+
+impl CommitLatency {
+    /// Create a new CommitLatency with zero'd inner struct `ffi::MDBX_commit_latency`.
+    pub(crate) fn new() -> Self {
+        unsafe { Self(std::mem::zeroed()) }
+    }
+
+    /// Returns a mut pointer to `ffi::MDBX_commit_latency`.
+    pub(crate) fn mdb_commit_latency(&mut self) -> *mut ffi::MDBX_commit_latency {
+        &mut self.0
+    }
+}
+
+impl CommitLatency {
+    /// Duration of preparation (commit child transactions, update
+    /// sub-databases records and cursors destroying).
+    #[inline]
+    pub fn preparation(&self) -> Duration {
+        Self::time_to_duration(self.0.preparation)
+    }
+
+    /// Duration of GC update by wall clock.
+    #[inline]
+    pub fn gc_wallclock(&self) -> Duration {
+        Self::time_to_duration(self.0.gc_wallclock)
+    }
+
+    /// Duration of internal audit if enabled.
+    #[inline]
+    pub fn audit(&self) -> Duration {
+        Self::time_to_duration(self.0.audit)
+    }
+
+    /// Duration of writing dirty/modified data pages to a filesystem,
+    /// i.e. the summary duration of a `write()` syscalls during commit.
+    #[inline]
+    pub fn write(&self) -> Duration {
+        Self::time_to_duration(self.0.write)
+    }
+
+    /// Duration of syncing written data to the disk/storage, i.e.
+    /// the duration of a `fdatasync()` or a `msync()` syscall during commit.
+    #[inline]
+    pub fn sync(&self) -> Duration {
+        Self::time_to_duration(self.0.sync)
+    }
+
+    /// Duration of transaction ending (releasing resources).
+    #[inline]
+    pub fn ending(&self) -> Duration {
+        Self::time_to_duration(self.0.ending)
+    }
+
+    /// The total duration of a commit.
+    #[inline]
+    pub fn whole(&self) -> Duration {
+        Self::time_to_duration(self.0.whole)
+    }
+
+    /// User-mode CPU time spent on GC update.
+    #[inline]
+    pub fn gc_cputime(&self) -> Duration {
+        Self::time_to_duration(self.0.gc_cputime)
+    }
+
+    #[inline]
+    fn time_to_duration(time: u32) -> Duration {
+        Duration::from_nanos(time as u64 * (1_000_000_000 / 65_536))
     }
 }
 

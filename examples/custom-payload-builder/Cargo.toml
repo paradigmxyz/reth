@@ -1,0 +1,21 @@
+[package]
+name = "custom-payload-builder"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+reth.workspace = true
+reth-primitives.workspace = true
+reth-node-api.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-payload-builder.workspace = true
+
+tracing.workspace = true
+clap = { workspace = true, features = ["derive"] }
+futures-util.workspace = true
+eyre.workspace = true
+tokio.workspace = true

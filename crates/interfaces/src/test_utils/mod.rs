@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 mod bodies;
 mod full_block;
 mod headers;

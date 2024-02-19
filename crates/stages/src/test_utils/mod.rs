@@ -1,10 +1,13 @@
-#![allow(unused)]
 use reth_primitives::stage::StageId;
 
+#[cfg(test)]
 mod macros;
+#[cfg(test)]
 pub(crate) use macros::*;
 
+#[cfg(test)]
 mod runner;
+#[cfg(test)]
 pub(crate) use runner::{
     ExecuteStageTestRunner, StageTestRunner, TestRunnerError, UnwindStageTestRunner,
 };

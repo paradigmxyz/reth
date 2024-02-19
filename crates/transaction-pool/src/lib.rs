@@ -110,22 +110,28 @@
 //! use reth_primitives::MAINNET;
 //! use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
+//! use reth_tasks::TaskSpawner;
+//! use reth_tasks::TaskManager;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
-//! use reth_transaction_pool::maintain::maintain_transaction_pool_future;
+//! use reth_transaction_pool::maintain::{maintain_transaction_pool_future};
+//!
 //!  async fn t<C, St>(client: C, stream: St)
 //!    where C: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
 //!     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 //!     {
 //!     let blob_store = InMemoryBlobStore::default();
+//!     let rt = tokio::runtime::Runtime::new().unwrap();
+//!     let manager = TaskManager::new(rt.handle().clone());
+//!     let executor = manager.executor();
 //!     let pool = Pool::eth_pool(
-//!         TransactionValidationTaskExecutor::eth(client.clone(), MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
+//!         TransactionValidationTaskExecutor::eth(client.clone(), MAINNET.clone(), blob_store.clone(), executor.clone()),
 //!         blob_store,
 //!         Default::default(),
 //!     );
 //!
 //!   // spawn a task that listens for new blocks and updates the pool's transactions, mined transactions etc..
-//!   tokio::task::spawn(  maintain_transaction_pool_future(client, pool, stream, TokioTaskExecutor::default(), Default::default()));
+//!   tokio::task::spawn(maintain_transaction_pool_future(client, pool, stream, executor.clone(), Default::default()));
 //!
 //! # }
 //! ```
@@ -140,12 +146,12 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![warn(clippy::missing_const_for_fn)]
 
-use crate::pool::PoolInner;
+use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;
+use reth_eth_wire::HandleAnnouncement;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
@@ -233,15 +239,11 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
-    ) -> PoolResult<Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)>> {
-        let outcomes = futures_util::future::join_all(
-            transactions.into_iter().map(|tx| self.validate(origin, tx)),
-        )
-        .await
-        .into_iter()
-        .collect();
-
-        Ok(outcomes)
+    ) -> Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)> {
+        futures_util::future::join_all(transactions.into_iter().map(|tx| self.validate(origin, tx)))
+            .await
+            .into_iter()
+            .collect()
     }
 
     /// Validates the given transaction
@@ -265,6 +267,11 @@ where
     /// Whether the pool is empty
     pub fn is_empty(&self) -> bool {
         self.pool.is_empty()
+    }
+
+    /// Returns whether or not the pool is over its configured size and transaction count limits.
+    pub fn is_exceeded(&self) -> bool {
+        self.pool.is_exceeded()
     }
 }
 
@@ -350,15 +357,13 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
-    ) -> PoolResult<Vec<PoolResult<TxHash>>> {
+    ) -> Vec<PoolResult<TxHash>> {
         if transactions.is_empty() {
-            return Ok(Vec::new())
+            return Vec::new()
         }
-        let validated = self.validate_all(origin, transactions).await?;
+        let validated = self.validate_all(origin, transactions).await;
 
-        let transactions =
-            self.pool.add_transactions(origin, validated.into_iter().map(|(_, tx)| tx));
-        Ok(transactions)
+        self.pool.add_transactions(origin, validated.into_iter().map(|(_, tx)| tx))
     }
 
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
@@ -421,7 +426,7 @@ where
         &self,
         base_fee: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
-        self.pool.best_transactions_with_base_fee(base_fee)
+        self.pool.best_transactions_with_attributes(BestTransactionsAttributes::base_fee(base_fee))
     }
 
     fn best_transactions_with_attributes(
@@ -450,8 +455,11 @@ where
         self.pool.remove_transactions(hashes)
     }
 
-    fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {
-        self.pool.retain_unknown(hashes)
+    fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
+    where
+        A: HandleAnnouncement,
+    {
+        self.pool.retain_unknown(announcement)
     }
 
     fn get(&self, tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
@@ -471,6 +479,16 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.get_transactions_by_sender(sender)
+    }
+
+    fn get_transactions_by_sender_and_nonce(
+        &self,
+        sender: Address,
+        nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        let transaction_id = TransactionId::new(self.pool.get_sender_id(sender), nonce);
+
+        self.inner().get_pool_data().all().get(&transaction_id).map(|tx| tx.transaction.clone())
     }
 
     fn get_transactions_by_origin(
@@ -529,6 +547,10 @@ where
 
     fn delete_blobs(&self, txs: Vec<TxHash>) {
         self.pool.delete_blobs(txs)
+    }
+
+    fn cleanup_blobs(&self) {
+        self.pool.cleanup_blobs()
     }
 }
 

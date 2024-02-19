@@ -1,11 +1,18 @@
 //! Types for broadcasting new data.
+
 use crate::{EthMessage, EthVersion};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
+
+use derive_more::{Constructor, Deref, DerefMut, IntoIterator};
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{Block, Bytes, TransactionSigned, B256, U128};
-use std::sync::Arc;
+use reth_primitives::{Block, Bytes, TransactionSigned, TxHash, B256, U128};
+
+use std::{collections::HashMap, mem, sync::Arc};
+
+#[cfg(feature = "arbitrary")]
+use proptest::{collection::vec, prelude::*};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -123,6 +130,14 @@ pub enum NewPooledTransactionHashes {
 // === impl NewPooledTransactionHashes ===
 
 impl NewPooledTransactionHashes {
+    /// Returns the message [`EthVersion`].
+    pub fn version(&self) -> EthVersion {
+        match self {
+            NewPooledTransactionHashes::Eth66(_) => EthVersion::Eth66,
+            NewPooledTransactionHashes::Eth68(_) => EthVersion::Eth68,
+        }
+    }
+
     /// Returns `true` if the payload is valid for the given version
     pub fn is_valid_for_version(&self, version: EthVersion) -> bool {
         match self {
@@ -140,6 +155,22 @@ impl NewPooledTransactionHashes {
         match self {
             NewPooledTransactionHashes::Eth66(msg) => msg.0.iter(),
             NewPooledTransactionHashes::Eth68(msg) => msg.hashes.iter(),
+        }
+    }
+
+    /// Returns an immutable reference to transaction hashes.
+    pub fn hashes(&self) -> &Vec<B256> {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => &msg.0,
+            NewPooledTransactionHashes::Eth68(msg) => &msg.hashes,
+        }
+    }
+
+    /// Returns a mutable reference to transaction hashes.
+    pub fn hashes_mut(&mut self) -> &mut Vec<B256> {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => &mut msg.0,
+            NewPooledTransactionHashes::Eth68(msg) => &mut msg.hashes,
         }
     }
 
@@ -187,6 +218,46 @@ impl NewPooledTransactionHashes {
             NewPooledTransactionHashes::Eth68(msg) => msg.hashes.len(),
         }
     }
+
+    /// Returns an immutable reference to the inner type if this an eth68 announcement.
+    pub fn as_eth68(&self) -> Option<&NewPooledTransactionHashes68> {
+        match self {
+            NewPooledTransactionHashes::Eth66(_) => None,
+            NewPooledTransactionHashes::Eth68(msg) => Some(msg),
+        }
+    }
+
+    /// Returns a mutable reference to the inner type if this an eth68 announcement.
+    pub fn as_eth68_mut(&mut self) -> Option<&mut NewPooledTransactionHashes68> {
+        match self {
+            NewPooledTransactionHashes::Eth66(_) => None,
+            NewPooledTransactionHashes::Eth68(msg) => Some(msg),
+        }
+    }
+
+    /// Returns a mutable reference to the inner type if this an eth66 announcement.
+    pub fn as_eth66_mut(&mut self) -> Option<&mut NewPooledTransactionHashes66> {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => Some(msg),
+            NewPooledTransactionHashes::Eth68(_) => None,
+        }
+    }
+
+    /// Returns the inner type if this an eth68 announcement.
+    pub fn take_eth68(&mut self) -> Option<NewPooledTransactionHashes68> {
+        match self {
+            NewPooledTransactionHashes::Eth66(_) => None,
+            NewPooledTransactionHashes::Eth68(msg) => Some(mem::take(msg)),
+        }
+    }
+
+    /// Returns the inner type if this an eth66 announcement.
+    pub fn take_eth66(&mut self) -> Option<NewPooledTransactionHashes66> {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => Some(mem::take(msg)),
+            NewPooledTransactionHashes::Eth68(_) => None,
+        }
+    }
 }
 
 impl From<NewPooledTransactionHashes> for EthMessage {
@@ -230,7 +301,6 @@ impl From<Vec<B256>> for NewPooledTransactionHashes66 {
 
 /// Same as [`NewPooledTransactionHashes66`] but extends that that beside the transaction hashes,
 /// the node sends the transaction types and their sizes (as defined in EIP-2718) as well.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NewPooledTransactionHashes68 {
@@ -242,8 +312,8 @@ pub struct NewPooledTransactionHashes68 {
     /// the following way:
     ///  * `[type_0: B_1, type_1: B_1, ...]`
     ///
-    /// This would make it seem like the [`Encodable`](alloy_rlp::Encodable) and
-    /// [`Decodable`](alloy_rlp::Decodable) implementations should directly use a `Vec<u8>` for
+    /// This would make it seem like the [`Encodable`] and
+    /// [`Decodable`] implementations should directly use a `Vec<u8>` for
     /// encoding and decoding, because it looks like this field should be encoded as a _list_ of
     /// bytes.
     ///
@@ -254,7 +324,7 @@ pub struct NewPooledTransactionHashes68 {
     /// **not** a RLP list.
     ///
     /// Because of this, we do not directly use the `Vec<u8>` when encoding and decoding, and
-    /// instead use the [`Encodable`](alloy_rlp::Encodable) and [`Decodable`](alloy_rlp::Decodable)
+    /// instead use the [`Encodable`] and [`Decodable`]
     /// implementations for `&[u8]` instead, which encodes into a RLP string, and expects an RLP
     /// string when decoding.
     pub types: Vec<u8>,
@@ -262,6 +332,43 @@ pub struct NewPooledTransactionHashes68 {
     pub sizes: Vec<usize>,
     /// Transaction hashes for new transactions that have appeared on the network.
     pub hashes: Vec<B256>,
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for NewPooledTransactionHashes68 {
+    type Parameters = ();
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        // Generate a single random length for all vectors
+        let vec_length = any::<usize>().prop_map(|x| x % 100 + 1); // Lengths between 1 and 100
+
+        vec_length
+            .prop_flat_map(|len| {
+                // Use the generated length to create vectors of TxType, usize, and B256
+                let types_vec =
+                    vec(any::<reth_primitives::TxType>().prop_map(|ty| ty as u8), len..=len);
+
+                // Map the usize values to the range 0..131072(0x20000)
+                let sizes_vec = vec(proptest::num::usize::ANY.prop_map(|x| x % 131072), len..=len);
+                let hashes_vec = vec(any::<B256>(), len..=len);
+
+                (types_vec, sizes_vec, hashes_vec)
+            })
+            .prop_map(|(types, sizes, hashes)| NewPooledTransactionHashes68 {
+                types,
+                sizes,
+                hashes,
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl NewPooledTransactionHashes68 {
+    /// Returns an iterator over tx hashes zipped with corresponding metadata.
+    pub fn metadata_iter(&self) -> impl Iterator<Item = (&B256, (u8, usize))> {
+        self.hashes.iter().zip(self.types.iter().copied().zip(self.sizes.iter().copied()))
+    }
 }
 
 impl Encodable for NewPooledTransactionHashes68 {
@@ -309,14 +416,251 @@ impl Decodable for NewPooledTransactionHashes68 {
         }
 
         let encodable = EncodableNewPooledTransactionHashes68::decode(buf)?;
-        Ok(Self { types: encodable.types.into(), sizes: encodable.sizes, hashes: encodable.hashes })
+        let msg = Self {
+            types: encodable.types.into(),
+            sizes: encodable.sizes,
+            hashes: encodable.hashes,
+        };
+
+        if msg.hashes.len() != msg.types.len() {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: msg.hashes.len(),
+                got: msg.types.len(),
+            })
+        }
+        if msg.hashes.len() != msg.sizes.len() {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: msg.hashes.len(),
+                got: msg.sizes.len(),
+            })
+        }
+
+        Ok(msg)
+    }
+}
+
+/// Interface for handling announcement data in filters in the transaction manager and transaction
+/// pool. Note: this trait may disappear when distinction between eth66 and eth68 hashes is more
+/// clearly defined, see <https://github.com/paradigmxyz/reth/issues/6148>.
+pub trait HandleAnnouncement {
+    /// The announcement contains no entries.
+    fn is_empty(&self) -> bool;
+
+    /// Returns the number of entries.
+    fn len(&self) -> usize;
+
+    /// Retain only entries for which the hash in the entry satisfies a given predicate, return
+    /// the rest.
+    fn retain_by_hash(&mut self, f: impl FnMut(&TxHash) -> bool) -> Self;
+
+    /// Returns the announcement version, either [`Eth66`](EthVersion::Eth66) or
+    /// [`Eth68`](EthVersion::Eth68).
+    fn msg_version(&self) -> EthVersion;
+}
+
+impl HandleAnnouncement for NewPooledTransactionHashes {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn retain_by_hash(&mut self, f: impl FnMut(&TxHash) -> bool) -> Self {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => Self::Eth66(msg.retain_by_hash(f)),
+            NewPooledTransactionHashes::Eth68(msg) => Self::Eth68(msg.retain_by_hash(f)),
+        }
+    }
+
+    fn msg_version(&self) -> EthVersion {
+        self.version()
+    }
+}
+
+impl HandleAnnouncement for NewPooledTransactionHashes68 {
+    fn is_empty(&self) -> bool {
+        self.hashes.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.hashes.len()
+    }
+
+    fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
+        let mut indices_to_remove = vec![];
+        for (i, hash) in self.hashes.iter().enumerate() {
+            if !f(hash) {
+                indices_to_remove.push(i);
+            }
+        }
+
+        let mut removed_hashes = Vec::with_capacity(indices_to_remove.len());
+        let mut removed_types = Vec::with_capacity(indices_to_remove.len());
+        let mut removed_sizes = Vec::with_capacity(indices_to_remove.len());
+
+        for index in indices_to_remove.into_iter().rev() {
+            let hash = self.hashes.remove(index);
+            removed_hashes.push(hash);
+            let ty = self.types.remove(index);
+            removed_types.push(ty);
+            let size = self.sizes.remove(index);
+            removed_sizes.push(size);
+        }
+
+        Self { hashes: removed_hashes, types: removed_types, sizes: removed_sizes }
+    }
+
+    fn msg_version(&self) -> EthVersion {
+        EthVersion::Eth68
+    }
+}
+
+impl HandleAnnouncement for NewPooledTransactionHashes66 {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
+        let mut indices_to_remove = vec![];
+        for (i, hash) in self.0.iter().enumerate() {
+            if !f(hash) {
+                indices_to_remove.push(i);
+            }
+        }
+
+        let mut removed_hashes = Vec::with_capacity(indices_to_remove.len());
+
+        for index in indices_to_remove.into_iter().rev() {
+            let hash = self.0.remove(index);
+            removed_hashes.push(hash);
+        }
+
+        Self(removed_hashes)
+    }
+
+    fn msg_version(&self) -> EthVersion {
+        EthVersion::Eth66
+    }
+}
+
+/// Announcement data that has been validated according to the configured network. For an eth68
+/// announcement, values of the map are `Some((u8, usize))` - the tx metadata. For an eth66
+/// announcement, values of the map are `None`.
+#[derive(Debug, Deref, DerefMut, IntoIterator, Constructor)]
+pub struct ValidAnnouncementData {
+    #[deref]
+    #[deref_mut]
+    #[into_iterator]
+    data: HashMap<TxHash, Option<(u8, usize)>>,
+    version: EthVersion,
+}
+
+impl ValidAnnouncementData {
+    /// Returns a new [`ValidAnnouncementData`] wrapper around validated
+    /// [`Eth68`](EthVersion::Eth68) announcement data.
+    pub fn new_eth68(data: HashMap<TxHash, Option<(u8, usize)>>) -> Self {
+        Self::new(data, EthVersion::Eth68)
+    }
+
+    /// Returns a new [`ValidAnnouncementData`] wrapper around validated
+    /// [`Eth68`](EthVersion::Eth68) announcement data.
+    pub fn new_eth66(data: HashMap<TxHash, Option<(u8, usize)>>) -> Self {
+        Self::new(data, EthVersion::Eth66)
+    }
+
+    /// Returns a new [`ValidAnnouncementData`] with empty data from an [`Eth68`](EthVersion::Eth68)
+    /// announcement.
+    pub fn empty_eth68() -> Self {
+        Self::new_eth68(HashMap::new())
+    }
+
+    /// Returns a new [`ValidAnnouncementData`] with empty data from an [`Eth66`](EthVersion::Eth66)
+    /// announcement.
+    pub fn empty_eth66() -> Self {
+        Self::new_eth66(HashMap::new())
+    }
+
+    /// Destructs returning the validated data.
+    pub fn into_data(self) -> HashMap<TxHash, Option<(u8, usize)>> {
+        self.data
+    }
+
+    /// Destructs returning only the valid hashes and the announcement message version. Caution! If
+    /// this is [`Eth68`](EthVersion::Eth68)announcement data, the metadata must be cached
+    /// before call.
+    pub fn into_request_hashes(self) -> (RequestTxHashes, EthVersion) {
+        let hashes = self.data.into_keys().collect::<Vec<_>>();
+
+        (RequestTxHashes::new(hashes), self.version)
+    }
+}
+
+impl HandleAnnouncement for ValidAnnouncementData {
+    fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
+        let data = std::mem::take(&mut self.data);
+
+        let (keep, rest) = data.into_iter().partition(|(hash, _)| f(hash));
+
+        self.data = keep;
+
+        ValidAnnouncementData::new(rest, self.version)
+    }
+
+    fn msg_version(&self) -> EthVersion {
+        self.version
+    }
+}
+
+/// Hashes to request from a peer.
+#[derive(Debug, Default, Deref, DerefMut, IntoIterator, Constructor)]
+pub struct RequestTxHashes {
+    #[deref]
+    #[deref_mut]
+    #[into_iterator(owned, ref)]
+    hashes: Vec<TxHash>,
+}
+
+impl RequestTxHashes {
+    /// Returns a new [`RequestTxHashes`] with given capacity for hashes. Caution! Make sure to
+    /// call [`Vec::shrink_to_fit`] on [`RequestTxHashes`] when full, especially where it will be
+    /// stored in its entirety like in the future waiting for a
+    /// [`GetPooledTransactions`](crate::GetPooledTransactions) request to resolve.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self::new(Vec::with_capacity(capacity))
+    }
+}
+
+impl FromIterator<(TxHash, Option<(u8, usize)>)> for RequestTxHashes {
+    fn from_iter<I: IntoIterator<Item = (TxHash, Option<(u8, usize)>)>>(iter: I) -> Self {
+        let mut hashes = Vec::with_capacity(32);
+
+        for (hash, _) in iter {
+            hashes.push(hash);
+        }
+
+        hashes.shrink_to_fit();
+
+        RequestTxHashes::new(hashes)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rlp::{Decodable, Encodable};
     use bytes::BytesMut;
     use reth_primitives::hex;
     use std::str::FromStr;

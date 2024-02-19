@@ -1,4 +1,5 @@
 //! Wrapper for `std::fs` methods
+
 use std::{
     fs::{self, ReadDir},
     io,
@@ -8,44 +9,116 @@ use std::{
 /// Various error variants for `std::fs` operations that serve as an addition to the io::Error which
 /// does not provide any information about the path.
 #[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
 pub enum FsPathError {
-    /// Provides additional path context for [`std::fs::write`].
+    /// Error variant for failed write operation with additional path context.
     #[error("failed to write to {path:?}: {source}")]
-    Write { source: io::Error, path: PathBuf },
-    /// Provides additional path context for [`std::fs::read`].
+    Write {
+        /// The source `io::Error`.
+        source: io::Error,
+        /// The path related to the operation.
+        path: PathBuf,
+    },
+
+    /// Error variant for failed read operation with additional path context.
     #[error("failed to read from {path:?}: {source}")]
-    Read { source: io::Error, path: PathBuf },
-    /// Provides additional path context for [`std::fs::read_link`].
+    Read {
+        /// The source `io::Error`.
+        source: io::Error,
+        /// The path related to the operation.
+        path: PathBuf,
+    },
+
+    /// Error variant for failed read link operation with additional path context.
     #[error("failed to read from {path:?}: {source}")]
-    ReadLink { source: io::Error, path: PathBuf },
-    /// Provides additional path context for [`std::fs::File::create`].
+    ReadLink {
+        /// The source `io::Error`.
+        source: io::Error,
+        /// The path related to the operation.
+        path: PathBuf,
+    },
+
+    /// Error variant for failed file creation operation with additional path context.
     #[error("failed to create file {path:?}: {source}")]
-    CreateFile { source: io::Error, path: PathBuf },
-    /// Provides additional path context for [`std::fs::remove_file`].
+    CreateFile {
+        /// The source `io::Error`.
+        source: io::Error,
+        /// The path related to the operation.
+        path: PathBuf,
+    },
+
+    /// Error variant for failed file removal operation with additional path context.
     #[error("failed to remove file {path:?}: {source}")]
-    RemoveFile { source: io::Error, path: PathBuf },
-    /// Provides additional path context for [`std::fs::create_dir`].
+    RemoveFile {
+        /// The source `io::Error`.
+        source: io::Error,
+        /// The path related to the operation.
+        path: PathBuf,
+    },
+
+    /// Error variant for failed directory creation operation with additional path context.
     #[error("failed to create dir {path:?}: {source}")]
-    CreateDir { source: io::Error, path: PathBuf },
-    /// Provides additional path context for [`std::fs::remove_dir`].
+    CreateDir {
+        /// The source `io::Error`.
+        source: io::Error,
+        /// The path related to the operation.
+        path: PathBuf,
+    },
+
+    /// Error variant for failed directory removal operation with additional path context.
     #[error("failed to remove dir {path:?}: {source}")]
-    RemoveDir { source: io::Error, path: PathBuf },
-    /// Provides additional path context for [`std::fs::read_dir`].
+    RemoveDir {
+        /// The source `io::Error`.
+        source: io::Error,
+        /// The path related to the operation.
+        path: PathBuf,
+    },
+
+    /// Error variant for failed directory read operation with additional path context.
     #[error("failed to read dir {path:?}: {source}")]
-    ReadDir { source: io::Error, path: PathBuf },
-    /// Provides additional context for [`std::fs::rename`].
+    ReadDir {
+        /// The source `io::Error`.
+        source: io::Error,
+        /// The path related to the operation.
+        path: PathBuf,
+    },
+
+    /// Error variant for failed file renaming operation with additional path context.
     #[error("failed to rename {from:?} to {to:?}: {source}")]
-    Rename { source: io::Error, from: PathBuf, to: PathBuf },
-    /// Provides additional path context for [`std::fs::File::open`].
+    Rename {
+        /// The source `io::Error`.
+        source: io::Error,
+        /// The original path.
+        from: PathBuf,
+        /// The target path.
+        to: PathBuf,
+    },
+
+    /// Error variant for failed file opening operation with additional path context.
     #[error("failed to open file {path:?}: {source}")]
-    Open { source: io::Error, path: PathBuf },
-    /// Provides additional path context for the file whose contents should be parsed as JSON.
+    Open {
+        /// The source `io::Error`.
+        source: io::Error,
+        /// The path related to the operation.
+        path: PathBuf,
+    },
+
+    /// Error variant for failed file read as JSON operation with additional path context.
     #[error("failed to parse json file: {path:?}: {source}")]
-    ReadJson { source: serde_json::Error, path: PathBuf },
-    /// Provides additional path context for the new JSON file.
+    ReadJson {
+        /// The source `serde_json::Error`.
+        source: serde_json::Error,
+        /// The path related to the operation.
+        path: PathBuf,
+    },
+
+    /// Error variant for failed JSON write to file operation with additional path context.
     #[error("failed to write to json file: {path:?}: {source}")]
-    WriteJson { source: serde_json::Error, path: PathBuf },
+    WriteJson {
+        /// The source `serde_json::Error`.
+        source: serde_json::Error,
+        /// The path related to the operation.
+        path: PathBuf,
+    },
 }
 
 impl FsPathError {
@@ -126,6 +199,12 @@ pub fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Result<()> {
 pub fn remove_dir_all(path: impl AsRef<Path>) -> Result<()> {
     let path = path.as_ref();
     fs::remove_dir_all(path).map_err(|err| FsPathError::remove_dir(err, path))
+}
+
+/// Wrapper for `std::fs::remove_file`
+pub fn remove_file(path: impl AsRef<Path>) -> Result<()> {
+    let path = path.as_ref();
+    fs::remove_file(path).map_err(|err| FsPathError::remove_file(err, path))
 }
 
 /// Wrapper for `std::fs::create_dir_all`
