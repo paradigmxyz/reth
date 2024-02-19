@@ -4,7 +4,7 @@ use criterion::{
 };
 use proptest::{
     prelude::*,
-    strategy::{Strategy, ValueTree},
+    strategy::ValueTree,
     test_runner::{RngAlgorithm, TestRng, TestRunner},
 };
 use reth_primitives::{hex_literal::hex, Address};

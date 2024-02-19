@@ -33,7 +33,6 @@ use reth_provider::{
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
-
 use reth_stages::{ControlFlow, Pipeline, PipelineError};
 use reth_tasks::TaskSpawner;
 use reth_tokio_util::EventListeners;
@@ -1896,8 +1895,8 @@ mod tests {
     use reth_provider::{BlockWriter, ProviderFactory};
     use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use reth_rpc_types_compat::engine::payload::try_block_to_payload_v1;
-    use reth_stages::{ExecOutput, PipelineError, StageError};
-    use std::{collections::VecDeque, sync::Arc, time::Duration};
+    use reth_stages::{ExecOutput, StageError};
+    use std::{collections::VecDeque, sync::Arc};
     use tokio::sync::oneshot::error::TryRecvError;
 
     // Pipeline error is propagated.
@@ -2353,10 +2352,10 @@ mod tests {
 
     mod new_payload {
         use super::*;
-        use reth_interfaces::test_utils::{generators, generators::random_block};
+        use reth_interfaces::test_utils::generators::random_block;
         use reth_primitives::{
             genesis::{Genesis, GenesisAllocator},
-            Hardfork, U256,
+            Hardfork,
         };
         use reth_provider::test_utils::blocks::BlockChainTestData;
 

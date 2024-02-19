@@ -320,9 +320,9 @@ mod tests {
         test_utils::generators::{self, Rng},
     };
     use reth_primitives::{
-        constants::eip4844::DATA_GAS_PER_BLOB, hex_literal::hex, proofs, Account, Address,
-        BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, Header, Signature,
-        TransactionKind, TransactionSigned, Withdrawal, Withdrawals, MAINNET, U256,
+        hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber, Bytes,
+        ChainSpecBuilder, Signature, TransactionKind, TransactionSigned, Withdrawal, Withdrawals,
+        MAINNET, U256,
     };
     use std::ops::RangeBounds;
 
