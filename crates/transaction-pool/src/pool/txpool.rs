@@ -291,7 +291,6 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) fn best_transactions(&self) -> BestTransactions<T> {
         self.pending_pool.best()
     }
-
     /// Returns an iterator that yields transactions that are ready to be included in the block with
     /// the given base fee and optional blob fee.
     pub(crate) fn best_transactions_with_attributes(
