@@ -1039,29 +1039,53 @@ mod test {
             B256::from_slice(&[5; 32]),
         ];
         let eth68_hashes_sizes = [
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST - 2,
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST, /* this one will
-                                                                        * not fit */
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST - MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED - 1,
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST,
             2,
-            9, // this one won't
-            2,
+            9,
+            MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED,
         ];
 
         // possible included index combinations are
-        // (i) 0 and 2
-        // (ii) 0 and 4
+        // (i) 0 and 4
+        // (ii) 0, 2 and 3
         // (iii) 1
         // (iv) 2, 3 and 4
+        // (v) 0, 2, 3 and 4 (if median byte size small legacy tx is inserted last)
+
         let possible_outcome_1 =
-            [eth68_hashes[0], eth68_hashes[2]].into_iter().collect::<HashSet<_>>();
-        let possible_outcome_2 =
             [eth68_hashes[0], eth68_hashes[4]].into_iter().collect::<HashSet<_>>();
+        let possible_outcome_2 =
+            [eth68_hashes[0], eth68_hashes[2], eth68_hashes[3]].into_iter().collect::<HashSet<_>>();
         let possible_outcome_3 = [eth68_hashes[1]].into_iter().collect::<HashSet<_>>();
         let possible_outcome_4 =
             [eth68_hashes[2], eth68_hashes[3], eth68_hashes[4]].into_iter().collect::<HashSet<_>>();
+        let possible_outcome_5 =
+            [eth68_hashes[0], eth68_hashes[2], eth68_hashes[3], eth68_hashes[4]]
+                .into_iter()
+                .collect::<HashSet<_>>();
 
-        let possible_outcomes =
-            [possible_outcome_1, possible_outcome_2, possible_outcome_3, possible_outcome_4];
+        let possible_outcomes = [
+            possible_outcome_1,
+            possible_outcome_2,
+            possible_outcome_3,
+            possible_outcome_4,
+            possible_outcome_5,
+        ];
+
+        // possible outcomes included index combinations for surplus hashes are
+        // (i) 0, 2, 3 and 4
+        // (ii) 1
+        // (iii) 2 and 3
+
+        let possible_outcome_surplus_1 =
+            [eth68_hashes[0], eth68_hashes[4]].into_iter().collect::<HashSet<_>>();
+        let possible_outcome_surplus_2 =
+            [eth68_hashes[0], eth68_hashes[2], eth68_hashes[3]].into_iter().collect::<HashSet<_>>();
+        let possible_outcome_surplus_3 = [eth68_hashes[1]].into_iter().collect::<HashSet<_>>();
+
+        let possible_outcomes_surplus_hashes =
+            [possible_outcome_surplus_1, possible_outcome_surplus_2, possible_outcome_surplus_3];
 
         let mut eth68_hashes_to_request = RequestTxHashes::with_capacity(3);
         let mut valid_announcement_data = ValidAnnouncementData::empty_eth68();
@@ -1072,7 +1096,7 @@ mod test {
             tx_fetcher.pack_request_eth68(&mut eth68_hashes_to_request, valid_announcement_data);
 
         let combo_surplus_hashes = surplus_eth68_hashes.into_iter().collect::<HashSet<_>>();
-        for combo in possible_outcomes.clone() {
+        for combo in possible_outcomes_surplus_hashes {
             assert_ne!(combo, combo_surplus_hashes)
         }
 
