@@ -55,7 +55,7 @@ mod tests {
 
     #[test]
     fn test_get_secret_key() {
-        for i in 1..=4 {
+        for i in 11..=14 {
             let path_string = format!("/work/bin/secrets/p2pn{}.hex", i);
             let path = Path::new(&path_string);
             let secret = rng_secret_key();
