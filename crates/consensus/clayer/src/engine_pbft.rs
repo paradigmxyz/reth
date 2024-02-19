@@ -1,24 +1,13 @@
-use alloy_primitives::B256;
 use alloy_rlp::Decodable;
-use reth_eth_wire::{ClayerBlock, ClayerConsensusMessage, ClayerConsensusMessageHeader};
+use reth_eth_wire::{ClayerConsensusMessage, ClayerConsensusMessageHeader};
 use reth_provider::{ConsensusNumberReader, ConsensusNumberWriter};
 use reth_rpc_types::PeerId;
 use tracing::info;
 
 use crate::{
-    consensus::{ParsedMessage, PbftConfig, PbftError, PbftState},
+    consensus::{ParsedMessage, PbftError, PbftState},
     ClayerConsensusEngine,
 };
-
-pub struct PbftEngine {
-    config: PbftConfig,
-}
-
-impl PbftEngine {
-    pub fn new(config: PbftConfig) -> Self {
-        PbftEngine { config }
-    }
-}
 
 #[derive(Debug)]
 pub enum ConsensusEvent {
@@ -62,7 +51,7 @@ where
         // ConsensusEvent::BlockValid(block_id) => consensus.on_block_valid(block_id, state)?,
         // ConsensusEvent::BlockInvalid(block_id) => consensus.on_block_invalid(block_id)?,
         // ConsensusEvent::BlockCommit(block_id) => consensus.on_block_commit(block_id, state)?,
-        ConsensusEvent::PeerMessage(peer_id, message) => {
+        ConsensusEvent::PeerMessage(_, message) => {
             let header: ClayerConsensusMessageHeader =
                 parse_consensus_message_header(&message.header_bytes)?;
             let verified_signer_id = header.signer_id.clone();

@@ -1,12 +1,7 @@
 //! Implementation of consensus layer messages[ClayerConsensusMessage]
-use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{
-    bytes::{Buf, BufMut},
-    hex, keccak256, public_key_to_address, Address, Block, Bloom, Bytes, PeerId, Withdrawal, B256,
-    B64, U256,
-};
-use secp256k1::PublicKey;
+use reth_primitives::{hex, Address, Bloom, Bytes, PeerId, Withdrawal, B256, B64, U256};
 
 use super::signature::ClayerSignature;
 #[cfg(feature = "serde")]
@@ -126,23 +121,29 @@ pub struct PbftNewView {
     pub view_changes: Vec<PbftSignedVote>,
 }
 
-// Messages related to PBFT consensus
+/// Messages types related to PBFT consensus
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd)]
 pub enum PbftMessageType {
+    /// Unset
     Unset = 0x00,
-    /// Basic message types for the multicast protocol
+    /// Pbft PrePrepare
     PrePrepare = 0x01,
+    /// Pbft Prepare
     Prepare = 0x02,
+    ///
     Commit = 0x03,
-
-    /// Auxiliary PBFT messages
+    /// Pbft NewView
     NewView = 0x04,
+    /// Pbft ViewChange
     ViewChange = 0x05,
+    /// Pbft SealRequest
     SealRequest = 0x06,
+    /// Pbft Seal
     Seal = 0x07,
+    /// Pbft BlockNew
     BlockNew = 0x08,
-
+    /// Pbft AnnounceBlock
     AnnounceBlock = 0x09,
 }
 

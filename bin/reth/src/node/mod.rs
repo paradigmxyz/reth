@@ -58,7 +58,6 @@ use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     fs,
-    hex::encode,
     kzg::KzgSettings,
     stage::StageId,
     BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, B256,
@@ -477,7 +476,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 secret_key,
                 Arc::clone(&self.chain),
                 blockchain_db.clone(),
-                transaction_pool.clone(),
                 network.clone(),
                 clayer_consensus_messaging_agent,
                 consensus_db,

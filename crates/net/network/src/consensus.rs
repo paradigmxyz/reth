@@ -1,26 +1,19 @@
-use crate::{
-    cache::LruCache,
-    manager::NetworkEvent,
-    message::{PeerRequest, PeerRequestSender},
-    metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
-    NetworkEvents, NetworkHandle,
-};
-use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt};
+//! Consensus management for the p2p network.
+
+use crate::{manager::NetworkEvent, message::PeerRequestSender, NetworkEvents, NetworkHandle};
+use futures::{Future, StreamExt};
 use reth_eth_wire::{ClayerConsensusMsg, EthVersion};
 use reth_interfaces::clayer::ClayerConsensusMessageAgentTrait;
-use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
-use reth_network_api::{Peers, ReputationChangeKind};
 use reth_rpc_types::PeerId;
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    num::NonZeroUsize,
+    collections::HashMap,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
-use tracing::{debug, info};
+use tracing::debug;
 
 /// Manages consensus on top of the p2p network.
 #[derive(Debug)]
@@ -100,7 +93,7 @@ where
     }
 
     fn propagate_consensus(&mut self, peers: Vec<PeerId>, data: reth_primitives::Bytes) {
-        for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
+        for (_, (peer_id, _peer)) in self.peers.iter_mut().enumerate() {
             if peers.is_empty() {
                 self.network.send_consensus(*peer_id, data.clone());
             } else {
@@ -156,8 +149,10 @@ pub enum NetworkConsensusEvent {
 #[derive(Debug)]
 struct ConsensusPeer {
     /// A communication channel directly to the peer's session task.
+    #[allow(unused)]
     request_tx: PeerRequestSender,
     /// negotiated version of the session.
+    #[allow(unused)]
     version: EthVersion,
     /// The peer's client version.
     #[allow(unused)]

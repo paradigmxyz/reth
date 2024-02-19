@@ -5,13 +5,12 @@ use reqwest::header::CONTENT_TYPE;
 pub use reqwest::Client;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_rpc_types::engine::{
-    ExecutionPayloadEnvelopeV2, ExecutionPayloadInputV2, ExecutionPayloadV1, ForkchoiceUpdated,
-    PayloadAttributes, PayloadId,
+    ExecutionPayloadInputV2, ExecutionPayloadV1, ForkchoiceUpdated, PayloadAttributes, PayloadId,
 };
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::collections::HashSet;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use url::Url;
 
 pub struct HttpJsonRpc {

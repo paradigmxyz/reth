@@ -122,7 +122,7 @@ where
     /// Starts the networking stack given a [NetworkConfig] and returns a handle to the network.
     pub async fn start_network(self) -> Result<NetworkHandle, NetworkError> {
         let client = self.client.clone();
-        let (handle, network, _txpool, eth, consensus) =
+        let (handle, network, _txpool, eth, _consensus) =
             NetworkManager::builder(self).await?.request_handler(client).split_with_handle();
 
         tokio::task::spawn(network);

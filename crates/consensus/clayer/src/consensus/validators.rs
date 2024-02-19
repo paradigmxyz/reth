@@ -1,8 +1,7 @@
-use alloy_primitives::{Address, Bytes};
 use reth_rpc_types::PeerId;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt;
-// use itertools::free::join;
+
 /// A set of validators
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Validators {

@@ -1,9 +1,11 @@
 use super::message::ParsedMessage;
 use super::PbftConfig;
 use reth_eth_wire::{ClayerBlock, PbftMessageInfo, PbftMessageType};
-use reth_primitives::{Block, Bytes, Signature, B256};
-use std::collections::{HashMap, HashSet};
-use std::{default, fmt};
+use reth_primitives::B256;
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+};
 use tracing::trace;
 
 pub struct PbftLog {

@@ -1,9 +1,12 @@
 use reth_rpc_types::PeerId;
 use tokio::sync::mpsc::Receiver;
 
+/// Consensus layer event
 #[derive(Debug)]
 pub enum ClayerConsensusEvent {
+    /// Peer connected or disconnected
     PeerNetWork(PeerId, bool),
+    /// Consensus message
     PeerMessage(PeerId, reth_primitives::Bytes),
 }
 
