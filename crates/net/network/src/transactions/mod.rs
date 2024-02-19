@@ -589,7 +589,7 @@ where
 
         // get handle to peer's session, if the session is still active
         let Some(peer) = self.peers.get_mut(&peer_id) else {
-            debug!(
+            trace!(
                 peer_id=format!("{peer_id:#}"),
                 msg=?msg,
                 "discarding announcement from inactive peer"
