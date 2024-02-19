@@ -140,6 +140,11 @@ impl<DB: Database> Pruner<DB> {
                     .duration_seconds
                     .record(segment_start.elapsed());
 
+                self.metrics
+                    .get_prune_segment_metrics(segment.segment())
+                    .highest_pruned_block
+                    .set(to_block as f64);
+
                 done = done && output.done;
                 delete_limit = delete_limit.saturating_sub(output.pruned);
                 stats.insert(
