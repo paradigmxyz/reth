@@ -110,7 +110,7 @@ mod tests {
         models::{
             sharded_key,
             storage_sharded_key::{StorageShardedKey, NUM_OF_INDICES_IN_SHARD},
-            BlockNumberAddress, ShardedKey, StoredBlockBodyIndices,
+            ShardedKey, StoredBlockBodyIndices,
         },
         tables,
         transaction::{DbTx, DbTxMut},
@@ -121,7 +121,7 @@ mod tests {
         generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
     use reth_primitives::{
-        address, b256, Address, BlockNumber, PruneMode, StorageEntry, B256, U256,
+        address, b256, Address, BlockNumber, StorageEntry, B256, U256,
     };
     use std::collections::BTreeMap;
 

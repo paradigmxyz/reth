@@ -117,14 +117,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_db::{
-        cursor::{DbCursorRO, DbCursorRW},
-        tables,
-        transaction::DbTxMut,
-    };
+    use reth_db::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_primitives::{
         hex_literal::hex,
-        trie::{BranchNodeCompact, StorageTrieEntry, StoredBranchNode},
+        trie::{StorageTrieEntry, StoredBranchNode},
     };
     use reth_provider::test_utils::create_test_provider_factory;
 

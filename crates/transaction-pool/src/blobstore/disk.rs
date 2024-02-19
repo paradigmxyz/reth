@@ -415,7 +415,7 @@ mod tests {
     use super::*;
     use proptest::{
         prelude::*,
-        strategy::{Strategy, ValueTree},
+        strategy::{ValueTree},
         test_runner::TestRunner,
     };
     use std::sync::atomic::Ordering;

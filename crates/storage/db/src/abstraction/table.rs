@@ -7,7 +7,6 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::Debug,
-    marker::{Send, Sync},
 };
 
 /// Trait that will transform the data to be saved in the DB in a (ideally) compressed format

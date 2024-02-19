@@ -1262,13 +1262,12 @@ mod tests {
             blocks::BlockChainTestData, create_test_provider_factory_with_chain_spec,
             TestExecutorFactory,
         },
-        BlockWriter, BundleStateWithReceipts, ProviderFactory,
+        ProviderFactory,
     };
     use reth_revm::EvmProcessorFactory;
     use reth_trie::StateRoot;
     use std::{
-        collections::{HashMap, HashSet},
-        sync::Arc,
+        collections::{HashMap},
     };
 
     fn setup_externals(

@@ -345,8 +345,6 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-        tables,
-        transaction::{DbTx, DbTxMut},
     };
     use reth_interfaces::test_utils::{
         generators,
@@ -355,7 +353,7 @@ mod tests {
         },
     };
     use reth_primitives::{
-        keccak256, stage::StageUnitCheckpoint, SealedBlock, StorageEntry, B256, U256,
+        keccak256, stage::StageUnitCheckpoint, SealedBlock, StorageEntry, U256,
     };
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;

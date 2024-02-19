@@ -471,9 +471,8 @@ pub enum ChainSplit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{Address, Receipts, B256};
+    use reth_primitives::{Receipts, B256};
     use revm::{
-        db::BundleState,
         primitives::{AccountInfo, HashMap},
     };
 
