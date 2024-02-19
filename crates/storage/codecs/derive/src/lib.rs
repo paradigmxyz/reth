@@ -8,7 +8,7 @@
 #![allow(unreachable_pub, missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use proc_macro::{self, TokenStream, TokenTree};
+use proc_macro::{TokenStream, TokenTree};
 use quote::{format_ident, quote};
 use syn::{parse_macro_input, DeriveInput};
 

@@ -305,8 +305,6 @@ impl Default for GasPriceOracleResult {
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::constants::GWEI_TO_WEI;
-
     use super::*;
 
     #[test]

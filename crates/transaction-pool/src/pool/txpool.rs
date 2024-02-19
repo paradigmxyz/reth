@@ -1079,18 +1079,27 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
             let mut cumulative_cost = tx.next_cumulative_cost();
 
+            // the next expected nonce after this transaction: nonce + 1
+            let mut next_nonce_in_line = tx.transaction.nonce().saturating_add(1);
+
             // Update all consecutive transaction of this sender
             while let Some((peek, ref mut tx)) = iter.peek_mut() {
                 if peek.sender != id.sender {
-                    // Found the next sender
+                    // Found the next sender we need to check
                     continue 'transactions
                 }
 
-                // can short circuit
-                if tx.state.has_nonce_gap() {
+                if tx.transaction.nonce() == next_nonce_in_line {
+                    // no longer nonce gapped
+                    tx.state.insert(TxState::NO_NONCE_GAPS);
+                } else {
+                    // can short circuit if there's still a nonce gap
                     next_sender!(iter);
                     continue 'transactions
                 }
+
+                // update for next iteration of this sender's loop
+                next_nonce_in_line = next_nonce_in_line.saturating_add(1);
 
                 // update cumulative cost
                 tx.cumulative_cost = cumulative_cost;
@@ -2817,5 +2826,52 @@ mod tests {
             pool.assert_invariants();
             assert!(pool.size().blob <= blob_limit.max_txs);
         }
+    }
+
+    #[test]
+    fn account_updates_nonce_gap() {
+        let on_chain_balance = U256::from(10_000);
+        let mut on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
+        let tx_1 = tx_0.next();
+        let tx_2 = tx_1.next();
+
+        // Create 4 transactions
+        let v0 = f.validated(tx_0.clone());
+        let v1 = f.validated(tx_1);
+        let v2 = f.validated(tx_2);
+
+        // Add first 2 to the pool
+        let _res = pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v1.clone(), on_chain_balance, on_chain_nonce).unwrap();
+
+        assert!(pool.queued_transactions().is_empty());
+        assert_eq!(2, pool.pending_transactions().len());
+
+        // Remove first (nonce 0) - simulating that it was taken to be a part of the block.
+        pool.prune_transaction_by_hash(v0.hash());
+
+        // Now add transaction with nonce 2
+        let _res = pool.add_transaction(v2.clone(), on_chain_balance, on_chain_nonce).unwrap();
+
+        // v2 is in the queue now. v1 is still in 'pending'.
+        assert_eq!(1, pool.queued_transactions().len());
+        assert_eq!(1, pool.pending_transactions().len());
+
+        // Simulate new block arrival - and chain nonce increasing.
+        let mut updated_accounts = HashMap::new();
+        on_chain_nonce += 1;
+        updated_accounts.insert(
+            v0.sender_id(),
+            SenderInfo { state_nonce: on_chain_nonce, balance: on_chain_balance },
+        );
+        pool.update_accounts(updated_accounts);
+
+        // 'pending' now).
+        assert!(pool.queued_transactions().is_empty());
+        assert_eq!(2, pool.pending_transactions().len());
     }
 }
