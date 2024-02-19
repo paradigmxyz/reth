@@ -41,6 +41,18 @@ pub struct TxPoolMetrics {
 
     /// How often the pool was updated after the canonical state changed
     pub(crate) performed_state_updates: Counter,
+
+    /// Total `discard_worst` calls
+    pub(crate) discard_worst_calls: Counter,
+
+    /// How long it took the pool to `discard_worst`
+    pub(crate) discard_worst_duration: Gauge,
+
+    /// How many times `discard_worst` looped
+    pub(crate) discard_worst_loops: Gauge,
+
+    /// How many transactions were removed in the last `discard_worst` call
+    pub(crate) discard_worst_removed: Gauge,
 }
 
 /// Transaction pool blobstore metrics

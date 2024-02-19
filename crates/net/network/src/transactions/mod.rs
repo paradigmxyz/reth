@@ -972,6 +972,10 @@ where
                 }
             }
 
+            // The original capacity reservation may have been too large, so we shrink the vector to
+            // the actual number of transactions to import.
+            // new_txs.shrink_to_fit();
+
             // import new transactions as a batch to minimize lock contention on the underlying pool
             if !new_txs.is_empty() {
                 let pool = self.pool.clone();

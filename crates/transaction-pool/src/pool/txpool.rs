@@ -756,6 +756,10 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// This returns all transactions that were removed from the entire pool.
     pub(crate) fn discard_worst(&mut self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
+        self.metrics.discard_worst_calls.increment(1);
+
+        let now = std::time::Instant::now();
+        let mut loops = 0;
 
         // Helper macro that discards the worst transactions for the pools
         macro_rules! discard_worst {
@@ -766,6 +770,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         .$limit
                         .is_exceeded($this.$pool.len(), $this.$pool.size())
                     {
+                        loops += 1;
                         trace!(
                             "discarding transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
                             stringify!($pool),
@@ -812,6 +817,11 @@ impl<T: TransactionOrdering> TxPool<T> {
                 queued_limit  => queued_pool,
             ]
         );
+
+        let elapsed = now.elapsed();
+        self.metrics.discard_worst_duration.set(elapsed.as_secs_f64());
+        self.metrics.discard_worst_removed.set(removed.len() as f64);
+        self.metrics.discard_worst_loops.set(loops as f64);
 
         removed
     }
