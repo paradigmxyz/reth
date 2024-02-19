@@ -36,7 +36,6 @@ use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 #[cfg(feature = "optimism")]
 use reth_node_optimism::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_primitives::DisplayHardforks;
 use reth_provider::{providers::BlockchainProvider, ProviderFactory};
 use reth_prune::PrunerBuilder;
 use reth_rpc_engine_api::EngineApi;
