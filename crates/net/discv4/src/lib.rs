@@ -1894,7 +1894,8 @@ impl LookupTargetRotator {
 
 /// Tracks lookups across multiple `FindNode` requests.
 ///
-/// If this type is dropped by all
+/// If this type is dropped by all Clones, it will send all the discovered nodes to the listener, if
+/// one is present.
 #[derive(Clone, Debug)]
 struct LookupContext {
     inner: Rc<LookupContextInner>,
