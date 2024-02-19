@@ -4541,7 +4541,7 @@
               }
             ]
           },
-          "unit": "cps"
+          "unit": "reqps"
         },
         "overrides": [
           {
