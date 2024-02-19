@@ -9,9 +9,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-extern crate alloc;
-use alloc::vec::Vec;
-
 pub use codecs_derive::*;
 
 use alloy_primitives::{Address, Bloom, Bytes, B256, B512, U256};
