@@ -527,7 +527,6 @@ impl<'de> DeserializeAs<'de, ExecutionPayload> for BeaconExecutionPayload<'de> {
 
 pub mod beacon_payload {
     use super::*;
-    use serde::{Deserializer, Serializer};
 
     /// Serialize the payload attributes for the beacon API.
     pub fn serialize<S>(
