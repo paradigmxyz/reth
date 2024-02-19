@@ -196,4 +196,9 @@ pub mod tx_fetcher {
 
     /// Median observed size in bytes of a small encoded legacy transaction. Default is 120 bytes.
     pub const MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED: usize = 120;
+
+    /// Marginal number of hashes to allocate capacity for in a
+    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request packed according
+    /// to `eth` protocol version [`Eth68`](reth_eth_wire::EthVersion::Eth68).
+    pub const MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST: usize = 8;
 }

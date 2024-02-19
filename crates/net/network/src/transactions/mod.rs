@@ -55,7 +55,6 @@ use reth_transaction_pool::{
     PropagatedTransactions, TransactionPool, ValidPoolTransaction,
 };
 use std::{
-    cmp::max,
     collections::{hash_map::Entry, HashMap, HashSet},
     num::NonZeroUsize,
     pin::Pin,
@@ -713,14 +712,18 @@ where
             return
         }
 
-        // load message version before announcement data is destructed in packing
+        // load message version before announcement data type is destructed in packing
         let msg_version = valid_announcement_data.msg_version();
+        //
         // demand recommended soft limit on response, however the peer may enforce an arbitrary
         // limit on the response (2MB)
-        let mut hashes_to_request = RequestTxHashes::with_capacity(valid_announcement_data.len());
+        //
+        // request buffer is shrunk via call to pack request!
+        let init_capacity_req =
+            self.transaction_fetcher.approx_capacity_get_pooled_transactions_req(msg_version);
+        let mut hashes_to_request = RequestTxHashes::with_capacity(init_capacity_req);
         let surplus_hashes =
             self.transaction_fetcher.pack_request(&mut hashes_to_request, valid_announcement_data);
-        hashes_to_request.shrink_to_fit();
 
         if !surplus_hashes.is_empty() {
             trace!(target: "net::tx",
@@ -914,9 +917,8 @@ where
         let mut num_already_seen = 0;
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
-            // pre-size to avoid reallocations, assuming ~50% of the transactions are new
-            let mut new_txs = Vec::with_capacity(max(1, transactions.len() / 2));
-
+            // pre-size to avoid reallocations
+            let mut new_txs = Vec::with_capacity(transactions.len());
             for tx in transactions {
                 // recover transaction
                 let tx = match tx.try_into_ecrecovered() {
@@ -971,6 +973,7 @@ where
                     }
                 }
             }
+            new_txs.shrink_to_fit();
 
             // import new transactions as a batch to minimize lock contention on the underlying pool
             if !new_txs.is_empty() {

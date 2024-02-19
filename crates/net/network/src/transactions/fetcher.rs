@@ -2,11 +2,12 @@ use crate::{
     cache::{LruCache, LruMap},
     message::PeerRequest,
 };
+
 use derive_more::Constructor;
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{
-    GetPooledTransactions, HandleAnnouncement, RequestTxHashes, ValidAnnouncementData,
+    EthVersion, GetPooledTransactions, HandleAnnouncement, RequestTxHashes, ValidAnnouncementData,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
@@ -244,6 +245,7 @@ impl TransactionFetcher {
 
         surplus_hashes.extend(hashes_from_announcement_iter.map(|(hash, _metadata)| hash));
         surplus_hashes.shrink_to_fit();
+        hashes_to_request.shrink_to_fit();
 
         surplus_hashes
     }
@@ -259,16 +261,16 @@ impl TransactionFetcher {
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: ValidAnnouncementData,
     ) -> RequestTxHashes {
-        let (mut request_hashes, _version) = hashes_from_announcement.into_request_hashes();
-        if request_hashes.len() <= SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST {
-            *hashes_to_request = request_hashes;
+        let (mut hashes, _version) = hashes_from_announcement.into_request_hashes();
+        if hashes.len() <= SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST {
+            *hashes_to_request = hashes;
+            hashes_to_request.shrink_to_fit();
 
             RequestTxHashes::default()
         } else {
-            let surplus_hashes = request_hashes
-                .split_off(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST - 1);
-
-            *hashes_to_request = request_hashes;
+            let surplus_hashes =
+                hashes.split_off(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST - 1);
+            *hashes_to_request = hashes;
 
             RequestTxHashes::new(surplus_hashes)
         }
@@ -350,7 +352,9 @@ impl TransactionFetcher {
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
         metrics_increment_egress_peer_channel_full: impl FnOnce(),
     ) {
-        let mut hashes_to_request = RequestTxHashes::with_capacity(32);
+        let init_capacity_req = self.approx_capacity_get_pooled_transactions_req_eth68();
+        let mut hashes_to_request = RequestTxHashes::with_capacity(init_capacity_req);
+
         let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
 
         // budget to look for an idle peer before giving up
@@ -796,6 +800,33 @@ impl TransactionFetcher {
             Some(limit)
         }
     }
+
+    /// Returns the approx number of transactions that a [`GetPooledTransactions`] request will
+    /// have capacity for w.r.t. the given version of the protocol.
+    pub fn approx_capacity_get_pooled_transactions_req(
+        &self,
+        announcement_version: EthVersion,
+    ) -> usize {
+        if announcement_version.is_eth68() {
+            self.approx_capacity_get_pooled_transactions_req_eth68()
+        } else {
+            self.approx_capacity_get_pooled_transactions_req_eth66()
+        }
+    }
+
+    /// Returns the approx number of transactions that a [`GetPooledTransactions`] request will
+    /// have capacity for w.r.t. the [`Eth68`](EthVersion::Eth68) protocol.
+    pub fn approx_capacity_get_pooled_transactions_req_eth68(&self) -> usize {
+        self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request /
+            MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED +
+            MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST
+    }
+
+    /// Returns the approx number of transactions that a [`GetPooledTransactions`] request will
+    /// have capacity for w.r.t. the [`Eth66`](EthVersion::Eth66) protocol.
+    pub fn approx_capacity_get_pooled_transactions_req_eth66(&self) -> usize {
+        SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST
+    }
 }
 
 impl Stream for TransactionFetcher {
@@ -824,7 +855,7 @@ impl Stream for TransactionFetcher {
             return match result {
                 Ok(Ok(transactions)) => {
                     // clear received hashes
-                    let mut fetched = Vec::with_capacity(transactions.hashes().count());
+                    let mut fetched = Vec::with_capacity(transactions.len());
                     requested_hashes.retain(|requested_hash| {
                         if transactions.hashes().any(|hash| hash == requested_hash) {
                             // hash is now known, stop tracking
@@ -833,6 +864,7 @@ impl Stream for TransactionFetcher {
                         }
                         true
                     });
+                    fetched.shrink_to_fit();
 
                     self.remove_hashes_from_transaction_fetcher(fetched);
 
@@ -1018,7 +1050,6 @@ impl Default for TransactionFetcherInfo {
 mod test {
     use std::collections::HashSet;
 
-    use reth_eth_wire::EthVersion;
     use reth_primitives::B256;
 
     use crate::transactions::tests::{default_cache, new_mock_session};
