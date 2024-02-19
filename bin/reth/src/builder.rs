@@ -1,9 +1,10 @@
 //! Contains types and methods that can be used to launch a node based off of a [NodeConfig].
 
-use crate::commands::debug_cmd::engine_api_store::EngineApiStore;
+use crate::commands::{debug_cmd::engine_api_store::EngineApiStore, import::ImportCommand};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, stream, stream_select, StreamExt};
+use lightspeed_scheduler::{job::Job, scheduler::Scheduler};
 use reth_auto_seal_consensus::AutoSealBuilder;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook},
@@ -11,6 +12,7 @@ use reth_beacon_consensus::{
 };
 use reth_blockchain_tree::{config::BlockchainTreeConfig, ShareableBlockchainTree};
 use reth_config::Config;
+
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -42,7 +44,7 @@ use reth_prune::PrunerBuilder;
 use reth_rpc_engine_api::EngineApi;
 use reth_tasks::{TaskExecutor, TaskManager};
 use reth_transaction_pool::TransactionPool;
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tracing::*;
 
@@ -74,7 +76,7 @@ pub async fn launch_from_config<E: RethCliExt>(
     mut config: NodeConfig,
     ext: E::Node,
     executor: TaskExecutor,
-) -> eyre::Result<NodeHandle> {
+) -> eyre::Result<(NodeHandle, tokio::task::JoinHandle<()>)> {
     info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
     let database = std::mem::take(&mut config.database);
@@ -112,7 +114,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         mut self,
         mut ext: E::Node,
         executor: TaskExecutor,
-    ) -> eyre::Result<NodeHandle> {
+    ) -> eyre::Result<(NodeHandle, tokio::task::JoinHandle<()>)> {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         raise_fd_limit()?;
@@ -332,7 +334,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             let mut pruner = PrunerBuilder::new(prune_config.clone())
                 .max_reorg_depth(tree_config.max_reorg_depth() as usize)
                 .prune_delete_limit(self.config.chain.prune_delete_limit)
-                .build(provider_factory, snapshotter.highest_snapshot_receiver());
+                .build(provider_factory.clone(), snapshotter.highest_snapshot_receiver());
 
             let events = pruner.events();
             hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));
@@ -359,6 +361,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             consensus_engine_rx,
             hooks,
         )?;
+
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let events = stream_select!(
@@ -436,12 +439,51 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             .await?;
         }
 
+        // Construct job scheduler for importing blocks
+        let import = ImportCommand::new(
+            Some(self.config_path()),
+            self.data_dir.clone().data_dir_path().into(),
+            self.config.chain.clone(),
+            self.config.bitfinity.clone(),
+            self.config.db,
+        );
+
+        let job_executor = lightspeed_scheduler::JobExecutor::new_with_local_tz();
+
+        // Schedule the import job
+        {
+            let interval = Duration::from_secs(self.config.bitfinity.import_interval);
+            let db = Arc::clone(&self.db);
+            job_executor
+                .add_job_with_scheduler(
+                    Scheduler::Interval { interval_duration: interval, execute_at_startup: true },
+                    Job::new("import", "block importer", None, move || {
+                        let import = import.clone();
+                        let config = config.clone();
+                        let provider_factory = provider_factory.clone();
+                        let db = db.clone();
+                        let blockchain_db = blockchain_db.clone();
+                        Box::pin(async move {
+                            import.import(config, provider_factory, db.into()).await?;
+
+                            blockchain_db.update_chain_info()?;
+
+                            Ok(())
+                        })
+                    }),
+                )
+                .await;
+        }
+
+        let job_executor_handler = job_executor.run().await?;
+
         // construct node handle and return
         let node_handle = NodeHandle {
             rpc_server_handles,
             node_exit_future: NodeExitFuture::new(rx, self.config.debug.terminate),
         };
-        Ok(node_handle)
+
+        Ok((node_handle, job_executor_handler))
     }
 
     /// Returns the path to the config file.
@@ -519,7 +561,7 @@ impl NodeHandle {
 pub async fn spawn_node(config: NodeConfig) -> eyre::Result<(NodeHandle, TaskManager)> {
     let task_manager = TaskManager::current();
     let ext = DefaultRethNodeCommandConfig::default();
-    Ok((launch_from_config::<()>(config, ext, task_manager.executor()).await?, task_manager))
+    Ok((launch_from_config::<()>(config, ext, task_manager.executor()).await?.0, task_manager))
 }
 
 #[cfg(test)]

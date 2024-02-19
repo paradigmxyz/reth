@@ -17,6 +17,7 @@ use clap::{value_parser, Parser};
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_interfaces::consensus::Consensus;
+use reth_node_core::args::BitfinityArgs;
 use reth_primitives::ChainSpec;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
@@ -84,6 +85,10 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     #[arg(long, value_name = "PATH")]
     pub trusted_setup_file: Option<PathBuf>,
 
+    /// Bitfinity Args
+    #[clap(flatten)]
+    pub bitfinity: BitfinityArgs,
+
     /// All networking related arguments
     #[clap(flatten)]
     pub network: NetworkArgs,
@@ -148,6 +153,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             pruning,
             #[cfg(feature = "optimism")]
             rollup,
+            bitfinity,
             ..
         } = self;
         NodeCommand {
@@ -169,6 +175,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             #[cfg(feature = "optimism")]
             rollup,
             ext,
+            bitfinity,
         }
     }
 
@@ -193,6 +200,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             #[cfg(feature = "optimism")]
             rollup,
             ext,
+            bitfinity,
         } = self;
 
         // set up real database
@@ -216,6 +224,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             pruning,
             #[cfg(feature = "optimism")]
             rollup,
+            bitfinity,
         };
 
         if with_unused_ports {
@@ -225,9 +234,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let executor = ctx.task_executor;
 
         // launch the node
-        let handle = launch_from_config::<Ext>(node_config, ext, executor).await?;
+        let (node_handle, job_handle) =
+            launch_from_config::<Ext>(node_config, ext, executor).await?;
 
-        handle.wait_for_node_exit().await
+        node_handle.wait_for_node_exit().await?;
+
+        job_handle.await?;
+
+        Ok(())
     }
 
     /// Returns the [Consensus] instance to use.

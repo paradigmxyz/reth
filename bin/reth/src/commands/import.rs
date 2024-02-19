@@ -13,16 +13,19 @@ use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
+use reth_db::database_metrics::DatabaseMetadata;
+
 use reth_db::{database::Database, init_db, mdbx::DatabaseArguments};
+use reth_downloaders::remote_client::RemoteClient;
 use reth_downloaders::{
-    bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
+    bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::consensus::Consensus;
-use reth_node_core::{events::node::NodeEvent, init::init_genesis};
+use reth_node_core::{args::BitfinityArgs, events::node::NodeEvent, init::init_genesis};
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageId, ChainSpec, B256};
-use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
+use reth_provider::{BlockNumReader, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage, TotalDifficultyStage},
@@ -32,7 +35,7 @@ use tokio::sync::watch;
 use tracing::{debug, info};
 
 /// Syncs RLP encoded blocks from a file.
-#[derive(Debug, Parser)]
+#[derive(Debug, Parser, Clone)]
 pub struct ImportCommand {
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
@@ -60,25 +63,34 @@ pub struct ImportCommand {
     )]
     chain: Arc<ChainSpec>,
 
+    /// Bitfinity Related Args
+    #[clap(flatten)]
+    bitfinity: BitfinityArgs,
+
+    /// The database configuration.
     #[clap(flatten)]
     db: DatabaseArgs,
-
-    /// The path to a block file for import.
-    ///
-    /// The online stages (headers and bodies) are replaced by a file import, after which the
-    /// remaining stages are executed.
-    #[arg(value_name = "IMPORT_PATH", verbatim_doc_comment)]
-    path: PathBuf,
 }
 
 impl ImportCommand {
+    /// Create a new `ImportCommand` with the given arguments.
+    pub fn new(
+        config: Option<PathBuf>,
+        datadir: MaybePlatformPath<DataDirPath>,
+        chain: Arc<ChainSpec>,
+        bitfinity: BitfinityArgs,
+        db: DatabaseArgs,
+    ) -> Self {
+        Self { config, datadir, chain, bitfinity, db }
+    }
+
     /// Execute `import` command
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
-
-        // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let config_path = self.config.clone().unwrap_or(data_dir.config_path());
+        // add network name to data dir
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
 
         let config: Config = self.load_config(config_path.clone())?;
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
@@ -87,28 +99,62 @@ impl ImportCommand {
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db =
-            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
+            Arc::new(init_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
+
         info!(target: "reth::cli", "Database opened");
-        let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone());
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
         init_genesis(db.clone(), self.chain.clone())?;
 
+        let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone());
+
+        self.import(config, provider_factory, db.into()).await?;
+
+        Ok(())
+    }
+
+    /// Import the chain from the file
+    pub async fn import<DB>(
+        &self,
+        config: Config,
+        provider_factory: ProviderFactory<DB>,
+        db: Arc<DB>,
+    ) -> eyre::Result<()>
+    where
+        DB: Database + DatabaseMetadata + Clone + Unpin + 'static,
+    {
         let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
         info!(target: "reth::cli", "Consensus engine initialized");
 
         // create a new FileClient
         info!(target: "reth::cli", "Importing chain file");
-        let file_client = Arc::new(FileClient::new(&self.path).await?);
+
+        // Get the local block number
+        let start_block = provider_factory.provider()?.last_block_number()? + 1;
+
+        info!(target: "reth::cli", "Starting block: {}", start_block);
+
+        let remote_client = Arc::new(
+            RemoteClient::from_rpc_url(
+                &self.bitfinity.rpc_url,
+                start_block,
+                self.bitfinity.end_block,
+                self.bitfinity.batch_size,
+            )
+            .await?,
+        );
 
         // override the tip
-        let tip = file_client.tip().expect("file client has no tip");
+        let tip = remote_client.tip().expect("file client has no tip");
         info!(target: "reth::cli", "Chain file imported");
 
-        let (mut pipeline, events) = self
-            .build_import_pipeline(config, provider_factory.clone(), &consensus, file_client)
-            .await?;
+        let (mut pipeline, events) = self.build_import_pipeline(
+            config,
+            provider_factory.clone(),
+            &consensus,
+            remote_client,
+        )?;
 
         // override the tip
         pipeline.set_tip(tip);
@@ -127,43 +173,40 @@ impl ImportCommand {
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
-        tokio::select! {
-            res = pipeline.run() => res?,
-            _ = tokio::signal::ctrl_c() => {},
-        };
+        pipeline.run().await?;
 
         info!(target: "reth::cli", "Finishing up");
         Ok(())
     }
 
-    async fn build_import_pipeline<DB, C>(
+    fn build_import_pipeline<DB, C>(
         &self,
         config: Config,
         provider_factory: ProviderFactory<DB>,
         consensus: &Arc<C>,
-        file_client: Arc<FileClient>,
+        remote_client: Arc<RemoteClient>,
     ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
     where
         DB: Database + Clone + Unpin + 'static,
         C: Consensus + 'static,
     {
-        if !file_client.has_canonical_blocks() {
+        if !remote_client.has_canonical_blocks() {
             eyre::bail!("unable to import non canonical blocks");
         }
 
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
-            .build(file_client.clone(), consensus.clone())
+            .build(remote_client.clone(), consensus.clone())
             .into_task();
 
         let body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
-            .build(file_client.clone(), consensus.clone(), provider_factory.clone())
+            .build(remote_client.clone(), consensus.clone(), provider_factory.clone())
             .into_task();
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let factory =
             reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
 
-        let max_block = file_client.max_block().unwrap_or(0);
+        let max_block = remote_client.max_block().unwrap_or(0);
         let mut pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
             // we want to sync all blocks the file client provides or 0 if empty

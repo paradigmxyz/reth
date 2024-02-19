@@ -1,5 +1,8 @@
 //! Parameters for configuring the rpc more granularity via CLI
 
+/// BitfinityArgs struct for configuring the bitfinity
+mod bitfinity_args;
+pub use bitfinity_args::BitfinityArgs;
 /// NetworkArg struct for configuring the network
 mod network_args;
 pub use network_args::{DiscoveryArgs, NetworkArgs};
