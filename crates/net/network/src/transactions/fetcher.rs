@@ -1092,9 +1092,8 @@ mod test {
         let mut eth68_hashes_to_request = RequestTxHashes::with_capacity(3);
         let valid_announcement_data = TestValidAnnouncementData(
             eth68_hashes
-                .clone()
                 .into_iter()
-                .zip(eth68_sizes.into_iter())
+                .zip(eth68_sizes)
                 .map(|(hash, size)| (hash, Some((0u8, size))))
                 .collect::<Vec<_>>(),
         );
