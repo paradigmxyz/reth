@@ -2412,7 +2412,7 @@ mod tests {
         use reth_interfaces::test_utils::{generators, generators::random_block};
         use reth_primitives::{
             genesis::{Genesis, GenesisAllocator},
-            Hardfork,
+            Hardfork, U256,
         };
         use reth_provider::test_utils::blocks::BlockChainTestData;
 
