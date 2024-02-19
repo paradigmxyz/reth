@@ -156,8 +156,13 @@ where
                 if let Some(seal) = seal {
                     clayer_block_from_seal(&startup_latest_header, seal)
                 } else {
-                    error!(target: "consensus::cl","block {} no seal",startup_latest_header.number);
-                    panic!("block {} no seal", startup_latest_header.number);
+                    if state.is_validator() {
+                        error!(target: "consensus::cl","block {} no seal",startup_latest_header.number);
+                        panic!("block {} no seal", startup_latest_header.number);
+                    } else {
+                        //todo for sync node
+                        clayer_block_from_genesis(&startup_latest_header)
+                    }
                 }
             };
             consensus_engine.initialize(block, &pbft_config, state);
@@ -171,7 +176,7 @@ where
                             let e = if connect {
                                 Some(ConsensusEvent::PeerConnected(peer_id))
                             } else {
-                                Some(ConsensusEvent::PeerConnected(peer_id))
+                                Some(ConsensusEvent::PeerDisconnected(peer_id))
                             };
                             e
                         }
@@ -200,30 +205,33 @@ where
                     sleep(pbft_config.update_recv_timeout);
                 }
 
-                // If the block publishing delay has passed, attempt to publish a block
-                block_publishing_ticker.tick(|| log_any_error(consensus_engine.try_publish(state)));
+                if state.is_validator() {
+                    // If the block publishing delay has passed, attempt to publish a block
+                    block_publishing_ticker
+                        .tick(|| log_any_error(consensus_engine.try_publish(state)));
 
-                // If the idle timeout has expired, initiate a view change
-                if consensus_engine.check_idle_timeout_expired(state) {
-                    warn!(target:"consensus::cl", "Idle timeout expired; proposing view change");
-                    log_any_error(consensus_engine.start_view_change(state, state.view + 1));
-                }
+                    // If the idle timeout has expired, initiate a view change
+                    if consensus_engine.check_idle_timeout_expired(state) {
+                        warn!(target:"consensus::cl", "Idle timeout expired; proposing view change");
+                        log_any_error(consensus_engine.start_view_change(state, state.view + 1));
+                    }
 
-                // If the commit timeout has expired, initiate a view change
-                if consensus_engine.check_commit_timeout_expired(state) {
-                    warn!(target:"consensus::cl", "Commit timeout expired; proposing view change");
-                    log_any_error(consensus_engine.start_view_change(state, state.view + 1));
-                }
+                    // If the commit timeout has expired, initiate a view change
+                    if consensus_engine.check_commit_timeout_expired(state) {
+                        warn!(target:"consensus::cl", "Commit timeout expired; proposing view change");
+                        log_any_error(consensus_engine.start_view_change(state, state.view + 1));
+                    }
 
-                // Check the view change timeout if the node is view changing so we can start a new
-                // view change if we don't get a NewView in time
-                if let PbftMode::ViewChanging(v) = state.mode {
-                    if consensus_engine.check_view_change_timeout_expired(state) {
-                        warn!(target:"consensus::cl",
-                            "View change timeout expired; proposing view change for view {}",
-                            v + 1
-                        );
-                        log_any_error(consensus_engine.start_view_change(state, v + 1));
+                    // Check the view change timeout if the node is view changing so we can start a new
+                    // view change if we don't get a NewView in time
+                    if let PbftMode::ViewChanging(v) = state.mode {
+                        if consensus_engine.check_view_change_timeout_expired(state) {
+                            warn!(target:"consensus::cl",
+                                "View change timeout expired; proposing view change for view {}",
+                                v + 1
+                            );
+                            log_any_error(consensus_engine.start_view_change(state, v + 1));
+                        }
                     }
                 }
             }

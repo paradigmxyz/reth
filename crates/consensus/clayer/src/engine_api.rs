@@ -476,13 +476,13 @@ impl ApiService {
             Ok(x) => x,
             Err(e) => {
                 // return Err(ApiServiceError::ApiError(format!("forkchoice_updated: {:?}", e)));
-                tracing::error!(target:"consensus::cl","ApiService::sync_block::forkchoice_updated return(error: {:?})", e);
+                //tracing::error!(target:"consensus::cl","ApiService::sync_block::forkchoice_updated return(error: {:?})", e);
                 return Err(ApiServiceError::ApiError(format!("forkchoice_updated: {:?}", e)));
             }
         };
         if !forkchoice_updated_result.payload_status.status.is_valid() {
             // return Err(ApiServiceError::BlockNotReady);
-            tracing::error!(target:"consensus::cl","ApiService::sync_block::forkchoice_updated return(not valid)");
+            //tracing::error!(target:"consensus::cl","ApiService::sync_block::forkchoice_updated return(not valid)");
             return Err(ApiServiceError::BlockNotReady);
         }
 

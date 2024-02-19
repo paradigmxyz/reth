@@ -205,11 +205,15 @@ where
             }
 
             // If connected to any peers already, send bootstrap commit messages to them
-            let connected_peers: Vec<PeerId> = self.agent.get_peers();
-            for peer_id in connected_peers {
-                self.broadcast_bootstrap_commit(peer_id, state).unwrap_or_else(|err| {
-                    error!("Failed to broadcast bootstrap commit due to error: {}", err)
-                });
+            if state.is_validator() {
+                let connected_peers: Vec<PeerId> = self.agent.get_peers();
+                for peer_id in connected_peers {
+                    self.broadcast_bootstrap_commit(peer_id, state).unwrap_or_else(|err| {
+                        error!("Failed to broadcast bootstrap commit due to error: {}", err)
+                    });
+                }
+            } else {
+                //nothing
             }
         }
 
@@ -273,6 +277,23 @@ where
         }
 
         let msg_type = PbftMessageType::from(msg.info().ptype);
+
+        //  if the node is a member of the PBFT network or not；
+        if !state.is_validator() {
+            match msg_type {
+                // PbftMessageType::PrePrepare => self.handle_pre_prepare(msg, state)?,
+                // PbftMessageType::Prepare => self.handle_prepare(msg, state)?,
+                // PbftMessageType::Commit => self.handle_commit(msg, state)?,
+                // PbftMessageType::ViewChange => self.handle_view_change(&msg, state)?,
+                // PbftMessageType::NewView => self.handle_new_view(&msg, state)?,
+                // PbftMessageType::SealRequest => self.handle_seal_request(msg, state)?,
+                // PbftMessageType::Seal => self.handle_seal_response(&msg, state)?,
+                // PbftMessageType::BlockNew => self.handle_block_new(msg, state)?,
+                PbftMessageType::AnnounceBlock => self.handle_announceblock_response(&msg)?,
+                _ => warn!("Received message with validiator type: {:?}", msg_type),
+            }
+            return Ok(());
+        }
 
         // If this node is in the process of a view change, ignore all messages except ViewChanges
         // and NewViews
@@ -749,7 +770,8 @@ where
         match self.service_mut().announce_block(blockhash) {
             Ok(_) => Ok(()),
             Err(_e) => {
-                Err(PbftError::ServiceError("announceblock".to_string(), "error".to_string()))
+                //Err(PbftError::ServiceError("announceblock".to_string(), "error".to_string()))
+                Ok(())
             }
         }
     }
@@ -1212,7 +1234,10 @@ where
         state: &mut PbftState,
     ) -> Result<(), PbftError> {
         // Ignore if the peer is not a member of the PBFT network or the chain head is block 0
-        if !state.validators.contains(&peer_id) || state.seq_num == 0 {
+        if !state.validators.contains(&peer_id)
+            || state.seq_num == 0
+            || !state.validators.contains(&state.id)
+        {
             return Ok(());
         }
 

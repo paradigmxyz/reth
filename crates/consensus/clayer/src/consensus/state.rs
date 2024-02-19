@@ -161,6 +161,11 @@ impl PbftState {
         self.validators.is_primary(self.id.clone(), self.view)
     }
 
+    /// Tell if this node is validator
+    pub fn is_validator(&self) -> bool {
+        self.validators.contains(&self.id)
+    }
+
     /// Tell if this node is the primary at the specified view
     pub fn is_primary_at_view(&self, view: u64) -> bool {
         self.id == self.get_primary_id_at_view(view)
