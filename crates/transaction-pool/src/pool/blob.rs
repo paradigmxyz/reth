@@ -85,7 +85,27 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         &self,
         _best_transactions_attributes: BestTransactionsAttributes,
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        Vec::new()
+        let mut transactions = Vec::new();
+        {
+            let mut iter = self.by_id.iter().peekable();
+
+            while let Some((id, tx)) = iter.next() {
+                if tx.transaction.max_fee_per_blob_gas() < Some(pending_fees.blob_fee) ||
+                    tx.transaction.max_fee_per_gas() < pending_fees.base_fee as u128
+                {
+                    // still parked in blob pool -> skip descendant transactions
+                    'this: while let Some((peek, _)) = iter.peek() {
+                        if peek.sender != id.sender {
+                            break 'this
+                        }
+                        iter.next();
+                    }
+                } else {
+                    transactions.push(*id);
+                }
+            }
+        }
+        transactions
     }
 
     /// The reported size of all transactions in this pool.
