@@ -305,7 +305,8 @@ pub trait EncodableExt {
     /// * The encoded data as `Vec<u8>`.
     /// * The length of the data at the point just before reaching the limit, or 0 if the limit was
     ///   not exceeded.
-    fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize);
+    /// * Actual payload length
+    fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize, usize);
 }
 
 impl<T: Encodable> EncodableExt for Vec<T> {
@@ -314,38 +315,76 @@ impl<T: Encodable> EncodableExt for Vec<T> {
         approx: usize,
         limit: usize,
     ) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error> {
-        let (mut buf, current_len) = self.encode_until_limit(approx, limit);
+        let (mut buf, current_len, actual_payload_length) = self.encode_until_limit(approx, limit);
 
         if current_len != 0 {
             // Don't shrink if limit_exceeded since we return Error anyway
             return Err(alloy_rlp::Error::Custom("Size limit exceeded"));
         }
+        let mut header_buffer = Vec::new();
+        let header = Header { list: true, payload_length: actual_payload_length };
+        header.encode(&mut header_buffer);
+        // Ensure the encoded header does not exceed the placeholder size
+        assert!(header_buffer.len() <= 3); // header placeholder size is 3
+                                           // Replace the placeholder with the real header
+        for i in 0..header_buffer.len() {
+            buf[i] = header_buffer[i];
+        }
+        // If the real header is smaller than the placeholder, remove the excess
+        if header_buffer.len() < 3 {
+            let excess = 3 - header_buffer.len();
+            buf.drain(header_buffer.len()..excess);
+        }
         buf.shrink_to_fit();
         Ok(buf)
     }
 
-    fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize) {
+    fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize, usize) {
         let mut buffer = Vec::with_capacity(approx);
         let mut header = Header { list: true, payload_length: 0 };
         for item in self {
+            // initial payload length calculation if limit is not exceeded
             header.payload_length += item.length();
         }
-        header.encode(&mut buffer);
+        // header.encode(&mut buffer);
+        let header_placeholder_size = 3;
+        buffer.extend(vec![0; header_placeholder_size]);
+        let mut actual_payload_length = 0;
         for item in self {
             let current_len = buffer.len();
             item.encode(&mut buffer);
             if buffer.len() > limit {
-                return (buffer, current_len);
+                return (buffer, current_len, actual_payload_length);
             }
+            actual_payload_length += item.length();
         }
         // Return current_len as 0
-        (buffer, 0)
+        (buffer, 0, header.payload_length)
     }
 
     fn encode_truncate(&self, approx: usize, limit: usize) -> Vec<u8> {
-        let (mut buf, current_len) = self.encode_until_limit(approx, limit);
+        let (mut buf, current_len, actual_payload_length) = self.encode_until_limit(approx, limit);
+        // let header_buffer
+        let mut header_buffer = Vec::new();
+        let header = Header { list: true, payload_length: actual_payload_length };
+        header.encode(&mut header_buffer);
+        // Ensure the encoded header does not exceed the placeholder size
+        assert!(header_buffer.len() <= 3); // header placeholder size is 3
+                                           // Replace the placeholder with the real header
+        for i in 0..header_buffer.len() {
+            buf[i] = header_buffer[i];
+        }
+        // If the real header is smaller than the placeholder, remove the excess
+        if header_buffer.len() < 3 {
+            let excess = 3 - header_buffer.len();
+            buf.drain(header_buffer.len()..excess);
+        }
         if current_len != 0 {
-            buf.truncate(current_len);
+            // placeholder value case, nothing in the vec that is to be encoded
+
+            let difference_in_list_header_estimation = 3 - header_buffer.len();
+
+            buf.truncate(current_len - difference_in_list_header_estimation);
             buf.shrink_to_fit(); // shrink buffer to catch cases where approx > limit
             return buf;
         }
@@ -599,7 +638,7 @@ mod tests {
         EthMessageID, GetNodeData, NodeData, ProtocolMessage,
     };
     use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives::{hex, Bytes, Header, B256, U256};
+    use reth_primitives::{hex, Address, Bytes, Header, B256, U256};
     use std::str::FromStr;
 
     fn encode<T: Encodable>(value: T) -> Vec<u8> {
@@ -653,12 +692,14 @@ mod tests {
         assert_eq!(expected, got);
     }
 
-    //Test vector for header from: https://eips.ethereum.org/EIPS/eip-2481
+    // Test vector for header from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]
     fn encode_max_header_decode() {
         let mut headers: Vec<Header> = Vec::new();
         // list header : f901fc
-        let expected = hex!("f901fcf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000");
+        let expected =
+    hex!("f901fcf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000"
+    );
 
         headers.push(Header {
             difficulty: U256::from(0x8ae_u64),
@@ -679,6 +720,107 @@ mod tests {
 
         let fail_res = headers.encode_max(300, 510);
         assert!(
+            matches!(fail_res, Err(alloy_rlp::Error::Custom(msg)) if msg.contains("Size limit
+    exceeded")),
+            "Expected 'Size limit exceeded' error"
+        );
+    }
+
+    //Test vector for header from: https://eips.ethereum.org/EIPS/eip-2481
+    #[test]
+    fn encode_max_header_decode_round_trip() {
+        let mut headers = Vec::new();
+        // list header : f901fc
+        let expected =
+    hex!("f901fcf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000"
+    );
+        let header1 = Header {
+            difficulty: U256::from(0x8ae_u64),
+            number: 0xd05_u64,
+            gas_limit: 0x115c_u64,
+            gas_used: 0x15b3_u64,
+            timestamp: 0x1a0a_u64,
+            extra_data: Bytes::from_str("7788").unwrap(),
+            ommers_hash: B256::ZERO,
+            state_root: B256::ZERO,
+            transactions_root: B256::ZERO,
+            receipts_root: B256::ZERO,
+            ..Default::default()
+        };
+        headers.push(header1.clone());
+
+        let res = headers.encode_max(300, 511).unwrap();
+        assert_eq!(res, expected);
+        let b = &mut &*res;
+        let s = Vec::<Header>::decode(b).unwrap();
+        assert_eq!(s[0], header1);
+    }
+
+    //Test vector for header from: https://eips.ethereum.org/EIPS/eip-2481 and https://github.com/ethereum/tests/blob/970503935aeb76f59adfa3b3224aabf25e77b83d/BlockchainTests/ValidBlocks/bcExample/shanghaiExample.json#L15-L34
+    #[test]
+    fn encode_max_header_decode_round_trip_vec() {
+        let mut headers = Vec::new();
+        // list header : f9041b + header1 + header2
+        let expected = hex!("f9041bf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f9021ca018db39e19931515b30b16b3a92c292398039e31d6c267111529c3f2ba0a26c17a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa095efce3d6972874ca8b531b233b7a1d1ff0a56f08b20c8f1b89bef1b001194a5a071e515dd89e8a7973402c2e11646081b4e2209b2d3a1550df5095289dabcb3fba0ed9c51ea52c968e552e370a77a41dac98606e98b915092fb5f949d6452fce1c4b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff830125b882079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a027f166f1d7c789251299535cb176ba34116e44894476a7886fe5d73d9be5c973");
+        let header1 = Header {
+            difficulty: U256::from(0x8ae_u64),
+            number: 0xd05_u64,
+            gas_limit: 0x115c_u64,
+            gas_used: 0x15b3_u64,
+            timestamp: 0x1a0a_u64,
+            extra_data: Bytes::from_str("7788").unwrap(),
+            ommers_hash: B256::ZERO,
+            state_root: B256::ZERO,
+            transactions_root: B256::ZERO,
+            receipts_root: B256::ZERO,
+            ..Default::default()
+        };
+        // header2
+        let _data2 = hex!("f9021ca018db39e19931515b30b16b3a92c292398039e31d6c267111529c3f2ba0a26c17a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa095efce3d6972874ca8b531b233b7a1d1ff0a56f08b20c8f1b89bef1b001194a5a071e515dd89e8a7973402c2e11646081b4e2209b2d3a1550df5095289dabcb3fba0ed9c51ea52c968e552e370a77a41dac98606e98b915092fb5f949d6452fce1c4b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff830125b882079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a027f166f1d7c789251299535cb176ba34116e44894476a7886fe5d73d9be5c973");
+        let header2 = Header {
+            parent_hash: B256::from_str(
+                "18db39e19931515b30b16b3a92c292398039e31d6c267111529c3f2ba0a26c17",
+            )
+            .unwrap(),
+            beneficiary: Address::from_str("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba").unwrap(),
+            state_root: B256::from_str(
+                "95efce3d6972874ca8b531b233b7a1d1ff0a56f08b20c8f1b89bef1b001194a5",
+            )
+            .unwrap(),
+            transactions_root: B256::from_str(
+                "71e515dd89e8a7973402c2e11646081b4e2209b2d3a1550df5095289dabcb3fb",
+            )
+            .unwrap(),
+            receipts_root: B256::from_str(
+                "ed9c51ea52c968e552e370a77a41dac98606e98b915092fb5f949d6452fce1c4",
+            )
+            .unwrap(),
+            number: 0x01,
+            gas_limit: 0x7fffffffffffffff,
+            gas_used: 0x0125b8,
+            timestamp: 0x079e,
+            extra_data: Bytes::from_str("42").unwrap(),
+            mix_hash: B256::from_str(
+                "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            )
+            .unwrap(),
+            base_fee_per_gas: Some(0x09),
+            withdrawals_root: Some(
+                B256::from_str("27f166f1d7c789251299535cb176ba34116e44894476a7886fe5d73d9be5c973")
+                    .unwrap(),
+            ),
+            ..Default::default()
+        };
+        headers.push(header1.clone());
+        headers.push(header2.clone());
+        let res = headers.encode_max(300, 1400).unwrap();
+        assert_eq!(res, expected);
+        let b = &mut &*res;
+        let s = Vec::<Header>::decode(b).unwrap();
+        assert_eq!(s[0], header1);
+        // payload length is 1051 + list header of 3(placeholder) . So 1053 will throw error
+        let fail_res = headers.encode_max(300, 1053);
+        assert!(
             matches!(fail_res, Err(alloy_rlp::Error::Custom(msg)) if msg.contains("Size limit exceeded")),
             "Expected 'Size limit exceeded' error"
         );
@@ -688,12 +830,14 @@ mod tests {
     #[test]
     fn test_encode_truncate() {
         let mut headers: Vec<Header> = Vec::new();
-        // list header : f901fc
+        // list header : f901fc + header
         let expected = hex!("f901fcf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000");
 
         // buffer will be truncated back to last item , i.e list header in our case. Since we had
         // list_header + 1 Header in the vec in our test
-        let truncated_expected = hex!("f901fc");
+        // list header will be
+        // let header = Header { list: true, payload_length: 0 }; which is 192 i.e c0
+        let truncated_expected = hex!("c0");
 
         headers.push(Header {
             difficulty: U256::from(0x8ae_u64),
