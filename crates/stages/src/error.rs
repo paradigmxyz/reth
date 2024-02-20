@@ -136,6 +136,7 @@ impl StageError {
                 StageError::ChannelClosed |
                 StageError::InconsistentBlockNumber { .. } |
                 StageError::InconsistentTxNumber { .. } |
+                StageError::Internal(_) |
                 StageError::Fatal(_)
         )
     }

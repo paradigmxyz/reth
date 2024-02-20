@@ -108,7 +108,7 @@ pub use best::BestTransactionFilter;
 pub use blob::{blob_tx_priority, fee_delta};
 pub use events::{FullTransactionEvent, TransactionEvent};
 pub use listener::{AllTransactionsEvents, TransactionEvents};
-pub use parked::{BasefeeOrd, ParkedOrd, ParkedPool};
+pub use parked::{BasefeeOrd, ParkedOrd, ParkedPool, QueuedOrd};
 pub use pending::PendingPool;
 
 mod best;

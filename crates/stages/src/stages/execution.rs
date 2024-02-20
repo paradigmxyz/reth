@@ -597,8 +597,8 @@ mod tests {
     use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Address,
-        Bytecode, ChainSpecBuilder, PruneMode, ReceiptsLogPruneConfig, SealedBlock, StorageEntry,
-        B256,
+        Bytecode, ChainSpecBuilder, PruneMode, PruneModes, ReceiptsLogPruneConfig, SealedBlock,
+        StorageEntry, B256, U256,
     };
     use reth_provider::{test_utils::create_test_provider_factory, AccountReader, ReceiptProvider};
     use reth_revm::EvmProcessorFactory;

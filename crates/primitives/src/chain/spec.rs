@@ -785,6 +785,14 @@ impl ChainSpec {
         &self.hardforks
     }
 
+    /// Returns the hardfork display helper.
+    pub fn display_hardforks(&self) -> DisplayHardforks {
+        DisplayHardforks::new(
+            self.hardforks(),
+            self.paris_block_and_final_difficulty.map(|(block, _)| block),
+        )
+    }
+
     /// Get the fork id for the given hardfork.
     #[inline]
     pub fn hardfork_fork_id(&self, fork: Hardfork) -> Option<ForkId> {
@@ -1530,8 +1538,7 @@ impl Display for DisplayFork {
 ///
 /// ```
 /// # use reth_primitives::MAINNET;
-/// # use reth_primitives::DisplayHardforks;
-/// println!("{}", DisplayHardforks::new(MAINNET.hardforks()));
+/// println!("{}", MAINNET.display_hardforks());
 /// ```
 ///
 /// An example of the output:
@@ -1553,7 +1560,7 @@ impl Display for DisplayFork {
 // - ArrowGlacier                     @13773000
 // - GrayGlacier                      @15050000
 // Merge hard forks:
-// - Paris                            @58750000000000000000000 (network is not known to be merged)
+// - Paris                            @58750000000000000000000 (network is known to be merged)
 //
 // Post-merge hard forks (timestamp based):
 // - Shanghai                         @1681338455
@@ -1595,26 +1602,27 @@ impl Display for DisplayHardforks {
 
 impl DisplayHardforks {
     /// Creates a new [`DisplayHardforks`] from an iterator of hardforks.
-    pub fn new(hardforks: &BTreeMap<Hardfork, ForkCondition>) -> Self {
-        Self::from_iter(hardforks.iter())
-    }
-}
-
-impl<'a, 'b> FromIterator<(&'a Hardfork, &'b ForkCondition)> for DisplayHardforks {
-    fn from_iter<T: IntoIterator<Item = (&'a Hardfork, &'b ForkCondition)>>(iter: T) -> Self {
+    pub fn new(
+        hardforks: &BTreeMap<Hardfork, ForkCondition>,
+        known_paris_block: Option<u64>,
+    ) -> Self {
         let mut pre_merge = Vec::new();
         let mut with_merge = Vec::new();
         let mut post_merge = Vec::new();
 
-        for (fork, condition) in iter {
-            let display_fork =
+        for (fork, condition) in hardforks {
+            let mut display_fork =
                 DisplayFork { name: fork.to_string(), activated_at: *condition, eip: None };
 
             match condition {
                 ForkCondition::Block(_) => {
                     pre_merge.push(display_fork);
                 }
-                ForkCondition::TTD { .. } => {
+                ForkCondition::TTD { total_difficulty, .. } => {
+                    display_fork.activated_at = ForkCondition::TTD {
+                        fork_block: known_paris_block,
+                        total_difficulty: *total_difficulty,
+                    };
                     with_merge.push(display_fork);
                 }
                 ForkCondition::Timestamp(_) => {
@@ -1690,7 +1698,7 @@ mod tests {
     #[test]
     fn test_hardfork_list_display_mainnet() {
         assert_eq!(
-            DisplayHardforks::new(MAINNET.hardforks()).to_string(),
+            MAINNET.display_hardforks().to_string(),
             "Pre-merge hard forks (block based):
 - Frontier                         @0
 - Homestead                        @1150000
@@ -1707,7 +1715,7 @@ mod tests {
 - ArrowGlacier                     @13773000
 - GrayGlacier                      @15050000
 Merge hard forks:
-- Paris                            @58750000000000000000000 (network is not known to be merged)
+- Paris                            @58750000000000000000000 (network is known to be merged)
 
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
@@ -1725,7 +1733,7 @@ Post-merge hard forks (timestamp based):
             .with_fork(Hardfork::Shanghai, ForkCondition::Never)
             .build();
         assert_eq!(
-            DisplayHardforks::new(spec.hardforks()).to_string(),
+            spec.display_hardforks().to_string(),
             "Pre-merge hard forks (block based):
 - Frontier                         @0
 "

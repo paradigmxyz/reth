@@ -13,7 +13,7 @@ use crate::{
 use parking_lot::RwLock;
 use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{ffi::DBI, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
-use reth_tracing::tracing::{trace, warn};
+use reth_tracing::tracing::{debug, trace, warn};
 use std::{
     backtrace::Backtrace,
     marker::PhantomData,
@@ -107,15 +107,27 @@ impl<K: TransactionKind> Tx<K> {
         outcome: TransactionOutcome,
         f: impl FnOnce(Self) -> (R, Option<CommitLatency>),
     ) -> R {
+        let run = |tx| {
+            let start = Instant::now();
+            let (result, commit_latency) = f(tx);
+            let total_duration = start.elapsed();
+
+            debug!(
+                target: "storage::db::mdbx",
+                ?total_duration,
+                ?commit_latency,
+                "Commit"
+            );
+
+            (result, commit_latency, total_duration)
+        };
+
         if let Some(mut metrics_handler) = self.metrics_handler.take() {
             metrics_handler.close_recorded = true;
             metrics_handler.log_backtrace_on_long_read_transaction();
 
-            let start = Instant::now();
-            let (result, commit_latency) = f(self);
+            let (result, commit_latency, close_duration) = run(self);
             let open_duration = metrics_handler.start.elapsed();
-            let close_duration = start.elapsed();
-
             TransactionMetrics::record_close(
                 metrics_handler.transaction_mode(),
                 outcome,
@@ -126,7 +138,7 @@ impl<K: TransactionKind> Tx<K> {
 
             result
         } else {
-            f(self).0
+            run(self).0
         }
     }
 

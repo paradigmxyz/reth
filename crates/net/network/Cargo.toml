@@ -46,7 +46,7 @@ tokio-util = { workspace = true, features = ["codec"] }
 
 # io
 serde = { workspace = true, optional = true }
-humantime-serde = { version = "1.1", optional = true }
+humantime-serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 
 # metrics
