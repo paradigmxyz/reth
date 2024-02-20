@@ -104,14 +104,14 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             let (recovered_senders_tx, recovered_senders_rx) = mpsc::channel();
             channels.push(recovered_senders_rx);
 
-            let manager = provider.snapshot_provider().clone();
+            let snapshot_provider = provider.snapshot_provider().clone();
 
             // Spawn the task onto the global rayon pool
             // This task will send the results through the channel after it has read the transaction
             // and calculated the sender.
             rayon::spawn(move || {
                 let mut rlp_buf = Vec::with_capacity(128);
-                let _ = manager.fetch_range_with_predicate(
+                let _ = snapshot_provider.fetch_range_with_predicate(
                     SnapshotSegment::Transactions,
                     chunk_range,
                     |cursor, number| {
