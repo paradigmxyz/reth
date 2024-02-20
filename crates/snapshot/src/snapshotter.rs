@@ -206,7 +206,7 @@ mod tests {
         let db = TestStageDB::default();
 
         let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3);
-        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), Some(0)).expect("insert blocks");
         // Unwind headers from snapshots and manually insert them into the database, so we're able
         // to check that snapshotter works
         db.factory
