@@ -399,10 +399,6 @@ mod tests {
     }
 
     impl TransactionLookupTestRunner {
-        fn set_commit_threshold(&mut self, threshold: u64) {
-            self.commit_threshold = threshold;
-        }
-
         fn set_prune_mode(&mut self, prune_mode: PruneMode) {
             self.prune_mode = Some(prune_mode);
         }
