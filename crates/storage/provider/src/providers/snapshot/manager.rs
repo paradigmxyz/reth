@@ -32,9 +32,7 @@ use std::{
     ops::{Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
     sync::Arc,
-    time::Instant,
 };
-use tracing::debug;
 
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a snapshot range.
