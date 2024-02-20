@@ -1413,6 +1413,12 @@ where
             }
             Err(err) => {
                 warn!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
+                if err.kind().is_invalid_block() {
+                    let (block, err) = err.split();
+                    warn!(target: "consensus::engine", invalid_number=?block.number, invalid_hash=?block.hash(), ?err, "Marking block as invalid");
+
+                    self.invalid_headers.insert(block.header);
+                }
             }
         }
     }
