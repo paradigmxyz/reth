@@ -81,7 +81,7 @@ mod tests {
     use reth_interfaces::test_utils::{generators, generators::random_block_range};
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber, B256};
     use reth_provider::PruneCheckpointReader;
-    use reth_stages::test_utils::TestStageDB;
+    use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::ops::Sub;
 
     #[test]
@@ -90,7 +90,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, 1..=10, B256::ZERO, 2..3);
-        db.insert_blocks(blocks.iter(), Some(0)).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
         let mut transaction_senders = Vec::new();
         for block in &blocks {
