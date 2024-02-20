@@ -1,13 +1,15 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
-use reth_primitives::stage::{StageCheckpoint, StageId};
-use reth_provider::{BlockNumReader, DatabaseProviderRW};
+use reth_primitives::{
+    snapshot::HighestSnapshots,
+    stage::{StageCheckpoint, StageId},
+};
+use reth_provider::{DatabaseProviderRW, StageCheckpointReader};
 use reth_snapshot::Snapshotter;
 
 /// The snapshot stage _copies_ all data from database to static files using [Snapshotter]. The
 /// block range for copying is determined by the current highest blocks contained in static files
-/// and [BlockNumReader::best_block_number],
-/// i.e. the range is `highest_snapshotted_block_number..=best_block_number`.
+/// and stage checkpoints for each segment individually.
 #[derive(Debug)]
 pub struct SnapshotStage<DB: Database> {
     snapshotter: Snapshotter<DB>,
@@ -30,7 +32,17 @@ impl<DB: Database> Stage<DB> for SnapshotStage<DB> {
         provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let targets = self.snapshotter.get_snapshot_targets(provider.best_block_number()?)?;
+        let targets = self.snapshotter.get_snapshot_targets(HighestSnapshots {
+            headers: provider
+                .get_stage_checkpoint(StageId::Headers)?
+                .map(|checkpoint| checkpoint.block_number),
+            receipts: provider
+                .get_stage_checkpoint(StageId::Execution)?
+                .map(|checkpoint| checkpoint.block_number),
+            transactions: provider
+                .get_stage_checkpoint(StageId::Bodies)?
+                .map(|checkpoint| checkpoint.block_number),
+        })?;
         self.snapshotter.run(targets)?;
         Ok(ExecOutput::done(input.checkpoint()))
     }
