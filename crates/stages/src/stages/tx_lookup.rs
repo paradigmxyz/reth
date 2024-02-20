@@ -100,13 +100,19 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let mut hash_collector: Collector<TxHash, TxNumber> =
             Collector::new(Arc::new(TempDir::new()?), 500 * (1024 * 1024));
 
+        debug!(
+            target: "sync::stages::transaction_lookup",
+            tx_range = ?input.checkpoint().block_number..=input.target(),
+            "Updating transaction lookup"
+        );
+
         loop {
             let (tx_range, block_range, is_final_range) = input
                 .next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
 
             let end_block = *block_range.end();
 
-            debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Updating transaction lookup");
+            debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Calculating transaction hashes");
 
             for (key, value) in provider.transaction_hashes_by_range(tx_range)? {
                 hash_collector.insert(key, value);
@@ -127,11 +133,11 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                 for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
                     let (hash, number) = hash_to_number?;
                     if index > 0 && index % interval == 0 {
-                        info!(
+                        debug!(
                             target: "sync::stages::transaction_lookup",
                             ?append_only,
                             progress = format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
-                            "Writing transaction hash index"
+                            "Inserting hashes"
                         );
                     }
 
