@@ -630,8 +630,9 @@ impl SnapshotWriter for Arc<SnapshotProvider> {
             debug!(
                 target: "provider::static_file",
                 segment = ?writer.segment(),
+                ?path,
                 duration = ?time.elapsed(),
-                "Commit time"
+                "Commit"
             );
         }
         Ok(())
