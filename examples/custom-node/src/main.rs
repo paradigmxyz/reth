@@ -39,7 +39,7 @@ use reth_node_api::{
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
-    node::{EthereumNetworkBuilder, EthereumPayloadBuilder, EthereumPoolBuilder},
+    node::{EthereumNetworkBuilder, EthereumPoolBuilder},
     EthEvmConfig,
 };
 use reth_payload_builder::{
@@ -147,7 +147,7 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
         chain_spec: &ChainSpec,
         parent: &Header,
     ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
-        EthereumPayloadBuilder::default().cfg_and_block_env(chain_spec, parent)
+        self.0.cfg_and_block_env(chain_spec, parent)
     }
 }
 

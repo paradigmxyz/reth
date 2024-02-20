@@ -204,7 +204,7 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::args::{utils::SUPPORTED_CHAINS, ColorMode};
+    use crate::args::ColorMode;
     use clap::CommandFactory;
 
     #[test]
