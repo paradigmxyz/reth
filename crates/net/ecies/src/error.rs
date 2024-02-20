@@ -3,6 +3,7 @@ use std::fmt;
 use thiserror::Error;
 
 /// An error that occurs while reading or writing to an ECIES stream.
+#[derive(Debug, Error)]
 pub struct ECIESError {
     inner: Box<ECIESErrorImpl>,
 }
@@ -14,21 +15,9 @@ impl ECIESError {
     }
 }
 
-impl fmt::Debug for ECIESError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(&*self.inner, f)
-    }
-}
-
 impl fmt::Display for ECIESError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&*self.inner, f)
-    }
-}
-
-impl std::error::Error for ECIESError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.inner.source()
     }
 }
 
