@@ -338,7 +338,7 @@ impl<T: Encodable> EncodableExt for Vec<T> {
                 let mut head: Vec<u8> = Vec::new();
                 header.payload_length = actual_payload_length - item.length();
                 header.encode(&mut head);
-                current_len = head.len() + current_len;
+                current_len += head.len();
                 head.append(&mut buffer);
                 return (head.clone(), current_len);
             }
@@ -367,7 +367,7 @@ impl<T: Encodable> EncodableExt for Vec<T> {
     }
 }
 
-fn check_limit(buf: &Vec<u8>, payload_length: usize) -> usize {
+fn check_limit(buf: &[u8], payload_length: usize) -> usize {
     let mut head: Vec<u8> = Vec::new();
     let header = Header { list: true, payload_length };
     header.encode(&mut head);
