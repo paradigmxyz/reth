@@ -137,32 +137,37 @@ impl<DB: Database> Snapshotter<DB> {
         Ok(targets)
     }
 
-    /// Returns a snapshot targets at the provided finalized block number.
+    /// Returns a snapshot targets at the provided finalized block numbers per segment.
     /// The target is determined by the check against highest snapshots using
     /// [SnapshotProvider::get_highest_snapshots].
     pub fn get_snapshot_targets(
         &self,
-        finalized_block_number: BlockNumber,
+        finalized_block_numbers: HighestSnapshots,
     ) -> RethResult<SnapshotTargets> {
         let highest_snapshots = self.snapshot_provider.get_highest_snapshots();
 
         let targets = SnapshotTargets {
-            headers: self.get_snapshot_target(highest_snapshots.headers, finalized_block_number),
+            headers: finalized_block_numbers.headers.and_then(|finalized_block_number| {
+                self.get_snapshot_target(highest_snapshots.headers, finalized_block_number)
+            }),
             // Snapshot receipts only if they're not pruned according to the user configuration
             receipts: if self.prune_modes.receipts.is_none() &&
                 self.prune_modes.receipts_log_filter.is_empty()
             {
-                self.get_snapshot_target(highest_snapshots.receipts, finalized_block_number)
+                finalized_block_numbers.receipts.and_then(|finalized_block_number| {
+                    self.get_snapshot_target(highest_snapshots.receipts, finalized_block_number)
+                })
             } else {
                 None
             },
-            transactions: self
-                .get_snapshot_target(highest_snapshots.transactions, finalized_block_number),
+            transactions: finalized_block_numbers.transactions.and_then(|finalized_block_number| {
+                self.get_snapshot_target(highest_snapshots.transactions, finalized_block_number)
+            }),
         };
 
         trace!(
             target: "snapshot",
-            %finalized_block_number,
+            ?finalized_block_numbers,
             ?highest_snapshots,
             ?targets,
             any = %targets.any(),
@@ -237,7 +242,13 @@ mod tests {
         let mut snapshotter =
             Snapshotter::new(provider_factory, snapshot_provider.clone(), PruneModes::default());
 
-        let targets = snapshotter.get_snapshot_targets(1).expect("get snapshot targets");
+        let targets = snapshotter
+            .get_snapshot_targets(HighestSnapshots {
+                headers: Some(1),
+                receipts: Some(1),
+                transactions: Some(1),
+            })
+            .expect("get snapshot targets");
         assert_eq!(
             targets,
             SnapshotTargets {
@@ -252,7 +263,13 @@ mod tests {
             HighestSnapshots { headers: Some(1), receipts: Some(1), transactions: Some(1) }
         );
 
-        let targets = snapshotter.get_snapshot_targets(3).expect("get snapshot targets");
+        let targets = snapshotter
+            .get_snapshot_targets(HighestSnapshots {
+                headers: Some(3),
+                receipts: Some(3),
+                transactions: Some(3),
+            })
+            .expect("get snapshot targets");
         assert_eq!(
             targets,
             SnapshotTargets {
@@ -267,7 +284,13 @@ mod tests {
             HighestSnapshots { headers: Some(3), receipts: Some(3), transactions: Some(3) }
         );
 
-        let targets = snapshotter.get_snapshot_targets(4).expect("get snapshot targets");
+        let targets = snapshotter
+            .get_snapshot_targets(HighestSnapshots {
+                headers: Some(4),
+                receipts: Some(4),
+                transactions: Some(4),
+            })
+            .expect("get snapshot targets");
         assert_eq!(
             targets,
             SnapshotTargets {

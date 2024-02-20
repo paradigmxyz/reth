@@ -7,7 +7,7 @@ use crate::{
 use futures::FutureExt;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
-use reth_primitives::BlockNumber;
+use reth_primitives::{snapshot::HighestSnapshots, BlockNumber};
 use reth_snapshot::{Snapshotter, SnapshotterWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
@@ -81,7 +81,11 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
                     return Ok(None)
                 };
 
-                let targets = snapshotter.get_snapshot_targets(finalized_block_number)?;
+                let targets = snapshotter.get_snapshot_targets(HighestSnapshots {
+                    headers: Some(finalized_block_number),
+                    receipts: Some(finalized_block_number),
+                    transactions: Some(finalized_block_number),
+                })?;
 
                 // Check if the snapshotting of any data has been requested.
                 if targets.any() {

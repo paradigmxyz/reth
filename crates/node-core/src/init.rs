@@ -239,7 +239,6 @@ mod tests {
         cursor::DbCursorRO,
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         table::{Table, TableRow},
-        transaction::DbTx,
         DatabaseEnv,
     };
     use reth_primitives::{
