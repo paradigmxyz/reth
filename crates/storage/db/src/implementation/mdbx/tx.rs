@@ -113,7 +113,7 @@ impl<K: TransactionKind> Tx<K> {
             let total_duration = start.elapsed();
 
             // fsync or msync
-            let sync = commit_latency.as_ref().and_then(|latency| Some(latency.sync()));
+            let sync = commit_latency.as_ref().map(|latency| latency.sync());
 
             debug!(
                 target: "provider::database",
