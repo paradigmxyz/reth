@@ -5905,6 +5905,7 @@ name = "reth-config"
 version = "0.1.0-alpha.19"
 dependencies = [
  "confy",
+ "humantime-serde",
  "reth-discv4",
  "reth-net-nat",
  "reth-network",
