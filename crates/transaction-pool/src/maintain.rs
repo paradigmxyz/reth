@@ -347,7 +347,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     pending_block_blob_fee,
                     changed_accounts,
                     // all transactions mined in the new chain need to be removed from the pool
-                    mined_transactions: new_mined_transactions.into_iter().collect(),
+                    mined_transactions: new_blocks.transaction_hashes().collect(),
                 };
                 pool.on_canonical_state_change(update);
 
