@@ -191,8 +191,7 @@ fn stage_checkpoint<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestStageDB, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind, TestRunnerError, TestStageDB, UnwindStageTestRunner
     };
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::{
@@ -231,7 +230,7 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        runner.db.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
+        runner.db.insert_blocks(blocks.iter(), StorageKind::Static).expect("failed to insert blocks");
 
         let rx = runner.execute(input);
 
@@ -366,7 +365,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
-        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
 
         let max_pruned_block = 30;
         let max_processed_block = 70;
@@ -488,7 +487,7 @@ mod tests {
             let mut rng = generators::rng();
 
             let blocks = random_block_range(&mut rng, stage_progress + 1..=end, B256::ZERO, 0..2);
-            self.db.insert_blocks(blocks.iter(), None)?;
+            self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             Ok(blocks)
         }
 

@@ -340,8 +340,7 @@ fn validate_state_root(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestStageDB, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind, TestRunnerError, TestStageDB, UnwindStageTestRunner
     };
     use assert_matches::assert_matches;
     use reth_db::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
@@ -515,7 +514,7 @@ mod tests {
             let mut blocks = vec![sealed_head];
             blocks.extend(random_block_range(&mut rng, start..=end, head_hash, 0..3));
             let last_block = blocks.last().cloned().unwrap();
-            self.db.insert_blocks(blocks.iter(), None)?;
+            self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
 
             let (transitions, final_state) = random_changeset_range(
                 &mut rng,

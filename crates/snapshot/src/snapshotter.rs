@@ -197,7 +197,7 @@ mod tests {
     };
     use reth_primitives::{snapshot::HighestSnapshots, PruneModes, SnapshotSegment, B256, U256};
     use reth_provider::providers::SnapshotWriter;
-    use reth_stages::test_utils::TestStageDB;
+    use reth_stages::test_utils::{TestStageDB, StorageKind};
 
     #[test]
     fn run() {
@@ -206,7 +206,7 @@ mod tests {
         let db = TestStageDB::default();
 
         let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3);
-        db.insert_blocks(blocks.iter(), Some(0)).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
         // Unwind headers from snapshots and manually insert them into the database, so we're able
         // to check that snapshotter works
         db.factory
