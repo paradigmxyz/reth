@@ -85,7 +85,7 @@ impl RemoteClient {
         let reqwest_client = ethereum_json_rpc_client::reqwest::ReqwestClient::new(rpc.to_string());
         let block_checker = match certificate_settings {
             None => None,
-            Some(settings) => Some(BlockCertificateChecker::create_certificate_checker(&reqwest_client, settings).await?),
+            Some(settings) => Some(BlockCertificateChecker::new(&reqwest_client, settings).await?),
         };
         let provider = ethereum_json_rpc_client::EthJsonRcpClient::new(reqwest_client);
 
@@ -210,7 +210,7 @@ struct BlockCertificateChecker {
 }
 
 impl BlockCertificateChecker {
-    async fn create_certificate_checker(reqwest_client: &ReqwestClient, certificate_settings: CertificateCheckSettings) -> Result<Self, RemoteClientError> {
+    async fn new(reqwest_client: &ReqwestClient, certificate_settings: CertificateCheckSettings) -> Result<Self, RemoteClientError> {
         let evmc_principal = Principal::from_text(certificate_settings.evmc_principal).map_err(|e| RemoteClientError::CertificateError(format!("failed to parse principal: {e}")))?;
         let ic_root_key = hex::decode(&certificate_settings.ic_root_key).map_err(|e| RemoteClientError::CertificateError(format!("failed to parse IC root key: {e}")))?;
 
