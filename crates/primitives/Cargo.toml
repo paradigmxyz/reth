@@ -38,7 +38,6 @@ c-kzg = { workspace = true, features = ["serde"], optional = true }
 tracing.workspace = true
 
 # misc
-smallvec = { version = "1.11", features = ["arbitrary", "serde", "union", "const_new"] }
 bytes.workspace = true
 byteorder = "1"
 clap = { workspace = true, features = ["derive"], optional = true }

@@ -179,6 +179,7 @@ where
             tx_gossip_disabled,
             #[cfg(feature = "optimism")]
                 optimism_network_config: crate::config::OptimismNetworkConfig { sequencer_endpoint },
+            ..
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -274,12 +275,13 @@ where
     ///
     ///     let config =
     ///         NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
+    ///     let transactions_manager_config = config.transactions_manager_config.clone();
     ///
     ///     // create the network instance
     ///     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
     ///         .await
     ///         .unwrap()
-    ///         .transactions(pool)
+    ///         .transactions(pool, transactions_manager_config)
     ///         .request_handler(client)
     ///         .split_with_handle();
     /// }
@@ -673,7 +675,12 @@ where
         // If the budget is exhausted we manually yield back control to the (coop) scheduler. This
         // manual yield point should prevent situations where polling appears to be frozen. See also <https://tokio.rs/blog/2020-04-preemption>
         // And tokio's docs on cooperative scheduling <https://docs.rs/tokio/latest/tokio/task/#cooperative-scheduling>
-        let mut budget = 1024;
+        //
+        // Testing has shown that this loop naturally reaches the pending state within 1-5
+        // iterations in << 100µs in most cases. On average it requires ~50µs, which is inside
+        // the range of what's recommended as rule of thumb.
+        // <https://ryhl.io/blog/async-what-is-blocking/>
+        let mut budget = 10;
 
         loop {
             // advance the swarm
@@ -924,6 +931,7 @@ where
             // ensure we still have enough budget for another iteration
             budget -= 1;
             if budget == 0 {
+                trace!(target: "net", budget=10, "exhausted network manager budget");
                 // make sure we're woken up again
                 cx.waker().wake_by_ref();
                 break

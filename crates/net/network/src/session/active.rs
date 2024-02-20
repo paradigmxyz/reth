@@ -761,8 +761,7 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 mod tests {
     use super::*;
     use crate::session::{
-        config::{INITIAL_REQUEST_TIMEOUT, PROTOCOL_BREACH_REQUEST_TIMEOUT},
-        handle::PendingSessionEvent,
+        config::PROTOCOL_BREACH_REQUEST_TIMEOUT, handle::PendingSessionEvent,
         start_pending_incoming_session,
     };
     use reth_ecies::{stream::ECIESStream, util::pk2id};
@@ -773,7 +772,6 @@ mod tests {
     use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
     use secp256k1::{SecretKey, SECP256K1};
-    use std::time::Duration;
     use tokio::{
         net::{TcpListener, TcpStream},
         sync::mpsc,

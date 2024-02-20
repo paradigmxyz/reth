@@ -809,9 +809,7 @@ impl Decodable for ProtocolVersion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        capability::SharedCapability, test_utils::eth_hello, DisconnectReason, EthVersion,
-    };
+    use crate::{capability::SharedCapability, test_utils::eth_hello, EthVersion};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
 
