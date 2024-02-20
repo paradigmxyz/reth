@@ -32,7 +32,9 @@ use std::{
     ops::{Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
     sync::Arc,
+    time::Instant,
 };
+use tracing::debug;
 
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a snapshot range.
@@ -623,7 +625,14 @@ impl SnapshotWriter for Arc<SnapshotProvider> {
 
     fn commit(&self) -> ProviderResult<()> {
         for mut writer in self.writers.iter_mut() {
+            let time = Instant::now();
             writer.commit()?;
+            debug!(
+                target: "provider::static::commit",
+                segment = ?writer.segment(),
+                duration = ?time.elapsed(),
+                "Commit time"
+            );
         }
         Ok(())
     }
