@@ -89,6 +89,33 @@ pub struct TransactionsManagerMetrics {
     pub(crate) egress_peer_channel_full: Counter,
     /// Total number of hashes pending fetch.
     pub(crate) hashes_pending_fetch: Gauge,
+
+    // Poll duration of `TransactionsManager` future
+    /// Duration of call to [`TransactionsManager`](crate::transactions::TransactionsManager) s
+    /// poll function.
+    ///
+    /// Updating metrics could take time, so the true duration of this call could
+    /// be longer than the sum of the accumulated durations of polling nested streams.
+    pub(crate) duration_poll_tx_manager: Gauge,
+    //
+    // Nested streams
+    /// Streaming session updates and updating peers accordingly. Duration in us.
+    pub(crate) acc_duration_poll_network_events: Gauge,
+    /// Flushing queue of batched pending pool imports into pool. Duration in us.
+    pub(crate) acc_duration_poll_pending_pool_imports: Gauge,
+    /// Streaming transaction and announcement broadcast, queueing for pool import
+    /// or requesting respectively. Duration in us.
+    pub(crate) acc_duration_poll_transaction_events: Gauge,
+    /// Streaming fetch events, queueing for pool import on successful fetch, Duration in us.
+    pub(crate) acc_duration_poll_fetch_events: Gauge,
+    /// Streaming and propagating transactions that were successfully imported into
+    /// the pool. Duration in us.
+    pub(crate) acc_duration_poll_imported_transactions: Gauge,
+    /// Assembling and sending requests for hashes fetching pending. Duration in us.
+    pub(crate) acc_duration_fetch_pending_hashes: Gauge,
+    /// Streaming commands and propagating, fetching and serving transactions
+    /// accordingly. Duration in us.
+    pub(crate) acc_duration_poll_commands: Gauge,
 }
 
 /// Metrics for Disconnection types
