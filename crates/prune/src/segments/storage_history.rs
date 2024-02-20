@@ -94,7 +94,7 @@ mod tests {
     };
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256};
     use reth_provider::PruneCheckpointReader;
-    use reth_stages::test_utils::{TestStageDB, StorageKind};
+    use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::{collections::BTreeMap, ops::AddAssign};
 
     #[test]

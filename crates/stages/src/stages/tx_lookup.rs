@@ -191,7 +191,8 @@ fn stage_checkpoint<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind, TestRunnerError, TestStageDB, UnwindStageTestRunner
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
+        TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::{
@@ -230,7 +231,10 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        runner.db.insert_blocks(blocks.iter(), StorageKind::Static).expect("failed to insert blocks");
+        runner
+            .db
+            .insert_blocks(blocks.iter(), StorageKind::Static)
+            .expect("failed to insert blocks");
 
         let rx = runner.execute(input);
 
@@ -269,7 +273,10 @@ mod tests {
         // Seed only once with full input range
         let seed =
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..4); // set tx count range high enough to hit the threshold
-        runner.db.insert_blocks(seed.iter(), StorageKind::Static).expect("failed to seed execution");
+        runner
+            .db
+            .insert_blocks(seed.iter(), StorageKind::Static)
+            .expect("failed to seed execution");
 
         let total_txs = runner.db.table::<tables::Transactions>().unwrap().len() as u64;
 
@@ -334,7 +341,10 @@ mod tests {
         // Seed only once with full input range
         let seed =
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..2);
-        runner.db.insert_blocks(seed.iter(), StorageKind::Static).expect("failed to seed execution");
+        runner
+            .db
+            .insert_blocks(seed.iter(), StorageKind::Static)
+            .expect("failed to seed execution");
 
         runner.set_prune_mode(PruneMode::Before(prune_target));
 

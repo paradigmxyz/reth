@@ -104,7 +104,7 @@ mod tests {
     use reth_interfaces::test_utils::{generators, generators::random_block_range};
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber, B256};
     use reth_provider::PruneCheckpointReader;
-    use reth_stages::test_utils::{TestStageDB, StorageKind};
+    use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::ops::Sub;
 
     #[test]

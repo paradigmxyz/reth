@@ -261,7 +261,8 @@ mod tests {
 
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind, TestRunnerError, TestStageDB, UnwindStageTestRunner
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
+        TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
 
     stage_test_suite_ext!(SenderRecoveryTestRunner, sender_recovery);
@@ -292,7 +293,10 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        runner.db.insert_blocks(blocks.iter(), StorageKind::Static).expect("failed to insert blocks");
+        runner
+            .db
+            .insert_blocks(blocks.iter(), StorageKind::Static)
+            .expect("failed to insert blocks");
 
         let rx = runner.execute(input);
 
@@ -326,7 +330,10 @@ mod tests {
         // Manually seed once with full input range
         let seed =
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..4); // set tx count range high enough to hit the threshold
-        runner.db.insert_blocks(seed.iter(), StorageKind::Static).expect("failed to seed execution");
+        runner
+            .db
+            .insert_blocks(seed.iter(), StorageKind::Static)
+            .expect("failed to seed execution");
 
         let total_transactions =
             runner.db.factory.snapshot_provider().count_entries::<tables::Transactions>().unwrap()

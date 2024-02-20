@@ -197,7 +197,7 @@ mod tests {
     };
     use reth_primitives::{snapshot::HighestSnapshots, PruneModes, SnapshotSegment, B256, U256};
     use reth_provider::providers::SnapshotWriter;
-    use reth_stages::test_utils::{TestStageDB, StorageKind};
+    use reth_stages::test_utils::{StorageKind, TestStageDB};
 
     #[test]
     fn run() {
