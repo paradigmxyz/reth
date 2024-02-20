@@ -301,8 +301,19 @@ impl<T: TransactionOrdering> TxPool<T> {
         match best_transactions_attributes.basefee.cmp(&self.all_transactions.pending_fees.base_fee)
         {
             Ordering::Equal => {
-                // fee unchanged, nothing to shift
-                Box::new(self.best_transactions())
+                // check if blob_fee become lower
+                let mut unlocked_with_blob = Vec::new();
+                if best_transactions_attributes.blob_fee.unwrap_or_default() <
+                    self.all_transactions.pending_fees.blob_fee as u64
+                {
+                    unlocked_with_blob =
+                        self.blob_pool.satisfy_attributes(best_transactions_attributes);
+                }
+
+                Box::new(self.pending_pool.best_with_unlocked(
+                    unlocked_with_blob,
+                    self.all_transactions.pending_fees.base_fee,
+                ))
             }
             Ordering::Greater => {
                 // base fee increased, we only need to enforce this on the pending pool
