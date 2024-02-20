@@ -401,7 +401,7 @@ impl StorageKind {
     }
 
     fn is_static(&self) -> bool {
-        matches!(self, Self::Database(_))
+        matches!(self, Self::Static)
     }
 
     fn tx_offset(&self) -> u64 {
