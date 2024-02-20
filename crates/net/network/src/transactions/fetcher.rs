@@ -13,6 +13,7 @@ use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
 use schnellru::{ByLength, Unlimited};
 use std::{
     collections::HashMap,
+    env,
     num::NonZeroUsize,
     pin::Pin,
     task::{Context, Poll},
@@ -26,6 +27,9 @@ use super::{
     AnnouncementFilter, Peer, PooledTransactions,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
+
+/// Verbose tracing logs.
+const TRACE_VERBOSE: &str = "RETH_TRACE_VERBOSE";
 
 /// The type responsible for fetching missing transactions from peers.
 ///
@@ -54,18 +58,25 @@ pub(crate) struct TransactionFetcher {
     pub(super) filter_valid_hashes: AnnouncementFilter,
     /// Info on capacity of the transaction fetcher.
     pub(super) info: TransactionFetcherInfo,
+    // Used for increased verbosity in trace logging. Implies with slightly more memory usage.
+    #[doc(hidden)]
+    trace_verbose: bool,
 }
 
 // === impl TransactionFetcher ===
 
 impl TransactionFetcher {
     /// Sets up transaction fetcher with config
-    pub fn with_transaction_fetcher_config(mut self, config: &TransactionFetcherConfig) -> Self {
-        self.info.soft_limit_byte_size_pooled_transactions_response =
+    pub fn new_with_transaction_fetcher_config(config: &TransactionFetcherConfig) -> Self {
+        let mut tx_fetcher = TransactionFetcher::default();
+        tx_fetcher.info.soft_limit_byte_size_pooled_transactions_response =
             config.soft_limit_byte_size_pooled_transactions_response;
-        self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request =
+        tx_fetcher.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request =
             config.soft_limit_byte_size_pooled_transactions_response_on_pack_request;
-        self
+
+        tx_fetcher.trace_verbose = env::var(TRACE_VERBOSE).is_ok();
+
+        tx_fetcher
     }
 
     /// Removes the specified hashes from inflight tracking.
@@ -422,10 +433,9 @@ impl TransactionFetcher {
         is_session_active: impl Fn(PeerId) -> bool,
         client_version: &str,
     ) {
-        #[cfg(not(debug_assertions))]
         let mut previously_unseen_hashes_count = 0;
-        #[cfg(debug_assertions)]
-        let mut previously_unseen_hashes = Vec::with_capacity(new_announced_hashes.len() / 4);
+        // used for verbose tracing if configured
+        let mut previously_unseen_hashes = vec![];
 
         let msg_version = new_announced_hashes.msg_version();
 
@@ -481,12 +491,11 @@ impl TransactionFetcher {
                 return false
             }
 
-            #[cfg(not(debug_assertions))]
-            {
+            if self.trace_verbose {
+                previously_unseen_hashes.push(*hash);
+            } else {
                 previously_unseen_hashes_count += 1;
             }
-            #[cfg(debug_assertions)]
-            previously_unseen_hashes.push(*hash);
 
             // todo: allow `MAX_ALTERNATIVE_PEERS_PER_TX` to be zero
             let limit = NonZeroUsize::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS.into()).expect("MAX_ALTERNATIVE_PEERS_PER_TX should be non-zero");
@@ -508,24 +517,24 @@ impl TransactionFetcher {
             true
         });
 
-        #[cfg(not(debug_assertions))]
-        trace!(target: "net::tx",
-            peer_id=format!("{peer_id:#}"),
-            previously_unseen_hashes_count=previously_unseen_hashes_count,
-            msg_version=%msg_version,
-            client_version=%client_version,
-            "received previously unseen hashes in announcement from peer"
-        );
-
-        #[cfg(debug_assertions)]
-        trace!(target: "net::tx",
-            peer_id=format!("{peer_id:#}"),
-            msg_version=%msg_version,
-            client_version=%client_version,
-            previously_unseen_hashes_len=?previously_unseen_hashes.len(),
-            previously_unseen_hashes=?previously_unseen_hashes,
-            "received previously unseen hashes in announcement from peer"
-        );
+        if self.trace_verbose {
+            trace!(target: "net::tx",
+                peer_id=format!("{peer_id:#}"),
+                msg_version=%msg_version,
+                client_version=%client_version,
+                previously_unseen_hashes_len=?previously_unseen_hashes.len(),
+                previously_unseen_hashes=?previously_unseen_hashes,
+                "received previously unseen hashes in announcement from peer"
+            );
+        } else {
+            trace!(target: "net::tx",
+                peer_id=format!("{peer_id:#}"),
+                previously_unseen_hashes_count=previously_unseen_hashes_count,
+                msg_version=%msg_version,
+                client_version=%client_version,
+                "received previously unseen hashes in announcement from peer"
+            );
+        }
     }
 
     /// Requests the missing transactions from the previously unseen announced hashes of the peer.
@@ -876,6 +885,7 @@ impl Default for TransactionFetcher {
             hashes_fetch_inflight_and_pending_fetch: LruMap::new_unlimited(),
             filter_valid_hashes: Default::default(),
             info: TransactionFetcherInfo::default(),
+            trace_verbose: false,
         }
     }
 }
