@@ -194,14 +194,19 @@ impl TestStageDB {
     /// Insert ordered collection of [SealedBlock] into corresponding tables.
     /// Superset functionality of [TestStageDB::insert_headers].
     ///
+    /// If tx_offset is set to `None`, then transactions will be stored on static files, otherwise
+    /// database.
+    ///
     /// Assumes that there's a single transition for each transaction (i.e. no block rewards).
     pub fn insert_blocks<'a, I>(&self, blocks: I, tx_offset: Option<u64>) -> ProviderResult<()>
     where
         I: Iterator<Item = &'a SealedBlock>,
     {
         let provider = self.factory.snapshot_provider();
-        let mut txs_writer =
-            provider.latest_writer(reth_primitives::SnapshotSegment::Transactions)?;
+        let mut txs_writer = tx_offset.map_or_else(
+            || Some(provider.latest_writer(reth_primitives::SnapshotSegment::Transactions)?),
+            |_| None,
+        );
         let mut headers_writer =
             provider.latest_writer(reth_primitives::SnapshotSegment::Headers)?;
         let tx = self.factory.provider_rw().unwrap().into_tx();
@@ -221,16 +226,27 @@ impl TestStageDB {
             }
             tx.put::<tables::BlockBodyIndices>(block.number, block_body_indices)?;
 
-            block.body.iter().try_for_each(|body_tx| {
-                txs_writer.append_transaction(next_tx_num, body_tx.clone().into())?;
+            let res = block.body.iter().try_for_each(|body_tx| {
+                if let Some(txs_writer) = &mut txs_writer {
+                    txs_writer.append_transaction(next_tx_num, body_tx.clone().into())?;
+                } else {
+                    tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?
+                }
                 next_tx_num += 1;
                 Ok::<(), ProviderError>(())
-            })
+            });
+
+            if let Some(txs_writer) = &mut txs_writer {
+                txs_writer.increment_block(reth_primitives::SnapshotSegment::Transactions)?;
+            }
+            res
         })?;
 
         tx.commit()?;
-        headers_writer.commit()?;
-        txs_writer.commit()
+        if let Some(txs_writer) = &mut txs_writer {
+            txs_writer.commit()?;
+        }
+        headers_writer.commit()
     }
 
     pub fn insert_tx_hash_numbers<I>(&self, tx_hash_numbers: I) -> ProviderResult<()>
