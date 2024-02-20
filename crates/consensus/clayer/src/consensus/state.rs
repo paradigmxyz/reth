@@ -97,6 +97,12 @@ pub struct PbftState {
 
     /// How many blocks to commit before forcing a view change for fairness
     pub forced_view_change_interval: u64,
+
+    /// Minimum time between publishing blocks
+    pub block_publishing_min_interval: Duration,
+
+    /// Last timestamp of the node's chain head
+    pub last_block_timestamp: u64,
 }
 
 impl fmt::Display for PbftState {
@@ -117,7 +123,12 @@ impl fmt::Display for PbftState {
 }
 
 impl PbftState {
-    pub fn new(sk: SecretKey, head_block_num: u64, config: &PbftConfig) -> Self {
+    pub fn new(
+        sk: SecretKey,
+        head_block_num: u64,
+        last_block_timestamp: u64,
+        config: &PbftConfig,
+    ) -> Self {
         let kp = KeyPair::from_secret_key(SECP256K1, &sk);
         let id = pk2id(&kp.public_key());
         // Maximum number of faulty nodes in this network. Panic if there are not enough nodes.
@@ -143,6 +154,8 @@ impl PbftState {
             exponential_retry_base: config.exponential_retry_base,
             exponential_retry_max: config.exponential_retry_max,
             forced_view_change_interval: config.forced_view_change_interval,
+            block_publishing_min_interval: config.block_publishing_min_interval,
+            last_block_timestamp,
         }
     }
     /// Obtain the ID for the primary node in the network

@@ -41,16 +41,13 @@ pub struct PbftConfig {
 
     /// How large the PbftLog is allowed to get before being pruned
     pub max_log_size: u64,
-
-    /// Where to store PbftState ("memory" or "disk+/path/to/file")
-    pub storage_location: String,
 }
 
 impl Default for PbftConfig {
     fn default() -> Self {
         PbftConfig {
             members: Vec::new(),
-            block_publishing_min_interval: Duration::from_millis(10000),
+            block_publishing_min_interval: Duration::from_millis(5000),
             block_publishing_delay: Duration::from_millis(1000),
             update_recv_timeout: Duration::from_millis(10),
             exponential_retry_base: Duration::from_millis(100),
@@ -60,7 +57,6 @@ impl Default for PbftConfig {
             view_change_duration: Duration::from_millis(5000),
             forced_view_change_interval: 100,
             max_log_size: 10000,
-            storage_location: "memory".into(),
         }
     }
 }

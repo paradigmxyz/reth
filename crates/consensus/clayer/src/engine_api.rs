@@ -426,7 +426,10 @@ impl ApiService {
     }
 
     /// Update the block that should be committed
-    pub fn commit_block(&mut self, block_id: B256) -> Result<(), ApiServiceError> {
+    pub fn commit_block(
+        &mut self,
+        block_id: B256,
+    ) -> Result<ExecutionPayloadWrapperV2, ApiServiceError> {
         tracing::info!(target:"consensus::cl","ApiService::commit_block");
         let (_, execution_payload) = match self.proposing_payload_pairs.get(&block_id) {
             Some(payload) => payload.clone(),
@@ -435,7 +438,7 @@ impl ApiService {
             }
         };
 
-        let payload_status = match new_payload(&self.api, execution_payload) {
+        let payload_status = match new_payload(&self.api, execution_payload.clone()) {
             Ok(x) => x,
             Err(e) => {
                 tracing::error!(target:"consensus::cl","ApiService::commit_block::new_payload return(error: {:?})", e);
@@ -445,7 +448,7 @@ impl ApiService {
 
         if payload_status.status.is_valid() {
             if let Some(_) = &payload_status.latest_valid_hash {
-                return Ok(());
+                return Ok(execution_payload);
             } else {
                 tracing::error!(target:"consensus::cl","ApiService::commit_block::new_payload latest_valid_hash is None");
                 return Err(ApiServiceError::BlockNotReady);

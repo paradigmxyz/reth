@@ -91,7 +91,7 @@ where
             .unwrap_or_else(|| chain_spec.sealed_genesis_header());
 
         let config = PbftConfig::new();
-        let state = PbftState::new(secret, latest_header.number, &config);
+        let state = PbftState::new(secret, latest_header.number, latest_header.timestamp, &config);
         Self {
             chain_spec,
             client,

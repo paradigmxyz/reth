@@ -28,10 +28,7 @@ use std::{
     collections::{HashSet, VecDeque},
     sync::Arc,
 };
-use tokio::sync::{
-    mpsc,
-    mpsc::{Receiver, Sender},
-};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::*;
 
 use crate::{
@@ -484,7 +481,7 @@ where
                 > 2 * state.f;
 
             if has_matching_pre_prepare && has_required_commits {
-                self.service.commit_block(block_id.clone()).map_err(|err| {
+                let payload = self.service.commit_block(block_id.clone()).map_err(|err| {
                     PbftError::ServiceError(
                         format!("Failed to commit block {:?}", hex::encode(&block_id)),
                         err.to_string(),
@@ -494,6 +491,7 @@ where
                 // Stop the commit timeout, since the network has agreed to commit the block
                 state.commit_timeout.stop();
 
+                state.last_block_timestamp = payload.execution_payload.payload_inner.timestamp;
                 self.on_block_commit(block_id, state)?;
 
                 //broadcast new block hash
@@ -978,7 +976,7 @@ where
         }
 
         // Commit the block, stop the idle timeout, and skip straight to Finishing
-        self.service.commit_block(seal.block_id.clone()).map_err(|err| {
+        let payload = self.service.commit_block(seal.block_id.clone()).map_err(|err| {
             PbftError::ServiceError(
                 format!(
                     "Failed to commit block with catch-up {:?} / {:?}",
@@ -990,6 +988,7 @@ where
         })?;
         state.idle_timeout.stop();
         state.phase = PbftPhase::Finishing(catchup_again);
+        state.last_block_timestamp = payload.execution_payload.payload_inner.timestamp;
 
         Ok(())
     }
@@ -1668,6 +1667,12 @@ where
         // on every engine loop, even if it's not yet ready. This isn't an error,
         // so just return Ok(()).
         if !state.is_primary() || state.phase != PbftPhase::PrePreparing {
+            return Ok(());
+        }
+
+        let now = chrono::prelude::Local::now().timestamp() as u64;
+        let interval = now - state.last_block_timestamp;
+        if state.seq_num > 1 && state.block_publishing_min_interval.as_secs() > interval {
             return Ok(());
         }
 

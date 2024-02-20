@@ -252,22 +252,21 @@ where
                 // define task
                 this.insert_task = Some(Box::pin(async move {
                     let network_id = network.peer_id();
-                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                    tokio::time::sleep(Duration::from_millis(5000)).await;
                     match client.latest_header().ok() {
                         Some(header) => {
                             if let Some(header) = header {
-                                info!(target: "consensus::cl", "execute insert task(chain id: {} network_id: {} last block: {})",chain_spec.chain.id(),network_id,header.number);
+                                trace!(target: "consensus::cl", "execute insert task(chain id: {} network_id: {} last block: {})",chain_spec.chain.id(),network_id,header.number);
                             }
                         }
                         None => {
-                            info!(target: "consensus::cl", "execute insert task(chain id: {} network_id: {}) last block",chain_spec.chain.id(),network_id);
+                            trace!(target: "consensus::cl", "execute insert task(chain id: {} network_id: {}) last block",chain_spec.chain.id(),network_id);
                         }
                     }
 
                     events
                 }));
             }
-            //consensu.init();
 
             if let Some(mut fut) = this.insert_task.take() {
                 match fut.poll_unpin(cx) {
