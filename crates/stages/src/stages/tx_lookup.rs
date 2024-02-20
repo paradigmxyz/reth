@@ -269,7 +269,7 @@ mod tests {
         // Seed only once with full input range
         let seed =
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..4); // set tx count range high enough to hit the threshold
-        runner.db.insert_blocks(seed.iter(), None).expect("failed to seed execution");
+        runner.db.insert_blocks(seed.iter(), StorageKind::Static).expect("failed to seed execution");
 
         let total_txs = runner.db.table::<tables::Transactions>().unwrap().len() as u64;
 
@@ -334,7 +334,7 @@ mod tests {
         // Seed only once with full input range
         let seed =
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..2);
-        runner.db.insert_blocks(seed.iter(), None).expect("failed to seed execution");
+        runner.db.insert_blocks(seed.iter(), StorageKind::Static).expect("failed to seed execution");
 
         runner.set_prune_mode(PruneMode::Before(prune_target));
 

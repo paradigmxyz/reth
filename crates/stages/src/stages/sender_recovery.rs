@@ -257,7 +257,7 @@ mod tests {
         stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
         TransactionSigned, B256,
     };
-    use reth_provider::PruneCheckpointWriter;
+    use reth_provider::{PruneCheckpointWriter, TransactionsProvider};
 
     use super::*;
     use crate::test_utils::{
@@ -326,7 +326,7 @@ mod tests {
         // Manually seed once with full input range
         let seed =
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..4); // set tx count range high enough to hit the threshold
-        runner.db.insert_blocks(seed.iter(), None).expect("failed to seed execution");
+        runner.db.insert_blocks(seed.iter(), StorageKind::Static).expect("failed to seed execution");
 
         let total_transactions =
             runner.db.factory.snapshot_provider().count_entries::<tables::Transactions>().unwrap()

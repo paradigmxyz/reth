@@ -481,7 +481,7 @@ mod tests {
                     B256::ZERO,
                     0..1,
                 ));
-                self.db.insert_blocks(preblocks.iter(), None)?;
+                self.db.insert_blocks(preblocks.iter(), StorageKind::Static)?;
             }
 
             let num_of_accounts = 31;
